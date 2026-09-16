@@ -24,7 +24,12 @@ from langchain_core.messages import HumanMessage
 logging.basicConfig(level=logging.INFO, format="[chatbot] %(message)s")
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.getenv("DB_PATH", "database.sqlite")
+# Dead SQLite-era parameter, NOT a live file path. Every chatbot tool's `_connect(db_path)`
+# ignores its argument and returns db_compat.connect() (Postgres) -- see tests/chatbot/conftest.py,
+# which documents the same no-op. Retained only because ~30 agent.py call sites and the chatbot
+# test suite still thread the argument; the old "database.sqlite" default made a decommissioned
+# file look load-bearing and nearly caused it to be treated as live (AF-20260910-14).
+DB_PATH = os.getenv("DB_PATH", "<unused:postgres-only>")
 CHATBOT_PORT = int(os.getenv("CHATBOT_PORT", "8001"))
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "http://localhost:3000")
 
@@ -167,4 +172,8 @@ async def trigger_ingest():
 
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=CHATBOT_PORT, reload=False)
+    # Loopback only, like every other service in this stack (python_api, worker_service,
+    # backend-python). The only consumers are the localhost browser client
+    # (StockChatbot.tsx hardcodes http://localhost:8001) and the nightly reingest job —
+    # binding 0.0.0.0 exposed /ingest and the LLM-spending /chat to the LAN for nothing.
+    uvicorn.run("app:app", host="127.0.0.1", port=CHATBOT_PORT, reload=False)

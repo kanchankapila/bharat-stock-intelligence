@@ -18,6 +18,16 @@ export function rowGroups(rowCount: number, cols: number): string {
 }
 
 /**
+ * Same as rowGroups but for groups that embed SQL literals, e.g.
+ * `"(?, 'etnow', ?, ?, ?)"`. Pass the count of `?` placeholders in the pattern
+ * (not the column count) as `cols` to bulkUpsert so chunking stays under the
+ * bind-parameter ceiling.
+ */
+export function rowGroupsWith(rowCount: number, pattern: string): string {
+  return Array(rowCount).fill(pattern).join(',');
+}
+
+/**
  * Run one multi-row upsert per chunk. `buildSql(rowCount)` receives the chunk's
  * row count and must embed `rowGroups(rowCount, cols)` in its VALUES clause.
  */

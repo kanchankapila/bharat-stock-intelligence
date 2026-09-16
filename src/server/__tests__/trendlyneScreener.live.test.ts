@@ -12,7 +12,10 @@
  * fixture pollution.
  *
  *   RUN_LIVE_DATASOURCE_TESTS=1 npx vitest run src/server/__tests__/trendlyneScreener.live.test.ts
- */
+  *
+ * LIVE_DATE_SAFE: writes trendlyne_screener_stocks, which has no date column.
+ * (Declared for liveTestTradingDayGuard.test.ts -- see it for why this must be stated.)
+*/
 import { describe, it, expect, beforeAll } from 'vitest';
 
 // Gated behind RUN_LIVE, not a static top-level `import 'dotenv/config'` -- that would load

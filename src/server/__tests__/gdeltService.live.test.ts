@@ -16,7 +16,10 @@
  * would defeat the entire purpose of a live_datasource test.
  *
  *   RUN_LIVE_DATASOURCE_TESTS=1 npx vitest run src/server/__tests__/gdeltService.live.test.ts
- */
+  *
+ * LIVE_DATE_SAFE: gdelt_sentiment.date comes from GDELT's own payload (pt.date), not the clock -- and world news genuinely happens at weekends.
+ * (Declared for liveTestTradingDayGuard.test.ts -- see it for why this must be stated.)
+*/
 import { describe, it, expect } from 'vitest';
 
 // Gated behind RUN_LIVE, not a static top-level `import 'dotenv/config'` -- that would load
@@ -35,7 +38,15 @@ const { dbGet } = await import('../dbAsync');
 const TEST_COMPANY = 'Reliance Industries';
 const TEST_SYMBOL = 'RELIANCE';
 
-describe.runIf(RUN_LIVE)('gdeltService [live]', () => {
+// RETIRED SOURCE (2026-09-11): the gdelt-sentiment job was unscheduled -- api.gdeltproject.org
+// answers this host with HTTP 429 on most requests even at compliant 8s spacing, and it filled 0
+// technical_signals rows the platform's own news did not already cover. This canary no longer
+// guards a production path, and from this IP it fails every live run, which trains people to
+// ignore red. gdeltService.ts stays for manual runs (scripts/gdelt_backfill.ts) from another host:
+// opt in with RUN_RETIRED_SOURCE_TESTS=1 alongside RUN_LIVE_DATASOURCE_TESTS=1.
+const RUN_RETIRED = process.env.RUN_RETIRED_SOURCE_TESTS === '1';
+
+describe.runIf(RUN_LIVE && RUN_RETIRED)('gdeltService [live]', () => {
   it('fetches real GDELT tone data for one company and persists ML-usable rows', async () => {
     const end = new Date();
     const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);

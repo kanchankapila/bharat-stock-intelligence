@@ -11,6 +11,7 @@ and joins into technical_signals (sector_global_corr_21d).
 
 Run daily after global_macro_fetcher.py.
 """
+import polars as pl
 import sys
 from datetime import date, timedelta
 
@@ -63,8 +64,8 @@ def _run(con, cur, days: int):
     # Each ALTER runs in its own auto-committed statement (safe_alter uses a
     # fresh engine.begin() block on PG) so a "column already exists" no-op
     # can never poison the transaction `con`/`cur` use for the rest of this run.
-    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN sector_global_corr_21d REAL")
-    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN sector_benchmark TEXT")
+    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS sector_global_corr_21d REAL")
+    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS sector_benchmark TEXT")
 
     end_date = date.today()
     start_date = end_date - timedelta(days=LOOKBACK + days + 10)
@@ -218,3 +219,9 @@ if __name__ == "__main__":
     p.add_argument("--days", type=int, default=7)
     args = p.parse_args()
     main(args.days)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

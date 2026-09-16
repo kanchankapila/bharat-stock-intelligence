@@ -8,6 +8,7 @@ Run:  python fii_dii_fetcher.py
       python fii_dii_fetcher.py --days 30
 """
 
+import polars as pl
 import os
 import datetime
 import argparse
@@ -18,6 +19,23 @@ from sqlalchemy import text
 
 from db_compat import get_engine
 from fetch_utils import retry_get
+import sys
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher
+
+class FiiDiiRowSchema(BaseModel):
+    category: str
+    date: str
+    buy_value: float | None = None
+    sell_value: float | None = None
+    net_value: float | None = None
+
+class FiiDiiBaseFetcher(BaseFetcher[FiiDiiRowSchema]):
+    fetcher_name = "FiiDiiFetcher"
+    domain = "nseindia.com"
+    schema = FiiDiiRowSchema
+    min_interval_sec = 0.5
+
 
 NSE_FII_DII_URL = "https://www.nseindia.com/api/fiidiiTradeReact"
 
@@ -47,7 +65,7 @@ class FiiDiiFetcher:
             self.session.get("https://www.nseindia.com", timeout=10)
             time.sleep(1)
         except Exception as e:
-            print(f"[FiiDii] Session prime warning: {e}")
+            print(f"[FiiDii] Session prime warning: {e}", file=sys.stderr)
 
     def fetch(self) -> list[dict]:
         """Fetch FII/DII data from NSE. Returns list of daily records.
@@ -60,7 +78,7 @@ class FiiDiiFetcher:
             resp = retry_get(self.session, NSE_FII_DII_URL, timeout=15)
             data = resp.json()
         except Exception as e:
-            print(f"[FiiDii] Fetch error after retries: {e}")
+            print(f"[FiiDii] Fetch error after retries: {e}", file=sys.stderr)
             return []
 
         # Group by date, then pivot FII/FPI and DII rows into one record per date
@@ -82,7 +100,7 @@ class FiiDiiFetcher:
                     by_date[date_str]["dii_sell"] = self._parse_float(row.get("sellValue"))
                     by_date[date_str]["dii_net"]  = self._parse_float(row.get("netValue"))
             except Exception as e:
-                print(f"[FiiDii] Row parse error: {e} — row={row}")
+                print(f"[FiiDii] Row parse error: {e} — row={row}", file=sys.stderr)
 
         records = []
         for date_str, vals in by_date.items():
@@ -190,7 +208,7 @@ class FiiDiiFetcher:
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            print(f"[FIIFetcher] Provisional fetch error: {e}")
+            print(f"[FIIFetcher] Provisional fetch error: {e}", file=sys.stderr)
             return
 
         # Find the row(s) whose date matches today
@@ -301,3 +319,9 @@ if __name__ == "__main__":
 
     fetcher = FiiDiiFetcher()
     fetcher.run(days=args.days)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

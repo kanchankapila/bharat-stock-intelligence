@@ -28,6 +28,151 @@ function isBenignLockError(err: any): boolean {
 const CATCHUP_STAGGER_MS = 5 * 60_000;
 let _catchupSlot = 0;
 
+/** An orphan requeue older than this is history, not a miss: re-running a 2-day-old EOD batch
+ *  would compute against a market that has moved on. Past this horizon the reclaim still frees
+ *  the queue and alerts, but does not requeue. */
+export const ORPHAN_REQUEUE_MAX_AGE_MS = 48 * 60 * 60_000;
+
+/** If the job's own schedule fires again within this window, the regular slot IS the make-up:
+ *  requeueing would double-run it on concurrency:1 queues. 90min covers every 15-min market-hours
+ *  job and the hourly ones with room to spare, while daily/weekly jobs (the ones that genuinely
+ *  lose a batch to a restart, like ml-daily-ops on 2026-09-08) sit far outside it and requeue. */
+export const ORPHAN_REQUEUE_SKIP_WINDOW_MS = 90 * 60_000;
+
+/**
+ * Requeue a make-up run for a job whose worker died mid-run (AF-20260909-06).
+ *
+ * reclaimStaleActiveJobs used to be the END of the story: the orphan was moved to failed and
+ * only logged. Worse, that failed state is self-masking -- the failed orphan's finishedOn is
+ * "just now", so addJobWithCatchup's missed-slot detector sees a fresh "last run" and concludes
+ * nothing was missed. That is the exact mechanism which silently lost the 2026-09-08
+ * ml-daily-ops batch (block deals, exit labels, performance_tracker, mf_sector_allocation all
+ * stale for a day while every sibling heartbeat stayed green).
+ *
+ * Guards, in order (each skip is logged):
+ *  0. The orphan was itself a make-up (orphanRequeue) -- alert only, never a second make-up.
+ *  1. Upcoming regular slot -- the job's repeatable fires again within
+ *     ORPHAN_REQUEUE_SKIP_WINDOW_MS, so the schedule itself covers the loss.
+ *  2. Make-up already in flight -- an active/waiting/delayed instance of the same jobName with
+ *     the isCatchup or orphanRequeue marker (so two orphans of the same job across rapid
+ *     restarts, or an orphan plus the missed-slot catch-up, don't stack duplicates). Same
+ *     marker-not-bare-name rule as addJobWithCatchup's duplicate guard: the repeatable's own
+ *     next occurrence sits delayed with this jobName forever.
+ *  3. Staleness -- processedOn older than ORPHAN_REQUEUE_MAX_AGE_MS: alert only, no requeue.
+ *
+ * The requeued job carries `isCatchup: true` (so the existing duplicate-catch-up guard
+ * recognizes it on subsequent boots) plus `orphanRequeue: true` (provenance), runs with
+ * attempts: 1 (no retry cascade on top of a make-up), and rides the same global stagger as
+ * missed-slot catch-ups so several orphans don't stampede on boot.
+ *
+ * Returns true when a make-up run was actually queued. Never throws.
+ */
+export async function requeueOrphanedJob(
+  queue: any,
+  orphan: { name: string; id?: string; data?: any; processedOn?: number | null },
+): Promise<boolean> {
+  const name = orphan.name;
+  try {
+    const now = Date.now();
+    const startedAt = typeof orphan.processedOn === 'number' ? orphan.processedOn : undefined;
+
+    // Guard 0: the orphan was itself a make-up. A job whose make-up also dies mid-run is a
+    // signal, not a miss -- dl-retrain-weekly exhausted host memory and killed the WSL2 VM
+    // (taking the DB with it), and each boot requeued it straight into the next kill
+    // (2026-09-10 23:48, 09-11 00:42 and 06:34 IST). One make-up per missed run; the regular
+    // schedule is the next attempt.
+    if (orphan.data?.orphanRequeue === true) {
+      console.warn(
+        `[QUEUE] ${queue.name}: orphaned ${name} was itself a make-up run that also died ` +
+        `mid-run -- not requeueing again (investigate before its next scheduled slot).`);
+      void alertOrphanedJob(queue.name, name, startedAt, false,
+        'the make-up run also died mid-run; not requeued again');
+      return false;
+    }
+
+    // Guard 1: the regular schedule covers it soon. Must be a FUTURE fire: a stale past `next`
+    // (a repeatable about to be replaced, the 2026-09-09 mover cron swap) must not suppress
+    // the requeue -- "fires again at yesterday" covers nothing.
+    try {
+      const repeatables = await queue.getRepeatableJobs();
+      for (const r of repeatables) {
+        if (r.name === name && typeof r.next === 'number' && r.next >= now &&
+            r.next - now < ORPHAN_REQUEUE_SKIP_WINDOW_MS) {
+          console.log(
+            `[QUEUE] ${queue.name}: orphaned ${name} (predates this process) fires again on its ` +
+            `regular schedule at ${new Date(r.next).toISOString()} -- not requeueing a make-up.`);
+          return false;
+        }
+      }
+    } catch { /* a queue that cannot list repeatables falls through to the other guards */ }
+
+    // Guard 2: a make-up for this jobName is already active/waiting/delayed.
+    try {
+      const inFlight = await queue.getJobs(['active', 'waiting', 'delayed'], 0, -1, false);
+      if (inFlight.some(j => j.name === name &&
+          (j.data?.isCatchup === true || j.data?.orphanRequeue === true))) {
+        console.log(
+          `[QUEUE] ${queue.name}: orphaned ${name} already has a make-up run pending -- not ` +
+          `requeueing a duplicate.`);
+        return false;
+      }
+    } catch { /* if we cannot read the queue, leave the decision to the add below */ }
+
+    // Guard 3: too old to be worth recomputing.
+    if (startedAt && now - startedAt > ORPHAN_REQUEUE_MAX_AGE_MS) {
+      console.warn(
+        `[QUEUE] ${queue.name}: orphaned ${name} started ${Math.floor((now - startedAt) / 3_600_000)}h ` +
+        `ago -- past the requeue horizon, alerting only.`);
+      void alertOrphanedJob(queue.name, name, startedAt, false, 'stale beyond requeue horizon');
+      return false;
+    }
+
+    const delay = (_catchupSlot++) * CATCHUP_STAGGER_MS;
+    await queue.add(name, {
+      ...(orphan.data ?? {}),
+      isCatchup: true,
+      orphanRequeue: true,
+      requeuedFrom: orphan.id ?? null,
+    }, {
+      jobId: `${name}-orphan-requeue-${now}`,
+      delay,
+      attempts: 1,
+      removeOnComplete: 10,
+      removeOnFail: 10,
+    });
+    console.warn(
+      `[QUEUE] ${queue.name}: REQUEUED make-up for orphaned job ${name} ` +
+      `(worker died mid-run; fires in ${Math.round(delay / 60_000)}min) -- AF-20260909-06`);
+    void alertOrphanedJob(queue.name, name, startedAt, true,
+      `make-up queued with ${Math.round(delay / 60_000)}min stagger`);
+    return true;
+  } catch (err) {
+    // Never let the make-up machinery fail the reclaim (and therefore the boot) itself.
+    console.warn(`[QUEUE] ${queue.name}: could not requeue orphaned job ${name}:`, err);
+    return false;
+  }
+}
+
+/** Best-effort Telegram alert about a reclaimed orphan. Fire-and-forget: alerting is additive
+ *  and must never break scheduling (sendMarkdownMessage itself is fully guarded, but the dynamic
+ *  import and message construction are not -- hence this wrapper). */
+async function alertOrphanedJob(
+  queueName: string, jobName: string, startedAt: number | undefined, requeued: boolean,
+  detail: string,
+): Promise<void> {
+  try {
+    const ranMin = startedAt ? Math.round((Date.now() - startedAt) / 60_000) : null;
+    const text = [
+      '[ALERT] Orphaned job reclaimed after restart',
+      `job: ${jobName} (queue ${queueName})`,
+      ranMin !== null ? `was active ${ranMin}m before the worker died` : null,
+      requeued ? `action: requeued make-up (${detail})` : `action: none (${detail})`,
+    ].filter(Boolean).join('\n');
+    const { telegramService } = await import('../telegramService');
+    await telegramService.sendMarkdownMessage(text);
+  } catch { /* alerting is additive; scheduling must not depend on it */ }
+}
+
 /**
  * Adds a repeatable BullMQ job, replacing any existing repeatable registration for the same
  * jobId/jobName, and queues an immediate one-off "catch-up" run if the schedule's last expected
@@ -35,12 +180,37 @@ let _catchupSlot = 0;
  * was already holding a not-yet-fired slot whose time has since passed, which a naive
  * remove+re-add would otherwise silently forfeit (`staleNextMissed` below).
  */
+// Queues already checked for orphaned active jobs THIS boot, so a queue shared across several
+// addJobWithCatchup call sites (multiple jobNames on one queue) is not re-scanned each time.
+const RECLAIM_CHECKED = new WeakSet<Queue>();
+
 export async function addJobWithCatchup(
   queue: Queue,
   jobName: string,
   data: any,
   opts: any = {}
 ) {
+  // Reclaim BEFORE anything else, including the SCHEDULER_PAUSED early-return below: a paused
+  // boot is exactly when a prior restart's zombie needs clearing, and this must cover every
+  // queue in the codebase, not only ones built through registerRepeatableJob.
+  //
+  // addJobWithCatchup is the single scheduling chokepoint every queue calls (36 call sites, no
+  // bypasses) -- unlike registerRepeatableJob, which only queues built through jobs/*.jobs.ts's
+  // newer pattern go through. Found 2026-09-06: ml-daily-ops (built via a raw `new Queue()` /
+  // `new Worker()` in queues.ts, the older pattern most queues still use) sat `active` for
+  // 118+ minutes with the SAME job id across a restart that had just deployed the
+  // registerRepeatableJob-only version of this fix, because ml-daily-ops never calls that
+  // function. Putting the reclaim here instead covers every queue uniformly.
+  if (!RECLAIM_CHECKED.has(queue)) {
+    RECLAIM_CHECKED.add(queue);
+    const orphans = await reclaimStaleActiveJobs(queue);
+    for (const o of orphans) {
+      console.warn(`[QUEUE] ${queue.name}: reclaimed orphaned job ${o.name} (id=${o.id}, was `
+                 + `active ${o.ageMin}m across a restart) -- queue is free again`
+                 + (o.requeued ? ', make-up requeued' : ', NOT requeued (see reclaim log)'));
+    }
+  }
+
   if (opts.repeat && (opts.repeat.pattern || opts.repeat.cron) && !opts.repeat.tz) {
     opts.repeat.tz = 'Etc/UTC';
   }
@@ -55,6 +225,28 @@ export async function addJobWithCatchup(
     }
   }
 
+  // SCHEDULER_PAUSED takes the whole platform off its schedule for a controlled
+  // one-job-at-a-time validation sweep, while leaving bharat-server (and therefore every
+  // Worker) running so each job can still be enqueued by hand. It sits here, after the
+  // removal loop and before the add, deliberately: clearing the repeatable is what stops the
+  // cron firing, skipping the add is what stops it being re-registered, and returning before
+  // the missed-schedule detector below is what stops the resume from queueing one catch-up per
+  // paused job at once -- a paused window is indistinguishable from a long outage to that
+  // detector, which is the duplicate-catch-up storm recorded 2026-08-30.
+  if (process.env.SCHEDULER_PAUSED === '1') {
+    // Removing the repeatable registration does NOT remove the delayed "next occurrence"
+    // placeholder BullMQ already materialised from it. Found live 2026-09-05: repeatables
+    // cleared, yet 10 delayed jobs remained across 8 queues and two were still due to fire
+    // inside the paused window -- the pause did not actually hold. drain(true) covers
+    // waiting + delayed; active is deliberately left alone so an in-flight job finishes.
+    await queue.drain(true);
+    // queue.name is included so the paused-boot log doubles as the authoritative
+    // queue -> jobName map the sweep runner needs; parsing queues.ts for it statically would
+    // drift the moment a registration moves.
+    console.log(`[QUEUE] SCHEDULER_PAUSED=1 queue=${queue.name} job=${jobName} left unscheduled (repeatable cleared, queue drained, no catch-up queued)`);
+    return;
+  }
+
   await queue.add(jobName, data, opts);
 
   if (!opts.repeat || (!opts.repeat.pattern && !opts.repeat.every && !opts.repeat.cron)) {
@@ -62,9 +254,25 @@ export async function addJobWithCatchup(
   }
 
   try {
-    const jobs = await queue.getJobs(['completed', 'failed'], 0, 1, false);
-    const lastJob = jobs.length > 0 ? jobs[0] : null;
-    const lastRunTime = lastJob?.timestamp || null;
+    // Regression 2026-08-29: a single combined getJobs(['completed','failed'], 0, 1) call was
+    // used to find "the last run", but BullMQ interleaves statuses in that combined form in
+    // whatever order it stores them, not by recency -- live for ml-weekly-retrain, it returned a
+    // month-old FAILED job as "the last run" on a day the job had actually completed successfully
+    // ~11 hours earlier, so every bharat-server restart concluded the weekly schedule was missed
+    // and queued a redundant catch-up (three restarts in one afternoon, three catch-ups, which is
+    // what starved exit_policy.py --train of its Python-subprocess slot budget). Query each status
+    // separately (BullMQ returns newest-first within a single status) and take whichever of the
+    // two is actually more recent -- neither a stale failure nor an absent history should shadow
+    // a genuinely recent run of the other kind.
+    const [completedJobs, failedJobs] = await Promise.all([
+      queue.getJobs(['completed'], 0, 1, false),
+      queue.getJobs(['failed'], 0, 1, false),
+    ]);
+    const candidateTimes = [completedJobs[0], failedJobs[0]]
+      .filter((j): j is Job => Boolean(j))
+      .map(j => j.finishedOn ?? j.timestamp)
+      .filter((t): t is number => typeof t === 'number');
+    const lastRunTime = candidateTimes.length > 0 ? Math.max(...candidateTimes) : null;
 
     let missed = staleNextMissed;
 
@@ -110,8 +318,23 @@ export async function addJobWithCatchup(
       // Sunday placeholder. Only a job actually queued via the catch-up path below carries
       // isCatchup: true, so that's the correct signal for "a catch-up from an earlier restart
       // is still in flight" -- the thing this guard was actually built to detect.
+      //
+      // ALSO must match a currently-ACTIVE run of this jobName even without isCatchup: true --
+      // the legitimate scheduled occurrence counts too, not just a prior catch-up. Without this,
+      // a restart that lands while the real run is still executing (routine for a long job like
+      // ml-daily-ops, observed 13:20->22:05 UTC in production) sees no *catchup* pending, "missed"
+      // stays true, and queues a duplicate that -- since these queues run at concurrency:1 --
+      // waits behind the live run and then re-executes the entire chain a second time same-day.
+      // Confirmed live 2026-08-19: ml-daily-ops job_heartbeat showed two runs on 2026-08-18 (a
+      // success at 14:50 UTC, a failure at 22:05 UTC on nse-bhavcopy-fetcher -- the second run's
+      // late-night steps hit a bhavcopy date NSE hadn't published yet), and trendlyne-midweek (a
+      // Tuesday-only job) queued three separate catch-ups on a single Wednesday, each burning
+      // into its own finite per-session WAF request budget against the provider.
       const inFlight = await queue.getJobs(['active', 'waiting', 'delayed'], 0, -1, false);
-      const alreadyPending = inFlight.some(j => j.name === jobName && j.data?.isCatchup === true);
+      const activeNow = await queue.getJobs(['active'], 0, -1, false);
+      const alreadyPending =
+        activeNow.some(j => j.name === jobName) ||
+        inFlight.some(j => j.name === jobName && j.data?.isCatchup === true);
       if (alreadyPending) {
         console.log(
           `[QUEUE] Job ${jobName} in ${queue.name} missed its scheduled run, but an instance ` +
@@ -171,7 +394,7 @@ export interface RepeatableJobConfig {
    *  Several jobs instead use updateMonitorState() (monitoringService.ts, MONITOR_SCRIPTS-driven
    *  DB-freshness checks) — a genuinely different mechanism, not interchangeable, so this must be
    *  passed explicitly per job rather than defaulted or guessed. */
-  monitorFn?: (name: string, status: 'success' | 'failed', detail?: string) => void;
+  monitorFn?: (name: string, status: 'success' | 'failed', detail?: string, durationMs?: number) => void;
   /** Wires the standard `.on('error', ...)` handler several jobs already had by hand: ignore
    *  benign lock-contention noise (stalled-lock race / "Missing lock"), log anything else as
    *  `[QUEUE] <monitorName> error: <message>`. Off by default — most jobs never had this handler
@@ -189,10 +412,107 @@ export interface RepeatableJobConfig {
  * jobs in queues.ts (stock-refresh, ai-signals, technical-signals, nse-sync, ...) need those
  * and are not yet migrated onto this helper; do not force them through it as-is.
  */
+
+/**
+ * jobName -> monitorName, so a heartbeat is attributed to the JOB rather than to whichever
+ * Worker happened to pick it up.
+ *
+ * registerRepeatableJob creates `new Worker(queueName, ...)` per call, so two schedules sharing
+ * a queue (job-digest-daily at 22:50 IST and job-digest-morning at 08:15 IST) leave TWO workers
+ * competing on it, each closing over its own cfg.monitorName. Which name a run recorded under
+ * was therefore a race. Measured 2026-09-06: `job-digest-morning` had no job_heartbeat row at
+ * all -- NEVER RUN in every status view -- while `job-digest` absorbed both schedules' outcomes.
+ * digests.jobs.ts's own comment already stated the intent ("its OWN monitorName so job_heartbeat
+ * tracks each schedule separately"); only the mechanism was missing.
+ */
+const MONITOR_NAME_BY_JOB = new Map<string, string>();
+
+export function registerMonitorName(jobName: string, monitorName: string): void {
+  MONITOR_NAME_BY_JOB.set(jobName, monitorName);
+}
+
+/** The registered monitor name for `jobName`, else `fallback` (ad-hoc and catch-up jobs). */
+export function resolveMonitorName(jobName: string | undefined, fallback: string): string {
+  return (jobName && MONITOR_NAME_BY_JOB.get(jobName)) || fallback;
+}
+
+/** Test-only: clear the registry between cases. */
+export function __resetMonitorNames(): void {
+  MONITOR_NAME_BY_JOB.clear();
+}
+
+
+
+/** Wall-clock ms at which THIS process started consuming queues. */
+export const PROCESS_BOOTED_AT = Date.now();
+
+/**
+ * True when an `active` job cannot belong to this process, i.e. it was orphaned by a worker
+ * that died mid-run.
+ *
+ * A pm2 restart kills the worker but leaves the job `active` in Redis until BullMQ's stalled
+ * reclaim fires -- and the long-running queues set lockDuration to 24h precisely because the
+ * work takes hours, so with concurrency: 1 the queue can be blocked for a day. The
+ * duplicate-catch-up guard then correctly declines to queue a replacement ("an instance is
+ * already active"), so the job silently does not run, and nothing in pm2 or getJobCounts
+ * distinguishes it from a genuinely long run. Observed twice on 2026-09-06.
+ *
+ * Keyed on process start, NOT on an age threshold: a three-hour-old job is healthy if this
+ * process has been up four hours and definitely orphaned if it has been up thirty seconds.
+ * Elapsed time cannot tell those apart; provenance can.
+ */
+export function isStaleActiveJob(job: { processedOn?: number | null }, bootedAt: number): boolean {
+  return typeof job?.processedOn === 'number' && job.processedOn < bootedAt;
+}
+
+/**
+ * Fail any `active` job this process could not have started, freeing its queue on boot.
+ * Returns the jobs it reclaimed, so the caller can log what it found.
+ */
+export async function reclaimStaleActiveJobs(queue: any, bootedAt = PROCESS_BOOTED_AT) {
+  const reclaimed: Array<{ name: string; id: string; ageMin: number; requeued?: boolean }> = [];
+  let active: any[] = [];
+  try {
+    active = await queue.getJobs(['active'], 0, 50);
+  } catch {
+    return reclaimed;   // a queue we cannot read is not worth failing boot over
+  }
+  for (const job of active) {
+    if (!isStaleActiveJob(job, bootedAt)) continue;
+    const ageMin = Math.round((Date.now() - (job.processedOn ?? Date.now())) / 60_000);
+    try {
+      await job.moveToFailed(
+        new Error(`orphaned: worker exited mid-run; job predates this process (active ${ageMin}m)`),
+        '0', true,
+      );
+      // AF-20260909-06: freeing the queue used to be all this did -- the failed orphan's fresh
+      // finishedOn also masked it from the missed-slot detector, so the work was simply lost.
+      // Requeue a guarded make-up run (see requeueOrphanedJob) and record the outcome.
+      const requeued = await requeueOrphanedJob(queue, job);
+      reclaimed.push({ name: job.name, id: String(job.id), ageMin, requeued });
+    } catch { /* another instance may have reclaimed it first */ }
+  }
+  return reclaimed;
+}
+
+
 export async function registerRepeatableJob(
   cfg: RepeatableJobConfig,
 ): Promise<{ queue: Queue; worker: Worker }> {
   const queue = new Queue(cfg.queueName, { connection: cfg.connection });
+
+  // Free any job orphaned by a worker that died mid-run (a pm2 restart, a crash). These queues
+  // set lockDuration to 24h because the work legitimately takes hours, so BullMQ's stalled
+  // reclaim will not free them for a day -- during which concurrency: 1 blocks the queue and
+  // the duplicate-catch-up guard correctly refuses a replacement, so the job silently does not
+  // run. Hit twice on 2026-09-06. See isStaleActiveJob for why this keys on process start
+  // rather than job age.
+  const orphans = await reclaimStaleActiveJobs(queue);
+  for (const o of orphans) {
+    console.warn(`[QUEUE] ${cfg.queueName}: reclaimed orphaned job ${o.name} (id=${o.id}, was `
+               + `active ${o.ageMin}m across a restart) -- queue is free again`
+               + (o.requeued ? ', make-up requeued' : ', NOT requeued (see reclaim log)'));
+  }
 
   const repeatables = await queue.getRepeatableJobs();
   for (const r of repeatables) {
@@ -228,18 +548,47 @@ export async function registerRepeatableJob(
   if (cfg.stalledInterval !== undefined) workerOpts.stalledInterval = cfg.stalledInterval;
   if (cfg.maxStalledCount !== undefined) workerOpts.maxStalledCount = cfg.maxStalledCount;
 
+  registerMonitorName(cfg.jobName, cfg.monitorName);
+
   const worker = new Worker(cfg.queueName, cfg.processor, workerOpts);
 
   const monitor = cfg.monitorFn ?? recordHeartbeat;
 
-  worker.on('completed', (_job, result) => {
-    console.log(`[QUEUE] ${cfg.monitorName} completed`);
-    monitor(cfg.monitorName, 'success');
+  worker.on('completed', (job, result) => {
+    const mName = resolveMonitorName(job?.name, cfg.monitorName);
+    console.log(`[QUEUE] ${mName} completed`);
+    // duration_ms (2026-09-04): BullMQ already stamps processedOn when the worker picked the
+    // job up, free for the taking here -- no new bookkeeping needed.
+    const durationMs = job.processedOn ? Date.now() - job.processedOn : undefined;
+    // A skip is not a success: stamping one erases the day's real failures. The four jobs fixed
+    // for this in 2026-08-12 each hand-rolled this guard in queues.ts's own completed handlers;
+    // every job routed through THIS helper was still missing it. Skip paths return
+    // { skipped: true } and must leave the heartbeat (and onCompleted's result logging) alone.
+    const r = result as { skipped?: boolean; success?: boolean; failedSteps?: string[] } | null | undefined;
+    if (r?.skipped) return;
+    // Sibling bug, same shape (ml-promotion-gate-review, 2026-08-19): a processor that already
+    // tracks its own internal steps via StepTracker and returns { success, failedSteps } (the
+    // ml-daily-ops/ml-weekly-retrain pattern, hand-rolled outside this helper specifically to
+    // avoid this) must not have that verdict overwritten by a blanket 'success' either -- the
+    // exact ACTION_ITEMS #16 bug this repo already fixed once for those two jobs, generalized so
+    // any FUTURE job wired through this shared helper doesn't have to bypass it to get the fix.
+    // Strict `=== false` (not falsy) so a processor that never reports success/failedSteps at
+    // all -- every existing caller, today -- keeps behaving exactly as before.
+    if (r?.success === false) {
+      monitor(mName, 'failed',
+        r.failedSteps?.length ? `${r.failedSteps.length} step(s) failed: ${r.failedSteps.join(', ')}` : undefined,
+        durationMs);
+      cfg.onCompleted?.(result);
+      return;
+    }
+    monitor(mName, 'success', undefined, durationMs);
     cfg.onCompleted?.(result);
   });
-  worker.on('failed', (_job, err) => {
-    console.error(`[QUEUE] ${cfg.monitorName} failed:`, err?.message);
-    monitor(cfg.monitorName, 'failed', err?.message);
+  worker.on('failed', (job, err) => {
+    const fName = resolveMonitorName(job?.name, cfg.monitorName);
+    console.error(`[QUEUE] ${fName} failed:`, err?.message);
+    const durationMs = job?.processedOn ? Date.now() - job.processedOn : undefined;
+    monitor(fName, 'failed', err?.message, durationMs);
     cfg.onFailed?.(err);
   });
   if (cfg.suppressLockErrors) {

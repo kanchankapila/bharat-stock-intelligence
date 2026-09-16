@@ -38,6 +38,21 @@ Run:
   python working_capital_fetcher.py --symbol BEL
   python working_capital_fetcher.py --limit 50
 """
+import polars as pl
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class WorkingCapitalFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class WorkingCapitalFetcherBaseFetcher(BaseFetcher[WorkingCapitalFetcherSchema]):
+    fetcher_name = 'WorkingCapitalFetcher'
+    domain = 'general'
+    schema = WorkingCapitalFetcherSchema
+    min_interval_sec = 0.5
+
 
 import argparse
 from datetime import date, timedelta
@@ -47,6 +62,7 @@ import requests
 from db_compat import connect
 from as_of import logical_write_floor
 from et_stats_client import HEADERS, fetch_et_stats, load_companyid_map, as_of_floor
+import sys
 
 DETERIORATING_THRESHOLD_DAYS = 5
 IMPROVING_THRESHOLD_DAYS = -5
@@ -78,11 +94,11 @@ def ensure_schema(con) -> None:
     con.commit()
 
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN receivables_days_ttm REAL",
-        "ALTER TABLE technical_signals ADD COLUMN ccc_ttm              REAL",
-        "ALTER TABLE technical_signals ADD COLUMN ccc_trend            REAL",
-        "ALTER TABLE technical_signals ADD COLUMN wc_deteriorating     INTEGER DEFAULT 0",
-        "ALTER TABLE technical_signals ADD COLUMN wc_improving         INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS receivables_days_ttm REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ccc_ttm              REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ccc_trend            REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS wc_deteriorating     INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS wc_improving         INTEGER DEFAULT 0",
     ]:
         try:
             cur.execute(ddl)
@@ -113,7 +129,10 @@ def _num(v, default=None):
 
 def compute_ccc(balance: list[dict] | None, quarterly: list[dict] | None) -> list[dict]:
     """balance: ET_Stats Balance.list (annual, most-recent-first).
-    quarterly: ET_Stats Quarterly.list (quarterly, most-recent-first, 8 back).
+    quarterly: ET_Stats Quarterly.list (quarterly, most-recent-first; caller must request
+    enough (last=20) to cover every fiscal year in `balance` -- the default last=5 is 5
+    QUARTERS, not 5 years, and silently limits every symbol to its single most recent
+    fiscal year (found 2026-08-27, see process_stock()'s call site comment).
     Returns one row per fiscal year that has both a balance-sheet snapshot
     and exactly 4 matching quarterly P&L rows, most-recent fiscal year first.
 
@@ -211,19 +230,19 @@ def update_technical_signals(symbol: str, features: dict, con, today: str | None
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            receivables_days_ttm = CASE WHEN date >= ? THEN COALESCE(?, receivables_days_ttm) ELSE NULL END,
-            ccc_ttm              = CASE WHEN date >= ? THEN COALESCE(?, ccc_ttm)              ELSE NULL END,
-            ccc_trend            = CASE WHEN date >= ? THEN COALESCE(?, ccc_trend)            ELSE NULL END,
-            wc_deteriorating     = CASE WHEN date >= ? THEN COALESCE(?, wc_deteriorating)     ELSE NULL END,
-            wc_improving         = CASE WHEN date >= ? THEN COALESCE(?, wc_improving)         ELSE NULL END
-        WHERE symbol = ?
+            receivables_days_ttm = CASE WHEN date >= ? THEN COALESCE(?, receivables_days_ttm) ELSE receivables_days_ttm END,
+            ccc_ttm              = CASE WHEN date >= ? THEN COALESCE(?, ccc_ttm)              ELSE ccc_ttm END,
+            ccc_trend            = CASE WHEN date >= ? THEN COALESCE(?, ccc_trend)            ELSE ccc_trend END,
+            wc_deteriorating     = CASE WHEN date >= ? THEN COALESCE(?, wc_deteriorating)     ELSE wc_deteriorating END,
+            wc_improving         = CASE WHEN date >= ? THEN COALESCE(?, wc_improving)         ELSE wc_improving END
+        WHERE symbol = ? AND date >= ?
     """, (
         floor, features.get("receivables_days_ttm"),
         floor, features.get("ccc_ttm"),
         floor, features.get("ccc_trend"),
         floor, features.get("wc_deteriorating"),
         floor, features.get("wc_improving"),
-        symbol,
+        symbol, floor,   # bounded: older rows only took ELSE-keep yet were all rewritten
     ))
     con.commit()
 
@@ -231,8 +250,16 @@ def update_technical_signals(symbol: str, features: dict, con, today: str | None
 # ── Per-stock processing ──────────────────────────────────────────────────────────
 
 def process_stock(symbol: str, company_id: str, today: str, session: requests.Session, con) -> dict:
+    # Balance defaults to last=5 (5 FISCAL YEARS, annual cadence). Quarterly's SAME default of
+    # 5 means 5 QUARTERS (~1.25y) -- nowhere near enough to complete a 4-quarter match for any
+    # fiscal year but the most recent, so compute_ccc()'s per-year loop below silently `continue`s
+    # every older Balance year for lack of matching quarters. This was the reason ccc_trend/
+    # wc_deteriorating/wc_improving never computed for ANY symbol (every one had exactly 1
+    # working_capital_history row) -- not a real data gap, live-verified: ET_Stats' own endpoint
+    # already returns 20 quarters back to 2021-09-30 on request, covering Balance's full 5-year
+    # span. last=20 = 5 years x 4 quarters, matching Balance's own depth.
     balance = fetch_et_stats(company_id, "Balance", session)
-    quarterly = fetch_et_stats(company_id, "Quarterly", session)
+    quarterly = fetch_et_stats(company_id, "Quarterly", session, last=20)
 
     ccc_rows = compute_ccc(balance, quarterly)
     if not ccc_rows:
@@ -277,6 +304,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Cash Conversion Cycle (annual) from ET_Stats")
     parser.add_argument("--symbol", default=None, help="Single stock NSE symbol")
     parser.add_argument("--limit", type=int, default=None, help="Process first N stocks")
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch all symbols even if fresh within last 25 days")
     args = parser.parse_args()
 
     con = connect()
@@ -287,6 +316,21 @@ def main() -> None:
         print("[WorkingCapital] No stocks with a companyid found.")
         con.close()
         return
+
+    # Smart 25-day cadence check, same window as mf_stock_holdings_fetcher.py's sibling
+    # monthly-cadence fetcher: this job only runs monthly (isFirstRunOfMonth gate in
+    # trendlyneWeekly.jobs.ts) against data that changes at most once a FISCAL YEAR, so a
+    # symbol fetched within the last 25 days is not going to have new working-capital figures
+    # -- this just protects a manual re-run or catch-up retry from re-costing the full universe.
+    if not args.force and not args.symbol:
+        from fetch_utils import filter_stale_symbols
+        fresh_cutoff = (date.today() - timedelta(days=25)).isoformat()
+        stale_stocks = filter_stale_symbols(con, stocks, "working_capital_history",
+                                            date_col="fetched_at", as_of_date=fresh_cutoff)
+        skipped = len(stocks) - len(stale_stocks)
+        if skipped > 0:
+            print(f"[WorkingCapital] Smart cadence skip: {skipped}/{len(stocks)} symbols already fresh within last 25 days. Processing {len(stale_stocks)} remaining.")
+            stocks = stale_stocks
 
     print(f"[WorkingCapital] Processing {len(stocks)} stocks — cash conversion cycle (annual)…")
     session = requests.Session()
@@ -327,7 +371,7 @@ def main() -> None:
             print(f"  [{i}/{len(stocks)}] {symbol}: {ccc_str} | {trend_str}{flag}")
 
         except Exception as e:
-            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}")
+            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}", file=sys.stderr)
 
     ccc_avg = round(ccc_sum / ccc_count, 1) if ccc_count else 0
     print(
@@ -341,3 +385,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

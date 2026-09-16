@@ -36,7 +36,7 @@ const retColor = (v?: unknown) => { const n = N(v); return n == null ? 'text-sla
 function StatTile({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
-      <div className="text-[11px] uppercase tracking-wider text-slate-500">{label}</div>
+      <div className="text-[11px] font-display uppercase tracking-wider text-slate-500">{label}</div>
       <div className={`mt-1 text-2xl font-semibold ${tone ?? 'text-white'}`}>{value}</div>
       {sub && <div className="mt-0.5 text-[11px] text-slate-500">{sub}</div>}
     </div>
@@ -49,7 +49,7 @@ function RollupTable({ title, keyName, rows }: { title: string; keyName: 'signal
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500">
+            <tr className="text-left text-[11px] font-display uppercase tracking-wider text-slate-500">
               <th className="py-1.5 pr-2">{keyName === 'signal_source' ? 'Source' : 'Regime'}</th>
               <th className="py-1.5 px-2 text-right">n</th>
               <th className="py-1.5 px-2 text-right">Decisive</th>
@@ -142,7 +142,7 @@ export function LiveHitRates() {
             <div className="max-h-[26rem] overflow-auto">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-slate-900">
-                  <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500">
+                  <tr className="text-left text-[11px] font-display uppercase tracking-wider text-slate-500">
                     <th className="py-1.5 pr-2">Source</th>
                     <th className="py-1.5 px-2">Regime</th>
                     <th className="py-1.5 px-2 text-right">Hzn</th>

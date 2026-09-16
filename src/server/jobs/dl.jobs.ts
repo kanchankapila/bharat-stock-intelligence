@@ -28,6 +28,7 @@ import { Job } from 'bullmq';
 import { runPython } from '../pythonRunner';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
+import { StepTracker } from '../jobSteps';
 import { shouldSkipOnTradingHoliday } from '../marketStatusService';
 
 export const QUEUE_DL_MACRO_FETCH    = 'dl-macro-fetch';
@@ -38,25 +39,30 @@ export const QUEUE_DL_RETRAIN_WEEKLY  = 'dl-retrain-weekly';
 
 export async function processDLPython(
   script: string, args: string[] = [], timeoutMs = 6 * 60 * 60_000,
-): Promise<{ success: boolean }> {
+): Promise<{ success: boolean; skipped?: boolean }> {
   await runPython(script, args, timeoutMs);
   return { success: true };
 }
 
-async function processDlMacroFetch(_job: Job): Promise<void> {
+async function processDlMacroFetch(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
   // Explicit timeout, not processDLPython's 6h default: this worker's lockDuration is
   // only 5 min, so an unbounded default lets a hang block the lock indefinitely instead
   // of failing cleanly -- exactly what caused a live incident (repeated "could not renew
   // lock" errors + a growing pile of stuck python.exe processes, since a stuck subprocess
   // was never killed and each BullMQ retry spawned another one alongside it).
+  const T = new StepTracker('dl-macro-fetch');
   await processDLPython('global_macro_fetcher.py', [], 2 * 60_000);
   // MC global: 15 indices (Nikkei/HangSeng/KOSPI/etc) + currencies + ADRs + commodities → mc_global_snapshot + macro_asset_prices.
+  // The two steps below were .catch(console.warn): mc_global_snapshot / macro_asset_prices /
+  // sector_global_corr_* could stop being written entirely with this job still green.
   await runPython('mc_global_macro_fetcher.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] mc_global_macro_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_global_macro_fetcher', e));
   // Sector-global correlation depends on macro_asset_prices populated above.
   await runPython('sector_global_corr.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] sector_global_corr failed:', (e as Error).message));
+    .catch(e => T.fail('sector_global_corr', e));
   // Bond yields (India G-Sec + US/UK/DE 10yr) are now fetched inside global_macro_fetcher.py.
+  const verdict = T.finish();
+  return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 async function processDlFeatureRefresh(job: Job): Promise<{ success: boolean; skipped?: boolean }> {
@@ -84,14 +90,14 @@ function _currentIstDateString(): string {
   return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-async function processDlInference(job: Job): Promise<{ success: boolean }> {
+async function processDlInference(job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- dl-feature-refresh
   // is also skipped on the same day (see processDlFeatureRefresh above), so feature_store has no
   // new row to infer against; re-running would just reproduce yesterday's prediction under
   // logical_trading_date()'s resolved date.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] dl-inference skipped — trading holiday, no new feature row to infer against');
-    return { success: true };
+    return { success: true, skipped: true };
   }
   // The scheduled fallback (job.name === 'dl-infer-daily', see registerDlJobs below) only
   // exists to catch the rare case the chain trigger never fired -- on a normal night it would
@@ -100,14 +106,14 @@ async function processDlInference(job: Job): Promise<{ success: boolean }> {
   // carries a different job.name ('dl-infer-after-feature-refresh') and is never skipped here.
   if (job.name === 'dl-infer-daily' && _lastDlInferenceRunIstDate === _currentIstDateString()) {
     console.log('[QUEUE] dl-inference (fallback) skipped — already ran today via the dl-feature-refresh chain trigger');
-    return { success: true };
+    return { success: true, skipped: true };
   }
   const result = await processDLPython('dl_engine.py', ['--mode', 'infer']);
   _lastDlInferenceRunIstDate = _currentIstDateString();
   return result;
 }
 
-async function processDlRegimeUpdate(_job: Job): Promise<{ success: boolean }> {
+async function processDlRegimeUpdate(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   // Same fix as processDlMacroFetch above: explicit timeout, not the 6h default, since this
   // worker's lockDuration is only 5 min.
   //
@@ -119,12 +125,12 @@ async function processDlRegimeUpdate(_job: Job): Promise<{ success: boolean }> {
   return processDLPython('regime_detector.py', ['--mode', 'update'], 4 * 60_000);
 }
 
-async function processDlRetrainWeekly(job: Job): Promise<{ success: boolean }> {
+async function processDlRetrainWeekly(job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   const trigger = job.data?.trigger || 'scheduled';
   // Explicit 24h timeout, not processDLPython's 6h default: a real full-universe BiLSTM
   // retrain (~2100 symbols, chunked training + walk-forward validation retraining
   // several more model copies) measured at ~15min for just 25 symbols on this machine's
-  // shared 8GB GPU under typical contention (Ollama + other jobs) -- extrapolated, a full
+  // shared 8GB GPU under typical contention (other GPU jobs, e.g. FinBERT) -- extrapolated, a full
   // run can run well past 6h. The 6h default is still correct for every OTHER
   // processDLPython caller (feature_engineering.py, dl_engine.py --mode infer,
   // backfill_ohlcv.py), so it's overridden per-call here rather than raised globally.
@@ -182,7 +188,7 @@ export async function registerDlJobs(connection: any) {
     // closed-day-early-batch (7:10 AM) and unified-ranker (7:30 AM), not at the old midnight
     // slot, since a fallback that only fires on a genuine miss doesn't need to run any earlier
     // than "before the next thing that might want it."
-    repeat: { pattern: '30 23 * * 1-5' },
+    repeat: { pattern: '0 16 * * 1-5' }, // 9:30 PM IST (16:00 UTC)
     jobId: 'dl-infer-daily',
     removeOnComplete: 3,
     removeOnFail: 3,
@@ -192,7 +198,7 @@ export async function registerDlJobs(connection: any) {
     lockDuration: 30 * 60 * 1000,
     lockRenewTime: 5 * 60 * 1000,
     // Real monitor id is 'dl-engine-infer', not 'dl-inference' -- see module docstring.
-    monitorFn: (_name, status, detail) => updateMonitorState('dl-engine-infer', status, detail),
+    monitorFn: (_name, status, detail, durationMs) => updateMonitorState('dl-engine-infer', status, detail, durationMs),
   });
 
   // Chain trigger: dispatch dl-inference the moment dl-feature-refresh actually finishes with
@@ -204,7 +210,12 @@ export async function registerDlJobs(connection: any) {
     if (result?.skipped) return;
     inference.queue.add('dl-infer-after-feature-refresh', {}, { removeOnComplete: 3, removeOnFail: 3 })
       .then(() => console.log('[QUEUE] dl-inference dispatched right after dl-feature-refresh (chain trigger)'))
-      .catch(e => console.warn('[QUEUE] Failed to chain-dispatch dl-inference after dl-feature-refresh:', (e as Error).message));
+      // swallow-ok: no job verdict exists to attach this to -- the 'completed' handler has
+      // already returned, so there is no StepTracker in scope, and stamping 'dl-engine-infer'
+      // failed would report on a run that has not happened. console.error (not warn) because an
+      // enqueue failure here is a Redis-level fault; the fixed dl-infer-daily schedule above is
+      // the functional mitigation, so a lost chain-dispatch delays inference, it does not skip it.
+      .catch(e => console.error('[QUEUE] Failed to chain-dispatch dl-inference after dl-feature-refresh:', (e as Error).message));
   });
 
   const regimeUpdate = await registerRepeatableJob({
@@ -220,14 +231,25 @@ export async function registerDlJobs(connection: any) {
     concurrency: 1,
     lockDuration: 5 * 60 * 1000,
     // Real monitor id is 'regime-detector', not 'dl-regime-update' -- see module docstring.
-    monitorFn: (_name, status, detail) => updateMonitorState('regime-detector', status, detail),
+    monitorFn: (_name, status, detail, durationMs) => updateMonitorState('regime-detector', status, detail, durationMs),
   });
 
   const retrainWeekly = await registerRepeatableJob({
     connection,
     queueName: QUEUE_DL_RETRAIN_WEEKLY,
     jobName: 'dl-retrain-weekly',
-    repeat: { pattern: '0 6 * * 0' }, // Sunday 11:30 IST (06:00 UTC) — early on the closed day, after ml retrain
+    // SUNDAY 10:30 IST (05:00 UTC). Moved off Saturday 06:00 UTC 2026-09-12 (AF-20260912-13).
+    // The old slot's comment claimed it ran 'after ml retrain'; it did not. A +60min cron
+    // offset is not a dependency, and ml-weekly-retrain's last three runs measured 87.4 /
+    // 110.7 / 192.7 min, so this job started mid-chain every week. Measured consequence on
+    // 2026-09-12: dl_trainer.py (13.50GB peak commit) ran concurrently with the ml chain's
+    // strategy_optimizer.py (16.87GB) on a 23.5GB host -- 94.3% of the 82GB commit limit,
+    // 339MB available, 102,856 pages/sec. Both were individually under the 20GB per-tree
+    // PY_CHILD_MEM_LIMIT_MB ceiling, which is exactly why neither ceiling fired.
+    // Sunday was entirely unscheduled, so this buys a full day of separation with no
+    // cross-job guard to get wrong -- the two heaviest trainers on the platform simply
+    // cannot coexist any more. Keep it that way: do NOT add a Saturday job here.
+    repeat: { pattern: '0 5 * * 0' },
     jobId: 'dl-retrain-weekly',
     removeOnComplete: 2,
     removeOnFail: 3,
@@ -239,7 +261,7 @@ export async function registerDlJobs(connection: any) {
     stalledInterval: 15 * 60 * 1000,
     maxStalledCount: 3,
     // Real monitor id is 'dl-trainer', not 'dl-retrain-weekly' -- see module docstring.
-    monitorFn: (_name, status, detail) => updateMonitorState('dl-trainer', status, detail),
+    monitorFn: (_name, status, detail, durationMs) => updateMonitorState('dl-trainer', status, detail, durationMs),
   });
 
   return { macroFetch, featureRefresh, inference, regimeUpdate, retrainWeekly };

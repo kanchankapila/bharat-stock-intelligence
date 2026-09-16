@@ -47,6 +47,8 @@ Run:
   python tickertape_deals_fetcher.py --pages 5        # recent deals
   python tickertape_deals_fetcher.py --pages 200      # deeper history
 """
+
+import polars as pl
 import argparse
 import datetime
 import sys
@@ -215,7 +217,7 @@ def parse_insider(raw: dict) -> dict | None:
 def ensure_insider_schema(conn: ConnWrapper) -> None:
     for col, typ in [("date_iso", "TEXT"), ("pct_transacted", "REAL"), ("source", "TEXT")]:
         try:
-            conn.execute(f"ALTER TABLE insider_trades ADD COLUMN {col} {typ}")
+            conn.execute(f"ALTER TABLE insider_trades ADD COLUMN IF NOT EXISTS {col} {typ}")
             conn.commit()
         except Exception:
             try:
@@ -252,7 +254,7 @@ def ensure_schema(conn: ConnWrapper) -> None:
     for col, typ in [("pct_transacted", "REAL"), ("client_name", "TEXT"),
                      ("trade_type", "TEXT"), ("category", "TEXT"), ("source", "TEXT")]:
         try:
-            conn.execute(f"ALTER TABLE block_deals ADD COLUMN {col} {typ}")
+            conn.execute(f"ALTER TABLE block_deals ADD COLUMN IF NOT EXISTS {col} {typ}")
             conn.commit()
         except Exception:
             # Already present. Postgres poisons the transaction on a failed statement, so
@@ -332,3 +334,22 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class TickertapeDealsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class TickertapeDealsFetcherBaseFetcher(BaseFetcher[TickertapeDealsFetcherSchema]):
+    fetcher_name = 'TickertapeDealsFetcher'
+    domain = 'tickertape.in'
+    schema = TickertapeDealsFetcherSchema
+    min_interval_sec = 0.5
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -19,6 +19,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import investsights_pe_band_fetcher as pb
 from live_datasource_helpers import assert_non_empty_response, assert_stored_row_ml_usable
@@ -46,7 +47,7 @@ class TestInvestsightsPeBandLiveDataSource:
         rows = pb.parse_chart_rows("RELIANCE", data)
         assert rows
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         pb.ensure_schema(con)
         assert pb.store_rows(con, rows) == len(rows)
 

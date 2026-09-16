@@ -17,10 +17,12 @@ same sector enter high-performing screeners on the same day.
 Run daily after screener_features_fetcher.py.
 """
 
+import polars as pl
 import json
 import datetime
 from collections import defaultdict
 from db_compat import connect
+import sys
 
 TODAY = datetime.date.today().isoformat()
 BAYESIAN_THRESHOLD = 0.38   # Bayesian shrinkage pulls to 0.40 with <30d data; use relative cutoff
@@ -80,6 +82,9 @@ def load_first_appearances_today(con, qualifying_screeners: set) -> dict:
       1. Appeared in a qualifying screener today (or within last 2 days for syncs)
       2. Had no appearance in the same screener within the last REENTRY_COOLDOWN_DAYS
     """
+    # trading-day-exempt: source is screener_appearances, which is NOT trading-day-only --
+    # measured 13,080 weekend rows in the last 21d (~19-29k every Saturday and Sunday), so a
+    # 2-calendar-day window always contains data.
     window_start = (datetime.date.today() - datetime.timedelta(days=2)).isoformat()
     cooldown_start = (datetime.date.today() - datetime.timedelta(days=REENTRY_COOLDOWN_DAYS)).isoformat()
 
@@ -198,7 +203,10 @@ def generate_signals(con, qualifying: dict, entries: dict) -> int:
                 VALUES (?,NOW(),?,?, ?,?,?,?, ?, ?,?,?, NOW())
             """, (
                 symbol, "SCREENER_ENTRY", "SCREENER_SURFACING",
-                price, target_price, stop_loss, min(0.70 + momentum_score * 0.01, 0.92),
+                # 0-100 scale, per db.ts's "confidence_score REAL, -- 0-100, from any source".
+                # Was min(0.70 + momentum_score * 0.01, 0.92) -- a 0-1 fraction in a column the
+                # AI path fills 0-100. See migration 1787070000000.
+                price, target_price, stop_loss, min(70.0 + momentum_score, 92.0),
                 reasoning,
                 round(momentum_score, 4), float(tier1_count), float(len(categories)),
             ))
@@ -206,7 +214,7 @@ def generate_signals(con, qualifying: dict, entries: dict) -> int:
             if sector:
                 sector_signals[sector].append(symbol)
         except Exception as e:
-            print(f"  [WARN] {symbol}: {e}")
+            print(f"  [WARN] {symbol}: {e}", file=sys.stderr)
             con.rollback()
 
     con.commit()
@@ -223,7 +231,7 @@ def generate_signals(con, qualifying: dict, entries: dict) -> int:
                 (symbol, signal_date, signal_type, signal_source,
                  confidence_score, reasoning, signal_generated_at)
                 VALUES (?, NOW(), 'SECTOR_SCREENER_CONFLUENCE', 'SCREENER_SURFACING',
-                        0.65, ?, NOW())
+                        65.0, ?, NOW())
             """, (
                 f"SECTOR:{sector}",
                 f"{len(symbols)} stocks from {sector} entering high-performing screeners today: "
@@ -260,3 +268,9 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

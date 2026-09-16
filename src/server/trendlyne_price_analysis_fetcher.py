@@ -26,6 +26,21 @@ Run:
   python trendlyne_price_analysis_fetcher.py --symbol BEL
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class TrendlynePriceAnalysisFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class TrendlynePriceAnalysisFetcherBaseFetcher(BaseFetcher[TrendlynePriceAnalysisFetcherSchema]):
+    fetcher_name = 'TrendlynePriceAnalysisFetcher'
+    domain = 'trendlyne.com'
+    schema = TrendlynePriceAnalysisFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -33,9 +48,16 @@ from datetime import date
 
 import requests
 
+import tl_fetch
+
 from db_compat import connect
 from as_of import logical_write_floor
-from fetch_utils import retry_get, FetchTracker, filter_numeric_tlids
+from fetch_utils import (retry_get, FetchTracker, filter_numeric_tlids,
+                         TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget, WAF_BLOCKED,
+                         _is_waf_challenge,
+                         run_deadline, past_deadline)
+import os
+import sys
 
 ANALYSIS_URL = "https://trendlyne.com/share-price/price-performance-analysis/{tlid}/"
 
@@ -58,7 +80,9 @@ RATE_LIMIT_SEC = 0.5
 # ponytail: no adaptive backoff/proxy rotation -- if this still trips the WAF, the run now
 # fails loud (FetchTracker/job_heartbeat) instead of silently, so the next tightening is a
 # data-driven follow-up, not a guess made now.
-BATCH_SIZE     = 5
+# Was 5 -- AWS WAF returns 405/captcha for the rest of the run when more than 3
+# requests are in flight at once. Measured, see TRENDLYNE_MAX_CONCURRENT in fetch_utils.py.
+BATCH_SIZE = TRENDLYNE_MAX_CONCURRENT
 BATCH_GAP_SEC  = 2.0
 
 # Map period name from returnsComparison to column key
@@ -122,21 +146,53 @@ def ensure_schema(con) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_tlpa_sym ON trendlyne_price_analysis(symbol, date DESC)")
     con.commit()
 
-    for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN tl_vs_nifty_1m       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_vs_nifty_3m       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_vs_nifty_6m       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_vs_ind_1m         REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_vs_ind_3m         REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_seasonal_month_5y REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_dist_3m_high_pct  REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_dist_3m_low_pct   REAL",
-    ]:
-        try:
-            cur.execute(ddl)
-            con.commit()
-        except Exception:
-            con.rollback()
+    # AF-20260901: lock-free information_schema pre-check + IF NOT EXISTS + 2s session
+    # lock_timeout -- these columns already exist (schema-of-record is
+    # db/schema.postgres.sql) yet the ALTERs re-ran on every fetch, logging duplicate-column
+    # postgres ERRORs and queueing an ACCESS EXCLUSIVE lock on a hot table each time
+    # (mechanism documented in trendlyne_overview_fetcher.py / AF-20260827-14).
+    cur.execute("SET lock_timeout = '2s'")
+    try:
+        for ddl in [
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_vs_nifty_1m       REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_vs_nifty_3m       REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_vs_nifty_6m       REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_vs_ind_1m         REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_vs_ind_3m         REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_seasonal_month_5y REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_dist_3m_high_pct  REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_dist_3m_low_pct   REAL",
+        ]:
+            try:
+                if not _ddl_column_exists(cur, ddl):
+                    cur.execute(ddl)
+                con.commit()
+            except Exception:
+                con.rollback()
+    finally:
+        cur.execute("SET lock_timeout = DEFAULT")
+        con.commit()
+
+
+def _ddl_column_exists(cur, ddl: str) -> bool:
+    """True when the column targeted by an ``ALTER TABLE t ADD COLUMN [IF NOT EXISTS] c``
+    statement already exists in the current schema. Lock-free (information_schema lookup),
+    so gating the ALTER on it avoids queueing an ACCESS EXCLUSIVE lock request just to
+    discover the column was already there (AF-20260901 / AF-20260827-14)."""
+    toks = ddl.split()
+    if (len(toks) < 6 or toks[0].upper() != "ALTER" or toks[1].upper() != "TABLE"
+            or toks[3].upper() != "ADD" or toks[4].upper() != "COLUMN"):
+        return False
+    rest = toks[5:]
+    if rest and rest[0].upper() == "IF":  # skip IF NOT EXISTS
+        rest = rest[3:]
+    if not rest:
+        return False
+    cur.execute(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+        f"AND table_name = '{toks[2]}' AND column_name = '{rest[0]}'"
+    )
+    return cur.fetchone() is not None
 
 
 # â”€â”€ Fetch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -146,11 +202,18 @@ def _fetch(tlid: str, session: requests.Session) -> dict | None:
     try:
         r = retry_get(session, url, params={"format": "json"}, timeout=15)
         data = r.json()
-        if data.get("head", {}).get("status") != "0":
+        if (data.get("head") or {}).get("status") != "0":
             return None
-        return data.get("body", {})
+        return data.get("body") or {}
     except Exception as e:
-        print(f"  [{tlid}] price-analysis error: {e}")
+        # A WAF challenge means OUR ALLOWANCE ended, not that this stock has no data. Returning
+        # the sentinel lets the caller stop the slice cleanly and resume next run, instead of
+        # booking ~2,100 phantom "failures" that trip FetchTracker's threshold and fail the job
+        # -- which is what made trendlyne-midweek fail 48 of 58 runs while writing real rows.
+        if _is_waf_challenge(e):
+            print(f"  [{tlid}] allowance exhausted (WAF): {e}", file=sys.stderr)
+            return WAF_BLOCKED
+        print(f"  [{tlid}] price-analysis error: {e}", file=sys.stderr)
         return None
 
 
@@ -278,27 +341,27 @@ def backfill_technical_signals(symbol: str, today_str: str, f: dict, con) -> Non
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            tl_vs_nifty_1m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_1m)       ELSE NULL END,
-            tl_vs_nifty_3m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_3m)       ELSE NULL END,
-            tl_vs_nifty_6m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_6m)       ELSE NULL END,
-            tl_vs_ind_1m         = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_ind_1m)         ELSE NULL END,
-            tl_vs_ind_3m         = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_ind_3m)         ELSE NULL END,
-            tl_seasonal_month_5y = CASE WHEN date >= ? THEN COALESCE(?, tl_seasonal_month_5y) ELSE NULL END,
-            tl_dist_3m_high_pct  = CASE WHEN date >= ? THEN COALESCE(?, tl_dist_3m_high_pct)  ELSE NULL END,
-            tl_dist_3m_low_pct   = CASE WHEN date >= ? THEN COALESCE(?, tl_dist_3m_low_pct)   ELSE NULL END
-        WHERE symbol = ?
+            tl_vs_nifty_1m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_1m)       ELSE tl_vs_nifty_1m END,
+            tl_vs_nifty_3m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_3m)       ELSE tl_vs_nifty_3m END,
+            tl_vs_nifty_6m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_6m)       ELSE tl_vs_nifty_6m END,
+            tl_vs_ind_1m         = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_ind_1m)         ELSE tl_vs_ind_1m END,
+            tl_vs_ind_3m         = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_ind_3m)         ELSE tl_vs_ind_3m END,
+            tl_seasonal_month_5y = CASE WHEN date >= ? THEN COALESCE(?, tl_seasonal_month_5y) ELSE tl_seasonal_month_5y END,
+            tl_dist_3m_high_pct  = CASE WHEN date >= ? THEN COALESCE(?, tl_dist_3m_high_pct)  ELSE tl_dist_3m_high_pct END,
+            tl_dist_3m_low_pct   = CASE WHEN date >= ? THEN COALESCE(?, tl_dist_3m_low_pct)   ELSE tl_dist_3m_low_pct END
+        WHERE symbol = ? AND date >= ?
     """, (
         today_str, f.get("alpha_nifty_1m"), today_str, f.get("alpha_nifty_3m"),
         today_str, f.get("alpha_nifty_6m"),
         today_str, f.get("alpha_ind_1m"), today_str, f.get("alpha_ind_3m"),
         today_str, f.get("tl_seasonal_month_5y"),
         today_str, f.get("dist_3m_high_pct"), today_str, f.get("dist_3m_low_pct"),
-        symbol,
+        symbol, today_str,   # bounded: older rows only took ELSE-keep yet were all rewritten
     ))
     con.commit()
 
 
-def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
+def _load_stocks(symbol_filter: str | None, con, skip_done_for_date=None) -> list[tuple[str, str]]:
     """Return [(symbol, tlid), ...] scoped to the NSE master list only (nse_stocks.tlid).
     No trendlyne_screener_stocks fallback — that table carries non-NSE-master symbols
     (junk/delisted/BSE-only tickers) which pulled the universe well past NSE coverage.
@@ -314,6 +377,42 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
     # Same permanent-404 filter as trendlyne_adv_tech_fetcher.py's sibling loader.
     rows, _ = filter_numeric_tlids(rows, "TLPriceAnalysis")
+    # Resume, mirroring the sibling loader in trendlyne_adv_tech_fetcher.py. Without this the
+    # run always restarted at the same alphabetical position, so every run re-fetched the same
+    # leading ~100 symbols, tripped Trendlyne's WAF (see TRENDLYNE_MAX_CONCURRENT in
+    # fetch_utils.py) and aborted -- leaving coverage pinned at 145/2234 no matter how often it
+    # ran. The sibling, which already had this, reached 2234/2234 by resuming across runs.
+    if skip_done_for_date:
+        cur.execute(
+            "SELECT symbol FROM trendlyne_price_analysis WHERE date = ?",
+            (skip_done_for_date,),
+        )
+        done = {r[0] for r in cur.fetchall()}
+        if done:
+            before = len(rows)
+            rows = [(s, t) for s, t in rows if s not in done]
+            print(f"[TLPriceAnalysis] Resuming: {before - len(rows)} of {before} stocks already "
+                  f"fetched for {skip_done_for_date}, {len(rows)} remaining.")
+        # Order the remaining work least-recently-fetched first, NOT alphabetically.
+        #
+        # Unlike the sibling loaders, this fetcher's skip key is the real calendar date (its
+        # `date` column is a calendar date -- extract_features needs it for the seasonal-month
+        # lookup), so `done` empties at every midnight and the run restarts from 'A'. Combined
+        # with a per-run budget below the universe size that starves a fixed tail forever:
+        # the catch-up rotation gives this script ~18 slices/day (one per 80 min) x 110 rows
+        # = 1,980 < 2,234 mapped tlids, so ranks ~1,981+ were re-cut from every run of every
+        # day and never fetched at all. Measured live 2026-08-17: the day's coverage was a
+        # contiguous alphabetical prefix, universe ranks 1-692 with a single gap inside it,
+        # and a rolling 3-day window held 691/2,234 distinct symbols.
+        #
+        # Sorting by each symbol's own last-fetched date (never-fetched sorts first, symbol
+        # breaks ties so the order stays deterministic) makes the shortfall rotate instead of
+        # falling on the same names, which is also what lets the rolling-window coverage check
+        # in dataQualityChecks.ts reach 100% -- under alphabetical order it was capped at
+        # 1,980/2,234 = 88.6% by construction, no matter how healthy the endpoint was.
+        cur.execute("SELECT symbol, MAX(date) AS last_date FROM trendlyne_price_analysis GROUP BY symbol")
+        last_fetched = {r[0]: (r[1] or "") for r in cur.fetchall()}
+        rows.sort(key=lambda row: (last_fetched.get(row[0], ""), row[0]))
     return rows
 
 
@@ -325,14 +424,25 @@ def main() -> None:
     con = connect()
     ensure_schema(con)
 
-    stocks = _load_stocks(args.symbol, con)
+    # Must be the ISO *string*, not a date object: trendlyne_price_analysis.date is TEXT in
+    # production (checked in information_schema, not assumed), and upsert_row writes today_str.
+    # Passing a date here raises `operator does not exist: text = date` on Postgres.
+    stocks = _load_stocks(
+        args.symbol, con,
+        skip_done_for_date=None if args.symbol else date.today().isoformat(),
+    )
     if not stocks:
         print("[TLPriceAnalysis] No stocks with tlid found.")
         return
 
+    stocks = cap_to_run_budget(stocks, "TLPriceAnalysis", requests_per_row=1)
     print(f"[TLPriceAnalysis] Fetching price-performance-analysis for {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)...")
-    session = requests.Session()
-    session.headers.update(HEADERS)
+    # 2026-08-26: curl_cffi Chrome-TLS-impersonated session via tl_fetch (see
+    # trendlyne_adv_tech_fetcher.py for the rationale); HEADERS applied only on the
+    # plain-requests fallback so Scrapling's own browser-consistent header set wins.
+    session = tl_fetch.create_session()
+    if not isinstance(session, tl_fetch.TLSession):
+        session.headers.update(HEADERS)
     today = date.today()  # real calendar date -- extract_features() needs this for the seasonal-month lookup
     # But the technical_signals UPDATE below needs the last COMPLETED trading session, not the
     # calendar date: this job runs Tuesday evening (trendlyne-midweek), and any day the grid-ensurer
@@ -357,13 +467,38 @@ def main() -> None:
         symbol, tlid = args
         return symbol, tlid, _fetch(tlid, session)
 
+    # Time-box the slice. cap_to_run_budget above bounds it by REQUEST COUNT (the WAF's own
+    # unit), which says nothing about elapsed time: when upstream slows to ~6s/request the
+    # 110-request slice overruns the 10-minute runPython budget and the run is KILLED mid-work.
+    # That budget cannot simply be raised -- it is deliberately below the 20-minute cadence so
+    # two catch-up runs can never overlap and double-spend the shared allowance. Stopping
+    # cleanly and letting the next run resume from the DB is already the designed behaviour
+    # (see cap_to_run_budget: 'a partial run here is normal, not a failure').
+    deadline = run_deadline(float(os.environ.get('TRENDLYNE_SLICE_DEADLINE_SEC', '480')))
+    allowance_gone = False
     for batch_start in range(0, len(stocks), BATCH_SIZE):
+        # Once the vendor's allowance is spent every further request is a 405; continuing only
+        # burns wall-clock and hammers a WAF that is already refusing us.
+        if allowance_gone:
+            print(f"[TLPriceAnalysis] Allowance exhausted at {done}/{len(stocks)} stocks -- "
+                  "stopping cleanly; the next scheduled run resumes from the DB.",
+                  file=sys.stderr)
+            break
+        if past_deadline(deadline):
+            print(f"[TLPriceAnalysis] Slice deadline reached at {done}/{len(stocks)} stocks -- "
+                  "stopping cleanly; the next scheduled run resumes from the DB.",
+                  file=sys.stderr)
+            break
         batch = stocks[batch_start:batch_start + BATCH_SIZE]
         with ThreadPoolExecutor(max_workers=len(batch)) as pool:
             futures = [pool.submit(_fetch_one, item) for item in batch]
             for fut in as_completed(futures):
                 symbol, tlid, body = fut.result()
                 done += 1
+                if body is WAF_BLOCKED:
+                    tracker.record_allowance_exhausted(symbol)
+                    allowance_gone = True
+                    continue
                 if body is None:
                     print(f"  [{done}/{len(stocks)}] {symbol}: no data")
                     tracker.record(symbol, ok=False)
@@ -386,3 +521,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

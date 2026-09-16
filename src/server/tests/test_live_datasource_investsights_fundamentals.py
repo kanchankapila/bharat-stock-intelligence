@@ -12,6 +12,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import investsights_fundamentals_fetcher as fu
 from live_datasource_helpers import assert_non_empty_response, assert_stored_row_ml_usable
@@ -50,7 +51,7 @@ class TestInvestsightsFundamentalsLiveDataSource:
         row = fu.parse_row("RELIANCE", "2026-08-13", ttm, fmp, growth, dcf)
         assert row is not None
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         fu.ensure_schema(con)
         assert fu.store_row(con, row) == 1
 

@@ -1,4 +1,5 @@
 import pandas as pd
+import polars as pl
 import os
 import json
 import datetime
@@ -10,6 +11,7 @@ import numpy as np
 
 from db_compat import get_engine
 from as_of import logical_write_floor
+import sys
 
 
 # ── ATR-based barriers ──────────────────────────────────────────────────────────
@@ -50,6 +52,20 @@ def compute_atr_barriers(price, atr, direction,
 #                                          still works unchanged)
 #   entry/target/stop -> passthrough (unified_signals already has these columns)
 #   reasoning         -> a human-readable RSI/MACD/BB summary (unified_signals' own free-text column)
+#
+# confidence_score is DELIBERATELY NOT WRITTEN, and that is a decision, not an oversight.
+# This source is 24,442 of unified_signals' rows (the largest single writer) and 100% of them
+# have a NULL confidence_score -- reviewed 2026-08-16 and left NULL on purpose. analyze_stock()
+# computes no confidence quantity: it produces a trend label, an RSI, a 4-state MACD label, a
+# Bollinger state and a pattern list. Any "confidence" derived from those would be an invented
+# weighting with no validation behind it, and .claude/rules/measurement.md is explicit that a
+# new score needs backtest evidence before it is emitted -- this codebase has already been
+# burned by scores that looked like evidence and were not.
+#
+# The correct handling is on the READ side, and it is done: a consumer must treat NULL here as
+# "this source does not report confidence", never as zero and never as a reason to exclude the
+# row. `confidence_score >= X` is never true for NULL, which is exactly how the chatbot's
+# get_buy_signals silently dropped every row from this source until 2026-08-15.
 
 def to_unified_signal_row(row: dict, signal_date: str) -> dict:
     return {
@@ -193,7 +209,7 @@ class TechnicalAnalysisEngine:
                 if analysis:
                     results.append(analysis)
             except Exception as e:
-                print(f"Error analyzing {symbol}: {e}")
+                print(f"Error analyzing {symbol}: {e}", file=sys.stderr)
 
         if results:
             # Anchored to the last real session in stock_ohlcv (2026-08-13), not wall-clock: a
@@ -240,3 +256,10 @@ def run_ta_engine():
 if __name__ == "__main__":
     engine = TechnicalAnalysisEngine()
     engine.process_all()
+from workflow_orchestrator import WorkflowDAG, TaskNode
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

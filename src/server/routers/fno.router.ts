@@ -127,6 +127,9 @@ export const fnoRouter = router({
       try {
         // so_stock_oi_summary.fut_price is not currently populated by the fetcher (data gap,
         // tracked separately) — use the latest stock_ohlcv close as the reference price instead.
+        // DISTINCT ON is Postgres-only and doesn't survive sqlTranslate.ts's translation to the
+        // SQLite dev fallback (same reason confluenceEngine.ts/scoring.router.ts/unified_ranker.py
+        // all use ROW_NUMBER() instead — see recurring-bugs.md's SQL dialect table).
         const rows = await dbAll<any>(`
           WITH latest_oi AS (
             SELECT symbol, MAX(date) AS max_date
@@ -135,15 +138,19 @@ export const fnoRouter = router({
             GROUP BY symbol
           ),
           nearest_expiry AS (
-            SELECT DISTINCT ON (o.symbol) o.symbol, o.expiry, o.max_pain, o.pcr, o.mwpl
-            FROM so_stock_oi_summary o
-            JOIN latest_oi l ON l.symbol = o.symbol AND l.max_date = o.date
-            ORDER BY o.symbol, o.expiry ASC
+            SELECT symbol, expiry, max_pain, pcr, mwpl FROM (
+              SELECT o.symbol, o.expiry, o.max_pain, o.pcr, o.mwpl,
+                     ROW_NUMBER() OVER (PARTITION BY o.symbol ORDER BY o.expiry ASC) AS rn
+              FROM so_stock_oi_summary o
+              JOIN latest_oi l ON l.symbol = o.symbol AND l.max_date = o.date
+            ) t WHERE rn = 1
           ),
           latest_close AS (
-            SELECT DISTINCT ON (symbol) symbol, close, date
-            FROM stock_ohlcv
-            ORDER BY symbol, date DESC
+            SELECT symbol, close, date FROM (
+              SELECT symbol, close, date,
+                     ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+              FROM stock_ohlcv
+            ) t WHERE rn = 1
           )
           SELECT n.symbol, ns.name, lc.close AS ltp, n.max_pain, n.pcr, n.mwpl,
                  ROUND((((lc.close - n.max_pain) / lc.close) * 100)::numeric, 2) AS diff_pct

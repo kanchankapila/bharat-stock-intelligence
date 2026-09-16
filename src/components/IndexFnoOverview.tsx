@@ -41,7 +41,7 @@ const PCRGauge: React.FC<{ pcr: number }> = ({ pcr }) => {
     <div className="p-5 glass-strong border border-slate-800/50 rounded-2xl">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Put-Call Ratio (PCR)</p>
+          <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest">Put-Call Ratio (PCR)</p>
           <p className={cn("text-3xl font-black tabular-nums italic mt-1", interpretation.color)}>{pcr.toFixed(2)}</p>
         </div>
         <div className="text-right">
@@ -64,7 +64,7 @@ const PCRGauge: React.FC<{ pcr: number }> = ({ pcr }) => {
 // ── IV Skew Widget ──────────────────────────────────────────────────────────
 const IVSkewWidget: React.FC<{ callIV: number | null; putIV: number | null; skew: number | null }> = ({ callIV, putIV, skew }) => (
   <div className="p-5 glass-strong border border-slate-800/50 rounded-2xl">
-    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">IV Skew (Put IV − Call IV)</p>
+    <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-3">IV Skew (Put IV − Call IV)</p>
     <div className="flex gap-6">
       <div>
         <p className="text-[9.5px] font-bold text-emerald-500 uppercase mb-1">Call IV (avg)</p>
@@ -84,7 +84,7 @@ const IVSkewWidget: React.FC<{ callIV: number | null; putIV: number | null; skew
       </div>
     </div>
     {skew != null && (
-      <p className="text-[10px] text-slate-400 font-bold mt-2 uppercase tracking-widest">
+      <p className="text-[10px] text-slate-400 font-bold mt-2 font-display uppercase tracking-widest">
         {skew > 3 ? '→ Elevated put premium — hedging demand / fear' :
          skew < -3 ? '→ Calls costlier — aggressive upside bets placed' :
          '→ Balanced skew — no extreme directional bias'}
@@ -163,9 +163,9 @@ const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
 
   if (!analysis && !futRows.length) {
     return (
-      <div className="p-8 text-center bg-slate-950/30 border border-slate-800/30 rounded-3xl">
+      <div className="p-8 text-center v1-card">
         <AlertTriangle className="w-6 h-6 text-slate-300 mx-auto mb-3" />
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No F&O data available for {fnoSymbol}</p>
+        <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest">No F&O data available for {fnoSymbol}</p>
       </div>
     );
   }
@@ -176,12 +176,12 @@ const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
           reflects immediate sentiment, further ones reflect longer-dated hedging/rollover. */}
       {expiries && expiries.length > 1 && (
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest">Horizon:</span>
+          <span className="text-[9.5px] font-black text-slate-400 font-display uppercase tracking-widest">Horizon:</span>
           {expiries.map((exp, i) => {
             const active = (selectedExpiry ?? expiries[0]) === exp;
             return (
               <button key={exp} onClick={() => setSelectedExpiry(exp)}
-                className={cn("px-2.5 py-1 rounded-lg text-[9.5px] font-black uppercase tracking-widest transition-all",
+                className={cn("px-2.5 py-1 rounded-lg text-[9.5px] font-black font-display uppercase tracking-widest transition-all",
                   active ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40" : "bg-slate-900/40 text-slate-400 border border-slate-800/50 hover:text-slate-200")}>
                 {exp}{i === 0 ? ' · Near' : ''}
               </button>
@@ -225,7 +225,7 @@ const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
                 <StrikeRow key={c.strike} strike={c.strike} oi={c.oi} ltp={c.ltp} iv={c.iv} buildup={c.buildup} type="CE" rank={i} />
               ))}
               {analysis.top3Calls[0] && (
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest pt-1">
+                <p className="text-[10px] text-slate-400 font-bold font-display uppercase tracking-widest pt-1">
                   Max call OI at ₹{analysis.top3Calls[0].strike.toLocaleString('en-IN')} — writers defending this level. Breakout above = short-squeeze rally.
                 </p>
               )}
@@ -240,7 +240,7 @@ const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
                 <StrikeRow key={p.strike} strike={p.strike} oi={p.oi} ltp={p.ltp} iv={p.iv} buildup={p.buildup} type="PE" rank={i} />
               ))}
               {analysis.top3Puts[0] && (
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest pt-1">
+                <p className="text-[10px] text-slate-400 font-bold font-display uppercase tracking-widest pt-1">
                   Max put OI at ₹{analysis.top3Puts[0].strike.toLocaleString('en-IN')} — put writers providing a strong floor. Break below = delta hedging cascade.
                 </p>
               )}
@@ -271,7 +271,7 @@ const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
                 <div key={idx} className="p-4 glass-strong border border-slate-800/50 rounded-2xl hover:border-blue-500/30 transition-all">
                   <div className="flex items-center gap-2 mb-2">
                     <Clock className="w-3 h-3 text-slate-400" />
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{expiry || `Contract ${idx + 1}`}</span>
+                    <span className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest">{expiry || `Contract ${idx + 1}`}</span>
                   </div>
                   <p className="text-2xl font-black text-white tabular-nums italic leading-none">
                     {ltp != null ? `₹${ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'}
@@ -283,13 +283,13 @@ const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
                       </span>
                     )}
                     {oiChg != null && (
-                      <span className={cn("text-[10px] font-black uppercase tracking-widest", oiChg >= 0 ? 'text-emerald-500' : 'text-rose-500')}>
+                      <span className={cn("text-[10px] font-black font-display uppercase tracking-widest", oiChg >= 0 ? 'text-emerald-500' : 'text-rose-500')}>
                         OI {oiChg >= 0 ? '+' : ''}{oiChg.toFixed(1)}%
                       </span>
                     )}
                   </div>
                   {buildup && (
-                    <p className={cn("text-[9.5px] font-black uppercase tracking-widest mt-2", buildupColors[buildup] || 'text-slate-400')}>
+                    <p className={cn("text-[9.5px] font-black font-display uppercase tracking-widest mt-2", buildupColors[buildup] || 'text-slate-400')}>
                       ● {buildup}
                     </p>
                   )}
@@ -302,10 +302,10 @@ const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
 
       {/* OI flow summary */}
       {analysis && (
-        <div className="p-5 bg-slate-900/40 border border-slate-800/30 rounded-3xl">
+        <div className="v1-card p-5">
           <div className="flex items-center gap-2 mb-3">
             <Zap className="w-3.5 h-3.5 text-amber-400" />
-            <h4 className="text-[10px] font-black text-amber-400 uppercase tracking-widest italic">OI Intelligence Summary — {fnoSymbol}</h4>
+            <h4 className="text-[10px] font-black text-amber-400 font-display uppercase tracking-widest italic">OI Intelligence Summary — {fnoSymbol}</h4>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
             <div>
@@ -357,7 +357,7 @@ const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
             </div>
           </div>
           {analysis.pcr != null && (
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-3">
+            <p className="text-[10px] text-slate-400 font-bold font-display uppercase tracking-widest mt-3">
               {analysis.pcr > 1.2
                 ? `PCR of ${analysis.pcr.toFixed(2)} indicates put-heavy positioning — market views current levels as support. Options traders are net bullish via put writing.`
                 : analysis.pcr < 0.8

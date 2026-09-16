@@ -8,7 +8,7 @@ Complements nt_oi_snapshot_fetcher.py (absolute OI) — this shows where new
 money is flowing in vs flowing out, which is the primary indicator for
 support/resistance confirmation.
 
-API: https://webapi.niftytrader.in/webapi/Option/change-oi-time-range
+API: https://www.niftytrader.in/api/niftytrader/Option/change-oi-time-range
      ?symbol={nt_symbol}&start_time={time}&end_time={time}&expiry=&exchange={exchange}
 
 Runs for all indices in index_provider_map (provider nt_index + nt_index_bse).
@@ -19,6 +19,21 @@ Run:
   python nt_change_oi_fetcher.py --time 14:00:00    # intraday snapshot
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class NtChangeOiFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class NtChangeOiFetcherBaseFetcher(BaseFetcher[NtChangeOiFetcherSchema]):
+    fetcher_name = 'NtChangeOiFetcher'
+    domain = 'niftytrader.in'
+    schema = NtChangeOiFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 from datetime import date as _date
 
@@ -26,6 +41,7 @@ import requests
 
 from db_compat import execute, executemany, query_all
 from fetch_utils import retry_get
+import sys
 
 NT_HEADERS = {
     "User-Agent": (
@@ -38,7 +54,7 @@ NT_HEADERS = {
 }
 
 CHANGE_OI_URL = (
-    "https://webapi.niftytrader.in/webapi/Option/change-oi-time-range"
+    "https://www.niftytrader.in/api/niftytrader/Option/change-oi-time-range"
     "?symbol={symbol}&start_time={time}&end_time={time}&expiry=&exchange={exchange}"
 )
 
@@ -65,7 +81,7 @@ def _get_nt_index_map() -> dict[str, tuple[str, str]]:
             for r in rows:
                 result[r["index_name"]] = (r["provider_id"], exchange)
     except Exception as e:
-        print(f"[nt_chg_oi] WARN: index map lookup failed ({e}), using fallback")
+        print(f"[nt_chg_oi] WARN: index map lookup failed ({e}), using fallback", file=sys.stderr)
     return result or _FALLBACK
 
 
@@ -86,7 +102,7 @@ def fetch_change_oi(nt_symbol: str, snap_time: str, exchange: str) -> list[dict]
             return []
         return d.get("resultData") or []
     except Exception as e:
-        print(f"  [chg-OI] fetch error for {nt_symbol} after retries: {e}")
+        print(f"  [chg-OI] fetch error for {nt_symbol} after retries: {e}", file=sys.stderr)
         return []
 
 
@@ -155,3 +171,9 @@ if __name__ == "__main__":
     parser.add_argument("--time",  default="15:20:00", help="Snapshot time HH:MM:SS")
     args = parser.parse_args()
     run(target_index=args.index, snap_time=args.time)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

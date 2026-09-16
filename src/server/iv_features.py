@@ -18,6 +18,7 @@ Run:  python iv_features.py            # backfill iv_rank/iv_skew for all dates
       python iv_features.py --date today
 """
 
+import polars as pl
 import argparse
 import datetime
 
@@ -33,7 +34,12 @@ IV_RANK_MIN_OBS = 20   # need at least this many prior obs before a rank is mean
 
 def compute_options_walls(conn, symbol: str, spot: float, as_of_date: str, rows=None) -> dict:
     """Compute call wall, put wall distance, and near-expiry gamma flag from option OI."""
-    result = {'call_wall_dist_pct': 0.0, 'put_wall_dist_pct': 0.0, 'near_expiry_gamma': 0.0}
+    # None, not 0.0, for the two DISTANCE columns: a name with no option chain has no wall,
+    # and 0.0 reads downstream as "the wall is exactly at spot". ml_ensemble.build_features
+    # fills a NULL with a neutral 5.0 (num(..., 5.0)) but cannot see through a stored 0, so
+    # near_call_wall/near_put_wall fired TRUE on ~93% of the grid. See migration
+    # 1787130000000. near_expiry_gamma stays 0.0 -- there, 0 genuinely means "not near expiry".
+    result = {'call_wall_dist_pct': None, 'put_wall_dist_pct': None, 'near_expiry_gamma': 0.0}
     if not spot or spot <= 0:
         return result
     try:
@@ -143,11 +149,13 @@ def run(only_date: str | None = None) -> int:
     # transaction (ADD COLUMN IF NOT EXISTS on PG) — a bare conn.execute here is never committed
     # and rolls back on conn.close() below, so the executemany then hit UndefinedColumn on Postgres.
     for col, typ in [
-        ("call_wall_dist_pct", "REAL DEFAULT 0"),
-        ("put_wall_dist_pct",  "REAL DEFAULT 0"),
+        # No DEFAULT on the two distance columns -- see compute_options_walls' comment and
+        # migration 1787130000000. A defaulted 0 is indistinguishable from a real wall at spot.
+        ("call_wall_dist_pct", "REAL"),
+        ("put_wall_dist_pct",  "REAL"),
         ("near_expiry_gamma",  "REAL DEFAULT 0"),
     ]:
-        safe_alter(None, f"ALTER TABLE technical_signals ADD COLUMN {col} {typ}")
+        safe_alter(None, f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} {typ}")
 
     # Read spot prices needed for wall computation from stock_option_features
     spot_rows = conn.execute(
@@ -223,3 +231,9 @@ if __name__ == "__main__":
     parser.add_argument("--date", help="If 'today', only update today's rows")
     args = parser.parse_args()
     run(only_date=args.date)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

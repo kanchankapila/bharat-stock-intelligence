@@ -83,7 +83,7 @@ export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ on
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex items-center gap-2 px-3 py-1 bg-slate-900/60 border border-white/[0.08] rounded-full backdrop-blur-sm">
              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-             <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-widest">Live NSE</span>
+             <span className="text-[9px] font-semibold text-slate-400 font-display uppercase tracking-widest">Live NSE</span>
           </div>
           <PriceFreshnessBadge updatedAt={dataUpdatedAt} thresholdMs={90_000} />
         </div>
@@ -95,7 +95,7 @@ export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ on
             {renderMoversList(section.data, section.color)}
             {section.data.length === 0 && (
               <div className="py-8 text-center">
-                <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest italic">No data detected</p>
+                <p className="text-slate-600 text-[10px] font-bold font-display uppercase tracking-widest italic">No data detected</p>
               </div>
             )}
           </Card>

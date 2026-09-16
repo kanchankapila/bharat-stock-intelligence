@@ -17,6 +17,7 @@ Run:  python oi_delta_features.py
       python oi_delta_features.py --date 2026-06-25
 """
 
+import polars as pl
 import datetime
 import argparse
 
@@ -92,3 +93,9 @@ if __name__ == '__main__':
     parser.add_argument('--date', default=None, help='Signal date (YYYY-MM-DD, default today)')
     args = parser.parse_args()
     run(date_str=args.date)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

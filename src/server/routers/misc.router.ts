@@ -16,10 +16,17 @@ import {
   fetchStockEarningsSummary,
   type FnoIndexId,
 } from "../marketIntelService";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, expensiveProcedure } from "../trpc";
+import { latestComputedAt } from "../latestComputedAt";
+
+// Shared TTL probe (consolidated 2026-09-02 from the per-router copies this comment used to
+// document) — same 5-minute TTL and CAST-to-TEXT semantics.
+async function urLatestAtMisc(): Promise<string | null> {
+  return latestComputedAt('unified_recommendations');
+}
 
 export const miscRouter = router({
-  getAIAnalysis: publicProcedure
+  getAIAnalysis: expensiveProcedure
     .input(z.object({ symbol: z.string(), data: z.record(z.string(), z.unknown()) }))
     .mutation(async ({ input }) => {
       const { symbol, data } = input;
@@ -184,7 +191,7 @@ export const miscRouter = router({
       }, 1800)
     ),
 
-  analyzePortfolio: publicProcedure
+  analyzePortfolio: expensiveProcedure
     .input(z.object({ symbols: z.array(z.string()), weights: z.array(z.number()) }))
     .mutation(async ({ input }) => {
       try {
@@ -330,19 +337,29 @@ export const miscRouter = router({
       return { date: latest.date, indicator: value, zone, trail: rows.slice(1, 8) };
     }, 900)),
 
-  // Raw NSE PIT (insider) filings: promoter/designated-person transactions with before/after
-  // %holding — richer than getDeals, previously only consumed as a binary flag by the scoring
-  // engine (technical_signals.insider_buy_flag/sell_flag).
+  // Insider/promoter transactions: was raw NSE PIT filings from insider_transactions, but that
+  // table has been stuck at 2026-05-02 for 3+ months (NSE's corporates-pit endpoint ignores its
+  // own from/to params -- see insider_transactions_fetcher.py's compute_and_write_features
+  // docstring, 2026-08-07) -- confirmed live 2026-08-14 (23,596 rows, still MAX(transaction_date)
+  // = 2026-05-02). The ML feature side switched to insider_trades (MoneyControl + Tickertape,
+  // fresh to within a day, already used for technical_signals.promoter_*_90d_cr) that same day,
+  // but this UI-facing procedure was missed and kept serving the frozen table. Repointed
+  // 2026-08-14. Trade-off: insider_trades has no before/after %holding (that's NSE PIT-specific;
+  // this source's closest analogue is pct_transacted, % of float, not carried here since no
+  // consumer reads it) -- before_pct/after_pct now come back null, which every consumer already
+  // renders as '—'.
   getInsiderTransactions: publicProcedure
     .input(z.object({ symbol: z.string().optional(), limit: z.number().min(1).max(200).optional().default(100) }))
     .query(async ({ input }) => {
       try {
         const rows = await dbAll<any>(
-          `SELECT symbol, person_name, person_category, transaction_mode, quantity, value_cr,
-                  before_pct, after_pct, transaction_date
-           FROM insider_transactions
+          `SELECT symbol, "acquirerName" AS person_name, category AS person_category,
+                  "typeOfTransaction" AS transaction_mode, quantity,
+                  ROUND(CAST("valueInr" AS NUMERIC) / 1e7, 4) AS value_cr,
+                  NULL AS before_pct, NULL AS after_pct, date_iso AS transaction_date
+           FROM insider_trades
            ${input.symbol ? "WHERE symbol = ?" : ""}
-           ORDER BY transaction_date DESC
+           ORDER BY date_iso DESC
            LIMIT ?`,
           input.symbol ? [input.symbol.toUpperCase(), input.limit] : [input.limit]
         );
@@ -454,6 +471,25 @@ export const miscRouter = router({
         const quantMap = new Map<string, Record<string, unknown>>();
         for (const q of quantRows) quantMap.set(q.symbol as string, q);
 
+        // canonical-read-audit (2026-08-19): this endpoint computes its own compositeScore/
+        // actionAdvice below -- a legitimate desk-specific position-sizing calculation, not a
+        // duplicate of unified_recommendations (different inputs, different question: "what
+        // size/entry/stop" vs. "what's the platform's cross-source rank"). Per scoring-authority.md,
+        // a component engine may keep its own score AS LONG AS the canonical rank is also surfaced
+        // as read-only context so the UI never presents this as if it were the platform's final
+        // call. Mirrors getStrategyStocks' unifiedScore/unifiedClassification columns.
+        let unifiedMap = new Map<string, { unified_score: number | null; classification: string | null; conviction_level: string | null }>();
+        try {
+          const urAt = await urLatestAtMisc();
+          if (urAt) {
+            const urRows = await dbAll<{ symbol: string; unified_score: number | null; classification: string | null; conviction_level: string | null }>(
+              `SELECT symbol, unified_score, classification, conviction_level FROM unified_recommendations WHERE CAST(computed_at AS TEXT) = ?`,
+              [urAt]
+            );
+            unifiedMap = new Map(urRows.map(r => [r.symbol, r]));
+          }
+        } catch { /* unified_recommendations not yet populated -- cockpit still works on its own inputs */ }
+
         let newsSentiment: Array<Record<string, unknown>> = [];
         try {
           newsSentiment = await dbAll<any>(`SELECT symbol, sentiment_score FROM news_sentiment_items WHERE published_at >= datetime('now', '-7 days') ORDER BY published_at DESC`);
@@ -541,10 +577,17 @@ export const miscRouter = router({
             : compositeScore >= 50 ? 'WATCH'
             : 'HOLD';
 
+          // Canonical cross-source rank, read-only context alongside this desk's own
+          // compositeScore -- see the comment above unifiedMap's query.
+          const ur = unifiedMap.get(symbol);
+
           return {
             symbol, name: getStockMapping(symbol)?.name || symbol, sector: data.sector,
             advice: actionAdvice, actionAdvice,
             compositeScore: parseFloat(compositeScore.toFixed(1)),
+            unifiedScore: ur?.unified_score ?? null,
+            unifiedClassification: ur?.classification ?? null,
+            unifiedConvictionLevel: ur?.conviction_level ?? null,
             mlWinProbability: parseFloat((winProb * 100).toFixed(1)),
             mlProbability:    parseFloat((winProb * 100).toFixed(1)),
             techSignalCount: 1,
@@ -619,14 +662,22 @@ export const miscRouter = router({
         const cutoffIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
         const [signalRows, newsRows] = await Promise.all([
+          // 'Bullish'/'Bearish' as well as BUY/SELL: technical_analysis_engine.py
+          // (signal_source='technical') is the LARGEST writer of this table and uses that
+          // spelling, so a BUY/SELL-only filter excluded it from the feed entirely — measured
+          // 2026-08-16 over a 72h window, 12,288 Bullish/Bearish against 757 BUY/SELL.
+          // Kept as a JS comment, NOT a `--` comment inside the template literal: sqlTranslate
+          // rewrites this string before it reaches the driver and is not comment-aware, so an
+          // in-SQL comment containing quotes broke the query — silently, because the
+          // `.catch(() => [])` below turns any failure into an empty feed rather than an error.
           dbAll<Record<string, unknown>>(`
             SELECT symbol, signal_source, signal_type, entry_price, target_price, stop_loss,
                    confidence_score, signal_generated_at, reasoning
             FROM unified_signals
-            WHERE signal_type IN ('BUY', 'SELL') AND signal_generated_at >= ?
+            WHERE signal_type IN ('BUY', 'SELL', 'Bullish', 'Bearish') AND signal_generated_at >= ?
             ORDER BY signal_generated_at DESC
             LIMIT ?
-          `, [cutoffIso, limit]).catch(() => []),
+          `, [cutoffIso, limit]).catch((e) => { console.error('[activity-feed] signal query failed:', e?.message ?? e); return []; }),
           (async () => {
             try {
               const { getNewsItems } = await import('../newsSentimentService');
@@ -649,7 +700,15 @@ export const miscRouter = router({
           headline: `${s.signal_type} signal · ${s.symbol}`,
           detail: (s.reasoning as string) || (s.entry_price ? `Entry ₹${s.entry_price}${s.target_price ? ` · Target ₹${s.target_price}` : ''}${s.stop_loss ? ` · SL ₹${s.stop_loss}` : ''}` : null),
           tag: `${s.signal_source ?? 'SIGNAL'}`,
-          tagSentiment: s.signal_type === 'BUY' ? 'BULLISH' : 'BEARISH',
+          // Explicit 3-way, NOT `=== 'BUY' ? BULLISH : BEARISH`. A two-pole ternary on a column
+          // with more than two values labels everything it does not recognise as the opposite
+          // pole -- the same defect as scoring_engine.py's neutral-screener-tags-as-bearish bug
+          // in .claude/rules/recurring-bugs.md. With 'Bullish' now selected above, the old form
+          // would have rendered every one of them as BEARISH.
+          tagSentiment: ((t) =>
+            t === 'BUY' || t === 'Bullish' ? 'BULLISH'
+            : t === 'SELL' || t === 'Bearish' ? 'BEARISH'
+            : 'NEUTRAL')(s.signal_type as string),
           source: (s.signal_source as string) || 'Signal Engine',
           url: null,
         }));
@@ -672,7 +731,21 @@ export const miscRouter = router({
           };
         });
 
-        const items = [...signalItems, ...newsItems]
+        // Reserve a share of the feed for signals instead of one global sort + slice.
+        //
+        // A pure recency sort makes this endpoint STRUCTURALLY news-only, not occasionally so.
+        // Measured 2026-08-16 over a 72h window: 5,733 news items against 12,288 eligible
+        // signals, and every news item was newer than the most recent signal (2026-08-14
+        // 14:03, the last session before a weekend). News is written 24/7; signals are
+        // generated a few times a day, so news wins every one of the `limit` slots whenever it
+        // is fresher — which is essentially always. The signal branch of this procedure built
+        // items that could never be returned.
+        //
+        // Both lists are already ordered newest-first by their own queries. Signals take up to
+        // a third of the slots (only as many as exist), news takes the rest, and the combined
+        // result is re-sorted so the feed still reads chronologically.
+        const signalQuota = Math.min(signalItems.length, Math.floor(limit / 3));
+        const items = [...signalItems.slice(0, signalQuota), ...newsItems.slice(0, limit - signalQuota)]
           .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
           .slice(0, limit);
 

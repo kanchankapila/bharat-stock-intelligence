@@ -55,6 +55,8 @@ the API itself returned).
 Run:
   python investsights_sector_intel_fetcher.py
 """
+
+import polars as pl
 import sys
 
 import requests
@@ -341,3 +343,22 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class InvestsightsSectorIntelFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class InvestsightsSectorIntelFetcherBaseFetcher(BaseFetcher[InvestsightsSectorIntelFetcherSchema]):
+    fetcher_name = 'InvestsightsSectorIntelFetcher'
+    domain = 'investsights.in'
+    schema = InvestsightsSectorIntelFetcherSchema
+    min_interval_sec = 0.5
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

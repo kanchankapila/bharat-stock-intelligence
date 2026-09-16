@@ -17,8 +17,11 @@ auto-promote just because there happens to be no prior baseline to fail against)
 other five sites' existing behavior does NOT special-case a NaN candidate -- changing that
 would be a functional change, not a refactor, so it is deliberately not applied everywhere.
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 import datetime
 import math
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 
@@ -126,3 +129,206 @@ def staleness_override_applies(baseline_trained_at, rejections: int,
     override doesn't apply) so callers can log/report it regardless of outcome."""
     age_days = days_since(baseline_trained_at)
     return (age_days >= max_days and rejections >= max_rejections), age_days
+
+
+def file_staleness_override_applies(baseline_metrics: dict | None,
+                                     max_days: float = DEFAULT_STALENESS_MAX_DAYS,
+                                     max_rejections: int = DEFAULT_STALENESS_MAX_REJECTIONS
+                                     ) -> Tuple[bool, float, int]:
+    """Same safety valve as staleness_override_applies(), for the engines whose promotion
+    gate persists to a local pickle/JSON file instead of model_registry (ml-promotion-gate-
+    review, 2026-08-14: dl_engine.py, live_screener_ml_ranker.py, breakout_classifier.py,
+    flyer_classifier.py, movement_predictor.py) -- rejections_since() needs a Postgres
+    model_registry connection these files don't have, so they had no equivalent self-healing
+    path at all: a stale baseline (e.g. inflated by a leak that's since been fixed) would
+    reject every future honest retrain forever, same class of deadlock already found and
+    fixed twice for the model_registry-backed engines (ensemble, cs_ranker).
+
+    Rejection bookkeeping lives inside the baseline's own stored metrics dict:
+    `first_rejected_at` (ISO string, set the first time a candidate is rejected against this
+    exact baseline) and `rejection_count` (int, incremented on each subsequent rejection).
+    The caller is responsible for writing the incremented fields back into the baseline
+    file's metrics dict when a candidate is rejected, and for clearing both fields when a
+    candidate IS promoted (the new baseline starts with a clean slate) -- this function only
+    reads them and decides.
+
+    Returns (override_applies, age_days, rejection_count) -- age_days/rejection_count are
+    always returned (even when the override doesn't apply) so callers can log regardless of
+    outcome. A baseline with no `first_rejected_at` yet (never been rejected) returns
+    (False, 0.0, 0) -- age is meaningless before the first rejection is recorded."""
+    if not baseline_metrics:
+        return False, 0.0, 0
+    rejection_count = int(baseline_metrics.get('rejection_count') or 0)
+    first_rejected_at = baseline_metrics.get('first_rejected_at')
+    if not first_rejected_at:
+        return False, 0.0, rejection_count
+    age_days = days_since(first_rejected_at)
+    return (age_days >= max_days and rejection_count >= max_rejections), age_days, rejection_count
+
+
+# ── Realized-forward-edge gate ────────────────────────────────────────────────
+#
+# A promotion gate built on a model's own self-reported CV/held-out AUC cannot tell a real
+# edge from an overfit one. Measured live 2026-08-21: the active ensemble (model_registry
+# id=220) held the BEST CV of all 59 registered ensemble candidates -- cv_roc_auc=0.7664 --
+# while the same model's live output, graded against realized forward returns by
+# factor_edge.py, scored hit_auc 0.493 / 0.512 / 0.535 at 1/5/21d. That is chance. A baseline
+# whose realized edge is that weak is not evidence of anything, and letting its inflated CV
+# block every honest challenger is the same permanent-deadlock failure that
+# staleness_override_applies() above exists to break -- just sourced from overfitting rather
+# than from a since-fixed leak, and therefore invisible to the age/rejection-count math (a
+# model that keeps winning on CV never accumulates rejections, so it never goes "stale").
+#
+# Thresholds deliberately mirror factor_edge.py's own _verdict(): USABLE requires
+# |rank_IC| >= 0.03 AND hit_AUC >= 0.55, and a reading under MIN_DATES_RELIABLE=20 dates is
+# LOW-DATA. Keeping one bar means "the gate says the incumbent has no edge" and "measurement.md
+# says the incumbent has no edge" can never disagree.
+
+LIVE_EDGE_MIN_IC = 0.03
+LIVE_EDGE_MIN_AUC = 0.55
+LIVE_EDGE_MIN_DATES = 20
+
+
+def live_edge_verdict(conn, table_name: str, score_col: str) -> Optional[dict]:
+    """Realized-forward-return reading for a scored column, from the most recent factor_edge.py
+    run recorded in factor_edge_history.
+
+    Takes the BEST horizon of that run (MAX over rank_ic/hit_auc/dates), deliberately: this
+    reading is used to decide whether an incumbent's edge is too weak to defend its CV baseline,
+    so being generous to the incumbent keeps the override conservative -- it can only fire when
+    even the incumbent's best horizon fails.
+
+    Returns None if the column has never been graded."""
+    try:
+        row = conn.execute(
+            "SELECT MAX(rank_ic), MAX(hit_auc), MAX(dates) FROM factor_edge_history "
+            "WHERE table_name = ? AND score_col = ? AND run_at = ("
+            "  SELECT MAX(run_at) FROM factor_edge_history "
+            "  WHERE table_name = ? AND score_col = ?)",
+            (table_name, score_col, table_name, score_col),
+        ).fetchone()
+    except Exception:
+        # A failed SELECT aborts the whole transaction on Postgres -- roll back or every later
+        # query on this shared conn dies with "current transaction is aborted".
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return None
+    if not row or row[0] is None or row[1] is None:
+        return None
+    return {'rank_ic': float(row[0]), 'hit_auc': float(row[1]), 'dates': int(row[2] or 0)}
+
+
+def live_edge_is_unproven(verdict: Optional[dict],
+                           min_ic: float = LIVE_EDGE_MIN_IC,
+                           min_auc: float = LIVE_EDGE_MIN_AUC,
+                           min_dates: int = LIVE_EDGE_MIN_DATES) -> Tuple[bool, str]:
+    """(is_unproven, reason) for a live_edge_verdict() reading.
+
+    "Unmeasured" is NOT the same as "measured and bad", and this returns False for both the
+    never-graded and the too-thin case on purpose: a newly-scored column with 3 dates behind it
+    must not be allowed to override its own baseline on no evidence. Only a reading with
+    >= min_dates dates that still fails the USABLE bar counts as unproven."""
+    if not verdict:
+        return False, "no realized-edge reading yet"
+    if verdict['dates'] < min_dates:
+        return False, f"realized-edge reading too thin ({verdict['dates']} dates < {min_dates})"
+    if abs(verdict['rank_ic']) >= min_ic and verdict['hit_auc'] >= min_auc:
+        return False, (f"live edge holds (rank_ic={verdict['rank_ic']:.4f}, "
+                        f"hit_auc={verdict['hit_auc']:.4f}, {verdict['dates']} dates)")
+    return True, (f"live rank_ic={verdict['rank_ic']:.4f} / hit_auc={verdict['hit_auc']:.4f} over "
+                   f"{verdict['dates']} dates fails IC>={min_ic} AND AUC>={min_auc}")
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
+
+
+@dataclass(frozen=True)
+class PromotionDecision:
+    promote: bool
+    reason: str
+
+
+def promotion_decision(
+    *,
+    candidate_cv: Optional[float],
+    baseline_cv: Optional[float],
+    clears_cv_bar: bool,
+    clears_test_gate: bool,
+    label_changed: bool,
+    edge: Optional[dict],
+    staleness_override: bool,
+    has_baseline: bool,
+) -> PromotionDecision:
+    """Decide promotion with REALIZED edge as the primary input, not self-reported CV.
+
+    Why this exists: the active ensemble once held the best cv_roc_auc of all 59 registered
+    candidates (0.7664) while the same model, graded against realized forward returns, scored
+    hit_auc 0.493/0.512/0.535. A gate whose only input is a number the candidate computed about
+    itself cannot detect overfitting, and the better the overfit the harder it defends it.
+
+    `live_edge_verdict` already existed but only as an OVERRIDE -- it could let a candidate
+    through past a demonstrably hollow incumbent, but could not stop one getting in on CV alone,
+    which is the direction that actually causes harm. This makes it the gate.
+
+    Precedence (order matters; each step's docstring says why it sits where it does):
+      1. NaN candidate is refused before any override can carry it. With the CV comparison
+         bypassed there is nothing else left to catch a diverged model, and `float(nan or 0.0)`
+         is NaN, not 0.0 -- this codebase's own recurring truthiness trap.
+      2. No incumbent -> promote. Nothing to defend.
+      3. Incumbent untrustworthy (label changed, or realized edge measured-and-failing) -> its CV
+         is not evidence and cannot block.
+      4. Incumbent has a PROVEN realized edge -> CV superiority alone must not displace it.
+      5. Incumbent ungraded, or its reading is below the reliability floor -> refuse. Previously
+         CV decided by default here, which is precisely the hole the incident above came
+         through. `staleness_override` remains the escape hatch so this cannot deadlock.
+    """
+    if candidate_cv is None or not math.isfinite(candidate_cv):
+        return PromotionDecision(False, "candidate cv_auc is not a finite number")
+
+    if not has_baseline:
+        return PromotionDecision(True, "no incumbent to defend")
+
+    edge_unproven, edge_reason = live_edge_is_unproven(edge)
+
+    # NOTE ON ORDER, because the first version of this got it wrong and the existing suite
+    # caught it: the test-AUC gate is checked AFTER the untrustworthy-baseline branches, not
+    # before. Both clears_cv_bar and clears_test_gate are BASELINE-RELATIVE comparisons, so when
+    # the incumbent's own numbers are not evidence -- a different label, or a realized edge at
+    # chance -- both are equally meaningless and both must be bypassed. Checking the test gate
+    # first let a hollow incumbent keep defending itself with a second self-reported number
+    # after the first had been disqualified.
+    if label_changed:
+        return PromotionDecision(True, "incumbent trained on a different label; its CV is not comparable")
+
+    if edge_unproven:
+        return PromotionDecision(True, f"incumbent has no realized edge to defend ({edge_reason})")
+
+    if staleness_override:
+        return PromotionDecision(True, "staleness override: incumbent is old and has rejected repeatedly")
+
+    # From here the incumbent's numbers ARE trustworthy, so its relative gates apply.
+    if not clears_test_gate:
+        return PromotionDecision(False, "candidate fails the held-out test-AUC gate")
+
+    if edge is None or edge.get("dates", 0) < LIVE_EDGE_MIN_DATES:
+        # NOT "promote because CV says so". An ungraded incumbent means we do not know whether
+        # its CV reflects skill, and CV alone is exactly the evidence this gate exists to stop
+        # trusting. Grade it (factor_edge.py --persist) and the decision becomes answerable.
+        return PromotionDecision(
+            False,
+            f"incumbent is not graded against realized returns ({edge_reason}); "
+            f"CV alone is not evidence -- run factor_edge.py --persist for this column",
+        )
+
+    # Incumbent's realized edge holds. CV superiority is not sufficient to displace it.
+    return PromotionDecision(
+        False,
+        f"incumbent's realized edge holds ({edge_reason}); a candidate must beat it live, "
+        f"not on CV (candidate cv={candidate_cv:.4f} vs baseline cv="
+        f"{baseline_cv if baseline_cv is None else round(baseline_cv, 4)})",
+    )

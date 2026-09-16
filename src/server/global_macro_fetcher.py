@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 """Fetch global macro indicators via yfinance and persist to macro_asset_prices table."""
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class GlobalMacroFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class GlobalMacroFetcherBaseFetcher(BaseFetcher[GlobalMacroFetcherSchema]):
+    fetcher_name = 'GlobalMacroFetcher'
+    domain = 'general'
+    schema = GlobalMacroFetcherSchema
+    min_interval_sec = 0.5
+
+
 import sys
 from datetime import datetime, timedelta
 
@@ -217,3 +232,9 @@ if __name__ == "__main__":
     fetch_macro(days)
     fetch_bond_yields()
     print("[MACRO] Done")
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

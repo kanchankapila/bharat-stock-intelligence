@@ -14,17 +14,30 @@ export interface CardProps {
   dense?: boolean;
 }
 
+// ponytail: colors match v1-card's border-top-color values (index.css) so Card-based pages
+// share the same "colored top edge" identity as pages using the raw v1-card classes directly.
+// Redesign 2026-09-10 ("quiet ledger"): softer indigo top edge (indigo-400 @ 55% rather than
+// indigo-600 @ 70% — reads as a hairline tint, not a racing stripe), and hover surfaces moved
+// from the old light-theme values (hover:bg-white/55) to near-invisible ink lifts that belong
+// on the dark body.
+const variantTopColor: Record<CardVariant, string> = {
+  default:  'rgba(129, 140, 248, 0.55)',
+  elevated: 'rgba(129, 140, 248, 0.55)',
+  accent:   'rgba(129, 140, 248, 0.55)',
+  ghost:    'transparent',
+};
+
 const variantBase: Record<CardVariant, string> = {
-  default:  'glass shadow-[0_4px_20px_rgba(0,0,0,0.03)]',
-  elevated: 'glass-strong shadow-[0_8px_32px_rgba(0,0,0,0.05)]',
-  accent:   'glass shadow-[0_4px_20px_rgba(99,102,241,0.04)] border-indigo-500/25',
+  default:  'glass shadow-[0_1px_2px_rgba(0,0,0,0.35),0_8px_24px_-12px_rgba(0,0,0,0.5)]',
+  elevated: 'glass-strong shadow-[0_2px_4px_rgba(0,0,0,0.35),0_16px_48px_-16px_rgba(0,0,0,0.6)]',
+  accent:   'glass shadow-[0_1px_2px_rgba(0,0,0,0.35),0_8px_24px_-12px_rgba(99,102,241,0.25)] border-indigo-500/25',
   ghost:    'bg-transparent border border-transparent',
 };
 
 const variantHover: Record<CardVariant, string> = {
-  default:  'hover:bg-white/55 hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] hover:border-white/80',
-  elevated: 'hover:bg-white/85 hover:shadow-[0_16px_48px_rgba(0,0,0,0.06)] hover:border-white/100',
-  accent:   'hover:bg-slate-950/60 hover:shadow-[0_8px_24px_rgba(99,102,241,0.06)] hover:border-indigo-500/40',
+  default:  'hover:bg-white/[0.04] hover:shadow-[0_2px_4px_rgba(0,0,0,0.35),0_12px_32px_-12px_rgba(0,0,0,0.55)] hover:border-white/15',
+  elevated: 'hover:bg-white/[0.06] hover:shadow-[0_4px_8px_rgba(0,0,0,0.35),0_20px_56px_-16px_rgba(0,0,0,0.65)] hover:border-white/20',
+  accent:   'hover:bg-white/[0.04] hover:shadow-[0_2px_4px_rgba(0,0,0,0.35),0_12px_32px_-12px_rgba(99,102,241,0.3)] hover:border-indigo-500/40',
   ghost:    'hover:bg-white/[0.04]',
 };
 
@@ -41,17 +54,18 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(({
   <div
     ref={ref}
     className={cn(
-      'rounded-2xl overflow-hidden transition-all duration-200 border',
+      'rounded-xl overflow-hidden transition-all duration-200 border border-t-2',
       variantBase[variant],
       onClick && cn('cursor-pointer', variantHover[variant]),
       className
     )}
+    style={{ borderTopColor: variantTopColor[variant] }}
     onClick={onClick}
   >
     {title && (
-      <div className={cn(dense ? 'px-3 py-2.5' : 'px-5 py-3.5', 'border-b border-slate-800/50 flex items-center justify-between bg-slate-950/20')}>
-        <h3 className="text-[10px] font-semibold text-slate-400 flex items-center gap-2 uppercase tracking-widest">
-          {Icon && <Icon className="w-3.5 h-3.5 text-indigo-600" />}
+      <div className={cn(dense ? 'px-3 py-2.5' : 'px-5 py-3.5', 'border-b border-white/[0.06] flex items-center justify-between bg-white/[0.02]')}>
+        <h3 className="text-[10px] font-semibold text-slate-400 flex items-center gap-2 font-display uppercase tracking-[0.14em]">
+          {Icon && <Icon className="w-3.5 h-3.5 text-indigo-400/80" />}
           {title}
         </h3>
         {action ?? null}

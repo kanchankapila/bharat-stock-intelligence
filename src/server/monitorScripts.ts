@@ -182,7 +182,7 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Retrains GB+RF+ET+LR stacking ensemble on accumulated outcomes',
-    schedule: 'Weekly Sunday',
+    schedule: 'Weekly Saturday',
     pyScript: 'ml_ensemble.py --train --score',
     queueName: 'ml-weekly-retrain',
     staleLimitHours: 200,
@@ -193,7 +193,7 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Optimizes category/source weights via differential evolution',
-    schedule: 'Weekly Sunday',
+    schedule: 'Weekly Saturday',
     pyScript: 'strategy_optimizer.py',
     queueName: 'ml-weekly-retrain',
     staleLimitHours: 200,
@@ -271,28 +271,6 @@ export const MONITOR_SCRIPTS = [
     graceMinutes: 280,
   },
   {
-    id: 'rl-agent-update',
-    label: 'RL Agent Update',
-    category: 'ML',
-    critical: false,
-    description: 'Q-learning meta-controller update — writes Q-values to rl_q_table from recent episodes.',
-    schedule: 'Daily 6:50 PM IST (inside ml-daily-ops)',
-    pyScript: 'rl_agent.py --update',
-    queueName: null,
-    staleLimitHours: 26,
-    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
-    // '20 13 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
-    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
-    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
-    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
-    // never touched the other. 60min grace flagged 'stale' on every run that took over an
-    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
-    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
-    // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['20 13 * * 1-5'],
-    graceMinutes: 280,
-  },
-  {
     id: 'dl-engine-infer',
     label: 'DL Engine Inference',
     category: 'ML',
@@ -304,11 +282,10 @@ export const MONITOR_SCRIPTS = [
     staleLimitHours: 26,
     // Dedicated DL Inference queue. 2026-08-06: primary trigger is now dl.jobs.ts's
     // featureRefresh.worker completion chain (fires the moment feature_store actually has
-    // fresh data, typically hours before the fallback below) -- '30 23' = 5:00 AM IST is a
-    // fallback-only cron for the rare case the chain never fired. Was '30 18' = 12:00 AM IST
-    // (moved 2026-07-31 off '0 17' = 10:30 PM IST, where it collided with stock-scoring).
+    // fresh data, typically hours before the fallback below) -- '0 16' = 9:30 PM IST is a
+    // fallback-only cron for the rare case the chain never fired.
     // Keep in lockstep with queues.ts.
-    cronPatterns: ['30 23 * * 1-5'],
+    cronPatterns: ['0 16 * * 1-5'],
     graceMinutes: 45,
   },
   {
@@ -317,7 +294,7 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Trains / retrains deep learning model on feature_store. Writes metrics to dl_model_performance.',
-    schedule: 'Weekly Sunday',
+    schedule: 'Weekly Saturday',
     pyScript: 'dl_trainer.py --trigger scheduled',
     queueName: null,
     staleLimitHours: 200,
@@ -353,11 +330,11 @@ export const MONITOR_SCRIPTS = [
     description: 'Fills screener_appearances returns, computes Bayesian tiers (A/B/C/D), classifies new screeners via Ollama',
     // Was labelled "Daily 6 PM" but the queue used `every: 24h`, which drifts on every
     // restart — it actually last succeeded at 5:42 AM IST. Pinned to a real cron 2026-07-31.
-    schedule: 'Daily 2:30 AM IST',
+    schedule: 'Daily 10:10 PM IST',
     pyScript: 'screener_performance.py',
     queueName: 'screener-performance',
     staleLimitHours: 26,
-    cronPatterns: ['0 21 * * 1-5'],
+    cronPatterns: ['40 16 * * 1-5'],
     graceMinutes: 180,
   },
   {
@@ -365,7 +342,7 @@ export const MONITOR_SCRIPTS = [
     label: 'Company Profile & AI Sync',
     category: 'Data',
     critical: false,
-    description: 'Fetches Trendlyne company descriptions and scores high-growth potential via Ollama AI.',
+    description: 'Fetches Trendlyne company descriptions and scores high-growth potential via Gemini AI.',
     // Actually daily, all 7 days, 21:00 IST (sync.jobs.ts 'sync-company-profiles', 30 15 * * *)
     // -- shards the universe by day-of-year, one run/day needed for full coverage every ~7
     // days. Label corrected 2026-08-03 (was stale "Bi-weekly Sunday", pure display text with
@@ -382,9 +359,13 @@ export const MONITOR_SCRIPTS = [
     category: 'Data',
     critical: false,
     description: 'EPS_TTM + DivYield series and DVM scores (PE/PB now fed by mc_pricefeed_fetcher.py)',
-    schedule: 'Weekly Sunday',
+    // Moved with the fetch prologue out of ml-weekly-retrain into ml-weekly-data
+    // (Friday 18:00 UTC) on 2026-09-12, AF-20260912-13. Both fields updated together:
+    // a queueName/schedule mirror left pointing at the old job is this repo's documented
+    // cron-mirror-drift class -- it produces phantom 'late'/'stale' alerts forever.
+    schedule: 'Weekly Friday',
     pyScript: 'trendlyne_fundamentals_fetcher.py',
-    queueName: 'ml-weekly-retrain',
+    queueName: 'ml-weekly-data',
     // 200h assumed a flat 168h (Sunday-to-Sunday) worst case, but the written `date` value is
     // logical_write_floor()-anchored to the last completed trading session (Friday), not the
     // Sunday run itself -- so the OLD value sits 2 extra days stale before each week's run
@@ -427,7 +408,7 @@ export const MONITOR_SCRIPTS = [
     // Was "First Sunday of month" / staleLimitHours: 900 -- both stale. financial_ratios_fetcher.py
     // was moved OUT of the first-Sunday gate on 2026-07-31 (see trendlyneWeekly.jobs.ts's
     // processTrendlyneRatiosMonthly: it now runs unconditionally on every Sunday, before the
-    // `isFirstSundayOfMonth` check that still gates working_capital_fetcher.py/
+    // `isFirstRunOfMonth` check (day-of-month <= 7) that still gates working_capital_fetcher.py/
     // mf_stock_holdings_fetcher.py below it) -- this entry's own label/threshold were never
     // updated to match, so it was carrying a 5x-looser threshold than its real weekly cadence
     // needs (not a false-alarm risk, since 900h > the true 168h worst case, but a real
@@ -436,7 +417,7 @@ export const MONITOR_SCRIPTS = [
     // test -- corrected to match its ml-weekly-retrain/trendlyne-fundamentals siblings' convention
     // (168h worst case + margin). working-capital below is genuinely still monthly-gated and
     // keeps its own correct 900h.
-    schedule: 'Weekly Sunday',
+    schedule: 'Weekly Saturday',
     // 200h was still wrong, found 2026-08-09: `as_of_date` is logical_write_floor()-anchored to
     // the last completed trading session (Friday), 2 days behind the Sunday run that writes it --
     // same lag as trendlyne-fundamentals above. True worst case checked right before that week's
@@ -456,7 +437,7 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Cash conversion cycle per fiscal year, rewritten against ET_Stats after Trendlyne retired the params',
-    schedule: 'First Sunday of month',
+    schedule: 'First run of month (Saturday)',
     pyScript: 'working_capital_fetcher.py',
     queueName: 'trendlyne-ratios-monthly',
     // Same "first Sunday of month" worst-case-gap fix as financial-ratios above (840h > 800h).

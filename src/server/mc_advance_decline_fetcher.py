@@ -12,12 +12,28 @@ API endpoint:
 Run:  python mc_advance_decline_fetcher.py
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McAdvanceDeclineFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McAdvanceDeclineFetcherBaseFetcher(BaseFetcher[McAdvanceDeclineFetcherSchema]):
+    fetcher_name = 'McAdvanceDeclineFetcher'
+    domain = 'moneycontrol.com'
+    schema = McAdvanceDeclineFetcherSchema
+    min_interval_sec = 0.5
+
+
 import datetime
 import time
 
 import requests
 
 from db_compat import execute, executemany
+import sys
 
 BASE_URL = "https://api.moneycontrol.com/mcapi/v1/indices/chart/exchange-advdec"
 
@@ -63,7 +79,7 @@ def ensure_schema() -> None:
         """
     )
     try:
-        execute("ALTER TABLE market_breadth ADD COLUMN adv_decline_ratio REAL")
+        execute("ALTER TABLE market_breadth ADD COLUMN IF NOT EXISTS adv_decline_ratio REAL")
     except Exception:
         pass   # column already exists
 
@@ -76,7 +92,7 @@ def _parse_mc_date(raw: str) -> str:
         dt = datetime.datetime.strptime(raw.strip(), "%b %d, %Y")
         return dt.strftime("%Y-%m-%d")
     except Exception:
-        print(f"[A/D] WARN: unparseable date '{raw}', defaulting to today")
+        print(f"[A/D] WARN: unparseable date '{raw}', defaulting to today", file=sys.stderr)
         return datetime.date.today().isoformat()
 
 
@@ -89,7 +105,7 @@ def fetch_adv_dec(session: requests.Session, ex_code: str) -> dict | None:
         resp.raise_for_status()
         payload = resp.json()
     except Exception as e:
-        print(f"[A/D] HTTP error ex={ex_code}: {e}")
+        print(f"[A/D] HTTP error ex={ex_code}: {e}", file=sys.stderr)
         return None
 
     data = payload.get("data", {})
@@ -194,3 +210,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

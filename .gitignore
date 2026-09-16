@@ -11,6 +11,12 @@ dist/
 coverage/
 *.tsbuildinfo
 
+# Redirected tool output. `npx tsc --noEmit > tsc_output.txt` / vitest equivalents get
+# left behind by sessions that capture output to a file instead of a pipe; vitest's is
+# ~85KB of ANSI escapes. Never wanted in the repo, and easy to `git add -A` by mistake.
+tsc_output.txt
+vitest_output.txt
+
 # run-skill driver output (live-data screenshots, not fixtures)
 .claude/skills/*/screenshots/
 
@@ -71,6 +77,8 @@ src/server/ml_models/
 
 # Scratch/temp directories and one-off scripts
 scratch/
+scratch_verify/
+PATHFINDER-*/
 .claude/worktrees/
 .claude/settings.local.json
 scripts/diagnose_db*.py
@@ -107,3 +115,14 @@ backups/
 logs/
 
 .superpowers/
+.claude/.session-start/
+
+# Personal trade journal (trade-desk skill) — user data, not source
+trade_journal.jsonl
+
+# Stray artifacts (2026-09-04): a 0-byte db.sqlite3 appeared in the tree despite SQLite
+# being fully decommissioned (see CLAUDE.md) and nothing in src/ referencing it; and Excel
+# writes ~$*.xlsx lock files next to any open workbook. Neither belongs in git, and a
+# committed db.sqlite3 would be actively misleading about which database this platform uses.
+db.sqlite3
+~$*.xlsx

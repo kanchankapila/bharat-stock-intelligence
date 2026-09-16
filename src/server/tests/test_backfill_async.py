@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import src.server.backfill_ohlcv as mod
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -116,13 +117,17 @@ class TestGapFillAsync:
         mock_response.status_code = 200
         mock_response.json.return_value = payload
 
-        conn = sqlite3.connect(":memory:")
+        conn = pg_memory_conn()
         conn.execute(
             "CREATE TABLE stock_ohlcv "
             "(symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER, "
             "adjustment_basis TEXT, "
             "PRIMARY KEY (symbol, date))"
         )
+        # _upsert -> filter_holiday_records -> _load_holidays reads this. Its `except Exception`
+        # hides a missing table on SQLite, but on Postgres the failed SELECT aborts the whole
+        # transaction and every later statement fails, so the table has to actually exist.
+        conn.execute("CREATE TABLE market_holidays (date TEXT, exchange TEXT)")
         conn.commit()
 
         existing = {"INFY": {"2024-01-02"}}  # jan2 already present

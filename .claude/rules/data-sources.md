@@ -23,15 +23,15 @@ The **NSE symbol** (e.g., `HDFCBANK`, `INFY`, `BAJAJ-AUTO`) is the single source
 
 ### Resolution Files
 
-- **`src/data/stocklist.ts`** — authoritative mapping table for 180 liquid stocks; holds all provider fields. Always preferred.
+- **`src/data/stocklist.ts`** — authoritative mapping table, **2,000 stocks** (~85% of `nseStocks.ts`'s 2,366-name NSE master); holds all provider fields, populated 89-100% depending on the field (`tlid`/`tlname` 100%, `isin` 99%, `mcsymbol`/`companyid` 98%, `stockid` 91%, `tickertape_sid` 90%, `scripcode` 89%). Always preferred.
 - **`src/data/nseStocks.ts`** — master list of 2000+ NSE stocks; NSE symbol + basic info only, no provider mappings.
 - **`src/server/stockMapping.ts`** — lookup functions; `stocklist.ts` takes precedence over `nseStocks.ts`.
 
 ### Resolution Order (for any new provider)
 
 1. **`stocklist.ts` first** — call `getStockMapping(nseTicker)` to get the full `StockMapping` object and read the provider's field directly.
-2. **Provider autocomplete API second** — if the stock is not in the 180-stock list, call the provider's search/autocomplete endpoint with the NSE symbol and cache the result in the `scIdCache` pattern already used for MoneyControl.
-3. **ISIN as fallback** — if the provider accepts ISIN, it is universally available from `StockMapping.isin` for all 180 stocks.
+2. **Provider autocomplete API second** — if the stock is not in `stocklist.ts`, or its row has an empty value for the field you need, call the provider's search/autocomplete endpoint with the NSE symbol and cache the result in the `scIdCache` pattern already used for MoneyControl (`stockMapping.ts:35`). This is now the exception (~366 NSE names are absent, plus the per-field gaps above), not the common path it was at 180.
+3. **ISIN as fallback** — if the provider accepts ISIN, `StockMapping.isin` carries one for **1,980 of the 2,000** rows (99%). Near-universal, but check the value is non-empty rather than assuming it.
 4. **Never guess** — do not construct provider IDs by convention. Each provider's ID scheme is opaque and must be resolved explicitly.
 
 ### Adding a New Provider
@@ -40,7 +40,7 @@ When integrating a new data source (new URL, new API endpoint):
 
 1. **Identify the provider's ID type** — look at its API docs/response to find what it uses to identify a stock (symbol, ISIN, internal ID, slug).
 2. **Add a field to `StockMapping`** in `src/data/stocklist.ts` if the provider has its own opaque ID not derivable from existing fields.
-3. **Populate mappings for the 180 stocks** in `stocklist.ts` before writing any fetch logic.
+3. **Populate mappings in `stocklist.ts`** before writing any fetch logic. It is 2,000 rows, so backfilling a new provider field across all of them is a scripted job, not a hand edit — and partial coverage is normal (see the per-field percentages above), so the fetcher must handle an empty value rather than assume every row resolves.
 4. **Add a resolver function** in `src/server/stockMapping.ts` following the `resolveMoneycontrolSymbol` pattern: hardcoded map first → in-memory cache → provider autocomplete API fallback.
 5. **For Yahoo Finance-style providers** — if the provider accepts `symbol.NS` or `symbol.BO` suffix conventions, derive it inline without adding a new field.
 6. **Cache the resolved ID** — use `Map<string, string>` keyed on the uppercase NSE symbol, populated on first resolution.
@@ -55,7 +55,7 @@ wrong on day one; the data-quality check catches one that's silently wrong (or d
 200 — neither substitutes for the other.
 
 Every fetcher that reads from an external URL/API — new or existing — needs one test marked
-`@pytest.mark.live_datasource` (see `src/server/tests/conftest.py`, `live_datasource_helpers.py`,
+`@pytest.mark.live_datasource` (see `src/server/conftest.py` — moved up from `tests/` on 2026-08-17, `src/server/tests/live_datasource_helpers.py`,
 and the two worked examples `test_live_datasource_trendlyne_screener.py` /
 `test_live_datasource_et_stats.py`) that:
 
@@ -112,6 +112,209 @@ Indices use a separate `indexData` array in `src/server/stockMapping.ts` with `{
 
 - **Any table keyed on an ID a third-party provider issues must include the provider as part of the primary key — never a bare provider-issued integer/string alone.** MoneyControl, Trendlyne, ETnow, and et_marketstats each hand out their own small-integer/opaque `scan_id`/`screener_id`/`screenpk` independently, and their ranges overlap in practice (confirmed collisions, not theoretical). This exact bug — a bare `scan_id`/`screener_id` PK letting one provider's row silently overwrite or misclassify another's — was fixed three separate times in 48 hours (2026-08-03–05: `screener_master`, `screener_reliability`, `screener_performance_v2`, each its own migration to a composite `(source, id)` key) before this rule was written down. Before adding a new table that stores any screener/scanner/deal/rating id from an external source, ask: does more than one provider issue this kind of id independently? If yes, the PK is `(source, provider_id)`, not `provider_id` alone — don't wait for a fourth occurrence to discover this.
 
+- **The same class extends beyond provider-issued IDs to any table keyed on a natural key (not an opaque id) that two providers can independently produce a row for.** `index_max_pain`'s PK was `(index_name, date, expiry)` — a real, meaningful key with no opaque id at all — but both `mc_index_oi_fetcher.py` and `nt_oi_snapshot_fetcher.py` independently derive `max_pain`/`pcr_oi` for NIFTY50/NIFTYBANK from their own OI data and upsert onto that same key, so whichever ran later in the day silently overwrote the other's numbers. Found in the 2026-08-14 12-audit sweep, fixed 2026-08-15 (migration `1787010000000`, widened to `(source, index_name, date, expiry)`, existing rows backfilled deterministically from `fetched_at`'s format — MC's ends `Z`, NT's doesn't). Live-verified: both providers' rows now coexist for the identical `(NIFTY50, date, expiry)` with different `pcr_oi` values. The tell is the same as the opaque-id case: ask "can more than one fetcher independently write a row for this exact key?", not just "does this column look like a provider-issued id?"
+
 ## Freshness-check mandate
 
 - **Every new live datasource (a fetcher that writes to its own table from an external API) must also get a freshness check in `src/server/dataQualityChecks.ts`.** This is not optional, for the same reason the `live_datasource`-test mandate above isn't: on 2026-08-03, a full sweep of every `runPython()` call site found the file covered only ~25 of the platform's ~140 DB-writing fetchers — most had zero monitoring, and one (`mf_sector_allocation`, `mf_sector_flow_fetcher.py`'s own target table) turned out to be completely empty, indistinguishable from healthy in every existing dashboard. Adding a check is a **one-line config addition**, not a hand-rolled block — push a `{ id, label, category, critical, table, dateColumn, ... }` entry onto the `TABLE_FRESHNESS_CHECKS` array (see the factory + its doc comment in `dataQualityChecks.ts`) and `makeFreshnessCheck()` generates the SQL + evaluate() logic. Use `tradingDayAware: true` (the default) for anything that only updates on NSE trading days — weekends must not false-positive a Monday-morning check (see the same file's `tradingDaysStale()`); set it `false` only for genuinely 24/7-cadence tables (e.g. `confluence_signals`, refreshed every 30 min year-round). Omit `failDays` for a "sparse by nature" datasource (insider filings, IPOs, bulk deals) so it only ever warns, matching `insider-trades-recency`'s existing style — a hand-rolled bespoke check is still fine for anything needing custom logic beyond simple freshness (coverage %, enum/range validation, plausibility bounds), the factory is only for "is this table still getting fresh rows." Only a hand-rolled `evaluate()` (not the factory) is needed for a genuinely internal/derived table (model registries, RL Q-tables, weight-history bookkeeping) — those are ML state, not datasources, and don't belong in this mandate.
+
+## Vendor-onboarding freeze (added 2026-08-30)
+
+**Before onboarding a new vendor/provider, first check whether the existing feature backlog is
+graded.** `ml_ensemble.py`'s own training matrix had **116 of 421 features (28%) with no measured
+cross-sectional signal as of 2026-08-21** (`ml_label_and_promotion_gate_2026_08_21` memory) — that
+count is now 2+ weeks old and has not been re-run since; treat it as directional evidence that the
+backlog is large, not as today's exact figure, and re-run the same constants-sweep methodology
+before using the specific number 116/421 to block a decision. The policy below doesn't depend on
+the exact count staying current — a large ungraded backlog either way is reason enough to check it
+first. Each new vendor adds
+more raw columns into `build_features()`/`feature_store` that are, by default, untested and
+correlated with what's already there (most published factors on this platform's data are
+negative or null — see `measurement.md`'s "Already tested" table, 14/23 Bonferroni-significant
+`feature_store` factors are ALL inverted vs. their literature sign). A new vendor is not evidence
+of a new edge; it is more untested surface area layered onto a platform whose main measured
+finding is that most of what's already there doesn't help.
+
+**Before adding a new vendor/provider integration:**
+1. Check `measurement.md`'s "Not testable" and "Already tested" sections — is there a specific,
+   named gap this vendor closes (e.g. a factor family with no data source yet), or is it another
+   instance of something already tested and rejected under a different vendor's label (screener
+   sentiment, technical composites, analyst/ownership snapshots — three separate vendors have
+   each contributed one of these, all measuring roughly the same thing)?
+2. State the hypothesis being tested BEFORE writing the fetcher — what specific factor/signal
+   does this vendor's data let you test that nothing else does. "More data can't hurt" is not a
+   hypothesis; per the shared-ceiling finding in `measurement.md`, more *correlated* engines does
+   not raise the AUC ceiling (max pairwise Spearman rho across today's 8 engines is only 0.29,
+   i.e. they're already fairly independent — a new vendor duplicating an existing factor family
+   adds cost and surface area, not diversification).
+3. **A new fetcher's own live-datasource test and freshness check (mandated above) are necessary
+   but not sufficient.** Once ~20 dates of history exist, the new column(s) must get a
+   `factor_edge.py`/`factor_backtest.py` reading before being wired into any production blend
+   (`unified_ranker.py`, `cs_ranker.py`, `exit_policy.py`, `ml_ensemble.py`'s `build_features()`)
+   at anything above a token starting weight — matching the existing `verify-gate.mjs` backtest-
+   evidence requirement for scoring-surface diffs, applied one step earlier, at onboarding time
+   rather than after the column has already been silently blended in for months.
+4. **A feature/vendor column that stays ungraded (LOW-DATA) or grades no-edge for 6+ months after
+   onboarding is a removal candidate**, not permanent scaffolding — re-check the 116-dead-feature
+   count periodically (`SELECT count(*) FROM factor_edge_history WHERE ...`) rather than letting
+   it only grow. This does not apply to genuinely calendar-blocked data (quarterly fundamentals,
+   anything needing 12+ months of history per `measurement.md`'s "Not testable" section) — those
+   are blocked by elapsed time, not by being untested on purpose.
+
+This is a discipline rule, not a hard gate — there is no automated enforcement for it (unlike the
+freshness-check mandate above). The cost of skipping it is diffuse and slow (a slightly bloated,
+slightly-more-correlated feature matrix that nobody prioritizes cleaning up) rather than a single
+sharp failure, which is exactly why it needs to be a written rule instead of relying on it being
+obviously worth doing in the moment.
+
+## A source that stops returning data: ASK, don't conclude "dead" (added 2026-09-05)
+
+**Whenever a datasource stops returning data — 404, 401/Unauthorized, an empty body, a
+restructured response — report it to the user and ask, before concluding it is dead and before
+hunting for a replacement yourself.** This is a standing user instruction, not a judgement call,
+and it applies to every case rather than only to obviously-broken URLs.
+
+Ask for either an alternative URL **or a captured browser fetch / DevTools network entry** from
+the working site. Name the captured-fetch option explicitly — it is the one that actually works.
+
+**Why this is a rule and not a preference.** NiftyTrader had been recorded here as dead for
+weeks: `webapi.niftytrader.in` answered every request with
+`{"result":0,"resultMessage":"Unauthorized: You are not authorized to access this resource."}`.
+That was verified three independent ways on 2026-09-05 — plain `requests`, full browser headers,
+and `curl_cffi` Chrome TLS impersonation (the JA3 fix that works for Trendlyne) — plus a check
+that the site issues **no cookies at all** and that the API host sends no `Set-Cookie`. The
+endpoint also returned a *distinct* `Url not found` for unknown routes, proving the route existed
+and was gated. Every one of those measurements was correct, and the conclusion drawn from them
+("no client-side change can fix this") was correct too — and completely useless.
+
+The user then pasted a captured `fetch(...)` from their browser. The vendor had simply **moved
+the API**: `webapi.niftytrader.in/webapi/*` → `www.niftytrader.in/api/niftytrader/*`. Measured
+route by route, 6 dead routes came back immediately — `option/option-chain-data`,
+`Symbol/other-stock-spot-data` (INDIA VIX), `symbol/psymbol-list`, `symbol/stock-index-data`,
+`symbol/today-spot-data`, `symbol/top-gainers-data` — and they require **no token, no cookie and
+no headers at all**. 27 files across `.py` and `.ts` were pointing at a retired host.
+
+**The lesson to generalise:** *"I have proven this endpoint cannot be made to work"* is not the
+same as *"this data is unobtainable."* A vendor that moved, versioned, or re-fronted its API is
+indistinguishable from one that revoked access, when observed only from outside. The user has a
+logged-in browser and its network tab holds the answer; asking costs one message and no tokens.
+
+**Two things that are still yours to do, not the user's:**
+
+1. **Verify a user-supplied alternative route by route, not in aggregate.** Of NiftyTrader's 19
+   routes: 6 were fixed by the move, 8 already worked on both hosts (so no regression risk), and
+   3 fail on *both* — meaning they are a separate, still-open problem the migration does not
+   solve. Reporting "the fix works" without that breakdown would have hidden the remaining 3.
+2. **Determine the MINIMUM the new call needs.** Test with headers, then without each one. Here
+   the answer was "nothing" — which turned a fix that would have required storing a JWT with a
+   3-week expiry into a plain base-URL change with no credential to rotate. Do not store a
+   user-supplied cookie/token in the repo before checking whether the endpoint needs it; if it
+   genuinely does, it belongs in `.env`, never in code.
+
+Related failure shape, different cause: a vendor that answers but *rations* — see
+`trendlyne_waf_request_allowance_2026_08_17` in memory and `so_option_chain_fetcher.py`'s
+`resume_order()`. A cumulative request allowance also presents as "this source doesn't work",
+but no amount of asking helps there; rotation does.
+
+### Catalog-assisted alternate lookup (added 2026-09-13)
+
+The "grep the repo for an alternate source and probe that too" step is now a query. The
+consolidated catalog (`url_endpoints`, 830 endpoint templates — see `DATA_SOURCE_INTEGRATION_GUIDE.md`
+§9.2) carries harmonized feature-target names per endpoint; alternates for a failing source's
+DATA rank by target overlap, provider, and last-known health (run from `src/server`):
+
+```powershell
+python -m url_explorer.ingest --find-alternates "pcr,delivery_pct" --exclude <failing-host>
+```
+
+Results are candidates, not verdicts — the route-by-route probing and minimum-header discipline
+above still applies. A row whose `verified_json` shows zero HTTP-200 evidence is
+access-controlled-or-retired, not confirmed dead; one with a healthy `last_status` was live the
+last time `url_explorer` fetched it.
+
+### Endpoint discovery registry — look here FIRST for alternates and for new data (added 2026-09-13)
+
+**Standing instruction (user, 2026-09-13):** whenever a source stops returning data, or you are
+exploring whether *any* source carries a metric the platform lacks, query the discovery registry
+in the production database **before** grepping the repo, hunting the web, or asking the user.
+It lives in `bharat_intel` (:5433), populated outside this repo (built by `urls-explorer`'s
+`scratch/build_pg_registry.py`) — nothing in `src/` reads or writes it, so this rule is the only
+pointer to it. **How to CALL and PARSE a registry hit is documented in
+[`DATA_FETCHING_GUIDE.md`](../../DATA_FETCHING_GUIDE.md)** (repo root) — per-provider headers,
+handshakes, POST payloads, JSONP/Trendlyne-matrix unwrapping. Use it, but read the conflicts list
+below first: parts of it contradict this file and were measured wrong.
+
+| Object | Rows (live 2026-09-13) | What it is |
+|---|---|---|
+| `market_endpoint_registry` | 3,408 (2,864 GET / 544 POST) | one row per endpoint that answered 200: `provider`, `data_domain`, `category`/`sub_category`, `scope`, `update_frequency`, `use_case` (prose), `target_url`, `url_template`, `required_params[]`, `request_headers`/`request_payload` (jsonb), `auth_type`, `output_fields[]`, `latency_ms`, `response_bytes`, `sample_info`, `validated_at` |
+| `url_candidates_validation_audit` | 4,477 (3,408 ok / 1,069 not) | every candidate probed, incl. failures with `status_code`/`error_msg` — check it before re-probing a URL someone already found dead |
+| `v_working_market_endpoints` / `v_stock_screeners` (2,709) / `v_fno_endpoints` (82) / `v_endpoint_discovery_summary` | views | convenience projections |
+
+GIN indexes exist on `output_fields`, `required_params`, and a `to_tsvector` over
+`use_case || endpoint_name || category`, so these are cheap:
+
+```sql
+-- by intent (most reliable column — see caveats)
+SELECT provider, http_method, target_url, url_template, required_params, auth_type, use_case
+FROM market_endpoint_registry
+WHERE to_tsvector('english', use_case||' '||endpoint_name||' '||category) @@ to_tsquery('english','option & chain');
+-- by taxonomy
+SELECT ... WHERE category = 'Fundamental Financials & Valuation' AND scope = 'SINGLE_STOCK';
+-- by field name (candidate generator only)
+SELECT ... WHERE output_fields @> ARRAY['pcr']::text[];
+-- was it already tried and failed?
+SELECT status_code, error_msg, validated_at FROM url_candidates_validation_audit WHERE url ILIKE '%<host>%';
+```
+
+**Order of lookup:** this registry (broadest, 3,408 endpoints) → `url_endpoints` /
+`--find-alternates` above (830 templates, carries our own fetch health) → repo grep → ask the
+user with the per-route breakdown. Both catalogs are candidate generators; neither is a verdict.
+
+**Caveats measured live 2026-09-13 — do not skip these, each one would mislead you:**
+
+1. **`is_working = true` means "HTTP 200", not "returned data".** All 3,408 rows are `true` /
+   `200`, so the flag discriminates nothing. The 41 NiftyTrader rows all point at the **retired
+   `webapi.niftytrader.in` host** (see the NiftyTrader section above); probed live, the
+   option-chain row returns `200 {"result":0,"resultMessage":"Unauthorized: ..."}` — a 110-byte
+   error envelope recorded as working. 153 rows have `response_bytes < 1000`; treat those as
+   suspects. Always fetch the candidate yourself and inspect the body.
+2. **`output_fields` is a per-provider/category TEMPLATE, not the measured response schema.**
+   Only 144 distinct arrays across 3,408 rows; **2,048 Trendlyne rows share one identical array**
+   (`stockId, name, lastPrice, changePercent, pe_ttm, marketCap, dvm_score`) — including a
+   "Promoter Holding" screener whose own `columns=` param requests FII/promoter/pledge fields and
+   no `pe_ttm`. So `output_fields @> ARRAY['pe_ttm']` returns screeners that may not carry it,
+   and misses endpoints that do. 147 rows have an empty array. Prefer `use_case` full-text or
+   the URL's own `columns=` parameter, then confirm the field in a real response.
+3. **`provider` is not normalized** — `MoneyControl` (324) vs `Moneycontrol` (175), `ETnow` /
+   `EconomicTimes` / `Economic Times` / `ETnow / Economic Times`. Filter with `ILIKE`, never `=`.
+4. **`validated_at` is a single ~15-minute sweep (2026-09-13 11:43–11:57 UTC).** It is a
+   snapshot; a row's health is only as current as that date.
+5. **A registry hit does not bypass the rest of this file.** Resolve the provider id from
+   `stocklist.ts` (never construct it from `url_template`'s example), find the minimum headers
+   route by route (`auth_type` is a hint — 12 Akamai/NSE and 12 SapphireBroking session rows),
+   add the `live_datasource` test and freshness check, and pass the vendor-onboarding freeze
+   above (a named hypothesis) before wiring a new column into any production blend.
+
+#### Using `DATA_FETCHING_GUIDE.md` — where it is right, and where this repo overrides it
+
+**Verified live 2026-09-13 (trust these):** §3.4 SapphireBroking genuinely needs BOTH the
+`sapp_session` cookie from the homepage AND an `Origin`/`Referer` — no cookie → `401 "A valid
+session cookie is required"`, cookie without Origin → `403 "Cross-origin requests are not
+accepted"`. §3.1 Trendlyne `kayal.trendlyne.com/broker-webview/...` base answers 200 with the
+`head`/`body.tableHeaders`/`tableData` matrix it describes. §3.2 ET `screenerByScreenerIdForWeb`
+POST with the documented payload returned 200 / 167 records — **ET is reachable again**, contrary
+to the 2026-09-12 "host-wide 503" note in `recurring-bugs.md`; re-probe before treating ET as down.
+
+**Overridden by this repo — do NOT copy these from the guide:**
+
+| Guide says | Why it is wrong here | Do instead |
+|---|---|---|
+| Header "Status: Verified Live, HTTP 200 … with active response payloads" | 200 ≠ data; see caveat 1 (Unauthorized envelope stored as working) | classify the BODY (ok / empty / error-envelope) on every call |
+| §3.6 NiftyTrader host `webapi.niftytrader.in/webapi/*` | **retired** — probed live: `200 {"result":0,"resultMessage":"Unauthorized…"}` (110 B); new host `www.niftytrader.in/api/niftytrader/*` returned `result:1`, 138 KB | rewrite the host per the NiftyTrader section above |
+| §2.1 "every request must carry" the full browser header set | headers are per-route and a token/header can LOWER access (`recurring-bugs.md`) | start from the guide's set, then isolate the minimum route by route |
+| §2.2 / §7 pool 25–50 per host, 20–25 workers, retry only 5xx | Trendlyne rations a cumulative request allowance; 429 is never retried; throttled and empty collapse to the same `[]` | bounded slice + resume-from-DB for Trendlyne; honor `retry_after`; count throttles separately and abort on sustained ones |
+| §3.2 `parse_et_screener`: `float(r.get(...) or 0.0)` | writes a sentinel `0.0` for missing — the sentinel-instead-of-NULL class | `math.isfinite` check, write NULL |
+| §5 client `_unpack_trendlyne_matrix` keys on `cell["parameter"]` only | the 2026-07-23 corruption was exactly a wrong-key header match; §3.1's own unpacker checks `unique_name` first | reuse the repo's existing Trendlyne parser / `tl_fetch.py`, and assert `assert_looks_like_ticker` on the symbol column |
+| §5 / §6 "drop-in production client" | a second generic HTTP client in `src/` duplicates existing fetcher helpers and bypasses the `live_datasource` / freshness mandates | reference it for header/payload shapes only; build the fetcher with `/onboard-data-source` |
+| §9 Recipe 1 `output_fields @> ARRAY['pe_ttm']` | `output_fields` is a template (caveat 2) | search `use_case` / the URL's `columns=` param, confirm in a real response |
+| §"File Location Reference" `file:///d:/Github/urls-explorer/...` | those links point at a different repo | the guide's copy here is the repo-root file; the CSV/XLSX live only in `urls-explorer` |

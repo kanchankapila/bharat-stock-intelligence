@@ -63,7 +63,15 @@ class TestMcIndexOiLiveDataSource:
         near_expiry = mio._near_term_expiries(expiries, n=1)[0]
 
         import datetime
-        today = datetime.date.today().isoformat()
+        import urllib.parse
+        # Request the session MC actually serves. During market hours its freshest OI block is
+        # T-1, and _fetch_and_store() deliberately writes NOTHING for a stale block whose
+        # session is already stored (the 2026-08-25 backdating fix) -- so asking for today's
+        # date made this test fail intraday while the fetcher behaved exactly as designed.
+        raw = mio._get(mio.OI_URL.format(sc_id=urllib.parse.quote(REAL_SC_ID, safe=";"),
+                                         expiry=near_expiry))
+        served = sorted(((raw.get("data") or {}).get("results") or {}).keys())
+        today = served[-1] if served else datetime.date.today().isoformat()
         fetched_at = datetime.datetime.utcnow().isoformat()
 
         cap = _CaptureDB()
@@ -108,9 +116,10 @@ class TestMcIndexOiLiveDataSource:
 
         max_pain_calls = [(sql, params) for sql, params in cap.calls if "index_max_pain" in sql]
         assert max_pain_calls, "_fetch_and_store() never wrote to index_max_pain"
-        # INSERT param order: (index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)
+        # INSERT param order: (source, index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)
         _, mp_params = max_pain_calls[0]
-        max_pain = mp_params[3]
+        assert mp_params[0] == mio.SOURCE, "index_max_pain.source must be stamped by the fetcher"
+        max_pain = mp_params[4]
         if max_pain is not None:
             assert_numeric_and_finite(max_pain, context="index_max_pain.max_pain")
             # The max-pain strike must be one of the strikes actually seen in the chain --
@@ -121,7 +130,7 @@ class TestMcIndexOiLiveDataSource:
                 f"[{min(strikes)}, {max(strikes)}] -- check for a call/put OI weighting regression"
             )
 
-        pcr_oi = mp_params[4]
+        pcr_oi = mp_params[5]
         if pcr_oi is not None:
             assert_numeric_and_finite(pcr_oi, context="index_max_pain.pcr_oi")
             assert pcr_oi >= 0, f"pcr_oi must be non-negative: {pcr_oi}"

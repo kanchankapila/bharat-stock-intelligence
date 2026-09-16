@@ -2,7 +2,7 @@ import { z } from "zod";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { enqueueAISignals, getAIQueueStats } from "../queues";
 import { invalidateAISignalCache } from "../signals";
-import { router, publicProcedure, protectedProcedure, adminProcedure } from "../trpc";
+import { router, publicProcedure, protectedProcedure, adminProcedure, expensiveProcedure } from "../trpc";
 
 /** ISO timestamp `days` ago — used instead of SQLite datetime('now','-N days') so the
  *  same query runs on both SQLite and Postgres (a parameterised interval isn't portable). */
@@ -53,11 +53,14 @@ export const signalsRouter = router({
       return { success: true };
     }),
 
-  enqueueSignals: publicProcedure
+  // .max(200): this array was unbounded, and every element becomes a BullMQ AI-queue job (an
+  // LLM call each). The two real callers batch the visible dashboard table -- DashboardPage.tsx
+  // and V3Dashboard.tsx -- which is tens of symbols, well under this ceiling.
+  enqueueSignals: expensiveProcedure
     .input(z.array(z.object({
-      symbol:    z.string(),
+      symbol:    z.string().max(32),
       stockData: z.record(z.string(), z.unknown()),
-    })))
+    })).max(200))
     .mutation(async ({ input }) => enqueueAISignals(input)),
 
   getQueueStats: publicProcedure
@@ -244,17 +247,13 @@ export const signalsRouter = router({
     .input(z.object({ days: z.number().default(30) }).optional())
     .query(async ({ input }) => {
       const days = input?.days ?? 30;
-      // Was `WHERE (symbol, date) IN (SELECT symbol, MAX(date) FROM stock_ohlcv GROUP BY
-      // symbol)` -- full GROUP BY aggregation + re-scan. Same ROW_NUMBER() rewrite used at
-      // scoring.router.ts's getStrategyPicks / ml.router.ts's getSignalReportCard.
+      // Latest close per signal symbol. Was `WHERE (symbol, date) IN (SELECT symbol, MAX(date)
+      // FROM stock_ohlcv GROUP BY symbol)` (full GROUP BY + re-scan), then a ROW_NUMBER()
+      // window CTE -- both scanned the ENTIRE 42M-row stock_ohlcv hypertable (live-verified
+      // 2026-09-03: 2.8s/call). A per-symbol LATERAL LIMIT 1 over the (symbol, date DESC)
+      // index returns bit-identical closes (A/B diffed live, zero differences on every shared
+      // symbol) in ~90ms.
       return dbAll(`
-        WITH latest_price AS (
-          SELECT symbol, close FROM (
-            SELECT symbol, close,
-                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
-            FROM stock_ohlcv
-          ) t WHERE rn = 1
-        )
         SELECT
           us.id,
           us.symbol,
@@ -270,7 +269,9 @@ export const signalsRouter = router({
           lp.close AS current_price,
           ROUND(COALESCE(100.0 * (lp.close - us.entry_price) / NULLIF(us.entry_price, 0), 0.0), 2) AS growth_pct
         FROM unified_signals us
-        LEFT JOIN latest_price lp ON lp.symbol = us.symbol
+        LEFT JOIN LATERAL (
+          SELECT o.close FROM stock_ohlcv o WHERE o.symbol = us.symbol ORDER BY o.date DESC LIMIT 1
+        ) lp ON true
         WHERE us.signal_generated_at >= ?
         ORDER BY us.signal_generated_at DESC
       `, [daysAgoIso(days)]);

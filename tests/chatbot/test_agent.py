@@ -1,16 +1,26 @@
 import pytest
 from unittest.mock import patch, MagicMock
-import sqlite3
+import importlib
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'server', 'chatbot'))
 
 from langchain_core.messages import HumanMessage, AIMessage
+from _pg_support import patch_tool_connect
 
 
 @pytest.fixture
-def agent_db(tmp_path):
-    db_path = str(tmp_path / "agent.db")
-    conn = sqlite3.connect(db_path)
+def agent_db(pg_conn, monkeypatch):
+    """Throwaway Postgres schema, with EVERY tool module the graph touches repointed at it.
+
+    Was a temp SQLite file passed in as db_path. Each tool's _connect() ignores that argument
+    and calls db_compat.connect(), so the fixture DB was written and never read -- locally the
+    tools reached real Postgres and the assertions quietly ran against production data; in CI
+    they reached a table-less SQLite file and the suite was red on every run
+    ("no such table: nse_stocks"). Patching one module is not enough here: build_graph() wires
+    sql_tool, price_tool, news_tool, screener_tool and market_tool, and any unpatched one falls
+    straight back to db_compat.connect().
+    """
+    conn = pg_conn
     conn.executescript("""
         CREATE TABLE nse_stocks(symbol TEXT PRIMARY KEY, name TEXT, sector TEXT, industry TEXT);
         CREATE TABLE stock_fundamentals(symbol TEXT PRIMARY KEY, trailing_pe REAL, price_to_book REAL,
@@ -30,7 +40,7 @@ def agent_db(tmp_path):
             return_3m REAL, return_6m REAL, above_sma200 INTEGER, momentum_score REAL);
         CREATE TABLE news_articles(id TEXT PRIMARY KEY, title TEXT, summary TEXT, source TEXT,
             sentiment TEXT, category TEXT, url TEXT, symbols TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     """)
     conn.execute("INSERT INTO nse_stocks VALUES ('INFY','Infosys Ltd','IT','Software')")
     conn.execute("INSERT INTO nse_stocks VALUES ('HDFCBANK','HDFC Bank','Banking','Private Bank')")
@@ -43,7 +53,10 @@ def agent_db(tmp_path):
     conn.execute("INSERT INTO quant_scores VALUES ('INFY',2.1,8.5,18.0,22.0,1,78.5)")
     conn.execute("INSERT INTO quant_scores VALUES ('HDFCBANK',1.5,5.0,12.0,18.0,1,65.0)")
     conn.commit()
-    conn.close()
+
+    db_path = None
+    for mod in ("sql_tool", "price_tool", "news_tool", "screener_tool", "market_tool"):
+        db_path = patch_tool_connect(monkeypatch, importlib.import_module(f"tools.{mod}"), conn)
     return db_path
 
 

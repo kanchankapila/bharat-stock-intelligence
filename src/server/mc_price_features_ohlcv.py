@@ -20,6 +20,7 @@ Run:
     python mc_price_features_ohlcv.py                # all symbols/dates in technical_signals
     python mc_price_features_ohlcv.py --symbols BEL,INFY
 """
+import polars as pl
 import argparse
 import sys
 
@@ -166,3 +167,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     only = [s.strip().upper() for s in args.symbols.split(",")] if args.symbols else None
     run(only)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -41,6 +41,12 @@ no value in fetching more often than once a month).
 
 Writes:
   tl_financial_quality  (symbol, as_of_date) — raw + derived values
+  et_cashflow_history   (symbol, year_ending) — full 6-year annual CFO/CFI/CFF series
+                          per stock (2026-09-01: the CashFlow payload was already fetched
+                          at last=6 but only period [0] was persisted — the other 5 annual
+                          periods were discarded. This table keeps them all, giving the
+                          platform its first real multi-year annual cash-flow history and
+                          enabling FCF-trend/stability features at zero extra network cost.)
   technical_signals     — fcf_yield_approx, interest_coverage, fcf_positive,
                           debt_coverage_risk, + the harvested fields above
 
@@ -50,14 +56,17 @@ Run:
   python financial_ratios_fetcher.py --limit 50
 """
 
+import polars as pl
+
 import argparse
-from datetime import date
+from datetime import date, timedelta
 
 import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
 from et_stats_client import HEADERS, fetch_et_stats, load_companyid_map, as_of_floor
+import sys
 
 DEBT_COVERAGE_RISK_THRESHOLD = 1.5
 
@@ -85,6 +94,23 @@ def ensure_schema(con) -> None:
         CREATE INDEX IF NOT EXISTS idx_tlfq_sym
         ON tl_financial_quality(symbol, as_of_date DESC)
     """)
+    # 2026-09-01: full annual cash-flow series (was: only period [0] of the last=6 payload
+    # survived, the rest discarded). One row per (symbol, fiscal-year-end).
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS et_cashflow_history (
+            symbol       TEXT NOT NULL,
+            year_ending  TEXT NOT NULL,
+            cfo          REAL,
+            cfi          REAL,
+            cff          REAL,
+            fetched_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (symbol, year_ending)
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_ecf_sym
+        ON et_cashflow_history(symbol, year_ending DESC)
+    """)
     con.commit()
 
     # KNOWN DEAD-BY-DESIGN COLUMNS (investigated 2026-08-07, dead-column sweep -- not a bug,
@@ -100,87 +126,87 @@ def ensure_schema(con) -> None:
     # logic to populate them -- that would resurrect a design this file has already moved past.
 
     for ddl in [
-        "ALTER TABLE tl_financial_quality ADD COLUMN fetched_at TEXT DEFAULT CURRENT_TIMESTAMP",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fetched_at TEXT DEFAULT CURRENT_TIMESTAMP",
         # Ratio-harvest columns: the Ratio/CashFlow payloads we already fetch expose ~40 ratios
         # over 5 years and we only read interestCoverage. Harvest the orthogonal-to-
         # fundamentals_history ones (which already has ROE/D-E/margins/growth): ROCE + its YoY
         # trend, quick ratio, EV/EBITDA, asset turnover, CFO growth.
-        "ALTER TABLE tl_financial_quality ADD COLUMN roce           REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN roce_trend     REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN quick_ratio    REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN ev_ebitda      REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN asset_turnover REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN cfo_growth     REAL",
-        "ALTER TABLE technical_signals ADD COLUMN fcf_yield_approx   REAL",
-        "ALTER TABLE technical_signals ADD COLUMN interest_coverage  REAL",
-        "ALTER TABLE technical_signals ADD COLUMN fcf_positive       INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN debt_coverage_risk INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN roce               REAL",
-        "ALTER TABLE technical_signals ADD COLUMN roce_trend         REAL",
-        "ALTER TABLE technical_signals ADD COLUMN quick_ratio        REAL",
-        "ALTER TABLE technical_signals ADD COLUMN ev_ebitda          REAL",
-        "ALTER TABLE technical_signals ADD COLUMN asset_turnover     REAL",
-        "ALTER TABLE technical_signals ADD COLUMN cfo_growth         REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS roce           REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS roce_trend     REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS quick_ratio    REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS ev_ebitda      REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS asset_turnover REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cfo_growth     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_yield_approx   REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS interest_coverage  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_positive       INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS debt_coverage_risk INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS roce               REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS roce_trend         REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS quick_ratio        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ev_ebitda          REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS asset_turnover     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS cfo_growth         REAL",
         # ── 2026-07-23 harvest: banking ratios (bank-only, NULL for non-banks) ──
-        "ALTER TABLE tl_financial_quality ADD COLUMN nim                        REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN cost_to_income             REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN int_income_earning_assets  REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN non_int_income_earning_assets REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN op_profit_earning_assets   REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN op_expense_earning_assets  REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN int_exp_earning_assets     REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN capital_adequacy           REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN tier1_capital              REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN tier2_capital              REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN gross_npa_pct              REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN net_npa_pct                REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN net_npa_to_advances        REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN num_branches               REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN int_income_per_employee    REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN np_per_employee            REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN business_per_employee      REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN int_income_per_branch      REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN np_per_branch              REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS nim                        REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cost_to_income             REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS int_income_earning_assets  REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS non_int_income_earning_assets REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS op_profit_earning_assets   REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS op_expense_earning_assets  REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS int_exp_earning_assets     REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS capital_adequacy           REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS tier1_capital              REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS tier2_capital              REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS gross_npa_pct              REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS net_npa_pct                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS net_npa_to_advances        REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS num_branches               REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS int_income_per_employee    REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS np_per_employee            REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS business_per_employee      REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS int_income_per_branch      REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS np_per_branch              REAL",
         # ── 2026-07-23 harvest: universal solvency / cash-flow-growth ──
-        "ALTER TABLE tl_financial_quality ADD COLUMN interest_coverage_post_tax REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN lt_de_ratio                REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN cfi_growth                 REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN cff_growth                 REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN cfo_cagr_3y                REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN cfi_cagr_3y                REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN cff_cagr_3y                REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN cfo_cagr_5y                REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN cfi_cagr_5y                REAL",
-        "ALTER TABLE tl_financial_quality ADD COLUMN cff_cagr_5y                REAL",
-        "ALTER TABLE technical_signals ADD COLUMN nim                        REAL",
-        "ALTER TABLE technical_signals ADD COLUMN cost_to_income             REAL",
-        "ALTER TABLE technical_signals ADD COLUMN int_income_earning_assets  REAL",
-        "ALTER TABLE technical_signals ADD COLUMN non_int_income_earning_assets REAL",
-        "ALTER TABLE technical_signals ADD COLUMN op_profit_earning_assets   REAL",
-        "ALTER TABLE technical_signals ADD COLUMN op_expense_earning_assets  REAL",
-        "ALTER TABLE technical_signals ADD COLUMN int_exp_earning_assets     REAL",
-        "ALTER TABLE technical_signals ADD COLUMN capital_adequacy           REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tier1_capital              REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tier2_capital              REAL",
-        "ALTER TABLE technical_signals ADD COLUMN gross_npa_pct              REAL",
-        "ALTER TABLE technical_signals ADD COLUMN net_npa_pct                REAL",
-        "ALTER TABLE technical_signals ADD COLUMN net_npa_to_advances        REAL",
-        "ALTER TABLE technical_signals ADD COLUMN num_branches               REAL",
-        "ALTER TABLE technical_signals ADD COLUMN int_income_per_employee    REAL",
-        "ALTER TABLE technical_signals ADD COLUMN np_per_employee            REAL",
-        "ALTER TABLE technical_signals ADD COLUMN business_per_employee      REAL",
-        "ALTER TABLE technical_signals ADD COLUMN int_income_per_branch      REAL",
-        "ALTER TABLE technical_signals ADD COLUMN np_per_branch              REAL",
-        "ALTER TABLE technical_signals ADD COLUMN interest_coverage_post_tax REAL",
-        "ALTER TABLE technical_signals ADD COLUMN lt_de_ratio                REAL",
-        "ALTER TABLE technical_signals ADD COLUMN cfi_growth                 REAL",
-        "ALTER TABLE technical_signals ADD COLUMN cff_growth                 REAL",
-        "ALTER TABLE technical_signals ADD COLUMN cfo_cagr_3y                REAL",
-        "ALTER TABLE technical_signals ADD COLUMN cfi_cagr_3y                REAL",
-        "ALTER TABLE technical_signals ADD COLUMN cff_cagr_3y                REAL",
-        "ALTER TABLE technical_signals ADD COLUMN cfo_cagr_5y                REAL",
-        "ALTER TABLE technical_signals ADD COLUMN cfi_cagr_5y                REAL",
-        "ALTER TABLE technical_signals ADD COLUMN cff_cagr_5y                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS interest_coverage_post_tax REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS lt_de_ratio                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cfi_growth                 REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cff_growth                 REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cfo_cagr_3y                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cfi_cagr_3y                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cff_cagr_3y                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cfo_cagr_5y                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cfi_cagr_5y                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cff_cagr_5y                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS nim                        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS cost_to_income             REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS int_income_earning_assets  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS non_int_income_earning_assets REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS op_profit_earning_assets   REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS op_expense_earning_assets  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS int_exp_earning_assets     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS capital_adequacy           REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tier1_capital              REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tier2_capital              REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS gross_npa_pct              REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS net_npa_pct                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS net_npa_to_advances        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS num_branches               REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS int_income_per_employee    REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS np_per_employee            REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS business_per_employee      REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS int_income_per_branch      REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS np_per_branch              REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS interest_coverage_post_tax REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS lt_de_ratio                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS cfi_growth                 REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS cff_growth                 REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS cfo_cagr_3y                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS cfi_cagr_3y                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS cff_cagr_3y                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS cfo_cagr_5y                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS cfi_cagr_5y                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS cff_cagr_5y                REAL",
     ]:
         try:
             cur.execute(ddl)
@@ -355,6 +381,39 @@ def compute_ratios(
     }
 
 
+def parse_cashflow_series(cashflow: list[dict] | None) -> list[dict]:
+    """Flatten the ET_Stats CashFlow payload (last=6 annual periods) into one row-dict per
+    fiscal year: {"year_ending", "cfo", "cfi", "cff"}. Pure — no network/DB.
+
+    Kept periods are those with a parseable ISO yearEnding AND at least one non-None cash-flow
+    figure; fully-empty periods are dropped rather than stored as all-NULL rows (same honest-
+    unknown rule the rest of this file follows). Values are rounded to 2dp like every other
+    number this fetcher persists."""
+    rows: list[dict] = []
+    for period in cashflow or []:
+        if not isinstance(period, dict):
+            continue
+        raw_ye = period.get("yearEnding")
+        if not raw_ye:
+            continue
+        try:
+            year_ending = date.fromisoformat(str(raw_ye)[:10]).isoformat()
+        except (ValueError, TypeError):
+            continue
+        cfo = _num(period.get("netCashFlowFromOperatingActivities"))
+        cfi = _num(period.get("netCashUsedInInvestingActivities"))
+        cff = _num(period.get("netCashUsedFromFinancingActivities"))
+        if cfo is None and cfi is None and cff is None:
+            continue
+        rows.append({
+            "year_ending": year_ending,
+            "cfo": round(float(cfo), 2) if cfo is not None else None,
+            "cfi": round(float(cfi), 2) if cfi is not None else None,
+            "cff": round(float(cff), 2) if cff is not None else None,
+        })
+    return rows
+
+
 # ── Persist ──────────────────────────────────────────────────────────────────────
 
 _HARVEST_COLUMNS = [
@@ -386,6 +445,25 @@ def upsert_quality(symbol: str, today: str, row: dict, con) -> None:
             {update_clause},
             fetched_at = CURRENT_TIMESTAMP
     """, tuple(symbol if c == "symbol" else today if c == "as_of_date" else row.get(c) for c in columns))
+    con.commit()
+
+
+def upsert_cashflow_history(symbol: str, rows: list[dict], con) -> None:
+    """Persist the full annual CFO/CFI/CFF series into et_cashflow_history. Idempotent per
+    (symbol, year_ending): re-runs refresh the figures in place (annual ET data only changes
+    on restatement), so weekly runs converge instead of accumulating rows."""
+    if not rows:
+        return
+    cur = con.cursor()
+    cur.executemany("""
+        INSERT INTO et_cashflow_history (symbol, year_ending, cfo, cfi, cff)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (symbol, year_ending) DO UPDATE SET
+            cfo = excluded.cfo,
+            cfi = excluded.cfi,
+            cff = excluded.cff,
+            fetched_at = CURRENT_TIMESTAMP
+    """, [(symbol, r["year_ending"], r["cfo"], r["cfi"], r["cff"]) for r in rows])
     con.commit()
 
 
@@ -431,6 +509,7 @@ def process_stock(symbol: str, company_id: str, today: str,
     features = compute_ratios(balance=None, cashflow=cashflow, ratio=ratio, market_cap=market_cap)
 
     upsert_quality(symbol, today, features, con)
+    upsert_cashflow_history(symbol, parse_cashflow_series(cashflow), con)
     update_technical_signals(symbol, features, con, today=today)
     return features
 
@@ -454,6 +533,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="FCF yield (approx) + interest coverage from ET_Stats")
     parser.add_argument("--symbol", default=None, help="Single stock NSE symbol")
     parser.add_argument("--limit", type=int, default=None, help="Process first N stocks")
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch all symbols even if fresh within last 20 days")
     args = parser.parse_args()
 
     con = connect()
@@ -464,6 +545,22 @@ def main() -> None:
         print("[FinancialRatios] No stocks with a companyid found.")
         con.close()
         return
+
+    # Smart 20-day cadence check: this job runs WEEKLY (trendlyne-midweek-batch), but FCF
+    # yield / interest coverage are earnings-driven and only move meaningfully on quarterly
+    # results -- a 20-day window (shorter than mf_stock_holdings_fetcher.py's 25-day monthly
+    # window, since this job's own cadence is weekly not monthly) still lets every symbol
+    # refresh at least monthly while skipping ~3 of every 4 weekly passes for a symbol whose
+    # ratios can't have changed.
+    if not args.force and not args.symbol:
+        from fetch_utils import filter_stale_symbols
+        fresh_cutoff = (date.today() - timedelta(days=20)).isoformat()
+        stale_stocks = filter_stale_symbols(con, stocks, "tl_financial_quality",
+                                            date_col="fetched_at", as_of_date=fresh_cutoff)
+        skipped = len(stocks) - len(stale_stocks)
+        if skipped > 0:
+            print(f"[FinancialRatios] Smart cadence skip: {skipped}/{len(stocks)} symbols already fresh within last 20 days. Processing {len(stale_stocks)} remaining.")
+            stocks = stale_stocks
 
     print(f"[FinancialRatios] Processing {len(stocks)} stocks — FCF yield (approx) + interest coverage…")
     session = requests.Session()
@@ -497,7 +594,7 @@ def main() -> None:
                 con.rollback()
             except Exception:
                 pass
-            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}")
+            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}", file=sys.stderr)
 
     fcf_pct = round(fcf_positive_count / ok * 100) if ok else 0
     print(
@@ -510,3 +607,22 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class FinancialRatiosFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class FinancialRatiosFetcherBaseFetcher(BaseFetcher[FinancialRatiosFetcherSchema]):
+    fetcher_name = 'FinancialRatiosFetcher'
+    domain = 'general'
+    schema = FinancialRatiosFetcherSchema
+    min_interval_sec = 0.5
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

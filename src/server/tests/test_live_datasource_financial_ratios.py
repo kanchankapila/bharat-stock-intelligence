@@ -19,6 +19,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 from financial_ratios_fetcher import (  # noqa: E402
     HEADERS, _HARVEST_COLUMNS, compute_ratios, ensure_schema,
     upsert_quality, update_technical_signals,
@@ -36,7 +37,7 @@ REAL_SYMBOL = "RELIANCE"
 
 
 def _throwaway_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     ensure_schema(conn)  # real tl_financial_quality DDL, not hand-duplicated
     # technical_signals isn't created by this fetcher (it's a shared platform table it only

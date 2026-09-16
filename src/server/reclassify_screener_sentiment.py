@@ -37,6 +37,7 @@ USAGE
     python reclassify_screener_sentiment.py --apply
 """
 from __future__ import annotations
+import polars as pl
 
 import argparse
 from collections import Counter
@@ -112,3 +113,9 @@ if __name__ == '__main__':
     g.add_argument('--apply', action='store_true')
     a = ap.parse_args()
     run(apply=a.apply)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

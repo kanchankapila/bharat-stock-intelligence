@@ -44,7 +44,7 @@ import {
 import { fetchTrendlyneChecklist } from './trendlyneService';
 
 import { pythonApi } from './pythonApi';
-import { recordHeartbeat, startHeartbeatMonitor } from './jobHeartbeat';
+import { recordHeartbeat, startHeartbeatMonitor, bullJobDurationMs } from './jobHeartbeat';
 import { startJobWatchdog, buildDailyDigest } from './jobWatchdog';
 import { telegramService, sanitizeMarkdown } from './telegramService';
 import { sendAccuracyDigest } from './signalAccuracyDigest';
@@ -94,11 +94,28 @@ export const QUEUE_SIGNAL_OUTCOMES      = 'signal-outcomes';
 export const QUEUE_NEWS_SENTIMENT       = 'news-sentiment';
 export const QUEUE_TRENDLYNE_INTRADAY   = 'trendlyne-intraday';
 export const QUEUE_ML_DAILY_OPS        = 'ml-daily-ops';
+export const QUEUE_ML_WEEKLY_DATA      = 'ml-weekly-data';
 export const QUEUE_ML_WEEKLY_RETRAIN   = 'ml-weekly-retrain';
 export const QUEUE_INTRADAY_FETCHER    = 'intraday-fetcher';
+// Ground-truth mover screener capture (see mover_screener_fetcher.py): persists the day's
+// Top Gainers/Losers, gap-up/down, price-shocker lists into mover_snapshots before they
+// scroll away -- the ground truth for reverse_engineering_study.py.
+export const QUEUE_MOVER_CAPTURE       = 'mover-screener-capture';
+// Intraday slot capture of the NT live cross-section (mover_screener_fetcher.py
+// --intraday): one POST -> ntlive_<HHMM>_market + local screens, several times a day.
+export const QUEUE_MOVER_INTRADAY      = 'mover-intraday-capture';
+// Per-filter live screener capture (niftytrader_live_screener_job.py):
+// each filter selected once, parallel requests, append-only, every 15 min during market hours
+export const QUEUE_NT_LIVE_FILTER       = 'nt-live-filter-capture';
+let moverQueue: Queue | undefined;
+let moverWorker: Worker | undefined;
+let moverIntradayQueue: Queue | undefined;
+let moverIntradayWorker: Worker | undefined;
+let ntLiveFilterQueue: Queue | undefined;
+let ntLiveFilterWorker: Worker | undefined;
 export { QUEUE_RESEARCH_PREMARKET, QUEUE_RESEARCH_POSTCLOSE, QUEUE_OUTCOME_RESOLVER } from './jobs/operations.jobs';
 export { QUEUE_SCREENER_PERFORMANCE, QUEUE_COMPANY_PROFILES_SYNC, QUEUE_TICKERTAPE_SCORECARD } from './jobs/sync.jobs';
-export { QUEUE_NSE_SYNC } from './jobs/sync.jobs';
+export { QUEUE_NSE_SYNC, QUEUE_ANALYST_ESTIMATES_SYNC } from './jobs/sync.jobs';
 export { QUEUE_DL_MACRO_FETCH, QUEUE_DL_FEATURE_REFRESH, QUEUE_DL_INFERENCE, QUEUE_DL_REGIME_UPDATE, QUEUE_DL_RETRAIN_WEEKLY } from './jobs/dl.jobs';
 export { QUEUE_TRENDLYNE_MIDWEEK, QUEUE_TRENDLYNE_RATIOS_MONTHLY } from './jobs/trendlyneWeekly.jobs';
 export { QUEUE_CONFLUENCE_COMPUTE, QUEUE_CONFLUENCE_OUTCOMES } from './jobs/confluence.jobs';
@@ -166,12 +183,13 @@ export let outcomeResolverQueue: Queue | null = null;
 let outcomeResolverWorker: Worker | null = null;
 export let mlDailyOpsQueue: Queue | null = null;
 let mlDailyOpsWorker: Worker | null = null;
+export let mlWeeklyDataQueue: Queue | null = null;
+let mlWeeklyDataWorker: Worker | null = null;
 export let mlWeeklyRetrainQueue: Queue | null = null;
 let mlWeeklyRetrainWorker: Worker | null = null;
 export let intradayFetcherQueue: Queue | null = null;
 let intradayFetcherWorker: Worker | null = null;
 export let gdeltSentimentQueue: Queue | null = null;
-let gdeltSentimentWorker: Worker | null = null;
 export let researchPremarketQueue: Queue | null = null;
 export let researchPostcloseQueue: Queue | null = null;
 let researchPremarketWorker: Worker | null = null;
@@ -220,18 +238,23 @@ let trendlyneChecklistCycleWorker: Worker | null = null;
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Stock-refresh worker processor (PHASE 1: Now persists OHLCV) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-async function processStockRefresh(job: Job): Promise<{ count: number; persisted: number }> {
+async function processStockRefresh(job: Job): Promise<{ count: number; persisted: number; skipped?: boolean; success?: boolean; failedSteps?: string[] }> {
   // 2026-08-06: the exchange never opened on a trading holiday, so there is no new EOD OHLCV
   // bar to persist -- fetchAndPersistOHLCVData() would just re-fetch/re-write yesterday's
   // close. Never dispatched by closed-day-early-batch, so a plain holiday check is enough.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] stock-refresh skipped — trading holiday, no new EOD bar to persist');
-    return { count: 0, persisted: 0 };
+    return { count: 0, persisted: 0, skipped: true };
   }
   const { fetchAndPersistOHLCVData } = await import('./liveStockData');
   const result = await fetchAndPersistOHLCVData();
-  await checkPriceAlerts().catch(e => console.error('[QUEUE] checkPriceAlerts failed:', (e as Error).message));
-  return result;
+  // Alert delivery must not abort the OHLCV persist that already succeeded, but it used to be
+  // a bare .catch(console.error) -- every ACTIVE price_alerts row could silently stop firing
+  // with stock-refresh still stamped green. The completed handler below honours success:false.
+  const T = new StepTracker('stock-refresh');
+  await checkPriceAlerts().catch(e => T.fail('checkPriceAlerts', e));
+  const verdict = T.finish();
+  return { ...result, success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 // Evaluates ACTIVE price_alerts against the just-refreshed live prices and pushes a broadcastAlert
@@ -280,7 +303,7 @@ async function processAISignal(job: Job): Promise<void> {
   const { gateAISignal, getAISignalMinConfidence, gateOnQuant, getAISignalMinWinProb,
           upsertUnifiedSignal, checkSurveillanceGate } = await import('./signals');
 
-  // Cheap DB-only gates FIRST, before spending an Ollama/Gemini call. Both of these are
+  // Cheap DB-only gates FIRST, before spending a Gemini call. Both of these are
   // independent of the LLM's output, so if either would reject the signal there is no reason
   // to generate one at all — this is what actually cuts inference volume/cost, not the
   // after-the-fact gates below.
@@ -389,7 +412,7 @@ async function processWalkForwardOptimize(job: Job): Promise<any> {
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML daily ops worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-async function processLiveScreenerCollect(_job: Job): Promise<{ skipped: boolean }> {
+async function processLiveScreenerCollect(_job: Job): Promise<{ skipped: boolean; success?: boolean; failedSteps?: string[] }> {
   if (!(await isMarketOpen())) {
     console.log('[QUEUE] live-screener-collect skipped — outside NSE market hours');
     // Skipped is not a success -- same bug class as technical-signals (2026-08-12): an
@@ -399,13 +422,17 @@ async function processLiveScreenerCollect(_job: Job): Promise<{ skipped: boolean
   }
   const { runLiveScreenerCollection } = await import('./liveScreenerCollector');
   await runLiveScreenerCollection();
+  // The two scoring steps below are non-fatal to collection but were .catch(console.warn):
+  // live_screener_appearances.ml_win_probability and the capitulation filter_key could stop
+  // being written every 15 min with this job still green.
+  const T = new StepTracker('live-screener-collect');
 
   // Score this cycle's matches against the currently-active ML model right after
   // collecting them, so the Intraday Edge tab's ml_win_probability is fresh every 15 min.
   // No-ops quietly (prints, doesn't throw) until live_screener_ml_ranker.py --train has
   // produced a first model.
   await runPython('live_screener_ml_ranker.py', ['--score'], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_screener_ml_ranker --score failed:', (e as Error).message));
+    .catch(e => T.fail('live_screener_ml_ranker_score', e));
 
   // 'todayCapitulation' (2026-08-13): gap-down + opened-at-the-low + top-loser-of-the-day,
   // computed live from intraday_ohlcv (not a NiftyTrader API filter like the ones above).
@@ -416,8 +443,9 @@ async function processLiveScreenerCollect(_job: Job): Promise<{ skipped: boolean
   // live_screener_appearances table under that filter_key -- same run cadence, no schema
   // change, no new consumer needed.
   await runPython('live_capitulation_screener.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_capitulation_screener failed:', (e as Error).message));
-  return { skipped: false };
+    .catch(e => T.fail('live_capitulation_screener', e));
+  const verdict = T.finish();
+  return { skipped: false, success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 async function processIntradayFetcher(_job: Job): Promise<{ skipped: boolean }> {
@@ -429,33 +457,45 @@ async function processIntradayFetcher(_job: Job): Promise<{ skipped: boolean }> 
     // completed handler used to stamp 'success' on this bare return too.
     return { skipped: true };
   }
-  // Fetches 15m bars for all 2328 NSE stocks (last 24h) — ~4 min per run.
-  await runPython('intraday_fetcher.py', ['--lookback-days', '1'], 600_000)
-    .catch(e => console.warn('[QUEUE] intraday_fetcher failed:', (e as Error).message));
+  // Fetches 15m bars for the full NSE universe (last 24h). Budget raised 600s -> 840s
+  // (2026-09-02): the old 600s left a 54s margin over a MEASURED 546s after-hours run
+  // (23:18 IST, 145,006 bars / 2,342 symbols), and market-hours runs exceeded it 6x in one
+  // day — every overage silently discarded a full fetch. 840s still fits inside the 15-min
+  // cadence, and overages now FAIL the job (no .catch) instead of vanishing.
+  //
+  // NO .catch swallow here (fixed 2026-09-02): a timed-out run silently returned success —
+  // job_heartbeat and job_run_history both said 'success' while the fetch wrote nothing, and
+  // the failures only surfaced as "untracked step failures" in the daily digest. A failed
+  // fetcher must propagate so the .on('failed') handler records it like every sibling job.
+  await runPython('intraday_fetcher.py', ['--lookback-days', '1'], 840_000);
   return { skipped: false };
 }
 
-// Found 2026-08-13 (data-coverage-audit): gdeltService.ts's runGdeltBackfill() existed with a
-// working parser/fetcher and a real table (gdelt_sentiment) but was never called from any
-// queue/job/route — fully disconnected code, table permanently at 0 rows. Wired in here rather
-// than deleted: GDELT is the only source on this platform with historical per-company tone
-// back to 2015 (RSS/Google News don't backfill), so it's worth keeping live.
-//
-// No isMarketOpen() gate -- GDELT indexes global news continuously, weekends and holidays
-// included, unlike NSE-trading-day-gated fetchers above. Trailing 3-day window (not just
-// "yesterday") so a missed run self-heals via the ON CONFLICT upsert in runGdeltBackfill,
-// same reasoning as every other backfill-shaped job in this file. limit=150 matches the
-// function's own default (~roughly this platform's liquid-universe size) -- GDELT's ~1
-// req/5.2s rate limit makes 150 companies a ~13-minute run; do not raise this without also
-// widening the cron gap, or a slow run risks overlapping the next scheduled tick.
-async function processGdeltSentiment(_job: Job): Promise<{ skipped: boolean }> {
-  const { runGdeltBackfill } = await import('./gdeltService');
-  const end = new Date();
-  const start = new Date(end.getTime() - 3 * 24 * 60 * 60 * 1000);
-  const result = await runGdeltBackfill(start, end, 150);
-  console.log(`[QUEUE] gdelt-sentiment: ${result.rows} rows across ${result.companies} companies`);
+async function processMoverCapture(_job: Job): Promise<{ skipped: boolean }> {
+  // Movers lists only exist on trading days; skip weekends/holidays like intraday-fetcher.
+  // NOT isMarketOpen(): this job is deliberately scheduled AFTER close (16:05 IST, see the
+  // registration comment below), so "is the market open right now" is guaranteed false on
+  // every trading day too -- it skipped unconditionally on both 2026-08-25 and 2026-08-26,
+  // never once actually running. shouldSkipOnTradingHoliday() answers the real question
+  // ("was today a trading day"), same as the sibling mover-intraday-slot worker.
+  if (await shouldSkipOnTradingHoliday({ name: 'mover-screener-capture' })) {
+    console.log('[QUEUE] mover-screener-capture skipped — weekend/holiday');
+    return { skipped: true };
+  }
+  // ~2 min: five lightweight JSON list endpoints + one OHLCV pass.
+  // Do NOT recordHeartbeat('failed') here — moverWorker.on('failed', ...) below already logs
+  // every rejection reaching BullMQ, and this .catch's own throw always reaches it, so logging
+  // here too would double-write job_heartbeat/job_run_history for every real failure (same class
+  // as quant-eod-sync's double-log, fixed 2026-09-10 — see dual-failure-log in repo-doctor).
+  await runPython('mover_screener_fetcher.py', [], 5 * 60_000)
+    .then(() => recordHeartbeat('mover-screener-capture', 'success'))
+    .catch(e => {
+      console.warn('[QUEUE] mover_screener_fetcher failed:', (e as Error).message);
+      throw e;
+    });
   return { skipped: false };
 }
+
 
 /**
  * Overall execution budget for a heavy processor.
@@ -480,18 +520,53 @@ function withJobTimeout<T>(name: string, budgetMs: number, fn: () => Promise<T>)
   return Promise.race([fn(), timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
-async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
+/**
+ * ACTION_ITEMS #16 follow-up: a red-verified run must PAGE, not just paint the
+ * dashboard red — nobody watches BullMQ job results overnight, and surfacing
+ * failedSteps was introduced precisely to end silent-green runs. Reported-not-
+ * thrown stays the contract with BullMQ (a throw would re-run the whole
+ * hours-long chain), so this is the only active notification path. Delivery is
+ * fire-and-forget: an alert failure must never fail the job itself.
+ */
+async function alertFailedSteps(
+  jobName: string,
+  verdict: { ok: boolean; failedSteps?: string[] },
+): Promise<void> {
+  if (verdict.ok || !verdict.failedSteps?.length) return;
+  const shown = verdict.failedSteps.slice(0, 15);
+  const rest = verdict.failedSteps.length - shown.length;
+  const text =
+    `🚨 *${jobName} finished DEGRADED*\n` +
+    `${verdict.failedSteps.length} step(s) failed:\n` +
+    shown.map(s => `• ${s}`).join('\n') +
+    (rest > 0 ? `\n• …and ${rest} more` : '') +
+    `\n\nJob result: success=false (reported, not thrown). Dashboard monitor + server logs have detail.`;
+  try {
+    await telegramService.sendMarkdownMessage(text);
+  } catch (e) {
+    console.error('[QUEUE] failed-steps Telegram alert could not be delivered:', (e as Error).message);
+  }
+}
+
+async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
   // 2026-08-06: skip the standalone 19:30 IST trigger on a trading holiday -- closed-day-early-
   // batch (queues.ts's QUEUE_CLOSED_DAY) already dispatches a 'closed-day-early'-named run at
   // ~07:10 IST that morning. Running the full ~120-script chain again that same evening off an
   // exchange that never opened would just re-fetch/re-score identical data twice.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] ml-daily-ops skipped — trading holiday (closed-day-early-batch already ran this morning)');
-    return { success: true };
+    return { success: true, skipped: true };
   }
   // Dashboard-visible sub-tasks are wrapped in T.run(...) so their monitor state reflects the
-  // ACTUAL step outcome (T.finish() at the end). Steps not tracked here stay best-effort with a
-  // console.warn — they aren't individually dashboarded, so they can't create a false-healthy signal.
+  // ACTUAL step outcome (T.finish() at the end).
+  //
+  // 2026-09-03: every other sub-step now ends in `.catch(e => T.fail('name', e))` instead of a
+  // bare `console.warn`. The old comment here claimed an untracked console.warn step "can't
+  // create a false-healthy signal" — that was wrong, and it is exactly how mc_index_oi_fetcher
+  // sat 3 days stale while this job reported success. T.fail() records the failure into
+  // finish()'s verdict (so the job goes 'failed' and the failed-step alert names it) WITHOUT
+  // minting a per-step job_heartbeat row, which getStaleJobs() would otherwise flag stale
+  // forever. Nothing in this chain swallows a failure any more.
   const T = new StepTracker('ml-daily-ops');
   // FULL-UNIVERSE feature grid FIRST: the signal scan only writes technical_signals rows
   // for stocks that produced a tradable pattern (14-800/day), so most of the universe had
@@ -499,13 +574,13 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // This guarantees a row for every liquid stock on the latest session BEFORE the enrichment
   // engines below run, so RS/HV/aVWAP/etc. fill the whole grid, not just the signal subset.
   await runPython('backfill_technical_features.py', ['--full-today'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] technical grid-ensurer failed:', (e as Error).message));
+    .catch(e => T.fail('technical grid-ensurer', e));
 
   // Forward-capture alt-data: MoneyControl breakout-pattern flags + technical rating onto
   // today's full grid (can't be backfilled — captured daily to accumulate for a future
   // richer breakout model). Runs after the grid-ensurer so it writes onto full-universe rows.
   await runPython('mc_techscanner_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_techscanner failed:', (e as Error).message));
+    .catch(e => T.fail('mc_techscanner', e));
 
   // Fetch extra alt-data from Indiatimes, MarketsMojo, and Trading80.
   // --scope daily: only the 5 endpoints extra_features_parser.py actually reads. It used to
@@ -514,40 +589,40 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // consumer, read 5 of them. The other 15 now run weekly (processMlWeeklyRetrain) so the raw
   // corpus stays warm without costing the nightly window. ~10,000 requests, comfortably inside.
   await runPython('extra_endpoints_fetcher.py', ['--scope', 'daily'], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] extra_endpoints_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('extra_endpoints_fetcher', e));
   // Separate step ON PURPOSE — do not fold this back into the fetcher. It used to be that
   // script's last statement, so the 30-min timeout kill (which happened every night, see the
   // fetcher's own comment) meant the parse never ran and all 14 ext_* feature columns stayed
   // at ~0%. Run as its own step, the parse still lands whatever the fetch managed to store.
   await runPython('extra_features_parser.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] extra_features_parser failed:', (e as Error).message));
+    .catch(e => T.fail('extra_features_parser', e));
 
   // Superstar-investor conviction tracking (InvestSights) — per-stock entry/exit/increase/
   // decrease by named investors, closing the gap the 2026-08-03 urls.txt field analysis
   // flagged as this platform's top new-data opportunity. ~60 sequential per-investor requests;
   // 5 min budget is generous headroom over the measured sub-minute runtime.
   await runPython('investsights_investor_activity_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] investsights_investor_activity_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('investsights_investor_activity_fetcher', e));
 
   // InvestSights per-stock TTM/FMP-ratios/growth-metrics/DCF fair-value snapshot (onboard-
   // data-source batch, 2026-08-13) → investsights_fundamentals_history. --limit 300 (liquid-
   // by-market-cap): 4 sequential requests/symbol, measured ~2.3s/symbol incl. rate limit —
   // 20 min budget is generous headroom over the ~12 min measured full-limit runtime.
   await runPython('investsights_fundamentals_fetcher.py', ['--limit', '300'], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] investsights_fundamentals_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('investsights_fundamentals_fetcher', e));
 
   // InvestSights per-stock filings/announcements/concall/rating documents (same batch) →
   // investsights_announcement_intel. --limit 200 (heavier payload per symbol than the
   // fundamentals fetcher above, up to ~44 nested filing items/symbol).
   await runPython('investsights_announcement_intel_fetcher.py', ['--limit', '200'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] investsights_announcement_intel_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('investsights_announcement_intel_fetcher', e));
 
   // InvestSights rolling PE-band chart (same batch) → investsights_pe_band_history. Corrected
   // 2026-08-14 to the real /market/pe-band/{symbol} path (the initial /fundamentals/{symbol}/
   // pe-band guess 404s -- see the fetcher's own docstring). 20 min budget: ~500 rows/symbol,
   // full re-upsert every run (no since-param on this endpoint).
   await runPython('investsights_pe_band_fetcher.py', ['--limit', '300'], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] investsights_pe_band_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('investsights_pe_band_fetcher', e));
 
   // MarketsMojo daily-cadence series (onboarded 2026-08-11, backfilled once, never scheduled
   // until now — their dataQualityChecks entries were set at warnDays 3/failDays 5 with no job
@@ -559,13 +634,16 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // to gain 2,787 genuinely new ones. getCardInfo still has no since-parameter — the whole
   // ~9,900-row series arrives regardless — so the fix is on the write side (skip dates already
   // stored, live-measured 13 rows/symbol instead of 9,876) plus an 8-worker fetch (2.02s/symbol
-  // serial = 61.7 min, which no budget could have absorbed). Now ~9 min; 20 gives real headroom.
+  // serial = 61.7 min, which no budget could have absorbed). Now ~9 min; 30 gives real headroom.
+  // 2026-09-15: timed out at 20min under contention (ml-daily-ops reported
+  // "1 steps failed: marketsmojo_technical_fetcher"), cascading to DL Engine Inference going
+  // stale and the Telegram DI report being ~24h late. 30min absorbs the worst observed spikes.
   // --full forces a complete re-upsert if the vendor ever restates history.
-  await runPython('marketsmojo_technical_fetcher.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] marketsmojo_technical_fetcher failed:', (e as Error).message));
+  await runPython('marketsmojo_technical_fetcher.py', [], 30 * 60_000)
+    .catch(e => T.fail('marketsmojo_technical_fetcher', e));
   // 81 indices, one call each — the BSE-family/sectoral coverage macro_asset_prices lacks.
   await runPython('marketsmojo_index_fetcher.py', [], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] marketsmojo_index_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('marketsmojo_index_fetcher', e));
 
   // Point-in-time fundamentals snapshot — builds the as-of trail load_training_data joins.
   // Runs in ~2s solo but its DELETE+INSERT…SELECT on fundamentals_history can block far longer on
@@ -574,26 +652,28 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // 6 min: DELETE+INSERT on fundamentals_history can block under Postgres lock/CPU contention;
   // 3 min was clipping on the 2nd daily-ops run (observed 2026-07-14 07:54 under load).
   await runPython('fundamentals_snapshot.py', [], 360_000)
-    .catch(e => console.warn('[QUEUE] fundamentals_snapshot failed:', (e as Error).message));
+    .catch(e => T.fail('fundamentals_snapshot', e));
 
   // Same rationale as fundamentals_snapshot above: stock_factor_breakdown is current-state-only
   // (overwritten in place), so this is the only way a future regime-conditional backtest of
   // unified_ranker's REGIME_CAT_TILT will ever have history to fit against.
   await runPython('factor_breakdown_snapshot.py', [], 120_000)
-    .catch(e => console.warn('[QUEUE] factor_breakdown_snapshot failed:', (e as Error).message));
+    .catch(e => T.fail('factor_breakdown_snapshot', e));
 
-  // analyst_estimates_snapshot moved to weekly retrain (2328 stocks × 3 calls × 0.4s = ~47 min)
+  // analyst_estimates_snapshot: now a dedicated daily job (analyst-estimates-sync-daily,
+  // sync.jobs.ts, Mon–Fri 14:15 UTC) since the hybrid direct-engine rewrite took the full
+  // run from ~47 min to ~2.5 min — see that file for why it left the weekly chain.
 
   // Surveillance gate: ASM/GSM flags → nse_stocks and technical_signals.asm_flag/gsm_stage.
   await runPython('asm_gsm_fetcher.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] asm_gsm_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('asm_gsm_fetcher', e));
 
   // Trailing chandelier stop ratchet for live ACTIVE positions (Finding #29, 2026-07-28
   // full-stack audit) -- the correct trailing-stop formula already proven in
   // exit_labeler.py/outcome_resolver.py for offline backtest grading had never been applied
   // to actual open positions before this. TS function, runs in-process (no runPython needed).
   await updateTrailingStops()
-    .catch(e => console.warn('[QUEUE] trailing stop updater failed:', (e as Error).message));
+    .catch(e => T.fail('trailing stop updater', e));
   await T.run('fii-dii-fetcher', () => runPython('fii_dii_fetcher.py', [], 90_000));
   // Deep-history top-up (endpoint-corpus audit §5-1). One call returns all 2,584 daily rows
   // back to 2016 in ~3s, so backfill and daily top-up are the same operation -- there is no
@@ -602,7 +682,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // (.catch) rather than fatal -- this is a supplementary third-party source, and an outage
   // must not fail the whole daily ML chain the way the drift-detector timeout did.
   await T.run('fii-dii-history', () => runPython('fii_dii_history_fetcher.py', [], 120_000))
-    .catch(e => console.warn('[QUEUE] fii_dii_history_fetcher failed (daily ops continues):', (e as Error).message));
+    .catch(e => T.fail('fii_dii_history_fetcher', e));
   // Bulk/block deals carrying pctTransacted (% of float) -- the cross-sectionally comparable
   // deal-size field NSE's own feed does not provide (endpoint-corpus audit §5-2). 5 pages of
   // 200 covers several days of deals, so a missed run self-heals on the next one.
@@ -610,9 +690,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // which NSE's PIT feed does not carry -- insider_features.py's ratio is near-binary, so
   // materiality (a 70%-of-float promoter exit vs a 0.01% one) is the missing dimension.
   await T.run('tickertape-deals', () => runPython('tickertape_deals_fetcher.py', ['--pages', '5', '--insider'], 180_000))
-    .catch(e => console.warn('[QUEUE] tickertape_deals_fetcher failed (daily ops continues):', (e as Error).message));
+    .catch(e => T.fail('tickertape_deals_fetcher', e));
   await runPython('pcr_fetcher.py', ['--gex'], 90_000)
-    .catch(e => console.warn('[QUEUE] pcr_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('pcr_fetcher', e));
   // Per-symbol PCR/max-pain/ATM-IV for the DEFAULT_SYMBOLS large-cap set -> stock_options_oi +
   // historical_fno_sentiment. Every OTHER pcr_fetcher.py call site in this file passes --gex
   // (index-level dealer GEX only, writes macro_asset_prices) -- this was the only call that
@@ -622,12 +702,19 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // fetcher.py/stock_option_chain_fetcher.py independently keep IT fresh). 20 symbols at NiftyTrader's
   // own 1.5s delay is ~30s, cheap enough for the daily chain.
   await runPython('pcr_fetcher.py', [], 90_000)
-    .catch(e => console.warn('[QUEUE] pcr_fetcher (per-symbol) failed:', (e as Error).message));
+    .catch(e => T.fail('pcr_fetcher (per-symbol)', e));
   // Parallel batch — safe to overlap: disjoint target tables (mc_* vs unified_signals vs
   // news_sentiment_items), no shared rows, no advisory locks, and distinct resources
   // (MoneyControl network vs DB-compute vs GPU/FinBERT). The 5-min MC scrape now runs
   // concurrently with the technical engine + news sentiment instead of after them. pythonRunner
-  // caps global Python concurrency at 5, so this can't oversubscribe the box.
+  // caps global Python concurrency at 5.
+  //
+  // ⚠ That count cap does NOT bound MEMORY, and this comment used to claim it did ('so this
+  // can't oversubscribe the box') -- corrected 2026-09-12, AF-20260912-13. Five slots can sum
+  // past host RAM: on 2026-09-12 strategy_optimizer.py (16,870MB) and dl_trainer.py (13,820MB)
+  // ran concurrently on a 23.5GB host and drove commit to 94.3% of 82GB with 339MB available.
+  // Memory is bounded by the exclusive heavy slot in pythonRunner.ts (PY_HEAVY_THRESHOLD_MB),
+  // not by this number. Do not reason about host memory from MAX_PYTHON_CONCURRENT.
   //
   // institutional_quant_engine.py used to run here, writing quant_scores via a full
   // DELETE+re-INSERT — but quantScoringService.ts's own upsert runs 3.5h later (11 PM IST,
@@ -643,15 +730,19 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // stale indefinitely between manual triggers.
   await Promise.allSettled([
     runPython('moneycontrol_fetcher.py', [], 900_000)
-      .catch(e => console.warn('[QUEUE] moneycontrol_fetcher failed:', (e as Error).message)),
-    runPython('technical_analysis_engine.py', [], 120_000)
-      .catch(e => console.warn('[QUEUE] technical_analysis_engine failed:', (e as Error).message)),
+      .catch(e => T.fail('moneycontrol_fetcher', e)),
+    // technical_analysis_engine sweeps the full universe (trend/RSI/MACD/Bollinger/pattern
+    // detection → unified_signals) and can exceed 120 s on a RAM-pressured box (measured
+    // timeout 2026-08-26 00:07). 300 s matches the default pythonRunner limit and the
+    // overhead of the 5-slot concurrency pool.
+    runPython('technical_analysis_engine.py', [], 300_000)
+      .catch(e => T.fail('technical_analysis_engine', e)),
     T.run('finbert-scorer', () => runPython('finbert_scorer.py', ['--days', '1'], 180_000)),
   ]);
   // iv_features reads the ATM IV that pcr_fetcher just wrote to stock_options_oi → technical_signals.iv_rank.
   // Kept serial: it writes technical_signals, which several later steps also update — avoids row-lock churn.
   await runPython('iv_features.py', ['--date', 'today'], 300_000)
-    .catch(e => console.warn('[QUEUE] iv_features failed:', (e as Error).message));
+    .catch(e => T.fail('iv_features', e));
 
   // NSE full bhavcopy -> nse_universe_history: the exchange's own record of what actually
   // traded each day, i.e. the POINT-IN-TIME universe. Every other price path here iterates
@@ -662,18 +753,34 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // the ones that died. Runs before the quality/feature steps so today's row is available.
   await T.run('nse-bhavcopy-fetcher', () => runPython('nse_bhavcopy_fetcher.py', [], 10 * 60_000));
 
+  // Reconcile today's stock_ohlcv (written earlier this evening by the stock-refresh queue's
+  // own repeatable job, sourced from Yahoo's batch quote endpoint at market close) against the
+  // bhavcopy row nse-bhavcopy-fetcher just wrote above.
+  // AF-20260903-01: live-verified 2026-09-03 that Yahoo's batch fetch can silently drop a
+  // symbol entirely — RELIANCE (NSE's most liquid stock) and, independently, PAYTM both had
+  // this happen on real recent sessions — when the miss-count exceeds MAX_INDIVIDUAL_FALLBACKS,
+  // the per-symbol retry is skipped for ALL of them, with no error. Dual-write validation
+  // phase: runs ALONGSIDE the existing Yahoo write (does not replace it yet) — see
+  // reconcile_stock_ohlcv_from_bhavcopy.py's own docstring for the cutover plan once this is
+  // proven clean over several sessions. T.run() records a reconciliation failure into the job
+  // verdict without aborting the chain, so it cannot silently no-op.
+  await T.run('reconcile-stock-ohlcv',
+    () => runPython('reconcile_stock_ohlcv_from_bhavcopy.py', [], 5 * 60_000));
+
   // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
   await runPython('ohlcv_quality.py', ['--no-ingest'], 600_000)
-    .catch(e => console.warn('[QUEUE] ohlcv_quality flag failed:', (e as Error).message));
+    .catch(e => T.fail('ohlcv_quality flag', e));
 
   // Cross-sectional relative strength from (cleaned) OHLCV → technical_signals.rs_rank_21d/63d.
-  await runPython('relative_strength.py', [], 180_000)
-    .catch(e => console.warn('[QUEUE] relative_strength failed:', (e as Error).message));
+  // 180 s is tight on this RAM-pressured box (measured timeout 2026-08-26 00:20); 300 s
+  // matches the pythonRunner default and the slot-pool overhead.
+  await runPython('relative_strength.py', [], 300_000)
+    .catch(e => T.fail('relative_strength', e));
 
   // Cross-sectional ownership flow: sector-relative + universe-rank of MF net flow already
   // stamped on technical_signals → mf_flow_vs_sector / mf_flow_rank. Same-day, no look-ahead.
   await runPython('ownership_relative.py', [], 120_000)
-    .catch(e => console.warn('[QUEUE] ownership_relative failed:', (e as Error).message));
+    .catch(e => T.fail('ownership_relative', e));
 
   // multi_factor_scorer.py (quant_scores.mf_*) used to run here — but this step (ml-daily-ops,
   // 7:30 PM IST) runs 3.5h BEFORE quantScoringService.ts's own quant_scores upsert (11 PM IST,
@@ -683,48 +790,48 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
 
   // Market breadth internals (% above 200DMA, A/D ratio, 20d highs, 52w net highs/lows) from stock_ohlcv.
   await runPython('market_breadth.py', ['--days', '420'], 120_000)
-    .catch(e => console.warn('[QUEUE] market_breadth failed:', (e as Error).message));
+    .catch(e => T.fail('market_breadth', e));
 
   // Rolling 90d insider buy/sell ratio from insider_trades → technical_signals.insider_buy_pct_90d.
   await runPython('insider_features.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] insider_features failed:', (e as Error).message));
+    .catch(e => T.fail('insider_features', e));
 
   // Intraday microstructure: opening-range break, VWAP deviation, first-hour vol share.
   // Runs post-close so the full session (9:15–15:30 IST) is in intraday_ohlcv.
   await runPython('intraday_features.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] intraday_features failed:', (e as Error).message));
+    .catch(e => T.fail('intraday_features', e));
 
   // Anchored VWAP deviation (20-day rolling anchor from stock_ohlcv) → technical_signals.avwap_deviation_pct.
   await runPython('avwap_features.py', [], 120_000)
-    .catch(e => console.warn('[QUEUE] avwap_features failed:', (e as Error).message));
+    .catch(e => T.fail('avwap_features', e));
 
   // OI net-change delta (day-over-day total OI % change from stock_options_oi) → oi_net_change_pct.
   // Depends on pcr_fetcher.py having run earlier in this same daily ops cycle.
   await runPython('oi_delta_features.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] oi_delta_features failed:', (e as Error).message));
+    .catch(e => T.fail('oi_delta_features', e));
 
   // Sector-level F&O sentiment: aggregate stock_options_oi by sector → sector_fo_sentiment.
   // Depends on pcr_fetcher.py (stock_options_oi) and iv_features (per-stock IV) having run.
   await runPython('sector_fo_proxy.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] sector_fo_proxy failed:', (e as Error).message));
+    .catch(e => T.fail('sector_fo_proxy', e));
 
   // F&O rollover % and cost of carry from NSE bhavcopies → fno_rollover → technical_signals.
   await runPython('fno_rollover_fetcher.py', ['--days', '1'], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] fno_rollover_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('fno_rollover_fetcher', e));
 
   // Cash market delivery % from NSE MTO DAT → stock_delivery_volume → technical_signals.
   await runPython('delivery_volume_fetcher.py', ['--days', '1'], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] delivery_volume_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('delivery_volume_fetcher', e));
 
   // Block deals from NSE live API → stock_block_deal_daily → technical_signals.
   await runPython('block_deal_fetcher.py', ['--days', '1'], 60_000)
-    .catch(e => console.warn('[QUEUE] block_deal_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('block_deal_fetcher', e));
 
   // MC pricefeed: IND_PE, CAGR 3/5y, consensus PE/PB, delivery avg (fundamentals/delivery only —
   // price/volume columns moved to mc_price_features_ohlcv.py below, see its docstring for why).
   // 2328 stocks × 0.35s = ~14 min
   await runPython('mc_pricefeed_fetcher.py', [], 25 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_pricefeed_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_pricefeed_fetcher', e));
 
   // Point-in-time mc_ma30/50/150/200_dist_pct, mc_3d_return, mc_52w_high/low_dist_pct,
   // mc_days_from_52wh, mc_ytd_return, mc_vol_ratio -- computed from stock_ohlcv (fresh as of
@@ -736,12 +843,13 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // MUST run after ohlcv_quality.py above -- it reads WHERE is_suspect=0 so a bad-print/
   // extreme-level-shift bar doesn't poison every moving-average window it falls inside.
   await runPython('mc_price_features_ohlcv.py', [], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_price_features_ohlcv failed:', (e as Error).message));
+    .catch(e => T.fail('mc_price_features_ohlcv', e));
 
   // MC chart patterns: professional pattern detection with target price, stop-loss, direction.
-  // 2328 stocks × 0.35s = ~14 min
-  await runPython('mc_chart_patterns_fetcher.py', [], 25 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_chart_patterns_fetcher failed:', (e as Error).message));
+  // Upgraded to bulk market API: 1 request fetches all market patterns in ~0.5s (was 25 min).
+  await runPython('mc_chart_patterns_fetcher.py', [], 2 * 60_000)
+    .catch(e => T.fail('mc_chart_patterns_fetcher', e));
+
 
   // Index/F&O microstructure batch — safe to overlap like the moneycontrol/institutional/finbert
   // group above: each hits a distinct external API and writes its own dedicated index-level
@@ -753,91 +861,117 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
     // NiftyTrader F&O dashboard: max_pain per stock + directional OI flow (calls vs puts Δoi)
     // for all 147 F&O stocks in a single API call — daily because max pain shifts each session.
     runPython('nt_dashboard_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] nt_dashboard_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('nt_dashboard_fetcher', e)),
     // NiftyTrader intraday PCR time series for major indices (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY).
     runPython('nt_pcr_ts_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] nt_pcr_ts_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('nt_pcr_ts_fetcher', e)),
     // NiftyTrader EOD strike-wise OI snapshot — feeds index_max_pain + nt_index_oi_eod.
     runPython('nt_oi_snapshot_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] nt_oi_snapshot_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('nt_oi_snapshot_fetcher', e)),
     // India VIX + GIFT NIFTY intraday values + EOD close → macro_asset_prices + nt_index_pcr_ts.
     runPython('nt_vix_fetcher.py', [], 60_000)
-      .catch(e => console.warn('[QUEUE] nt_vix_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('nt_vix_fetcher', e)),
     // Market Mood Index (Tickertape fear/greed 0-100) → macro_asset_prices INDIA_MMI.
     runPython('mmi_fetcher.py', [], 60_000)
-      .catch(e => console.warn('[QUEUE] mmi_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('mmi_fetcher', e)),
     // NiftyTrader per-strike OI change (buildup/unwinding) for index options.
     runPython('nt_change_oi_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] nt_change_oi_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('nt_change_oi_fetcher', e)),
     // SmartOptions Greek-enriched option chain for all F&O stocks (Delta/Gamma/Theta/Vega/IV).
     runPython('so_option_chain_fetcher.py', ['--delay', '0.3'], 30 * 60_000)
-      .catch(e => console.warn('[QUEUE] so_option_chain_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('so_option_chain_fetcher', e)),
+    // Per-stock FUTURES OI/positioning (MC FUTSTK) -> stock_futures_oi_history: open interest,
+    // OI change, long/short buildup, rollover %, basis. This is the family measurement.md had
+    // recorded as impossible ("no fetcher captures per-stock futures OI"); the endpoint was
+    // already in urls_sample.json and simply never built. NOT a signal yet -- it must be graded
+    // through factor_edge.py like everything else before anything consumes it. Budget is
+    // generous because it is 2 requests per F&O name at a 0.25s pace.
+    runPython('mc_stock_futures_oi_fetcher.py', [], 30 * 60_000)
+      .catch(e => T.fail('mc_stock_futures_oi_fetcher', e)),
     // SmartOptions cross-market F&O activity screeners (most-active-value/oi-gainers/oi-losers)
     // at the current monthly expiry -- distinct from so_option_chain_fetcher's per-stock chain
     // above (that one needs stockCode; this one is a ranked cross-market screener with no
     // per-stock id). Promoted 2026-07-30 from a stale-expiry URL found in updated_urls.json.
     runPython('trendlyne_fno_activity_fetcher.py', [], 3 * 60_000)
-      .catch(e => console.warn('[QUEUE] trendlyne_fno_activity_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('trendlyne_fno_activity_fetcher', e)),
     // Sector Relative Rotation Graph + sector x sector correlation matrix (2026-08-06 urls.txt
     // analysis) → sector_rrg_history/sector_correlation_{pairs,stats,summary}.
     runPython('investsights_sector_intel_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] investsights_sector_intel_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('investsights_sector_intel_fetcher', e)),
     // Cross-sectional PE/ROE/ROCE/growth screener snapshot (onboard-data-source batch,
     // 2026-08-13) → investsights_factor_scores. Paginated batch query, not per-stock —
     // measured ~15s for the full ~5,377-row provider universe, 2 min budget is ample.
     runPython('investsights_factor_scores_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] investsights_factor_scores_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('investsights_factor_scores_fetcher', e)),
     // Ranked institutional buy/sell deal activity (2026-08-06 urls.txt analysis) → institutional_deal_signals.
     runPython('institutional_deals_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] institutional_deals_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('institutional_deals_fetcher', e)),
     // AI-generated earnings-call tone/takeaway (2026-08-06 urls.txt analysis) → concall_takeaways.
     runPython('investsights_concall_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] investsights_concall_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('investsights_concall_fetcher', e)),
+    // StockEdge's "Higher Delivery Quantity" top-5 alert list (2026-08-15, promoted from
+    // endpoint_registry.py's stockedge_high_delivery_qty, archived-only until now) → stockedge_high_delivery_alerts.
+    runPython('stockedge_high_delivery_fetcher.py', [], 60_000)
+      .catch(e => T.fail('stockedge_high_delivery_fetcher', e)),
+    // Trading80's own buy/sell call list, third-party vendor calls not this platform's own
+    // (2026-08-15, promoted from endpoint_registry.py's trading80_call_alerts) → trading80_call_alerts.
+    runPython('trading80_call_alerts_fetcher.py', [], 60_000)
+      .catch(e => T.fail('trading80_call_alerts_fetcher', e)),
+    // MarketsMojo's own model-portfolio picks, entry/exit + live P&L (2026-08-15, promoted from
+    // endpoint_registry.py's marketsmojo_stock_picks_history) → marketsmojo_stock_picks.
+    runPython('marketsmojo_stock_picks_fetcher.py', [], 60_000)
+      .catch(e => T.fail('marketsmojo_stock_picks_fetcher', e)),
+    // Trendlyne's pre-classified corporate-event feed (order wins, margin moves, estimate
+    // beats/misses, block deals, ...) — 2026-08-15, promoted from endpoint_registry.py's
+    // trendlyne_market_insight after re-inspection showed it arrives pre-labeled, not raw
+    // headlines needing NLP (see the fetcher's own docstring) → trendlyne_market_insights.
+    runPython('trendlyne_market_insight_fetcher.py', [], 60_000)
+      .catch(e => T.fail('trendlyne_market_insight_fetcher', e)),
     // Market-wide corporate-actions calendar sourced from real NSE filings (2026-08-07
     // urls.txt open-source sourcing pass) → nse_filed_corporate_actions. Daily and cheap (one
     // API call, ~40 rows): the completeness cross-check for mc_corporate_actions_fetcher.py's
     // weekly per-stock crawl, so it should stay fresher than the thing it's checking.
     runPython('investsights_corporate_actions_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] investsights_corporate_actions_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('investsights_corporate_actions_fetcher', e)),
     // NDTV Profit futures basis/roll-spread/PCR, independent cross-check for fno_rollover_fetcher.py
     // (2026-08-07 urls.txt follow-up) → ndtv_fno_basis. F&O-eligible universe only (209 symbols) --
     // futures don't exist for the rest of nse_stocks. Live-measured ~7s for the full universe.
     runPython('ndtv_fno_basis_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] ndtv_fno_basis_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('ndtv_fno_basis_fetcher', e)),
   ]);
 
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
   // Writes eps_beat_last_q / eps_beat_streak_4q / eps_miss_streak_4q → technical_signals.
   await runPython('earnings_beat_features.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] earnings_beat_features failed:', (e as Error).message));
+    .catch(e => T.fail('earnings_beat_features', e));
 
   // Sector-global benchmark correlation (requires macro_asset_prices from global_macro_fetcher).
   await runPython('sector_global_corr.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] sector_global_corr failed:', (e as Error).message));
+    .catch(e => T.fail('sector_global_corr', e));
 
   // Historical Volatility (HV10/20/30/60d + IV-HV ratio) purely from stock_ohlcv — no new feed.
   await runPython('hv_features.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] hv_features failed:', (e as Error).message));
+    .catch(e => T.fail('hv_features', e));
 
   // Analyst estimate revision drift (EPS + price-target 3m change) from analyst_estimates_history.
   await runPython('analyst_revision.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] analyst_revision failed:', (e as Error).message));
+    .catch(e => T.fail('analyst_revision', e));
 
   // Commodity/FX sensitivity: 90d rolling corr of each stock vs CRUDE/GOLD/DXY/SP500.
   // Requires macro_asset_prices to be populated (global_macro_fetcher runs at session start).
   await runPython('commodity_sensitivity.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] commodity_sensitivity failed:', (e as Error).message));
+    .catch(e => T.fail('commodity_sensitivity', e));
 
   // Earnings calendar + PEAD categories + price shockers + sector earnings + market breadth.
   await runPython('mc_earnings_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_earnings_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_earnings_fetcher', e));
 
   // F&O expiry countdown (days_to_expiry/is_expiry_day) -- the expiry-side counterpart to
   // days_to_next_results above. nt_fno_expiry's own expiry dates are refreshed weekly
   // (sync_nt_fno_symbols.py, ml-weekly-retrain) since they rarely change, but the countdown
   // itself must recompute daily against today's date, same as days_to_next_results.
   await runPython('expiry_features.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] expiry_features failed:', (e as Error).message));
+    .catch(e => T.fail('expiry_features', e));
 
   // Broker research recommendations: named broker BUY/SELL events → mc_broker_reco + technical_signals.
   // Timeout bumped 2min->6min (2026-07-31): fetch_recos() no longer breaks out of pagination on
@@ -846,56 +980,56 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // in any order). Fixing that means every run now scans all MAX_PAGES=15 pages regardless of
   // --days, live-measured at ~4.6 min end-to-end.
   await runPython('mc_broker_reco_fetcher.py', ['--days', '7'], 6 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_broker_reco_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_broker_reco_fetcher', e));
 
   // Economic calendar: upcoming high-impact macro events → eco_calendar + macro_asset_prices.
   await runPython('mc_eco_calendar_fetcher.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] mc_eco_calendar_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_eco_calendar_fetcher', e));
 
   // Corporate action calendar: ex-dividend dates + board meeting dates → corporate_actions + technical_signals.
   // Prevents false STOP_LOSS signals on ex-div days; adds pre-earnings drift feature.
   await runPython('mc_corporate_calendar_fetcher.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] mc_corporate_calendar_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_corporate_calendar_fetcher', e));
 
   // NSE's own primary-market IPO calendar (current/upcoming/past issues) → nse_ipo_calendar.
   // Promoted 2026-07-30 via the `nse` (NseIndiaApi) package -- genuinely new data, no prior
   // fetcher in this codebase covered the IPO calendar.
   await runPython('nse_ipo_calendar_fetcher.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] nse_ipo_calendar_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('nse_ipo_calendar_fetcher', e));
 
   // Screener features: stamp per-stock screener ML features into technical_signals
   // (runs after screener sync so appearances are current)
   await runPython('screener_features_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_features_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('screener_features_fetcher', e));
 
   // Sector screener rotation: aggregate bull/bear signals by sector
   await runPython('screener_sector_rotation.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_sector_rotation failed:', (e as Error).message));
+    .catch(e => T.fail('screener_sector_rotation', e));
 
   // Screener surfacing alerts: new screener entries → unified_signals
   await runPython('screener_signal_generator.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_signal_generator failed:', (e as Error).message));
+    .catch(e => T.fail('screener_signal_generator', e));
 
   // Per-stock option chain: expected move + GEX proxy + BS-derived ATM IV + next-month IV
   // term structure → stock_option_features + stock_options_oi + technical_signals.
   // 3min -> 6min (2026-07-18): the term-structure feature adds a second per-symbol API call
   // (next-month expiry chain), roughly doubling this script's request count.
   await runPython('stock_option_chain_fetcher.py', [], 6 * 60_000)
-    .catch(e => console.warn('[QUEUE] stock_option_chain_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('stock_option_chain_fetcher', e));
   // Re-run iv_features after stock chains so per-stock iv_rank reflects BS-computed ATM IV (not just index IV from pcr_fetcher).
   await runPython('iv_features.py', [], 90_000)
-    .catch(e => console.warn('[QUEUE] iv_features (stock IV pass) failed:', (e as Error).message));
+    .catch(e => T.fail('iv_features (stock IV pass)', e));
 
   // EPS surprise streak: beat/miss history from MC actual-estimate API → eps_surprise_history + technical_signals.
   await runPython('eps_surprise_fetcher.py', [], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] eps_surprise_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('eps_surprise_fetcher', e));
 
   // financial_ratios_fetcher + working_capital_fetcher moved to weekly retrain
   // (3058 stocks × 4-5 calls = 61-102 min each; data changes quarterly not daily)
 
   // Delivery % trend + bulk/block deals + short interest proxy → technical_signals.
   await runPython('delivery_trend_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] delivery_trend_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('delivery_trend_fetcher', e));
 
   // insider_transactions_fetcher.py moved to the weekly retrain (processMlWeeklyRetrain).
   // It cost 14m47 of the nightly critical path (measured 2026-08-12, the single largest step
@@ -907,11 +1041,18 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
 
   // Credit rating events (upgrades/downgrades) from BSE → credit_rating_events + technical_signals.
   await runPython('credit_rating_fetcher.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] credit_rating_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('credit_rating_fetcher', e));
 
-  // MF sector AUM flow from AMFI monthly disclosures → mf_sector_allocation + technical_signals.
-  await runPython('mf_sector_flow_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] mf_sector_flow_fetcher failed:', (e as Error).message));
+  // MF sector AUM flow (ET / mcxlivefeeds JSONP feed, replaces dead AMFI disclosure endpoint)
+  // → mf_scheme_sector_allocation + mf_sector_allocation + technical_signals.
+  // 45 min, not the original 5: measured live 2026-09-04 at 24m10s end-to-end against the real
+  // universe (exit 0, 13 sectors aggregated, 2,315 technical_signals rows updated) -- so this
+  // step could never once have completed inside its old budget, and it was one of the three
+  // ml-daily-ops steps reporting failed every night. Sized at ~2x measured rather than just
+  // over it: recurring-bugs.md's repeated defect here is picking a budget with no headroom and
+  // never revisiting it as the work grows. Fits inside the job's own 3.5h withJobTimeout.
+  await runPython('mf_sector_allocation_fetcher.py', [], 45 * 60_000)
+    .catch(e => T.fail('mf_sector_allocation_fetcher', e));
 
   // Index/macro batch — same rationale as the NT/MMI/option-chain batch above: five distinct
   // external APIs, five distinct index-level destination tables (macro_asset_prices, index_valuation,
@@ -922,36 +1063,41 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   await Promise.allSettled([
     // India macro indicators: PMI, GST, IIP, auto sales, RBI rate → macro_asset_prices.
     runPython('india_macro_fetcher.py', [], 3 * 60_000)
-      .catch(e => console.warn('[QUEUE] india_macro_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('india_macro_fetcher', e)),
     // Index PE/PB/EPS → index_valuation (MoneyControl + Trendlyne, last 30 days).
     // ~35 of the ~91 indices now fall back to a second Trendlyne round-trip per index because
     // MC's graph endpoint returns corrupted data for most sector sub-indices — a full run takes
     // 6-7 minutes, well past the old 3-minute budget.
     runPython('nifty_pe_fetcher.py', ['--days', '30'], 10 * 60_000)
-      .catch(e => console.warn('[QUEUE] nifty_pe_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('nifty_pe_fetcher', e)),
     // Index OHLC history from MoneyControl → stock_ohlcv (covers SENSEX + indices missing from Yahoo).
     runPython('mc_index_ohlc_fetcher.py', ['--range', '5d'], 3 * 60_000)
-      .catch(e => console.warn('[QUEUE] mc_index_ohlc_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('mc_index_ohlc_fetcher', e)),
     // NSE/BSE advance-decline raw counts → mc_advance_decline + market_breadth.adv_decline_ratio.
     runPython('mc_advance_decline_fetcher.py', [], 60_000)
-      .catch(e => console.warn('[QUEUE] mc_advance_decline_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('mc_advance_decline_fetcher', e)),
     // Index options OI by strike → index_option_oi + index_max_pain (Nifty + BankNifty).
     runPython('mc_index_oi_fetcher.py', [], 3 * 60_000)
-      .catch(e => console.warn('[QUEUE] mc_index_oi_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('mc_index_oi_fetcher', e)),
   ]);
 
   // BSE event classifier: news_articles → event_signal_score in technical_signals.
   await runPython('bse_event_classifier.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] bse_event_classifier failed:', (e as Error).message));
+    .catch(e => T.fail('bse_event_classifier', e));
 
   // Backfill technical features (RSI/MACD/ADX from stock_ohlcv) for any outcome that
   // still lacks a ts row — keeps ML training coverage high as new signals resolve.
   await runPython('backfill_technical_features.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] backfill_technical_features failed:', (e as Error).message));
+    .catch(e => T.fail('backfill_technical_features', e));
 
-  // PEAD model: eps_growth_yoy + volume + RS → pead_score in technical_signals.
-  await runPython('pead_model.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] pead_model failed:', (e as Error).message));
+  // PEAD model retired 2026-08-20. NOT because eps_growth_yoy/qoq were NULL (that was a stale
+  // claim -- verified live, they're genuinely populated: 34,756 pead_score rows / 1,673 symbols
+  // / 37 dates, 06-30->08-19, ~1,655-1,661/day most weekdays). Graded via factor_edge.py the
+  // same session: no edge at 1/5/10/21d (IC 0.026-0.029, AUC 0.505-0.521, never clears
+  // USABLE), AND zero downstream readers -- not unified_ranker.py, not anywhere else, ever
+  // (grep confirmed). A real, correctly-functioning, measured no-edge score nothing reads is
+  // pure runtime cost. See measurement.md for the full grading. Re-add only if pead_score gets
+  // wired into a consumer AND re-graded positive.
 
   // These were UNCAUGHT: if outcome resolution threw (e.g. a transient PG/IPv6 blip), the
   // whole daily-ops run aborted here — skipping ALL ML training below AND never reaching the
@@ -959,18 +1105,18 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // showed "never succeeded" for a week. Every step below is now best-effort so the run
   // always completes and the training tail always attempts (scripts are idempotent — a
   // failed one simply retries tomorrow).
-  await resolveOutcomesResilient(1).catch(e => console.warn('[QUEUE] resolveOutcomes(1) failed:', (e as Error).message));
+  await resolveOutcomesResilient(1).catch(e => T.fail('resolveOutcomes(1)', e));
   await T.run('outcome-resolver-5d', () => resolveOutcomesResilient(5));
   await T.run('outcome-resolver-15d', () => resolveOutcomesResilient(15));
 
   // Compute excursion path labels for all resolved entries:
   await runPython('exit_labeler.py', ['--limit', '500'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
+    .catch(e => T.fail('exit_labeler', e));
 
   // Now a windowed batch-resolve (was per-row N+1, routinely blew the old 180s
   // timeout on any real backlog) — give it real headroom.
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
-    .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
+    .catch(err => T.fail('live_screener_resolver.py', err));
 
   // Measured 83.6s standalone (2026-08-08) -- well inside the implicit 5min default -- but it
   // runs here alongside ~15 other ml-daily-ops steps hitting the same DB, and 11 of its last
@@ -980,7 +1126,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // screener_performance.py/quant-eod-sync/alphaQuant.score elsewhere in this file.
   await T.run('performance-tracker', () => runPython('performance_tracker.py', ['--horizon', '5'], 15 * 60_000));
   await runPython('performance_tracker.py', ['--horizon', '15'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] performance_tracker(15) failed:', (e as Error).message));
+    .catch(e => T.fail('performance_tracker(15)', e));
 
   // ── feature-matrix hygiene (2026-07-31 bias audit) ──────────────────────────────
   // Must run AFTER every enrichment fetcher above and BEFORE any training step below.
@@ -1008,13 +1154,14 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // cycle. The audit's extra checks were merged into ohlcv_quality.flag_malformed_bars()
   // instead; data_integrity_repair.py --bad-bars remains available as a manual one-off.
 
-  await runPython('online_learner.py', ['--window', '180'], 120_000)
-    .catch(e => console.warn('[QUEUE] online_learner failed:', (e as Error).message));
-
-  // Warm-start LGBM ensemble on the last 3 days of newly-resolved outcomes (+20 boost rounds).
-  // Runs after online_learner so SGD priors are already updated; keeps ensemble fresh daily
-  // without the cost of a full weekly retrain.
-  await T.run('ml-ensemble-incremental', () => runPython('ml_ensemble.py', ['--incremental', '--incr-days', '3'], 5 * 60_000));
+  // online_learner REMOVED from scheduling 2026-08-31: its live CV AUC measured 0.5017
+  // (2026-08-30 run, 266,396 outcomes) — a coin flip that kept an active model_registry row
+  // and burned ~3.5min of the nightly Python-slot budget. Nothing reads online_sgd's output
+  // in any scoring path (ml_ensemble's incremental warm-start is independent). The script
+  // stays on disk for manual runs; its registry row is deactivated.
+  // Warm-start LGBM ensemble on the last 3 days of newly-resolved outcomes (+20 boost rounds);
+  // keeps the ensemble fresh daily without the cost of a full weekly retrain.
+  await T.run('ml-ensemble-incremental', () => runPython('ml_ensemble.py', ['--incremental', '--incr-days', '3', '--label', 'triple_barrier'], 5 * 60_000));
 
   await T.run('ml-ensemble-score', () => pythonApi.scorePending());
 
@@ -1024,7 +1171,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // margin, so it only ever passed on a fully idle box and was killed by the timeout on most
   // real runs. Same measure-then-budget correction as exit_labeler/exit_policy before it.
   await runPython('ml_calibration.py', [], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] ml_calibration failed:', (e as Error).message));
+    .catch(e => T.fail('ml_calibration', e));
 
   // PSI-based feature drift check — writes drift_score to dl_model_performance so
   // scoring_engine applies a win_probability haircut when distributions shift.
@@ -1048,19 +1195,20 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
     })
   );
 
-  await runPython('cs_ranker.py', ['--score'], 120_000)
-    .catch(e => console.warn('[QUEUE] cs_ranker score failed:', (e as Error).message));
+  // cs_ranker daily --score REMOVED 2026-08-31: its live registry CV AUC is 0.176 —
+  // materially worse than random — and its weight in the unified blend is now zeroed
+  // (unified_ranker.py REGIME_WEIGHTS). No point scoring a deactivated engine daily.
 
   // Breakout classifier (Lever #4): score today's universe with P(>=6% move in 10d) →
   // technical_signals.breakout_probability. Advisory only for now (strong purged-OOF AUC
   // ~0.73 but on limited history); the weekly --train refits as coverage grows.
   await runPython('breakout_classifier.py', ['--score'], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] breakout_classifier score failed:', (e as Error).message));
+    .catch(e => T.fail('breakout_classifier score', e));
 
   // Winner attribution: which stocks actually flew today, did we have them flagged,
   // and which precursors preceded the move → rolling lift → tomorrow's candidate list.
   await runPython('high_flyer_retrospective.py', [], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] high_flyer_retrospective failed:', (e as Error).message));
+    .catch(e => T.fail('high_flyer_retrospective', e));
 
   // Push what the retrospective just computed. Its only reader was a v4 widget, and v4 is not
   // the default shell — so recall and wrong-direction numbers were being produced nightly and
@@ -1071,32 +1219,31 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // Breakout classifier (Lever #4) -- moved here from the weekly retrain (2026-07-17): its
   // only training source, stock_ohlcv, updates once a day at EOD, so daily is the cadence
   // that actually tracks the data rather than going stale for most of the week.
-  await runPython('breakout_classifier.py', ['--train', '--score'], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] breakout_classifier train failed:', (e as Error).message));
+  // T.run (not a bare .catch), ml-promotion-gate-review 2026-08-19: same gap as cs_ranker/
+  // exit_policy/online_learner above -- breakout_classifier writes a promotion decision to its
+  // baseline pickle file (model_promotion.file_staleness_override_applies) but its failure was
+  // invisible to every monitor.
+  await T.run('breakout-classifier-train', () => runPython('breakout_classifier.py', ['--train', '--score'], 30 * 60_000));
   // Day-movement predictor: cross-sectional model for which stocks will have an outsized
   // intraday RANGE today (regardless of direction) -- purged-OOF AUC 0.76 on OHLCV alone
   // (2026-07-17). Advisory-only for now: writes technical_signals.movement_probability,
   // not yet blended into intraday_ranker.py's score or position sizing.
-  await runPython('movement_predictor.py', ['--train', '--score'], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] movement_predictor train failed:', (e as Error).message));
+  // T.run, same reason as breakout_classifier immediately above.
+  await T.run('movement-predictor-train', () => runPython('movement_predictor.py', ['--train', '--score'], 30 * 60_000));
 
   // Intraday feedback loop: paper-trade today's intraday recs vs the day's OHLC, then reverse-
   // engineer which signals preceded the winners → learned blend weights the ranker leans on.
   await runPython('intraday_outcome_resolver.py', [], 120_000)
-    .catch(e => console.warn('[QUEUE] intraday_outcome_resolver failed:', (e as Error).message));
+    .catch(e => T.fail('intraday_outcome_resolver', e));
   await runPython('intraday_strategy_learner.py', [], 120_000)
-    .catch(e => console.warn('[QUEUE] intraday_strategy_learner failed:', (e as Error).message));
+    .catch(e => T.fail('intraday_strategy_learner', e));
 
   await T.run('reward-engine', () => runPython('reward_engine.py'));
-  // --update only recomputes Q-values for existing rl_episodes rows; nothing creates NEW
-  // rows day-to-day (log_episode() is unused dead code) — --backfill is what actually
-  // inserts episodes from newly-resolved signal_outcomes. A short lookback keeps this a
-  // cheap daily top-up instead of re-scanning the full history (default 180d) every run.
-  // Budget: measured 220s uncontended on 2026-07-31 (13,313 outcomes -> Q-updates) against a
-  // 5-minute budget — 27% headroom, which concurrent load in this 19:30-00:00 window eats.
-  await runPython('rl_agent.py', ['--backfill', '--lookback', '5'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] rl_agent backfill failed:', (e as Error).message));
-  await T.run('rl-agent-update', () => runPython('rl_agent.py', ['--update']));
+  // rl_agent (Q-learning over signal episodes) REMOVED 2026-08-31: zero demonstrated edge
+  // anywhere in the platform's measurement history (docs/measurement-history.md), and its
+  // --update path only recomputed Q-values for rows nothing else creates. rl_q_table /
+  // rl_episodes dropped with it. The ranker's identically-named _passes_rl_gate is UNRELATED
+  // (a realized-track-record veto over recommendation_log) and stays.
 
   const { computeSignalTypeStats } = await import('./technicalSignalsService');
   await T.run('signal-type-stats', () => computeSignalTypeStats());
@@ -1114,8 +1261,15 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
 
   // Surface the real per-step outcomes (and a degraded job state if any failed) instead of the
   // old blanket 'success' the completed handler used to stamp on all of these.
-  T.finish();
-  return { success: true };
+  //
+  // The job-level result now matches what finish() already writes to the dashboard. It used to
+  // be an unconditional `{ success: true }`, so a run where every Python step failed completed
+  // green at the BullMQ level while the monitor showed it red (ACTION_ITEMS #16). Reported, not
+  // thrown -- this chain runs for hours and throwing would hand it to BullMQ's retry machinery
+  // to re-run in full over one failed step.
+  const verdict = T.finish();
+  await alertFailedSteps('ml-daily-ops', verdict);
+  return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 // ── Trendlyne checklist cycle processor (self-rescheduling, random interval) ──
@@ -1180,23 +1334,43 @@ async function processTrendlyneChecklistCycle(_job: Job): Promise<{ skipped: boo
   }
 }
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Python runner ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-
-async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> {
-  // Dashboard sub-tasks (ml-ensemble-train, strategy-optimizer) run under T.run so their monitor
-  // state reflects the REAL outcome via T.finish() — not the blanket 'success' the completed
-  // handler used to stamp. Untracked steps stay best-effort with console.warn.
-  const T = new StepTracker('ml-weekly-retrain');
+// ── ML weekly DATA prep (fetch + labelling) ───────────────────────────────────
+/**
+ * Split out of processMlWeeklyRetrain 2026-09-12 (AF-20260912-13). Two reasons, both measured:
+ *
+ * 1. MEMORY. The Saturday window ran ml-weekly-retrain's fetch prologue, its training half and
+ *    dl-retrain-weekly concurrently. Live peaks that day: strategy_optimizer.py 16.87GB +
+ *    dl_trainer.py 13.50GB on a 23.5GB box -- commit hit 94.3% of 82GB with 339MB available and
+ *    102,856 pages/sec. MAX_PYTHON_CONCURRENT is a COUNT (5) and PY_CHILD_MEM_LIMIT_MB is
+ *    PER-TREE (20GB), so both jobs were individually legal and jointly fatal; pythonRunner.ts's
+ *    own comment already says 'It is per job tree, not per host: 5 slots can still sum past RAM.'
+ *
+ * 2. A TRAIN JOB MUST NOT FETCH. Training reads the DB; fetching is a separate weekday concern.
+ *    Market data cannot change over a weekend at all -- stock_ohlcv holds ZERO Sat/Sun bars --
+ *    and the fundamentals this block pulls are quarterly/monthly, not weekly (measured
+ *    2026-09-12: finstack_cashflow_history's newest period_end is 2026-06-30 across 6 distinct
+ *    periods; marketsmojo_shareholding_history's periods are quarter-ends).
+ *
+ * The fetch budgets here sum to ~513 min, which is also why dl-retrain-weekly's '+60min' cron
+ * offset and its 'after ml retrain' comment were never true: ml-weekly-retrain's last three
+ * runs measured 87.4 / 110.7 / 192.7 min, so the DL job always started mid-fetch.
+ *
+ * outcome_resolver + exit_labeler come along deliberately: they are label PREP, not training,
+ * and exit_policy.py --train depends on exit_labeler having run. Landing labels on Friday
+ * strengthens that ordering instead of racing it inside one chain.
+ */
+async function processMlWeeklyData(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
+  const T = new StepTracker('ml-weekly-data');
   // Keep index_provider_map in sync with live provider index lists.
   await runPython('sync_mc_index_map.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] sync_mc_index_map failed:', (e as Error).message));
+    .catch(e => T.fail('sync_mc_index_map', e));
   await runPython('sync_tl_index_map.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] sync_tl_index_map failed:', (e as Error).message));
+    .catch(e => T.fail('sync_tl_index_map', e));
   await runPython('sync_nt_fno_symbols.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] sync_nt_fno_symbols failed:', (e as Error).message));
+    .catch(e => T.fail('sync_nt_fno_symbols', e));
   // Refresh earnings beat/miss history (quarterly data, no need to run daily).
   await runPython('earnings_surprise_fetcher.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] earnings_surprise_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('earnings_surprise_fetcher', e));
   // MF holdings: mf_holdings_fetcher.py REWRITTEN 2026-08-13 -- its old source
   // (mfapps.indiatimes.com's MFPortfolioHolding.cms) was dead (confirmed live, 404 for every
   // symbol, upstream retired). Repointed at ET's shareholding-pattern endpoint
@@ -1204,36 +1378,82 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // codes -- also fixes a hard LIMIT 200 in the old ID-resolution path. Quarterly disclosure
   // data, weekly crawl is generous.
   await runPython('mf_holdings_fetcher.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] mf_holdings_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mf_holdings_fetcher', e));
   // MarketsMojo quarterly-cadence series (onboarded 2026-08-11, backfilled once, never
   // scheduled). Weekly, not daily: the vendor only restates these on results/filing days, and
   // their dataQualityChecks entries are warnDays 45 to match. ~1,824 stocks x 0.5s ≈ 15 min each.
   await runPython('marketsmojo_financials_fetcher.py', [], 40 * 60_000)
-    .catch(e => console.warn('[QUEUE] marketsmojo_financials_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('marketsmojo_financials_fetcher', e));
   await runPython('marketsmojo_shareholding_fetcher.py', [], 40 * 60_000)
-    .catch(e => console.warn('[QUEUE] marketsmojo_shareholding_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('marketsmojo_shareholding_fetcher', e));
   await runPython('marketsmojo_fintrend_fetcher.py', [], 40 * 60_000)
-    .catch(e => console.warn('[QUEUE] marketsmojo_fintrend_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('marketsmojo_fintrend_fetcher', e));
+  // FinStack MCP quarterly cash-flow (onboarded 2026-09-01): the platform's first real
+  // QUARTERLY CFO/CFI/CFF/capex/FCF history, fetched by speaking MCP stdio to
+  // `python -m finstack.server` (whose cash_flow tool wraps yfinance quarterly_cashflow).
+  // Coverage is a SUBSET of NSE names (live-verified: INFY/TCS/WIPRO yes, RELIANCE no) —
+  // missing symbols are skipped via the tool's error envelope, never fabricated. Weekly for
+  // the same restates-on-results-days reason as the trio above; host needs finstack
+  // pip-installed for the PATH python (see finstack_cashflow_fetcher.py's docstring).
+  //
+  // AF-20260912-14 (after this step's abort failed the verdict 3 weeks running — 09-10
+  // "25 symbols rate-limited", 09-11, 09-12): the fetcher now crawls INCREMENTALLY —
+  // a 90d checked-marker skip (finstack_cashflow_checked), a 250-symbol date-rotated batch,
+  // a pool-wide throttle governor, and an ET annual fallback into et_cashflow_history for
+  // the batch (financial_ratios_fetcher's own harvest, reused — separate table, no source
+  // mixing). Its exit rule: 0 when any row was written anywhere (Yahoo or ET; DEGRADED
+  // stderr still fires for the digest), 1 only for a throttled-and-wrote-nothing outage.
+  // Steady state after convergence is a near-no-op like the marketsmojo trio; the residual
+  // quarterly backfill converges over ~8 runs and no longer depends on this job's wall time.
+  await runPython('finstack_cashflow_fetcher.py', [], 40 * 60_000)
+    .catch(e => T.fail('finstack_cashflow_fetcher', e));
+
+  // SEBI PIT insider filings -> insider_transactions. Moved off the nightly chain 2026-08-13
+  // (14m47 of the critical path to re-scrape a 90-day window that changes weekly at most), and
+  // the comment recording that move said it had gone "to the weekly retrain" -- but it was
+  // never actually added here. Live-verified 2026-09-10: NO invocation existed in queues.ts or
+  // jobs/*.jobs.ts, no `job_heartbeat` row and no `job_run_history` entry for it, and the table
+  // had frozen at transaction_date 2026-05-02 (~131 days stale, up from the 75.3d recorded when
+  // it was first flagged). It had run nowhere for 28 days. (AF-20260910-16.)
+  //
+  // Why nothing caught it: `insider-trades-recency` is deliberately warn-only because SEBI PIT
+  // filings are genuinely event-driven and sparse (data-sources.md's "sparse by nature" case).
+  // A warn-only freshness check cannot tell "sparse" from "the writer is gone", so that
+  // exemption is exactly the cover a dead fetcher needs -- which is why the durable guard here
+  // is queuesMovedStepsAreScheduled.test.ts, not a tighter threshold on the freshness check.
+  //
+  // `.catch` (not T.run) deliberately: this feeds insider_features.py's 90d rolling ratio, which
+  // degrades gracefully to the last landed window. The weekly retrain is already budget-strained
+  // (AF-20260910-13), so a slow filing feed must not fail the parent job that also trains models.
+  await runPython('insider_transactions_fetcher.py', [], 40 * 60_000)
+    .catch(e => T.fail('insider_transactions_fetcher', e));
   // Trendlyne EPS/DivYield series + DVM scores — 2 calls/stock (PE/PB dropped: MC's daily
   // fetch already covers them, fed into the same history tables — see mc_pricefeed_fetcher.py).
   // Scoped to scripts/stocklist.json (~2005 stocks), not the full tlid universe: 2005 stocks
   // × 2 API calls × 0.5s = ~34 min; 150 min timeout is generous headroom
   await runPython('trendlyne_fundamentals_fetcher.py', [], 150 * 60_000)
-    .catch(e => console.warn('[QUEUE] trendlyne_fundamentals_fetcher failed:', (e as Error).message));
-  // Analyst consensus + price targets — 2328 stocks × 3 calls × 0.4s = ~47 min (quarterly data)
-  await runPython('analyst_estimates_snapshot.py', [], 70 * 60_000)
-    .catch(e => console.warn('[QUEUE] analyst_estimates_snapshot failed:', (e as Error).message));
+    .catch(e => T.fail('trendlyne_fundamentals_fetcher', e));
+  // Analyst consensus + price targets: REMOVED from this weekly chain 2026-09-01 —
+  // now a dedicated daily BullMQ job (analyst-estimates-sync-daily, sync.jobs.ts,
+  // Mon–Fri 14:15 UTC). The hybrid direct-engine rewrite (~2.5 min full universe vs
+  // the old ~47 min sequential crawl) made daily cadence cheaper than the old weekly
+  // slot; keep cadence claims in sync with jobRegistry.ts's 'analyst-estimates-sync'.
   // The 15 per-stock endpoints extra_features_parser.py does NOT read (ml-daily-ops fetches the
   // 5 it does, nightly). No feature consumes these today — they are kept warm for future
   // feature work, which is a weekly-cadence need, not a reason to spend the nightly window on
   // them. Drop this step rather than let it grow if nothing has parsed them by the next audit.
   await runPython('extra_endpoints_fetcher.py', ['--scope', 'weekly'], 90 * 60_000)
-    .catch(e => console.warn('[QUEUE] extra_endpoints_fetcher (weekly scope) failed:', (e as Error).message));
-  // Moved off the nightly chain (2026-08-13): 14m47 of ml-daily-ops every night to refresh a
-  // feed measured 73.7 days stale. SEBI PIT filings are sparse and event-driven; weekly is the
-  // cadence the data actually has. 30 min matches the budget it had on the daily chain.
-  await runPython('insider_transactions_fetcher.py', [], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] insider_transactions_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('extra_endpoints_fetcher (weekly scope)', e));
+  // insider_transactions_fetcher.py: moved off the nightly chain 2026-08-13 (14m47/night for a
+  // feed measured 73.7 days stale), then dropped from this weekly slot entirely 2026-08-14 --
+  // NSE's corporates-pit endpoint ignores its own from/to params, so the table it fills
+  // (insider_transactions) can structurally never gain a new row regardless of cadence
+  // (confirmed live: still MAX(transaction_date)=2026-05-02 after 3+ months of nightly-then-
+  // weekly runs). The real ML feature source switched to insider_trades (MoneyControl +
+  // Tickertape, fresh to ~1 day) back on 2026-08-07 -- compute_and_write_features() in the same
+  // .py file already reads from insider_trades, not this fetch. The 30-min slot bought nothing.
+  // Fetcher file, insider_transactions table, and its data-quality check are left in place
+  // (still runnable by hand if NSE's endpoint is ever fixed) -- only the schedule is removed.
   // trendlyne_adv_tech_fetcher.py + trendlyne_price_analysis_fetcher.py moved to the
   // trendlyne-midweek queue (Tuesday) to de-conflict from this Sunday batch.
   // trendlyne_overview_fetcher.py moved into company-profiles-sync (dedupes the
@@ -1243,45 +1463,94 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // Best-effort: a resolver blip must NOT skip the ml_ensemble --train below (the whole
   // point of the weekly job). Every step here is idempotent and independently catchable.
   await runPython('outcome_resolver.py', ['--horizon', '5'])
-    .catch(e => console.warn('[QUEUE] weekly outcome_resolver(5) failed:', (e as Error).message));
+    .catch(e => T.fail('weekly outcome_resolver(5)', e));
   await runPython('outcome_resolver.py', ['--horizon', '15'])
-    .catch(e => console.warn('[QUEUE] weekly outcome_resolver(15) failed:', (e as Error).message));
+    .catch(e => T.fail('weekly outcome_resolver(15)', e));
   // Run exit labeler to resolve excursions. Unlike the daily-ops call (--limit 500), this
   // one is unbounded — it's the weekly catch-up sweep for the full backlog since last
   // Sunday — so it needs real headroom; 10min was SIGTERM-killing it most weeks (2026-07-19).
   await runPython('exit_labeler.py', [], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
-  // Retrain the exit policy models. 10min was SIGTERM-killing this deterministically (not
-  // just under contention) once signal_excursions grew to ~145k rows -- GradientBoosting
-  // fits 4 models (2 targets x split-fit + refit-all) at n_estimators=300, measured 703s
-  // uncontended on 2026-07-26. Same growing-dataset timeout pattern already hit once before
-  // by exit_labeler.py just above (bumped 10min -> 30min on 2026-07-19); mirrored here.
-  await runPython('exit_policy.py', ['--train'], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] exit_policy training failed:', (e as Error).message));
+    .catch(e => T.fail('exit_labeler', e));
+  const verdict = T.finish();
+  await alertFailedSteps('ml-weekly-data', verdict);
+  return { success: verdict.ok, failedSteps: verdict.failedSteps };
+}
+
+
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Python runner ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+
+async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
+  // Dashboard sub-tasks (ml-ensemble-train, strategy-optimizer) run under T.run so their monitor
+  // state reflects the REAL outcome via T.finish() — not the blanket 'success' the completed
+  // handler used to stamp. Untracked steps stay best-effort with console.warn.
+  const T = new StepTracker('ml-weekly-retrain');
+  // Fetch + labelling moved to processMlWeeklyData (ml-weekly-data, Friday) 2026-09-12,
+  // AF-20260912-13 -- see that function's docstring for the measured reason. This job is now
+  // TRAIN-ONLY and reads the database; it must not regain a fetcher.
+  // Retrain the exit policy models. Growing-dataset timeout history: 10min killed it
+  // deterministically once signal_excursions reached ~145k rows (bumped to 20min on
+  // 2026-07-26, measured 703s uncontended at that size); by the 2026-08-23 run the table had
+  // grown to 362k trainable rows (+151%) and 20min became deterministic too -- killed at
+  // exactly 1,200,000ms two weeks running (2026-08-17 silently, 2026-08-23 surfaced via
+  // job_heartbeat), leaving the live model >1 week stale both times. Re-timed standalone
+  // 2026-08-24: ~2,090s (~35min) wall at 362k trainable rows (309k after the fundamentals
+  // as-of join) -- confirmed past capacity, not contention; bumped 20min -> 45min, which
+  // leaves headroom for roughly another doubling. If it times out again, re-time the script
+  // standalone first (contention vs capacity) -- GradientBoosting fits 4 models (2 targets x
+  // split-fit + refit-all) at n_estimators=300, so runtime scales with row count. Safe to
+  // extend: no chain-level budget wraps this processor (only ml-daily-ops/quant-eod-sync get
+  // withJobTimeout) and this worker's 6h lockDuration dwarfs the added 25min.
+  // T.run (not a bare .catch), ml-promotion-gate-review 2026-08-19: exit_policy writes a
+  // promotion decision to model_registry on every run, and this step's --train call has already
+  // timed out silently in production (2026-08-17) with nothing surfacing it beyond this log line
+  // -- same fix already applied to ml-ensemble-train/strategy-optimizer/backtest-optimizer below.
+  // 2026-08-29: hit the 45min ceiling again (bumped from 20min just 5 days earlier, 2026-08-24)
+  // -- the real fix is exit_policy.py's own MAX_TRAINING_ROWS cap (added this session, keeps its
+  // query's row count roughly flat instead of growing every week); this bump to 60min is a
+  // margin against transient contention on top of that, not a second "wait for it to keep
+  // growing" deferral.
+  // 2026-09-10: timed out at 60min again (AF-20260910-13). Per the instruction above, the
+  // script was re-timed STANDALONE before touching this number rather than bumped a fourth
+  // time: 06:04:45Z -> 06:49:54Z = 45m09s, exit 0, on 150k excursions (holdout n=12,790), with
+  // the full platform live around it. So this is contention, not capacity -- MAX_TRAINING_ROWS
+  // is holding the row count flat as intended. 90min = ~2x the measured standalone run, which
+  // covers the >1.33x contention factor the chain actually exhibits instead of the 33% margin
+  // that kept failing. Still safe per the note above: nothing wraps this processor in a
+  // chain-level budget and the worker's 6h lockDuration dwarfs it.
+  // 2026-09-15: timed out at 90min (5400s) on 2026-09-12 under concurrent ml-weekly-retrain
+  // load. 120min = ~2.66x measured standalone (45min), absorbing the worst observed contention.
+  await T.run('exit-policy-train', () => runPython('exit_policy.py', ['--train'], 120 * 60_000));
   // --tune runs Optuna hyperparameter search (this is what took the model from AUC 0.70 to
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
   // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.
   // Soft failure: if ml-ensemble-train crashes (e.g. ValueError in score_pending), log the
   // warning but let the weekly job continue to breakout_classifier, strategy-optimizer, etc.
   // and always reach T.finish() so the heartbeat is written.
-  await T.run('ml-ensemble-train', () => runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000))
-    .catch(e => console.warn('[QUEUE] ml-ensemble-train failed (weekly retrain continues):', (e as Error).message));
-  // breakout_classifier.py moved to daily ops (2026-07-17) -- its only training source,
-  // stock_ohlcv, updates once a day at EOD, so a weekly cadence left it stale against data
-  // that had already moved on for up to 6 of every 7 days.
-  await runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] cs_ranker retrain failed:', (e as Error).message));
-  await T.run('strategy-optimizer', () => runPython('strategy_optimizer.py', [], 30 * 60_000));
+  await T.run('ml-ensemble-train', () => runPython('ml_ensemble.py', ['--train', '--tune', '--score', '--label', 'triple_barrier'], 90 * 60_000))
+    .catch(e => T.fail('ml-ensemble-train', e));
+  // cs-ranker-train REMOVED 2026-08-31 alongside the daily score and the blend weight:
+  // training a model whose live CV AUC (0.176) is worse than a coin flip only spends
+  // the weekly Python-slot budget to reproduce the same verdict.
+  // 2026-08-29 (AF-20260829-30/45): 30min was too tight for max_iterations=300's default grid
+  // search, not (only) a symptom of concurrent load as first suspected -- live-timed standalone
+  // under LOW contention (no other heavy jobs running): still executing, real CPU burn confirmed
+  // via the OS process table (not idle/hung), past 30min with no sign of a stuck connection.
+  // Bumped to match backtest_optimizer.py's sibling budget one line below, a similarly-shaped
+  // grid-search step in the same weekly pipeline.
+  // 2026-09-15: hit 20GB memory ceiling at 60min on 2026-09-14. PIT alignment fix reduced
+  // the Cartesian product from 13.5M rows, but under contention the process still peaks near
+  // the ceiling. 90min gives headroom for the slower post-PIT-fix runtime + contention.
+  await T.run('strategy-optimizer', () => runPython('strategy_optimizer.py', [], 90 * 60_000));
   await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] backtester failed:', (e as Error).message));
+    .catch(e => T.fail('backtester', e));
   // Backtest-driven strategy parameter tuning (holdout-gated inside the script itself).
   // Keeps app_settings.optimal_* fresh only when out-of-sample Sharpe improves.
   await T.run('backtest-optimizer', () => runPython('backtest_optimizer.py', ['--window', '365'], 60 * 60_000))
-    .catch(e => console.warn('[QUEUE] backtest_optimizer failed (weekly retrain continues):', (e as Error).message));
+    .catch(e => T.fail('backtest_optimizer', e));
   await runPython('performance_tracker.py', ['--horizon', '5'])
-    .catch(e => console.warn('[QUEUE] weekly performance_tracker(5) failed:', (e as Error).message));
+    .catch(e => T.fail('weekly performance_tracker(5)', e));
   await runPython('performance_tracker.py', ['--horizon', '15'])
-    .catch(e => console.warn('[QUEUE] weekly performance_tracker(15) failed:', (e as Error).message));
+    .catch(e => T.fail('weekly performance_tracker(15)', e));
   // Factor-edge validation: does each candidate vendor/derived score actually predict forward
   // returns? Persists rank IC + cross-sectional AUC per horizon/regime to factor_edge_history so a
   // score that crosses the usable threshold surfaces as history accumulates. Advisory only —
@@ -1289,18 +1558,74 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   await runPython('factor_edge.py',
     ['--table', 'trendlyne_dvm_scores', '--scores', 'd_score,v_score,m_score',
      '--horizons', '5,10,21,63', '--by-regime', '--persist'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] factor_edge (dvm) failed:', (e as Error).message));
+    .catch(e => T.fail('factor_edge (dvm)', e));
   // Same discipline applied to our OWN 8 unified_ranker.py engines, not just third-party scores:
   // does screener/ml/cs/confluence/technical/dl/breakout/smart_money each actually predict
   // forward returns, or is it dead weight in the blend? Advisory only for now (see
   // engine_edge_weight/edge_adjusted_engine_score below, flag-gated off) -- this just measures.
+  // unified_score is FIRST in this list deliberately. Until 2026-08-21 it was absent entirely:
+  // the 8 component engines were graded weekly while the canonical blended output every
+  // dashboard actually shows had NEVER been measured by this harness (checked live:
+  // 0 rows in factor_edge_history WHERE score_col='unified_score'). That is the one number a
+  // user acts on, and it was the only one with no scheduled IC/AUC verdict.
   await runPython('factor_edge.py',
     ['--table', 'unified_recommendations', '--date-col', 'computed_at',
-     '--scores', 'screener_stock_score,ml_score,confluence_score,technical_score,dl_score,cs_score,breakout_score,smart_money_score',
+     '--scores', 'unified_score,screener_stock_score,ml_score,confluence_score,technical_score,dl_score,cs_score,breakout_score,smart_money_score',
      '--horizons', '5,10,21', '--by-regime', '--persist'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] factor_edge (unified engines) failed:', (e as Error).message));
-  T.finish();
-  return { success: true };
+    .catch(e => T.fail('factor_edge (unified engines)', e));
+
+  // Equal-weight cross-sectional composite of the 6 raw engines -> engine_composite_scores.
+  // Persisted so it ACCUMULATES and can be graded honestly; graded immediately below.
+  // Measured 2026-08-21: 5d rank IC +0.083 over 46 dates -- the highest 5d IC on this platform
+  // and ~7x unified_score's -- but hit_AUC 0.526/0.540 never clears 0.55, so the verdict is
+  // "no edge", NOT usable, and it is deliberately not wired into unified_ranker.py. See
+  // measurement.md (including the same-day correction retracting an earlier USABLE claim).
+  await runPython('engine_composite.py', [], 10 * 60_000)
+    .catch(e => T.fail('engine_composite', e));
+  await runPython('factor_edge.py',
+    ['--table', 'engine_composite_scores', '--date-col', 'date',
+     '--scores', 'composite', '--horizons', '1,5,21', '--persist'], 15 * 60_000)
+    .catch(e => T.fail('factor_edge (composite)', e));
+
+  // The RAW engine outputs, upstream of unified_ranker.py's normalization/blend. Graded by hand
+  // on 2026-08-20 and never scheduled, so those verdicts were already going stale -- the same
+  // "a one-off measurement rots" problem the DVM/unified runs above exist to avoid.
+  // movement_probability is deliberately EXCLUDED: its pre-2026-08-20 rows were produced by a
+  // train/serve-skew bug (score() skipped the _lag_by_symbol() that load_training_data() applies,
+  // so it "predicted" a same-day label from that day's own bar -- AUC 0.894, not real). Grading
+  // the column now would just re-persist a tainted verdict, because factor_edge reads the whole
+  // table. Re-add once ~20 dates of post-fix rows have accumulated. See measurement.md.
+  await runPython('factor_edge.py',
+    ['--table', 'technical_signals', '--date-col', 'date',
+     '--scores', 'win_probability,cs_score,breakout_probability,signal_score',
+     '--horizons', '1,5,21', '--persist'], 15 * 60_000)
+    .catch(e => T.fail('factor_edge (technical_signals)', e));
+  // dl_engine.py's three heads, each at its OWN native horizon (target_ret_1d/5d/15d) rather
+  // than a generic grid -- grading a model against a horizon it was not trained for is the
+  // mismatch that produced three wrong verdicts on 2026-08-20 (see measurement.md's correction).
+  await runPython('factor_edge.py',
+    ['--table', 'deep_learning_predictions', '--date-col', 'prediction_date',
+     '--scores', 'prob_up_1d,prob_up_5d,prob_up_15d',
+     '--horizons', '1,5,15', '--persist'], 15 * 60_000)
+    .catch(e => T.fail('factor_edge (dl heads)', e));
+  // mc_stock_futures_oi_fetcher.py's own docstring/queues.ts comment says this table "must be
+  // graded through factor_edge.py like everything else before anything consumes it" -- that
+  // grading call never existed until now, so the table was accumulating rows with no scheduled
+  // path to a verdict (same gap engine_composite_scores had before it got one). oi_buildup is
+  // excluded: it's a vendor text label (Long Buildup/Short Covering/...), not a numeric score,
+  // and this platform's one prior test of a vendor's own directional label (mojo_indigraph)
+  // measured no edge -- turning it into a signed feature is a measurement decision, not a
+  // parsing one, per the fetcher's own docstring. First run will read LOW-DATA (table is <1
+  // week old); that's correct, not a bug -- it's what starts the accumulation.
+  await runPython('factor_edge.py',
+    ['--table', 'stock_futures_oi_history', '--date-col', 'date',
+     '--scores', 'oi_change,oi_pct_change,oi_pcr,basis,rollover_pct',
+     '--horizons', '1,5,21', '--persist'], 15 * 60_000)
+    .catch(e => T.fail('factor_edge (stock_futures_oi)', e));
+  // Same as ml-daily-ops above: report the tracker's real verdict rather than a blanket true.
+  const verdict = T.finish();
+  await alertFailedSteps('ml-weekly-retrain', verdict);
+  return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Initialise queues & workers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -1342,14 +1667,14 @@ async function quantPhase(steps: Promise<unknown>[]): Promise<void> {
   if (failed) throw (failed as PromiseRejectedResult).reason;
 }
 
-async function processQuantEodSync(job: Job): Promise<{ success: boolean }> {
+async function processQuantEodSync(job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- every phase here
   // (proprietary-score syncs, fundamentals resync, multi-factor scoring) re-derives from the
   // same closed-exchange session's unchanged data. Not wired into closed-day-early-batch's
   // dispatch, same reasoning as processStockScoring/processQuantScoring in screeners.jobs.ts.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] quant-eod-sync skipped — trading holiday, nothing new to sync');
-    return { success: true };
+    return { success: true, skipped: true };
   }
   console.log('[QUEUE] quant-eod-sync starting...');
   try {
@@ -1364,11 +1689,25 @@ async function processQuantEodSync(job: Job): Promise<{ success: boolean }> {
     const today = new Date().toISOString().split('T')[0];
     await quantPhase([
       // 30min budget was hit by the real scheduled run on 2026-08-07 (14% historical fail
-      // rate, 8/56 runs). Bumped defensively -- could not independently re-time this one
-      // (getAllStocks() x per-symbol NiftyTrader fetch needs the live auth token, which a
-      // standalone script outside the running server doesn't pick up the same way), so this
-      // is headroom based on the observed failure rate, not a re-measured confirmation like
-      // the other timeout fixes made this session.
+      // rate, 8/56 runs). Bumped defensively at the time -- the comment used to say it "could
+      // not independently re-time this one" because a standalone script doesn't pick up the
+      // live auth token the same way.
+      //
+      // RE-MEASURED 2026-09-10, and the numbers were available all along: quantStep's own
+      // `finally` already logs "[QUANT EOD] <label> took X.Xmin" -- to pm2 STDOUT
+      // (logs/pm2-out.log), not the structured app log, which is why nobody found them.
+      // Measured `niftytrader-scores`: 2026-09-08 23.8min, 2026-09-09 25.4min, against the
+      // 2026-09-07 failure which ran to exactly 45.0min (i.e. it hit the cap, it did not
+      // merely exceed a tight one). Typical is ~24-25min, so 45 is ~1.8x the norm and is
+      // ADEQUATE -- deliberately NOT bumped again, since the evidence says the 09-07 run was
+      // an outlier (vendor-side), not a systematically-too-small budget. Sibling for scale:
+      // `trendlyne-technicals` (45min budget) measures 5.1-5.4min typical with observed
+      // spikes to 18.1, 29.0 and 32.9min -- same vendor-variance shape, same verdict.
+      //
+      // If you are here because this failed again: read the durations out of pm2-out.log
+      // FIRST (`grep "QUANT EOD.*took" logs/pm2-out.log`) and only raise the budget if the
+      // successful runs have actually moved. Raising it on a single failure is how the
+      // no-headroom class gets re-created.
       quantStep('niftytrader-scores', 45, () => syncNiftyTraderScores()),
       quantStep('trendlyne-scores', 30, () => syncTrendlyneScores()),
       quantStep('delivery-map', 10, () => fetchDeliveryMap(today)),
@@ -1401,11 +1740,15 @@ async function processQuantEodSync(job: Job): Promise<{ success: boolean }> {
     // See docs session notes 2026-08-04 for the full evidence trail (each call traced to its
     // function body, not just its job name).
 
-    updateMonitorState('quant-eod-sync', 'success');
+    updateMonitorState('quant-eod-sync', 'success', undefined, job.processedOn ? Date.now() - job.processedOn : undefined);
     console.log('[QUEUE] quant-eod-sync completed successfully');
     return { success: true };
   } catch (err: any) {
-    updateMonitorState('quant-eod-sync', 'failed', err.message);
+    // Do NOT call updateMonitorState here — the throw below always propagates through
+    // withJobTimeout's Promise.race to the worker's own 'failed' handler (line ~2983), which
+    // logs this exact failure. Logging it here too double-wrote job_heartbeat/job_run_history
+    // for every non-timeout failure (confirmed 2026-09-10: two identical rows 9ms apart for the
+    // 2026-09-07 niftytrader-scores budget failure), inflating the 7-day fail-rate metric.
     console.error('[QUEUE] quant-eod-sync failed:', err.message);
     throw err;
   }
@@ -1484,18 +1827,28 @@ export async function initQueues(): Promise<boolean> {
       { 
         connection, 
         concurrency: 1,
-        lockDuration: 600000, // 10 minutes (Ollama can be very slow)
+        lockDuration: 600000, // 10 minutes
         lockRenewTime: 120000, // 2 minutes
       },
     );
 
+    // The success===false guard below: processStockRefresh's own StepTracker already wrote this
+    // job's true verdict, and a blanket 'success' stamp here would overwrite it -- the same shape
+    // registerJob.ts guards for. Kept OUTSIDE the handler body on purpose: holidayJobSkip.test.ts
+    // asserts on a 500-char slice measured from the handler's opening line, so a comment inside it
+    // pushes recordHeartbeat out of that window (recurring-bugs.md's marker-distance class).
     stockWorker.on('completed', (job, result) => {
+      if (result.skipped) {
+        console.log('[QUEUE] stock-refresh completed without new data');
+        return;
+      }
       console.log(`[QUEUE] stock-refresh completed: ${result.count} stocks`);
-      recordHeartbeat('stock-refresh', 'success');
+      if (result?.success === false) return;
+      recordHeartbeat('stock-refresh', 'success', undefined, bullJobDurationMs(job));
     });
     stockWorker.on('failed', (job, err) => {
       console.error(`[QUEUE] stock-refresh failed:`, err.message);
-      recordHeartbeat('stock-refresh', 'failed', err?.message);
+      recordHeartbeat('stock-refresh', 'failed', err?.message, bullJobDurationMs(job));
     });
     stockWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
@@ -1513,10 +1866,9 @@ export async function initQueues(): Promise<boolean> {
       processAISignal,
       {
         connection,
-        // Ollama now keeps the model resident between calls (OLLAMA_KEEP_ALIVE in aiService.ts,
-        // was `keep_alive: 0` forcing a full reload per stock) and the quant/surveillance gates
-        // run before the LLM call, so this no longer needs to be as conservative as when every
-        // single job paid a cold model load.
+        // AI provider is Gemini (Ollama removed 2026-08-20 — no local model-load cost to
+        // worry about) and the quant/surveillance gates run before the LLM call, so this
+        // stays conservative mainly to respect Gemini's own rate limits, not model-load time.
         concurrency: 2,
         lockDuration: 600000,    // 10 minutes
         lockRenewTime: 180000,   // 3 minutes renewal
@@ -1531,12 +1883,12 @@ export async function initQueues(): Promise<boolean> {
 
     signalWorker.on('completed', (job) => {
       console.log(`[QUEUE] ai-signals job ${job?.data?.symbol} completed successfully`);
-      recordHeartbeat('ai-signals', 'success');
+      recordHeartbeat('ai-signals', 'success', undefined, bullJobDurationMs(job));
     });
 
     signalWorker.on('failed', (job, err) => {
       console.warn(`[QUEUE] ai-signals job ${job?.data?.symbol} failed:`, err.message);
-      recordHeartbeat('ai-signals', 'failed', err.message);
+      recordHeartbeat('ai-signals', 'failed', err.message, bullJobDurationMs(job));
     });
 
     signalWorker.on('stalled', (jobId) => {
@@ -1591,7 +1943,9 @@ export async function initQueues(): Promise<boolean> {
         // the full universe at 2 AM and on weekends/holidays against completely unchanged EOD
         // data. Narrowed to the same 8:30 AM-4:00 PM IST window as intraday-fetcher (one extra
         // post-close run), plus the same in-handler isMarketOpen() check for holiday-awareness.
-        repeat: { pattern: '*/30 3-10 * * 1-5' }, // 3:00-10:30 UTC = 8:30 AM-4:00 PM IST, weekdays
+        // 03:00-10:30 UTC = 08:30-16:00 IST, weekdays (every 30 min). Spans the full NSE session
+        // (09:15-15:30 IST) plus a pre-open and post-close cycle either side.
+        repeat: { pattern: '*/30 3-10 * * 1-5' },
         jobId: 'technical-signals-daily',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -1623,11 +1977,11 @@ export async function initQueues(): Promise<boolean> {
     technicalSignalsWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] technical-signals completed');
       if (result?.skipped) return;
-      updateMonitorState('technical-scan', 'success');
+      updateMonitorState('technical-scan', 'success', undefined, bullJobDurationMs(_job));
     });
     technicalSignalsWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] technical-signals failed:', err.message);
-      updateMonitorState('technical-scan', 'failed', err.message);
+      updateMonitorState('technical-scan', 'failed', err.message, bullJobDurationMs(_job));
     });
     technicalSignalsWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
@@ -1667,13 +2021,13 @@ export async function initQueues(): Promise<boolean> {
       },
     );
 
-    signalOutcomesWorker.on('completed', (_job) => {
+    signalOutcomesWorker.on('completed', (job) => {
       console.log('[QUEUE] signal-outcomes completed');
-      recordHeartbeat('signal-outcomes', 'success');
+      recordHeartbeat('signal-outcomes', 'success', undefined, bullJobDurationMs(job));
     });
-    signalOutcomesWorker.on('failed', (_job, err) => {
+    signalOutcomesWorker.on('failed', (job, err) => {
       console.error('[QUEUE] signal-outcomes failed:', err.message);
-      recordHeartbeat('signal-outcomes', 'failed', err.message);
+      recordHeartbeat('signal-outcomes', 'failed', err.message, bullJobDurationMs(job));
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ News sentiment queue (every 30 seconds) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -1886,7 +2240,7 @@ export async function initQueues(): Promise<boolean> {
         } else if (job.name === 'bse-announcements-refresh-hot') {
           if (!(await svc.isResultsSeasonActive())) {
             console.log('[QUEUE] bse-announcements-refresh-hot skipped — not results season');
-            return;
+            return { skipped: true };
           }
           await svc.runBseAnnouncementsCycle();
         } else if (job.name === 'gnews-market-refresh') {
@@ -1904,7 +2258,7 @@ export async function initQueues(): Promise<boolean> {
         } else if (job.name === 'nse-financial-results-refresh-hot') {
           if (!(await svc.isResultsSeasonActive())) {
             console.log('[QUEUE] nse-financial-results-refresh-hot skipped — not results season');
-            return;
+            return { skipped: true };
           }
           await svc.runNseFinancialResultsCycle();
         } else if (job.name === 'mc-earnings-news-refresh') {
@@ -1912,7 +2266,7 @@ export async function initQueues(): Promise<boolean> {
         } else if (job.name === 'mc-earnings-news-refresh-hot') {
           if (!(await svc.isResultsSeasonActive())) {
             console.log('[QUEUE] mc-earnings-news-refresh-hot skipped — not results season');
-            return;
+            return { skipped: true };
           }
           await svc.runMcEarningsNewsCycle();
         } else if (job.name === 'mc-deals-news-refresh') {
@@ -1932,13 +2286,13 @@ export async function initQueues(): Promise<boolean> {
       },
     );
 
-    newsSentimentWorker.on('completed', (_job) => {
+    newsSentimentWorker.on('completed', (job) => {
       console.log('[QUEUE] news-sentiment completed');
-      recordHeartbeat('news-sentiment', 'success');
+      recordHeartbeat('news-sentiment', 'success', undefined, bullJobDurationMs(job));
     });
-    newsSentimentWorker.on('failed', (_job, err) => {
+    newsSentimentWorker.on('failed', (job, err) => {
       console.error('[QUEUE] news-sentiment failed:', err.message);
-      recordHeartbeat('news-sentiment', 'failed', err?.message);
+      recordHeartbeat('news-sentiment', 'failed', err?.message, bullJobDurationMs(job));
     });
     newsSentimentWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
@@ -1985,14 +2339,14 @@ export async function initQueues(): Promise<boolean> {
       },
     );
 
-    trendlyneIntradayWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+    trendlyneIntradayWorker.on('completed', (job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] trendlyne-intraday completed');
       if (result?.skipped) return;
-      recordHeartbeat('trendlyne-intraday', 'success');
+      recordHeartbeat('trendlyne-intraday', 'success', undefined, bullJobDurationMs(job));
     });
-    trendlyneIntradayWorker.on('failed', (_job, err) => {
+    trendlyneIntradayWorker.on('failed', (job, err) => {
       console.error('[QUEUE] trendlyne-intraday failed:', err.message);
-      recordHeartbeat('trendlyne-intraday', 'failed', err.message);
+      recordHeartbeat('trendlyne-intraday', 'failed', err.message, bullJobDurationMs(job));
     });
     trendlyneIntradayWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
@@ -2058,20 +2412,51 @@ export async function initQueues(): Promise<boolean> {
       // processor (reflecting real outcomes), so this handler no longer blanket-marks success.
       console.log('[QUEUE] ml-daily-ops completed');
     });
-    mlDailyOpsWorker.on('failed', (_job, err) => {
+    mlDailyOpsWorker.on('failed', (job, err) => {
       // Processor threw before finish() ran (steps are best-effort, so this is a harness/uncaught
       // error, not a step failure) — mark the job failed so it isn't seen as healthy.
       console.error('[QUEUE] ml-daily-ops failed:', err.message);
-      recordHeartbeat('ml-daily-ops', 'failed', err?.message);
+      recordHeartbeat('ml-daily-ops', 'failed', err?.message, bullJobDurationMs(job));
     });
 
+    // -- ML weekly DATA prep: fetch + labelling, FRIDAY 23:30 IST (18:00 UTC) --
+    // Deliberately a WEEKDAY slot, and deliberately not adjacent to the Saturday training
+    // window (AF-20260912-13). 18:00 UTC clears ml-daily-ops' worst case: that job is
+    // '20 13 * * 1-5' with a 3.5h withJobTimeout, so it cannot run past 16:50 UTC.
+    // Everything this job fetches is quarterly/monthly disclosure data or a symbol master;
+    // none of it can change between Friday night and Saturday morning, which is precisely
+    // why it no longer belongs in the Saturday chain.
+    mlWeeklyDataQueue = new Queue(QUEUE_ML_WEEKLY_DATA, { connection });
+    await addJobWithCatchup(mlWeeklyDataQueue, 'ml-weekly-data', {}, {
+      repeat: { pattern: '0 18 * * 5' },
+      jobId: 'ml-weekly-data',
+      removeOnComplete: 2, removeOnFail: 3,
+    });
+    mlWeeklyDataWorker = new Worker(QUEUE_ML_WEEKLY_DATA, processMlWeeklyData, {
+      connection,
+      concurrency: 1,
+      // Matches the fetch budgets this job inherited (~513 min of runPython ceilings) with
+      // headroom, and mirrors ml-weekly-retrain's renew/stall settings.
+      lockDuration: 10 * 60 * 60 * 1000,
+      lockRenewTime: 30 * 60 * 1000,
+      stalledInterval: 15 * 60 * 1000,
+      maxStalledCount: 3,
+    });
+    mlWeeklyDataWorker.on('completed', () => {
+      // Per-step + overall monitor states are written by StepTracker.finish() in the processor.
+      console.log('[QUEUE] ml-weekly-data done');
+    });
+    mlWeeklyDataWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] ml-weekly-data failed:', err.message);
+      updateMonitorState('ml-weekly-data', 'failed', err?.message);
+    });
     // -- ML weekly retrain + optimize (Sunday 10:30 IST = 05:00 UTC, see the repeat pattern below) --
     mlWeeklyRetrainQueue = new Queue(QUEUE_ML_WEEKLY_RETRAIN, { connection });
     // addJobWithCatchup does its own remove-then-add internally (and needs the pre-removal
     // repeatable's `next` to detect a slot missed by a restart) — removing it here first would
     // erase that signal before the helper ever sees it.
     await addJobWithCatchup(mlWeeklyRetrainQueue, 'ml-weekly-retrain', {}, {
-      repeat: { pattern: '0 5 * * 0' }, // Sunday 10:30 IST (05:00 UTC) — early on the closed day, after fundamentals
+      repeat: { pattern: '0 5 * * 6' }, // Saturday 10:30 IST (05:00 UTC) — early on the closed day, after fundamentals
       jobId: 'ml-weekly-retrain',
       removeOnComplete: 2, removeOnFail: 3,
     });
@@ -2098,9 +2483,14 @@ export async function initQueues(): Promise<boolean> {
     // 30-min cadence needlessly doubled worst-case CMP staleness for no reason -- 15 min
     // matches the source data's own granularity, ~4min runtime leaves ample headroom.
     intradayFetcherQueue = new Queue(QUEUE_INTRADAY_FETCHER, { connection });
-    const intradayRep = await intradayFetcherQueue.getRepeatableJobs();
-    for (const r of intradayRep) await intradayFetcherQueue.removeRepeatableByKey(r.key);
-    await intradayFetcherQueue.add('intraday-fetcher', {}, {
+    // addJobWithCatchup, not a raw add (2026-09-08): the raw remove-all-then-add shape is how
+    // this queue lost its next-run delayed job across the 2026-09-07 restarts — BullMQ only
+    // creates the NEXT delayed occurrence when a worker processes the current one, so any boot
+    // that tears the registration down without a worker ever processing leaves the queue dead
+    // forever (observed live: repeat config present, delayed=0, no captures for 2 trading
+    // days). addJobWithCatchup removes only STALE repeatables (next < now), reclaims orphaned
+    // actives, and queues a catch-up when the schedule was missed — self-healing by design.
+    await addJobWithCatchup(intradayFetcherQueue, 'intraday-fetcher', {}, {
       repeat: { pattern: '*/15 3-10 * * 1-5', tz: 'Etc/UTC' },
       jobId: 'intraday-fetcher',
       removeOnComplete: 5,
@@ -2111,51 +2501,201 @@ export async function initQueues(): Promise<boolean> {
       processIntradayFetcher,
       { connection, concurrency: 1, lockDuration: 10 * 60 * 1000, lockRenewTime: 2 * 60 * 1000 },
     );
-    intradayFetcherWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+    intradayFetcherWorker.on('completed', (job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] intraday-fetcher completed');
       if (result?.skipped) return;
-      recordHeartbeat('intraday-fetcher', 'success');
+      recordHeartbeat('intraday-fetcher', 'success', undefined, bullJobDurationMs(job));
     });
-    intradayFetcherWorker.on('failed', (_, err) => {
+    intradayFetcherWorker.on('failed', (job, err) => {
       console.error('[QUEUE] intraday-fetcher failed:', err.message);
-      recordHeartbeat('intraday-fetcher', 'failed', err?.message);
+      recordHeartbeat('intraday-fetcher', 'failed', err?.message, bullJobDurationMs(job));
     });
 
-    // ── GDELT sentiment (daily, 19:00 UTC = 12:30 AM IST, every day incl. weekends -- news
-    // accumulates on non-trading days too, unlike the NSE-specific fetchers above). Deliberately
-    // NOT 17:00-18:00 UTC -- that whole window is the evening-batch cluster (score-all 17:00,
-    // quant-score-daily 17:30, ml-daily-ops-adjacent jobs through 18:45); 19:00 sits clear of it
-    // with the full ~13 min runtime (150 companies x ~5.2s GDELT rate limit) as headroom before
-    // the next scheduled job at 20:30 -- see processGdeltSentiment's own comment before touching
-    // this, and jobPipelineOrdering.test.ts's minute-collision check before picking a new slot.
-    gdeltSentimentQueue = new Queue(QUEUE_GDELT_SENTIMENT, { connection });
-    const gdeltRep = await gdeltSentimentQueue.getRepeatableJobs();
-    for (const r of gdeltRep) await gdeltSentimentQueue.removeRepeatableByKey(r.key);
-    await gdeltSentimentQueue.add('gdelt-sentiment', {}, {
-      repeat: { pattern: '0 19 * * *', tz: 'Etc/UTC' },
-      jobId: 'gdelt-sentiment',
-      removeOnComplete: 5,
+    // ── Mover screener capture (4:50 PM IST weekdays, after close + after OHLCV lands): persists Top
+    // Gainers/Losers (1d+1w), MarketsMojo movers, NiftyTrader gaps, MC price-shockers
+    // plus computed gap/open=high/open=low/volume-shocker/breakout classes for today
+    // into mover_snapshots. Ground truth for reverse_engineering_study.py; lists scroll
+    // away within a day, so the capture is the only durable record.
+    moverQueue = new Queue(QUEUE_MOVER_CAPTURE, { connection });
+    // addJobWithCatchup, not a raw add — same 2026-09-08 dead-repeatable failure as
+    // intraday-fetcher (see the comment there for the mechanism).
+    await addJobWithCatchup(moverQueue, 'mover-capture-daily', {}, {
+      // 16:50 IST (was 16:05 IST): the capture labels everything resolve_trade_date() returns —
+      // MAX(date) from stock_ohlcv — and at 16:05 the day's bars had not landed yet
+      // (stock-refresh 16:00 IST, ohlcv gap-fill 16:20 IST), so the whole post-close capture
+      // (live EOD screens + calc_* classes) was labeled with YESTERDAY's session and today's
+      // calc classes were silently dropped (df filtered to a date that did not exist yet).
+      // Found live 2026-09-09: trade_date 09-07 rows captured on 09-08 16:05, zero 09-08 rows.
+      // 16:50 IST lands after both writers with margin; jobRegistryCronMirror does not track
+      // this queue (not in JOB_REGISTRY — only its parent ml-daily-ops is).
+      repeat: { pattern: '20 11 * * 1-5', tz: 'Etc/UTC' },
+      jobId: 'mover-capture-daily',
+      removeOnComplete: 3,
       removeOnFail: 3,
     });
-    gdeltSentimentWorker = new Worker(
-      QUEUE_GDELT_SENTIMENT,
-      processGdeltSentiment,
-      { connection, concurrency: 1, lockDuration: 20 * 60 * 1000, lockRenewTime: 3 * 60 * 1000 },
+    moverWorker = new Worker(
+      QUEUE_MOVER_CAPTURE,
+      processMoverCapture,
+      { connection, concurrency: 1, lockDuration: 10 * 60 * 1000, lockRenewTime: 2 * 60 * 1000 },
     );
-    gdeltSentimentWorker.on('completed', () => {
-      console.log('[QUEUE] gdelt-sentiment completed');
-      recordHeartbeat('gdelt-sentiment', 'success');
+    moverWorker.on('completed', (job, result?: { skipped?: boolean }) => {
+      console.log('[QUEUE] mover-screener-capture completed');
+      if (result?.skipped) return;
+      recordHeartbeat('mover-screener-capture', 'success', undefined, bullJobDurationMs(job));
     });
-    gdeltSentimentWorker.on('failed', (_, err) => {
-      console.error('[QUEUE] gdelt-sentiment failed:', err.message);
-      recordHeartbeat('gdelt-sentiment', 'failed', err?.message);
+    moverWorker.on('failed', (job, err) => {
+      console.error('[QUEUE] mover-screener-capture failed:', err.message);
+      recordHeartbeat('mover-screener-capture', 'failed', err?.message, bullJobDurationMs(job));
     });
 
-    // ── Live Screener paced collector (every 15 min during market hours: 3:30-10:00 UTC = 9:00-15:30 IST)
+    // ── Mover INTRADAY slot capture (hourly 10:00-14:00 IST weekdays + holiday guard):
+    // one NT live cross-section POST -> ntlive_<HHMM>_market + local screens per slot.
+    // Slots are cohorts the study scores against same-day EOD outcomes ("what did the
+    // 11:30 gain5 cohort look like by close?"). Hourly, not */15 -- each slot is a full
+    // universe snapshot (~2.3k rows) and the study needs distinct times, not noise.
+    moverIntradayQueue = new Queue(QUEUE_MOVER_INTRADAY, { connection });
+    // addJobWithCatchup, not a raw add — same 2026-09-08 dead-repeatable failure as
+    // intraday-fetcher (see the comment there for the mechanism).
+    await addJobWithCatchup(moverIntradayQueue, 'mover-intraday-slot', {}, {
+      repeat: { pattern: '0 4-8 * * 1-5', tz: 'Etc/UTC' },   // 09:30/10:30/11:30/12:30/13:30 IST
+      jobId: 'mover-intraday-slot',
+      removeOnComplete: 3,
+      removeOnFail: 3,
+    });
+    moverIntradayWorker = new Worker(
+      QUEUE_MOVER_INTRADAY,
+      async () => {
+        if (await shouldSkipOnTradingHoliday({ name: 'mover-intraday-slot' })) {
+          return { skipped: true };
+        }
+        await runPython('mover_screener_fetcher.py', ['--intraday'], 240_000);
+        return { skipped: false };
+      },
+      { connection, concurrency: 1, lockDuration: 6 * 60 * 1000, lockRenewTime: 2 * 60 * 1000 },
+    );
+    moverIntradayWorker.on('completed', (job, result?: { skipped?: boolean }) => {
+      console.log('[QUEUE] mover-intraday-capture completed');
+      if (result?.skipped) return;   // skip must not stamp over a real failure's heartbeat
+      recordHeartbeat('mover-intraday-capture', 'success', undefined, bullJobDurationMs(job));
+    });
+    moverIntradayWorker.on('failed', (job, err) => {
+      console.error('[QUEUE] mover-intraday-capture failed:', err.message);
+      recordHeartbeat('mover-intraday-capture', 'failed', err?.message, bullJobDurationMs(job));
+    });
+
+    // ── NiftyTrader Live Filter capture (*/15 during market hours, weekdays):
+    // Each filter selected once, parallel requests (ThreadPoolExecutor), append-only.
+    // Runs every 15 minutes from 09:15-15:30 IST (03:45-10:00 UTC).
+    // The Python script checks market hours at runtime and skips outside 09:15-15:30 IST.
+    // 28 filters x ~1000 rows each = ~28k rows per run, ~224k rows/day (8 runs x 28 filters).
+    ntLiveFilterQueue = new Queue(QUEUE_NT_LIVE_FILTER, { connection });
+    // addJobWithCatchup, not a raw add — same 2026-09-08 dead-repeatable failure as
+    // intraday-fetcher (see the comment there for the mechanism); this queue was one of
+    // the two the DQ freshness checks caught live (2 trading days of zero captures).
+    await addJobWithCatchup(ntLiveFilterQueue, 'nt-live-filter-slot', {}, {
+      repeat: { pattern: '*/15 3-10 * * 1-5', tz: 'Etc/UTC' },  // 09:15-15:30 IST (with runtime check)
+      jobId: 'nt-live-filter-slot',
+      removeOnComplete: 3,
+      removeOnFail: 3,
+    });
+    ntLiveFilterWorker = new Worker(
+      QUEUE_NT_LIVE_FILTER,
+      async () => {
+        if (await shouldSkipOnTradingHoliday({ name: 'nt-live-filter-slot' })) {
+          return { skipped: true };
+        }
+        // The cron is '*/15 3-10 * * 1-5' -- a coarse hour range that fires from 08:30 IST to
+        // 16:15 IST, wider than the real 09:15-15:30 session, and the Python script no-ops
+        // outside those hours. Without this guard those out-of-session invocations returned
+        // { skipped: false } and the completed handler stamped 'success', overwriting whatever
+        // the last REAL capture reported -- recurring-bugs.md's skip-path-stamped-as-success
+        // class, which has already recurred 6 times in this repo. Same isMarketOpen() guard the
+        // sibling intraday workers use.
+        if (!(await isMarketOpen())) {
+          console.log('[QUEUE] nt-live-filter-capture skipped — outside NSE market hours');
+          return { skipped: true };
+        }
+        // 600s timeout: 71 filters x 15s timeout each / 5 concurrency = ~213s minimum
+        await runPython('niftytrader_live_screener_job.py', ['--concurrency', '5'], 600_000);
+        return { skipped: false };
+      },
+      { connection, concurrency: 1, lockDuration: 15 * 60 * 1000, lockRenewTime: 3 * 60 * 1000 },
+    );
+    ntLiveFilterWorker.on('completed', (job, result?: { skipped?: boolean }) => {
+      console.log('[QUEUE] nt-live-filter-capture completed');
+      if (result?.skipped) return;
+      recordHeartbeat('nt-live-filter-capture', 'success', undefined, bullJobDurationMs(job));
+    });
+    ntLiveFilterWorker.on('failed', (job, err) => {
+      console.error('[QUEUE] nt-live-filter-capture failed:', err.message);
+      recordHeartbeat('nt-live-filter-capture', 'failed', err?.message, bullJobDurationMs(job));
+    });
+
+    // ── Mover STUDY (weekly, Saturday 14:00 IST = 08:30 UTC): rebuilds computed classes
+    // over 250 sessions then runs reverse_engineering_study.py (rank-IC, cohort lift,
+    // engine hit-rate -- now including the ntlive_<HHMM>_* slot cohorts vs EOD outcomes).
+    // addJobWithCatchup: if the box is down Saturday, the study still runs once on
+    // next startup instead of silently skipping a week.
+    //
+    // Moved off Sunday 12:00 IST 2026-08-30: every other weekly job on this platform lands on
+    // Saturday, and this one alone kept a Sunday dependency, so a "did the weekend finish?"
+    // check could never be answered on Saturday night. 14:00 IST sits after ml-weekly-retrain
+    // (10:30) and dl-retrain-weekly (11:30) have finished, and well before tickertape-scorecard
+    // (18:30), so the Saturday lane stays serial with no new overlap.
+    const QUEUE_MOVER_STUDY = 'mover-reverse-engineering-study';
+    const moverStudyQueue = new Queue(QUEUE_MOVER_STUDY, { connection });
+    await addJobWithCatchup(moverStudyQueue, 'mover-study-weekly', {}, {
+      repeat: { pattern: '30 8 * * 6', tz: 'Etc/UTC' },   // Saturday 14:00 IST, market closed
+      jobId: 'mover-study-weekly',
+      removeOnComplete: 2,
+      removeOnFail: 3,
+    });
+    const moverStudyWorker = new Worker(
+      QUEUE_MOVER_STUDY,
+      async () => {
+        // Backfill first so calc_* classes cover everything the study window reads;
+        // the study itself is read-only except its own results table.
+        await runPython('mover_screener_fetcher.py', ['--backfill-days', '250'], 1_800_000);
+        await runPython('reverse_engineering_study.py', ['--days', '250'], 1_800_000);
+        return { skipped: false };
+      },
+      { connection, concurrency: 1, lockDuration: 75 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 },
+    );
+    moverStudyWorker.on('completed', (job, result?: { skipped?: boolean }) => {
+      console.log('[QUEUE] mover-study-weekly completed');
+      if (result?.skipped) return;
+      recordHeartbeat('mover-study-weekly', 'success', undefined, bullJobDurationMs(job));
+    });
+    moverStudyWorker.on('failed', (job, err) => {
+      console.error('[QUEUE] mover-study-weekly failed:', err.message);
+      recordHeartbeat('mover-study-weekly', 'failed', err?.message, bullJobDurationMs(job));
+    });
+
+    // ── GDELT sentiment — RETIRED 2026-09-11 (user decision: "if GDELT is not bringing add-on,
+    // replace it with other news URLs"). api.gdeltproject.org throttles this host's IP (HTTP 429
+    // "one every 5 seconds" on 2 of 3 requests spaced 8s apart), so the ~42-minute daily run
+    // wrote tone for only 2-14 of 150 companies while reporting success; and over the last 10
+    // trading dates it filled 0 technical_signals rows -- ml_ensemble reads it only as a
+    // COALESCE fallback for a NULL news_sentiment_score, and every symbol it covered already had
+    // one from the 21-source news pipeline (9,833 articles in 7 days). The schedule is removed
+    // from Redis on boot so the old repeatable cannot fire into a queue with no worker.
+    // gdeltService.ts + scripts/gdelt_backfill.ts remain for manual runs from another IP.
+    gdeltSentimentQueue = new Queue(QUEUE_GDELT_SENTIMENT, { connection });
+    for (const r of await gdeltSentimentQueue.getRepeatableJobs()) {
+      await gdeltSentimentQueue.removeRepeatableByKey(r.key);
+    }
+
+    // ── Live Screener paced collector (every 15 min, '*/15 3-10 * * 1-5' = 03:00-10:45 UTC =
+    //    08:30-16:15 IST weekdays). NOTE the stated window is the CRON window, not the market
+    //    window: NSE trades 09:15-15:30 IST, so ~3 cycles either side sit outside the session and
+    //    are no-ops via the processor's own holiday/market guard (it returns { skipped: true }).
+    //    Comment corrected 2026-08-30 -- it previously claimed '9:00-15:30 IST', which no cron
+    //    field in this repeat has ever produced.
     liveScreenerCollectQueue = new Queue(QUEUE_LIVE_SCREENER_COLLECT, { connection });
-    const lsRepeatables = await liveScreenerCollectQueue.getRepeatableJobs();
-    for (const r of lsRepeatables) await liveScreenerCollectQueue.removeRepeatableByKey(r.key);
-    await liveScreenerCollectQueue.add('live-screener-collect', {}, {
+    // addJobWithCatchup, not a raw add — same 2026-09-08 dead-repeatable failure as
+    // intraday-fetcher (see the comment there for the mechanism); this queue was one of
+    // the two the DQ freshness checks caught live (2 trading days of zero captures).
+    await addJobWithCatchup(liveScreenerCollectQueue, 'live-screener-collect', {}, {
       repeat: { pattern: '*/15 3-10 * * 1-5', tz: 'Etc/UTC' },
       jobId: 'live-screener-collect-repeatable',
       removeOnComplete: 5,
@@ -2166,14 +2706,16 @@ export async function initQueues(): Promise<boolean> {
       processLiveScreenerCollect,
       { connection, concurrency: 1, lockDuration: 8 * 60 * 1000 }
     );
-    liveScreenerCollectWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+    liveScreenerCollectWorker.on('completed', (job, result?: { skipped?: boolean; success?: boolean }) => {
       console.log('[QUEUE] live-screener-collect completed');
       if (result?.skipped) return;
-      recordHeartbeat('live-screener-collect', 'success');
+      // processLiveScreenerCollect's StepTracker already wrote the verdict -- don't clobber it.
+      if (result?.success === false) return;
+      recordHeartbeat('live-screener-collect', 'success', undefined, bullJobDurationMs(job));
     });
-    liveScreenerCollectWorker.on('failed', (_, err) => {
+    liveScreenerCollectWorker.on('failed', (job, err) => {
       console.error('[QUEUE] live-screener-collect failed:', err.message);
-      recordHeartbeat('live-screener-collect', 'failed', err.message);
+      recordHeartbeat('live-screener-collect', 'failed', err.message, bullJobDurationMs(job));
     });
 
 
@@ -2188,9 +2730,12 @@ export async function initQueues(): Promise<boolean> {
     // GIFT Nifty level + Asia sentiment + global risk score captured before Indian market opens.
     const QUEUE_PREOPEN = 'preopen-snapshot';
     const preopenQueue = new Queue(QUEUE_PREOPEN, { connection });
-    const preopenRep = await preopenQueue.getRepeatableJobs();
-    for (const r of preopenRep) await preopenQueue.removeRepeatableByKey(r.key);
-    await preopenQueue.add('preopen-daily', {}, {
+    // addJobWithCatchup, not a raw add — same 2026-09-08 dead-repeatable failure as
+    // intraday-fetcher (see the comment there for the mechanism). A restart catch-up of this
+    // job mid-session is safe: the processor's own 3-minute timeouts exist precisely because
+    // NSE preopen endpoints misbehave outside 9:00-9:15 IST (T.runQuiet swallows the failure),
+    // and the isCatchup guard means at most ONE catch-up ever queues regardless of restarts.
+    await addJobWithCatchup(preopenQueue, 'preopen-daily', {}, {
       // tz is mandatory here: with no tz, BullMQ/cron-parser falls back to the Node process's
       // local timezone, which on this deployment is Asia/Kolkata -- so '40 3' was firing at
       // 3:40 AM IST (hours before NSE's 9:00-9:15 IST preopen session even opens) instead of
@@ -2207,16 +2752,16 @@ export async function initQueues(): Promise<boolean> {
       async () => {
         // 3 min: NSE preopen endpoints respond slowly (or hang) when hit outside the
         // 9:00-9:15 IST window -- e.g. a restart catch-up job -- and 60s killed those runs.
-        await runPython('preopen_fetcher.py', [], 3 * 60_000)
-          .then(() => recordHeartbeat('preopen-snapshot', 'success'))
-          .catch(e => {
-            console.warn('[QUEUE] preopen_fetcher failed:', (e as Error).message);
-            recordHeartbeat('preopen-snapshot', 'failed', (e as Error).message);
-          });
+        // Both steps report through one tracker named for this job's registered monitor id.
+        // early_hours_predictor was a bare .catch(console.warn), so early_hours_predictions
+        // could stop being written while 'preopen-snapshot' still read green off the fetcher
+        // alone; T.finish() now writes that id from BOTH steps' outcomes.
+        const T = new StepTracker('preopen-snapshot');
+        await T.runQuiet('preopen_fetcher', () => runPython('preopen_fetcher.py', [], 3 * 60_000));
 
         console.log('[QUEUE] Running early_hours_predictor...');
-        await runPython('early_hours_predictor.py', [], 60_000)
-          .catch(e => console.warn('[QUEUE] early_hours_predictor failed:', (e as Error).message));
+        await T.runQuiet('early_hours_predictor', () => runPython('early_hours_predictor.py', [], 60_000));
+        T.finish();
       },
       // No lockDuration previously -- fell back to BullMQ's 30s default while this worker
       // awaits up to 2 sequential 60s runPython calls (120s worst case), causing repeated
@@ -2224,13 +2769,36 @@ export async function initQueues(): Promise<boolean> {
       { connection, concurrency: 1, lockDuration: 3 * 60_000 });
     console.log('[QUEUE] Pre-open snapshot scheduled at 9:10 AM IST (weekdays)');
 
-    // ── Intraday regime refresh: VIX + USDINR + Nifty basis every 15 min (9:15–15:30 IST) ──
+    // ── Intraday regime refresh: VIX + USDINR + Nifty basis, every 15 min ──
+    // '*/15 3-10 * * 1-5' = 03:00-10:45 UTC = 08:30-16:15 IST weekdays. Corrected 2026-08-30:
+    // the old comment said '3:45-10:00 UTC = 9:15-15:30 IST', which is the NSE session, not what
+    // this pattern fires. Cycles outside 09:15-15:30 IST no-op on the chain's own guard.
+    //
+    // Keep this note ABOVE the addJobWithCatchup call, not inside its opts: everything between
+    // this queue's own jobName marker and its lockDuration counts against
+    // jobRegistryGraceMinutesConsistency.test.ts's 4000-char MAX_LOOKAHEAD. Placing these four
+    // lines inside the opts object pushed that distance to 4189 and broke the market-regime-
+    // refresh + intraday-ranker cases of that test (CI, 2026-08-31) -- the same proximity-parser
+    // fragility recurring-bugs.md already records for the 'ml-daily-ops' marker in this file.
+    // The intraday chain's steps 1-3 report through one StepTracker named for this job's own
+    // registered monitor id. pcr_fetcher and intraday_regime were bare .catch(console.warn), so
+    // the intraday PCR/GEX refresh and app_settings.intraday_regime could both stop updating for
+    // a whole session while that id still read green off market_regime_fetcher alone. The ranker
+    // step uses T.run (not runQuiet) because 'intraday-ranker' is its own registered monitor id
+    // and keeps its per-step heartbeat. The breadth capture keeps its own heartbeat too -- its
+    // closed-market semantics differ (see monitorScripts.ts's intraday-breadth-capture entry) --
+    // and is deliberately untouched.
+    //
+    // This explanation lives ABOVE the queue declaration, not inside the worker body, because
+    // jobRegistryGraceMinutesConsistency.test.ts locates this worker's lockDuration by scanning
+    // forward at most 4000 chars from the job-name literal below; prose in between eats that
+    // budget (recurring-bugs.md's marker-distance class -- third instance in this file).
     const QUEUE_REGIME = 'market-regime-refresh';
     const regimeQueue = new Queue(QUEUE_REGIME, { connection });
     const regimeRep = await regimeQueue.getRepeatableJobs();
     for (const r of regimeRep) await regimeQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(regimeQueue, 'regime-intraday', {}, {
-      repeat: { pattern: '*/15 3-10 * * 1-5' },  // 3:45–10:00 UTC = 9:15–15:30 IST
+      repeat: { pattern: '*/15 3-10 * * 1-5' },
       jobId: 'regime-intraday',
       removeOnComplete: 3, removeOnFail: 3,
     });
@@ -2250,42 +2818,35 @@ export async function initQueues(): Promise<boolean> {
         // cache during market hours. Result: 54 snapshot rows total, with multi-day gaps, and
         // intraday_regime.py's (correct) staleness guard therefore dropped breadth from the
         // regime fusion most cycles. On this chain it runs every 15 min like its consumer.
+        const breadthStart = Date.now();
         try {
           const { getOrRefreshAllStocks } = await import('./liveStockData');
           const { persistIntradayBreadth } = await import('./intradayBreadth');
           const quotes = await getOrRefreshAllStocks();
           const breadth = await persistIntradayBreadth(quotes);
-          recordHeartbeat('intraday-breadth-capture', 'success');
+          recordHeartbeat('intraday-breadth-capture', 'success', undefined, Date.now() - breadthStart);
           if (breadth) console.log(`[QUEUE] intraday breadth captured (score ${breadth.breadthScore})`);
         } catch (e) {
           console.warn('[QUEUE] intraday breadth capture failed:', (e as Error).message);
-          recordHeartbeat('intraday-breadth-capture', 'failed', (e as Error).message);
+          recordHeartbeat('intraday-breadth-capture', 'failed', (e as Error).message, Date.now() - breadthStart);
         }
+        const T = new StepTracker('market-regime-refresh');
         // 1) fetch live macro (VIX/USDINR/basis) → macro_asset_prices
-        await runPython('market_regime_fetcher.py', [], 60_000)
-          .then(() => recordHeartbeat('market-regime-refresh', 'success'))
-          .catch(e => {
-            console.warn('[QUEUE] market_regime_fetcher failed:', (e as Error).message);
-            recordHeartbeat('market-regime-refresh', 'failed', (e as Error).message);
-          });
+        await T.runQuiet('market_regime_fetcher', () => runPython('market_regime_fetcher.py', [], 60_000));
         // 1b) Nifty PCR + dealer GEX (index-level only, ~90s) → macro_asset_prices. Previously
         // only refreshed once/day inside ml-daily-ops/quant-eod-sync, so the intraday regime
         // nowcast below fused a stale EOD PCR all session. This is the lightweight index-only
         // call (NOT so_option_chain_fetcher.py/stock_option_chain_fetcher.py, the ~30min/3min
         // per-stock scrapes that stay EOD-only) -- cheap enough for a 15-min cadence.
         await runPython('pcr_fetcher.py', ['--gex'], 90_000)
-          .catch(e => console.warn('[QUEUE] pcr_fetcher (intraday) failed:', (e as Error).message));
+          .catch(e => T.fail('pcr_fetcher_intraday', e));
         // 2) fuse VIX/basis/MMI/breadth/PCR → app_settings.intraday_regime (non-fatal: ranker
         //    defaults to NEUTRAL if this is missing)
         await runPython('intraday_regime.py', [], 60_000)
-          .catch(e => console.warn('[QUEUE] intraday_regime failed:', (e as Error).message));
+          .catch(e => T.fail('intraday_regime', e));
         // 3) rank stocks for intraday off the fresh regime → intraday_recommendations
-        await runPython('intraday_ranker.py', [], 5 * 60_000)
-          .then(() => recordHeartbeat('intraday-ranker', 'success'))
-          .catch(e => {
-            console.warn('[QUEUE] intraday_ranker failed:', (e as Error).message);
-            recordHeartbeat('intraday-ranker', 'failed', (e as Error).message);
-          });
+        await T.run('intraday-ranker', () => runPython('intraday_ranker.py', [], 5 * 60_000));
+        T.finish();
       },
       // Generous lockDuration: four sequential runPython calls (~8.5 min worst case) plus the
       // shared 5-concurrent-subprocess semaphore wait, so BullMQ doesn't consider it stalled.
@@ -2319,9 +2880,10 @@ export async function initQueues(): Promise<boolean> {
       removeOnComplete: 3, removeOnFail: 3,
     });
     new Worker(QUEUE_CLOSED_DAY,
-      async () => {
+      async (job) => {
+        const elapsed = () => (job.processedOn ? Date.now() - job.processedOn : undefined);
         if (!(await isTradingHolidayToday())) {
-          recordHeartbeat('closed-day-early-batch', 'success'); // normal session / weekend — nothing to early-run
+          recordHeartbeat('closed-day-early-batch', 'success', undefined, elapsed()); // normal session / weekend — nothing to early-run
           return;
         }
         console.log('[QUEUE] Trading holiday — running daily pipeline early (outcome-resolver → ml-daily-ops → unified-ranker)');
@@ -2331,10 +2893,10 @@ export async function initQueues(): Promise<boolean> {
           await mlDailyOpsQueue?.add('closed-day-early', {}, opt);
           // unified-ranker after a delay so fresh scores / ml-ops land first
           await unifiedRankerQueue?.add('closed-day-early', {}, { ...opt, delay: 20 * 60_000 });
-          recordHeartbeat('closed-day-early-batch', 'success');
+          recordHeartbeat('closed-day-early-batch', 'success', undefined, elapsed());
         } catch (e) {
           console.warn('[QUEUE] closed-day-early-batch failed:', (e as Error).message);
-          recordHeartbeat('closed-day-early-batch', 'failed', (e as Error).message);
+          recordHeartbeat('closed-day-early-batch', 'failed', (e as Error).message, elapsed());
         }
       },
       { connection, concurrency: 1, lockDuration: 5 * 60_000 });
@@ -2354,13 +2916,29 @@ export async function initQueues(): Promise<boolean> {
         stalledInterval: 15 * 60 * 1000,
         maxStalledCount: 3,
       });
-    dlRetrainEmergencyWorker.on('completed', () => {
+    dlRetrainEmergencyWorker.on('completed', (job) => {
       console.log('[QUEUE] dl-retrain-emergency done');
-      recordHeartbeat('dl-retrain-emergency', 'success');
+      recordHeartbeat('dl-retrain-emergency', 'success', undefined, bullJobDurationMs(job));
+      // 2026-09-15 bookkeeping fix: the flag column stayed 0 on every dl_model_performance row
+      // since drift_detector's 2026-08-15 recalibration because nothing flipped it when the
+      // retrain this queue runs actually completed -- any monitor reading retrain_triggered
+      // concludes "no drift signal was ever answered by a retrain". Stamp each model's most
+      // recent drift-scored row (the one whose EMERGENCY_RETRAIN exit(1) enqueued this job).
+      // Swallow-and-warn: a bookkeeping stamp must never turn a finished retrain into a
+      // reported failure (same convention as write_training_metrics' non-fatal persistence).
+      void dbRun(
+        `UPDATE dl_model_performance SET retrain_triggered = 1
+         WHERE id IN (
+           SELECT MAX(id) FROM dl_model_performance
+           WHERE drift_score IS NOT NULL AND retrain_triggered = 0
+           GROUP BY model_name
+         )`,
+      ).catch((e: Error) =>
+        console.warn('[QUEUE] retrain_triggered stamp failed (non-fatal):', e.message));
     });
-    dlRetrainEmergencyWorker.on('failed', (_, err) => {
+    dlRetrainEmergencyWorker.on('failed', (job, err) => {
       console.error('[QUEUE] dl-retrain-emergency failed:', err.message);
-      recordHeartbeat('dl-retrain-emergency', 'failed', err.message);
+      recordHeartbeat('dl-retrain-emergency', 'failed', err.message, bullJobDurationMs(job));
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ OHLCV Backfill ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -2374,7 +2952,7 @@ export async function initQueues(): Promise<boolean> {
         // are one-off catch-up runs, not routine daily waste).
         if (job.name === 'ohlcv-gap-fill-daily' && await shouldSkipOnTradingHoliday(job)) {
           console.log('[QUEUE] ohlcv-gap-fill-daily skipped — trading holiday, no new session to gap-fill');
-          return { success: true };
+          return { success: true, skipped: true };
         }
         const mode = (job.data?.mode as string) || 'gap-fill';
         const lookback = (job.data?.lookback as number) || 30;
@@ -2390,19 +2968,35 @@ export async function initQueues(): Promise<boolean> {
       });
     ohlcvBackfillWorker.on('completed', (job) => {
       console.log(`[QUEUE] ohlcv-backfill (${job.data?.mode}) done`);
-      updateMonitorState('ohlcv-backfill', 'success');
+      updateMonitorState('ohlcv-backfill', 'success', undefined, bullJobDurationMs(job));
     });
-    ohlcvBackfillWorker.on('failed', (_, err) => {
+    ohlcvBackfillWorker.on('failed', (job, err) => {
       console.error('[QUEUE] ohlcv-backfill failed:', err.message);
-      updateMonitorState('ohlcv-backfill', 'failed', err.message);
+      updateMonitorState('ohlcv-backfill', 'failed', err.message, bullJobDurationMs(job));
     });
 
-    // Weekly gap-fill: Saturday 2:00 AM IST = Friday 20:30 UTC
+    // Weekly gap-fill: Saturday 5:30 AM IST = Saturday 00:00 UTC.
+    // Moved off Saturday 02:00 IST 2026-08-30. That slot is expressed in UTC as FRIDAY 20:30,
+    // which put a 30-day full-universe backfill inside the tail of the Friday weekday chain
+    // (live-measured: it ran 02:01 on Sat 2026-08-29 while trendlyne-daily-fetch was still
+    // finishing at 00:14 and chatbot-reingest at 01:30). Saturday 00:00 UTC is the earliest
+    // Saturday-ANCHORED slot available -- any IST Saturday time before 05:30 is still Friday in
+    // UTC -- so this both clears the weekday tail and makes the cron string's day-of-week field
+    // agree with the day the job actually runs on.
     // Daily gap-fill: weekdays 4:15 PM IST = 10:45 UTC (after market close, lookback 3 days)
     const ohlcvRep = await ohlcvBackfillQueue.getRepeatableJobs();
     for (const r of ohlcvRep) await ohlcvBackfillQueue.removeRepeatableByKey(r.key);
+    // THURSDAY 23:30 IST (18:00 UTC). Moved off Saturday 00:00 UTC 2026-09-12
+    // (AF-20260912-13): NSE does not trade at the weekend, and stock_ohlcv holds ZERO
+    // Saturday/Sunday bars (verified live), so a Saturday run cannot observe a single bar
+    // that Friday's ohlcv-gap-fill-daily had not already seen. The only thing this 30-day
+    // full-universe sweep can legitimately catch is a vendor RESTATING an older bar, which
+    // is not weekend-sensitive and does not need to sit in the Saturday training window.
+    // A weekday slot also keeps it clear of ml-daily-ops (13:20 UTC + 3.5h worst case) and
+    // of ml-weekly-data (Friday 18:00 UTC). The 30-day lookback makes the exact weekday
+    // irrelevant to coverage -- only the latency of repairing a restated bar changes.
     await addJobWithCatchup(ohlcvBackfillQueue, 'ohlcv-gap-fill-weekly', { mode: 'gap-fill', lookback: 30 }, {
-      repeat: { pattern: '30 20 * * 5' },
+      repeat: { pattern: '0 18 * * 4' },
       jobId: 'ohlcv-gap-fill-weekly',
       removeOnComplete: 2, removeOnFail: 3,
     });
@@ -2502,10 +3096,10 @@ export async function initQueues(): Promise<boolean> {
       }
     );
     quantEodSyncWorker.on('completed', () => console.log('[QUEUE] quant-eod-sync done'));
-    quantEodSyncWorker.on('failed', (_, e) => {
+    quantEodSyncWorker.on('failed', (job, e) => {
       // The processor's own catch can't see a timeout — it rejects outside the processor —
       // so mark the state here too, otherwise a timed-out run leaves the last success showing.
-      updateMonitorState('quant-eod-sync', 'failed', e.message);
+      updateMonitorState('quant-eod-sync', 'failed', e.message, bullJobDurationMs(job));
       console.error('[QUEUE] quant-eod-sync failed:', e.message);
     });
 
@@ -2539,18 +3133,20 @@ export async function initQueues(): Promise<boolean> {
       { connection, concurrency: 2, lockDuration: 30 * 60_000 }
     );
 
-    trendlyneDailyFetchWorker.on('completed', () => {
+    trendlyneDailyFetchWorker.on('completed', (job) => {
       console.log('[QUEUE] trendlyne-daily-fetch completed');
-      recordHeartbeat('trendlyne-daily-fetch', 'success');
+      recordHeartbeat('trendlyne-daily-fetch', 'success', undefined, bullJobDurationMs(job));
     });
-    trendlyneDailyFetchWorker.on('failed', (_, e) => {
+    trendlyneDailyFetchWorker.on('failed', (job, e) => {
       console.error('[QUEUE] trendlyne-daily-fetch failed:', e.message);
-      recordHeartbeat('trendlyne-daily-fetch', 'failed', e?.message);
+      recordHeartbeat('trendlyne-daily-fetch', 'failed', e?.message, bullJobDurationMs(job));
     });
 
     const trendlyneWeeklyJobs = await registerTrendlyneWeeklyJobs(connection);
     ({ queue: trendlyneMidweekQueue, worker: trendlyneMidweekWorker } = trendlyneWeeklyJobs.midweek);
     ({ queue: trendlyneRatiosMonthlyQueue, worker: trendlyneRatiosMonthlyWorker } = trendlyneWeeklyJobs.ratiosMonthly);
+    // trendlyne-catchup owns its own Queue/Worker; nothing outside this module reads them, so
+    // unlike its siblings there is no module-level binding to assign here.
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Unified Ranker Ã¢â‚¬â€ daily at 15:45 IST (10:15 UTC) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     unifiedRankerQueue = new Queue(QUEUE_UNIFIED_RANKER, { connection });
@@ -2562,7 +3158,7 @@ export async function initQueues(): Promise<boolean> {
         // 20-min delay after ml-daily-ops) that same morning.
         if (await shouldSkipOnTradingHoliday(job)) {
           console.log('[QUEUE] unified-ranker skipped — trading holiday (closed-day-early-batch already ran this morning)');
-          return;
+          return { skipped: true };
         }
         console.log('[QUEUE] unified-ranker starting...');
         // 30 min: a full run now takes 15-20+ min (700k-row confluence window scans +
@@ -2596,39 +3192,45 @@ export async function initQueues(): Promise<boolean> {
       'unified-ranker-daily',
       {},
       {
-        // 07:30 IST (02:00 UTC), pre-open. Was 15:45 IST (just after close) — but that ran
-        // the canonical ranker BEFORE its own inputs refreshed: stock_scores (stock-scoring
-        // 22:30 IST), technical_signals ML features + win_probability (ml-daily-ops 19:30 IST)
-        // and OHLCV (stock-refresh 16:00 IST) all land AFTER 15:45, so unified_recommendations
-        // was always built on ~1-day-stale scores. Running pre-open consumes the fully-refreshed
-        // prior-session features and has the fresh ranking ready before the 09:15 open.
-        repeat:  { pattern: '0 2 * * 1-5' },
+        // 22:30 IST (17:00 UTC), post-close. Was 07:30 IST (02:00 UTC) — pre-open next day.
+        // Moved to 22:30 IST so all daily recommendations, digests, and ranker updates complete before 23:30 IST.
+        repeat:  { pattern: '0 17 * * 1-5' },
         jobId:   'unified-ranker-daily-repeatable',
         attempts: 2,
         backoff:  { type: 'fixed', delay: 60_000 },
+        // Every other of the 38 other job registrations in this file sets this; this one was
+        // the sole holdout (found in the 2026-08-20 performance audit's bracket-matched sweep
+        // of every addJobWithCatchup/*.add() call). No Worker in this file sets a
+        // defaultJobOptions fallback either, so BullMQ's real default -- keep job data in
+        // Redis forever -- applied here alone. Runs 5x/week; unbounded over the process's life.
+        removeOnComplete: { age: 86400 * 3 },
+        removeOnFail: { age: 86400 * 3, count: 20 },
       },
     );
-    unifiedRankerWorkerInstance.on('completed', () => {
+    unifiedRankerWorkerInstance.on('completed', (job) => {
       console.log('[QUEUE] unified-ranker done');
-      recordHeartbeat('unified-ranker', 'success');
+      recordHeartbeat('unified-ranker', 'success', undefined, bullJobDurationMs(job));
     });
-    unifiedRankerWorkerInstance.on('failed', (_, err) => {
+    unifiedRankerWorkerInstance.on('failed', (job, err) => {
       console.error('[QUEUE] unified-ranker failed:', err.message);
-      recordHeartbeat('unified-ranker', 'failed', err.message);
+      recordHeartbeat('unified-ranker', 'failed', err.message, bullJobDurationMs(job));
     });
 
     await registerDigestJobs(connection);
 
-    // ── Daily data-integrity report — 8:40 AM IST (03:10 UTC), every day ──────────
+    // ── Daily data-integrity report — 11:00 PM IST (17:30 UTC), every day ──────────
     // Formal cron wrapper around dataQualityChecks.ts's ~25-check suite (2026-08-01 audit).
     // The 15-min setInterval poll in jobWatchdog.ts already runs these checks continuously
     // and pages on critical failures -- this does NOT replace that, it exists because the
     // poll itself was never a monitored JOB_REGISTRY job (an unregistered setInterval has no
     // lateness detection: a dead process silently takes monitoring down with it, same class
     // of gap job-digest had before it was registered). Sends a pass/warn/fail summary
-    // regardless of outcome, so a quiet day is confirmed rather than assumed. Scheduled
-    // after both unified-ranker (07:30 IST) and recommendations-digest (08:15 IST weekdays)
-    // so the report reflects that morning's freshly-built state when both ran.
+    // regardless of outcome, so a quiet day is confirmed rather than assumed. Moved from
+    // 8:40 AM IST to 11 PM IST by 37c0fec (2026-08-27, "optimize Indian market timelines") to
+    // run after that day's post-market chain -- unified-ranker (22:30 IST), job-digest
+    // (22:50 IST) and recommendations-digest (22:40 IST weekdays) -- so the report reflects
+    // that day's freshly-built state instead of the previous evening's. This paragraph was
+    // left describing the old morning slot for a day; the pattern below was already correct.
     const QUEUE_DATA_QUALITY_DAILY = 'data-quality-daily';
     const dataQualityDailyQueue = new Queue(QUEUE_DATA_QUALITY_DAILY, { connection });
     const dataQualityDailyWorker = new Worker(
@@ -2640,6 +3242,23 @@ export async function initQueues(): Promise<boolean> {
         const warned = results.filter(r => r.status === 'warn');
         const failed = results.filter(r => r.status === 'fail' || r.status === 'error');
         const criticalFailed = failed.filter(r => r.critical);
+
+        // scripts/daily_failure_triage.py (2026-08-15): ~125 of ~148 queues.ts steps are bare
+        // `.catch(e => console.warn(...))`, so their failures are logged and never surface --
+        // job_heartbeat stays 'success', this very check suite has no coverage for them, and
+        // the only way they were previously found was an occasional manual weekly log review.
+        // Wrapping all 125 call sites in StepTracker is the fuller fix and a large, risky edit
+        // to a file several sessions touch concurrently; this reuses the digest that already
+        // exists and is already read daily, at zero risk to the job chain itself.
+        let untrackedFailures: { key: string; n: number; days: number; sample: string }[] = [];
+        try {
+          // runPython resolves relative to src/server/*.py; the triage script lives in
+          // scripts/, one level up, so it's invoked via its relative path from there.
+          const { stdout } = await runPython('../../scripts/daily_failure_triage.py', ['--days', '1', '--json'], 30_000);
+          untrackedFailures = JSON.parse(stdout);
+        } catch (e) {
+          console.warn('[QUEUE] daily_failure_triage step failed (non-fatal, digest continues):', (e as Error).message);
+        }
 
         // r.detail routinely embeds raw snake_case table names (e.g. "mf_sector_allocation is
         // empty") -- unbalanced underscores kill this whole single-message digest in Telegram's
@@ -2653,6 +3272,20 @@ export async function initQueues(): Promise<boolean> {
           lines.push('', '*Warnings:*');
           for (const r of warned) lines.push(`⚠️ \`${sanitizeMarkdown(r.label)}\` — ${sanitizeMarkdown(r.detail)}`);
         }
+        if (untrackedFailures.length) {
+          // Deliberately a WARNING section, never a throw source: unlike the DQ checks above
+          // (which only fire on a known, named condition someone chose to watch), this is raw
+          // log triage and its first-ever run already surfaced 15 pre-existing signatures with
+          // no muting review done yet. Throwing on all of them immediately would be exactly the
+          // alert-fatigue failure dq-new-failures (added the same day) exists to prevent -- this
+          // needs a triage pass to populate daily_failure_triage.py's MUTED set for known-benign
+          // upstream conditions before graduating any of it to critical.
+          lines.push('', '*Untracked step failures (not in job_heartbeat):*');
+          for (const f of untrackedFailures.slice(0, 10)) {
+            lines.push(`⚠️ \`${sanitizeMarkdown(f.key)}\` — ${f.n}x/${f.days}d — ${sanitizeMarkdown(f.sample)}`);
+          }
+          if (untrackedFailures.length > 10) lines.push(`… and ${untrackedFailures.length - 10} more (run scripts/daily_failure_triage.py for the full list)`);
+        }
         await telegramService.sendMarkdownMessage(lines.join('\n'));
 
         if (criticalFailed.length) {
@@ -2664,19 +3297,19 @@ export async function initQueues(): Promise<boolean> {
       },
       { connection, concurrency: 1, lockDuration: 5 * 60_000 },
     );
-    dataQualityDailyWorker.on('completed', () => {
+    dataQualityDailyWorker.on('completed', (job) => {
       console.log('[QUEUE] data-quality-daily sent');
-      recordHeartbeat('data-quality-daily', 'success');
+      recordHeartbeat('data-quality-daily', 'success', undefined, bullJobDurationMs(job));
     });
-    dataQualityDailyWorker.on('failed', (_, err) => {
+    dataQualityDailyWorker.on('failed', (job, err) => {
       console.error('[QUEUE] data-quality-daily failed:', err.message);
-      recordHeartbeat('data-quality-daily', 'failed', err.message);
+      recordHeartbeat('data-quality-daily', 'failed', err.message, bullJobDurationMs(job));
     });
 
     const dataQualityRepeatables = await dataQualityDailyQueue.getRepeatableJobs();
     for (const r of dataQualityRepeatables) await dataQualityDailyQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(dataQualityDailyQueue, 'data-quality-daily-run', {}, {
-      repeat: { pattern: '10 3 * * *' },
+      repeat: { pattern: '30 17 * * *' }, // 11:00 PM IST (17:30 UTC), daily after unified-ranker & digests
       jobId: 'data-quality-daily-repeatable',
       removeOnComplete: 3,
       removeOnFail: 3,
@@ -2689,13 +3322,13 @@ export async function initQueues(): Promise<boolean> {
       processTrendlyneChecklistCycle,
       { connection, concurrency: 1, lockDuration: 20 * 60 * 1000, lockRenewTime: 3 * 60 * 1000 },
     );
-    trendlyneChecklistCycleWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+    trendlyneChecklistCycleWorker.on('completed', (job, result?: { skipped?: boolean }) => {
       if (result?.skipped) return;
-      recordHeartbeat('trendlyne-checklist-cycle', 'success');
+      recordHeartbeat('trendlyne-checklist-cycle', 'success', undefined, bullJobDurationMs(job));
     });
-    trendlyneChecklistCycleWorker.on('failed', (_job, err) => {
+    trendlyneChecklistCycleWorker.on('failed', (job, err) => {
       console.error('[QUEUE] trendlyne-checklist-cycle failed:', err.message);
-      recordHeartbeat('trendlyne-checklist-cycle', 'failed', err.message);
+      recordHeartbeat('trendlyne-checklist-cycle', 'failed', err.message, bullJobDurationMs(job));
     });
 
     // Only kick off the self-rescheduling chain if one isn't already pending —

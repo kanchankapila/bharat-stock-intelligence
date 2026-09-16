@@ -16,6 +16,21 @@ Run:
   python nt_vix_fetcher.py --symbol GIFT+NIFTY
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class NtVixFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class NtVixFetcherBaseFetcher(BaseFetcher[NtVixFetcherSchema]):
+    fetcher_name = 'NtVixFetcher'
+    domain = 'niftytrader.in'
+    schema = NtVixFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 from datetime import date as _date
 
@@ -23,6 +38,7 @@ import requests
 
 from db_compat import execute, executemany
 from fetch_utils import retry_get
+import sys
 
 NT_HEADERS = {
     "User-Agent": (
@@ -34,7 +50,7 @@ NT_HEADERS = {
     "Referer": "https://www.niftytrader.in/",
 }
 
-SPOT_URL = "https://webapi.niftytrader.in/webapi/Symbol/other-stock-spot-data?symbol={symbol}"
+SPOT_URL = "https://www.niftytrader.in/api/niftytrader/Symbol/other-stock-spot-data?symbol={symbol}"
 
 # NT URL param → canonical name (for DB storage)
 _SYMBOLS: list[tuple[str, str]] = [
@@ -59,7 +75,7 @@ def fetch_spot(nt_param: str) -> dict | None:
             return None
         return d.get("resultData")
     except Exception as e:
-        print(f"  [spot] fetch error for {nt_param} after retries: {e}")
+        print(f"  [spot] fetch error for {nt_param} after retries: {e}", file=sys.stderr)
         return None
 
 
@@ -117,3 +133,9 @@ if __name__ == "__main__":
     parser.add_argument("--symbol", default=None, help="NT param, e.g. INDIA+VIX or GIFT+NIFTY")
     args = parser.parse_args()
     main(target=args.symbol)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

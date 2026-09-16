@@ -46,7 +46,8 @@ def _make_sqlite_engine():
             CREATE TABLE stock_options_oi (
                 symbol TEXT, date TEXT, expiry TEXT, call_oi REAL, put_oi REAL, pcr REAL,
                 total_call_oi REAL, total_put_oi REAL, market_pcr REAL, atm_iv REAL,
-                iv_skew REAL, fetched_at TEXT
+                iv_skew REAL, fetched_at TEXT,
+                PRIMARY KEY (symbol, date, expiry)
             )
         """))
     return engine

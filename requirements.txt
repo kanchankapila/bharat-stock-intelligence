@@ -1,4 +1,13 @@
+# NOTE (2026-09-11): backend-python/requirements.txt is the pinned file CI installs
+# (ci.yml:122) and the file of record for deployment. This root file is the README's
+# quick-start entry point — kept aligned with it, WITHOUT the heavy deps that drifted
+# in and were never imported anywhere (pytorch-forecasting, pytorch-lightning, shap,
+# ipython — all verified zero-import across src/backend-python/scripts/tests/db on
+# 2026-09-11). Do not re-add a dep here that CI doesn't pin; add it to both or neither.
 pandas
+polars
+# pyarrow deliberately NOT listed -- it breaks torch on Windows when imported first
+# (AF-20260829-21, added and reverted 2026-09-03). See backend-python/requirements.txt.
 yfinance
 ta
 sqlalchemy
@@ -6,12 +15,14 @@ numpy
 requests
 nse
 beautifulsoup4
-ollama
 frozendict
 curl_cffi
+# Fetcher-only (no scraping/spiders): curl_cffi Chrome-TLS-impersonated HTTP client used by
+# tl_fetch.py for trendlyne.com's AWS WAF. After installing/upgrading, browsers are NOT
+# required — only `Fetcher` is imported, so `scrapling install` is unnecessary here.
+scrapling[fetchers]
 rich
 psycopg2-binary
-ipython
 markdown-it-py
 mdurl
 transformers
@@ -19,16 +30,14 @@ transformers
 # python -m pip install "torch==2.9.1+cu128" torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 torch>=2.9.1
 torchvision>=0.17.0
-pytorch-forecasting>=1.0.0
-pytorch-lightning>=2.2.0
 hmmlearn>=0.3.0
-shap>=0.45.0
 scikit-learn>=1.4.0
 httpx
+pydantic>=2.0.0
+tenacity>=8.0.0
 langchain>=0.3.0
 langgraph>=0.2.0
 langchain-community>=0.3.0
-langchain-ollama>=0.2.0
 langchain-google-genai>=2.0.0
 chromadb>=0.5.0
 sentence-transformers>=3.0.0

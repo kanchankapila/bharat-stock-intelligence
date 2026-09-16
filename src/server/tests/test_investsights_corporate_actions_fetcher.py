@@ -9,6 +9,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import investsights_corporate_actions_fetcher as ica
 
@@ -66,7 +67,7 @@ class TestParseAction:
 
 class TestSchemaAndStorage:
     def test_ensure_schema_creates_table(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         ica.ensure_schema(con)
         tables = {r[0] for r in con.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
@@ -74,7 +75,7 @@ class TestSchemaAndStorage:
         assert "nse_filed_corporate_actions" in tables
 
     def test_source_url_upsert_is_idempotent(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         ica.ensure_schema(con)
         row = ica.parse_action(TATAPOWER_ROW, UNIVERSE)
         assert ica.store(con, [row]) == 1
@@ -83,7 +84,7 @@ class TestSchemaAndStorage:
         assert count == 1
 
     def test_two_distinct_filings_both_stored(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         ica.ensure_schema(con)
         rows = [ica.parse_action(TATAPOWER_ROW, UNIVERSE), ica.parse_action(CINEVISTA_ROW, UNIVERSE)]
         assert ica.store(con, rows) == 2
@@ -94,13 +95,13 @@ class TestRunReturnCode:
         """An empty actions list is the real outage signal -- distinct from actions existing
         but all failing to resolve to a known symbol (a coverage question, not an outage)."""
         monkeypatch.setattr(ica, "fetch_filed_actions", lambda *a, **k: [])
-        monkeypatch.setattr(ica, "connect", lambda: sqlite3.connect(":memory:"))
+        monkeypatch.setattr(ica, "connect", lambda: pg_memory_conn())
         monkeypatch.setattr(ica, "load_nse_universe", lambda: UNIVERSE)
         assert ica.run() == 1
 
     def test_actions_present_but_none_resolve_is_still_success(self, monkeypatch):
         monkeypatch.setattr(ica, "fetch_filed_actions",
                              lambda *a, **k: [{**TATAPOWER_ROW, "symbol": "NOPE"}])
-        monkeypatch.setattr(ica, "connect", lambda: sqlite3.connect(":memory:"))
+        monkeypatch.setattr(ica, "connect", lambda: pg_memory_conn())
         monkeypatch.setattr(ica, "load_nse_universe", lambda: UNIVERSE)
         assert ica.run() == 0

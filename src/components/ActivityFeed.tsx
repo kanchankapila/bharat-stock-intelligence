@@ -38,7 +38,7 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({ onSelectStock, hours
     return (
       <div className="py-12 flex flex-col items-center gap-3">
         <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest animate-pulse">Loading activity…</p>
+        <p className="text-[9px] font-black text-slate-500 font-display uppercase tracking-widest animate-pulse">Loading activity…</p>
       </div>
     );
   }
@@ -46,7 +46,7 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({ onSelectStock, hours
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between px-0.5">
-        <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+        <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-wider">
           Last {hours}h · {items.length} events
         </p>
         {dataUpdatedAt > 0 && (
@@ -59,9 +59,9 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({ onSelectStock, hours
       </div>
 
       {items.length === 0 ? (
-        <div className="py-12 bg-slate-900/40 border border-slate-800/50 rounded-xl text-center">
+        <div className="py-12 v1-card text-center">
           <Radio className="w-6 h-6 text-slate-700 mx-auto mb-2" />
-          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+          <p className="text-[10px] font-black text-slate-500 font-display uppercase tracking-widest">
             No signals or news in the last {hours}h
           </p>
         </div>
@@ -96,7 +96,7 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({ onSelectStock, hours
                 {item.detail && (
                   <p className="text-[9px] text-slate-400 mt-0.5 line-clamp-2">{item.detail}</p>
                 )}
-                <div className="flex items-center gap-1.5 mt-1 text-[8.5px] font-bold uppercase tracking-wider">
+                <div className="flex items-center gap-1.5 mt-1 text-[8.5px] font-bold font-display uppercase tracking-wider">
                   <span className="px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-400">{item.tag}</span>
                   <span className="text-slate-600">·</span>
                   <span className="text-slate-500">{item.source}</span>

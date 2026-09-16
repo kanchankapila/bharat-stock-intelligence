@@ -17,29 +17,31 @@ ranking/UI surfaces should read:
 `unified_ranker.py` reads both as component scores, so they cannot be physically merged into the
 table they feed. "Consolidation" here means keeping UI reads from bypassing the canonical table,
 not deleting the input tables. Both closed 2026-08: `getTopRatedStocks` (`scoringService.ts`) reads
-`unified_recommendations` first, falling back to `stock_scores` only when UR has no rows yet
-(cold start); `getStrategyStocks` (`quantScoringService.ts`) surfaces UR's `unified_score`/
+`unified_recommendations` first for `timeframe === 'long_term'` — falling back to `stock_scores`
+only when UR has no rows yet (cold start) — but goes straight to `stock_scores` for `intraday`/
+`swing` without checking UR at all (found by the 2026-08-18 canonical-read-audit, AF-20260818-40;
+not a live gap, `TopRatedStocks.tsx` already carries a `LegacyScoreBanner` disclosing non-canonical
+status regardless of timeframe); `getStrategyStocks` (`quantScoringService.ts`) surfaces UR's `unified_score`/
 `classification`/`conviction_level` as read-only context columns on every row, plus an opt-in
 `requireUnifiedCoverage` filter, with the same cold-start fallback. Any new engine should still
 write a *component* score the ranker ingests — never a parallel "final" score.
 
-**`timeframe_scores` is NOT a fourth producer — it is a pre-existing violation of the "never
-write a parallel final score" rule above, found by the 2026-08-14 canonical-read-audit, decided
-here rather than left undocumented.** `scoringService.ts`'s `computeTimeframeScores` (called from
-`screeners.router.ts`'s `computeTimeframeScores`/`getTimeframeRanking` procedures, rendered by
-`ScreenerRankingPanel.tsx` inside the live, routed `/screener-intelligence` page) computes its own
-hand-rolled weighted blend — `momentum_score * 0.4 + technical_composite_score * 0.4 +
-return_on_equity-derived * 0.2` — on demand, per screener run, writing to `timeframe_scores`. It
-does not feed `unified_ranker.py`, is not blended into `unified_recommendations`, and has never
-been backtested (no `factor_backtest.py` run, no entry in `measurement.md`) — exactly the
-unmeasured-parallel-score shape this file exists to prevent. It predates this rule file and is
-reachable in production today, so the fix is disclosure, not silent removal: `ScreenerRankingPanel.tsx`
-now carries an inline caveat ("not the canonical unified model, not backtested"). Treat it as a
-deprecation candidate, not a base to extend — do not add inputs to `computeTimeframeScores`'s
-formula or route new UI to `getTimeframeRanking`; route new work to `unified_ranker.py`'s inputs
-instead. Removing it outright needs a decision on whether `/screener-intelligence`'s
-"compute rankings on this screener run" interaction has a real user, which this audit didn't
-establish either way.
+**`timeframe_scores` — REMOVED 2026-08-30, no longer a live concern.** Was a pre-existing
+violation of the "never write a parallel final score" rule above (found by the 2026-08-14
+canonical-read-audit): `scoringService.ts`'s `computeTimeframeScores` computed its own hand-rolled
+weighted blend (`momentum_score * 0.4 + technical_composite_score * 0.4 + return_on_equity-derived
+* 0.2`) writing to `timeframe_scores`, never fed `unified_ranker.py`, and was never backtested.
+The 2026-08-14 audit left removal undecided pending evidence of real usage. That evidence arrived
+2026-08-30: `timeframe_scores` had **zero rows ever written**, and `backtesting_runs` (what the
+same cluster's `triggerBacktest` would write to) had zero rows with the `bt:` prefix that code
+path uses — confirming the entire `computeTimeframeScores`/`getTimeframeRanking`/`triggerBacktest`/
+`backtestRunner.ts` cluster had never fired in production. Removed outright: the three router
+procedures, `computeTimeframeScores()` itself, `backtestRunner.ts` and its test,
+`ScreenerRankingPanel.tsx`, and the dead sub-block inside `ScreenerIntelligencePage.tsx` (the page
+itself stays — it also drives screener detail/category-stats/leaderboard, all unrelated and live).
+The `timeframe_scores` DB table itself was left in place (empty, harmless schema debris — dropping
+a table is a separate, more invasive decision). Full detail: `docs/session-log.md`'s 2026-08-30
+"Phase 2" entry.
 
 `quant_scores` previously had three writers with a real ordering bug: `institutional_quant_engine.py`
 ran inside `ml-daily-ops` (7:30 PM IST) and did a full `DELETE`+re-`INSERT`, but `quantScoringService.ts`'s
@@ -49,8 +51,9 @@ always clobbered same-night. Retired as an automatic writer (still reachable on-
 depend on `quantScoringService` having already run but ran *before* it — moved to run inside the
 `quant-scoring` job, after `runQuantScoring()`.
 
-**Signal model.** `signals` was dropped 2026-06-20 ("Cluster A" —
-`docs/superpowers/plans/2026-06-19-signal-model-rationalization-cluster-a.md`); `technical_analysis_signals`
+**Signal model.** `signals` was dropped 2026-06-20 ("Cluster A", fully executed — the original
+planning doc was removed in the 2026-08-28 stale-docs sweep, this section is the authoritative
+record now); `technical_analysis_signals`
 was folded into `unified_signals` (`signal_source='technical'`) 2026-08 ("Cluster B-lite", continuing
 Cluster A's own deferred scope) — its writer (`technical_analysis_engine.py`, now also scheduled nightly
 inside `ml-daily-ops` for the first time — it had never run on any automatic schedule before) and all 3

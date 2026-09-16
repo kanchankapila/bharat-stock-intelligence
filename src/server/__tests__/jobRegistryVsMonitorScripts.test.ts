@@ -17,7 +17,7 @@ import { MONITOR_SCRIPTS } from '../routers/monitor.router';
  */
 const KNOWN_SAFE_OVERLAPS = new Set([
   'fii-dii-fetcher', 'finbert-scorer', 'outcome-resolver-5d', 'outcome-resolver-15d',
-  'performance-tracker', 'ml-ensemble-score', 'reward-engine', 'rl-agent-update',
+  'performance-tracker', 'ml-ensemble-score', 'reward-engine',
   'signal-type-stats', 'ml-ensemble-train', 'strategy-optimizer',
   // Added 2026-08-03: JOB_REGISTRY tracks these two everyMs jobs via job_heartbeat (did the
   // BullMQ processor return without throwing), which is structurally blind to a deliberate

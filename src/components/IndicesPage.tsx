@@ -35,11 +35,11 @@ export const IndicesPage: React.FC<{
 
   if (isLoading) {
     return (
-      <div className="p-6 space-y-6">
-        <h1 className="text-2xl font-black text-white uppercase tracking-tight">Market Indices</h1>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="v1-page space-y-6">
+        <h1 className="v1-title-page">Market Indices</h1>
+        <div className="v1-grid-4">
           {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className="h-24 glass border border-slate-800/50 rounded-2xl animate-pulse" />
+            <div key={i} className="v1-card animate-pulse h-24" />
           ))}
         </div>
       </div>
@@ -47,17 +47,19 @@ export const IndicesPage: React.FC<{
   }
 
   return (
-    <div className="p-6 space-y-8">
-      <div>
-        <h1 className="text-2xl font-black text-white uppercase tracking-tight mb-1">Market Indices</h1>
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Live Indian Market Intelligence — Click any index for details</p>
+    <div className="v1-page space-y-8">
+      <div className="v1-header">
+        <div className="v1-header-left">
+          <h1 className="v1-title-page">Market Indices</h1>
+          <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400">Live Indian Market Intelligence — Click any index for details</p>
+        </div>
       </div>
 
       {advDecData?.data && Array.isArray(advDecData.data) && (
-        <div className="glass border border-slate-800/50 rounded-2xl p-4">
+        <div className="v1-card p-4">
           <div className="flex items-center gap-2 mb-4">
             <Activity className="w-4 h-4 text-purple-400" />
-            <h2 className="text-sm font-black text-white uppercase tracking-widest">Market Breadth (Advance/Decline)</h2>
+            <h2 className="text-sm font-black text-white font-display uppercase tracking-widest">Market Breadth (Advance/Decline)</h2>
           </div>
           <div className="h-48 w-full">
             <ResponsiveContainer width="100%" height="100%">
@@ -90,7 +92,7 @@ export const IndicesPage: React.FC<{
 
       {indicesList.map(group => (
         <div key={group.name}>
-          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 pl-1">{group.name}</h2>
+          <h2 className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-4 pl-1">{group.name}</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {group.list
               .filter((idx: any) => idx.name)
@@ -105,11 +107,12 @@ export const IndicesPage: React.FC<{
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     className={cn(
-                      "glass border rounded-2xl p-4 text-left transition-all hover:shadow-lg group",
-                      up ? "border-slate-800/50 hover:border-emerald-500/30" : "border-slate-800/50 hover:border-rose-500/30"
+                      up ? "v1-card-up" : "v1-card-down",
+                      "p-4 text-left transition-all hover:shadow-lg group",
+                      up ? "hover:border-emerald-500/50" : "hover:border-rose-500/50"
                     )}
                   >
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 group-hover:text-slate-400 transition-colors line-clamp-2 leading-relaxed">
+                    <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-2 group-hover:text-slate-400 transition-colors line-clamp-2 leading-relaxed">
                       {idx.name}
                     </p>
                     <p className="text-base font-black text-white tabular-nums mb-1">{idx.value}</p>

@@ -14,10 +14,24 @@ selection bias. Features are the same technical_signals matrix the ensemble uses
 shared build_features() transformer. Training is purged walk-forward (TimeSeriesSplit with
 an embargo gap) so a stock's forward-looking label can't leak across the fold boundary.
 
+Delivery%, sector-relative return, and options OI were all evaluated (2026-09-02) as
+candidate feature additions and deliberately NOT wired into FEATURE_COLS:
+  - sector-relative (rs_vs_sector_21d/63d) is full-history-safe but measured NULL on the
+    live panel (775,254 rows/1,153 dates): purged-OOF AUC 0.6130->0.6131, held-out test AUC
+    0.6399->0.6402 — noise, not a lift. See SECTOR_FEATURE_COLS's comment / --sector-ablation.
+  - delivery% (stock_delivery_data) only covers ~300 of this file's ~1150+ training dates —
+    see DELIVERY_FEATURE_COLS's comment / --delivery-ablation for the restricted-window read.
+  - options OI (so_option_chain/stock_options_oi) cover only ~44-54 dates, a single regime —
+    too sparse to measure meaningfully; not wired in, not ablated either.
+
 Run:
-    python breakout_classifier.py --train           # fit + report purged-OOF AUC
-    python breakout_classifier.py --score            # write breakout_probability for latest date
+    python breakout_classifier.py --train              # fit + report purged-OOF AUC
+    python breakout_classifier.py --score               # write breakout_probability for latest date
+    python breakout_classifier.py --delivery-ablation   # measure delivery% on its covered window only
+    python breakout_classifier.py --sector-ablation     # measure sector-relative return (full panel)
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import argparse
 import datetime
@@ -28,7 +42,9 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, translate, use_postgres
-from model_promotion import decide_promotion_with_nan_guard
+from model_promotion import decide_promotion_with_nan_guard, file_staleness_override_applies
+from relative_strength import build_sector_features
+import sys
 
 RET_THRESHOLD = 0.06     # +6% forward move = breakout
 HORIZON = 10             # within the next 10 trading days
@@ -61,6 +77,26 @@ FEATURE_COLS = [
     "consec_up",          # up-day streak length (momentum persistence)
     "hv_ratio_10_60",     # short vs long realized vol — vol regime shift
 ]
+
+# Sector-relative features (rs_vs_sector_21d/63d, reusing relative_strength.py's tested
+# build_sector_features -- not reimplemented) are full-history-safe (sector membership is a
+# static join against nse_stocks) but are NOT in FEATURE_COLS: measured live 2026-09-02 on
+# the identical 775,254-row/1,153-date panel, they moved purged-OOF AUC 0.6130->0.6131 and
+# held-out test AUC 0.6399->0.6402 -- both deltas are noise (a couple thousandths), not a
+# real lift. This is a second, independent confirmation (after measurement.md's rejected
+# sector-neutral value/momentum factors) that sector-relative framing doesn't help on this
+# platform's data. Kept as --sector-ablation (writes no model) so a future re-test after
+# more history/regimes accumulate doesn't have to re-derive this wiring from scratch.
+SECTOR_FEATURE_COLS = ["rs_vs_sector_21d", "rs_vs_sector_63d"]
+
+# Delivery features are NOT in FEATURE_COLS / the production blend either. stock_delivery_data
+# only spans ~302 dates (2025-06-20 onward) against this file's 2000-day (~5.5y) training
+# lookback -- wiring it into FEATURE_COLS directly would fillna(0.0) roughly 80% of training
+# rows with a value meaning "no delivery data", which is exactly the era-mixing failure this
+# file's own module docstring says it was rewritten to avoid (see the FEATURE_COLS comment
+# above about the old technical_signals join). Measure on the restricted delivery-covered
+# window instead (--delivery-ablation) before ever promoting these into FEATURE_COLS.
+DELIVERY_FEATURE_COLS = ["delivery_pct", "delivery_pct_chg_5d", "delivery_qty_surge"]
 
 
 # ── pure label core ───────────────────────────────────────────────────────────
@@ -153,6 +189,33 @@ def compute_ohlcv_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _load_sector_map() -> pd.Series:
+    """symbol -> sector, from nse_stocks (100% populated live, 14 sectors, static
+    membership) -- so unlike delivery/options this join is safe over the FULL training
+    history, not just a recent window. Used only by --sector-ablation; not in the
+    production train/score path -- see SECTOR_FEATURE_COLS's comment for why."""
+    df = read_df("SELECT symbol, sector FROM nse_stocks WHERE sector IS NOT NULL")
+    if df.empty:
+        return pd.Series(dtype=object)
+    return df.drop_duplicates("symbol").set_index("symbol")["sector"]
+
+
+def compute_delivery_features(delivery: pd.DataFrame) -> pd.DataFrame:
+    """delivery: long frame (symbol, date, delivery_pct, delivery_qty). Returns long frame
+    with DELIVERY_FEATURE_COLS. Not called from the production train/score path -- see
+    DELIVERY_FEATURE_COLS's comment; this exists only for --delivery-ablation."""
+    pct = delivery.pivot_table(index="date", columns="symbol", values="delivery_pct").sort_index()
+    qty = delivery.pivot_table(index="date", columns="symbol", values="delivery_qty").sort_index()
+    f: dict[str, pd.DataFrame] = {}
+    f["delivery_pct"] = pct
+    f["delivery_pct_chg_5d"] = pct - pct.shift(5)
+    f["delivery_qty_surge"] = qty / qty.rolling(20).mean()
+    parts = [frame.stack(future_stack=True).rename(name) for name, frame in f.items()]
+    out = pd.concat(parts, axis=1).reset_index()
+    out.columns = ["date", "symbol"] + list(f.keys())
+    return out
+
+
 # ── training data ────────────────────────────────────────────────────────────
 
 def _load_ohlcv(cutoff: str) -> pd.DataFrame:
@@ -190,7 +253,7 @@ def _load_ohlcv(cutoff: str) -> pd.DataFrame:
                       f"delisted symbols, +{len(extra)} bars")
     except Exception as e:
         print(f"[BreakoutClassifier] survivorship fill unavailable ({str(e)[:80]}); "
-              "training on stock_ohlcv's current-universe-only history")
+              "training on stock_ohlcv's current-universe-only history", file=sys.stderr)
 
     return ohlcv
 
@@ -212,8 +275,8 @@ def load_labeled_features(horizon: int = HORIZON) -> pd.DataFrame:
     return df.dropna(subset=FEATURE_COLS, how="any").reset_index(drop=True)
 
 
-def _feature_matrix(df: pd.DataFrame):
-    return df[FEATURE_COLS].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+def _feature_matrix(df: pd.DataFrame, feature_cols: list[str] = FEATURE_COLS):
+    return df[feature_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
 def _make_model(spw: float):
@@ -230,7 +293,7 @@ def _make_model(spw: float):
 
 
 def evaluate_purged_cv(df: pd.DataFrame, embargo: int = EMBARGO, n_folds: int = 4,
-                        holdout_frac: float = 0.15) -> dict:
+                        holdout_frac: float = 0.15, feature_cols: list[str] = FEATURE_COLS) -> dict:
     """Purged walk-forward OOF AUC — the honest read on whether breakouts are predictable.
     CRITICAL: purge by DATE, not by row. The label looks forward `horizon` trading days,
     and each date holds ~170 rows, so a row-based gap (TimeSeriesSplit gap=10) leaves the
@@ -261,7 +324,7 @@ def evaluate_purged_cv(df: pd.DataFrame, embargo: int = EMBARGO, n_folds: int = 
         keep = set(all_dates[::2])
         df = df[df["date"].isin(keep)].reset_index(drop=True)
     y = df["flew"].astype(int)
-    X = _feature_matrix(df)
+    X = _feature_matrix(df, feature_cols)
     base_rate = float(y.mean())
     spw = (1 - base_rate) / max(base_rate, 1e-6)
 
@@ -341,6 +404,19 @@ def evaluate_purged_cv(df: pd.DataFrame, embargo: int = EMBARGO, n_folds: int = 
             "df": df, "cv_df": cv_df, "oof": oof}
 
 
+def _load_baseline_metrics(model_path: str) -> dict | None:
+    """Full baseline dict (not just test_auc) -- needed for the staleness-override rejection
+    bookkeeping (first_rejected_at/rejection_count, ml-promotion-gate-review 2026-08-15), which
+    lives inside this same pickle so a file-based baseline doesn't need a model_registry row."""
+    if not os.path.exists(model_path):
+        return None
+    try:
+        with open(model_path, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
 def _load_baseline_test_auc(model_path: str) -> float | None:
     """The currently-active model's own stored test_auc, or None if there's no existing
     model or it can't be read. Mirrors movement_predictor.py's helper of the same name --
@@ -357,7 +433,7 @@ def _load_baseline_test_auc(model_path: str) -> float | None:
         return existing.get("test_auc")
     except Exception as e:
         print(f"[Breakout] Could not read existing model at {model_path} for comparison "
-              f"({e}) -- treating as no baseline.")
+              f"({e}) -- treating as no baseline.", file=sys.stderr)
         return None
 
 
@@ -368,6 +444,50 @@ def _breakout_promotion_decision(test_auc: float, baseline_test_auc: float | Non
     identical _movement_promotion_decision) -- same comparison, same NaN handling."""
     return decide_promotion_with_nan_guard(test_auc, baseline_test_auc, BREAKOUT_PROMOTION_MARGIN,
                                             metric_name="test AUC")
+
+
+def _promote_or_reject_breakout(payload: dict, test_auc: float, auc: float) -> bool:
+    """Writes payload to MODEL_PATH (promoted) or CANDIDATE_PATH (rejected), gated by
+    _breakout_promotion_decision() plus the staleness-override safety valve. Extracted from
+    train() so this decision+write logic is directly testable without a real feature/fit pass
+    (ml-promotion-gate-review, 2026-08-15). Returns whether the model was activated.
+
+    STALENESS OVERRIDE: this file's baseline lives in a pickle, not model_registry, so it had
+    no equivalent to ml_ensemble.py/cs_ranker.py's safety valve against a baseline that's
+    become permanently unbeatable -- every future honest retrain would reject forever.
+    Rejection bookkeeping (first_rejected_at/rejection_count) lives inside the baseline dict
+    itself; see model_promotion.file_staleness_override_applies()'s docstring for the contract.
+    """
+    baseline = _load_baseline_metrics(MODEL_PATH)
+    baseline_test_auc = baseline.get("test_auc") if baseline else None
+    promote, refusal_reason = _breakout_promotion_decision(test_auc, baseline_test_auc)
+
+    staleness_override, age_days, rejection_count = (False, 0.0, 0)
+    if not promote:
+        staleness_override, age_days, rejection_count = file_staleness_override_applies(baseline)
+
+    if promote or staleness_override:
+        with open(MODEL_PATH, "wb") as f:
+            pickle.dump(payload, f)
+        if staleness_override and not promote:
+            print(f"[Breakout] STALENESS OVERRIDE — baseline unbeaten {age_days:.1f}d across "
+                  f"{rejection_count} rejections ({refusal_reason}) -- promoting anyway -> {MODEL_PATH}")
+        else:
+            print(f"[Breakout] PROMOTED (OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}, "
+                  f"baseline {baseline_test_auc}) -> {MODEL_PATH}")
+        return True
+
+    if baseline is not None:
+        baseline["rejection_count"] = rejection_count + 1
+        baseline.setdefault("first_rejected_at", datetime.datetime.now().isoformat())
+        with open(MODEL_PATH, "wb") as f:
+            pickle.dump(baseline, f)
+    with open(CANDIDATE_PATH, "wb") as f:
+        pickle.dump(payload, f)
+    print(f"[Breakout] REJECTED — {refusal_reason} Candidate saved to {CANDIDATE_PATH}; "
+          f"active model at {MODEL_PATH} left untouched (rejection bookkeeping updated: "
+          f"{rejection_count + 1} rejections so far).")
+    return False
 
 
 def train(report_only: bool = False, leak_check: bool = False) -> dict:
@@ -426,22 +546,10 @@ def train(report_only: bool = False, leak_check: bool = False) -> dict:
                "horizon": HORIZON, "trained_at": datetime.date.today().isoformat(),
                "oof_auc": auc, "test_auc": test_auc}
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-
-    baseline_test_auc = _load_baseline_test_auc(MODEL_PATH)
-    promote, refusal_reason = _breakout_promotion_decision(test_auc, baseline_test_auc)
-    if promote:
-        with open(MODEL_PATH, "wb") as f:
-            pickle.dump(payload, f)
-        print(f"[Breakout] PROMOTED (OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}, "
-              f"baseline {baseline_test_auc}) -> {MODEL_PATH}")
-    else:
-        with open(CANDIDATE_PATH, "wb") as f:
-            pickle.dump(payload, f)
-        print(f"[Breakout] REJECTED — {refusal_reason} Candidate saved to {CANDIDATE_PATH}; "
-              f"active model at {MODEL_PATH} left untouched.")
+    promoted = _promote_or_reject_breakout(payload, test_auc, auc)
 
     return {"trained": True, "n": len(y), "auc": auc, "test_auc": test_auc, "base_rate": base_rate,
-            "lift": lift, "promoted": promote}
+            "lift": lift, "promoted": promoted}
 
 
 def score() -> int:
@@ -455,7 +563,7 @@ def score() -> int:
     conn = connect()
     cur = conn.cursor()
     try:
-        cur.execute(translate("ALTER TABLE technical_signals ADD COLUMN breakout_probability REAL"))
+        cur.execute(translate("ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS breakout_probability REAL"))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -489,16 +597,110 @@ def score() -> int:
     return len(today)
 
 
+def sector_ablation() -> dict:
+    """Full-history measurement of whether sector-relative return (rs_vs_sector_21d/63d)
+    lifts the classifier -- unlike delivery/options, sector membership is a static join so
+    both arms can run on the SAME full training panel (no restricted-window caveat needed).
+    Writes no model. Re-run this if the universe/regime mix changes materially -- last run
+    (2026-09-02, 775,254 rows / 1,153 dates) found a null result, recorded in
+    SECTOR_FEATURE_COLS's comment and measurement.md."""
+    df = load_labeled_features()
+    if df.empty:
+        print("[Breakout][sector-ablation] no labeled features; aborting.")
+        return {"ran": False}
+
+    sector_map = _load_sector_map()
+    # Recompute sector features straight from OHLCV (df has no close-pivot-ready shape).
+    cutoff = (datetime.date.today() - datetime.timedelta(days=TRAIN_LOOKBACK_DAYS)).isoformat()
+    ohlcv = _load_ohlcv(cutoff)
+    ohlcv_sec = ohlcv[["symbol", "date", "close"]].copy()
+    ohlcv_sec["sector"] = ohlcv_sec["symbol"].map(sector_map)
+    sector_feats = build_sector_features(ohlcv_sec)
+    if sector_feats.empty:
+        print("[Breakout][sector-ablation] no sector features computed; aborting.")
+        return {"ran": False}
+
+    augmented_df = df.merge(sector_feats, on=["symbol", "date"], how="inner")
+    augmented_df = augmented_df.dropna(subset=SECTOR_FEATURE_COLS, how="any").reset_index(drop=True)
+    n_dates = augmented_df["date"].nunique()
+    print(f"[Breakout][sector-ablation] {len(augmented_df)} rows across {n_dates} dates "
+          f"(vs {df['date'].nunique()} dates in the full training history)")
+
+    baseline = evaluate_purged_cv(augmented_df, feature_cols=FEATURE_COLS)
+    augmented = evaluate_purged_cv(augmented_df, feature_cols=FEATURE_COLS + SECTOR_FEATURE_COLS)
+    print(f"[Breakout][sector-ablation] baseline  OOF AUC={baseline['auc']:.4f} "
+          f"test AUC={baseline['test_auc']:.4f}")
+    print(f"[Breakout][sector-ablation] +sector   OOF AUC={augmented['auc']:.4f} "
+          f"test AUC={augmented['test_auc']:.4f}")
+    return {"ran": True, "n_dates": n_dates, "n_rows": len(augmented_df),
+            "baseline_auc": baseline["auc"], "baseline_test_auc": baseline["test_auc"],
+            "augmented_auc": augmented["auc"], "augmented_test_auc": augmented["test_auc"]}
+def delivery_ablation() -> dict:
+    """Apples-to-apples measurement of whether stock_delivery_data helps, restricted to the
+    ~300 dates it actually covers (2025-06-20 onward) so both arms train/validate on the
+    IDENTICAL row set -- comparing a full-history AUC against a delivery-augmented AUC on a
+    different date range would conflate "delivery helps" with "recent regime is easier",
+    exactly the trap measurement.md's panel-spec section warns about. Prints both purged-OOF
+    and held-out test AUC for FEATURE_COLS alone vs FEATURE_COLS+DELIVERY_FEATURE_COLS;
+    does NOT write a model or touch MODEL_PATH -- this is evidence-gathering only. Promote
+    delivery into FEATURE_COLS/production only if this shows a clear, reproducible lift."""
+    df = load_labeled_features()
+    if df.empty:
+        print("[Breakout][delivery-ablation] no labeled features; aborting.")
+        return {"ran": False}
+
+    delivery = read_df("SELECT symbol, date, delivery_pct, delivery_qty FROM stock_delivery_data ORDER BY date")
+    if delivery.empty:
+        print("[Breakout][delivery-ablation] stock_delivery_data is empty; aborting.")
+        return {"ran": False}
+    delivery["date"] = pd.to_datetime(delivery["date"]).dt.strftime("%Y-%m-%d")
+    delivery_feats = compute_delivery_features(delivery)
+
+    restricted = df.merge(delivery_feats, on=["symbol", "date"], how="inner")
+    restricted = restricted.dropna(subset=DELIVERY_FEATURE_COLS, how="any").reset_index(drop=True)
+    n_dates = restricted["date"].nunique()
+    print(f"[Breakout][delivery-ablation] restricted window: {len(restricted)} rows across "
+          f"{n_dates} dates (vs {df['date'].nunique()} dates in the full training history)")
+    if n_dates < 2 * EMBARGO:
+        print(f"[Breakout][delivery-ablation] only {n_dates} dates -- too few for a purged "
+              f"CV with embargo={EMBARGO}; re-run once more delivery history accumulates.")
+        return {"ran": False, "n_dates": n_dates}
+
+    baseline = evaluate_purged_cv(restricted, feature_cols=FEATURE_COLS)
+    augmented = evaluate_purged_cv(restricted, feature_cols=FEATURE_COLS + DELIVERY_FEATURE_COLS)
+    print(f"[Breakout][delivery-ablation] baseline   OOF AUC={baseline['auc']:.4f} "
+          f"test AUC={baseline['test_auc']:.4f}")
+    print(f"[Breakout][delivery-ablation] +delivery  OOF AUC={augmented['auc']:.4f} "
+          f"test AUC={augmented['test_auc']:.4f}")
+    return {"ran": True, "n_dates": n_dates, "n_rows": len(restricted),
+            "baseline_auc": baseline["auc"], "baseline_test_auc": baseline["test_auc"],
+            "augmented_auc": augmented["auc"], "augmented_test_auc": augmented["test_auc"]}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Breakout classifier (Lever #4)")
     parser.add_argument("--train", action="store_true", help="Fit + report purged-OOF AUC")
     parser.add_argument("--report", action="store_true", help="Evaluate only, don't save a model")
     parser.add_argument("--leak-check", action="store_true", help="Run the leak-canary test (re-runs OOF CV on an extra-lagged copy of the features; expensive, opt-in)")
     parser.add_argument("--score", action="store_true", help="Write breakout_probability for latest date")
+    parser.add_argument("--delivery-ablation", action="store_true",
+                         help="Measure stock_delivery_data's effect on the restricted date range it covers; writes no model")
+    parser.add_argument("--sector-ablation", action="store_true",
+                         help="Measure sector-relative return's effect on the full training panel; writes no model")
     args = parser.parse_args()
     if args.train or args.report:
         train(report_only=args.report, leak_check=args.leak_check)
     if args.score:
         score()
-    if not (args.train or args.report or args.score):
+    if args.delivery_ablation:
+        delivery_ablation()
+    if args.sector_ablation:
+        sector_ablation()
+    if not (args.train or args.report or args.score or args.delivery_ablation or args.sector_ablation):
         train(report_only=True)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

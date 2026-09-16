@@ -13,6 +13,7 @@ as computed that day) -- no backfill is possible for history before this script 
 Run:  python factor_breakdown_snapshot.py
 """
 
+import polars as pl
 import datetime
 
 from db_compat import connect
@@ -65,3 +66,9 @@ def run() -> int:
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -73,8 +73,10 @@ export function triggerRetrainIfNeeded() {
 }
 
 export default { updateScreenerReliability, triggerRetrainIfNeeded };
-export function updateMonitorState(taskName: string, state: 'success' | 'failed', message?: string) {
+export function updateMonitorState(
+  taskName: string, state: 'success' | 'failed', message?: string, durationMs?: number,
+) {
   // Fire-and-forget: recordHeartbeat already swallows its own errors and this function's
   // callers (queues.ts worker event handlers) are synchronous void calls.
-  void recordHeartbeat(taskName, state, message);
+  void recordHeartbeat(taskName, state, message, durationMs);
 }

@@ -26,6 +26,7 @@ Run:
     python commodity_sensitivity.py --days 90
 """
 
+import polars as pl
 import argparse
 import datetime
 
@@ -33,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, executemany, read_df, translate
+import sys
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -59,7 +61,7 @@ def ensure_schema() -> None:
     for col in COLUMNS:
         try:
             conn = connect()
-            conn.execute(translate(f"ALTER TABLE technical_signals ADD COLUMN {col} REAL"))
+            conn.execute(translate(f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} REAL"))
             conn.commit()
             conn.close()
             print(f"[CommoditySensitivity] Added column technical_signals.{col}")
@@ -86,7 +88,7 @@ def load_macro_returns(cutoff: str) -> pd.DataFrame:
             (cutoff,),
         )
     except Exception as exc:
-        print(f"[CommoditySensitivity] Could not read macro_asset_prices: {exc}")
+        print(f"[CommoditySensitivity] Could not read macro_asset_prices: {exc}", file=sys.stderr)
         return pd.DataFrame()
 
     if raw.empty:
@@ -149,7 +151,15 @@ def compute_corr_for_symbol(
         if len(aligned) < min_overlap:
             result[asset] = None
         else:
-            corr = aligned["stock"].corr(aligned["macro"])
+            # A constant series (a suspended/illiquid name that did not move across the
+            # whole window) has zero stddev, so pandas' pearson path divides by zero inside
+            # np.corrcoef and returns NaN. That NaN is HANDLED on the next line -- it is
+            # written as NULL, which is the honest answer. Silence only this warning, only
+            # here: letting it reach stderr made every run of this script read as a
+            # real_error in the app log while it was behaving exactly as designed
+            # (AF-20260912-03). Scoped with errstate so an overflow anywhere else still shows.
+            with np.errstate(invalid="ignore", divide="ignore"):
+                corr = aligned["stock"].corr(aligned["macro"])
             result[asset] = None if np.isnan(corr) else round(float(corr), 6)
     return result
 
@@ -274,3 +284,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     run(symbol=args.symbol, window=args.days)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

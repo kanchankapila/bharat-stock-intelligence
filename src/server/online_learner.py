@@ -18,15 +18,16 @@ Run:  python online_learner.py
       python online_learner.py --min-new 10  # only update if ≥10 new outcomes
       python online_learner.py --dry-run
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
-import os, sys, json, datetime, argparse, pickle, warnings
+import copy, os, sys, json, datetime, argparse, pickle, warnings
 warnings.filterwarnings('ignore')
 
 import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, ConnWrapper
-from as_of import as_of_join_sql
 
 # Script-relative, not os.getcwd()-relative -- see ml_ensemble.py's MODELS_DIR comment.
 MODELS_DIR     = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_models')
@@ -52,53 +53,23 @@ def load_recent_outcomes(window_days: int, min_new: int) -> pd.DataFrame:
     ml_ensemble.load_training_data so build_features() receives every column
     it expects (missing ones default safely inside the ensemble's num() helper).
     """
+    # 2026-08-30: was a hand-rolled ~30-column SELECT while build_features() (called on this
+    # DataFrame two calls downstream) reads 304 raw columns -- the other ~90% silently defaulted
+    # to constants via num()'s fallback, same bug class as cs_ranker.py/exit_policy.py (see
+    # ml-model-bugs.md). Worse here than in those two: load_pending_signals() below already
+    # delegates to ml_ensemble's canonical (full-width) query, so the SGD/PassiveAggressive
+    # models were trained on a narrow constant-padded vector but SCORED on the real wide one --
+    # a train/serve feature-distribution skew, not just a narrower model. Fixed by sharing the
+    # same full_feature_train_sql() cs_ranker.py/exit_policy.py now use.
+    from ml_ensemble import full_feature_train_sql  # deferred, see build_features() above
     cutoff = (datetime.datetime.now() - datetime.timedelta(days=window_days)).strftime('%Y-%m-%d')
+    select_cols, joins = full_feature_train_sql('so', 'signal_date')
     q = f"""
         SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
                so.signal_score, so.signals_json,
-               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
-               ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
-               ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
-               ts.sector_ret_5d, ts.sector_ret_21d,
-               ts.iv_rank, ts.iv_skew,
-               ts.rs_rank_21d, ts.rs_rank_63d,
-               ts.insider_buy_pct_90d,
-               ts.opening_range_break, ts.vwap_deviation_pct, ts.first_hour_vol_share,
-               COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
-               COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
-               COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
-               COALESCE(fh.operating_margins, sf.operating_margins)     AS operating_margins,
-               COALESCE(fh.return_on_equity, sf.return_on_equity)       AS return_on_equity,
-               COALESCE(fh.revenue_growth, sf.revenue_growth)           AS revenue_growth,
-               COALESCE(fh.earnings_growth, sf.earnings_growth)         AS earnings_growth,
-               COALESCE(fh.earnings_yield, sf.earnings_yield)           AS earnings_yield,
-               COALESCE(fh.price_to_book, sf.price_to_book)             AS price_to_book,
-               COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap,
-               aeh.n_analysts, aeh.buy_count, aeh.target_mean,
-               psh_az.score_value AS altman_z,
-               psh_oo.score_value AS ohlson_o
+               {select_cols}
         FROM signal_outcomes so
-        LEFT JOIN technical_signals ts
-               ON ts.symbol = so.symbol AND ts.date = so.signal_date
-        {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
-        LEFT JOIN stock_fundamentals sf ON sf.symbol = so.symbol
-        {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}
-        LEFT JOIN proprietary_scores_history psh_az
-               ON psh_az.symbol = so.symbol AND psh_az.source = 'moneycontrol'
-              AND psh_az.score_type = 'altman_z_score'
-              AND psh_az.date = (
-                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
-                  WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'altman_z_score' AND p2.date <= so.signal_date
-              )
-        LEFT JOIN proprietary_scores_history psh_oo
-               ON psh_oo.symbol = so.symbol AND psh_oo.source = 'moneycontrol'
-              AND psh_oo.score_type = 'ohlson_o_score'
-              AND psh_oo.date = (
-                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
-                  WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'ohlson_o_score' AND p2.date <= so.signal_date
-              )
+        {joins}
         WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
           AND so.signal_date >= ?
           AND so.signal_source = 'technical'
@@ -149,7 +120,7 @@ def load_or_init_sgd(expected_n_features: int | None = None) -> dict:
                     return _new_sgd_state()
             return state
         except Exception as e:
-            print(f"[OnlineLearner] Could not load SGD state ({e}) — reinitialising.")
+            print(f"[OnlineLearner] Could not load SGD state ({e}) — reinitialising.", file=sys.stderr)
     return _new_sgd_state()
 
 
@@ -196,18 +167,25 @@ def predict_sgd(state: dict, X: np.ndarray) -> np.ndarray:
 ONLINE_REGRESSION_TOLERANCE = 0.02
 
 
-def register_update(conn: ConnWrapper, state: dict, n_new: int, cv_auc: float):
-    """Registers this incremental update in model_registry.
+def register_update(conn: ConnWrapper, state: dict, n_new: int, cv_auc: float) -> bool:
+    """Registers this incremental update in model_registry. Returns whether it was marked
+    active -- the caller uses this to decide whether to persist the post-update SGD state to
+    disk or revert to its own pre-update snapshot (see run()'s save_sgd call).
 
     Promotion gate (Finding #17, 2026-07-28 full-stack audit): this used to insert every
     update as is_active=1 with no comparison to pre-update state and no deactivation of
     prior rows -- model_registry could accumulate multiple 'active' online_sgd rows, and a
     regressed update was indistinguishable from a good one to anything reading is_active.
-    Unlike confluence_ml_engine.py/cs_ranker.py, partial_fit has already mutated the live
-    SGD state by the time this is called (there is no separate candidate file to withhold),
-    so this can't prevent a bad batch from being absorbed -- what it CAN do, and now does,
-    is keep model_registry honest: deactivate the previous active row, and only mark this
-    one active if cv_auc didn't regress beyond ONLINE_REGRESSION_TOLERANCE versus it.
+    Deactivate the previous active row, and only mark this one active if cv_auc didn't
+    regress beyond ONLINE_REGRESSION_TOLERANCE versus it.
+
+    Fixed 2026-08-15 (recurring-bugs.md, "the live online_sgd.pkl is never withheld even when
+    cv_auc regresses"): partial_fit mutates the live SGD state in place with no undo, so this
+    function alone can't prevent a bad batch from being absorbed into the in-memory state --
+    but the ON-DISK file is a different question. run() now snapshots state before partial_fit
+    and only writes the post-update state to disk if this returns True, otherwise it re-persists
+    the pre-update snapshot -- so a regression this function correctly refuses to mark active no
+    longer survives into the next process that loads online_sgd.pkl either.
     """
     baseline_auc = None
     try:
@@ -244,6 +222,7 @@ def register_update(conn: ConnWrapper, state: dict, n_new: int, cv_auc: float):
         notes,
     ))
     conn.commit()
+    return bool(is_active)
 
 
 # ── Score pending signals ─────────────────────────────────────────────────────
@@ -291,8 +270,14 @@ def score_pending_with_ensemble_blend(
         probs = sgd_probs
 
     cur = conn.cursor()
+    # Stamp win_probability_scored_at here too (migration 1787050000000) -- this writer runs
+    # before ml_ensemble.py's do_score pass in the daily job chain (queues.ts) and fills
+    # win_probability for the whole universe, so do_score's own `WHERE win_probability IS
+    # NULL` candidate query finds nothing left to score and its stamp never fires. Confirmed
+    # live: win_probability_scored_at was 0% populated on 7 of the last 9 trading days.
     cur.executemany(
-        "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND date = ?",
+        "UPDATE technical_signals SET win_probability = ?, win_probability_scored_at = CURRENT_TIMESTAMP "
+        "WHERE symbol = ? AND date = ?",
         [(round(float(prob), 4), row['symbol'], row['signal_date'])
          for (_, row), prob in zip(df.iterrows(), probs)],
     )
@@ -318,7 +303,7 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
     try:
         from sklearn.linear_model import SGDClassifier
     except ImportError:
-        print("[OnlineLearner] scikit-learn not installed.")
+        print("[OnlineLearner] scikit-learn not installed.", file=sys.stderr)
         sys.exit(1)
 
     print(f"[OnlineLearner] Starting at {datetime.datetime.now()}")
@@ -361,6 +346,10 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
             print("[OnlineLearner] Dry-run: skipping update and scoring.")
             return
 
+        # Snapshot before partial_fit mutates state in place (no undo exists for online
+        # learning otherwise) -- restored below if register_update rejects this batch, so a
+        # regression is not persisted to disk even though it can't be un-absorbed in memory.
+        pre_update_state = copy.deepcopy(state)
         state = partial_fit_sgd(state, Xtrain, ytrain)
 
         # Crude AUC on val set
@@ -376,15 +365,21 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
 
         print(f"[OnlineLearner] Updated — samples_seen={state['n_samples_seen']}  "
               f"val_AUC={cv_auc:.4f}")
-        save_sgd(state)
-        register_update(conn, state, len(df), cv_auc)
+        is_active = register_update(conn, state, len(df), cv_auc)
+        # save_sgd used to run unconditionally BEFORE register_update, so a regressed batch's
+        # weights were persisted to disk even when model_registry correctly refused to mark it
+        # active -- the on-disk file and the registry's "what's live" claim could disagree.
+        # Persist the pre-update snapshot instead when rejected.
+        save_sgd(state if is_active else pre_update_state)
+        if not is_active:
+            print("[OnlineLearner] Regressed update NOT persisted to disk — reverted to the pre-update SGD state.")
 
         try:
             from signal_type_priors import update_priors_from_outcomes
             update_priors_from_outcomes(df[['signals_json', 'outcome']])
             print(f"[OnlineLearner] Signal-type priors updated.")
         except Exception as e:
-            print(f"[OnlineLearner] Prior update skipped: {e}")
+            print(f"[OnlineLearner] Prior update skipped: {e}", file=sys.stderr)
 
         # Load ensemble for blended scoring
         ensemble = None
@@ -413,3 +408,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run(window_days=args.window, min_new=args.min_new, dry_run=args.dry_run)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

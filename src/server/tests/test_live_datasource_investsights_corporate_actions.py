@@ -12,6 +12,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import investsights_corporate_actions_fetcher as ica
 from live_datasource_helpers import assert_non_empty_response, assert_stored_row_ml_usable
@@ -45,7 +46,7 @@ class TestInvestsightsCorporateActionsLiveDataSource:
         rows = [r for r in (ica.parse_action(a, universe) for a in actions) if r is not None]
         assert_non_empty_response(rows, "resolved filed-action rows")
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         ica.ensure_schema(con)
         stored = ica.store(con, rows)
         assert stored == len(rows)

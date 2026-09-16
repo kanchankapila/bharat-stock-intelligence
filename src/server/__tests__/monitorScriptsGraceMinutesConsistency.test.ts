@@ -122,7 +122,6 @@ describe('MONITOR_SCRIPTS.graceMinutes consistency', () => {
     'regime-detector': [{ jobKey: 'dl-regime-daily', marker: "jobName: 'dl-regime-daily'" }],
     'feature-engineering': [{ jobKey: 'dl-feature-daily', marker: "jobName: 'dl-feature-daily'" }],
     'reward-engine': [{ jobKey: 'ml-daily-ops', marker: 'mlDailyOpsWorker = new Worker' }],
-    'rl-agent-update': [{ jobKey: 'ml-daily-ops', marker: 'mlDailyOpsWorker = new Worker' }],
     'dl-engine-infer': [{ jobKey: 'dl-infer-daily', marker: "jobName: 'dl-infer-daily'" }],
     'signal-type-stats': [{ jobKey: 'ml-daily-ops', marker: 'mlDailyOpsWorker = new Worker' }],
     'screener-performance': [{ jobKey: 'screener-performance-daily', marker: "jobName: 'screener-performance-daily'" }],

@@ -65,7 +65,7 @@ export const WhyThisPick: React.FC<{ symbol: string; timeframe?: 'long_term' | '
         onClick={() => setExpanded(v => !v)}
         className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-900/40 transition-colors"
       >
-        <span className="text-xs font-black text-slate-300 uppercase tracking-widest font-mono flex items-center gap-2">
+        <span className="text-xs font-black text-slate-300 font-display uppercase tracking-widest font-data flex items-center gap-2">
           <BrainCircuit className="w-4 h-4 text-indigo-400" /> Why This Score
           {score?.classification && (
             <span className={cn("text-[9px] px-2 py-0.5 rounded border font-bold normal-case tracking-normal", CLASS_COLORS[score.classification] || "text-slate-400 bg-slate-500/10 border-slate-700")}>
@@ -80,7 +80,7 @@ export const WhyThisPick: React.FC<{ symbol: string; timeframe?: 'long_term' | '
         <div className="px-6 pb-6 space-y-5">
           {factorEntries.length > 0 && (
             <div>
-              <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-2">{symbol}'s Factor Contributions</p>
+              <p className="text-[9px] font-bold text-slate-500 font-display uppercase tracking-wider mb-2">{symbol}'s Factor Contributions</p>
               <div className="space-y-2">
                 {factorEntries.map(f => {
                   const isPos = f.value >= 0;
@@ -95,7 +95,7 @@ export const WhyThisPick: React.FC<{ symbol: string; timeframe?: 'long_term' | '
                           style={{ width: `${widthPct}%` }}
                         />
                       </div>
-                      <span className={cn("text-[10px] font-mono w-14 text-right", isPos ? "text-emerald-400" : "text-rose-400")}>
+                      <span className={cn("text-[10px] font-data w-14 text-right", isPos ? "text-emerald-400" : "text-rose-400")}>
                         {isPos ? '+' : ''}{f.value.toFixed(1)}
                       </span>
                     </div>
@@ -107,7 +107,7 @@ export const WhyThisPick: React.FC<{ symbol: string; timeframe?: 'long_term' | '
 
           {reasons.length > 0 && (
             <div>
-              <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+              <p className="text-[9px] font-bold text-slate-500 font-display uppercase tracking-wider mb-2">
                 Items Feeding This Score
                 {(score?.positive_count != null || score?.negative_count != null) && (
                   <span className="normal-case text-slate-600"> — {score.positive_count ?? 0} positive, {score.negative_count ?? 0} negative</span>
@@ -137,12 +137,12 @@ export const WhyThisPick: React.FC<{ symbol: string; timeframe?: 'long_term' | '
 
           {globalDrivers && Array.isArray(globalDrivers) && globalDrivers.length > 0 && (
             <div>
-              <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+              <p className="text-[9px] font-bold text-slate-500 font-display uppercase tracking-wider mb-2">
                 Model-Wide Top Drivers <span className="normal-case text-slate-600">(same for every stock — context, not specific to {symbol})</span>
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {globalDrivers.map((d: any, i: number) => (
-                  <span key={i} className="text-[10px] font-mono px-2 py-1 rounded bg-slate-800/60 text-slate-400 border border-slate-800">
+                  <span key={i} className="text-[10px] font-data px-2 py-1 rounded bg-slate-800/60 text-slate-400 border border-slate-800">
                     {d.feature_name}
                   </span>
                 ))}

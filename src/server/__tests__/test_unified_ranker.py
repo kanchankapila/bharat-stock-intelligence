@@ -7,11 +7,12 @@ import pytest
 
 # Add src/server to path so we can import unified_ranker
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 
 def make_db():
     """Create in-memory SQLite with required tables."""
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript('''
         CREATE TABLE screener_catalog (
@@ -86,9 +87,11 @@ def make_db():
             symbol TEXT NOT NULL, computed_at TEXT NOT NULL, generated_at TEXT NOT NULL,
             regime TEXT, unified_score REAL, conviction_level TEXT, classification TEXT,
             screener_stock_score REAL, ml_score REAL, confluence_score REAL,
-            technical_score REAL, cs_score REAL, breakout_score REAL, smart_money_score REAL,
+            technical_score REAL, cs_score REAL, dl_score REAL, breakout_score REAL,
+            smart_money_score REAL,
             fundamental_score REAL, engine_coverage_count INTEGER, entry_zone_low REAL,
             stop_loss REAL, target_1 REAL, position_size_pct REAL, sector TEXT,
+            win_probability REAL,
             PRIMARY KEY (symbol, generated_at)
         );
         CREATE TABLE unified_signals (
@@ -271,6 +274,28 @@ class TestUnifiedRankerRun:
         rows = conn.execute('SELECT * FROM unified_recommendations').fetchall()
         assert len(rows) > 0
         os.unlink(csv_path)
+
+    def test_engine_score_columns_null_not_zero_when_engine_has_no_row(self):
+        """AF-20260818-31/39 (unified_ranker.py has_data guard). INFY has a technical_signals
+        row (feeds ml_score/technical_score) but no confluence_signals row and no dl-feeding
+        data at all in this fixture -- confluence_score/dl_score must be NULL, not the engine's
+        absent-default 0.0, or the frontend's null-vs-zero display fix has nothing to key off
+        and a genuinely-uncovered engine looks identical to a real score of 0."""
+        import os
+        ranker, conn, csv_path = self._setup()
+        try:
+            results = ranker.run()
+            by_sym = {r['symbol']: r for r in results}
+            assert 'INFY' in by_sym
+            row = by_sym['INFY']
+            assert row['confluence_score'] is None, row['confluence_score']
+            assert row['dl_score'] is None, row['dl_score']
+            # sanity: engines that DO have a row for INFY must still be populated, not blanked
+            assert row['ml_score'] is not None
+            assert row['technical_score'] is not None
+            assert row['screener_stock_score'] is not None
+        finally:
+            os.unlink(csv_path)
 
     def test_history_snapshot_is_append_only_across_reruns(self):
         """A re-run must ADD a snapshot, never replace the previous run's.
@@ -532,10 +557,26 @@ class TestUnifiedRankerRun:
 
     def test_regime_weights_sum_to_one(self):
         from unified_ranker import REGIME_WEIGHTS
-        assert REGIME_WEIGHTS['BULL']['screener'] == 0.30
-        assert REGIME_WEIGHTS['CRASH']['screener'] == 0.40
+        # screener was shrunk 0.5x TWICE on the same policy and the same kind of evidence:
+        # 2026-08-20 (0.30 -> 0.15 BULL, 0.40 -> 0.20 CRASH) and again 2026-08-21
+        # (-> 0.075 / 0.10) after factor_edge put screener_stock_score at rank IC -0.033 @5d
+        # and -0.016 @10d on 35/30 dates while technical/dl were positive on identical rows.
+        # On 2026-08-24 (commit 0c666ec) ml was halved on its own arm evidence (dIC +0.0019,
+        # t=+2.05) and every regime re-normalized, lifting screener back up (BULL 0.08445,
+        # CRASH 0.115177 -- renormalization redistributes freed mass). Pin the POLICY
+        # invariant instead of a renormalization-sensitive number: screener stays below HALF
+        # its original pre-evidence weight (BULL 0.30, CRASH 0.40) in every regime. Climbing
+        # back above that line requires new measurement, not arithmetic.
+        # See measurement.md and REGIME_WEIGHTS' own comment block.
+        assert REGIME_WEIGHTS['BULL']['screener'] <= 0.15 + 1e-9
+        assert REGIME_WEIGHTS['CRASH']['screener'] <= 0.20 + 1e-9
         for regime, weights in REGIME_WEIGHTS.items():
             assert abs(sum(weights.values()) - 1.0) < 1e-9, f"{regime} weights don't sum to 1"
+        # breakout is PINNED by an independent audit-derived ceiling; a proportional
+        # redistribution must never scale it up. Pinning it here means a future reshuffle that
+        # forgets the exclusion fails on this line rather than silently breaching the ceiling.
+        assert [REGIME_WEIGHTS[r]['breakout'] for r in
+                ('BULL', 'BEAR', 'HIGH_VOL', 'CRASH', 'SIDEWAYS')] == [0.15, 0.05, 0.10, 0.05, 0.13]
 
 
 class TestSellRowGeometryBackstop:
@@ -622,11 +663,28 @@ class TestSellRowGeometryBackstop:
         ranker, conn, csv_path = TestUnifiedRankerRun()._setup()
         conn.execute("""
             INSERT INTO confluence_signals
-            (symbol, computed_at, confluence_score, entry_zone_low, entry_zone_high,
+            (symbol, computed_at, confluence_score, trend_alignment_score, volume_score,
+             sector_strength_score, fundamental_score, entry_zone_low, entry_zone_high,
              stop_loss, target_1, target_2, target_3, risk_reward, suggested_timeframe,
              trade_reasoning, sector)
-            VALUES ('INFY', date('now'), 75, 1500.0, 1520.0, 1450.0, 1600.0, 1650.0, 1700.0,
-                    2.0, 'SWING', 'clean long setup', 'IT')
+            VALUES ('INFY', date('now'), 75, 14.0, 9.0, 7.0, 11.0, 1500.0, 1520.0, 1450.0,
+                    1600.0, 1650.0, 1700.0, 2.0, 'SWING', 'clean long setup', 'IT')
+        """)
+        # WEAK also needs a (weak) confluence row. _normalize_to_100 has an n==1 special case
+        # that returns a flat 50 regardless of magnitude -- with INFY as the ONLY symbol in
+        # confluence_scores, its genuinely-strong sub-scores above were silently discarded to
+        # a neutral default rather than differentiating it from WEAK. Populating both, INFY
+        # clearly above WEAK, lets INFY earn the same top-of-2 percentile on confluence as it
+        # already does on screener/ml/technical -- this is what actually made the row marginal
+        # enough to stop clearing DIRECTIONLESS_BUY_FLOOR once screener's weight was reduced
+        # 2026-08-20 (measurement.md), not a fixture that was ever meant to represent an
+        # unambiguous Buy candidate in the first place (it was riding a ~70.02 razor's edge
+        # even under the old weights).
+        conn.execute("""
+            INSERT INTO confluence_signals
+            (symbol, computed_at, confluence_score, trend_alignment_score, volume_score,
+             sector_strength_score, fundamental_score, sector)
+            VALUES ('WEAK', date('now'), 10, 1.0, 1.0, 1.0, 1.0, 'IT')
         """)
         conn.commit()
         results = ranker.run()
@@ -1574,26 +1632,31 @@ class TestBuyFloorSelectivityReporting:
     def test_reports_fraction_and_warns_when_far_too_few_buys(self, capsys):
         # The real 2026-08-10 shape: 22 of 1842 cleared the floor.
         frac = self._ur()._report_buy_floor_selectivity(self._rows(22, 1820))
-        out = capsys.readouterr().out
+        # stderr, not stdout -- pythonRunner.ts's runPython() only inspects stderr for its
+        # "finished successfully with warnings" log.warn(); see recurring-bugs.md's
+        # "A degraded-read message printed to the wrong stream defeats the one hook..." entry.
+        err = capsys.readouterr().err
         assert abs(frac - 22 / 1842) < 1e-9
-        assert 'buy-floor selectivity' in out
-        assert 'WARNING' in out, "a 1.2% selectivity must trip the tripwire"
+        assert 'buy-floor selectivity' in err
+        assert 'WARNING' in err, "a 1.2% selectivity must trip the tripwire"
 
     def test_no_warning_inside_the_expected_band(self, capsys):
         # The pre-drift shape: ~33% of the universe actionable.
         frac = self._ur()._report_buy_floor_selectivity(self._rows(600, 1200))
-        out = capsys.readouterr().out
+        err = capsys.readouterr().err
         assert 0.32 < frac < 0.34
-        assert 'buy-floor selectivity' in out
-        assert 'WARNING' not in out
+        assert 'buy-floor selectivity' in err
+        assert 'WARNING' not in err
 
     def test_warns_when_far_too_many_buys(self, capsys):
         self._ur()._report_buy_floor_selectivity(self._rows(900, 100))
-        assert 'WARNING' in capsys.readouterr().out
+        assert 'WARNING' in capsys.readouterr().err
 
     def test_empty_result_set_is_a_clean_no_op(self, capsys):
         assert self._ur()._report_buy_floor_selectivity([]) is None
-        assert capsys.readouterr().out == ''
+        out = capsys.readouterr()
+        assert out.out == ''
+        assert out.err == ''
 
     def test_is_pure_reporting_and_never_mutates_rows(self):
         rows = self._rows(5, 5)

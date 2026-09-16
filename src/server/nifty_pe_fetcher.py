@@ -22,6 +22,21 @@ Run:  python nifty_pe_fetcher.py              # last 30 days from MC
       python nifty_pe_fetcher.py --days 365   # last 365 days from MC
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class NiftyPeFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class NiftyPeFetcherBaseFetcher(BaseFetcher[NiftyPeFetcherSchema]):
+    fetcher_name = 'NiftyPeFetcher'
+    domain = 'general'
+    schema = NiftyPeFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import datetime
 import time
@@ -29,6 +44,7 @@ import time
 import requests
 
 from db_compat import execute, executemany, load_index_map, load_index_map_inv
+import sys
 
 MC_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
@@ -91,7 +107,7 @@ def _ensure_table():
     """)
     # Add eps column if upgrading from older schema
     try:
-        execute("ALTER TABLE index_valuation ADD COLUMN eps REAL")
+        execute("ALTER TABLE index_valuation ADD COLUMN IF NOT EXISTS eps REAL")
     except Exception:
         pass
 
@@ -124,9 +140,53 @@ def _parse_mc_graph(resp_json: dict) -> list[tuple[str, float]]:
     return result
 
 
+def _mc_duration(days: int) -> str:
+    """MC's graph accepts exactly [1M, 3M, 6M, 1Y, 5Y, Max] (its own 422 lists them; '3Y' was
+    sent here for 366-1095 days and always failed). Resolution drops with length: 1Y is daily,
+    5Y weekly (from ~5 years back), Max monthly (from 2015)."""
+    for limit, code in ((30, "1M"), (90, "3M"), (180, "6M"), (365, "1Y"), (1825, "5Y")):
+        if days <= limit:
+            return code
+    return "Max"
+
+
+# A point more than this far from the median of its neighbouring sessions is a vendor glitch, not
+# a market move: an index P/E moves a few percent a day even in a crash.
+_MAX_NEIGHBOUR_DEVIATION = 0.25
+_NEIGHBOURS = 5
+
+
+def _drop_implausible(combined: dict[str, dict]) -> dict[str, dict]:
+    """Remove impossible pe/pb points MC's graph returns and this table stored verbatim
+    (AF-20260913-08): pe == pb (NIFTY50 2025-12-29 read 26.0/26.0 against pb ~3.55), isolated
+    spikes (2025-09-08 pe=1.1 among ~21.7), and weekend dates -- the graph's in-progress point
+    for the run's own calendar day, stored rounded (NIFTY50 pb=2.0 against ~2.9 on every one).
+    Negative values are NOT dropped: BSETELECOM's pb is genuinely negative. Other fields kept."""
+    out = {d: dict(v) for d, v in combined.items()
+           if datetime.date.fromisoformat(d[:10]).weekday() < 5}
+    for v in out.values():
+        pe, pb = v.get("pe"), v.get("pb")
+        if pe is not None and pb is not None and pe == pb:
+            v.pop("pe"); v.pop("pb")
+    dates = sorted(out)
+    for k in ("pe", "pb"):
+        valid = [(d, out[d][k]) for d in dates if out[d].get(k) is not None]
+        bad = []
+        for i, (d, val) in enumerate(valid):
+            nb = [x for _, x in valid[max(0, i - _NEIGHBOURS):i] + valid[i + 1:i + 1 + _NEIGHBOURS]]
+            if len(nb) < 3:
+                continue
+            med = sorted(nb)[len(nb) // 2]
+            if med > 0 and abs(val / med - 1) > _MAX_NEIGHBOUR_DEVIATION:
+                bad.append(d)
+        for d in bad:
+            out[d].pop(k, None)
+    return out
+
+
 def fetch_mc_pe_pb(ind_id: int, days: int = 365) -> dict[str, dict]:
     """Fetch PE and PB history from MoneyControl. Returns {date: {pe, pb}}."""
-    duration = "1Y" if days <= 365 else ("3Y" if days <= 1095 else "5Y")
+    duration = _mc_duration(days)
     combined: dict[str, dict] = {}
 
     for metric, key in [("pe", "pe"), ("pb", "pb")]:
@@ -137,7 +197,7 @@ def fetch_mc_pe_pb(ind_id: int, days: int = 365) -> dict[str, dict]:
             for date_str, val in _parse_mc_graph(r.json()):
                 combined.setdefault(date_str, {})[key] = val
         except Exception as e:
-            print(f"[PE] MC {metric} fetch error for indId={ind_id}: {e}")
+            print(f"[PE] MC {metric} fetch error for indId={ind_id}: {e}", file=sys.stderr)
         time.sleep(0.4)
 
     # Also fetch overview for latest EPS / div yield
@@ -191,7 +251,7 @@ def fetch_trendlyne(tlid: int, metric: str) -> list[tuple[str, float]]:
                 continue
         return result
     except Exception as e:
-        print(f"[PE] Trendlyne {metric} fetch error for tlid={tlid}: {e}")
+        print(f"[PE] Trendlyne {metric} fetch error for tlid={tlid}: {e}", file=sys.stderr)
         return []
 
 
@@ -243,6 +303,7 @@ def run(days: int = 30, full: bool = False):
             else:
                 print(f"[PE] {index_name}: MC {len(combined)} dates")
 
+        combined = _drop_implausible(combined)
         if not combined:
             continue
 
@@ -274,3 +335,9 @@ if __name__ == "__main__":
     parser.add_argument("--full", action="store_true", help="Full history from Trendlyne")
     args = parser.parse_args()
     run(days=args.days, full=args.full)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

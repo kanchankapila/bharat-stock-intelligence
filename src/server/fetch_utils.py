@@ -22,9 +22,41 @@ Usage:
 
 from __future__ import annotations
 
+import polars as pl
 import sys
 import time
 import random
+
+
+class _WafBlocked:
+    """Sentinel returned by a fetcher's per-item fetch when the WAF refused because our
+    cumulative request allowance ended, as distinct from `None` (this item has no data).
+
+    A distinct object rather than an exception because these fetches run inside a
+    ThreadPoolExecutor: an exception would have to be re-raised per future and would abort
+    sibling requests that are already in flight and perfectly valid.
+    """
+    __slots__ = ()
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "<WAF_BLOCKED>"
+
+
+WAF_BLOCKED = _WafBlocked()
+
+
+def _is_waf_challenge(exc: Exception) -> bool:
+    """True if `exc` is an HTTPError whose response carries AWS WAF's own
+    `x-amzn-waf-action` header (e.g. 'captcha', 'challenge') -- an unambiguous signal from
+    the WAF itself, not a heuristic on status code alone (a bare 403/405 can mean other
+    things on other providers). Retrying THIS specific response is never useful: it will not
+    self-clear within a backoff window, and for providers whose allowance is a per-session
+    REQUEST COUNT rather than a rate (see cap_to_run_budget's docstring), every retry directly
+    consumes budget that a genuinely-fetchable row further down the list could have used.
+    """
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return False
+    return bool(resp.headers.get("x-amzn-waf-action"))
 
 
 def retry_get(session_or_requests, url: str, retries: int = 3, backoff_base: float = 1.0, **kwargs):
@@ -32,6 +64,16 @@ def retry_get(session_or_requests, url: str, retries: int = 3, backoff_base: flo
 
     Mirrors requests' call signature (session.get(url, **kwargs) or requests.get(url, **kwargs))
     so it's a drop-in replacement at existing call sites.
+
+    Does NOT retry a response the WAF itself marks as a challenge/captcha (see
+    _is_waf_challenge) -- found 2026-08-27: trendlyne_adv_tech_fetcher.py/
+    trendlyne_price_analysis_fetcher.py's cap_to_run_budget(limit=110) caps the number of
+    SYMBOLS per run, but blindly retrying every WAF-blocked one 3x before FetchTracker's
+    abort_after_consecutive_fails=20 circuit breaker trips meant up to 20*3=60 of that
+    110-request allowance was spent on responses that were never going to succeed --
+    silently multiplying the effective per-run request cost against the exact ceiling this
+    budget exists to respect, and explaining trendlyne-midweek's 83% failure rate despite the
+    budget "working as designed" by its own row count.
     """
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
@@ -41,6 +83,10 @@ def retry_get(session_or_requests, url: str, retries: int = 3, backoff_base: flo
             return resp
         except Exception as e:
             last_exc = e
+            if _is_waf_challenge(e):
+                print(f"[RETRY] {url} blocked by WAF challenge (not retrying -- would not "
+                      f"self-clear, and would waste this run's request allowance)")
+                break
             if attempt == retries:
                 break
             sleep_s = backoff_base * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
@@ -64,6 +110,7 @@ class FetchTracker:
         self.succeeded: list[str] = []
         self.failed: list[str] = []
         self._consecutive_fails = 0
+        self.allowance_blocked: list[str] = []
 
     def record(self, item: str, ok: bool) -> None:
         (self.succeeded if ok else self.failed).append(item)
@@ -89,6 +136,26 @@ class FetchTracker:
                   f"blocked/down, not worth grinding through the rest of the run at the same rate.")
             sys.exit(1)
 
+    def record_allowance_exhausted(self, item: str) -> None:
+        """The vendor refused because OUR REQUEST ALLOWANCE ended -- not because this item failed.
+
+        Trendlyne enforces a cumulative request count, not a rate (measured from the other side
+        in so_option_chain_fetcher.resume_order: ~160 requests succeed, then a block of refusals).
+        When it ends, the vendor is saying "no more this run". That is the slice finishing, and
+        since every caller resumes from the DB, the remainder converges over successive runs.
+
+        Counting those items as failures is what made trendlyne-midweek the platform's noisiest
+        job at 48 failures in 58 runs: measured live 2026-09-05 it wrote 6,325 rows, logged
+        "Resuming: 106 of 2234 already fetched", and then exited non-zero purely because the
+        blocked tail tripped the 15% threshold. `cap_to_run_budget`'s own comment already said
+        "a partial run here is normal, not a failure"; the tracker had never been told.
+
+        Deliberately does NOT touch _consecutive_fails: abort_after_consecutive_fails exists for
+        a total upstream outage, and an allowance ending mid-run is the opposite situation --
+        the expected end of a healthy slice.
+        """
+        self.allowance_blocked.append(item)
+
     @property
     def total(self) -> int:
         return len(self.succeeded) + len(self.failed)
@@ -107,7 +174,40 @@ class FetchTracker:
             more = f" (+{len(self.failed) - 15} more)" if len(self.failed) > 15 else ""
             print(f"[FETCH SUMMARY] {self.job_name}: failed items — {preview}{more}")
 
+        # An allowance-limited run that made progress is convergence, not failure -- but one
+        # that achieved NOTHING is a real outage and must still exit non-zero, or this becomes a
+        # way to silence a dead datasource.
+        if self.allowance_blocked:
+            n = len(self.allowance_blocked)
+            if self.succeeded:
+                print(f"[FETCH SUMMARY] {self.job_name}: vendor allowance exhausted after "
+                      f"{len(self.succeeded)} item(s); {n} not attempted this run. This is a "
+                      f"partial slice, not a failure -- the next run resumes from the DB.",
+                      file=sys.stderr)
+            else:
+                # Loud, but NOT a non-zero exit. The allowance is cumulative AND SHARED across
+                # every Trendlyne fetcher, so a run starting after a sibling spent the budget
+                # legitimately gets zero items -- gating on that fires on a benign, expected
+                # case, which is the always-fires defect (ml-model-bugs.md, drift_detector).
+                # One run cannot tell "budget already spent" from "vendor gone"; only elapsed
+                # time can, and the freshness checks already do exactly that.
+                print(f"[FETCH SUMMARY] {self.job_name}: allowance exhausted with ZERO items "
+                      f"fetched ({n} blocked). Nothing landed this run. Sustained silence is "
+                      f"gated by the table's freshness check (dataQualityChecks.ts), not by "
+                      f"this exit code.", file=sys.stderr)
+
+        # A run the allowance truncated is judged on "did anything land" (handled above), not on
+        # its fail RATE. Two reasons, and the second is the load-bearing one:
+        #   1. the sample is tiny -- 14 attempts cannot distinguish a 28% rate from a 2% one;
+        #   2. the sample is BIASED. These fetchers resume from the DB, so the remainder they
+        #      work through is precisely the set of symbols not yet fetched today, which is
+        #      enriched for the ones that already failed. A resumed slice's fail rate is
+        #      therefore systematically higher than the universe rate the threshold was
+        #      calibrated against, and comparing them is a category error.
+        # The failed items are still printed above, so the information is kept -- only the
+        # exit-code gate is dropped.
         if (exit_on_threshold
+                and not self.allowance_blocked
                 and total >= self.min_total_for_threshold
                 and self.fail_rate > self.fail_threshold):
             print(f"[FETCH SUMMARY] {self.job_name}: failure rate {rate_pct:.1f}% exceeds "
@@ -148,3 +248,201 @@ def filter_numeric_tlids(rows, label: str = "trendlyne"):
               f"{' ...' if len(dropped) > 10 else ''}. "
               f"Run resolve_trendlyne_tlids.py to recover them.")
     return kept, dropped
+
+
+# ── Trendlyne request concurrency ────────────────────────────────────────────────────────
+# trendlyne.com sits behind AWS WAF on CloudFront. When its bot rule fires it returns
+# HTTP 405 with `x-amzn-waf-action: captcha` and a "Human Verification" HTML body for EVERY
+# subsequent request (~10 min), so one trip fails the whole run, not just the request.
+#
+# The trigger is CONCURRENCY, not volume or sustained rate. Measured live 2026-08-17 against
+# the real endpoint, same session/headers/URL the fetchers use:
+#
+#   concurrency  1 (serial, 0.5s apart) -> 60/60 OK
+#   concurrency  2                      -> 16/16 OK
+#   concurrency  3                      -> 24/24 OK
+#   concurrency  5                      -> TRIPPED after 20 requests
+#   concurrency 15 (the old BATCH_SIZE) -> TRIPPED on the very FIRST batch, all 15
+#
+# 15 tripping on request 1 is why trendlyne-midweek failed every run since 2026-08-04: the
+# opening batch poisoned the session before any work happened. price_analysis's BATCH_SIZE=5
+# was over the line too, which is why it managed ~145 rows and then died every time.
+#
+# This matches the one Trendlyne job that has NEVER failed -- trendlyne-daily-fetch
+# (87,721 runs, 0 failures) -- which issues ONE request per symbol jittered across a 12-hour
+# window (`randomizeTrendlyneFetchDelay`, trendlyneAuthService.ts) and so is never concurrent.
+#
+# 3 is the highest measured-safe value. Raising it requires re-running the measurement above,
+# not a guess -- and note the safe level is a property of Trendlyne's WAF config, which can
+# change under us. ponytail: no adaptive concurrency controller; the FetchTracker abort plus
+# each fetcher's resume-from-DB means a trip degrades to "finish next run" rather than a loss.
+# Serial. Concurrency does not just risk a trip, it SHRINKS the allowance (below), so there is
+# nothing to buy by raising this: 1 -> ~131-150 requests, 3 -> ~84, 5 -> ~20, 15 -> 15.
+TRENDLYNE_MAX_CONCURRENT = 1
+
+# Per-RUN request budget.
+#
+# Follow-up measurement (2026-08-17) showed the WAF allowance is a cumulative REQUEST COUNT per
+# anonymous session, not a rate -- so no amount of slowing down buys a full-universe pass:
+#
+#   serial @ 55 req/min (1.0s spacing) -> tripped at request 131 (after 142s)
+#   serial @ 23 req/min (2.5s spacing) -> tripped at request 150 (after 386s)
+#
+# Halving the rate moved the trip point by 19 requests. A 2,234-symbol universe is ~15x the
+# allowance, so a single pass is IMPOSSIBLE at any pacing without solving the CAPTCHA.
+#
+# So each run takes a bounded slice and stops CLEANLY while still under the allowance, instead of
+# charging into it and burning the rest of the run on 405s. Combined with each fetcher's
+# resume-from-DB skip, successive runs converge on full coverage -- which is exactly how
+# trendlyne_adv_tech_daily went 1350 -> 2234/2234 (100%) on 2026-08-17.
+#
+# 110 leaves ~20 requests of headroom under the lowest observed trip point (131).
+TRENDLYNE_RUN_REQUEST_BUDGET = 110
+
+
+def run_deadline(seconds: float) -> float:
+    """Monotonic deadline for a resumable fetcher slice, `seconds` from now.
+
+    cap_to_run_budget() above bounds a slice by REQUEST COUNT, which is the right constraint for
+    Trendlyne's WAF allowance (a per-session count, not a rate). It does not bound WALL TIME, and
+    the two are independent: trendlyne-catchup's 110-request slice is sized for ~2-4 min against a
+    10-minute runPython budget, and that budget is deliberately BELOW the 20-minute cadence so two
+    catch-up runs can never overlap and double-spend the shared allowance -- so when upstream slows
+    to ~6s/request the slice overruns and the run is killed mid-work rather than the budget simply
+    being raised. Measured 2026-09-05: 5 timeout kills in 30 days, the most frequent on the platform.
+
+    Stopping early is already the designed behaviour for these fetchers -- see cap_to_run_budget's
+    "a partial run here is normal, not a failure" -- it just had no notion of elapsed time.
+
+    Monotonic rather than time.time() so a system clock adjustment mid-run cannot extend or
+    collapse the window.
+    """
+    return time.monotonic() + seconds
+
+
+def past_deadline(deadline: float | None) -> bool:
+    """True once `deadline` (from run_deadline) has passed. None means no deadline, so a caller
+    that has not opted in behaves exactly as before."""
+    return deadline is not None and time.monotonic() >= deadline
+
+
+def cap_to_run_budget(rows, label: str, requests_per_row: int = 1,
+                      limit: int = TRENDLYNE_RUN_REQUEST_BUDGET):
+    """Trim a resumable work list to this run's WAF allowance, logging what was deferred.
+
+    Not a rate limiter -- the allowance is a request COUNT, so pacing is not the lever (see
+    TRENDLYNE_RUN_REQUEST_BUDGET). Callers MUST already skip rows completed for the current
+    date, or this would re-fetch the same leading slice forever and never converge, which is
+    exactly the bug that pinned trendlyne_price_analysis at 145/2234.
+    """
+    max_rows = max(1, limit // max(1, requests_per_row))
+    if len(rows) <= max_rows:
+        return rows
+    print(f"[{label}] Taking {max_rows} of {len(rows)} remaining this run "
+          f"({requests_per_row} request(s)/row against a ~{limit}-request allowance, which is a "
+          f"per-session COUNT (~131-150 observed), not a rate). The next scheduled run resumes "
+          f"from the DB; a partial run here is normal, not a failure.")
+    return rows[:max_rows]
+
+
+# ── Smart Delta-Fetch (Skip Already-Fresh Symbols) ───────────────────────────
+
+def filter_stale_symbols(conn, symbols: list, table_name: str,
+                         date_col: str = "date", as_of_date: str | None = None) -> list:
+    """Filter out symbols that already have an up-to-date row in `table_name` for `as_of_date`.
+
+    Accepts `symbols` as either a list of string symbols ['RELIANCE', 'TCS'] or a list of tuples
+    [('RELIANCE', 'RI'), ('TCS', 'TCS')] matching fetcher loops.
+
+    Returns the subset of `symbols` that are missing or stale.
+    """
+    if not symbols:
+        return []
+
+    target_date = as_of_date or time.strftime("%Y-%m-%d")
+    try:
+        cur = conn.cursor()
+        query = f"SELECT DISTINCT symbol FROM {table_name} WHERE {date_col} >= ?"
+        cur.execute(query, (target_date,))
+        rows = cur.fetchall()
+        fresh_symbols = set()
+        for r in rows:
+            if hasattr(r, '__getitem__'):
+                try:
+                    s = r['symbol'] if 'symbol' in r else r[0]
+                except Exception:
+                    s = list(dict(r).values())[0]
+            else:
+                s = str(r)
+            if s:
+                fresh_symbols.add(str(s).strip().upper())
+    except Exception as e:
+        print(f"[DELTA-FETCH] Warning: could not query {table_name} freshness ({e}) - processing all symbols")
+        return symbols
+
+
+    stale = []
+    skipped_count = 0
+    for item in symbols:
+        sym = (item[0] if isinstance(item, (tuple, list)) else item).upper()
+        if sym in fresh_symbols:
+            skipped_count += 1
+        else:
+            stale.append(item)
+
+    if skipped_count > 0:
+        print(f"[DELTA-FETCH] {table_name}: {skipped_count}/{len(symbols)} symbols already fresh for {target_date} — skipped network calls. Processing {len(stale)} remaining.")
+    return stale
+
+
+# ── Async httpx High-Throughput Fetcher Utilities ────────────────────────────
+
+async def async_retry_get(client, url: str, retries: int = 3, backoff_base: float = 1.0, **kwargs):
+    """Asynchronous HTTP GET with exponential backoff and jitter."""
+    import asyncio
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = await client.get(url, **kwargs)
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            last_exc = e
+            if attempt == retries:
+                break
+            sleep_s = backoff_base * (2 ** (attempt - 1)) + random.uniform(0, 0.3)
+            await asyncio.sleep(sleep_s)
+    raise last_exc
+
+
+async def async_batch_fetch(urls: list[str], headers: dict | None = None,
+                            concurrency: int = 10, timeout: float = 10.0) -> list:
+    """Fetch multiple URLs concurrently with controlled concurrency semaphore."""
+    import httpx
+    import asyncio
+
+    sem = asyncio.Semaphore(concurrency)
+    results = []
+
+    async def _fetch_one(client, u):
+        async with sem:
+            try:
+                resp = await client.get(u, headers=headers)
+                if resp.status_code == 200:
+                    return {"url": u, "status": 200, "data": resp.text, "error": None}
+                return {"url": u, "status": resp.status_code, "data": None, "error": f"HTTP {resp.status_code}"}
+            except Exception as exc:
+                return {"url": u, "status": None, "data": None, "error": str(exc)}
+
+    async with httpx.AsyncClient(headers=headers, timeout=timeout) as client:
+        tasks = [_fetch_one(client, url) for url in urls]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+    return results
+
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
+

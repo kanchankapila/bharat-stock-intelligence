@@ -13,7 +13,10 @@
  * not test fixture pollution -- there is nothing to delete afterward.
  *
  *   RUN_LIVE_DATASOURCE_TESTS=1 npx vitest run src/server/__tests__/deliveryFetcher.live.test.ts
- */
+  *
+ * LIVE_DATE_SAFE: resolves its date from `MAX(date) FROM stock_ohlcv WHERE date < CURRENT_DATE` -- a session the platform already knows closed, never the clock.
+ * (Declared for liveTestTradingDayGuard.test.ts -- see it for why this must be stated.)
+*/
 import { describe, it, expect } from 'vitest';
 
 // Gated behind RUN_LIVE, not a static top-level `import 'dotenv/config'` -- that would load

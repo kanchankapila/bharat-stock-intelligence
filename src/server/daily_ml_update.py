@@ -3,25 +3,29 @@ Daily ML feedback loop — run after market close (~15:35 IST).
 
 Order:
   1. outcome_resolver  — labels matured signals WIN/LOSS/NEUTRAL using today's prices
-  2. online_learner    — partial_fit SGD + update Beta-Bernoulli priors
-  3. ml_ensemble       — warm-start LGBM incremental (+20 rounds on last 3d)
-  4. drift_detector    — PSI feature drift check → writes to dl_model_performance
+  2. ml_ensemble       — warm-start LGBM incremental (+20 rounds on last 3d)
+  3. drift_detector    — PSI feature drift check → writes to dl_model_performance
+
+(online_learner removed 2026-08-31: live val AUC 0.5017 — a coin flip — and nothing
+downstream reads its output; its slot in the nightly chain was pure latency.)
 
 Run: python daily_ml_update.py
      python daily_ml_update.py --dry-run
 """
 
+import polars as pl
 import subprocess
 import sys
 import datetime
 import argparse
 import os
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 SCRIPTS = [
-    ('outcome_resolver',  ['python', 'outcome_resolver.py']),
-    ('online_learner',    ['python', 'online_learner.py', '--window', '30', '--min-new', '1']),
-    ('ml_ensemble_incr',  ['python', 'ml_ensemble.py', '--incremental', '--incr-days', '3']),
-    ('drift_detector',    ['python', 'drift_detector.py']),
+    ('outcome_resolver',  [sys.executable, os.path.join(BASE_DIR, 'outcome_resolver.py')]),
+    ('ml_ensemble_incr',  [sys.executable, os.path.join(BASE_DIR, 'ml_ensemble.py'), '--incremental', '--incr-days', '3']),
+    ('drift_detector',    [sys.executable, os.path.join(BASE_DIR, 'drift_detector.py')]),
 ]
 
 # On Windows, subprocess.run() with the default stdout/stderr=None inherits the *parent* process's
@@ -70,3 +74,9 @@ if __name__ == '__main__':
     parser.add_argument('--dry-run', action='store_true', help='Print commands without running')
     args = parser.parse_args()
     run(dry_run=args.dry_run)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -15,6 +15,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import fii_dii_history_fetcher as fdh
 
@@ -127,7 +128,7 @@ class TestRowHygiene:
 
 
 def _mem_db():
-    con = sqlite3.connect(":memory:")
+    con = pg_memory_conn()
     con.execute("""
         CREATE TABLE fii_dii_flow (
             date TEXT PRIMARY KEY, fii_buy REAL, fii_sell REAL, fii_net REAL,

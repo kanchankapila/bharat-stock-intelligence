@@ -10,6 +10,21 @@ Run: python src/server/moneycontrol_fetcher.py --symbols INFY RELIANCE
      python src/server/moneycontrol_fetcher.py --batch-size 150
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MoneycontrolFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MoneycontrolFetcherBaseFetcher(BaseFetcher[MoneycontrolFetcherSchema]):
+    fetcher_name = 'MoneycontrolFetcher'
+    domain = 'moneycontrol.com'
+    schema = MoneycontrolFetcherSchema
+    min_interval_sec = 0.5
+
+
 import os
 import re
 import sys
@@ -210,7 +225,7 @@ def ensure_tables_exist(engine):
             try:
                 conn.execute(text(ddl))
             except Exception as e:
-                print(f"[MC Fetcher] DDL Error: {e} - Query: {ddl[:80]}...")
+                print(f"[MC Fetcher] DDL Error: {e} - Query: {ddl[:80]}...", file=sys.stderr)
 
         # Create indexes
         indexes = [
@@ -350,7 +365,7 @@ class MoneyControlFetcher:
                     print(f"[MC Fetcher] Rate limited ({r.status_code}) fetching {url[:60]}, backing off...")
                     time.sleep(5.0 * (attempt + 1))
             except Exception as e:
-                print(f"[MC Fetcher] Exception fetching {url[:60]}: {e}")
+                print(f"[MC Fetcher] Exception fetching {url[:60]}: {e}", file=sys.stderr)
                 time.sleep(2.0)
         return None
 
@@ -420,7 +435,7 @@ class MoneyControlFetcher:
                     elif key == "hits_misses":
                         self._parse_hits_misses(symbol, payload)
             except Exception as e:
-                print(f"[MC Fetcher] Parse Error for {symbol} ({key}): {e}")
+                print(f"[MC Fetcher] Parse Error for {symbol} ({key}): {e}", file=sys.stderr)
 
     def _fetch_intraday(self, symbol: str):
         """Fetch 15-minute resolution intraday bars for the last 5 days."""
@@ -447,7 +462,16 @@ class MoneyControlFetcher:
 
             rows = []
             for i in range(len(t_arr)):
-                dt_str = datetime.datetime.fromtimestamp(t_arr[i]).strftime("%Y-%m-%d %H:%M:%S")
+                # epoch -> AWARE UTC, never bare fromtimestamp(): on this IST box the local-time
+                # render stamped every bar +5:30 into the future ("09:15 IST" became "09:15 UTC"),
+                # duplicated intraday_fetcher.py's correct rows under shifted PK stamps, and in the
+                # 09:15-10:00 UTC range COLLIDED with the legit 14:45-15:30 IST bars' stamps on
+                # (symbol, datetime, interval) -- each run's writer overwrote the other's prices.
+                # Found live 2026-09-09: ~3.2k rows/day stamped 11:00-15:30 UTC (21:00 IST close
+                # bars that do not exist). Same bug class as db_compat.now_utc_iso.
+                dt_str = datetime.datetime.fromtimestamp(
+                    t_arr[i], tz=datetime.timezone.utc
+                ).strftime("%Y-%m-%d %H:%M:%S+00")
                 rows.append({
                     "symbol": symbol,
                     "datetime": dt_str,
@@ -477,7 +501,7 @@ class MoneyControlFetcher:
                         """), r)
                 print(f"[MC Fetcher] Ingested {len(rows)} intraday 15m bars for {symbol}")
         except Exception as e:
-            print(f"[MC Fetcher] Intraday parse error for {symbol}: {e}")
+            print(f"[MC Fetcher] Intraday parse error for {symbol}: {e}", file=sys.stderr)
 
     def _parse_insider(self, symbol: str, html: str):
         soup = BeautifulSoup(html, "html.parser")
@@ -535,7 +559,7 @@ class MoneyControlFetcher:
                     "typeOfTransaction": action_str or "Trade",
                     "quantity": qty or 0,
                     "valueInr": val_inr,
-                    "date": date_str,
+                    "date": parsed.isoformat() if parsed else date_str,
                     "dateIso": parsed.isoformat() if parsed else None,
                 })
 
@@ -709,13 +733,18 @@ class MoneyControlFetcher:
             with self.engine.begin() as conn:
                 for r in rows:
                     conn.execute(text("""
-                        INSERT INTO mc_earnings_forecast (symbol, date, metric_type, high, low, avg, actual)
-                        VALUES (:symbol, :date, :metric_type, :high, :low, :avg, :actual)
+                        INSERT INTO mc_earnings_forecast (symbol, date, metric_type, high, low, avg, actual, fetched_at)
+                        VALUES (:symbol, :date, :metric_type, :high, :low, :avg, :actual, CURRENT_TIMESTAMP)
                         ON CONFLICT(symbol, date, metric_type) DO UPDATE SET
                             high   = excluded.high,
                             low    = excluded.low,
                             avg    = excluded.avg,
-                            actual = excluded.actual
+                            actual = excluded.actual,
+                            -- LAST-SEEN by design: this backs the freshness check, which asks
+                            -- "did the fetcher touch this recently", not "when was it first
+                            -- published". `date` cannot answer either -- it is a fiscal period
+                            -- label ('Mar 2026'), so max() over it is lexicographic.
+                            fetched_at = CURRENT_TIMESTAMP
                     """), r)
 
     def _parse_hits_misses(self, symbol: str, data: dict):
@@ -956,7 +985,7 @@ class MoneyControlFetcher:
                     sym = fut.result()
                     success_count += 1
                 except Exception as e:
-                    print(f"[MC Fetcher] Execution error: {e}")
+                    print(f"[MC Fetcher] Execution error: {e}", file=sys.stderr)
 
         print(f"[MC Fetcher] Finished crawling. Successfully processed {success_count}/{len(targets)} stocks.")
 
@@ -973,3 +1002,9 @@ if __name__ == "__main__":
         fetcher.run_seasonality()
     else:
         fetcher.run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

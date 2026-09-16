@@ -7,6 +7,8 @@ Modes:
   --update-probabilities Write ML probabilities for current confluence_signals batch
   --evaluate             Print model metrics (AUC, accuracy, feature importances)
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import argparse
 import os
@@ -16,7 +18,7 @@ import pickle
 import numpy as np
 from datetime import datetime, timedelta
 
-from db_compat import connect, use_postgres, ConnWrapper
+from db_compat import connect, ConnWrapper
 from model_promotion import (clears_promotion_bar, rejections_since,
                               staleness_override_applies,
                               DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
@@ -100,10 +102,12 @@ FEATURE_COLS = [
 
 MIN_TRAINING_ROWS = 30
 
-# computed_at is TIMESTAMPTZ on Postgres / TEXT day-string on SQLite. Normalize to a
-# 'YYYY-MM-DD' text day-key so it joins against the TEXT signal_date / technical_signals.date
-# columns (a bare (computed_at)::date on PG can't be compared to a text column).
-_CS_DAY = "to_char(cs.computed_at, 'YYYY-MM-DD')" if use_postgres() else "DATE(cs.computed_at)"
+# Postgres-only day key: technical_signals.date is a native DATE column, so join it to a
+# DATE-cast computed_at, NOT to_char(...) TEXT -- the old TEXT day-key raised
+# `operator does not exist: date = text` on every --update-probabilities run (measured live
+# 2026-08-25). AT TIME ZONE 'UTC' preserves exactly the day-key to_char produced (this
+# host's Postgres session runs UTC), just typed as DATE instead of TEXT.
+_CS_DAY = "(cs.computed_at AT TIME ZONE 'UTC')::date"
 
 
 def get_connection() -> ConnWrapper:
@@ -138,62 +142,34 @@ def build_training_data(conn):
     # into training rows for symbols whose outcome predates today.
     _FUND_JOIN = as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')
 
-    if use_postgres():
-        # Outcome-driven rewrite: the ~4k h7 WIN/LOSS outcomes drive the scan, and a LATERAL
-        # picks the latest confluence row per (symbol, signal-day) using a SARGABLE computed_at
-        # range so the (symbol, computed_at) PK does a range-seek. The previous version ran a
-        # ROW_NUMBER() window over the ENTIRE ~1.9M-row confluence_signals table and joined on a
-        # non-sargable to_char(computed_at) day-key — it hung for >8 min and tripped the 120s
-        # queue timeout every run. This form returns the same rows in <1s.
-        sql = f"""
-        SELECT
-        {_SELECT_COLS}
-        FROM signal_outcomes so
-        JOIN LATERAL (
-            SELECT c.* FROM confluence_signals c
-            WHERE c.symbol = so.symbol
-              AND c.confluence_score IS NOT NULL
-              AND c.computed_at >= so.signal_date::timestamp
-              AND c.computed_at <  so.signal_date::timestamp + INTERVAL '1 day'
-            ORDER BY c.computed_at DESC
-            LIMIT 1
-        ) cs ON true
-        LEFT JOIN technical_signals ts ON ts.symbol = cs.symbol AND ts.date = so.signal_date
-        LEFT JOIN quant_scores qs       ON qs.symbol = cs.symbol
-        {_FUND_JOIN}
-        WHERE so.horizon_days = 7 AND so.outcome IN ('WIN', 'LOSS')
-          AND so.signal_source = 'confluence'
-        """
-    else:
-        # SQLite (dev): tiny dataset, keep the portable window-function form (no LATERAL).
-        sql = f"""
-        WITH daily_confluence AS (
-            SELECT * FROM (
-                SELECT cs.*,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY cs.symbol, {_CS_DAY}
-                        ORDER BY cs.computed_at DESC
-                    ) AS row_num
-                FROM confluence_signals cs
-                WHERE cs.confluence_score IS NOT NULL
-            )
-            WHERE row_num = 1
-        )
-        SELECT
-        {_SELECT_COLS}
-        FROM daily_confluence cs
-        JOIN signal_outcomes so
-          ON so.symbol = cs.symbol
-          AND {_CS_DAY} = so.signal_date
-          AND so.horizon_days = 7
-          AND so.outcome IN ('WIN', 'LOSS')
-          AND so.signal_source = 'confluence'
-        LEFT JOIN technical_signals ts
-          ON ts.symbol = cs.symbol
-          AND ts.date = {_CS_DAY}
-        LEFT JOIN quant_scores qs ON qs.symbol = cs.symbol
-        {_FUND_JOIN}
-        """
+    # Outcome-driven rewrite: the ~4k h7 WIN/LOSS outcomes drive the scan, and a LATERAL
+    # picks the latest confluence row per (symbol, signal-day) using a SARGABLE computed_at
+    # range so the (symbol, computed_at) PK does a range-seek. The previous version ran a
+    # ROW_NUMBER() window over the ENTIRE ~1.9M-row confluence_signals table and joined on a
+    # non-sargable to_char(computed_at) day-key — it hung for >8 min and tripped the 120s
+    # queue timeout every run. This form returns the same rows in <1s.
+    # ts join: so.signal_date is TEXT ('YYYY-MM-DD'), ts.date native DATE -> cast the TEXT
+    # side (2026-08-25; the bare equality was `date = text` and silently zeroed the join,
+    # starving training of its technical features).
+    sql = f"""
+    SELECT
+    {_SELECT_COLS}
+    FROM signal_outcomes so
+    JOIN LATERAL (
+        SELECT c.* FROM confluence_signals c
+        WHERE c.symbol = so.symbol
+          AND c.confluence_score IS NOT NULL
+          AND c.computed_at >= so.signal_date::timestamp
+          AND c.computed_at <  so.signal_date::timestamp + INTERVAL '1 day'
+        ORDER BY c.computed_at DESC
+        LIMIT 1
+    ) cs ON true
+    LEFT JOIN technical_signals ts ON ts.symbol = cs.symbol AND ts.date = so.signal_date::date
+    LEFT JOIN quant_scores qs       ON qs.symbol = cs.symbol
+    {_FUND_JOIN}
+    WHERE so.horizon_days = 7 AND so.outcome IN ('WIN', 'LOSS')
+      AND so.signal_source = 'confluence'
+    """
     rows = conn.execute(sql).fetchall()
 
     if len(rows) < MIN_TRAINING_ROWS:
@@ -220,7 +196,13 @@ def build_model():
         return xgb.XGBClassifier(
             n_estimators=200, max_depth=5, learning_rate=0.05,
             subsample=0.8, colsample_bytree=0.8,
-            use_label_encoder=False, eval_metric='logloss',
+            # `use_label_encoder` was removed as a named parameter in xgboost 2.x (verified
+            # against the installed 3.2.0: it is not in XGBClassifier.__init__'s signature),
+            # so passing it landed in **kwargs and printed a "Parameters: { use_label_encoder }
+            # are not used" WARNING from learner.cc on every fit -- 31 of them in the
+            # 2026-09-10..12 pm2 window. False has been the default behaviour since 1.6, so
+            # dropping it changes nothing except the noise (AF-20260912-06).
+            eval_metric='logloss',
             random_state=42, n_jobs=-1
         )
     if HAS_LGB:
@@ -451,14 +433,20 @@ def update_probabilities(conn):
     # happens inside predict_proba, so X is passed through raw (unscaled).
     probs = model.predict_proba(X)[:, 1]
 
-    conn.executemany("""
-        UPDATE confluence_signals
-        SET ml_breakout_probability = ?
-        WHERE symbol = ? AND computed_at = ?
-    """, [(float(round(prob, 4)), row['symbol'], row['computed_at'])
-          for row, prob in zip(rows, probs)])
+    batch_params = [
+        (float(round(prob, 4)), row['symbol'], row['computed_at'])
+        for row, prob in zip(rows, probs)
+    ]
+    chunk_size = 500
+    for i in range(0, len(batch_params), chunk_size):
+        chunk = batch_params[i:i + chunk_size]
+        conn.executemany("""
+            UPDATE confluence_signals
+            SET ml_breakout_probability = ?
+            WHERE symbol = ? AND computed_at = ?
+        """, chunk)
+        conn.commit()
 
-    conn.commit()
     print(f'[ML] Updated ml_breakout_probability for {len(rows)} signals (batch: {latest_batch})')
 
 
@@ -497,3 +485,9 @@ if __name__ == '__main__':
             print('No mode specified. Use --train, --update-probabilities, or --evaluate.')
     finally:
         conn.close()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -68,7 +68,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, translate
-from model_promotion import decide_promotion_with_nan_guard
+from model_promotion import decide_promotion_with_nan_guard, file_staleness_override_applies
 from breakout_classifier import compute_ohlcv_features, _load_ohlcv, _make_model, evaluate_purged_cv
 from high_flyer_retrospective import (
     RET_THRESHOLD as FLYER_RET_THRESHOLD,
@@ -155,6 +155,55 @@ def _load_baseline_test_auc(model_path: str) -> float | None:
         return None
 
 
+def _load_baseline_metrics(model_path: str) -> dict | None:
+    """Full baseline dict (not just test_auc) -- needed for the staleness-override rejection
+    bookkeeping (first_rejected_at/rejection_count, ml-promotion-gate-review 2026-08-15).
+    Mirrors breakout_classifier.py's helper of the same name."""
+    if not os.path.exists(model_path):
+        return None
+    try:
+        with open(model_path, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
+def _promote_or_reject_flyer(payload: dict, test_auc: float, auc: float) -> bool:
+    """Mirrors breakout_classifier.py's _promote_or_reject_breakout -- see that function's
+    docstring for the full staleness-override contract. Extracted from train() for testability."""
+    baseline = _load_baseline_metrics(MODEL_PATH)
+    baseline_test_auc = baseline.get("test_auc") if baseline else None
+    promote, refusal_reason = decide_promotion_with_nan_guard(
+        test_auc, baseline_test_auc, FLYER_PROMOTION_MARGIN, metric_name="test AUC")
+
+    staleness_override, age_days, rejection_count = (False, 0.0, 0)
+    if not promote:
+        staleness_override, age_days, rejection_count = file_staleness_override_applies(baseline)
+
+    if promote or staleness_override:
+        with open(MODEL_PATH, "wb") as f:
+            pickle.dump(payload, f)
+        if staleness_override and not promote:
+            print(f"[Flyer] STALENESS OVERRIDE — baseline unbeaten {age_days:.1f}d across "
+                  f"{rejection_count} rejections ({refusal_reason}) -- promoting anyway -> {MODEL_PATH}")
+        else:
+            print(f"[Flyer] PROMOTED (OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}, "
+                  f"baseline {baseline_test_auc}) -> {MODEL_PATH}")
+        return True
+
+    if baseline is not None:
+        baseline["rejection_count"] = rejection_count + 1
+        baseline.setdefault("first_rejected_at", datetime.datetime.now().isoformat())
+        with open(MODEL_PATH, "wb") as f:
+            pickle.dump(baseline, f)
+    with open(CANDIDATE_PATH, "wb") as f:
+        pickle.dump(payload, f)
+    print(f"[Flyer] REJECTED — {refusal_reason} Candidate saved to {CANDIDATE_PATH}; "
+          f"active model at {MODEL_PATH} left untouched (rejection bookkeeping updated: "
+          f"{rejection_count + 1} rejections so far).")
+    return False
+
+
 def train(report_only: bool = False) -> dict:
     df = load_labeled_features()
     if df.empty or len(df) < 500:
@@ -177,28 +226,25 @@ def train(report_only: bool = False) -> dict:
                "trained_at": datetime.date.today().isoformat(),
                "oof_auc": auc, "test_auc": test_auc}
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-
-    baseline_test_auc = _load_baseline_test_auc(MODEL_PATH)
-    promote, refusal_reason = decide_promotion_with_nan_guard(
-        test_auc, baseline_test_auc, FLYER_PROMOTION_MARGIN, metric_name="test AUC")
-    if promote:
-        with open(MODEL_PATH, "wb") as f:
-            pickle.dump(payload, f)
-        print(f"[Flyer] PROMOTED (OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}, "
-              f"baseline {baseline_test_auc}) -> {MODEL_PATH}")
-    else:
-        with open(CANDIDATE_PATH, "wb") as f:
-            pickle.dump(payload, f)
-        print(f"[Flyer] REJECTED — {refusal_reason} Candidate saved to {CANDIDATE_PATH}; "
-              f"active model at {MODEL_PATH} left untouched.")
+    promoted = _promote_or_reject_flyer(payload, test_auc, auc)
 
     return {"trained": True, "n": len(y), "auc": auc, "test_auc": test_auc, "base_rate": base_rate,
-            "lift": lift, "promoted": promote}
+            "lift": lift, "promoted": promoted}
 
 
 def score() -> int:
-    """Compute OHLCV features for the latest session and write flyer_probability onto that
-    day's technical_signals rows. Advisory-only column — nothing reads it yet."""
+    """Compute OHLCV features as of the latest completed session and write flyer_probability
+    onto the FOLLOWING session's technical_signals rows. Advisory-only column — nothing
+    reads it yet.
+
+    Date-alignment fix (2026-08-19, found tracing an IC finding end-to-end): the model is
+    trained on features(feat_date) -> label(flew on the NEXT trading day, see
+    load_labeled_features's feat_date = prev_trading_day(label date)) -- so a prediction made
+    from today's close is a forecast for TOMORROW, not today. This used to write under `d`
+    (the feature date itself), mislabeling every live-scored row by one trading day. Fixed to
+    look up the real next technical_signals date from the DB (not a calendar computation --
+    NSE holidays make "d+1 calendar day" wrong) and write there instead; harmless today since
+    score() has zero consumers and was never scheduled."""
     if not os.path.exists(MODEL_PATH):
         print("[Flyer] no model; run --train first.")
         return 0
@@ -207,7 +253,7 @@ def score() -> int:
     conn = connect()
     cur = conn.cursor()
     try:
-        cur.execute(translate("ALTER TABLE technical_signals ADD COLUMN flyer_probability REAL"))
+        cur.execute(translate("ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS flyer_probability REAL"))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -222,6 +268,16 @@ def score() -> int:
     if today.empty:
         print(f"[Flyer] no feature rows for {d}.")
         return 0
+
+    row = cur.execute(translate(
+        "SELECT MIN(date) FROM technical_signals WHERE date > ?"), (d,)).fetchone()
+    d_next = row[0] if row and row[0] else None
+    if not d_next:
+        print(f"[Flyer] no technical_signals row exists yet for the session after {d} -- "
+              f"a prediction from {d}'s close describes tomorrow, and tomorrow's row hasn't "
+              f"been created. Nothing to write to; skipping.")
+        return 0
+
     X = today[art["feature_names"]].replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(np.float32)
     preds = np.zeros(len(X))
     for m in art["models"]:
@@ -229,11 +285,11 @@ def score() -> int:
     probs = preds / len(art["models"])
     cur.executemany(
         "UPDATE technical_signals SET flyer_probability = ? WHERE symbol = ? AND date = ?",
-        [(round(float(p), 4) if np.isfinite(p) else None, s, d)
+        [(round(float(p), 4) if np.isfinite(p) else None, s, d_next)
          for p, s in zip(probs, today["symbol"])],
     )
     conn.commit()
-    print(f"[Flyer] scored {len(today)} symbols for {d}.")
+    print(f"[Flyer] scored {len(today)} symbols for {d_next} (features as of {d}).")
     return len(today)
 
 
@@ -250,3 +306,11 @@ if __name__ == "__main__":
         score()
     if not (args.train or args.report or args.score):
         train(report_only=True)
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

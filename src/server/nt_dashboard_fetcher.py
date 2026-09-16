@@ -30,6 +30,21 @@ Run:
   python nt_dashboard_fetcher.py --symbol BEL
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class NtDashboardFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class NtDashboardFetcherBaseFetcher(BaseFetcher[NtDashboardFetcherSchema]):
+    fetcher_name = 'NtDashboardFetcher'
+    domain = 'niftytrader.in'
+    schema = NtDashboardFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import math
 import time
@@ -39,8 +54,9 @@ import requests
 
 from db_compat import connect, translate
 from as_of import logical_write_floor
+import sys
 
-DASHBOARD_URL = "https://webapi.niftytrader.in/webapi/Option/dashboard-data"
+DASHBOARD_URL = "https://www.niftytrader.in/api/niftytrader/Option/dashboard-data"
 
 HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -86,10 +102,10 @@ def ensure_schema(con) -> None:
     con.commit()
 
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN nt_max_pain_dist_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN nt_oi_direction       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN nt_pcr                REAL",
-        "ALTER TABLE technical_signals ADD COLUMN nt_option_volume_log  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS nt_max_pain_dist_pct REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS nt_oi_direction       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS nt_pcr                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS nt_option_volume_log  REAL",
     ]:
         try:
             cur.execute(ddl)
@@ -112,7 +128,7 @@ def _fetch_all() -> dict | None:
             return None
         return payload.get("resultData", {})
     except Exception as e:
-        print(f"[NTDashboard] fetch error: {e}")
+        print(f"[NTDashboard] fetch error: {e}", file=sys.stderr)
         return None
 
 
@@ -225,17 +241,17 @@ def backfill_technical_signals(ts_floor: str, f: dict, con) -> None:
     cur = con.cursor()
     cur.execute(translate("""
         UPDATE technical_signals SET
-            nt_max_pain_dist_pct = CASE WHEN date >= ? THEN COALESCE(?, nt_max_pain_dist_pct) ELSE NULL END,
-            nt_oi_direction      = CASE WHEN date >= ? THEN COALESCE(?, nt_oi_direction)      ELSE NULL END,
-            nt_pcr               = CASE WHEN date >= ? THEN COALESCE(?, nt_pcr)               ELSE NULL END,
-            nt_option_volume_log = CASE WHEN date >= ? THEN COALESCE(?, nt_option_volume_log) ELSE NULL END
-        WHERE symbol = ?
+            nt_max_pain_dist_pct = CASE WHEN date >= ? THEN COALESCE(?, nt_max_pain_dist_pct) ELSE nt_max_pain_dist_pct END,
+            nt_oi_direction      = CASE WHEN date >= ? THEN COALESCE(?, nt_oi_direction)      ELSE nt_oi_direction END,
+            nt_pcr               = CASE WHEN date >= ? THEN COALESCE(?, nt_pcr)               ELSE nt_pcr END,
+            nt_option_volume_log = CASE WHEN date >= ? THEN COALESCE(?, nt_option_volume_log) ELSE nt_option_volume_log END
+        WHERE symbol = ? AND date >= ?
     """), (
         ts_floor, f.get("max_pain_dist_pct"),
         ts_floor, f.get("oi_direction"),
         ts_floor, f.get("pcr"),
         ts_floor, vol_log,
-        f["symbol"],
+        f["symbol"], ts_floor,   # bounded: older rows only took ELSE-keep yet were all rewritten
     ))
     con.commit()
 
@@ -278,3 +294,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

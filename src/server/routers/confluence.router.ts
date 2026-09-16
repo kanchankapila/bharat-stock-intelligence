@@ -3,6 +3,7 @@ import { dbGet, dbAll } from '../dbAsync';
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { computeConfluenceSignals, getLatestConfluenceSignals } from '../confluenceEngine';
 import { usePostgres } from '../pgConfig';
+import { latestComputedAt, invalidateLatestComputedAt } from '../latestComputedAt';
 
 // Was `DATE(cs.computed_at)::text = so.signal_date` in both getConfluenceOutcomes queries below
 // -- wrapping confluence_signals' TimescaleDB partitioning column in DATE() defeats both
@@ -12,25 +13,19 @@ import { usePostgres } from '../pgConfig';
 // express it as a half-open range on the bare column instead, using each dialect's own date-add
 // syntax (the shared sqlTranslate.ts regex only rewrites the `date('now', ...)` literal shape,
 // not an arbitrary column argument, so this needs an explicit per-dialect branch). Computed at
-// call time, not module load -- usePostgres() is read fresh per-call everywhere else in this
-// codebase specifically because tests flip USE_POSTGRES after import (see dbAsync.ts's own
-// per-call env read); a module-level const here would freeze whatever was true at import time.
+// call time, not module load. (That used to matter because tests flipped USE_POSTGRES after
+// import; since 2026-08-15 the dialect reads no env var at all, so there is nothing left to
+// freeze -- the function shape is kept only because callers already depend on it.)
 export function confluenceJoinOnSignalDate(): string {
-  return usePostgres()
-    ? `cs.computed_at >= so.signal_date::timestamptz AND cs.computed_at < so.signal_date::timestamptz + interval '1 day'`
-    : `cs.computed_at >= so.signal_date AND cs.computed_at < date(so.signal_date, '+1 day')`;
+  // Single dialect since SQLITE_DECOMMISSION_PLAN Phase 2 — the SQLite arm
+  // (`date(so.signal_date, '+1 day')`) is gone because there is no SQLite path left to take it.
+  return `cs.computed_at >= so.signal_date::timestamptz AND cs.computed_at < so.signal_date::timestamptz + interval '1 day'`;
 }
 
-// Cached latest computed_at for confluence_signals — avoids a MAX() scan on every request.
-// Invalidated when refreshConfluenceSignals() runs.
-let _confluenceLatestAt: string | null = null;
-
+// Cached latest computed_at for confluence_signals — shared TTL probe (consolidated
+// 2026-09-02); the TTL-rationale history lives in latestComputedAt.ts.
 async function confluenceLatestAt(): Promise<string | null> {
-  if (!_confluenceLatestAt) {
-    const row = await dbGet<{ ts: string }>('SELECT MAX(computed_at) AS ts FROM confluence_signals');
-    _confluenceLatestAt = row?.ts ?? null;
-  }
-  return _confluenceLatestAt;
+  return latestComputedAt('confluence_signals');
 }
 
 export const confluenceRouter = router({
@@ -109,7 +104,7 @@ export const confluenceRouter = router({
   refreshConfluenceSignals: adminProcedure
     .mutation(async () => {
       const result = await computeConfluenceSignals();
-      _confluenceLatestAt = null; // invalidate cache so next read re-queries MAX()
+      invalidateLatestComputedAt('confluence_signals'); // invalidate cache so next read re-queries MAX()
       return { success: true, ...result };
     }),
 

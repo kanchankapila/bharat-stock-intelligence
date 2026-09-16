@@ -28,6 +28,7 @@ import { Job } from 'bullmq';
 import { runPython } from '../pythonRunner';
 import { isMarketOpen, shouldSkipOnTradingHoliday } from '../marketStatusService';
 import { registerRepeatableJob } from './registerJob';
+import { StepTracker } from '../jobSteps';
 import { makeConnection } from '../queues';
 
 export const QUEUE_CONFLUENCE_COMPUTE = 'confluence-compute';
@@ -53,18 +54,47 @@ export function isConfluenceComputeWindow(now = new Date()): boolean {
   return (hour >= 17 && hour <= 23) || hour === 6 || hour === 7;
 }
 
-async function processConfluenceCompute(_job: Job): Promise<{ computed: number; elite: number; strong: number }> {
+
+/**
+ * Whether to actually compute, given the clock and an explicit force flag.
+ *
+ * The window gate stays the default -- outside IST 06-07 / 17-23 the engine's inputs are
+ * provably static and recomputing is waste. But the gate alone leaves no way to CATCH UP after
+ * a window is missed, and a missed window is routine: a deploy, a restart, or a maintenance
+ * pause all skip one, after which confluence_signals ages from its healthy ~9h maximum to ~22h
+ * and the critical freshness check pages until the next window opens hours later.
+ *
+ * Guards on `=== true` rather than truthiness: job data round-trips through Redis as JSON, so a
+ * stray `force: "false"` or `force: 0` must not silently defeat the gate.
+ */
+export function shouldComputeConfluence(
+  opts: { now?: Date; force?: unknown } = {},
+): boolean {
+  if (opts.force === true) return true;
+  return isConfluenceComputeWindow(opts.now ?? new Date());
+}
+
+async function processConfluenceCompute(job: Job): Promise<{ computed: number; elite: number; strong: number; skipped?: boolean }> {
   // Positional signal (whole-universe, heavy). Skip during market hours so it doesn't compete with
   // the intraday pipeline for CPU/DB — its consumers (positional dashboards + the post-close
   // unified_ranker) don't need intraday freshness. The pre-open compute carries through the session
-  // and the 30-min cadence resumes after close. Returning normally keeps the heartbeat fresh.
+  // and the 30-min cadence resumes after close.
+  //
+  // These return `skipped: true` so registerJob.ts declines to stamp a heartbeat. They previously
+  // returned a bare zero-result to "keep the heartbeat fresh", which meant a genuine failure inside
+  // the work window was overwritten by the next out-of-window skip within 30 minutes — on a job
+  // marked critical. Lateness across the (long) skip window is handled by this job's
+  // lateDeadlineCronPatterns in jobRegistry.ts, not by faking a success here.
   if (await isMarketOpen()) {
     console.log('[QUEUE] confluence-compute skipped — market hours (positional signal runs off-hours)');
-    return { computed: 0, elite: 0, strong: 0 };
+    return { computed: 0, elite: 0, strong: 0, skipped: true };
   }
-  if (!isConfluenceComputeWindow()) {
+  if (!shouldComputeConfluence({ force: (job?.data as any)?.force })) {
     console.log('[QUEUE] confluence-compute skipped — outside the evening-landing/pre-open window (inputs are static)');
-    return { computed: 0, elite: 0, strong: 0 };
+    return { computed: 0, elite: 0, strong: 0, skipped: true };
+  }
+  if ((job?.data as any)?.force === true && !isConfluenceComputeWindow()) {
+    console.log('[QUEUE] confluence-compute FORCED outside its window — catch-up for a missed window');
   }
   const { computeConfluenceSignals, runMLProbabilityOverlay } = await import('../confluenceEngine');
   const result = await computeConfluenceSignals();
@@ -74,22 +104,37 @@ async function processConfluenceCompute(_job: Job): Promise<{ computed: number; 
   return result;
 }
 
-async function processConfluenceOutcomes(job: Job): Promise<void> {
+async function processConfluenceOutcomes(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] } | void> {
   // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- confluence
   // outcomes/reliability are graded against price action that didn't happen (exchange never
   // opened), and confluence_ml_engine --train would just refit on an unchanged dataset.
+  // Deliberately does NOT return { skipped: true } (unlike processConfluenceCompute above):
+  // getLateJobs() is not holiday-aware, so see HOLIDAY_SKIP_NOTE at the foot of this file.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] confluence-outcomes skipped — trading holiday, nothing new to grade');
-    return;
+    return { success: true, skipped: true };
   }
   // Sequential, not Promise.all: confluence_ml_engine --train is CPU-heavy (multiprocessing)
   // and the old concurrent 120s budget both starved the tracker AND timeout-killed the
   // trainer (its real runtime is several minutes) — 10 of its last 11 runs failed this way.
   // Per-step .catch keeps a failure in one from aborting the other.
-  await runPython('confluence_outcome_tracker.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] confluence_outcome_tracker failed:', (e as Error).message));
+  // Was 5 min -- job-runtime-audit (2026-08-14) found this budget had been blown every single
+  // scheduled run for 11 consecutive days as stock_ohlcv's unbounded full-table OHLCV load grew
+  // past what any fixed budget survives. Fixed the query to bound by date (confluence_outcome_
+  // tracker.py), but the first catch-up run against the 11-day backlog still took 17m24s
+  // (652,679 outcomes tracked) -- bumped to 20 min for real headroom against a normal day's
+  // incremental volume plus margin, matching the "give real headroom" precedent already used for
+  // alphaQuant's own daily scoring job (see alphaQuantClient.ts).
+  // Per-step .catch keeps a failure in one from aborting the other -- but it used to end in
+  // console.warn, so both could fail and this job still reported success. T.fail preserves the
+  // don't-abort-the-sibling property and degrades the job verdict.
+  const T = new StepTracker('confluence-outcomes');
+  await runPython('confluence_outcome_tracker.py', [], 20 * 60_000)
+    .catch(e => T.fail('confluence_outcome_tracker', e));
   await runPython('confluence_ml_engine.py', ['--train'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] confluence_ml_engine --train failed:', (e as Error).message));
+    .catch(e => T.fail('confluence_ml_engine_train', e));
+  const verdict = T.finish();
+  return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 export async function registerConfluenceJobs() {
@@ -115,9 +160,8 @@ export async function registerConfluenceJobs() {
     connection: makeConnection(),
     queueName: QUEUE_CONFLUENCE_OUTCOMES,
     jobName: 'confluence-outcomes-daily',
-    // 11:30 PM IST (18:00 UTC). Moved off 11:00 PM (2026-07-31) so it no longer shares a
-    // slot with quant-scoring; the evening tail is now one job per 30 min.
-    repeat: { pattern: '0 18 * * 1-5' },
+    // 9:10 PM IST (15:40 UTC), Mon-Fri after quant scoring
+    repeat: { pattern: '40 15 * * 1-5' },
     // No jobId in the original registration -- see the note on confluence-compute above.
     removeOnComplete: 3,
     removeOnFail: 3,
@@ -132,3 +176,35 @@ export async function registerConfluenceJobs() {
 
   return { compute, outcomes };
 }
+
+/**
+ * HOLIDAY_SKIP_NOTE — the trading-holiday skip / heartbeat / lateness interplay, recorded so
+ * the next reader doesn't re-derive it.
+ *
+ * registerJob.ts declines to stamp a heartbeat for any processor returning { skipped: true },
+ * so a skip can never erase a real failure. processConfluenceCompute uses the marker because it
+ * no-ops for ~9 hours EVERY day: a genuine failure inside its work window was being overwritten
+ * by the next out-of-window skip within 30 minutes, on a job marked critical.
+ *
+ * A trading-holiday skip was a different risk profile, and the reason processConfluenceOutcomes'
+ * holiday skip originally could NOT use the marker: with getLateJobs() holiday-blind, declining
+ * the heartbeat on the ~10 NSE holidays a year would flag this job — and its identically-shaped
+ * siblings processStockScoring, processMcScreenerSync, processEtnowScreenerSync,
+ * processEtMarketstatsSync, processTrendlyneScreenerSync, processScreenerPerf, several of them
+ * critical — as 'late' on exactly the days they are correctly idle (the phantom-alert class
+ * recurring-bugs.md records 6 times).
+ *
+ * That blocker is RESOLVED 2026-09-14: jobHeartbeat.ts's getRecentTradingSessions()/
+ * computeCronLateness() now judge the occurrence's IST date against the exchange's own session
+ * record (stock_ohlcv sessions + a technical_signals probe for the ambiguous newest-session-to-
+ * today band + the live holiday feed for today) and forgive weekday-only jobs on proven closed
+ * days — gated so 24/7 cadences and weekend-anchored weekly jobs can never be pardoned
+ * (src/server/__tests__/holidayLatenessForgiveness.test.ts pins every rule). Which is why the
+ * holiday skip above now safely returns { success: true, skipped: true }: the declined heartbeat
+ * leaves a provable-idle day behind, not a false 'late'.
+ *
+ * The one bounded trade-off that remains: a REAL failure landing on the holiday slot itself is
+ * only surfaced from the next real session's occurrence (≤1 day), because a skip still erases
+ * the failure's verdict for that one occurrence — the same erasure-window bound this note has
+ * always recorded, now the only inaccuracy left standing.
+ */

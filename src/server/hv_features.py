@@ -1,3 +1,4 @@
+import polars as pl
 """
 Historical Volatility Feature Engine
 =====================================
@@ -70,7 +71,7 @@ def ensure_schema(con) -> None:
     ]
     for col, dtype in new_cols:
         try:
-            cur.execute(f"ALTER TABLE technical_signals ADD COLUMN {col} {dtype}")
+            cur.execute(f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} {dtype}")
             con.commit()
         except Exception:
             con.rollback()
@@ -247,3 +248,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     run(only_date=args.date, only_symbol=args.symbol)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

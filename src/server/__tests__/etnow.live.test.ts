@@ -13,7 +13,10 @@
  * production-shaped rows.
  *
  *   RUN_LIVE_DATASOURCE_TESTS=1 npx vitest run src/server/__tests__/etnow.live.test.ts
- */
+  *
+ * LIVE_DATE_SAFE: writes etnow_screeners / etnow_screener_stocks, neither of which has a date column at all.
+ * (Declared for liveTestTradingDayGuard.test.ts -- see it for why this must be stated.)
+*/
 import { describe, it, expect, beforeAll } from 'vitest';
 
 // Gated behind RUN_LIVE, not a static top-level `import 'dotenv/config'` -- that would load

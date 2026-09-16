@@ -121,8 +121,10 @@ import math
 
 import numpy as np
 import pandas as pd
+import polars as pl
 
 from db_compat import read_df, transaction
+import sys
 
 # -- Cost model -------------------------------------------------------------------
 DEFAULT_COST_BPS_PER_SIDE = 25.0     # see COST MODEL above; sweep this, don't trust one value
@@ -261,6 +263,23 @@ FACTORS = {
     # above). See FEATURE_STORE_FACTORS / _add_feature_store for the exclusion rationale.
     **{f'fs_{c}': (lambda d, c=c: d[c]) for c in FEATURE_STORE_FACTORS},
 
+    # -- Mean-reversion composite (2026-08-20). The 14 fs_* columns above that clear Bonferroni
+    # are ALL negative long-only -- i.e. going long the highest readings on these
+    # overbought/high-momentum/high-volume indicators loses money. That's a real signal read
+    # backwards for a long-only portfolio, not "no signal" -- so test the natural long-only-
+    # compatible construction: go long the names with the LOWEST readings (oversold/calm)
+    # instead, sign-flipped, equal-weighted z-score sum of exactly the 14 Bonferroni-clearing
+    # columns (not all 23 -- the 9 that were never significant either way don't belong in a
+    # composite built to test THIS specific finding). No new short-selling infrastructure
+    # needed -- this is a standard long-only rank, same as every other factor in this file.
+    'mean_reversion_14': lambda d: -(
+        _z(d['stoch_d']) + _z(d['williams_r']) + _z(d['stoch_k']) + _z(d['cci'])
+        + _z(d['di_plus']) + _z(d['dist_sma20_pct']) + _z(d['vwap_dist_pct'])
+        + _z(d['volume_ratio_20d']) + _z(d['obv_slope']) + _z(d['atr_pct'])
+        + _z(d['volume_ratio_5d']) + _z(d['macd_hist']) + _z(d['mtf_alignment_score'])
+        + _z(d['bb_width'])
+    ),
+
     # -- PEAD (post-earnings-announcement drift), pre-registered (2026-08-13). Bernard/Thomas
     # (1989): stocks whose most recent result beat estimates continue drifting UP for weeks;
     # misses continue drifting down. pead_model.py's own compute_pead_score() is NOT usable --
@@ -273,6 +292,12 @@ FACTORS = {
     # is what gets tested here, not pead_score.
     'earnings_beat_yoy': lambda d: d['earnings_category_yoy'],
     'earnings_beat_qoq': lambda d: d['earnings_category_qoq'],
+
+    # -- win_probability (2026-08-20), the cost/turnover-aware portfolio run measurement.md's
+    # win_probability section names as the still-open step. Raw score, no sign flip -- higher
+    # win_probability is the model's own claim of higher win odds, so top-K = highest score is
+    # the natural long side. See _add_win_probability for the point-in-time/coverage notes.
+    'win_probability': lambda d: d['win_probability'],
 
     # -- Contested SCREENER families, reconstructed from price so their direction is
     # MEASURED rather than read off the screener's wording. Each is signed so that a
@@ -514,6 +539,7 @@ def load_price_panel(start: str = DEFAULT_START,
     px = _add_screener_breadth(px)
     px = _add_feature_store(px, start, end)
     px = _add_earnings_category(px, start, end)
+    px = _add_win_probability(px, start, end)
     px = px.drop(columns=['_dr', '_hi252', '_mkt', '_ticket'], errors='ignore')
 
     # TWO different eligibilities, and conflating them is what made the live screen stale:
@@ -557,7 +583,7 @@ def _add_valuation(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
             )
         except Exception as e:                                  # noqa: BLE001
             print(f"[FactorBacktest] WARNING: {tbl} unavailable ({str(e)[:80]}); "
-                  "value factors will be skipped.")
+                  "value factors will be skipped.", file=sys.stderr)
             px[col] = np.nan
             continue
         if df.empty:
@@ -627,7 +653,7 @@ def _add_mojo_indigraph(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
         )
     except Exception as e:                                          # noqa: BLE001
         print(f"[FactorBacktest] WARNING: marketsmojo_technical_history unavailable "
-              f"({str(e)[:80]}); mojo factors will be skipped.")
+              f"({str(e)[:80]}); mojo factors will be skipped.", file=sys.stderr)
         px['mojo_indigraph'] = np.nan
         return px
     if df.empty:
@@ -676,7 +702,7 @@ def _add_sector(px: pd.DataFrame) -> pd.DataFrame:
         sec = read_df("SELECT symbol, sector FROM nse_stocks WHERE sector IS NOT NULL")
     except Exception as e:                                      # noqa: BLE001
         print(f"[FactorBacktest] WARNING: nse_stocks unavailable ({str(e)[:80]}); "
-              "sector-neutral factors will be skipped.")
+              "sector-neutral factors will be skipped.", file=sys.stderr)
         px['sector'] = np.nan
         return px
     if sec.empty:
@@ -732,7 +758,7 @@ def _add_insider(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
             ((pd.Timestamp(start) - pd.Timedelta(days=INSIDER_WINDOW_DAYS + 30)).strftime('%Y-%m-%d'), end),
         )
     except Exception as e:                                      # noqa: BLE001
-        print(f"[FactorBacktest] WARNING: insider_trades unavailable ({str(e)[:80]}); skipped.")
+        print(f"[FactorBacktest] WARNING: insider_trades unavailable ({str(e)[:80]}); skipped.", file=sys.stderr)
         px['insider_net'] = np.nan
         return px
 
@@ -815,7 +841,7 @@ def _add_screener_breadth(px: pd.DataFrame) -> pd.DataFrame:
             'WHERE appeared_date IS NOT NULL'
         )
     except Exception as e:                                      # noqa: BLE001
-        print(f"[FactorBacktest] WARNING: screener_appearances unavailable ({str(e)[:80]}); skipped.")
+        print(f"[FactorBacktest] WARNING: screener_appearances unavailable ({str(e)[:80]}); skipped.", file=sys.stderr)
         px['screener_breadth'] = np.nan
         return px
     if ev.empty:
@@ -879,7 +905,7 @@ def _add_feature_store(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
             (start, end),
         )
     except Exception as e:                                      # noqa: BLE001
-        print(f"[FactorBacktest] WARNING: feature_store unavailable ({str(e)[:80]}); skipped.")
+        print(f"[FactorBacktest] WARNING: feature_store unavailable ({str(e)[:80]}); skipped.", file=sys.stderr)
         for c in FEATURE_STORE_FACTORS:
             px[c] = np.nan
         return px
@@ -908,7 +934,7 @@ def _add_earnings_category(px: pd.DataFrame, start: str, end: str) -> pd.DataFra
             (start, end),
         )
     except Exception as e:                                      # noqa: BLE001
-        print(f"[FactorBacktest] WARNING: earnings_category unavailable ({str(e)[:80]}); skipped.")
+        print(f"[FactorBacktest] WARNING: earnings_category unavailable ({str(e)[:80]}); skipped.", file=sys.stderr)
         px['earnings_category_yoy'] = np.nan
         px['earnings_category_qoq'] = np.nan
         return px
@@ -918,6 +944,39 @@ def _add_earnings_category(px: pd.DataFrame, start: str, end: str) -> pd.DataFra
     print(f"[FactorBacktest] earnings_category: {len(ec):,} rows merged, {ec['date'].nunique()} "
           f"distinct dates. Coverage -- yoy={int(px['earnings_category_yoy'].notna().sum()):,}, "
           f"qoq={int(px['earnings_category_qoq'].notna().sum()):,}")
+    return px
+
+
+def _add_win_probability(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    """Merge technical_signals.win_probability onto the panel -- the cost/turnover-aware
+    portfolio run measurement.md's win_probability section names as the still-open step
+    after its 2026-08-20 factor_edge.py re-measurement (real rank_IC, hit_AUC never clears
+    the 0.55 USABLE bar).
+
+    Same point-in-time convention as _add_earnings_category: technical_signals.date is the
+    trading day the row's win_probability describes. Write-timing verified live 2026-08-20
+    via win_probability_scored_at -- average ~14h after that date's UTC midnight, i.e. the
+    evening of the SAME IST calendar day, well before the next session's open this harness
+    enters at. win_probability_scored_at itself is only populated from 2026-08-15 onward
+    (added by migration 1787050000000), so it can't be used as a provenance FILTER over the
+    whole panel without discarding almost all history -- same tradeoff _add_earnings_category
+    already accepts for earnings_category_yoy/_qoq, not a new gap introduced here.
+    """
+    try:
+        wp = read_df(
+            "SELECT symbol, date, win_probability FROM technical_signals "
+            "WHERE win_probability IS NOT NULL AND date >= ? AND date <= ?",
+            (start, end),
+        )
+    except Exception as e:                                      # noqa: BLE001
+        print(f"[FactorBacktest] WARNING: win_probability unavailable ({str(e)[:80]}); skipped.", file=sys.stderr)
+        px['win_probability'] = np.nan
+        return px
+
+    wp['date'] = pd.to_datetime(wp['date']).dt.strftime('%Y-%m-%d')
+    px = px.merge(wp, on=['symbol', 'date'], how='left')
+    print(f"[FactorBacktest] win_probability: {len(wp):,} rows merged, {wp['date'].nunique()} "
+          f"distinct dates. Coverage -- {int(px['win_probability'].notna().sum()):,}")
     return px
 
 
@@ -994,7 +1053,7 @@ def _fill_delisted(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
     except Exception as e:                                  # noqa: BLE001
         print(f"[FactorBacktest] WARNING: survivorship fill FAILED ({str(e)[:110]}). "
               "Results are survivorship-biased and will read optimistic -- do not compare them "
-              "against a filled run.")
+              "against a filled run.", file=sys.stderr)
         return px
 
 
@@ -1076,7 +1135,8 @@ def run_backtest(panel: pd.DataFrame,
                  by_date: dict | None = None,
                  missing_exit_pct: float = MISSING_EXIT_PCT,
                  exit_by_date: dict | None = None,
-                 last_alive: dict | None = None) -> dict:
+                 last_alive: dict | None = None,
+                 veto_fn=None) -> dict:
     """Equal-weight top-K portfolio, rebalanced every `rebalance_days` SESSIONS.
 
     Rebalance cadence is counted in trading sessions, not calendar days, so holidays cannot
@@ -1084,6 +1144,14 @@ def run_backtest(panel: pd.DataFrame,
 
     Pass `by_date` (from index_by_date) when sweeping many factors over one panel -- the
     per-date grouping is the expensive step and is identical across factors.
+
+    `veto_fn`, if given, is called as `veto_fn(cur)` on each rebalance date's eligible slice
+    (same shape `FACTORS[factor]` receives) and must return a boolean Series aligned to `cur`'s
+    index -- True where the name should be EXCLUDED from the selection pool before ranking.
+    Added 2026-08-30 to test a veto-shaped construction (same mechanism as the validated
+    HIGH_VOL_VETO in unified_ranker.py) for the mean-reversion-14 finding, as an alternative to
+    the standalone-factor construction already tested and rejected (see measurement.md). Default
+    None preserves every existing call site's behavior exactly.
     """
     if factor not in FACTORS:
         raise KeyError(f"unknown factor {factor!r}; known: {sorted(FACTORS)}")
@@ -1112,6 +1180,9 @@ def run_backtest(panel: pd.DataFrame,
             continue
 
         scored = cur.assign(_s=score_fn(cur)).dropna(subset=['_s', 'next_open'])
+        if veto_fn is not None:
+            vetoed = veto_fn(cur).reindex(scored.index).fillna(False)
+            scored = scored.loc[~vetoed]
         if len(scored) < top_k * 2:
             continue
         scored = scored.sort_values('_s', ascending=False)
@@ -1490,7 +1561,7 @@ def main() -> None:
                              by_date=by_date, missing_exit_pct=a.missing_exit_pct,
                              exit_by_date=exit_by_date, last_alive=last_alive)
         except Exception as e:                              # noqa: BLE001
-            print(f"[FactorBacktest] {f}: FAILED -- {e}")
+            print(f"[FactorBacktest] {f}: FAILED -- {e}", file=sys.stderr)
             continue
         out.append(r)
         if not a.json:
@@ -1508,6 +1579,13 @@ def main() -> None:
               .to_string(index=False))
         print("\nNothing with |t| < 2 is evidence of anything. Sweep --cost-bps before "
               "acting on a result that sits near break-even.")
+
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
 
 
 if __name__ == '__main__':

@@ -10,6 +10,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import institutional_deals_fetcher as idf
 
@@ -83,7 +84,7 @@ class TestParseDeal:
 
 class TestSchemaAndStorage:
     def test_ensure_schema_and_upsert_round_trip(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         idf.ensure_schema(con)
         buy = idf.parse_deal("buy", REAL_BUY_ROW, UNIVERSE)
         sell = idf.parse_deal("sell", REAL_SELL_ROW, UNIVERSE)
@@ -95,7 +96,7 @@ class TestSchemaAndStorage:
                          ("ADANIGREEN", "sell", "ardour investment holding ltd")]
 
     def test_upsert_is_idempotent(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         idf.ensure_schema(con)
         buy = idf.parse_deal("buy", REAL_BUY_ROW, UNIVERSE)
         assert idf.store(con, [buy]) == 1
@@ -104,6 +105,6 @@ class TestSchemaAndStorage:
         assert count == 1
 
     def test_store_empty_list_is_a_noop(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         idf.ensure_schema(con)
         assert idf.store(con, []) == 0

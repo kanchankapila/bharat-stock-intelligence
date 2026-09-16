@@ -79,7 +79,7 @@ Walk `recurring-bugs.md`'s table against this diff:
 - A backfill/upsert loop gated on re-selection by one of several columns it fills — permanently excludes rows that got column 1 but not columns 2-3.
 - A per-call API with no since-parameter, re-upserting full history every run — check what fraction of a typical response is actually new data; under 1% means the upsert, not the fetch, is the bottleneck.
 - A parsing/enrichment step that's the *last* statement in a script that routinely hits a job-runner timeout — check the job's logs for "killed by timeout" on a recurring basis; if so, assume anything after the kill point has never run.
-- Env-var-dependent DB routing (`USE_POSTGRES`) in a standalone script run without `import 'dotenv/config'` — silently talks to SQLite. Print `process.env.USE_POSTGRES` and cross-check a row count against a number you already know from `psql`/`db_compat` before trusting any number this fetcher's own verification prints.
+- A verification number the fetcher prints about itself. Cross-check it against a row count you already know from `psql`/`db_compat`. (The old form of this check — "print `process.env.USE_POSTGRES` to confirm you aren't on SQLite" — is **dead as of 2026-08-15**: `use_postgres()` consults no env var for a real process, so a correct script prints `undefined`. There is no wrong database left to land on, only a wrong number.)
 
 ## 6. Report
 

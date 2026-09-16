@@ -11,19 +11,21 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import screener_catalog_enricher as sce  # noqa: E402
 
 
 def _make_db():
     import sqlite3
-    conn = sqlite3.connect(":memory:")
+    conn = pg_memory_conn()
     conn.executescript("""
         CREATE TABLE screener_master (
             scan_id TEXT, source TEXT, name TEXT,
             signal_type_tag TEXT, screener_url TEXT
         );
         CREATE TABLE trendlyne_screeners (
-            id INTEGER PRIMARY KEY, screener_id TEXT, screenpk TEXT, screener_url TEXT
+            id INTEGER PRIMARY KEY, screener_id TEXT, screenpk TEXT, screener_url TEXT,
+            screener_name TEXT
         );
         CREATE TABLE screener_catalog (
             screener_id TEXT, source TEXT, screener_name TEXT,
@@ -82,6 +84,79 @@ def test_tl_screener_url_builds_a_real_trendlyne_url():
     assert "9999" in url
 
 
+def test_catalog_accepts_master_sentiment_for_matching_screener():
+    conn = pg_memory_conn()
+    conn.executescript("""
+        CREATE TABLE screener_master (
+            scan_id TEXT, source TEXT, inferred_sentiment TEXT
+        );
+        CREATE TABLE screener_catalog (
+            screener_id TEXT, source TEXT, signal_bias TEXT
+        );
+    """)
+    conn.execute("INSERT INTO screener_master VALUES ('s1', 'Trendlyne', 'bearish')")
+    conn.execute("INSERT INTO screener_catalog VALUES ('s1', 'trendlyne', 'neutral')")
+    conn.commit()
+
+    changed = sce.sync_catalog_bias_from_master(conn)
+
+    assert changed == 1
+    assert conn.execute(
+        "SELECT signal_bias FROM screener_catalog WHERE screener_id = 's1'"
+    ).fetchone()[0] == 'bearish'
+
+
+def test_directional_neutral_reclassification_leaves_ambiguous_rows_neutral():
+    conn = pg_memory_conn()
+    conn.executescript("""
+        CREATE TABLE screener_master (
+            scan_id TEXT, source TEXT, name TEXT, inferred_category TEXT,
+            inferred_sentiment TEXT
+        );
+        CREATE TABLE screener_catalog (
+            screener_id TEXT, source TEXT, screener_name TEXT,
+            category TEXT, signal_bias TEXT
+        );
+    """)
+    conn.execute("INSERT INTO screener_master VALUES ('s1', 'MoneyControl', 'FII Selling', 'other', 'neutral')")
+    conn.execute("INSERT INTO screener_master VALUES ('s2', 'MoneyControl', 'Banking Stocks', 'sector_theme', 'neutral')")
+    conn.execute("INSERT INTO screener_catalog VALUES ('s1', 'moneycontrol', 'FII Selling', 'other', 'neutral')")
+    conn.execute("INSERT INTO screener_catalog VALUES ('s2', 'moneycontrol', 'Banking Stocks', 'sector_theme', 'neutral')")
+    conn.commit()
+
+    changed = sce.reclassify_directional_neutrals(conn)
+
+    assert changed == (1, 1)
+    assert conn.execute("SELECT inferred_sentiment FROM screener_master WHERE scan_id = 's1'").fetchone()[0] == 'bearish'
+    assert conn.execute("SELECT signal_bias FROM screener_catalog WHERE screener_id = 's1'").fetchone()[0] == 'bearish'
+    assert conn.execute("SELECT inferred_sentiment FROM screener_master WHERE scan_id = 's2'").fetchone()[0] == 'neutral'
+
+
+def test_step2_name_lookup_matches_capitalized_trendlyne_source():
+    """AF-20260816-19 (docs/audit-findings.md): screener_catalog.source holds both 'trendlyne'
+    and 'Trendlyne' live (343 rows capitalized, confirmed 2026-08-19). Step 2's name-lookup JOIN
+    used an exact-case `sc.source = 'trendlyne'`, so every capitalized row silently lost its
+    trendlyne_screeners enrichment (screenpk/screener_url/screener_name) -- not a crash, a quiet
+    gap, exactly the shape three OTHER joins in this same file already guard against with
+    LOWER(). Mirrors the real Step 2 query (screener_catalog_enricher.py's run()) rather than a
+    hand-copied version, so a regression in the source actually fails this test."""
+    conn = _make_db()
+    conn.execute(
+        "INSERT INTO screener_catalog (screener_id, source, screener_name, signal_keywords) "
+        "VALUES ('777', 'Trendlyne', 'Some Screen', NULL)"
+    )
+    conn.execute(
+        "INSERT INTO trendlyne_screeners (screener_id, screenpk, screener_url) "
+        "VALUES ('777', '5555', 'https://trendlyne.com/equity/screener/5555/')"
+    )
+    conn.commit()
+
+    rows = sce.load_catalog_rows_for_name_enrichment(conn)
+
+    assert len(rows) == 1
+    assert rows[0][3] == '5555', "capitalized 'Trendlyne' source must still match trendlyne_screeners"
+
+
 class TestCategoryNotCollapsedToOther:
     """Live bug, 2026-08-13: cat_norm was re-validated against CATEGORY_DEFAULTS (a coarser,
     unrelated vocabulary -- momentum/breakout/valuation/...) instead of trusted as-is, which
@@ -127,7 +202,7 @@ class TestExistingCorruptedRowsBackfilled:
 
     def _make_db(self):
         import sqlite3
-        conn = sqlite3.connect(":memory:")
+        conn = pg_memory_conn()
         conn.executescript("""
             CREATE TABLE screener_master (scan_id TEXT, source TEXT, inferred_category TEXT);
             CREATE TABLE screener_catalog (screener_id TEXT, source TEXT, category TEXT);

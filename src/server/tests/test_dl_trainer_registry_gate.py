@@ -121,3 +121,64 @@ class TestRetrainModelsGateWiring:
             "not reimplement its own acc/auc NaN check"
         )
         assert "_record_model_registry" in src
+
+
+class TestStepLog:
+    """2026-08-29: added after a live investigation had no way to tell 'still working' from
+    'hung' beyond an OS-level CPU-delta check on a guessed PID -- every per-step subprocess's
+    stdout/stderr is DEVNULL'd by _run(). These pin the two things that made that investigation
+    hard: (1) timestamps must be explicit UTC, not the naive local time dl_retrain_acquired_at
+    already used (confirmed live: this machine's local clock is IST, +5:30, which silently
+    misled that investigation about how late the job had started); (2) each step's duration must
+    actually get recorded, in order, even when a later step fails."""
+
+    def test_utc_now_iso_is_utc_not_naive_local(self):
+        from datetime import datetime, timezone
+        iso = dlt._utc_now_iso()
+        parsed = datetime.fromisoformat(iso)
+        assert parsed.tzinfo is not None, "must carry an explicit timezone, not naive local time"
+        assert parsed.utcoffset() == timezone.utc.utcoffset(None)
+
+    def test_step_timer_records_duration_and_status_ok(self, monkeypatch):
+        monkeypatch.setattr(dlt, "connect", lambda: _FakeConn())
+        log = dlt._StepLog()
+        with log.step("thing"):
+            pass
+        assert len(log.steps) == 1
+        rec = log.steps[0]
+        assert rec["step"] == "thing"
+        assert rec["status"] == "ok"
+        assert rec["duration_sec"] >= 0
+        assert rec["started_at"] <= rec["finished_at"]
+
+    def test_step_timer_records_error_status_and_still_raises(self, monkeypatch):
+        monkeypatch.setattr(dlt, "connect", lambda: _FakeConn())
+        log = dlt._StepLog()
+        try:
+            with log.step("boom"):
+                raise RuntimeError("simulated failure")
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("the step timer must not swallow the exception")
+        assert log.steps[0]["status"] == "error"
+
+    def test_multiple_steps_accumulate_in_order(self, monkeypatch):
+        monkeypatch.setattr(dlt, "connect", lambda: _FakeConn())
+        log = dlt._StepLog()
+        with log.step("first"):
+            pass
+        with log.step("second"):
+            pass
+        assert [s["step"] for s in log.steps] == ["first", "second"]
+
+    def test_a_broken_db_connection_does_not_fail_the_step(self, monkeypatch):
+        # Best-effort logging: a DB hiccup while recording progress must never fail the
+        # actual retrain step it's timing.
+        def _broken_connect():
+            raise ConnectionError("db unreachable")
+        monkeypatch.setattr(dlt, "connect", _broken_connect)
+        log = dlt._StepLog()
+        with log.step("still-works"):
+            pass
+        assert log.steps[0]["status"] == "ok"

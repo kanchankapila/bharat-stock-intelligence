@@ -56,7 +56,7 @@ export const V1MFAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
                 { label: 'Promoters', pct: promPct, chg: null },
               ].map(row => (
                 <div key={row.label} className="text-center p-3 glass-strong rounded-xl border border-slate-800/50">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{row.label}</p>
+                  <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">{row.label}</p>
                   <p className="text-xl font-black text-white italic tracking-tighter">
                     {row.pct !== null ? `${Number(row.pct).toFixed(2)}%` : '—'}
                   </p>

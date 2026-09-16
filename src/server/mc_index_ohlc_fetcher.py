@@ -12,6 +12,21 @@ Run:  python mc_index_ohlc_fetcher.py            # 2yr range (default)
       python mc_index_ohlc_fetcher.py --range 6m  # specific range
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McIndexOhlcFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McIndexOhlcFetcherBaseFetcher(BaseFetcher[McIndexOhlcFetcherSchema]):
+    fetcher_name = 'McIndexOhlcFetcher'
+    domain = 'moneycontrol.com'
+    schema = McIndexOhlcFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import datetime
 import time
@@ -19,6 +34,7 @@ import time
 import requests
 
 from db_compat import execute, executemany, query_all
+import sys
 
 # ── Index mapping: loaded from DB (index_provider_map provider='mc_ohlc') ─────
 # Fallback used only if the table is missing (first-run bootstrap).
@@ -111,7 +127,7 @@ def fetch_index_ohlc(session: requests.Session, ind_id: int, range_: str) -> lis
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        print(f"[MC-OHLC] HTTP error ind_id={ind_id}: {e}")
+        print(f"[MC-OHLC] HTTP error ind_id={ind_id}: {e}", file=sys.stderr)
         return []
 
     # MC appfeeds graph response: {"graph": {"values": [{"_time": "29 May 2026",
@@ -247,3 +263,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -4,7 +4,7 @@ nt_oi_snapshot_fetcher.py
 Fetches a strike-wise option OI snapshot for major indices from NiftyTrader
 and stores it in nt_index_oi_eod (one row per strike per expiry, EOD snapshot).
 
-API: https://webapi.niftytrader.in/webapi/Option/oi-time-range
+API: https://www.niftytrader.in/api/niftytrader/Option/oi-time-range
      ?symbol={nt_symbol}&start_time={start}&end_time={end}&expiry=&exchange=nse
 
 Index symbols are read from index_provider_map (provider='nt_index').
@@ -24,13 +24,30 @@ Run:
   python nt_oi_snapshot_fetcher.py --time 14:00:00    # intraday snapshot
 """
 
-import argparse
-from datetime import date as _date
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
 
+class NtOiSnapshotFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class NtOiSnapshotFetcherBaseFetcher(BaseFetcher[NtOiSnapshotFetcherSchema]):
+    fetcher_name = 'NtOiSnapshotFetcher'
+    domain = 'niftytrader.in'
+    schema = NtOiSnapshotFetcherSchema
+    min_interval_sec = 0.5
+
+
+import argparse
 import requests
 
+from as_of import logical_trading_date
 from db_compat import execute, executemany, query_all
 from fetch_utils import retry_get
+import sys
+
+SOURCE = "niftytrader"
 
 NT_HEADERS = {
     "User-Agent": (
@@ -43,7 +60,7 @@ NT_HEADERS = {
 }
 
 OI_URL = (
-    "https://webapi.niftytrader.in/webapi/Option/oi-time-range"
+    "https://www.niftytrader.in/api/niftytrader/Option/oi-time-range"
     "?symbol={symbol}&start_time={time}&end_time={time}&expiry=&exchange={exchange}"
 )
 
@@ -75,7 +92,7 @@ def _get_nt_index_map() -> dict[str, tuple[str, str]]:
             for r in rows:
                 result[r["index_name"]] = (r["provider_id"], exchange)
     except Exception as e:
-        print(f"[nt_oi_snap] WARN: index map lookup failed ({e}), using fallback")
+        print(f"[nt_oi_snap] WARN: index map lookup failed ({e}), using fallback", file=sys.stderr)
     return result or _FALLBACK
 
 
@@ -96,7 +113,7 @@ def fetch_oi_snapshot(nt_symbol: str, snap_time: str, exchange: str = "nse") -> 
             return []
         return d.get("resultData") or []
     except Exception as e:
-        print(f"  [OI] fetch error for {nt_symbol} after retries: {e}")
+        print(f"  [OI] fetch error for {nt_symbol} after retries: {e}", file=sys.stderr)
         return []
 
 
@@ -175,15 +192,15 @@ def save_snapshot(index_name: str, data: list[dict], today: str) -> int:
         snap_ts = str(recs[0].get("time") or "")[:19]
         execute("""
             INSERT INTO index_max_pain
-                (index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (index_name, date, expiry) DO UPDATE SET
+                (source, index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (source, index_name, date, expiry) DO UPDATE SET
                 max_pain    = excluded.max_pain,
                 pcr_oi      = excluded.pcr_oi,
                 total_ce_oi = excluded.total_ce_oi,
                 total_pe_oi = excluded.total_pe_oi,
                 fetched_at  = excluded.fetched_at
-        """, (index_name, today, exp, mp, pcr, int(total_ce), int(total_pe), snap_ts))
+        """, (SOURCE, index_name, today, exp, mp, pcr, int(total_ce), int(total_pe), snap_ts))
 
     return len(rows)
 
@@ -197,7 +214,7 @@ def run(target_index: str | None = None, snap_time: str = "15:20:00") -> None:
             print(f"[nt_oi_snap] Unknown index {target_index!r}. Known: {list(all_known)}")
             return
 
-    today = _date.today().isoformat()
+    today = logical_trading_date()
     print(f"[nt_oi_snap] Fetching EOD OI snapshot @{snap_time} for {list(nt_map)} ...")
     total = 0
     for index_name, (nt_symbol, exchange) in nt_map.items():
@@ -216,3 +233,9 @@ if __name__ == "__main__":
     parser.add_argument("--time",  default="15:20:00", help="Snapshot time HH:MM:SS")
     args = parser.parse_args()
     run(target_index=args.index, snap_time=args.time)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

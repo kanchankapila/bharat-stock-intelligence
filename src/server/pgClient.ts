@@ -6,7 +6,7 @@
  * (and a health probe) lives in one place.
  */
 import { Pool, types, type PoolClient, type QueryResultRow } from 'pg';
-import { pgConnectionString } from './pgConfig';
+import { pgConnectionString, vitestSchema } from './pgConfig';
 
 // Parse Postgres BIGINT (INT8) as JavaScript numbers (safe up to 2^53 - 1)
 types.setTypeParser(types.builtins.INT8, (val) => parseInt(val, 10));
@@ -52,10 +52,29 @@ let pool: Pool | null = null;
 
 export function getPool(): Pool {
   if (!pool) {
+    // Inside the vitest `unit` project, vitest.globalSetup.ts has already created a private
+    // throwaway schema and applied db/schema.postgres.sql into it. Pinning search_path on the
+    // POOL (not per-query) is what makes the isolation unconditional: every unqualified name in
+    // every query, from any call site, resolves inside the throwaway schema first and can only
+    // shadow a production table, never write to one. `public` stays on the path so pg_trgm and
+    // timescaledb types still resolve. Mirrors conftest.py's pg_schema fixture exactly.
+    const schema = vitestSchema();
     pool = new Pool({
-      connectionString: pgConnectionString(),
-      // Budget: bharat-server 22 + alphaquant 5 + ml-api 5 + chatbot 3 + Python 10 = 45 / 60 max_connections
-      max: Number(process.env.PG_POOL_MAX ?? 22),
+      connectionString: schema ? (process.env.VITEST_PG_URL || pgConnectionString()) : pgConnectionString(),
+      ...(schema ? { options: `-c search_path="${schema}",public` } : {}),
+      // Budget: bharat-server 22 + alphaquant 5 + ml-api 5 + chatbot 3 + Python 10 = 45 / 60
+      // max_connections. That budget never included the TEST processes, and it has to: vitest
+      // runs TWO projects (unit + live), each a singleFork process building its own Pool from
+      // this same function. At max 22 apiece that is 44 more against a 60-connection server
+      // with 37 already in use at rest (pm2 stack + TimescaleDB background workers, measured
+      // 2026-08-29) -- so the suite could not fit, and every symptom was a 5s/10s TEST TIMEOUT
+      // with zero assertion failures, which reads as flakiness rather than exhaustion. This is
+      // the mechanism behind the intermittent-vitest-flake history in docs/audit-findings.md
+      // (AF-20260829-23) and the 53300 retry logic below.
+      //
+      // A singleFork test process runs one file at a time, so it needs a handful of
+      // connections, never 22. 5 apiece puts the two projects at 10 instead of 44.
+      max: Number(process.env.PG_POOL_MAX ?? (process.env.VITEST ? 5 : 22)),
       idleTimeoutMillis: 20_000,
       connectionTimeoutMillis: 15_000,  // more resilient to startup spikes
     });
@@ -67,7 +86,11 @@ export function getPool(): Pool {
 /** True for transient pool/socket errors where the query never reached the server. */
 function isTransientConnError(err: unknown): boolean {
   const msg = (err as { message?: string })?.message ?? '';
-  return /connection terminated|connection timeout|ECONNRESET|ETIMEDOUT|Client has encountered a connection error|server closed the connection/i.test(
+  // 53300 "too many clients already": under load (unit + live vitest projects co-running with
+  // the four pm2 services against one Postgres) new connections are briefly refused -- same
+  // shape as the connection-terminated case below, safe to retry because SELECTs are
+  // idempotent and pgExecute's caller decides for writes.
+  return /connection terminated|connection timeout|ECONNRESET|ETIMEDOUT|Client has encountered a connection error|server closed the connection|too many clients already/i.test(
     msg,
   );
 }
@@ -459,7 +482,10 @@ export async function pgEnsureColumns(): Promise<void> {
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_beat_streak       BIGINT`,
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_miss_after_streak BIGINT DEFAULT 0`,
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rev_surprise_q1       DOUBLE PRECISION`,
-    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_yield             DOUBLE PRECISION`,
+    // fcf_yield ensure REMOVED 2026-09-11: column had 0 rows ever (measurement.md
+    // 2026-09-10); superseded by fcf_yield_approx (migration 066). Dropped on live DB by
+    // migrations/20260911090000_technical-signals-drop-fcf-yield.sql — readers alias
+    // fcf_yield_approx AS fcf_yield, so no reader changes were needed.
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS interest_coverage     DOUBLE PRECISION`,
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_positive          BIGINT DEFAULT 0`,
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS debt_coverage_risk    BIGINT DEFAULT 0`,
@@ -513,6 +539,15 @@ export async function pgEnsureColumns(): Promise<void> {
     `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cfi_ttm            DOUBLE PRECISION`,
     `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fcf_ttm_approx     DOUBLE PRECISION`,
     `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fcf_yield_approx   DOUBLE PRECISION`,
+    // finbert-tone ensemble columns (migration 20260911100000) — second sentiment engine
+    // in finbert_scorer.py; sentiment_conflict = |prosusai_signed - tone_signed| / 2.
+    // Fail-soft: NULL until the tone model cache is warmed (hf_pull_model.py).
+    `ALTER TABLE news_sentiment_items ADD COLUMN IF NOT EXISTS tone_pos           DOUBLE PRECISION`,
+    `ALTER TABLE news_sentiment_items ADD COLUMN IF NOT EXISTS tone_neg           DOUBLE PRECISION`,
+    `ALTER TABLE news_sentiment_items ADD COLUMN IF NOT EXISTS tone_neu           DOUBLE PRECISION`,
+    `ALTER TABLE news_sentiment_items ADD COLUMN IF NOT EXISTS tone_label         TEXT`,
+    `ALTER TABLE news_sentiment_items ADD COLUMN IF NOT EXISTS tone_score         DOUBLE PRECISION`,
+    `ALTER TABLE news_sentiment_items ADD COLUMN IF NOT EXISTS sentiment_conflict DOUBLE PRECISION`,
     // New quant_scores risk and multi-factor columns (migration 053)
     `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS beta_1y            DOUBLE PRECISION`,
     `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS beta_6m            DOUBLE PRECISION`,
@@ -552,6 +587,15 @@ export async function pgEnsureColumns(): Promise<void> {
     // _get_confluence_scores/_get_confluence_latest_map.
     `ALTER TABLE trendlyne_screener_stocks ADD CONSTRAINT chk_tl_screener_stocks_symbol_not_url CHECK (symbol IS NULL OR symbol NOT LIKE '%://%')`,
   ];
+  await client.query(`CREATE TABLE IF NOT EXISTS "data_ingestion_dlq" (
+    "id" BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    "fetcher_name" TEXT NOT NULL,
+    "domain" TEXT,
+    "payload_sample" TEXT,
+    "error_message" TEXT NOT NULL,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
+    "status" TEXT DEFAULT 'NEW'
+  )`);
 
   await client.query(`CREATE TABLE IF NOT EXISTS "_migrations" (
     "name" TEXT PRIMARY KEY,
@@ -605,8 +649,39 @@ export async function pgHealthy(): Promise<boolean> {
 }
 
 export async function closePool(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = null;
+  if (!pool) return;
+  const p = pool;
+  pool = null; // drop the reference first so nothing checks a pool that is shutting down
+
+  // pool.end() hangs indefinitely while any client is still checked out, which stalled
+  // vitest's afterAll. Cap the wait -- but do NOT swallow the outcome: a timeout here
+  // means connections are still open, and a silent "clean shutdown" would be a lie.
+  // The timer is unref'd and cleared so a fast, healthy end() is not held back by it
+  // (an un-unref'd 2s timer keeps Node's event loop alive and delays process exit).
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = Symbol('closePool-timeout');
+  try {
+    const result = await Promise.race([
+      // Promise.resolve(...) wrapper: a mocked pool (pgClient.test.ts) returns undefined
+      // from end(), and calling .then() on that throws. Promise.race tolerated a
+      // non-promise on its own; an explicit .then() chain does not.
+      Promise.resolve(p.end()).then(() => 'ended' as const),
+      new Promise<typeof timedOut>((resolve) => {
+        timer = setTimeout(() => resolve(timedOut), 2000);
+        timer.unref?.();
+      }),
+    ]);
+    if (result === timedOut) {
+      console.warn(
+        '[pgClient] closePool: pool.end() did not settle within 2000ms — one or more clients ' +
+        'were still checked out, so this was NOT a clean shutdown. Two causes, both real: a ' +
+        'caller that never released (use withClient/dbTransaction, which release in a finally), ' +
+        'or — more often here — a query still in flight because a test timed out at the vitest ' +
+        'layer while its server-side work kept running. The latter is the documented mechanism ' +
+        'behind signalOutcomesServiceSource.test.ts flaking under parallel load.',
+      );
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

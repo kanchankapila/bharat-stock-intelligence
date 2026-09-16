@@ -92,11 +92,11 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                     {screener.name}
                   </h2>
                   <div className="flex items-center gap-2 mt-2">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-800 px-2 py-0.5 rounded">
+                    <span className="text-[10px] font-black text-slate-500 font-display uppercase tracking-widest bg-slate-800 px-2 py-0.5 rounded">
                       Source: {screener.source}
                     </span>
                     <span className={cn(
-                      "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded",
+                      "text-[10px] font-black font-display uppercase tracking-widest px-2 py-0.5 rounded",
                       isBullish ? "text-emerald-400 bg-emerald-500/10" :
                       isBearish ? "text-rose-400 bg-rose-500/10" :
                       "text-slate-400 bg-slate-800"
@@ -104,6 +104,9 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                       {screener.sentiment}
                     </span>
                   </div>
+                  <p className="text-[10px] text-amber-300/70 mt-1.5">
+                    Keyword-classified, unvalidated -- measured sentiment consensus is inverted (t=-4.61)
+                  </p>
                 </div>
               </div>
               {screener.description && (
@@ -132,7 +135,7 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50"
               />
             </div>
-            <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">
+            <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 font-display uppercase tracking-widest whitespace-nowrap">
               <Activity className="w-3 h-3" />
               {filteredStocks.length} Results
             </div>
@@ -148,12 +151,12 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
             ) : error ? (
               <div className="py-20 text-center">
                 <Activity className="w-12 h-12 text-slate-800 mx-auto mb-4" />
-                <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">Failed to load screener results</p>
+                <p className="text-slate-500 text-sm font-bold font-display uppercase tracking-widest">Failed to load screener results</p>
               </div>
             ) : filteredStocks.length === 0 ? (
               <div className="py-20 text-center">
                 <Search className="w-12 h-12 text-slate-800 mx-auto mb-4" />
-                <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">No stocks found matching your search</p>
+                <p className="text-slate-500 text-sm font-bold font-display uppercase tracking-widest">No stocks found matching your search</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -220,10 +223,10 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                         <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5">Price</p>
                         <p className="text-[10px] font-black text-white italic leading-none">₹{stock.ltp.toLocaleString()}</p>
                       </div>
-                      <div className={cn("p-1.5 rounded-lg border border-slate-800/30", stock.changePercent >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5")}>
+                      <div className={cn("p-1.5 rounded-lg border border-slate-800/30", stock.changePercent == null ? "bg-slate-700/5" : stock.changePercent >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5")}>
                         <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5">Change</p>
-                        <p className={cn("text-[10px] font-black italic leading-none", stock.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                          {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                        <p className={cn("text-[10px] font-black italic leading-none", stock.changePercent == null ? "text-slate-500" : stock.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                          {stock.changePercent == null ? '—' : `${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%`}
                         </p>
                       </div>
                     </div>
@@ -232,13 +235,13 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                       <div className="flex gap-1.5">
                         <div className="flex flex-col">
                           <span className="text-[6px] font-black text-slate-600 uppercase">1W</span>
-                          <span className={cn("text-[8px] font-bold tabular-nums", (stock.return_1w || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                          <span className={cn("text-[8px] font-bold tabular-nums", stock.return_1w == null ? "text-slate-500" : stock.return_1w >= 0 ? "text-emerald-500" : "text-rose-500")}>
                             {stock.return_1w != null ? `${stock.return_1w >= 0 ? '+' : ''}${stock.return_1w.toFixed(1)}%` : '—'}
                           </span>
                         </div>
                         <div className="flex flex-col">
                           <span className="text-[6px] font-black text-slate-600 uppercase">1M</span>
-                          <span className={cn("text-[8px] font-bold tabular-nums", (stock.return_1m || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                          <span className={cn("text-[8px] font-bold tabular-nums", stock.return_1m == null ? "text-slate-500" : stock.return_1m >= 0 ? "text-emerald-500" : "text-rose-500")}>
                             {stock.return_1m != null ? `${stock.return_1m >= 0 ? '+' : ''}${stock.return_1m.toFixed(1)}%` : '—'}
                           </span>
                         </div>
@@ -260,7 +263,7 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
             </div>
             <button 
               onClick={onClose}
-              className="text-[10px] font-black text-slate-400 hover:text-white uppercase tracking-widest px-4 py-2 bg-slate-900 rounded-xl transition-colors border border-slate-800"
+              className="text-[10px] font-black text-slate-400 hover:text-white font-display uppercase tracking-widest px-4 py-2 bg-slate-900 rounded-xl transition-colors border border-slate-800"
             >
               Close Window
             </button>

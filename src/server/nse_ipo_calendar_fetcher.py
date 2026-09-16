@@ -18,6 +18,21 @@ Run:
   python nse_ipo_calendar_fetcher.py
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class NseIpoCalendarFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class NseIpoCalendarFetcherBaseFetcher(BaseFetcher[NseIpoCalendarFetcherSchema]):
+    fetcher_name = 'NseIpoCalendarFetcher'
+    domain = 'nseindia.com'
+    schema = NseIpoCalendarFetcherSchema
+    min_interval_sec = 0.5
+
+
 from datetime import datetime
 
 from nse import NSE
@@ -122,3 +137,9 @@ def run() -> int:
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

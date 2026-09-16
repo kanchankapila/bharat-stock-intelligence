@@ -30,6 +30,21 @@ Run:
   python mf_stock_holdings_fetcher.py --limit 50
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MfStockHoldingsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MfStockHoldingsFetcherBaseFetcher(BaseFetcher[MfStockHoldingsFetcherSchema]):
+    fetcher_name = 'MfStockHoldingsFetcher'
+    domain = 'amfiindia.com'
+    schema = MfStockHoldingsFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import time
 from datetime import date, datetime, timedelta
@@ -38,6 +53,7 @@ import requests
 
 from db_compat import connect
 from et_stats_client import HEADERS, load_companyid_map
+import sys
 
 MF_URL = ("https://mfapps.indiatimes.com/Ulip/mfsInvestingInStock.htm"
           "?pagesize=100&sortby=numberOfSharesHeld&companyid={cid}&marketcap=&callback=&pageno={page}")
@@ -66,13 +82,13 @@ def ensure_schema(con) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_mfsh_sym ON mf_stock_holdings(symbol, as_of_date DESC)")
     con.commit()
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN mf_net_share_chg_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mf_fund_count        INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mf_funds_adding      INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mf_funds_trimming    INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mf_add_trim_ratio    REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mf_avg_pct_assets    REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mf_big_fund_flow     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_net_share_chg_pct REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_fund_count        INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_funds_adding      INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_funds_trimming    INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_add_trim_ratio    REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_avg_pct_assets    REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_big_fund_flow     REAL",
     ]:
         try:
             cur.execute(ddl); con.commit()
@@ -256,6 +272,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Per-stock mutual-fund ownership flow")
     parser.add_argument("--symbol", default=None)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch all symbols even if fresh within last 25 days")
     args = parser.parse_args()
 
     con = connect()
@@ -265,8 +283,20 @@ def main() -> None:
         print("[MFHoldings] No stocks with a companyid found.")
         con.close(); return
 
+    # Smart 25-day cadence check: mutual funds report monthly on month-end
+    if not args.force and not args.symbol:
+        from fetch_utils import filter_stale_symbols
+        fresh_cutoff = (date.today() - timedelta(days=25)).isoformat()
+        stale_stocks = filter_stale_symbols(con, stocks, "mf_stock_holdings",
+                                            date_col="fetched_at", as_of_date=fresh_cutoff)
+        skipped = len(stocks) - len(stale_stocks)
+        if skipped > 0:
+            print(f"[MFHoldings] Smart cadence skip: {skipped}/{len(stocks)} symbols already fresh within last 25 days. Processing {len(stale_stocks)} remaining.")
+            stocks = stale_stocks
+
     print(f"[MFHoldings] Processing {len(stocks)} stocks — per-stock MF ownership flow…")
     session = requests.Session(); session.headers.update(HEADERS)
+
     ok = accumulating = 0
     for i, (symbol, cid) in enumerate(stocks, 1):
         try:
@@ -280,10 +310,16 @@ def main() -> None:
             print(f"  [{i}/{len(stocks)}] {symbol}: {agg['num_funds']} funds | "
                   f"net {chg:+.2f}%" if chg is not None else f"  [{i}/{len(stocks)}] {symbol}: {agg['num_funds']} funds")
         except Exception as e:
-            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}")
+            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}", file=sys.stderr)
     print(f"[MFHoldings] Done. {ok} stocks; {accumulating} with net MF accumulation.")
     con.close()
 
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

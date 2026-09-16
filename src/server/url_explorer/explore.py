@@ -62,6 +62,9 @@ def run(urls, universe, fetch_fn=None, returns_by_target=None,
                 for c in cors:
                     store.insert_correlation(eid, run_at, c)
         n_ok = sum(1 for r in ep_results if r.ok)
+        if write and eid:
+            store.record_health(eid, n_ok > 0,
+                                None if n_ok else f"{len(ep_results) - n_ok}/{len(ep_results)} fetches failed")
         items.append({"endpoint": ep, "n_ok": n_ok, "n_total": len(ep_results),
                       "profiles": profiles, "correlations": cors})
 

@@ -6,6 +6,8 @@ Backtests custom combinations of NiftyTrader live screener filters using
 resolved historical outcomes (returns over 1d, 3d, 5d) and compares vs Nifty 50.
 Stores runs in `backtesting_runs` table so they are visible in UI dashboards.
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import os
 import sys
@@ -219,7 +221,7 @@ def run_backtest(filters: list[str], horizon: str = '3d', initial_capital: float
             nifty_end = nifty_df['close'].iloc[-1]
             nifty_ret = (nifty_end - nifty_start) / nifty_start * 100.0
     except Exception as e:
-        print(f"  [Benchmark] Failed to load Nifty benchmarking: {e}")
+        print(f"  [Benchmark] Failed to load Nifty benchmarking: {e}", file=sys.stderr)
         
     alpha = total_ret - nifty_ret
     
@@ -344,7 +346,7 @@ def auto_backtest_top(n: int = 5, horizon: str = '3d', initial_capital: float = 
         try:
             run_backtest(filters, horizon, initial_capital, max_positions)
         except Exception as e:
-            print(f"  [AutoBacktest] Failed: {e}")
+            print(f"  [AutoBacktest] Failed: {e}", file=sys.stderr)
 
     for single in singles:
         f = single['filter']
@@ -352,7 +354,7 @@ def auto_backtest_top(n: int = 5, horizon: str = '3d', initial_capital: float = 
         try:
             run_backtest([f], horizon, initial_capital, max_positions)
         except Exception as e:
-            print(f"  [AutoBacktest] Failed: {e}")
+            print(f"  [AutoBacktest] Failed: {e}", file=sys.stderr)
 
     print(f"\n[AutoBacktest] Completed. Results available in backtesting_runs table (run_name LIKE 'live_screener_%').")
 
@@ -385,3 +387,9 @@ if __name__ == '__main__':
         run_backtest(filters_list, args.horizon, args.capital, args.max_positions, args.start, args.end)
     else:
         parser.print_help()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

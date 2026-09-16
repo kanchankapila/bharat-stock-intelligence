@@ -74,7 +74,7 @@ export const GlobalMarketCards: React.FC = () => {
               )}
             >
               <div className="flex justify-between items-start mb-1">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest truncate mr-1">
+                <span className="text-[10px] font-black text-slate-500 font-display uppercase tracking-widest truncate mr-1">
                   {market.symbol}
                 </span>
                 <span className="text-[8px] text-slate-600 font-bold uppercase">
@@ -92,7 +92,7 @@ export const GlobalMarketCards: React.FC = () => {
               {(() => {
                 const tz = lookupExchangeTimeZone(market.country);
                 return (
-                  <div className="flex items-center gap-1.5 mt-1.5 text-[8px] font-bold uppercase tracking-wide">
+                  <div className="flex items-center gap-1.5 mt-1.5 text-[8px] font-bold font-display uppercase tracking-wide">
                     {tz && (
                       <span className="text-slate-500 tabular-nums">{currentTimeInZone(tz)} local</span>
                     )}
@@ -118,7 +118,7 @@ export const GlobalMarketCards: React.FC = () => {
         })}
       </div>
       {dataUpdatedAt > 0 && (
-        <div className="text-[8px] text-slate-600 font-semibold uppercase tracking-wide mt-2 text-right">
+        <div className="text-[8px] text-slate-600 font-semibold font-display uppercase tracking-wide mt-2 text-right">
           Data fetched {relativeFromNow(dataUpdatedAt)} · local clocks live
         </div>
       )}

@@ -11,8 +11,10 @@ Also backfills:
 
 Run: python screener_catalog_enricher.py
 """
+import polars as pl
 import re
 from db_compat import connect
+import sys
 
 # ── Signal keyword patterns (same as trendlyne_screener_discovery.py) ────────
 SIGNAL_KEYWORD_PATTERNS = [
@@ -102,38 +104,137 @@ CATEGORY_DEFAULTS = {
 BEARISH_KEYWORDS = r"breakdown|sell|short|fall|decline|bearish|overbought|death.cross"
 
 
+def classify_screener(name: str) -> str | None:
+    nl = (name or '').lower()
+
+    # Special Value / Reversal / Turnaround Overrides
+    if 'turnaround' in nl and 'loss to profit' in nl:
+        return 'bullish'
+    if 'good fundamental' in nl and 'near 52 week low' in nl:
+        return 'bullish'
+    if any(k in nl for k in [
+        'pe less than industry', 'pe less than sector', 'peg lower than industry',
+        'peg lower than sector', 'price to book value (p/bv) less than'
+    ]):
+        return 'bullish'
+
+    # Technical Bearish / Sell indicators
+    if any(k in nl for k in [
+        'trending down', 'crossed below', 'crossed -80 from above', 'overbought',
+        'bearish', 'breakdown', 'death cross', 'lower low', 'volume loser',
+        'downgrade', 'profit fall', 'loss', 'new 52 week low', 'underperform',
+        'promoter pledge', 'high debt', 'less than industry', 'lower than sector',
+        'less than sector', 'lower than industry', 'falling rsi', 'macd negative',
+        'signal changed to sell', 'negative surprise', 'negative revenue growth',
+        'negative quarterly', 'negative eps', 'analysts estimate negative', 'profit to loss'
+    ]):
+        return 'bearish'
+
+    # Technical Bullish / Buy indicators
+    if any(k in nl for k in [
+        'trending up', 'crossed above', 'oversold', 'bullish', 'breakout',
+        'golden cross', 'higher high', 'volume gainer', 'signal changed to buy',
+        'new 52 week high', 'high delivery', 'volume spike', 'fii buying', 'dii buying',
+        'profit growth', 'revenue growth', 'earnings beat', 'upgrade', 'outperform',
+        'strong buy', 'high momentum', 'multibagger', 'piotroski score', 'high roe',
+        'positive surprise', 'positive revenue growth', 'positive quarterly', 'positive eps',
+        'analysts estimate positive'
+    ]):
+        return 'bullish'
+
+    return None
+
+
+def sync_catalog_bias_from_master(con) -> int:
+    """Accept screener_master's latest sentiment classification in the catalog."""
+    result = con.execute("""
+        UPDATE screener_catalog AS sc
+        SET signal_bias = sm.inferred_sentiment
+        FROM screener_master AS sm
+        WHERE sm.scan_id = sc.screener_id
+          AND LOWER(sm.source) = LOWER(sc.source)
+          AND sm.inferred_sentiment IN ('bullish', 'bearish', 'neutral')
+          AND sc.signal_bias IS DISTINCT FROM sm.inferred_sentiment
+    """)
+    return result.rowcount
+
+
+def reclassify_directional_neutrals(con) -> tuple[int, int]:
+    """Promote only neutral rows with an explicit directional classifier result."""
+    master_changed = 0
+    for row in con.execute("""
+        SELECT scan_id, source, name, inferred_category
+        FROM screener_master
+        WHERE inferred_sentiment IS NULL OR LOWER(inferred_sentiment) = 'neutral'
+    """).fetchall():
+        bias, _, _, _ = resolve_screener_defaults(
+            row['inferred_category'] or 'other', None, row['name'] or ''
+        )
+        if bias not in ('bullish', 'bearish'):
+            continue
+        con.execute(
+            "UPDATE screener_master SET inferred_sentiment = ? WHERE scan_id = ? AND LOWER(source) = LOWER(?)",
+            (bias, row['scan_id'], row['source']),
+        )
+        master_changed += 1
+
+    catalog_changed = 0
+    for row in con.execute("""
+        SELECT screener_id, source, screener_name, category
+        FROM screener_catalog
+        WHERE LOWER(signal_bias) = 'neutral'
+    """).fetchall():
+        bias, _, _, _ = resolve_screener_defaults(
+            row['category'] or 'other', None, row['screener_name'] or ''
+        )
+        if bias not in ('bullish', 'bearish'):
+            continue
+        con.execute(
+            "UPDATE screener_catalog SET signal_bias = ? WHERE screener_id = ? AND LOWER(source) = LOWER(?)",
+            (bias, row['screener_id'], row['source']),
+        )
+        catalog_changed += 1
+
+    return master_changed, catalog_changed
+
+
 def resolve_screener_defaults(category: str, sentiment: str | None, name: str) -> tuple[str, str, str, float]:
     """Pure: (signal_bias, cat_norm, investment_horizon, confidence) for a screener_master
-    row being inserted into screener_catalog (Step 5).
-
-    `category` is already the real, correctly-classified value from screener_master.
-    inferred_category (screenerClassifier.ts's RULES / NLPScreenerInference), which uses the
-    SAME taxonomy as unified_ranker.py's CAT_BASE_WT ('technical_trend', 'fundamental_quality',
-    'ownership_institutional', ...). Bug found live 2026-08-13: cat_norm used to be
-    re-validated against CATEGORY_DEFAULTS -- a different, coarser vocabulary meant only to
-    supply horizon/confidence fallbacks -- which shares almost no keys with the real taxonomy
-    ('sector_theme'/'other' being the only overlap) and silently collapsed every other real
-    category to 'other' (CAT_BASE_WT weight 0.0). Hit 95/95 (100%) of et_marketstats'
-    screeners and up to 35% of moneycontrol's, all inserted via this exact path -- e.g.
-    'Above EMA-20' correctly classified 'technical_trend' in screener_master, silently written
-    as 'other' here, contributing ZERO to every stock's score. `category` is now trusted as-is;
-    CATEGORY_DEFAULTS is consulted only for its own stated purpose (horizon/confidence)."""
-    if sentiment and sentiment in ('bullish', 'bearish', 'neutral'):
+    row being inserted into screener_catalog (Step 5)."""
+    # 1. Check domain classifier first
+    domain_bias = classify_screener(name)
+    if domain_bias:
+        bias = domain_bias
+    elif sentiment and sentiment in ('bullish', 'bearish', 'neutral'):
         bias = sentiment
     elif re.search(_safe_pattern(BEARISH_KEYWORDS), name.lower()):
         bias = 'bearish'
     elif category == 'sector_theme':
         bias = 'neutral'
     else:
-        # Was 'bullish' (2026-08-10). A catch-all that defaults to BULLISH makes every
-        # screener nobody classified into a buy vote, which systematically tilts
-        # bullish_screener_count and every score derived from it. "We could not tell"
-        # is neutral, not bullish -- abstain instead of guessing a direction.
         bias = 'neutral'
 
     cat_norm = category
     _, horizon, confidence = CATEGORY_DEFAULTS.get(category, ('neutral', 'medium_term', 0.65))
     return bias, cat_norm, horizon, confidence
+
+
+def load_catalog_rows_for_name_enrichment(con):
+    """Step 2's name-lookup: rows still missing signal_keywords, joined against
+    trendlyne_screeners/screener_master for a display name. Extracted so a regression in the
+    LOWER(sc.source) join condition (AF-20260816-19 -- screener_catalog.source holds both
+    'trendlyne' and 'Trendlyne' live) actually fails a test, rather than a hand-copied mirror of
+    the query passing regardless of what the real one says -- see resolve_screener_defaults()
+    above for the same reasoning applied to Step 5."""
+    return con.execute("""
+        SELECT sc.screener_id, sc.source, sc.screener_name,
+               ts.screenpk, ts.screener_url AS ts_url, ts.screener_name AS ts_name,
+               sm.name AS sm_name
+        FROM screener_catalog sc
+        LEFT JOIN trendlyne_screeners ts ON ts.screener_id = sc.screener_id AND LOWER(sc.source) = 'trendlyne'
+        LEFT JOIN screener_master sm ON sm.scan_id = sc.screener_id
+        WHERE sc.signal_keywords IS NULL OR sc.signal_keywords = ''
+    """).fetchall()
 
 
 def run():
@@ -156,15 +257,7 @@ def run():
 
     # ── Step 2: Load screener names from all sources ──────────────────────────
     # screener_catalog: join on screener_master or trendlyne_screeners for name
-    rows = con.execute("""
-        SELECT sc.screener_id, sc.source, sc.screener_name,
-               ts.screenpk, ts.screener_url AS ts_url, ts.screener_name AS ts_name,
-               sm.name AS sm_name
-        FROM screener_catalog sc
-        LEFT JOIN trendlyne_screeners ts ON ts.screener_id = sc.screener_id AND sc.source = 'trendlyne'
-        LEFT JOIN screener_master sm ON sm.scan_id = sc.screener_id
-        WHERE sc.signal_keywords IS NULL OR sc.signal_keywords = ''
-    """).fetchall()
+    rows = load_catalog_rows_for_name_enrichment(con)
 
     print(f"[CatalogEnricher] {len(rows)} screener_catalog rows to enrich")
     catalog_updated = 0
@@ -179,12 +272,17 @@ def run():
         kw = extract_signal_keywords(name)
         url = ts_url or (tl_screener_url(screenpk) if source == "trendlyne" and screenpk else None)
 
+        # WHERE screener_id = ? alone (no source filter) let this silently overwrite a
+        # DIFFERENT provider's row sharing the same numeric screener_id with keywords/url
+        # derived from THIS row's source -- same class as trendlyne_screener_discovery.py's fix,
+        # cross-writer-collision-audit 2026-08-14. `source` here is this loop's own per-row
+        # value (from the `rows` query), so scoping to it is correct, not just defensive.
         con.execute("""
             UPDATE screener_catalog
             SET signal_keywords = ?,
                 screener_url = COALESCE(screener_url, ?)
-            WHERE screener_id = ?
-        """, (kw, url, scid))
+            WHERE screener_id = ? AND source = ?
+        """, (kw, url, scid, source))
         catalog_updated += 1
 
     con.commit()
@@ -301,11 +399,17 @@ def run():
             """, (scan_id, name, source, bias, cat_norm, horizon, confidence, kw, url, scan_id, source))
             inserted += 1
         except Exception as e:
-            print(f"  [WARN] Cannot insert {scan_id}: {e}")
+            print(f"  [WARN] Cannot insert {scan_id}: {e}", file=sys.stderr)
             con.rollback()
 
     con.commit()
     print(f"[CatalogEnricher] screener_catalog: {inserted} new rows inserted from screener_master")
+
+    master_neutrals, catalog_neutrals = reclassify_directional_neutrals(con)
+    synced_biases = sync_catalog_bias_from_master(con)
+    con.commit()
+    print(f"[CatalogEnricher] directional neutrals: {master_neutrals} master / {catalog_neutrals} catalog corrected")
+    print(f"[CatalogEnricher] screener_catalog: {synced_biases} signal biases accepted from screener_master")
 
     # ── Step 5b: Backfill category for EXISTING rows the CATEGORY_DEFAULTS bug already hit ──
     # The Step 5 fix above only stops NEW rows losing their category -- it does nothing for the
@@ -374,3 +478,9 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

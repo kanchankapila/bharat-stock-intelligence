@@ -10,7 +10,10 @@
  * market_sentiment_snapshots, identical to what the real 15-min cycle writes.
  *
  *   RUN_LIVE_DATASOURCE_TESTS=1 npx vitest run src/server/__tests__/newsSentimentService.live.test.ts
- */
+  *
+ * LIVE_DATE_SAFE: writes news_sentiment_items, dated by the article's own published_at; fetched_at is a fetch time, not a market date.
+ * (Declared for liveTestTradingDayGuard.test.ts -- see it for why this must be stated.)
+*/
 import { describe, it, expect } from 'vitest';
 
 // Gated behind RUN_LIVE, not a static top-level `import 'dotenv/config'` -- that would load

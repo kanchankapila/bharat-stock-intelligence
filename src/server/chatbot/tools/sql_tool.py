@@ -9,7 +9,12 @@ from db_compat import connect as db_connect
 
 # DB_PATH is handled centrally by db_compat via USE_POSTGRES env var.
 # This local default is legacy and ignored by _connect().
-DB_PATH = os.getenv("DB_PATH", "database.sqlite")
+# Dead SQLite-era parameter, NOT a live file path. Every chatbot tool's `_connect(db_path)`
+# ignores its argument and returns db_compat.connect() (Postgres) -- see tests/chatbot/conftest.py,
+# which documents the same no-op. Retained only because ~30 agent.py call sites and the chatbot
+# test suite still thread the argument; the old "database.sqlite" default made a decommissioned
+# file look load-bearing and nearly caused it to be treated as live (AF-20260910-14).
+DB_PATH = os.getenv("DB_PATH", "<unused:postgres-only>")
 
 
 def _connect(db_path: str = None):
@@ -89,12 +94,33 @@ def filter_stocks_by_fundamentals(
 
 def get_buy_signals(
     symbol: str | None = None,
-    min_confidence: float = 0.65,
+    min_confidence: float = 65.0,
     limit: int = 20,
     db_path: str = DB_PATH,
 ) -> list[dict]:
     """
-    Active BUY signals. Queries unified_signals (live, updated daily).
+    Active bullish signals. Queries unified_signals (live, updated daily).
+
+    `min_confidence` is on the 0-100 scale db.ts documents for the column. It was 0.65
+    against a column that held BOTH 0-1 and 0-100 values, so it filtered the 0-1 writers
+    and was a no-op for the 0-100 ones (49 >= 0.65 always). Migration 1787070000000
+    normalised the four out-of-spec writers to 0-100 and backfilled 8,448 rows, so the
+    comparison is now a plain one -- no read-time rescaling, which would misread a
+    legitimate low score as a fraction needing multiplication.
+
+    Two measured facts still drive the shape of this query (live-measured 2026-08-15
+    over a trailing 7 days, 15,752 rows):
+
+    1. signal_type is NOT a single vocabulary. The largest writer
+       (technical_analysis_engine.py, signal_source='technical') emits
+       'Bullish'/'Bearish'; the smaller ones emit 'BUY'/'SELL'. Matching only 'BUY'
+       selected 834 of 15,752 rows and silently dropped every signal from the
+       dominant source.
+    2. signal_source='technical' never writes confidence_score at all -- 14,732 of
+       15,752 rows are NULL. `confidence_score >= ?` is never true for NULL, so those
+       rows were excluded a second, independent time. They are included now with
+       confidence surfaced as NULL (honestly "unknown" to the caller) and sorted last,
+       because returning ~5% of the signal table as "active signals" is the worse lie.
     """
     conn = _connect(db_path)
     cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
@@ -102,9 +128,9 @@ def get_buy_signals(
     # unified_signals (live, updated daily)
     try:
         conditions = [
-            "signal_type = 'BUY'",
+            "signal_type IN ('BUY', 'Bullish')",
             "signal_date >= ?",
-            "confidence_score >= ?",
+            "(confidence_score IS NULL OR confidence_score >= ?)",
         ]
         params: list = [cutoff, min_confidence]
         if symbol:
@@ -117,7 +143,9 @@ def get_buy_signals(
             f"confidence_score AS confidence, reasoning "
             f"FROM unified_signals "
             f"WHERE {' AND '.join(conditions)} "
-            f"ORDER BY confidence_score DESC, signal_date DESC LIMIT ?",
+            # COALESCE rather than NULLS LAST: NULLs sort highest on a Postgres DESC,
+            # which would rank every unknown-confidence row above every scored one.
+            f"ORDER BY COALESCE(confidence_score, -1) DESC, signal_date DESC LIMIT ?",
             params,
         ).fetchall()
         conn.close()

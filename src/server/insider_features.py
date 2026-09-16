@@ -12,6 +12,7 @@ insider_buy_pct_90d in [0, 1]:
 Run: python insider_features.py
 """
 
+import polars as pl
 import sys
 import os
 import datetime
@@ -24,8 +25,59 @@ from db_compat import connect, read_df, executemany
 from as_of import logical_trading_date
 
 WINDOW_DAYS = 90
-BUY_TYPES   = {'BUY', 'ACQUISITION', 'PURCHASE', 'ACQUIRE'}
-SELL_TYPES  = {'SELL', 'DISPOSAL', 'SALE'}
+NEUTRAL = 0.5
+# SEBI PIT lets an insider disclose up to 2 trading days after the trade and insider_trades
+# stores the trade date, not the disclosure date -- so a history series must not see a trade
+# until it could have been public. 7 calendar days covers 2 sessions plus a long weekend.
+DISCLOSURE_LAG_DAYS = 7
+
+# Open-market trades only, matched on UPPER(TRIM()) of the vendor's real strings (note NSE's
+# double space). ESOP/gift/pledge/inter-se/allotment carry no view on price. These sets used to
+# be {'BUY','ACQUISITION','PURCHASE','ACQUIRE'} / {'SELL','DISPOSAL','SALE'} matched EXACTLY, so
+# NSE's 'ACQUISITION -  MARKET PURCHASE' (18.7k rows) never counted (AF-20260913-03).
+# insider_transactions_fetcher.py passes these straight into a SQL IN list.
+BUY_TYPES   = {'BUY', 'MARKET PURCHASE', 'ACQUISITION -  MARKET PURCHASE', 'ACQUISITION -  MARKET'}
+SELL_TYPES  = {'SELL', 'MARKET SALE', 'DISPOSAL -  MARKET SALE', 'DISPOSAL -  MARKET'}
+# insider_trades holds ~8.5 copies of each trade (79,327 rows / 9,302 distinct).
+TRADE_KEY = ('symbol', 'acquirerName', 'typeOfTransaction', 'quantity', 'date_iso')
+
+
+def _classified(trades: pd.DataFrame) -> pd.DataFrame:
+    t = trades.copy()
+    t['typeOfTransaction'] = t['typeOfTransaction'].astype(str).str.upper().str.strip()
+    t = t.drop_duplicates(subset=[c for c in TRADE_KEY if c in t.columns])
+    qty = pd.to_numeric(t['quantity'], errors='coerce').fillna(0.0).clip(lower=0)
+    t['buy_qty'] = np.where(t['typeOfTransaction'].isin(BUY_TYPES), qty, 0.0)
+    t['sell_qty'] = np.where(t['typeOfTransaction'].isin(SELL_TYPES), qty, 0.0)
+    return t
+
+
+def _buy_pct(buy, sell):
+    buy = np.asarray(buy, dtype=float)
+    total = buy + np.asarray(sell, dtype=float)
+    return np.where(total > 0, buy / np.where(total > 0, total, 1.0), NEUTRAL)
+
+
+def insider_buy_pct_series(trades: pd.DataFrame, dates, lag_days: int = DISCLOSURE_LAG_DAYS,
+                           window_days: int = WINDOW_DAYS) -> pd.Series:
+    """Point-in-time insider_buy_pct_90d for each of `dates` from ONE symbol's trades.
+
+    A trade counts from date_iso + lag_days for window_days calendar days. Dates with no
+    open-market trade in the window read NEUTRAL, never 0 (0 means 'all selling')."""
+    idx = pd.DatetimeIndex(pd.to_datetime(dates))
+    if trades is None or trades.empty:
+        return pd.Series(NEUTRAL, index=idx, dtype=float)
+    t = _classified(trades)
+    t = t[(t['buy_qty'] > 0) | (t['sell_qty'] > 0)]
+    t = t[pd.to_datetime(t['date_iso'], errors='coerce').notna()]
+    if t.empty or len(idx) == 0:
+        return pd.Series(NEUTRAL, index=idx, dtype=float)
+    avail = (pd.to_datetime(t['date_iso']) + pd.Timedelta(days=lag_days)).dt.normalize()
+    daily = t.assign(avail=avail.values).groupby('avail')[['buy_qty', 'sell_qty']].sum()
+    norm = idx.normalize()
+    cal = pd.date_range(min(daily.index.min(), norm.min()), max(daily.index.max(), norm.max()), freq='D')
+    roll = daily.reindex(cal, fill_value=0.0).rolling(window_days, min_periods=1).sum().reindex(norm)
+    return pd.Series(_buy_pct(roll['buy_qty'].values, roll['sell_qty'].values), index=idx)
 
 
 def compute_insider_features(cutoff_date: str) -> pd.DataFrame:
@@ -43,24 +95,15 @@ def compute_insider_features(cutoff_date: str) -> pd.DataFrame:
     # 2,187 rows (0.18%) despite 46k trades being available. The 2026-07-30 bias audit added
     # the parsed date_iso column for exactly this, but no consumer was ever switched over.
     df = read_df(
-        'SELECT symbol, "typeOfTransaction", quantity FROM insider_trades '
+        'SELECT symbol, "acquirerName", "typeOfTransaction", quantity, date_iso FROM insider_trades '
         "WHERE date_iso >= ? AND date_iso <= ?",
         (window_start, cutoff_date),
     )
     if df.empty:
         return pd.DataFrame(columns=['symbol', 'insider_buy_pct_90d'])
 
-    df['typeOfTransaction'] = df['typeOfTransaction'].str.upper().str.strip()
-    df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0.0).clip(lower=0)
-
-    df['buy_qty']  = np.where(df['typeOfTransaction'].isin(BUY_TYPES),  df['quantity'], 0.0)
-    df['sell_qty'] = np.where(df['typeOfTransaction'].isin(SELL_TYPES), df['quantity'], 0.0)
-
-    agg = df.groupby('symbol')[['buy_qty', 'sell_qty']].sum().reset_index()
-    # +1 in denominator prevents 0/0 for rows with only unknown transaction types
-    agg['insider_buy_pct_90d'] = (
-        agg['buy_qty'] / (agg['buy_qty'] + agg['sell_qty'] + 1.0)
-    ).clip(0.0, 1.0)
+    agg = _classified(df).groupby('symbol')[['buy_qty', 'sell_qty']].sum().reset_index()
+    agg['insider_buy_pct_90d'] = _buy_pct(agg['buy_qty'], agg['sell_qty'])
 
     return agg[['symbol', 'insider_buy_pct_90d']]
 
@@ -97,3 +140,9 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

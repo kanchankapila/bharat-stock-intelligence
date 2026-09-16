@@ -2,13 +2,17 @@ from pathlib import Path
 import json
 import datetime
 import pandas as pd
+import polars as pl
 import difflib
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
 
-from db_compat import get_engine, connect as db_connect, now_utc_iso
+from db_compat import get_engine, connect as db_connect, now_utc_iso, safe_alter, use_postgres
+import as_of
 from technical_analysis_engine import compute_atr_barriers
+from indian_market_costs import round_trip_cost_bps
 
 
 # ── Pure functions: regime-edge-adjusted ML win_probability consumption ────────
@@ -26,6 +30,20 @@ def apply_edge_adjustment_to_win_probs(win_prob_map: Dict[str, float], regime_ma
         regime = regime_map.get(sym)
         out[sym] = edge_adjusted_probability(wp, regime, edge_status) if regime else wp
     return out
+
+
+def apply_drift_haircut(win_prob_map: Dict[str, float], multiplier: float) -> Dict[str, float]:
+    """Shrink each win_probability toward the neutral 0.5 by `multiplier`, extracted from the
+    scoring loop for unit testing (same convention as apply_ml_score_adjustment below).
+
+    NOT `wp * multiplier`. See the call site for the full reasoning: these are calibrated
+    probabilities, so scaling them is miscalibration by construction, and below 0.5 the old form
+    was directionally backwards (it made a losing call MORE confident). Same shape as
+    ml_calibration.edge_adjusted_probability, which answers the identical question.
+    """
+    if multiplier >= 1.0:
+        return win_prob_map
+    return {sym: round(0.5 + multiplier * (wp - 0.5), 4) for sym, wp in win_prob_map.items()}
 
 
 def apply_ml_score_adjustment(final_score: float, normalized_score: float, wp) -> float:
@@ -608,14 +626,29 @@ class AlphaQuantScoringEngine:
                     {'bullish': 'positive', 'bearish': 'negative'}
                 ).fillna('neutral')
                 news_df['is_json_symbols'] = True
-            except Exception:
+            except SQLAlchemyError as exc:
+                # Narrowed from a bare `except Exception` (2026-08-16). A blanket catch here
+                # swallowed ANY failure -- including a transient connection blip -- and silently
+                # swapped in the degraded legacy path with no log line, so nobody could tell a
+                # real outage from normal operation.
+                print(
+                    f"[ScoringEngine] news_sentiment_items unavailable, falling back to legacy "
+                    f"news_articles (magnitudes are estimated, not measured): {exc}"
+                )
                 news_df = pd.read_sql(
                     "SELECT symbols, sentiment, title, source, timestamp AS published_at FROM news_articles",
                     conn,
                 )
                 news_df['sentiment'] = news_df['sentiment'].str.lower()
-                news_df['sentiment_score'] = 1.0  # Fallback
-                news_df['impact'] = 'MEDIUM'      # Fallback
+                # Was 1.0 -- the MAXIMUM magnitude on this column's scale, applied to every
+                # legacy article. Measured live 2026-08-16 over 20k rows: sentiment_score runs
+                # [-1, +1] with mean |score| 0.404 and median 0.000, so 1.0 was scoring every
+                # fallback article as maximally confident, ~2.5x the average real article.
+                # `news_articles` carries only a DIRECTION and no magnitude, so the honest
+                # stand-in is an average-magnitude article, not a maximal one. Direction is
+                # preserved (the consumer's `mult` reads `sentiment`, not this value).
+                news_df['sentiment_score'] = 0.4
+                news_df['impact'] = 'MEDIUM'      # matches impact_mult 1.0, the neutral case
                 news_df['is_json_symbols'] = False
 
         news_map: Dict[str, list] = {}
@@ -655,7 +688,14 @@ class AlphaQuantScoringEngine:
         win_prob_map: Dict[str, float] = {}
         win_prob_regime_map: Dict[str, str] = {}
         try:
-            wp_cutoff = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+            # NOT date.today()-1: technical_signals is trading-day-only, so on any Monday
+            # that window contains no session and this returns []. win_prob_map is then
+            # empty, every .get(symbol) below yields None, and ml_alignment_points() falls
+            # back to its `8  # neutral` branch -- dropping Factor 3 from a measured mean
+            # of 17.71/20 to 8/20 on EVERY symbol, uniformly. A uniform shift cannot move
+            # a ranking, which is why nothing caught it, but it shifts the whole population
+            # against this file's absolute thresholds. See recurring-bugs.md.
+            wp_cutoff = as_of.trading_days_back(1, db_connect())[-1].isoformat()
             with self.engine.connect() as conn:
                 wp_rows = conn.execute(text("""
                     SELECT DISTINCT ON (symbol) symbol, nifty_regime,
@@ -670,11 +710,27 @@ class AlphaQuantScoringEngine:
         except Exception:
             pass
 
-        # Apply drift multiplier to win_probability values (haircut when feature drift detected)
+        # Apply drift multiplier to win_probability values (haircut when feature drift detected).
+        #
+        # SHRINK toward the neutral 0.5, never multiply toward zero (fixed 2026-08-15). These
+        # values are CALIBRATED probabilities -- `calibrated_win_probability` is the output of an
+        # isotonic fit whose entire purpose is that 0.60 means a 60% empirical win rate
+        # (ml_calibration.py) -- so scaling them by a constant is miscalibration by construction.
+        # Worse, `wp * m` is directionally wrong below 0.5: it pushes a 0.30 to 0.255, i.e. MORE
+        # confident the name will lose, when the whole point of a drift haircut is LESS
+        # confidence. Measured on the full live history (73,563 rows / 68 dates): 1,448 rows
+        # (1.97%) sit below 0.5 and were being made more extreme by the old form.
+        #   0.5 + m*(wp-0.5) reduces confidence in BOTH directions and leaves 0.5 fixed, which is
+        # the neutral point every consumer here already assumes (bet_size_from_probability(<=0.5)
+        # == 0; this file's own bonus/discount bands straddle 0.5). Identical shape to
+        # ml_calibration.edge_adjusted_probability, deliberately -- same question, same answer.
+        # Impact is small but systematic and one-directional: the band gates below
+        # (apply_ml_score_adjustment) barely move (50 of 73,563 symbol-days change band), but
+        # ml_alignment_points is CONTINUOUS (int(wp*24), 0-20 pts) and there the old form cost
+        # 2.82 pts/symbol at m=0.85 versus 0.91 under shrinkage -- ~1.9 points of Factor 3, on
+        # every symbol, every drifted day. Full derivation: measurement.md.
         self._refresh_drift_multiplier()
-        if self._drift_multiplier < 1.0:
-            win_prob_map = {sym: round(wp * self._drift_multiplier, 4)
-                           for sym, wp in win_prob_map.items()}
+        win_prob_map = apply_drift_haircut(win_prob_map, self._drift_multiplier)
 
         # Edge-adjust win_probability per symbol's own regime when enabled (see ml_calibration.py
         # -- win_probability has real live discrimination only in some regimes, e.g. BEAR; this
@@ -712,7 +768,9 @@ class AlphaQuantScoringEngine:
                     "SELECT signal_type, AVG(weight) FROM signal_type_weights GROUP BY signal_type"
                 )).fetchall()
                 type_weight = {r[0]: float(r[1]) for r in stw if r[0]}
-                sig_cutoff = (datetime.date.today() - datetime.timedelta(days=3)).isoformat()
+                # Trading days, not calendar days -- days=3 survives Fri->Mon exactly but
+                # returns empty after any holiday Monday, silently skipping the prior blend.
+                sig_cutoff = as_of.trading_days_back(3, db_connect())[-1].isoformat()
                 sig_rows = conn.execute(text("""
                     SELECT symbol, signals_json FROM technical_signals
                     WHERE date >= :cutoff AND signals_json IS NOT NULL
@@ -1097,8 +1155,86 @@ class AlphaQuantScoringEngine:
                   f"candidates not in the tradeable universe (no master entry or no recent price)")
         return keep
 
+    _COST_COLS_ENSURED = False
+
+    @classmethod
+    def _ensure_cost_columns(cls) -> None:
+        """Add recommendation_log's cost columns if the live table predates the cost feature.
+
+        node-pg-migrate owns the production migration (20260909120000); this keeps throwaway
+        test DBs and fresh dev boxes working -- the identical arrangement exit_labeler uses for
+        signal_excursions.vol_rank. Wrapped via safe_alter's SET lock_timeout='2s' per
+        AF-20260829-26 (bare ALTERs on a hot table queue an ACCESS EXCLUSIVE lock and stall
+        every concurrent reader). One process-level flag: _log_recommendations runs once per
+        scoring run, and re-probing information_schema on every run is wasted round-trips.
+        """
+        if AlphaQuantScoringEngine._COST_COLS_ENSURED:
+            return
+        safe_alter(None, "ALTER TABLE recommendation_log ADD COLUMN IF NOT EXISTS round_trip_cost_pct DOUBLE PRECISION")
+        safe_alter(None, "ALTER TABLE recommendation_log ADD COLUMN IF NOT EXISTS cost_adjusted_target_1 DOUBLE PRECISION")
+        AlphaQuantScoringEngine._COST_COLS_ENSURED = True
+
+    def _compute_cost_map(self, symbols: list) -> dict:
+        """Compute round-trip transaction cost for each symbol.
+
+        Returns {symbol: round_trip_cost_pct} using the full Indian-market fee schedule
+        (STT, exchange fees, stamp duty, GST, brokerage, slippage) from indian_market_costs.
+
+        Costs are liquidity-scaled: participation_rate is estimated from a notional
+        ₹10 lakh position vs the stock's 20-day average daily turnover.
+        """
+        if not symbols:
+            return {}
+        cost_map = {}
+        try:
+            with self.engine.connect() as conn:
+                placeholders = ', '.join(f':s{i}' for i in range(len(symbols)))
+                rows = conn.execute(text(f"""
+                    SELECT ts.symbol, ts.cmp,
+                           COALESCE(
+                               (SELECT AVG(close * volume) FROM stock_ohlcv so
+                                WHERE so.symbol = ts.symbol AND so.date >= CURRENT_DATE - 20),
+                               0
+                           ) AS adt,
+                           COALESCE(
+                               (SELECT cs.atr FROM confluence_signals cs
+                                WHERE cs.symbol = ts.symbol AND cs.atr IS NOT NULL
+                                ORDER BY cs.computed_at DESC LIMIT 1),
+                               ts.cmp * 0.02
+                           ) AS atr
+                    FROM technical_signals ts
+                    WHERE ts.symbol IN ({placeholders})
+                      AND ts.date = (SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = ts.symbol)
+                """), {f's{i}': s for i, s in enumerate(symbols)}).fetchall()
+                for row in rows:
+                    sym = row[0]
+                    cmp_val = float(row[1]) if row[1] else 0.0
+                    adt = float(row[2]) if row[2] else 0.0
+                    atr = float(row[3]) if row[3] else cmp_val * 0.02
+                    # Estimate participation rate: ₹10L notional vs ADT
+                    notional = 1_000_000.0
+                    participation = (notional / adt) if adt > 0 else 0.01
+                    participation = min(participation, 0.25)  # cap at 25% of ADT
+                    # Daily volatility as percentage
+                    daily_vol_pct = (atr / cmp_val * 100.0) if cmp_val > 0 else 2.0
+                    cost = round_trip_cost_bps(
+                        notional=notional,
+                        asset_class='equity',
+                        trade_type='intraday',
+                        participation_rate=participation,
+                        volatility_pct=daily_vol_pct,
+                    )
+                    cost_map[sym] = cost
+        except Exception as e:
+            print(f"[ScoringEngine] cost map computation failed: {e}")
+        return cost_map
+
     def _log_recommendations(self, results: list):
         """Write top BUY/STRONG BUY recommendations to recommendation_log for outcome tracking."""
+        # The cost columns below are new (2026-09-09); make sure they exist before the INSERT
+        # needs them -- a fresh dev box or a live table that predates the feature would
+        # otherwise fail the whole upsert with `column "round_trip_cost_pct" does not exist`.
+        self._ensure_cost_columns()
         now        = now_utc_iso()  # see db_compat.now_utc_iso() docstring
         today      = datetime.date.today().isoformat()
         candidates = [r for r in results if r.get('classification') in ('Strong Buy', 'Buy')]
@@ -1149,6 +1285,9 @@ class AlphaQuantScoringEngine:
         except Exception as e:
             print(f"[ScoringEngine] price/ATR lookup for recommendation_log failed (entry_price will be null): {e}")
 
+        # Compute transaction costs for each symbol (STT, fees, slippage)
+        cost_map = self._compute_cost_map(symbols)
+
         rows = []
         for r in candidates:
             cmp_val, sentiment_val, atr_val, quant_val = price_atr_map.get(r['symbol'], (None, None, None, None))
@@ -1162,6 +1301,12 @@ class AlphaQuantScoringEngine:
                 target_2 = round(entry_price + 2 * (target_1 - entry_price), 2)
                 target_3 = round(entry_price + 3 * (target_1 - entry_price), 2)
 
+            # Cost-adjusted expected return: subtract round-trip cost from target
+            round_trip_cost_pct = cost_map.get(r['symbol'])
+            cost_adjusted_target_1 = None
+            if entry_price and entry_price > 0 and target_1 and round_trip_cost_pct:
+                cost_adjusted_target_1 = round(entry_price + (target_1 - entry_price) * (1 - round_trip_cost_pct * 100 / ((target_1 - entry_price) / entry_price * 100)), 2) if target_1 != entry_price else target_1
+
             rows.append({
                 'symbol':         r['symbol'],
                 'rec_type':       'BUY' if r['classification'] == 'Buy' else 'STRONG_BUY',
@@ -1173,6 +1318,8 @@ class AlphaQuantScoringEngine:
                 'target_1':       target_1,
                 'target_2':       target_2,
                 'target_3':       target_3,
+                'round_trip_cost_pct': round_trip_cost_pct,
+                'cost_adjusted_target_1': cost_adjusted_target_1,
                 'confidence_score': r.get('confidence'),
                 'screener_score': r.get('score'),
                 'quant_score':    float(quant_val) if quant_val is not None else None,
@@ -1237,3 +1384,10 @@ if __name__ == "__main__":
 
     engine = AlphaQuantScoringEngine()
     engine.process_scoring(force_rebuild=args.rebuild)
+
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -7,6 +7,7 @@ import {
   queryFutureDatedFactsCutoff, queryLatestFeatureSnapshotSession, queryMedianCoverageOnLatestSession,
   querySuspectFeatureSnapshotViolations,
 } from '@greenfield/db';
+import { computeRankerArtifactHash } from './artifact-hash.js';
 
 export interface DqOutcome {
   checkId: string;
@@ -51,18 +52,39 @@ export async function checkFeatureSuspectExclusion(pool: pg.Pool, source = 'nse'
 }
 
 /** Stage 4's own task list never trains a model (that's Stage 5) -- this
- * honestly reports "no active model yet" rather than fabricating a pass.
- * Negative-controlled by inserting/removing a real model_version row with a
- * deliberately mismatched hash in the test, not by pretending one exists here. */
+ * honestly reports "no active model yet" rather than fabricating a pass when
+ * nothing has been promoted. Once a model IS active, this recomputes its
+ * artifact hash from the row's own persisted spec (`metrics.variant`/
+ * `metrics.factors` + the `version` column) using the exact same
+ * `computeRankerArtifactHash` the writer used, and fails if it disagrees with
+ * the stored `artifact_hash` -- the Task 4.5 spec's literal requirement
+ * ("active model artifact's stored hash matches [its source]"), not just a
+ * presence check. Negative-controlled by inserting a model_version row with a
+ * deliberately mismatched hash and confirming this returns 'fail'. */
 export async function checkModelArtifactHash(pool: pg.Pool): Promise<DqOutcome> {
   const active = await queryActiveModelArtifact(pool);
   if (!active) {
     return { checkId: 'model-artifact-hash', status: 'info', detail: 'no active model_version yet (Stage 5 trains the first one)', observed: {} };
   }
+
+  const variant = active.metrics?.variant;
+  const factors = active.metrics?.factors;
+  if (typeof variant !== 'string' || factors === undefined) {
+    return {
+      checkId: 'model-artifact-hash', status: 'fail',
+      detail: `active model ${active.model}@${active.version} has no reconstructable spec (metrics.variant/metrics.factors missing) -- cannot verify its stored hash`,
+      observed: { model: active.model, version: active.version },
+    };
+  }
+
+  const recomputedHash = computeRankerArtifactHash({ variant, version: active.version, factors });
+  const matches = recomputedHash === active.artifactHash;
   return {
-    checkId: 'model-artifact-hash', status: 'info',
-    detail: `active model ${active.model}@${active.version}, hash=${active.artifactHash.slice(0, 12)}...`,
-    observed: { model: active.model, version: active.version },
+    checkId: 'model-artifact-hash', status: matches ? 'info' : 'fail',
+    detail: matches
+      ? `active model ${active.model}@${active.version}: stored hash matches a recomputation from its own persisted spec (hash=${active.artifactHash.slice(0, 12)}...)`
+      : `active model ${active.model}@${active.version}: stored hash ${active.artifactHash.slice(0, 12)}... does NOT match the recomputed hash ${recomputedHash.slice(0, 12)}... from its own persisted spec -- artifact_hash or metrics has been corrupted or tampered with`,
+    observed: { model: active.model, version: active.version, matches },
   };
 }
 

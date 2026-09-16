@@ -124,16 +124,18 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'et-marketstats-sync': "jobName: 'et-marketstats-sync'",
     'trendlyne-screener-sync': "jobName: 'trendlyne-screener-sync'",
     'nse-sync': "jobName: 'nse-sync-weekly'",
+    'index-membership': "jobName: 'index-membership-daily'",
+    'analyst-estimates-sync': "jobName: 'analyst-estimates-sync-daily'",
+
     'fundamentals-sync': "jobName: 'sync-fundamentals-weekly'",
     'quant-scoring': "jobName: 'quant-score-daily'",
     'signal-outcomes': "'signal-outcomes-daily'",
     'trendlyne-intraday': "'trendlyne-intraday-scan'",
-    // These 6 use the Worker-constructor variable name, not the positional job-name marker
+    // These use the Worker-constructor variable name, not the positional job-name marker
     // used elsewhere: their lockDuration sits far enough past the registration (long comment
     // blocks / a separately-constructed Worker) that it fell outside MAX_LOOKAHEAD from the
     // positional marker -- found while building this test, verified each is a unique string.
     'intraday-fetcher': 'intradayFetcherWorker = new Worker',
-    'gdelt-sentiment': 'gdeltSentimentWorker = new Worker',
     // news-sentiment moved into this group 2026-08-04 -- adding the GNews (3 cycles) + MC
     // stock-news jobs between the 'news-sentiment-refresh' marker and the Worker's
     // lockDuration pushed the distance to 5378 chars, over MAX_LOOKAHEAD (4000).
@@ -142,11 +144,18 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'research-postclose': "jobName: 'research-postclose-daily'",
     'dl-macro-fetch': "jobName: 'dl-macro-daily'",
     'preopen-snapshot': "'preopen-daily'",
+    // Own queue + Worker (lockDuration 75min), registered 2026-09-04. Uses the Worker-variable
+    // marker for the same reason as the group above -- a long scheduling-rationale comment sits
+    // between the job-name literal and the lockDuration.
+    'mover-study-weekly': 'moverStudyWorker = new Worker',
+    // Own queue + Worker (lockDuration 15min), registered 2026-09-04.
+    'nt-live-filter-capture': 'ntLiveFilterWorker = new Worker',
     'market-regime-refresh': "'regime-intraday'",
     'intraday-ranker': "'regime-intraday'",
     'closed-day-early-batch': "'closed-day-early-batch'",
     'confluence-compute': "jobName: 'confluence-compute'",
     'confluence-outcomes': "jobName: 'confluence-outcomes-daily'",
+    'trendlyne-catchup': "jobName: 'trendlyne-catchup-slice'",
     'agent-data-scientist': "jobName: 'agent-ds-daily'",
     'agent-strategist': "jobName: 'agent-strat-daily'",
     'agent-auditor': "jobName: 'agent-audit-daily'",
@@ -160,12 +169,15 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'live-screener-collect': 'liveScreenerCollectWorker = new Worker',
     'quant-eod-sync': "'sync-quant-eod'",
     'outcome-resolver': "jobName: 'outcome-resolver-daily'",
+    'chatbot-reingest': "jobName: 'chatbot-reingest-daily'",
     'ml-daily-ops': 'mlDailyOpsWorker = new Worker',
     'trendlyne-daily-fetch': 'trendlyneDailyFetchWorker = new Worker',
+    'ml-weekly-data': 'mlWeeklyDataWorker = new Worker',
     'ml-weekly-retrain': 'mlWeeklyRetrainWorker = new Worker',
     'trendlyne-ratios-monthly': "jobName: 'trendlyne-ratios-monthly-check'",
     'dl-feature-refresh': "jobName: 'dl-feature-daily'",
     'job-digest': "jobName: 'job-digest-daily'",
+    'job-digest-morning': "jobName: 'job-digest-morning'",
     'recommendations-digest': "jobName: 'recommendations-digest-daily'",
     'data-quality-daily': "'data-quality-daily-run'",
   };
@@ -175,11 +187,15 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
   const mlDailyOpsSubsteps = [
     'fii-dii-fetcher', 'fii-dii-history', 'tickertape-deals', 'finbert-scorer',
     'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker',
-    'densify-feature-matrix', 'nse-bhavcopy-fetcher', 'ml-ensemble-incremental',
-    'ml-ensemble-score', 'drift-detector', 'reward-engine', 'rl-agent-update',
+    'densify-feature-matrix', 'nse-bhavcopy-fetcher', 'reconcile-stock-ohlcv', 'ml-ensemble-incremental',
+    'ml-ensemble-score', 'drift-detector', 'reward-engine',
     'signal-type-stats', 'news-symbol-link',
+    // Added 2026-09-04 alongside their JOB_REGISTRY entries: all three are T.run steps inside
+    // processMlDailyOps (queues.ts), sharing ml-daily-ops's own '20 13 * * 1-5' cron, so they
+    // have no Worker/lockDuration of their own to measure.
+    'event-triggers', 'breakout-classifier-train', 'movement-predictor-train',
   ];
-  const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer'];
+  const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer', 'exit-policy-train', 'backtest-optimizer'];
   const eventDrivenIds = ['ai-signals', 'dl-retrain-emergency'];
 
   it('driving-job list covers every scheduled JOB_REGISTRY entry not already special-cased', () => {

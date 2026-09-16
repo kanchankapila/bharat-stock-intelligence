@@ -1,6 +1,8 @@
 import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { fetchETnowScreener } from './etnow';
 import { getSymbolFromMcsymbol } from './stockMapping';
+import { rowGroups, rowGroupsWith, bulkUpsert } from './dbBulk';
+import { delay } from './lib/async';
 
 export async function getETnowStockCount(): Promise<number> {
   try {
@@ -46,9 +48,10 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
 
   console.log(`📊 Fetching data for ${screeners.length} ETNow screeners...`);
 
-  const upsertSql = `
+  const STOCK_COLS = 5;
+  const buildStockUpsertSql = (n: number) => `
     INSERT INTO etnow_screener_stocks (screener_id, symbol, stock_name, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?)
+    VALUES ${rowGroups(n, STOCK_COLS)}
     ON CONFLICT(screener_id, symbol) DO UPDATE SET
       stock_name = excluded.stock_name,
       last_seen  = excluded.last_seen
@@ -106,26 +109,32 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
       }
 
       await dbTransaction(async (tx) => {
-        // Remove exits
+        // Remove exits — one statement; the diff is bounded by a single screener's membership
         const existing = await tx.all<{ symbol: string }>(`SELECT symbol FROM etnow_screener_stocks WHERE screener_id = ?`,
           [screener.screener_id]);
         const toRemove = existing.filter(r => !incomingSymbols.has(r.symbol));
         if (toRemove.length) {
-          const delSql = `DELETE FROM etnow_screener_stocks WHERE screener_id = ? AND symbol = ?`;
-          for (const r of toRemove) await tx.run(delSql, [screener.screener_id, r.symbol]);
+          await tx.run(
+            `DELETE FROM etnow_screener_stocks WHERE screener_id = ? AND symbol IN (${toRemove.map(() => '?').join(',')})`,
+            [screener.screener_id, ...toRemove.map(r => r.symbol)]
+          );
         }
-        // Upsert current
+        // Upsert current — single multi-row statement. Deduped by symbol (a later duplicate
+        // row overwrites an earlier one, matching the sequential per-row upserts) because
+        // Postgres rejects an ON CONFLICT DO UPDATE that touches the same row twice.
+        const rowsBySymbol = new Map<string, unknown[]>();
         for (const record of records) {
           const stockName = record.assetName || record.name || record.companyName || record.stock_name || record.shortName || '';
           const rawSymbol = record.assetSymbol || record.stkId || record.symbol || record.code || record.nseid || '';
           if (rawSymbol) {
             const nseSymbol = rawSymbol.replace(/-NSE$/i, '').replace(/EQ$/i, '').replace(/BE$/i, '').trim();
             if (nseSymbol) {
-              await tx.run(upsertSql, [screener.screener_id, nseSymbol, stockName, today, today]);
+              rowsBySymbol.set(nseSymbol, [screener.screener_id, nseSymbol, stockName, today, today]);
               currentSymbols.add(nseSymbol);
             }
           }
         }
+        await bulkUpsert(tx, [...rowsBySymbol.values()], STOCK_COLS, buildStockUpsertSql);
       });
 
       // Update screener_master sync time. PK is (source, scan_id) -- scope to ETnow or this
@@ -142,8 +151,12 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
         // dedup key, so it cannot carry a time. Without this the intraday question ("enter at
         // the moment of flagging, exit at the close") is unmeasurable; see the migration.
         const appearedAt = new Date().toISOString();
-        const insertAppSql = `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date, appeared_at) VALUES (?, 'etnow', ?, ?, ?)`;
-        await dbTransaction(async (tx) => { for (const s of entered) await tx.run(insertAppSql, [screener.screener_id, s, today, appearedAt]); });
+        // 4 bind params per row; the 'etnow' literal stays in the SQL (screenerAppearedAt.test.ts
+        // pins the source literal on the INSERT line).
+        const buildAppSql = (n: number) =>
+          `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date, appeared_at) VALUES ${rowGroupsWith(n, "(?, 'etnow', ?, ?, ?)")}`;
+        await dbTransaction((tx) =>
+          bulkUpsert(tx, entered.map(s => [screener.screener_id, s, today, appearedAt]), 4, buildAppSql));
       }
       if (exited.length > 0) {
         await dbRun(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,
@@ -151,7 +164,7 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
       }
 
       // Small delay to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 800));
+      await delay(800);
     } catch (error) {
       console.error(`  ❌ Error fetching ${screener.screener_name}:`, error instanceof Error ? error.message : error);
       continue;

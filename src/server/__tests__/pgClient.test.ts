@@ -5,7 +5,9 @@ const mockClient = { query: vi.fn(), release: mockRelease };
 const mockConnect = vi.fn().mockResolvedValue(mockClient);
 const parsers: Record<number, (val: string) => unknown> = {};
 vi.mock('pg', () => ({
-  Pool: vi.fn().mockImplementation(() => ({ connect: mockConnect, on: vi.fn() })),
+  // `end` is not optional: vitest.setup.ts's afterAll calls closePool() for every file, and a
+  // Pool mock without it fails the whole suite with "pool.end is not a function".
+  Pool: vi.fn().mockImplementation(() => ({ connect: mockConnect, on: vi.fn(), end: vi.fn() })),
   types: {
     setTypeParser: vi.fn((oid: number, fn: (val: string) => unknown) => { parsers[oid] = fn; }),
     builtins: { INT8: 20, TIMESTAMP: 1114, NUMERIC: 1700 },

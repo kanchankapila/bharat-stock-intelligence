@@ -3,13 +3,56 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
 
+// .claude/worktrees/ holds other concurrent sessions' checkouts of this same repo, so vitest was
+// collecting a stale duplicate of every test file in each of them -- 1,010 test files instead of
+// ~93, most of the run's wall-clock, and failures from other people's in-progress work. CI never
+// saw this (the directory is gitignored, so a fresh checkout has none), which is worse, not
+// better: the local suite disagreed with CI and the local red was easy to learn to ignore.
+// Vitest's defaults are replaced wholesale when `exclude` is set, so node_modules/dist/build are
+// restated here deliberately.
+//
+// greenfield/ is a separate pnpm workspace with its own isolated Postgres/Redis/S3 stack and its
+// own per-package .env files (deliberately different ports -- see those files' own comments).
+// This root config's `loadEnv(mode, '.', '')` loads the ROOT .env with an empty prefix (needed
+// for GEMINI_API_KEY), and Vitest injects everything loadEnv returns into process.env for every
+// collected test file -- so a root `npx vitest run` was clobbering greenfield's own DATABASE_URL
+// with the root app's unrelated `DATABASE_URL=database.sqlite`. pg-connection-string then
+// mis-parses that bare filename (no `://`) and extracts the literal substring "base" inside
+// "database.sqlite" as the hostname, so every greenfield DB test failed with
+// `getaddrinfo ENOTFOUND base` -- nothing wrong with greenfield's code, just the wrong env
+// reaching it. greenfield has its own `pnpm -r run test` (run from greenfield/, confirmed to pick
+// up its own .env correctly with no interference) -- excluded here the same way
+// .claude/worktrees/ is, since it's an independently-configured tree, not part of this run.
+//
+// Shared by both projects below; a project's own `exclude` replaces the root one wholesale, so
+// it has to be spread in rather than inherited.
+const SHARED_EXCLUDE = [
+  '**/node_modules/**',
+  '**/dist/**',
+  '**/build/**',
+  '**/.claude/worktrees/**',
+  '**/greenfield/**',
+];
+
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react(), tailwindcss()],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-    },
+    // NO `define` for GEMINI_API_KEY (removed 2026-08-15). `define` is a literal text
+    // substitution into every module in the CLIENT graph, so it bakes the secret into the
+    // browser bundle in plaintext for anyone to read via view-source.
+    //
+    // It was survivable only by accident: the sole consumers, src/services/aiService.ts and
+    // src/services/geminiService.ts, happen to be imported exclusively from src/server/*, which
+    // runs in Node under tsx and reads the real process.env -- never through this transform.
+    // But CLAUDE.md documents src/services/ as the FRONTEND layer ("aiService (Ollama),
+    // geminiService (fallback)"), next to marketService, which genuinely is frontend. One
+    // component importing aiService as documented would have shipped the key, with nothing
+    // failing loudly to say so.
+    //
+    // If a browser-side Gemini call is ever genuinely needed, it must go through a server
+    // procedure, not a bundled key. Client-safe config belongs in a VITE_-prefixed var, which
+    // Vite exposes on import.meta.env by design and which is understood to be public.
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -55,6 +98,11 @@ export default defineConfig(({mode}) => {
           '**/graphify-out/**',
           '**/backend-python/venv/**',
           '**/.venv/**',
+          // Root-level audit/memory scratch files are rewritten in place by audit sessions;
+          // a lock held during the rewrite surfaced as EBUSY inside chokidar's watcher and an
+          // unhandledRejection in the server log (2026-09-09 00:00:08, .audit-files.txt).
+          // Nothing in the app imports them, so watching them is pure crash-surface.
+          '**/.audit-files.txt',
         ],
       },
     },
@@ -84,9 +132,56 @@ export default defineConfig(({mode}) => {
       },
     },
     test: {
-      // Single forked process: the test suites share one SQLite migration table, and
-      // parallel workers race on `UNIQUE _migrations.name`. Serialising avoids it without
-      // each run needing `--pool=forks --poolOptions.forks.singleFork` on the CLI.
+      // Two projects, and the split is a correctness boundary, not organisation.
+      //
+      // `unit` runs against a private throwaway Postgres schema (vitest.globalSetup.ts creates
+      // it, applies db/schema.postgres.sql into it, drops it CASCADE afterwards). `live` runs
+      // the RUN_LIVE_DATASOURCE_TESTS canaries against REAL production Postgres, because a
+      // live_datasource test's whole job is proving a fetcher writes correct real rows --
+      // data-sources.md calls that write "genuine, correct production data".
+      //
+      // They must not share a process. Every *.live.test.ts loads `dotenv/config`, and under
+      // one project with `singleFork: true` that mutated a single shared `process.env` for the
+      // whole run -- so whichever file happened to run first decided which database every LATER
+      // test file talked to. Measured 2026-08-16: 2,148 fabricated Saturday stock_ohlcv bars
+      // written to production, and deliveryFetcher.live failing against empty SQLite in one run
+      // and passing against production in the next. Separate projects means separate processes,
+      // so the live half's credentials and dialect cannot reach the unit half at all.
+      projects: [
+        {
+          extends: true,
+          test: {
+            name: 'unit',
+            exclude: [...SHARED_EXCLUDE, '**/*.live.test.ts', '**/mcapiProxy.test.ts'],
+            globalSetup: ['./vitest.globalSetup.ts'],
+            // Closes each file's own pg Pool; without it they accumulate past
+            // max_connections. See vitest.setup.ts.
+            setupFiles: ['./vitest.setup.ts'],
+            pool: 'forks',
+            poolOptions: { forks: { singleFork: true } },
+          },
+        },
+        {
+          extends: true,
+          test: {
+            name: 'live',
+            include: ['**/*.live.test.ts', '**/mcapiProxy.test.ts'],
+            exclude: SHARED_EXCLUDE,
+            // vitest.setup.live.ts MUST run first: it strips VITEST_PG_SCHEMA/VITEST_PG_URL,
+            // which a co-running `unit` project's globalSetup leaks into this project's forked
+            // process via env inheritance (see that file's header for the full mechanism and the
+            // two failures it was silently causing). Order matters -- setupFiles run in array
+            // order, and the delete must land before vitest.setup.ts or any test file's own
+            // `await import('../pgClient')` can read the leaked value.
+            setupFiles: ['./vitest.setup.live.ts', './vitest.setup.ts'],
+            pool: 'forks',
+            poolOptions: { forks: { singleFork: true } },
+          },
+        },
+      ],
+      // Single forked process: the suites serialise DB setup, and parallel workers race on
+      // `UNIQUE _migrations.name`. Restated per-project above; kept here for a bare
+      // `vitest --project` invocation.
       pool: 'forks',
       poolOptions: { forks: { singleFork: true } },
       // .claude/worktrees/ holds other concurrent sessions' checkouts of this same repo, so
@@ -110,13 +205,7 @@ export default defineConfig(({mode}) => {
       // own `pnpm -r run test` (run from greenfield/, confirmed to pick up its own .env
       // correctly with no interference) -- excluded here the same way .claude/worktrees/ is,
       // since it's an independently-configured tree, not part of this vitest run.
-      exclude: [
-        '**/node_modules/**',
-        '**/dist/**',
-        '**/build/**',
-        '**/.claude/worktrees/**',
-        '**/greenfield/**',
-      ],
+      exclude: SHARED_EXCLUDE,
     },
   };
 });

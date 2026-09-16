@@ -18,6 +18,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import credit_rating_fetcher as crf
 from live_datasource_helpers import assert_non_empty_response, assert_stored_row_ml_usable
 
@@ -27,7 +28,7 @@ from live_datasource_helpers import assert_non_empty_response, assert_stored_row
 
 
 def _install_shims(monkeypatch):
-    conn = sqlite3.connect(":memory:")
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
 
     def shim_execute(sql, params=None):

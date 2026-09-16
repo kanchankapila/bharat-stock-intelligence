@@ -225,6 +225,88 @@ class TestMultiwordPgCast:
         assert crb.check_multiword_pg_cast(_p(), text) == []
 
 
+class TestInformationSchemaMissingTableSchema:
+    def test_fires_on_unqualified_columns_query(self):
+        text = (
+            '    cols = conn.execute("""\n'
+            "        SELECT column_name FROM information_schema.columns\n"
+            "        WHERE table_name='technical_signals'\n"
+            '    """).fetchall()\n'
+        )
+        findings = crb.check_information_schema_missing_table_schema(_p(), text)
+        assert len(findings) == 1
+        assert "table_schema" in findings[0]
+
+    def test_fires_on_unqualified_tables_query(self):
+        text = '    conn.execute("SELECT 1 FROM information_schema.tables WHERE table_name=?")\n'
+        findings = crb.check_information_schema_missing_table_schema(_p(), text)
+        assert len(findings) == 1
+
+    def test_qualified_query_is_fine(self):
+        text = (
+            '    cols = conn.execute("""\n'
+            "        SELECT column_name FROM information_schema.columns\n"
+            "        WHERE table_name='technical_signals' AND table_schema = current_schema()\n"
+            '    """).fetchall()\n'
+        )
+        assert crb.check_information_schema_missing_table_schema(_p(), text) == []
+
+    def test_table_schema_filter_after_the_from_is_also_fine(self):
+        """Real repo shape (densify_feature_matrix.py): table_schema can appear on the SAME
+        line as the FROM, not just a separate WHERE line further down."""
+        text = (
+            "    cols = conn.execute(\"\"\"\n"
+            "        SELECT column_name, data_type FROM information_schema.columns\n"
+            "        WHERE table_name='technical_signals' AND table_schema = current_schema()\n"
+            "    \"\"\").fetchall()\n"
+        )
+        assert crb.check_information_schema_missing_table_schema(_p(), text) == []
+
+    def test_prose_describing_the_bug_is_not_flagged(self):
+        text = "# an unqualified information_schema.columns query is the bug this fixes\n"
+        assert crb.check_information_schema_missing_table_schema(_p(), text) == []
+
+    def test_test_files_are_exempt(self):
+        text = 'conn.execute("SELECT 1 FROM information_schema.columns WHERE table_name=?")\n'
+        findings = crb.check_information_schema_missing_table_schema(
+            crb.REPO_ROOT / "src" / "server" / "tests" / "test_something.py", text
+        )
+        assert findings == []
+
+
+class TestScreenerCatalogExactCaseSource:
+    def test_fires_on_exact_case_source_filter(self):
+        text = (
+            '    conn.execute("""\n'
+            "        SELECT * FROM screener_catalog sc\n"
+            "        WHERE sc.source = 'Trendlyne' AND sc.active = 1\n"
+            '    """)\n'
+        )
+        findings = crb.check_screener_catalog_exact_case_source(_p(), text)
+        assert len(findings) == 1
+        assert "AF-20260816-19" in findings[0]
+
+    def test_does_not_fire_when_wrapped_in_lower(self):
+        text = (
+            '    conn.execute("""\n'
+            "        SELECT * FROM screener_catalog sc\n"
+            "        WHERE LOWER(sc.source) = 'trendlyne' AND sc.active = 1\n"
+            '    """)\n'
+        )
+        assert crb.check_screener_catalog_exact_case_source(_p(), text) == []
+
+    def test_does_not_fire_without_screener_catalog_nearby(self):
+        text = "    conn.execute(\"SELECT * FROM screener_master WHERE source = 'Trendlyne'\")\n"
+        assert crb.check_screener_catalog_exact_case_source(_p(), text) == []
+
+    def test_test_files_are_exempt(self):
+        text = "sc.source = 'trendlyne', so every capitalized row silently lost its screener_catalog rows\n"
+        findings = crb.check_screener_catalog_exact_case_source(
+            crb.REPO_ROOT / "src" / "server" / "tests" / "test_something.py", text
+        )
+        assert findings == []
+
+
 class TestMissingLiveDatasourceTest:
     # The mandate applies to fetchers that actually call an external endpoint, so every
     # fixture here must carry an HTTP client import — without one the file is a derived-feature
@@ -418,6 +500,71 @@ class TestSkipNotSuccess:
         assert crb.check_skip_not_success(path, path.read_text(encoding="utf-8")) == []
 
 
+
+class TestJobStepCatchConsole:
+    """check_job_step_catch_console -- class 10. The shape converted across queues.ts and
+    jobs/*.jobs.ts on 2026-09-03/04: a sub-step whose only failure handler is a console.* log,
+    so the chain stays fault-tolerant (right) but the failure never reaches the job verdict or
+    any monitor (wrong) -- a fetcher can stop writing entirely with the job still green."""
+
+    def test_fires_on_the_real_bug_shape(self):
+        text = (
+            "async function processX(_job) {\n"
+            "  await runPython('mc_index_oi_fetcher.py', [], 60_000)\n"
+            "    .catch(e => console.warn('[QUEUE] mc_index_oi_fetcher failed:', (e as Error).message));\n"
+            "  return { success: true };\n"
+            "}\n"
+        )
+        findings = crb.check_job_step_catch_console(_ts(), text)
+        assert len(findings) == 1
+        assert "console-logged" in findings[0]
+
+    def test_fires_on_the_typed_and_console_error_variants(self):
+        text = (
+            "  await a().catch((e: unknown) => console.error('[QUEUE] a failed:', e));\n"
+            "  await b().catch(err => console.log('[QUEUE] b failed:', err));\n"
+        )
+        assert len(crb.check_job_step_catch_console(_ts(), text)) == 2
+
+    def test_stepTracker_conversion_is_not_flagged(self):
+        """The fix shape. T.fail keeps the await/void shape and reaches finish()'s verdict."""
+        text = (
+            "  await runPython('x.py', [], 60_000).catch(e => T.fail('x', e));\n"
+            "  await T.run('y', () => runPython('y.py', [], 60_000));\n"
+            "  await T.runQuiet('z', () => runPython('z.py', [], 60_000));\n"
+        )
+        assert crb.check_job_step_catch_console(_ts(), text) == []
+
+    def test_swallow_ok_marker_on_the_line_above_suppresses_it(self):
+        """dl.jobs.ts's chain-dispatch: fires outside any processor, so there is no verdict to
+        attach it to. The marker must carry a reason, and must be honoured."""
+        text = (
+            "  // swallow-ok: no job verdict in scope, the fixed schedule is the mitigation\n"
+            "  q.add('j', {}).catch(e => console.error('[QUEUE] dispatch failed:', e));\n"
+        )
+        assert crb.check_job_step_catch_console(_ts(), text) == []
+
+    def test_a_commented_out_example_is_not_flagged(self):
+        """This repo's own rule files and code comments quote the bug shape verbatim."""
+        text = "  // .catch(e => console.warn('[QUEUE] x failed:', (e as Error).message));\n"
+        assert crb.check_job_step_catch_console(_ts(), text) == []
+
+    def test_only_applies_to_job_processor_files(self):
+        """A console.warn in a router/service is not this class -- there is no job verdict."""
+        text = "  await a().catch(e => console.warn('[API] a failed:', e));\n"
+        assert crb.check_job_step_catch_console(_ts("routers/market.router.ts"), text) == []
+        assert len(crb.check_job_step_catch_console(_ts("jobs/sync.jobs.ts"), text)) == 1
+
+    def test_the_pattern_is_not_vacuous(self):
+        """Emptiness self-test (recurring-bugs.md): a check whose regex silently matches
+        NOTHING passes every file and protects nothing. This one shipped broken exactly that
+        way once -- a shell heredoc collapsed the trailing word-boundary escape into a literal
+        0x08 byte, so the compiled pattern could never match and the whole check read clean
+        against a tree that still had 40 live instances."""
+        assert "\\x08" not in repr(crb._CATCH_CONSOLE_RE.pattern)
+        probe = "  await a().catch(e => console.warn('[QUEUE] boom:', e));\n"
+        assert crb._CATCH_CONSOLE_RE.search(probe) is not None
+
 class TestDiffRefResolution:
     """CI died with a raw CalledProcessError traceback (exit 128) when its base ref was the
     all-zero SHA of a new-branch push and the HEAD~1 fallback hit a shallow clone."""
@@ -430,3 +577,128 @@ class TestDiffRefResolution:
 
     def test_a_real_ref_still_returns_file_paths(self):
         assert isinstance(crb._diff_python_files("HEAD", staged=False), list)
+
+
+class TestShortCalendarLookback:
+    """AF-20260823-70: `date.today() - timedelta(days=N)` for small N over a trading-day
+    table. A Fri->Mon gap is 3 calendar days, so days<=4 can select NO trading session at
+    all and the read silently returns empty rather than erroring."""
+
+    def test_fires_on_one_day_cutoff(self):
+        text = (
+            "def _get_dl_scores(self):\n"
+            "    cutoff = (date.today() - timedelta(days=1)).isoformat()\n"
+            "    return self.conn.execute(\n"
+            "        'SELECT symbol FROM deep_learning_predictions "
+            "WHERE prediction_date >= ?', (cutoff,)).fetchall()\n"
+        )
+        findings = crb.check_short_calendar_lookback(_p("unified_ranker.py"), text)
+        assert len(findings) == 1
+        assert "days=1" in findings[0]
+
+    def test_fires_at_the_boundary_but_not_past_it(self):
+        """4 calendar days is a long weekend; 5 clears it. The boundary is the whole point
+        of the check, so it is pinned rather than left to the constant's definition."""
+        mk = lambda n: (
+            "cutoff = (date.today() - timedelta(days=%d)).isoformat()\n"
+            "rows = conn.execute('SELECT x FROM t WHERE date >= ?', (cutoff,))\n" % n
+        )
+        assert len(crb.check_short_calendar_lookback(_p(), mk(4))) == 1
+        assert crb.check_short_calendar_lookback(_p(), mk(5)) == []
+
+    def test_long_lookbacks_are_not_flagged(self):
+        """A 30/90-day window absorbs any weekend or holiday -- flagging it would make the
+        check noise, and noise is how a check stops being read."""
+        text = (
+            "cutoff = (date.today() - timedelta(days=30)).isoformat()\n"
+            "rows = conn.execute('SELECT x FROM t WHERE date >= ?', (cutoff,))\n"
+        )
+        assert crb.check_short_calendar_lookback(_p(), text) == []
+
+    def test_prose_describing_the_bug_is_not_the_bug(self):
+        """The real false positive this check had to survive: recurring-bugs.md's own
+        signature text, and this repo's habit of documenting a fix in the docstring right
+        above the fixed code. An ast walk cannot see inside a string literal at all, which
+        is why this check is ast-based and not a line regex."""
+        text = (
+            'def f():\n'
+            '    """Was `date.today() - timedelta(days=1)`, which broke every Monday.\n'
+            '    Now uses as_of.logical_write_floor(). See date >= cutoff below.\n'
+            '    """\n'
+            '    cutoff = as_of.logical_write_floor(conn)\n'
+            "    rows = conn.execute('SELECT x FROM t WHERE date >= ?', (cutoff,))\n"
+        )
+        assert crb.check_short_calendar_lookback(_p(), text) == []
+
+    def test_comment_mentioning_the_pattern_is_not_flagged(self):
+        text = (
+            "# cutoff = (date.today() - timedelta(days=1)).isoformat()  # old, broken\n"
+            "cutoff = as_of.logical_write_floor(conn)\n"
+            "rows = conn.execute('SELECT x FROM t WHERE date >= ?', (cutoff,))\n"
+        )
+        assert crb.check_short_calendar_lookback(_p(), text) == []
+
+    def test_tests_directory_is_exempt(self):
+        text = (
+            "cutoff = (date.today() - timedelta(days=1)).isoformat()\n"
+            "rows = conn.execute('SELECT x FROM t WHERE date >= ?', (cutoff,))\n"
+        )
+        p = crb.REPO_ROOT / "src" / "server" / "tests" / "test_thing.py"
+        assert crb.check_short_calendar_lookback(p, text) == []
+
+    def test_unparseable_file_does_not_crash_the_run(self):
+        """A syntax error elsewhere in the repo must not take the whole checker down."""
+        assert crb.check_short_calendar_lookback(_p(), "def broken(:\n") == []
+
+
+class TestShortCalendarLookbackExemption:
+    """The line-level opt-out must be exactly that -- an opt-out for ONE site with a stated
+    reason, not a blanket off-switch. Negative-controlled: remove the marker and the same file
+    must be flagged again."""
+
+    SRC = (
+        "import datetime\n"
+        "def f(con):\n"
+        "    cutoff = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()\n"
+        "    return con.execute('SELECT x FROM t WHERE date >= ?', (cutoff,))\n"
+    )
+
+    def _run(self, tmp_path, src):
+        p = tmp_path / "sample.py"
+        p.write_text(src, encoding="utf-8")
+        return crb.check_short_calendar_lookback(p, src)
+
+    def test_flags_a_short_lookback(self, tmp_path):
+        assert len(self._run(tmp_path, self.SRC)) == 1
+
+    def test_marker_on_the_same_line_suppresses(self, tmp_path):
+        src = self.SRC.replace(
+            "    cutoff = (datetime",
+            "    cutoff = (datetime",
+        ).replace(".isoformat()\n", ".isoformat()  # trading-day-exempt: reason\n", 1)
+        assert self._run(tmp_path, src) == []
+
+    def test_marker_in_the_comment_block_above_suppresses(self, tmp_path):
+        src = self.SRC.replace(
+            "    cutoff = (datetime",
+            "    # trading-day-exempt: source writes on weekends too\n    cutoff = (datetime",
+        )
+        assert self._run(tmp_path, src) == []
+
+    def test_an_unrelated_comment_above_does_NOT_suppress(self, tmp_path):
+        """The control: a comment block alone must not exempt anything, or the marker check
+        would be a no-op that silently passes every commented site."""
+        src = self.SRC.replace(
+            "    cutoff = (datetime",
+            "    # just an ordinary explanatory comment\n    cutoff = (datetime",
+        )
+        assert len(self._run(tmp_path, src)) == 1
+
+    def test_a_safe_lookback_is_not_flagged(self, tmp_path):
+        src = self.SRC.replace("days=1", "days=30")
+        assert self._run(tmp_path, src) == []
+
+    def test_prose_in_a_docstring_is_not_flagged(self, tmp_path):
+        """ast-based on purpose: this repo's own rule files and docstrings describe the bug."""
+        src = 'def f():\n    """Do not use date.today() - timedelta(days=1) here."""\n    return 1\n'
+        assert self._run(tmp_path, src) == []

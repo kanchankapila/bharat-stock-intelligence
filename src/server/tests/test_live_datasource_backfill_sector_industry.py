@@ -16,6 +16,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import backfill_sector_industry as bsi
 from live_datasource_helpers import assert_looks_like_ticker
 
@@ -46,7 +47,7 @@ class TestBackfillSectorIndustryLiveDataSource:
         if not sector and not industry:
             pytest.skip("Yahoo returned no classification for RELIANCE on this run")
 
-        conn = sqlite3.connect(":memory:")
+        conn = pg_memory_conn()
         conn.execute("CREATE TABLE nse_stocks (symbol TEXT PRIMARY KEY, sector TEXT, industry TEXT, last_updated TEXT)")
         conn.execute("INSERT INTO nse_stocks (symbol, sector, industry) VALUES (?, 'Unknown', NULL)", (REAL_SYMBOL,))
         conn.execute(

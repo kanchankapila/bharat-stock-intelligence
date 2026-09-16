@@ -3,6 +3,8 @@ from unittest.mock import patch, MagicMock
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'server', 'chatbot'))
 
+import tools.price_tool as price_tool
+from _pg_support import patch_tool_connect
 from tools.price_tool import get_live_price, get_earnings_calendar
 
 
@@ -42,10 +44,12 @@ def test_get_live_price_returns_none_on_error():
     assert result is None
 
 
-def test_get_earnings_calendar_returns_dict_with_expected_keys(tmp_path):
-    import sqlite3
-    db_path = str(tmp_path / "test.db")
-    conn = sqlite3.connect(db_path)
+def test_get_earnings_calendar_returns_dict_with_expected_keys(pg_conn, monkeypatch):
+    # pg_conn, not a temp SQLite file: price_tool's _connect() ignores its db_path argument and
+    # calls db_compat.connect(), so the old fixture DB was written and never read. Locally that
+    # silently resolved to real Postgres (tables present, test "passed"); in CI it resolved to a
+    # SQLite file with no tables -- "no such table: unified_signals", red on every run.
+    conn = pg_conn
     # technical_analysis_signals folded into unified_signals (signal_source='technical',
     # Cluster B-lite, 2026-08): trend -> signal_type, rsi -> technical_score.
     conn.executescript("""
@@ -59,7 +63,7 @@ def test_get_earnings_calendar_returns_dict_with_expected_keys(tmp_path):
     conn.execute("INSERT INTO unified_signals VALUES ('INFY','technical','Bullish',62.0,'2026-08-03T18:00:00')")
     conn.execute("INSERT INTO stock_scores VALUES ('INFY','long_term',80.0,'Buy',0.82,'Technical')")
     conn.commit()
-    conn.close()
+    db_path = patch_tool_connect(monkeypatch, price_tool, conn)
 
     mock_web = [{"title": "Q1 results", "snippet": "Infosys to declare Q1 results July 17", "url": "http://example.com"}]
     with patch("tools.price_tool.web_search", return_value=mock_web):

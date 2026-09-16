@@ -1,4 +1,4 @@
-import importlib, os, sqlite3, sys, tempfile
+import importlib, os, sys, uuid
 import pytest
 SERVER_DIR = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, SERVER_DIR)
@@ -6,16 +6,41 @@ from url_explorer.normalizer import EndpointTemplate, ParamSpec
 
 @pytest.fixture(autouse=True)
 def _db():
-    saved = {k: os.environ.get(k) for k in ("DATABASE_URL", "USE_POSTGRES")}
-    path = os.path.join(tempfile.mkdtemp(), "store_test.sqlite")
-    os.environ.pop("USE_POSTGRES", None)
-    os.environ["DATABASE_URL"] = f"sqlite:///{path}"
+    import psycopg2
+    from pg_test_support import (
+        PG_TEST_SCHEMA_LOCK_NS, _pg_dsn, _sa_url, pg_available, drop_throwaway_schema,
+    )
+    if not pg_available():
+        pytest.skip("live Postgres not reachable — set PGTEST_* or start the container")
+    saved = {k: os.environ.get(k) for k in ("POSTGRES_URL", "USE_POSTGRES", "DATABASE_URL")}
+    schema = f"t_{uuid.uuid4().hex[:12]}"
+    admin = psycopg2.connect(**_pg_dsn())
+    admin.autocommit = True
+    admin_cur = admin.cursor()
+    admin_cur.execute(f'CREATE SCHEMA "{schema}"')
+    # See pg_test_support.purge_orphan_schemas: claim ownership before this schema has any
+    # table of its own, or a concurrent sweep can read the pre-DDL gap as orphaned.
+    admin_cur.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", (PG_TEST_SCHEMA_LOCK_NS, schema))
+    os.environ["USE_POSTGRES"] = "true"
+    os.environ["POSTGRES_URL"] = _sa_url(schema)
+    os.environ.pop("DATABASE_URL", None)
     import db_compat; importlib.reload(db_compat)
     import url_explorer.store as store; importlib.reload(store)
     store.ensure_schema()
-    yield store, path
+    yield store
+    # MUST precede the DROP: pooled connections still scoped to this schema hold
+    # AccessShareLocks on its tables, and DROP SCHEMA CASCADE needs AccessExclusiveLock.
+    # reload() alone abandons the old engine cache with its sockets open. See dispose_engines().
+    db_compat.dispose_engines()
+    try:
+        drop_throwaway_schema(admin, schema)
+    finally:
+        admin.close()
     for k, v in saved.items():
-        os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
     importlib.reload(db_compat)
 
 def _ep():
@@ -25,25 +50,25 @@ def _ep():
         params=[ParamSpec("x", "query", "int_id", True, 3, ["1", "2"])], urls=["u1", "u2"])
 
 def test_upsert_endpoint_returns_id_and_is_idempotent(_db):
-    store, path = _db
+    store = _db
     a = store.upsert_endpoint(_ep())
     b = store.upsert_endpoint(_ep())
     assert a == b
-    con = sqlite3.connect(path)
-    assert con.execute("SELECT COUNT(*) FROM url_endpoints").fetchone()[0] == 1
+    import db_compat
+    assert db_compat.query_scalar("SELECT COUNT(*) FROM url_endpoints") == 1
 
 def test_upsert_params_writes_rows(_db):
-    store, path = _db
+    store = _db
     eid = store.upsert_endpoint(_ep())
     store.upsert_params(eid, _ep().params)
     store.upsert_params(eid, _ep().params)  # idempotent
-    con = sqlite3.connect(path)
-    assert con.execute("SELECT COUNT(*) FROM url_params").fetchone()[0] == 1
+    import db_compat
+    assert db_compat.query_scalar("SELECT COUNT(*) FROM url_params") == 1
 
 def test_insert_fetch_appends_history(_db):
-    store, path = _db
+    store = _db
     eid = store.upsert_endpoint(_ep())
     store.insert_fetch(eid, "u1", "{}", 200, 12, True, 100, '{"a":1}', None)
     store.insert_fetch(eid, "u1", "{}", 200, 13, True, 100, '{"a":2}', None)
-    con = sqlite3.connect(path)
-    assert con.execute("SELECT COUNT(*) FROM url_fetches").fetchone()[0] == 2
+    import db_compat
+    assert db_compat.query_scalar("SELECT COUNT(*) FROM url_fetches") == 2

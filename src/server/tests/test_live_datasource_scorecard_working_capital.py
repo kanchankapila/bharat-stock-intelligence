@@ -25,6 +25,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 from live_datasource_helpers import assert_non_empty_response, assert_numeric_and_finite
 
@@ -33,7 +34,7 @@ REAL_SYMBOL = "RELIANCE"
 
 @pytest.fixture
 def mem_db():
-    con = sqlite3.connect(":memory:")
+    con = pg_memory_conn()
     con.row_factory = sqlite3.Row
     yield con
     con.close()

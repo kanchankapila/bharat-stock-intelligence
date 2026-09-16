@@ -67,7 +67,7 @@ export function SignalReportCard() {
   return (
     <div className="p-6 space-y-8">
       <div>
-        <h1 className="text-3xl font-semibold text-white">Signal Intelligence Engine</h1>
+        <h1 className="v1-title-page">Signal Intelligence Engine</h1>
         <p className="mt-2 text-sm text-slate-400">Overview of current engine performance, confidence, and source signal health.</p>
       </div>
 
@@ -134,7 +134,7 @@ export function SignalReportCard() {
       </div>
 
       <div>
-        <h2 className="text-2xl font-semibold text-white">Trade Candidates</h2>
+        <h2 className="v1-title-section">Trade Candidates</h2>
         <p className="mt-2 text-sm text-slate-400">Stocks with live signals and growth since the signal was generated.</p>
       </div>
 
@@ -170,7 +170,7 @@ export function SignalReportCard() {
       </div>
 
       <div>
-        <h2 className="text-2xl font-semibold text-white">Strategy Intelligence</h2>
+        <h2 className="v1-title-section">Strategy Intelligence</h2>
         <p className="mt-2 text-sm text-slate-400">Performance metrics from strategy evaluation and backtest analytics.</p>
       </div>
 
@@ -225,7 +225,7 @@ export function SignalReportCard() {
       </div>
 
       <div>
-        <h2 className="text-2xl font-semibold text-white">Alpha</h2>
+        <h2 className="v1-title-section">Alpha</h2>
         <p className="mt-2 text-sm text-slate-400">The strongest signal performers by growth since generation.</p>
       </div>
 

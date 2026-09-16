@@ -3,14 +3,18 @@ unified_ranker.py — Regime-gated unified stock recommendation engine.
 
 Run after market close: python unified_ranker.py
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 import json
 import csv
 import math
+import sys
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
 from db_compat import connect
 import as_of
+from indian_market_costs import round_trip_cost_bps
 
 CSV_PATH         = Path(__file__).parent.parent.parent / 'screener_scoring_v2.csv'
 CORRECTIONS_PATH = Path(__file__).parent.parent.parent / 'screener_corrections.csv'
@@ -107,15 +111,182 @@ HORIZON_MULT = {
 # real but is a DIFFERENT construction; a blend engine consumes the long-only top slice, which is
 # the one that loses. See measurement.md, which names this engine explicitly. The draft also left
 # BEAR and SIDEWAYS summing to 0.995 rather than 1.0.
+# `screener` shrunk 0.5x, 2026-08-20 -- same ENGINE_EDGE_SHRINK factor this file already
+# applies elsewhere for a demonstrated "no edge"/negative engine (see edge_adjusted_weights),
+# applied here directly rather than through that mechanism because its own gate reads
+# factor_edge_history against unified_recommendations, which is stuck at 1 date (LOW-DATA,
+# same calendar constraint as smart_money_score) and can't fire yet. `screener` was the
+# HEAVIEST-weighted engine of all 8 in every regime (0.20-0.40) despite two independent,
+# well-powered live measurements both finding it net-negative: measurement.md's own
+# "screener bullish consensus IC -0.027, t=-2.36" (0/552-1,563 individual screeners survive
+# correction), and a same-session natural experiment (2026-08-20) comparing
+# confluence_signals.confluence_score, which bakes in a screener sub-component, against the
+# identical construction with that component stripped out (_get_confluence_scores's own
+# 2026-08-05 "decorrelation fix") -- WITH screener graded consistently worse at every horizon
+# (1d +0.019->+0.012, 5d +0.056->+0.040, 21d +0.067->+0.044 rank IC). A from-scratch linear
+# reconstruction of this blend's other 6 engines (screener/smart_money excluded, otherwise
+# identical _normalize_to_100/_blend mechanics and BULL weights) measured real, USABLE-at-21d
+# IC (+0.037/+0.081/+0.100 at 1d/5d/21d) -- dramatically higher than unified_score's own
+# live headline number (5d rank IC ~=0.0001) -- which is what motivated tracing screener's
+# weight specifically rather than assuming the components can't be combined at all. Full
+# derivation: measurement.md, "The shared-ceiling pattern, tested rather than argued" section.
+# Freed weight redistributed proportionally over the other 6 non-pinned engines in each regime
+# (ml/cs/confluence/technical/dl/smart_money) -- the same mechanism this file's own comments
+# already describe for the cs/breakout and smart_money additions above. `breakout` is
+# deliberately EXCLUDED from the redistribution and stays pinned at its exact prior value in
+# every regime: TestBreakoutWeightCeiling (test_unified_ranker_regime.py) and
+# scripts/check_load_bearing_constraints.py's BREAKOUT_WEIGHT_CEILING both independently cap
+# it, for an unrelated reason (momentum measured net-negative after costs on this universe,
+# mom21 -0.53%/5d t=-3.21) -- naively scaling every non-screener engine up, breakout included,
+# would have pushed it above that ceiling in all 5 regimes. NOT a re-derivation of the whole
+# table from scratch -- a single, targeted, reversible shrink on the one component with a
+# direct negative-edge finding, leaving every other regime-conditional judgment call as-is.
+# Re-check via a fresh live unified_ranker.py run + factor_edge.py grading of the resulting
+# unified_score once ~20+ dates have accumulated under these weights -- this could not be
+# validated retroactively since past unified_recommendations rows were generated under the
+# old weights.
+# THIRD targeted shrink, 2026-08-24: `ml` halved (ENGINE_EDGE_SHRINK=0.5), freed weight
+# redistributed proportionally over the other 6 non-pinned engines; `breakout` pinned at its
+# exact prior value in every regime (same mechanism and policy as the 2026-08-20 and
+# 2026-08-21 screener shrinks documented below). Why ml: its persisted engine score averages
+# a window of isotonic-CALIBRATED win probabilities (_get_ml_scores read
+# COALESCE(calibrated_win_probability, ...) until today), and the calibrators collapse
+# dispersion by design when a regime has no live edge (HIGH_VOL emitted ~0.78 for ~90% of
+# the universe -- see that function's own 2026-08-10 note). A near-constant input carries
+# blend weight without contributing cross-sectional rank information and dilutes the
+# composite (blended AUC@5d measured 0.5206 vs confluence_score's own 0.5812 on identical
+# rows). Today's companion fix switches that read back to raw win_probability, so this table
+# encodes "the engine we actually have"; the shrink and the input fix were verified TOGETHER
+# because arm-testing ran against persisted (collapsed) scores.
+#
+# Evidence gate, run BEFORE editing (measurement.md rule: never reweight from argument alone):
+#   python src/server/_tmp_weight_arms.py -- mechanical candidate transforms scored on the
+#   IDENTICAL panel/labels/metrics as blend_walkforward.py (59,756 rows, 24 sessions,
+#   2026-06-30..2026-08-13), paired t-stats over daily rank-IC deltas vs BASE:
+#     BASE              mean IC 0.0405, 18/24 days positive, 6 top-30 gainer hits
+#     A  ml x0.5        mean IC 0.0424, dIC +0.0019, paired t=+2.05, 19/24 days  <- SHIPPED
+#     B  ml+dl both x0.5  IC 0.0379, dIC -0.0027, t=-1.82                       <- rejected
+#     C  ml x0.5 + give freed share straight to confluence  IC 0.0420, dIC +0.0014, t=+0.78
+#   Only arm A cleared the pre-declared bar (dIC > 0 AND |t| >= ~2), so ONLY arm A ships.
+#   Confluence rises here as a CONSEQUENCE of proportional redistribution (BULL
+#   0.190227 -> 0.214195), NOT because it was hand-picked -- arm C, the hand-picked variant,
+#   failed its own significance test. dl explicitly KEEPS its weight: demoting it (arm B)
+#   measurably hurt (it holds the best engine IC, +0.059 @5d), contradicting the earlier
+#   "observation-only" hypothesis -- the hypothesis was tested and lost.
+#
+# Known consequence, accepted (same class as the 2026-08-21 note below): shrinking one
+# engine's share shifts the unified_score distribution and therefore how many names clear
+# DIRECTIONAL_BUY_FLOOR-style absolute thresholds. Left alone for the same reason as then.
+# Re-check via a fresh blend_walkforward.py run once ~20+ further sessions accumulate; if
+# the dIC advantage reverses on the larger sample, revert is a one-commit operation.
+# Timeframe casing normalizer (2026-08-31): confluence_signals.suggested_timeframe and
+# recommendation_log.timeframe arrive in mixed conventions ('swing', 'long_term',
+# 'Intraday'), while the ranker's own literals are uppercase. unified_recommendations is
+# read with exact-match timeframe filters in several routers, so a lowercase variant
+# silently vanishes from those surfaces (live: a handful of 'intraday'/'long_term' rows
+# per day were invisible to every timeframe='SWING'-style filter). Normalize at the write
+# boundary so the table carries one convention only.
+def _normalize_timeframe(raw):
+    if raw is None:
+        return None
+    t = str(raw).strip().upper()
+    return t or None
+
+
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.30, 'ml': 0.135,  'cs': 0.05, 'confluence': 0.135,  'technical': 0.108, 'dl': 0.072,  'breakout': 0.15, 'smart_money': 0.05},
-    'BEAR':     {'screener': 0.35, 'ml': 0.166,  'cs': 0.05, 'confluence': 0.166,  'technical': 0.084, 'dl': 0.084,  'breakout': 0.05, 'smart_money': 0.05},
-    'HIGH_VOL': {'screener': 0.20, 'ml': 0.12,   'cs': 0.05, 'confluence': 0.12,   'technical': 0.24,  'dl': 0.12,   'breakout': 0.10, 'smart_money': 0.05},
-    'CRASH':    {'screener': 0.40, 'ml': 0.162,  'cs': 0.05, 'confluence': 0.126,  'technical': 0.081, 'dl': 0.081,  'breakout': 0.05, 'smart_money': 0.05},
+    'BULL':     {'screener': 0.0, 'ml': 0.184783, 'cs': 0.0, 'confluence': 0.369565, 'technical': 0.295652, 'dl': 0.0, 'breakout': 0.15, 'smart_money': 0.0},
+    'BEAR':     {'screener': 0.0, 'ml': 0.236786, 'cs': 0.0, 'confluence': 0.473574, 'technical': 0.23964, 'dl': 0.0, 'breakout': 0.05, 'smart_money': 0.0},
+    'HIGH_VOL': {'screener': 0.0, 'ml': 0.12857, 'cs': 0.0, 'confluence': 0.257143, 'technical': 0.514287, 'dl': 0.0, 'breakout': 0.10, 'smart_money': 0.0},
+    'CRASH':    {'screener': 0.0, 'ml': 0.267188, 'cs': 0.0, 'confluence': 0.415624, 'technical': 0.267188, 'dl': 0.0, 'breakout': 0.05, 'smart_money': 0.0},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
-    # a rangebound tape (lean slightly less on momentum/dl than BULL).
-    'SIDEWAYS': {'screener': 0.32, 'ml': 0.144,  'cs': 0.05, 'confluence': 0.144,  'technical': 0.09,  'dl': 0.072,  'breakout': 0.13, 'smart_money': 0.05},
+    # a rangebound tape (lean slightly less on momentum than BULL).
+    'SIDEWAYS': {'screener': 0.0, 'ml': 0.204705, 'cs': 0.0, 'confluence': 0.409413, 'technical': 0.255882, 'dl': 0.0, 'breakout': 0.13, 'smart_money': 0.0},
 }
+# dl PAUSED to 0.0 2026-09-13 by user decision (AF-20260913-05), pending the rebuild+retrain in
+# AF-20260913-02 -- a pause, not a verdict on the engine. Evidence: dl_score read no edge on
+# unified_recommendations (+0.007 rank IC @5d, measurement.md 2026-09-10), and with inference
+# inputs corrected (AF-20260913-01) the active v5 pins 40% of prob_up_5d below 0.01 / above 0.99
+# (23% even on its own training window) while the calibrated alternative v3 has no honest AUC.
+# Same mechanics as the screener/cs/smart_money zeroings below: key kept, freed weight split
+# proportionally over ml/confluence/technical only, breakout left at its pinned ceiling. Restore
+# by re-deriving from the promoted model's realized factor_edge reading, not the old 0.16-0.21.
+# cs and smart_money zeroed 2026-08-31 (fourth+ fifth engine-weight removals), same procedure
+# and same evidence bar as the screener zeroing below:
+#   - cs (cs_ranker): live model_registry CV AUC 0.176 — materially WORSE than random — and
+#     measurement.md's standing verdict "cs_score no edge (correctly configured on the first
+#     pass)". Its training/scoring jobs were removed from queues.ts the same day.
+#   - smart_money: measured inert in four independent ablations (identical to baseline to
+#     4 decimals in assembly_ablation.py's rw7 arms, re-confirmed 2026-08-29/30) — it never
+#     moved the blend, so zeroing it is a no-op for scoring that stops paying the appearance
+#     of a live engine.
+# Both keys are KEPT at 0.0 rather than removed for the same reasons as 'screener': _blend()
+# renormalizes over present engines, and the persisted cs_score/smart_money_score reporting
+# columns, drift monitoring, and dispersion-collapse tracking all expect the key to exist.
+# Freed weight was redistributed proportionally over ml/confluence/technical/dl only —
+# breakout stays pinned at its audit-derived ceiling [0.15, 0.05, 0.10, 0.05, 0.13]
+# (test_regime_weights_sum_to_one asserts the sums).
+# THIRD screener shrink, 2026-08-30, all the way to zero (the first two were 2026-08-20/21).
+#
+# Kept the 'screener' key (weight 0.0) rather than removing it, deliberately: _blend()
+# renormalizes over `{e: weights[e] for e in weights if e in present_engines}` -- a present
+# engine at weight 0.0 contributes exactly 0.0 to both the numerator and wsum, which is
+# mathematically identical to dropping the key, but keeps `unified_recommendations`'s
+# `screener_stock_score` column, drift monitoring, and every downstream reader that expects
+# the key present (dispersion-collapse tracking, the reporting columns) working unchanged --
+# only its weight in unified_score is now zero, not its existence in the pipeline.
+#
+# screener's freed weight was redistributed proportionally across the other 6 engines --
+# EXCLUDING breakout, which stays pinned at its own independent audit-derived ceiling
+# ([0.15, 0.05, 0.10, 0.05, 0.13] across BULL/BEAR/HIGH_VOL/CRASH/SIDEWAYS, asserted by
+# test_unified_ranker.py's test_regime_weights_sum_to_one) -- a proportional split must never
+# scale that value up just because screener's mass became available.
+#
+# Evidence for zero specifically, not just "shrink further": assembly_ablation.py's `rw7`
+# (screener excluded) vs `rw7+screener` (screener added back in at this exact REGIME_WEIGHTS
+# value, same _blend()-style renormalization) arms have measured this precise comparison FOUR
+# independent times (direct factor test, the confluence_score natural experiment, the ablation
+# bisection itself, and the 2026-08-29 full re-run, reproduced bit-identical 2026-08-30) --
+# adding screener at its prior nonzero weight cost -0.0136 IC @5d / -0.0163 IC @21d every time.
+# That comparison IS this code change (screener-in-at-current-weight vs screener-out), not a
+# proxy for it. See measurement.md's screener bisection entry for the numbers and
+# .claude/rules/ml-model-bugs.md for why a monitor/ablation result needs the null checked before
+# trusting it -- already done for this one. Re-verify post-deploy once ~15-20 fresh dates
+# accumulate under the new weights: `factor_edge.py --table unified_recommendations` against the
+# live `unified_score` column, not just this repeated ablation read.
+# ENGINE_EDGE_SHRINK=0.5 applied again to `screener` only, freed weight redistributed
+# proportionally over the 6 non-pinned engines. `breakout` is pinned at its exact prior value
+# in every regime -- it has an independent audit-derived ceiling (BREAKOUT_WEIGHT_CEILING /
+# TestBreakoutWeightCeiling) and a naive proportional scale-up would silently breach it.
+# Screener went BULL 0.30 -> 0.15 -> 0.075; CRASH 0.40 -> 0.20 -> 0.10.
+#
+# Evidence, TWO independent measurements agreeing, neither of them a re-run of the other:
+#   1. factor_edge.py on unified_recommendations (35 dates): screener_stock_score rank IC
+#      -0.0326 @5d, -0.0160 @10d -- negative at both well-powered horizons, while
+#      technical_score is +0.031 and dl_score +0.059 on the identical rows.
+#   2. The natural experiment already in the schema (2026-08-20): confluence_score WITH its
+#      screener component grades worse than the same composite WITHOUT it at every horizon
+#      (5d +0.056 -> +0.040, 21d +0.067 -> +0.044).
+# Plus the standing population-level result: 0 of 1,563 individual screeners survive FDR or
+# Bonferroni, and bullish screener consensus is significantly NEGATIVE (t=-2.36).
+#
+# This is a REMOVAL of a measured-harmful input, not the addition of an unproven one -- the
+# distinction that makes it defensible under measurement.md's "reweighting is not a fix" rule,
+# which is about chasing gains by retuning, not about cutting a demonstrated negative.
+# Deliberately a shrink and not a drop to zero: at 21d screener reads +0.002 (LOW-DATA, 4
+# dates), so "harmful at every horizon" is not established, and zeroing an engine also changes
+# _blend's renormalization for symbols where other engines are missing.
+# Full derivation + the composite finding that motivated re-examining the blend: measurement.md.
+#
+# MEASURED SIDE EFFECT, live before/after on the same day and the same SIDEWAYS regime:
+# actionable Buys fell 81 -> 66 (-19%) while mean unified_score barely moved (43.55 -> 43.66).
+# This is recurring-bugs.md's "restricting/deflating a score upstream re-tunes every ABSOLUTE
+# threshold downstream" class -- the reweighting is rank-motivated, but DIRECTIONLESS_BUY_FLOOR
+# (70.0) and STRONG_BUY (80.0) are absolute, so a distributional shift in the upper tail changes
+# how many names clear them. Left as-is DELIBERATELY rather than re-tuning the floor to hold the
+# old count: no Buy call on this platform has ever demonstrated forward edge (unified_score 5d
+# IC +0.012, AUC 0.514 over 38 dates), so manufacturing more of them by loosening a floor would
+# be fitting the output to a target rather than to evidence. Flagged here so the next session
+# sees this was a known, chosen consequence and not an unnoticed regression.
 
 # Per-regime CATEGORY tilt (multipliers on CAT_BASE_WT). Rangebound/neutral = SIDEWAYS (no
 # tilt). In risk-off regimes (BEAR/CRASH) overweight valuation/quality/dividend and
@@ -190,7 +361,10 @@ def regime_tilt_fit_readiness(conn, min_days: int = 60, min_episodes: int = 20) 
         ).fetchall()}
         rows = conn.execute("SELECT date, regime FROM market_regimes ORDER BY date").fetchall()
     except Exception as e:
-        print(f"[UnifiedRanker] regime_tilt_fit_readiness unavailable: {e}")
+        # Module-level function, no self -- route to stderr directly (see UnifiedRanker._degraded
+        # for why stderr, not stdout: it's the one stream pythonRunner.ts's runPython() surfaces
+        # as a log.warn() on an otherwise "successful" run).
+        print(f"[UnifiedRanker] regime_tilt_fit_readiness unavailable: {e}", file=sys.stderr)
         return {}
 
     episodes, prev = {}, None
@@ -243,7 +417,9 @@ def _load_regime_tilt_override():
         ).fetchone()
         _regime_tilt_override = json.loads(row['value']) if row and row['value'] else {}
     except Exception as e:
-        print(f"[UnifiedRanker] Could not load optimal_regime_cat_tilt override: {e}")
+        # Module-level function, no self -- see the matching comment in
+        # regime_tilt_fit_readiness() above.
+        print(f"[UnifiedRanker] Could not load optimal_regime_cat_tilt override: {e}", file=sys.stderr)
         _regime_tilt_override = {}
     return _regime_tilt_override
 
@@ -336,7 +512,8 @@ def _finite_engine_map(name, raw):
     dropped = len(raw) - len(clean)
     if dropped:
         print(f"[UnifiedRanker] WARNING: engine '{name}' returned {dropped}/{len(raw)} "
-              f"non-finite scores - those symbols are treated as having no {name} signal.")
+              f"non-finite scores - those symbols are treated as having no {name} signal.",
+              file=sys.stderr)
     return clean
 
 
@@ -365,16 +542,55 @@ def _finite_engine_map(name, raw):
 ZERO_DISPERSION_EPS = 1e-9
 ZERO_DISPERSION_MIN_SYMBOLS = 50   # below this a flat map is thin coverage, not a dead engine
 
+# A near-flat engine is as unrankable as a perfectly flat one, and after the percentile
+# normalization below it is strictly WORSE: _normalize_to_100 re-spreads any input, however
+# narrow, to a uniform 0-100, so an engine whose whole universe sits in a 5-point band has its
+# noise amplified to full weight instead of being harmlessly diluted. Under the old raw blend
+# that engine contributed a near-constant offset (measured 1.1% of ranking influence on a
+# 17.2% weight); normalized without this floor it would contribute 17.2% of pure noise. So
+# this floor is not an independent tightening — it is required BY the normalization.
+#
+# Threshold derived from the data, not picked (recurring-bugs.md: measure the null first).
+# Per-(engine, date) stddev over the 38 ranker-days with >=200 symbols, 2026-06-01..08-24,
+# 138 engine-days, bucketed by 2 on the 0-100 score scale:
+#   [0,2): 31   [2,4): 4   [4,6): 4   [6,8): 4   [8,10): 4   [10,12): 13   ... [28,30): 38
+# Bimodal: a collapsed mode massed under 2 and the healthy mode from ~10 up, with a sparse
+# valley between. 5.0 sits in that valley and errs toward keeping for every engine except the
+# raw-first ML map below. It fires on real dates, not only pathological ones: dl_score 15 and
+# technical 7 times -- the collapse is episodic (regime-dependent isotonic calibration), which
+# is exactly why the check has to be dynamic per run rather than an engine being removed from
+# REGIME_WEIGHTS.
+ZERO_DISPERSION_MIN_SD = 5.0
+
+# ML now intentionally reads raw win_probability before percentile normalization. Its trusted
+# SIDEWAYS distribution has a 3.2-4.6 point standard deviation (and live AUC 0.58), so applying
+# the mixed-engine 5-point floor discarded useful cross-sectional ordering on every recent run.
+# 3.0 remains above the observed <=2 collapsed mode while leaving that proven operating band in
+# the blend. Other engines retain the conservative shared floor above.
+ZERO_DISPERSION_MIN_SD_BY_ENGINE = {"ml": 3.0}
+
+
+def _stddev(vals):
+    n = len(vals)
+    if n < 2:
+        return 0.0
+    mean = sum(vals) / n
+    return math.sqrt(sum((v - mean) ** 2 for v in vals) / (n - 1))
+
 
 def drop_zero_dispersion_engines(engine_maps):
-    """Remove engines whose scores carry no cross-sectional information at all.
+    """Remove engines whose scores carry no usable cross-sectional information.
 
-    Returns (kept_maps, dropped_engine_names). Missing/!=constant engines pass through.
+    Returns (kept_maps, dropped_engine_names). Missing/thinly-covered engines pass through.
     """
     kept, dropped = {}, []
     for name, m in engine_maps.items():
         vals = list(m.values())
-        if len(vals) >= ZERO_DISPERSION_MIN_SYMBOLS and (max(vals) - min(vals)) <= ZERO_DISPERSION_EPS:
+        min_sd = ZERO_DISPERSION_MIN_SD_BY_ENGINE.get(name, ZERO_DISPERSION_MIN_SD)
+        if len(vals) >= ZERO_DISPERSION_MIN_SYMBOLS and (
+            (max(vals) - min(vals)) <= ZERO_DISPERSION_EPS
+            or _stddev(vals) < min_sd
+        ):
             dropped.append(name)
             continue
         kept[name] = m
@@ -597,6 +813,64 @@ def apply_correlation_cap(weights: dict, clusters: dict,
     return {k: round(v, 4) for k, v in out.items()}
 
 
+# ── Transaction cost penalty (#cost-aware sizing) ─────────────────────────────
+# High transaction costs (STT, stamp duty, slippage on illiquid names) eat into
+# expected returns. This function reduces raw position sizes for symbols where
+# round-trip costs are high relative to expected edge. Symbols with costs
+# exceeding the expected edge are zeroed out entirely.
+#
+# The penalty is: size_multiplier = max(0, 1 - round_trip_cost_pct / expected_edge_pct)
+# where expected_edge_pct is the symbol's expected return above risk-free rate.
+# For simplicity, we use a platform-wide default edge estimate that can be
+# overridden per symbol if the ML ensemble provides one.
+DEFAULT_EXPECTED_EDGE_PCT = 5.0  # 5% expected edge (conservative for Indian equities)
+MAX_COST_TO_EDGE_RATIO = 0.5     # if costs exceed 50% of expected edge, halve the size
+
+
+def apply_cost_penalty(
+    raw_sizes: dict,
+    cost_map: dict,
+    default_edge_pct: float = DEFAULT_EXPECTED_EDGE_PCT,
+) -> dict:
+    """Reduce position sizes for high-transaction-cost symbols.
+
+    Args:
+        raw_sizes: {symbol: raw_conviction_size} before normalization
+        cost_map: {symbol: round_trip_cost_pct} from indian_market_costs
+        default_edge_pct: Expected edge as percentage (e.g. 5.0 for 5%)
+
+    Returns:
+        Cost-adjusted raw_sizes dict (same keys, reduced values)
+    """
+    if not cost_map or default_edge_pct <= 0:
+        return raw_sizes
+
+    adjusted = {}
+    for sym, size in raw_sizes.items():
+        if size <= 0:
+            adjusted[sym] = size
+            continue
+        cost_pct = cost_map.get(sym)
+        if cost_pct is None or cost_pct <= 0:
+            adjusted[sym] = size
+            continue
+        # Cost as percentage points
+        cost_pct_points = cost_pct * 100.0
+        # Penalty: reduce size proportionally to cost/edge ratio
+        ratio = cost_pct_points / default_edge_pct
+        if ratio >= 1.0:
+            # Costs exceed expected edge — don't trade
+            adjusted[sym] = 0.0
+        elif ratio >= MAX_COST_TO_EDGE_RATIO:
+            # Costs are significant — scale down
+            penalty = 1.0 - (ratio - MAX_COST_TO_EDGE_RATIO) / (1.0 - MAX_COST_TO_EDGE_RATIO)
+            adjusted[sym] = size * max(0.0, penalty)
+        else:
+            # Costs are manageable — small reduction
+            adjusted[sym] = size * (1.0 - 0.3 * ratio)
+    return adjusted
+
+
 # Bounded score-fallback for directionless stocks (2026-08-05 pipeline-review finding,
 # "direction and magnitude are decoupled" -- resolved per explicit user confirmation of the
 # bounded-fallback approach over full multi-engine voting or leaving it as-is). Screeners keep
@@ -690,7 +964,23 @@ def is_engine_edge_adjustment_enabled(conn) -> bool:
         ).fetchone()
         return bool(row) and row['value'] == 'true'
     except Exception as e:
-        print(f"[UnifiedRanker] is_engine_edge_adjustment_enabled unavailable: {e}")
+        # Module-level function, no self -- see the matching comment in
+        # regime_tilt_fit_readiness() above.
+        print(f"[UnifiedRanker] is_engine_edge_adjustment_enabled unavailable: {e}", file=sys.stderr)
+        return False
+
+
+def is_ic_tilt_enabled(conn) -> bool:
+    """Gate for ic_tilted_weights(): app_settings 'engine_ic_tilt_enabled', default OFF
+    (missing row), same convention as every other ranker flag here. When ON it supersedes
+    is_engine_edge_adjustment_enabled (run() enforces the precedence)."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'engine_ic_tilt_enabled'"
+        ).fetchone()
+        return bool(row) and row['value'] == 'true'
+    except Exception as e:
+        print(f"[UnifiedRanker] is_ic_tilt_enabled unavailable: {e}", file=sys.stderr)
         return False
 
 
@@ -719,7 +1009,9 @@ def load_engine_edge_verdicts(conn, regime: str, horizon: int = ENGINE_EDGE_HORI
             out[engine] = r['verdict'] if r else None
         return out
     except Exception as e:
-        print(f"[UnifiedRanker] load_engine_edge_verdicts unavailable: {e}")
+        # Module-level function, no self -- see the matching comment in
+        # regime_tilt_fit_readiness() above.
+        print(f"[UnifiedRanker] load_engine_edge_verdicts unavailable: {e}", file=sys.stderr)
         return {}
 
 
@@ -735,6 +1027,93 @@ def edge_adjusted_weights(base_weights: dict, verdicts: dict) -> dict:
     if total <= 0:
         return dict(base_weights)
     return {e: w / total * sum(base_weights.values()) for e, w in adjusted.items()}
+
+
+# ── IC-tilted engine weights (successor to binary edge_adjusted_weights) ──────
+# Why this exists (AF-20260823-81 close-out): edge_adjusted_weights is BINARY -- it halves
+# any engine whose persisted 5d verdict reads 'no edge'. Measured live 2026-08-24, every
+# engine except dl grades 'no edge' at h=5 (dl +0.059 IC, technical +0.031, breakout +0.026,
+# ml/cs/screener/confluence negative), so the binary rule halves nearly everything and the
+# freed weight flows proportionally to LOW-DATA engines with NO evidence -- reallocation
+# toward the unproven, not toward the proven. The magnitude information (the actual signed
+# rank IC) is thrown away exactly where it is informative.
+#
+# ic_tilted_weights instead rescales each engine's share by its own measured 5d rank IC,
+# clamped to [1+ENGINE_TILT_CLAMP, 1+ENGINE_TILT_CLAMP] so a single strong (or pathological)
+# estimate cannot dominate, floored at 0 so a negatively-loaded engine never enters the buy
+# blend inverted (a negative-IC engine is DROPPED here, not flipped -- sign flips are a
+# different decision requiring their own evidence), and renormalized. Engines below
+# ENGINE_IC_MIN_DATES distinct dates carry no reliable estimate (factor_edge's own
+# MIN_DATES_RELIABLE bar) and pass through untouched.
+#
+# Gate: app_settings 'engine_ic_tilt_enabled' (default OFF, like every predecessor). When
+# ON it SUPERSEDES engine_edge_adjustment_enabled -- the two must not stack (shrink-then-
+# tilt would double-count the same evidence). run() enforces the precedence.
+ENGINE_IC_MIN_DATES = 20
+ENGINE_TILT_CLAMP = 0.75   # max |deviation| of an engine's multiplier from 1.0
+
+
+def load_latest_engine_ics(conn, horizon: int = ENGINE_EDGE_HORIZON,
+                           table_name: str = 'unified_recommendations__open_entry') -> dict:
+    """engine -> {'ic': float, 'dates': int} from the most recent factor_edge_history run
+    for this table/horizon (regime 'ALL'), or {} when nothing has ever been graded.
+    Missing engines simply stay absent -- callers decide what absence means.
+    Defaults to the __open_entry grades: that is the panel-spec entry convention
+    (enter at next open, exit at the open N sessions later -- no untradeable overnight
+    gap credit) and what blend_walkforward.py measures against, so tilt multipliers must
+    come from the same label definition the harness validates. Close-entry rows stay
+    available under table_name='unified_recommendations'."""
+    try:
+        row = conn.execute(
+            "SELECT MAX(run_at) AS r FROM factor_edge_history "
+            "WHERE table_name = ? AND horizon_days = ? AND regime = 'ALL'",
+            (table_name, int(horizon))).fetchone()
+        run_at = row['r'] if row else None
+        if not run_at:
+            return {}
+        out = {}
+        rows = conn.execute(
+            "SELECT score_col, rank_ic, dates FROM factor_edge_history "
+            "WHERE run_at = ? AND table_name = ? AND horizon_days = ? AND regime = 'ALL'",
+            (run_at, table_name, int(horizon))).fetchall()
+        for r in rows:
+            for engine, col in ENGINE_TO_SCORE_COL.items():
+                if col == r['score_col'] and r['rank_ic'] is not None and r['dates'] is not None:
+                    out[engine] = {'ic': float(r['rank_ic']), 'dates': int(r['dates'])}
+        return out
+    except Exception as e:
+        print(f"[UnifiedRanker] load_latest_engine_ics unavailable: {e}", file=sys.stderr)
+        return {}
+
+
+def ic_tilted_weights(base_weights: dict, engine_ics: dict,
+                      min_dates: int = ENGINE_IC_MIN_DATES,
+                      clamp: float = ENGINE_TILT_CLAMP) -> tuple:
+    """Pure function -> (weights, report). Rescale each engine's share by
+    min(1 + ic, 1 + clamp), floored at 0 -- an anti-predictive engine is shrunk toward
+    zero-weight and only reaches literal 0 (dropped) once its IC <= -1; it is never
+    inverted. Engines whose estimate carries >= min_dates distinct dates qualify;
+    everything else passes through untouched. Renormalizes to the original total.
+    Returns the ORIGINAL dict unchanged (identity, not copy-equal) when no engine qualifies."""
+    report = {}
+    touched = False
+    adjusted = {}
+    for e, w in base_weights.items():
+        info = engine_ics.get(e) or {}
+        ic, dates = info.get('ic'), info.get('dates', 0)
+        if ic is None or dates is None or dates < min_dates:
+            adjusted[e] = w
+            continue
+        mult = max(0.0, min(1.0 + ic, 1.0 + clamp))
+        # 1 - clamp floor: a strongly negative IC drives the multiplier to 0 (dropped),
+        # never negative (an anti-predictive engine must not enter the blend inverted).
+        adjusted[e] = w * mult
+        report[e] = {'ic': round(ic, 4), 'dates': dates, 'mult': round(mult, 4)}
+        touched = True
+    total = sum(adjusted.values())
+    if not touched or total <= 0:
+        return dict(base_weights), {}
+    return ({e: w / total * sum(base_weights.values()) for e, w in adjusted.items()}, report)
 
 
 #: Selectivity band the Buy floor is expected to land in, as a fraction of the scored
@@ -769,12 +1148,13 @@ def _report_buy_floor_selectivity(results, band=BUY_FLOOR_EXPECTED_SELECTIVITY):
     frac = buys / total
     lo, hi = band
     print(f'[UnifiedRanker] buy-floor selectivity: {buys}/{total} ({frac*100:.1f}%) cleared '
-          f'DIRECTIONLESS_BUY_FLOOR={DIRECTIONLESS_BUY_FLOOR}')
+          f'DIRECTIONLESS_BUY_FLOOR={DIRECTIONLESS_BUY_FLOOR}', file=sys.stderr)
     if frac < lo or frac > hi:
         print(f'[UnifiedRanker] WARNING: buy-floor selectivity {frac*100:.1f}% is outside the '
               f'expected {lo*100:.0f}-{hi*100:.0f}% band. The floor is an ABSOLUTE cut on a '
               f'non-stationary score scale -- check whether an engine was fixed, rolled back, '
-              f'or dropped for zero dispersion before reading this as a change in the market.')
+              f'or dropped for zero dispersion before reading this as a change in the market.',
+              file=sys.stderr)
     return frac
 
 
@@ -1005,11 +1385,68 @@ def factor_crowding_multiplier(factor_scores: dict) -> tuple:
     return 1.0, None
 
 
+_last_generated_at: "datetime | None" = None
+
+
+def _next_generated_at() -> datetime:
+    """Wall-clock UTC, but guaranteed STRICTLY INCREASING within this process.
+
+    Why this is not just `datetime.now(timezone.utc)` (fixed 2026-08-15):
+
+    `unified_recommendations_history` is PRIMARY KEY (symbol, generated_at) and its insert is
+    `ON CONFLICT DO NOTHING` -- deliberately, because silently rewriting a snapshot is the exact
+    failure that table exists to prevent. That design assumes two runs can never share a
+    timestamp. They can: `datetime.now()`'s resolution is the SYSTEM CLOCK TICK, not the
+    microseconds its ISO output implies. Measured on Windows 2026-08-15 --
+    `time.get_clock_info('time').resolution` is 0.015625 s, and 2000 back-to-back
+    `datetime.now(timezone.utc)` calls returned exactly ONE distinct value.
+
+    `run()` over a small universe finishes well inside 15.6 ms, so two runs in quick succession
+    (a retry, a double-trigger, a same-process re-run) produce the IDENTICAL generated_at, the
+    ON CONFLICT fires, and the second run's ENTIRE snapshot is discarded with no error, no
+    warning, and no row-count change to notice. That reproduces precisely the evidence loss
+    documented in measurement.md: re-runs overwriting each other until the canonical ranker had
+    only one provably pre-market date and could not be graded against forward returns at all.
+
+    Linux (production pm2) has ~1 ns clock resolution, so live exposure is far smaller than on
+    a Windows dev box -- but a snapshot table's uniqueness guarantee must not rest on how coarse
+    the host's clock happens to be. Bumping by 1 microsecond on collision keeps the value a real
+    wall-clock timestamp (it is used to prove a run was pre-market) while making the key
+    reliable.
+
+    Found via `test_history_snapshot_is_append_only_across_reruns`, which had been dismissed as
+    an order-dependent flake for weeks -- it was reporting a real defect the whole time. Test
+    ordering only changed how long the gap between the two runs was.
+    """
+    global _last_generated_at
+    now = datetime.now(timezone.utc)
+    if _last_generated_at is not None and now <= _last_generated_at:
+        now = _last_generated_at + timedelta(microseconds=1)
+    _last_generated_at = now
+    return now
+
+
 class UnifiedRanker:
     def __init__(self, conn=None, csv_path=None, corrections_path=None):
         self.conn = conn or connect()
         self.csv_path = Path(csv_path) if csv_path else CSV_PATH
         self.corrections_path = Path(corrections_path) if corrections_path else CORRECTIONS_PATH
+        self._degraded_count = 0
+
+    def _degraded(self, msg: str) -> None:
+        """Report a query that degraded to an empty/fallback result instead of raising.
+        Every one of ~30 read methods in this class does this by design (a missing/renamed
+        table must not crash the nightly ranker), but until now they all printed to STDOUT,
+        which pythonRunner.ts's runPython() never inspects -- only STDERR content triggers its
+        '[PY] <script> finished successfully with warnings/stderr output' log.warn(), the one
+        existing hook that makes a degraded-but-"successful" run visible without a human
+        reading the raw log. Routes through that hook instead of adding new alerting.
+        See recurring-bugs.md's "except Exception: pass does NOT contain the failure" and
+        "A UNION half that supplies NULL... is inert, and its row count hides that" entries --
+        same family: this run reported success while quietly producing less than it should.
+        """
+        self._degraded_count += 1
+        print(msg, file=sys.stderr)
 
     def seed_screener_catalog(self):
         """Load screener_scoring_v2.csv into screener_catalog + apply corrections. Idempotent."""
@@ -1028,7 +1465,11 @@ class UnifiedRanker:
                     screener_id = row.get('screener_id', '').strip() or slugify(name)
                     rows.append((
                         screener_id,
-                        row['source'].strip(),
+                        row['source'].strip().lower(),  # match screener_catalog_enricher.py's
+                        # lowercase convention -- an uncontrolled-case source here re-splits an
+                        # existing (screener_id, source) row into a second row on every reseed
+                        # if the CSV's casing differs from what another writer already used for
+                        # the same screener_id (cross-writer-collision-audit, 2026-08-14).
                         name,
                         row['category'].strip(),
                         row.get('subcategory', '').strip(),
@@ -1112,18 +1553,25 @@ class UnifiedRanker:
                 "SELECT close FROM macro_asset_prices WHERE symbol = 'INDIAVIX' "
                 "ORDER BY date DESC LIMIT 1"
             ).fetchone()
-        except Exception:
+        except Exception as e:
+            # Missing the rollback every sibling except block has here would poison the
+            # connection for every later read in this run (recurring-bugs.md: "except
+            # Exception: pass does NOT contain the failure on Postgres").
+            self.conn.rollback()
+            self._degraded(f"[UnifiedRanker] VIX regime downgrade check unavailable: {e}")
             return regime
         vix = float(row['close']) if row and row['close'] is not None else None
         if vix is None:
             return regime  # nothing to second-guess the label with -- trust it
         if regime == 'HIGH_VOL' and vix < self._HIGH_VOL_VIX_FLOOR:
             print(f"[UnifiedRanker] Regime 'HIGH_VOL' downgraded to 'SIDEWAYS' for weight "
-                  f"selection -- real VIX={vix:.2f} < {self._HIGH_VOL_VIX_FLOOR} historical-median floor.")
+                  f"selection -- real VIX={vix:.2f} < {self._HIGH_VOL_VIX_FLOOR} historical-median floor.",
+                  file=sys.stderr)
             return 'SIDEWAYS'
         if regime == 'CRASH' and vix < self._CRASH_VIX_FLOOR:
             print(f"[UnifiedRanker] Regime 'CRASH' downgraded to 'BEAR' for weight selection "
-                  f"-- real VIX={vix:.2f} < {self._CRASH_VIX_FLOOR} historical-p75 floor.")
+                  f"-- real VIX={vix:.2f} < {self._CRASH_VIX_FLOOR} historical-p75 floor.",
+                  file=sys.stderr)
             return 'BEAR'
         return regime
 
@@ -1140,10 +1588,10 @@ class UnifiedRanker:
             ).fetchall():
                 out[r['symbol']] = r['triggers']
         except Exception as e:                                   # noqa: BLE001
-            print(f"[UnifiedRanker] event triggers unavailable ({str(e)[:60]}); "
+            self._degraded(f"[UnifiedRanker] event triggers unavailable ({str(e)[:60]}); "
                   "recommendations will carry no event disclosure today.")
         if out:
-            print(f"[UnifiedRanker] event triggers on {len(out):,} symbols")
+            print(f"[UnifiedRanker] event triggers on {len(out):,} symbols", file=sys.stderr)
         return out
 
     def _get_fundamental_scores(self):
@@ -1179,8 +1627,13 @@ class UnifiedRanker:
         hedge in run() -- this only makes the ML leg honest, it doesn't remove the hedge that
         already covers for it in no-edge regimes."""
         cutoff = (date.today() - timedelta(days=30)).isoformat()
+        # Raw win_probability FIRST (fix 2026-08-24): isotonic calibration collapses
+        # dispersion when a regime has no live edge (~90% of HIGH_VOL rows sat pinned
+        # near ~0.78), so preferring calibrated_win_probability made this average
+        # near-constant -- sizing every name off a constant silently erases per-symbol
+        # conviction even though the number looks stable.
         rows = self.conn.execute(
-            "SELECT symbol, nifty_regime, COALESCE(calibrated_win_probability, win_probability) AS p "
+            "SELECT symbol, nifty_regime, COALESCE(win_probability, calibrated_win_probability) AS p "
             "FROM technical_signals WHERE date >= ? AND win_probability IS NOT NULL",
             (cutoff,)
         ).fetchall()
@@ -1221,7 +1674,7 @@ class UnifiedRanker:
             ).fetchall():
                 master_bias[(str(r['scan_id']), (r['source'] or '').lower())] = r['inferred_sentiment']
         except Exception as e:                                   # noqa: BLE001
-            print(f"[UnifiedRanker] screener_master fallback unavailable ({str(e)[:60]}); "
+            self._degraded(f"[UnifiedRanker] screener_master fallback unavailable ({str(e)[:60]}); "
                   "uncatalogued screeners will contribute with a neutral bias.")
 
         def _add(sym, bias, conf, cat, subcat, horizon, name=None, sid=None, src=None):
@@ -1265,18 +1718,22 @@ class UnifiedRanker:
                 # falls back to Hold/0-bull/0-bear with no error surfaced anywhere — the
                 # ranker looks like it's running fine while producing no directional signal
                 # at all. Log so a monitoring pass can catch it.
-                print(f"[UnifiedRanker] Screener membership query failed: {e}")
+                self._degraded(f"[UnifiedRanker] Screener membership query failed: {e}")
                 self.conn.rollback()
 
         if not membership:
-            print("[UnifiedRanker] WARNING: screener membership is completely empty — "
+            self._degraded("[UnifiedRanker] WARNING: screener membership is completely empty — "
                   "every symbol will classify as Hold with 0 bull/bear counts.")
 
         return membership
 
     def _get_screener_momentum_scores(self):
         """Load screener_momentum_score from technical_signals (stamped by screener_features_fetcher)."""
-        cutoff = (date.today() - timedelta(days=2)).isoformat()
+        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
+        # long weekend is 4, so a short date.today() window can contain NO session, this
+        # read returns {}, and _blend silently renormalizes over the engines that remain.
+        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
+        cutoff = as_of.trading_days_back(2, self.conn)[-1].isoformat()
         try:
             rows = self.conn.execute(
                 "SELECT symbol, screener_momentum_score FROM technical_signals "
@@ -1292,14 +1749,19 @@ class UnifiedRanker:
                 if sym not in result or val > result[sym]:
                     result[sym] = val
             return result
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_screener_momentum_scores failed: {e}")
             self.conn.rollback()
             return {}
 
     def _get_ml_scores(self):
         # technical_signals.date is a text column; compare against a Python-computed cutoff
         # string (date('now',...) translates to a real date on Postgres -> text>=date error).
-        cutoff = (date.today() - timedelta(days=3)).isoformat()
+        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
+        # long weekend is 4, so a short date.today() window can contain NO session, this
+        # read returns {}, and _blend silently renormalizes over the engines that remain.
+        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
+        cutoff = as_of.trading_days_back(3, self.conn)[-1].isoformat()
         try:
             # Was AVG(win_probability) (raw) — inconsistent with _get_win_probabilities above,
             # which already reads the regime-fair calibrated value for sizing. This 'ml' score
@@ -1318,8 +1780,12 @@ class UnifiedRanker:
             # that knowledge. Shrinking here too collapses a no-edge regime's near-constant
             # score toward neutral (50), so _blend's per-symbol renormalization leans on the
             # OTHER engines instead of diluting the ranking with what amounts to noise.
+            # Raw-first swap (2026-08-24), matching the sizing query above: isotonic
+            # calibration collapses dispersion in no-edge regimes, so the calibrated
+            # column handed this engine a near-constant input that still carried its
+            # full regime weight while contributing no cross-sectional rank information.
             rows = self.conn.execute(
-                "SELECT symbol, nifty_regime, COALESCE(calibrated_win_probability, win_probability) AS p "
+                "SELECT symbol, nifty_regime, COALESCE(win_probability, calibrated_win_probability) AS p "
                 "FROM technical_signals WHERE date >= ?",
                 (cutoff,),
             ).fetchall()
@@ -1341,7 +1807,7 @@ class UnifiedRanker:
                 acc.setdefault(r['symbol'], []).append(p)
             return {sym: (sum(v) / len(v)) * 100 for sym, v in acc.items() if v}
         except Exception as e:
-            print(f"[UnifiedRanker] _get_ml_scores failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_ml_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1366,12 +1832,71 @@ class UnifiedRanker:
             ).fetchall()
             return {r['symbol']: float(r['hv_20d']) for r in rows}
         except Exception as e:
-            print(f"[UnifiedRanker] _get_realized_vol failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_realized_vol failed: {e}")
             self.conn.rollback()
             return {}
 
+    def _compute_cost_map(self, symbols: list) -> dict:
+        """Compute round-trip transaction cost for each symbol.
+
+        Returns {symbol: round_trip_cost_pct} using the full Indian-market fee schedule
+        (STT, exchange fees, stamp duty, GST, brokerage, slippage) from indian_market_costs.
+
+        Costs are liquidity-scaled: participation_rate is estimated from a notional
+        ₹10 lakh position vs the stock's 20-day average daily turnover.
+        """
+        if not symbols:
+            return {}
+        cost_map = {}
+        try:
+            placeholders = ', '.join(f':s{i}' for i in range(len(symbols)))
+            rows = self.conn.execute(f"""
+                SELECT ts.symbol, ts.cmp,
+                       COALESCE(
+                           (SELECT AVG(close * volume) FROM stock_ohlcv so
+                            WHERE so.symbol = ts.symbol AND so.date >= CURRENT_DATE - 20),
+                           0
+                       ) AS adt,
+                       COALESCE(
+                           (SELECT cs.atr FROM confluence_signals cs
+                            WHERE cs.symbol = ts.symbol AND cs.atr IS NOT NULL
+                            ORDER BY cs.computed_at DESC LIMIT 1),
+                           ts.cmp * 0.02
+                       ) AS atr
+                FROM technical_signals ts
+                WHERE ts.symbol IN ({placeholders})
+                  AND ts.date = (SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = ts.symbol)
+            """, {f's{i}': s for i, s in enumerate(symbols)}).fetchall()
+            for row in rows:
+                sym = row[0]
+                cmp_val = float(row[1]) if row[1] else 0.0
+                adt = float(row[2]) if row[2] else 0.0
+                atr = float(row[3]) if row[3] else cmp_val * 0.02
+                # Estimate participation rate: ₹10L notional vs ADT
+                notional = 1_000_000.0
+                participation = (notional / adt) if adt > 0 else 0.01
+                participation = min(participation, 0.25)  # cap at 25% of ADT
+                # Daily volatility as percentage
+                daily_vol_pct = (atr / cmp_val * 100.0) if cmp_val > 0 else 2.0
+                cost = round_trip_cost_bps(
+                    notional=notional,
+                    asset_class='equity',
+                    trade_type='intraday',
+                    participation_rate=participation,
+                    volatility_pct=daily_vol_pct,
+                )
+                cost_map[sym] = cost
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _compute_cost_map failed: {e}")
+            self.conn.rollback()
+        return cost_map
+
     def _get_cs_scores(self):
-        cutoff = (date.today() - timedelta(days=3)).isoformat()
+        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
+        # long weekend is 4, so a short date.today() window can contain NO session, this
+        # read returns {}, and _blend silently renormalizes over the engines that remain.
+        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
+        cutoff = as_of.trading_days_back(3, self.conn)[-1].isoformat()
         try:
             rows = self.conn.execute(
                 "SELECT symbol, AVG(cs_score) AS s FROM technical_signals "
@@ -1380,7 +1905,7 @@ class UnifiedRanker:
             ).fetchall()
             return _normalize_to_100({r['symbol']: float(r['s'] or 0) for r in rows})
         except Exception as e:
-            print(f"[UnifiedRanker] _get_cs_scores failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_cs_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1409,11 +1934,11 @@ class UnifiedRanker:
                 self.conn.rollback()
             except Exception:
                 pass
-            print(f"[UnifiedRanker] universe restriction unavailable ({e}); ranking unfiltered")
+            self._degraded(f"[UnifiedRanker] universe restriction unavailable ({e}); ranking unfiltered")
             return symbols
 
         if not master or not priced:
-            print("[UnifiedRanker] empty master/price universe; ranking unfiltered")
+            self._degraded("[UnifiedRanker] empty master/price universe; ranking unfiltered")
             return symbols
 
         keep = {s for s in symbols if s in master and s in priced}
@@ -1421,7 +1946,7 @@ class UnifiedRanker:
         if dropped:
             sample = sorted(s for s in symbols if s not in keep)[:5]
             print(f"[UnifiedRanker] universe filter: kept {len(keep)}, dropped {dropped} "
-                  f"non-tradeable/unpriced symbols (e.g. {sample})")
+                  f"non-tradeable/unpriced symbols (e.g. {sample})", file=sys.stderr)
         return keep
 
     def _get_confluence_scores(self):
@@ -1445,7 +1970,11 @@ class UnifiedRanker:
         # the standalone Confluence page, intraday_ranker.py, etc.) -- only what THIS engine
         # feeds into the unified blend changes. Percentile-normalized to 0-100 like
         # _get_technical_scores, since the raw sum tops out around 45, not 100.
-        cutoff = (date.today() - timedelta(days=1)).isoformat()
+        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
+        # long weekend is 4, so a short date.today() window can contain NO session, this
+        # read returns {}, and _blend silently renormalizes over the engines that remain.
+        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
+        cutoff = as_of.trading_days_back(1, self.conn)[-1].isoformat()
         try:
             rows = self.conn.execute(
                 "SELECT symbol, "
@@ -1459,12 +1988,16 @@ class UnifiedRanker:
             raw = {r['symbol']: float(r['non_screener_score'] or 0) for r in rows}
             return _normalize_to_100(raw)
         except Exception as e:
-            print(f"[UnifiedRanker] _get_confluence_scores failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_confluence_scores failed: {e}")
             self.conn.rollback()
             return {}
 
     def _get_technical_scores(self):
-        cutoff = (date.today() - timedelta(days=3)).isoformat()
+        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
+        # long weekend is 4, so a short date.today() window can contain NO session, this
+        # read returns {}, and _blend silently renormalizes over the engines that remain.
+        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
+        cutoff = as_of.trading_days_back(3, self.conn)[-1].isoformat()
         try:
             rows = self.conn.execute(
                 "SELECT symbol, AVG(signal_score) AS s FROM technical_signals WHERE date >= ? GROUP BY symbol",
@@ -1474,12 +2007,16 @@ class UnifiedRanker:
             # same scale as the other engines before blending.
             return _normalize_to_100({r['symbol']: float(r['s'] or 0) for r in rows})
         except Exception as e:
-            print(f"[UnifiedRanker] _get_technical_scores failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_technical_scores failed: {e}")
             self.conn.rollback()
             return {}
 
     def _get_dl_scores(self):
-        cutoff = (date.today() - timedelta(days=1)).isoformat()
+        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
+        # long weekend is 4, so a short date.today() window can contain NO session, this
+        # read returns {}, and _blend silently renormalizes over the engines that remain.
+        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
+        cutoff = as_of.trading_days_back(1, self.conn)[-1].isoformat()
         try:
             rows = self.conn.execute(
                 "SELECT symbol, prob_up_5d AS probability FROM deep_learning_predictions WHERE prediction_date >= ?",
@@ -1487,7 +2024,7 @@ class UnifiedRanker:
             ).fetchall()
             return {r['symbol']: float(r['probability'] or 0) * 100 for r in rows}
         except Exception as e:
-            print(f"[UnifiedRanker] _get_dl_scores failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_dl_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1510,7 +2047,7 @@ class UnifiedRanker:
                     result[sym] = float(r['breakout_probability'] or 0) * 100
             return result
         except Exception as e:
-            print(f"[UnifiedRanker] _get_breakout_scores failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_breakout_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1536,7 +2073,7 @@ class UnifiedRanker:
                 if sym not in insider_scores:
                     insider_scores[sym] = float(r['insider_buy_pct_90d'] or 0) * 100
         except Exception as e:
-            print(f"[UnifiedRanker] _get_smart_money_scores (insider) failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_smart_money_scores (insider) failed: {e}")
             self.conn.rollback()
 
         # 2. Block/Bulk deal accumulation (90-day window)
@@ -1553,7 +2090,7 @@ class UnifiedRanker:
                 # 10% of float bought over 90d -> 100; scaled linearly, capped at 100.
                 block_scores[r['symbol']] = min(100.0, float(r['total_pct'] or 0) * 10.0)
         except Exception as e:
-            print(f"[UnifiedRanker] _get_smart_money_scores (block deals) failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_smart_money_scores (block deals) failed: {e}")
             self.conn.rollback()
 
         # 3. Ranked Institutional Insights (MoneyControl ranked feed)
@@ -1570,7 +2107,7 @@ class UnifiedRanker:
                 # 500Cr+ in 2 weeks -> 100; scaled linearly, capped at 100.
                 inst_scores[r['symbol']] = min(100.0, float(r['total_value'] or 0) / 5.0)
         except Exception as e:
-            print(f"[UnifiedRanker] _get_smart_money_scores (inst insights) failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_smart_money_scores (inst insights) failed: {e}")
             self.conn.rollback()
 
         result = {}
@@ -1588,7 +2125,8 @@ class UnifiedRanker:
                 (cutoff,),
             ).fetchone()
             return float(row['avg_r'] or 0)
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_avg_track_record failed: {e}")
             self.conn.rollback()
             return 0.0
 
@@ -1654,7 +2192,7 @@ class UnifiedRanker:
                 out[r['symbol']] = (mean, cnt, sd)
             return out
         except Exception as e:
-            print(f"[UnifiedRanker] _get_rl_gate_map failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_rl_gate_map failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1690,7 +2228,8 @@ class UnifiedRanker:
         else:
             t_stat = float('-inf')
         print(f"[UnifiedRanker] RL gate excluded {symbol}: "
-              f"avg_return={avg_r:.2f}% over {cnt} resolved outcomes (90d), t={t_stat:.2f}")
+              f"avg_return={avg_r:.2f}% over {cnt} resolved outcomes (90d), t={t_stat:.2f}",
+              file=sys.stderr)
         return False
 
     def _get_confluence_latest_map(self):
@@ -1710,7 +2249,8 @@ class UnifiedRanker:
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_confluence_latest_map failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1725,20 +2265,39 @@ class UnifiedRanker:
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_rec_log_latest_map failed: {e}")
             self.conn.rollback()
             return {}
 
     def _get_unified_signals_latest_map(self):
-        # WHERE signal_type = 'BUY': unified_signals carries a real direction column with
+        # Long-direction rows only. unified_signals carries a real direction column with
         # genuinely different geometry conventions per direction (signals.ts's exit logic
-        # treats BUY/SELL rows' stop/target oppositely). This fallback's own caller
+        # treats long/short rows' stop/target oppositely). This fallback's own caller
         # (_get_entry_targets) only ever attaches its result to a long-entry-style setup
         # (entry_zone_low/high, target above, stop below -- see the fallback-2 branch this
         # mirrors), so an unfiltered "latest row regardless of direction" could hand a
-        # Buy-classified row a SELL signal's inverted short-style geometry. Filtering here
-        # matches the BUY-only convention _log_recommendations() already established for the
-        # recommendation_log fallback one tier up.
+        # Buy-classified row a short signal's inverted geometry.
+        #
+        # 'Bullish' added 2026-08-16. The safety property above is about DIRECTION, not about
+        # the literal string 'BUY', and this table has no single signal_type vocabulary:
+        # technical_analysis_engine.py (the largest writer) spells a long 'Bullish'. Excluding
+        # it was not conservative, it was a coverage gap.
+        #
+        # Verified empirically before widening, not assumed -- measured live over the full
+        # table, counting rows by where the target sits relative to the stop:
+        #
+        #   signal_type   rows     long-style   short-style
+        #   BUY          33,772       32,512             0
+        #   Bullish      13,192       13,192             0     <- identical convention, no exceptions
+        #   Bearish      11,211        1,705         9,496     <- MIXED, must stay out
+        #   SELL            451            0           451
+        #
+        # 'Bullish' is exactly as safe here as 'BUY'. 'Bearish' is deliberately NOT added: 15%
+        # of its rows carry long-style geometry, so it fails the very test 'Bullish' passes.
+        # Measured coverage effect: symbols with a usable row in this tier go 2,335 -> 2,393.
+        # Not a scoring change (no score, weight, threshold or classification is touched) --
+        # see the matching entry in .claude/rules/measurement.md.
         try:
             rows = self.conn.execute("""
                 SELECT * FROM (
@@ -1746,11 +2305,12 @@ class UnifiedRanker:
                            stop_loss AS "stopLoss", reasoning AS trade_reasoning,
                            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY signal_generated_at DESC) AS rn
                     FROM unified_signals
-                    WHERE signal_type = 'BUY'
+                    WHERE signal_type IN ('BUY', 'Bullish')
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_unified_signals_latest_map failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1758,7 +2318,8 @@ class UnifiedRanker:
         try:
             rows = self.conn.execute("SELECT symbol, sector FROM nse_stocks").fetchall()
             return {r['symbol']: r['sector'] for r in rows}
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_sector_map failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1773,7 +2334,8 @@ class UnifiedRanker:
                    FROM quant_scores WHERE mf_composite_score IS NOT NULL"""
             ).fetchall()
             return {r['symbol']: dict(r) for r in rows}
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_multi_factor_map failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1800,7 +2362,7 @@ class UnifiedRanker:
                 tuple(symbols) + (cutoff,),
             ).fetchall()
         except Exception as e:
-            print(f"[UnifiedRanker] _get_recent_returns failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_recent_returns failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1831,7 +2393,7 @@ class UnifiedRanker:
                 'target_2':        float(row['target_2'])        if row['target_2']        is not None else None,
                 'target_3':        float(row['target_3'])        if row['target_3']        is not None else None,
                 'risk_reward':     float(row['risk_reward'])     if row['risk_reward']     is not None else None,
-                'timeframe':       row['timeframe'],
+                'timeframe':       _normalize_timeframe(row['timeframe']),
                 'trade_reasoning': row['trade_reasoning'],
                 'sector':          row['sector'],
             }
@@ -1862,7 +2424,7 @@ class UnifiedRanker:
                     'target_2':        float(row['target_2']) if row['target_2'] is not None else None,
                     'target_3':        float(row['target_3']) if row['target_3'] is not None else None,
                     'risk_reward':     rr,
-                    'timeframe':       row['timeframe'],
+                    'timeframe':       _normalize_timeframe(row['timeframe']),
                     'trade_reasoning': row['trade_reasoning'],
                     'sector':          row['sector'],
                 }
@@ -1924,7 +2486,7 @@ class UnifiedRanker:
         # measuring a session against its own date's row could silently be look-ahead.
         # One timestamp for the whole run -- one run is one generation event, and a per-row
         # now() would imply a precision that does not exist.
-        generated_at = datetime.now(timezone.utc)
+        generated_at = _next_generated_at()
 
         if self.conn.execute('SELECT COUNT(*) FROM screener_catalog').fetchone()[0] == 0:
             self.seed_screener_catalog()
@@ -1932,10 +2494,20 @@ class UnifiedRanker:
         regime, _conf     = self._get_regime()
         regime_for_weights = self._effective_regime_for_weights(regime)
         base_weights      = REGIME_WEIGHTS.get(regime_for_weights, REGIME_WEIGHTS['BULL'])
-        if is_engine_edge_adjustment_enabled(self.conn):
+        if is_engine_edge_adjustment_enabled(self.conn) and not is_ic_tilt_enabled(self.conn):
             verdicts = load_engine_edge_verdicts(self.conn, regime_for_weights)
             base_weights = edge_adjusted_weights(base_weights, verdicts)
-            print(f"[UnifiedRanker] engine edge adjustment applied: {verdicts}")
+            print(f"[UnifiedRanker] engine edge adjustment applied: {verdicts}", file=sys.stderr)
+        # IC-tilt supersedes the binary shrink when both flags are set -- running both would
+        # apply the same factor_edge evidence twice (shrink-then-tilt double-counts).
+        if is_ic_tilt_enabled(self.conn):
+            engine_ics = load_latest_engine_ics(self.conn, horizon=ENGINE_EDGE_HORIZON)
+            base_weights, tilt_report = ic_tilted_weights(base_weights, engine_ics)
+            if tilt_report:
+                print(f"[UnifiedRanker] IC-tilt applied: {tilt_report}", file=sys.stderr)
+            else:
+                print("[UnifiedRanker] IC-tilt enabled but no engine carries a reliable "
+                      "(>=20-date) estimate yet -- weights unchanged.", file=sys.stderr)
         event_triggers_map = self._get_event_triggers(today)
         fund_scores       = self._get_fundamental_scores()
         quality_metrics   = self._get_quality_metrics()
@@ -2005,9 +2577,34 @@ class UnifiedRanker:
         # live run of this change.
         engine_maps_all = engine_maps
         engine_maps, _flat = drop_zero_dispersion_engines(engine_maps)
+        # Put every surviving engine on ONE scale before blending. Four engines
+        # (screener/cs/confluence/technical) were already percentile-rank normalized; the four
+        # probability engines (ml/dl/breakout/smart_money) return raw probability*100 and were
+        # not. _blend is a weighted AVERAGE, so mixing the two scales broke it two ways —
+        # measured live on the 2026-08-24 snapshot (2,075 symbols):
+        #
+        #  1. A weight was not an influence share. Influence is proportional to weight x
+        #     dispersion, so at BULL weights the real shares were confluence 23.7%, screener
+        #     21.0%, technical 14.2%, dl 12.7%, smart_money 10.9%, cs 8.5%, breakout 8.0% and
+        #     ml 1.1% -- ml being the joint-HEAVIEST engine (0.172) whose live range was
+        #     69.1-74.1, and smart_money getting 10.9% off a 0.064 weight purely by having the
+        #     widest raw spread. REGIME_WEIGHTS was tuning numbers that were not what it thought.
+        #  2. Missing-engine coverage became a signal, and the wrong one. _blend renormalizes
+        #     over present engines, so dropping an engine shifted a symbol's score by that
+        #     engine's MEAN OFFSET -- and the means ran 27.6 (smart_money) to 73.2 (ml). Live:
+        #     symbols with 3 engines averaged 28.31 and were classified 91 Sell / 0 Buy, and
+        #     the bottom-100 by unified_score averaged 4.94 engines against 6.75 universe-wide.
+        #     Thin coverage was being routed to Sell mechanically.
+        #
+        # Normalizing here makes every engine mean-50 and uniformly spread, so a weight is an
+        # influence share and a missing engine costs nothing but its own information. Applied to
+        # the BLEND view only: engine_maps_all stays raw so the persisted *_score columns remain
+        # the diagnostic they are meant to be, and so breakout's raw probability still drives
+        # position sizing against its own p80/p90 thresholds.
+        engine_maps_blend = {name: _normalize_to_100(m) for name, m in engine_maps.items()}
         if _flat:
             print(f"[UnifiedRanker] engines with ZERO cross-sectional dispersion dropped from "
-                  f"the blend (weight redistributed): {', '.join(sorted(_flat))}")
+                  f"the blend (weight redistributed): {', '.join(sorted(_flat))}", file=sys.stderr)
 
         results = []
         raw_sizes = {}   # symbol -> conviction×inverse-vol (normalized into weights after the loop)
@@ -2023,7 +2620,8 @@ class UnifiedRanker:
         hv_cut = high_vol_cutoff(realized_vol.values())
         if hv_cut is None:
             print(f"[UnifiedRanker] high-vol veto INACTIVE (only {len(realized_vol)} symbols "
-                  f"with hv_20d; need 50+). Buy pool is unfiltered for volatility today.")
+                  f"with hv_20d; need 50+). Buy pool is unfiltered for volatility today.",
+                  file=sys.stderr)
         # How often each filter/multiplier actually fires. This exists because "the ranker has
         # too many layers" is an opinion until you can say which of them touch anything: a layer
         # that never fires is removable at zero risk, and one that fires constantly deserves
@@ -2043,8 +2641,11 @@ class UnifiedRanker:
             present = {e for e, m in engine_maps.items() if sym in m}
             has_data = {e for e, m in engine_maps_all.items() if sym in m}
             # renormalize weights over engines that actually have data for this symbol, so
-            # empty confluence/dl tables don't drag every score down to ~15.
-            unified = _blend(engine_scores, present, base_weights)
+            # empty confluence/dl tables don't drag every score down to ~15. Blends the
+            # NORMALIZED view (see engine_maps_blend) -- engine_scores stays raw for reporting
+            # and for breakout's sizing thresholds below.
+            blend_scores = {e: m.get(sym, 0.0) for e, m in engine_maps_blend.items()}
+            unified = _blend(blend_scores, present, base_weights)
 
             # ORDERING INVARIANT (2026-08-10): every ordinary score MULTIPLIER runs here,
             # BEFORE the single _classify call, and nothing may touch `unified` after it.
@@ -2205,14 +2806,23 @@ class UnifiedRanker:
                 'conviction_level':        _conviction(unified, classification),
                 'classification':          classification,
                 'screener_names_json':     json.dumps(screener_names_payload),
-                'screener_stock_score':    round(engine_scores['screener'], 2),
-                'ml_score':                round(engine_scores['ml'], 2),
-                'confluence_score':        round(engine_scores['confluence'], 2),
-                'technical_score':         round(engine_scores['technical'], 2),
-                'dl_score':                round(engine_scores['dl'], 2),
                 # has_data (not present): report what the engine said even if it was excluded
                 # from the blend for zero dispersion — otherwise the column silently goes NULL
                 # and the collapse becomes invisible in the very table you'd debug it from.
+                # These 5 were missing the `has_data` guard the 3 below already use, so a
+                # symbol with genuinely NO row from an engine (e.g. dl_score for a stock the DL
+                # model never scored) was written as a literal 0.0 instead of NULL --
+                # indistinguishable from a real score of 0, and the frontend's "n/a" vs "0"
+                # display fix (AF-20260818-31) had nothing to key off. Fixed 2026-08-18
+                # (AF-20260818-31, escalated from a frontend-only finding once traced here).
+                # engine_scores[e] itself is untouched, and `unified` above was already computed
+                # from `present`/`_blend()` before this dict is built -- this only changes what
+                # gets WRITTEN to the reporting columns, not any score, weight, or classification.
+                'screener_stock_score':    round(engine_scores['screener'], 2) if 'screener' in has_data else None,
+                'ml_score':                round(engine_scores['ml'], 2) if 'ml' in has_data else None,
+                'confluence_score':        round(engine_scores['confluence'], 2) if 'confluence' in has_data else None,
+                'technical_score':         round(engine_scores['technical'], 2) if 'technical' in has_data else None,
+                'dl_score':                round(engine_scores['dl'], 2) if 'dl' in has_data else None,
                 'cs_score':                round(engine_scores['cs'], 2) if 'cs' in has_data else None,
                 'breakout_score':          round(engine_scores['breakout'], 2) if 'breakout' in has_data else None,
                 'smart_money_score':       round(engine_scores['smart_money'], 2) if 'smart_money' in has_data else None,
@@ -2248,11 +2858,24 @@ class UnifiedRanker:
             print(f'[UnifiedRanker] win_probability spread {_lo:.4f}..{_hi:.4f} '
                   f'({len(set(round(v, 4) for v in _wp))} distinct) -> mean ML bet {_mlb:.3f}; '
                   f'breakout tilt caps at {BREAKOUT_SIZE_P90} so it can '
-                  f'{"BIND" if BREAKOUT_SIZE_P90 > _mlb else "NEVER BIND"} under max().')
+                  f'{"BIND" if BREAKOUT_SIZE_P90 > _mlb else "NEVER BIND"} under max().',
+                  file=sys.stderr)
         _tot = len(all_symbols)
         print('[UnifiedRanker] layer firing counts over %d candidates: %s' % (
-            _tot, ', '.join(f'{k}={v} ({v/max(1,_tot)*100:.1f}%)' for k, v in fired.items())))
+            _tot, ', '.join(f'{k}={v} ({v/max(1,_tot)*100:.1f}%)' for k, v in fired.items())),
+            file=sys.stderr)
         _report_buy_floor_selectivity(results)
+
+        # Cost-aware position sizing: compute round-trip costs and penalize
+        # high-cost symbols (illiquid small-caps, high-slippage names)
+        cost_map = self._compute_cost_map(all_symbols)
+        if cost_map:
+            raw_sizes = apply_cost_penalty(raw_sizes, cost_map)
+            penalized = sum(1 for s in raw_sizes.values() if s == 0)
+            if penalized:
+                print(f"[UnifiedRanker] cost penalty zeroed {penalized} symbols (costs >= expected edge)",
+                      file=sys.stderr)
+
         position_sizes = normalize_position_sizes(raw_sizes, sectors=sector_map)
 
         # Correlation-cluster cap (#27/#30 follow-up, 2026-08-05): the sector cap alone can miss
@@ -2267,12 +2890,26 @@ class UnifiedRanker:
                 if clusters:
                     position_sizes = apply_correlation_cap(position_sizes, clusters)
                     print(f"[UnifiedRanker] correlation cap applied to "
-                          f"{len(set(clusters.values()))} cluster(s) covering {len(clusters)} symbols.")
+                          f"{len(set(clusters.values()))} cluster(s) covering {len(clusters)} symbols.",
+                          file=sys.stderr)
         except Exception as e:
-            print(f"[UnifiedRanker] correlation-cluster cap skipped: {e}")
+            self._degraded(f"[UnifiedRanker] correlation-cluster cap skipped: {e}")
 
         for r in results:
             r['position_size_pct'] = round(position_sizes.get(r['symbol'], 0.0) * 100, 2)
+
+        # win_probability into each result row for unified_recommendations_history (the raw
+        # meta-label behind position_size_pct; see migration 1787140000000). Explicit None,
+        # NOT a missing key (fix 2026-08-25): SQLAlchemy's bind resolution treats an absent
+        # dict key as an ERROR ("A value is required for bind parameter 'win_probability'",
+        # sqlalche.me/e/20/cd3x), not as NULL -- so every symbol the ensemble had no finite
+        # probability for aborted the whole persist loop BEFORE self.conn.commit(), losing the
+        # entire run's main-table upserts with it (10 failures logged 2026-08-25 alone). A
+        # bound None lands as a genuine NULL, which is what the original comment here always
+        # claimed happened.
+        for r in results:
+            wp = win_probs.get(r['symbol'])
+            r['win_probability'] = float(wp) if (wp is not None and math.isfinite(wp)) else None
 
         cur = self.conn.cursor()
         for r in results:
@@ -2335,18 +2972,31 @@ class UnifiedRanker:
             # a row instead of replacing one. DO NOTHING, not DO UPDATE: within a single run this
             # key cannot legitimately repeat, and silently rewriting a snapshot is the exact
             # failure this table exists to prevent.
+            #
+            # GRADER CONTRACT (pin for whoever writes the ~late-Sept canonical-ranker grading):
+            #   * Key everything on generated_at (timestamptz, real time-of-day). The text
+            #     computed_at column copied here is a LOGICAL SESSION LABEL -- post-midnight IST
+            #     runs legitimately stamp the prior trading day, so it carries NO usable
+            #     time-of-day and must not drive entry-timing or pre-market filters.
+            #   * Gradeable pre-market snapshot := MIN(generated_at) per (computed_at date,
+            #     symbol), keeping only dates whose min time < 03:45 UTC (09:15 IST open).
+            #     Live check 2026-08-23: 11 dates accumulated, 8 pass this filter.
+            #   * computed_at may legitimately be a weekend/holiday day (logical session),
+            #     so join outcomes on the NEXT TRADING DAY from stock_ohlcv, never on
+            #     computed_at + N calendar days.
             cur.execute('''
                 INSERT INTO unified_recommendations_history
                 (symbol, computed_at, generated_at, regime, unified_score, conviction_level,
                  classification, screener_stock_score, ml_score, confluence_score,
-                 technical_score, cs_score, breakout_score, smart_money_score,
+                 technical_score, cs_score, dl_score, breakout_score, smart_money_score,
                  fundamental_score, engine_coverage_count, entry_zone_low, stop_loss,
-                 target_1, position_size_pct, sector)
+                 target_1, position_size_pct, sector, win_probability)
                 VALUES (:symbol, :computed_at, :generated_at, :regime, :unified_score,
                         :conviction_level, :classification, :screener_stock_score, :ml_score,
-                        :confluence_score, :technical_score, :cs_score, :breakout_score,
-                        :smart_money_score, :fundamental_score, :engine_coverage_count,
-                        :entry_zone_low, :stop_loss, :target_1, :position_size_pct, :sector)
+                        :confluence_score, :technical_score, :cs_score, :dl_score,
+                        :breakout_score, :smart_money_score, :fundamental_score,
+                        :engine_coverage_count, :entry_zone_low, :stop_loss, :target_1,
+                        :position_size_pct, :sector, :win_probability)
                 ON CONFLICT(symbol, generated_at) DO NOTHING
             ''', r)
         self.conn.commit()
@@ -2366,10 +3016,10 @@ class UnifiedRanker:
                 )
                 if cur.rowcount:
                     print(f"[UnifiedRanker] purged {cur.rowcount} stale rows for {today} "
-                          f"(scored by an earlier run, not by this one).")
+                          f"(scored by an earlier run, not by this one).", file=sys.stderr)
                 self.conn.commit()
         except Exception as e:
-            print(f"[UnifiedRanker] stale-row purge failed: {e}")
+            self._degraded(f"[UnifiedRanker] stale-row purge failed: {e}")
             self.conn.rollback()
 
         # Backfill sector from nse_stocks for any row still NULL/Unknown
@@ -2385,7 +3035,8 @@ class UnifiedRanker:
                   AND ns.sector NOT IN ('Unknown', '', 'OTHER', 'NA')
             """, (today,))
             self.conn.commit()
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] sector backfill failed: {e}")
             self.conn.rollback()
 
         breakdown = {}
@@ -2393,8 +3044,18 @@ class UnifiedRanker:
             c = r['conviction_level']
             breakdown[c] = breakdown.get(c, 0) + 1
 
+        if self._degraded_count:
+            # One unmissable line beyond the individual self._degraded() calls above --
+            # someone skimming pm2 logs for "did tonight's run work" should not have to
+            # notice N scattered stderr lines to learn the run degraded.
+            self._degraded(
+                f"[UnifiedRanker] SUMMARY: {self._degraded_count} read(s)/write(s) degraded "
+                f"to an empty/fallback result this run -- see the lines above for which."
+            )
+
         output = {'success': True, 'stocks_scored': len(results),
-                  'conviction_breakdown': breakdown, 'regime': regime}
+                  'conviction_breakdown': breakdown, 'regime': regime,
+                  'degraded_count': self._degraded_count}
         print(json.dumps(output))
         return results
 
@@ -2402,3 +3063,9 @@ class UnifiedRanker:
 if __name__ == '__main__':
     ranker = UnifiedRanker()
     ranker.run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

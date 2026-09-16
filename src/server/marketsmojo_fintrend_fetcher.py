@@ -16,9 +16,25 @@ this project's provider-ID scheme.
 symbol resolution and headers are shared with marketsmojo_technical_fetcher.py.
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MarketsmojoFintrendFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MarketsmojoFintrendFetcherBaseFetcher(BaseFetcher[MarketsmojoFintrendFetcherSchema]):
+    fetcher_name = 'MarketsmojoFintrendFetcher'
+    domain = 'marketsmojo.com'
+    schema = MarketsmojoFintrendFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 
@@ -31,6 +47,10 @@ from marketsmojo_technical_fetcher import HEADERS, load_sid_map  # noqa: E402
 BASE_URL = "https://frapi.marketsmojo.com/stocks/finTrendGraph"
 CID = 34
 RATE_LIMIT_SEC = 0.5
+# marketsmojo_technical_fetcher.py's own comment measured 8 concurrent workers against this
+# same frapi.marketsmojo.com host with zero throttling (2.02s/symbol serial -> ~0.28s/symbol
+# parallel). Same rate/host profile, same MAX_WORKERS.
+MAX_WORKERS = 8
 
 
 def fetch_fintrend_history(sid: str, session: requests.Session, exchange: int = 0) -> list[dict] | None:
@@ -50,7 +70,7 @@ def fetch_fintrend_history(sid: str, session: requests.Session, exchange: int = 
             return None
         fin_graph = payload.get("data", {}).get("fin_graph", {})
     except Exception as e:
-        print(f"  [marketsmojo fintrend] sid={sid} error: {e}")
+        print(f"  [marketsmojo fintrend] sid={sid} error: {e}", file=sys.stderr)
         return None
     finally:
         time.sleep(RATE_LIMIT_SEC)
@@ -59,9 +79,29 @@ def fetch_fintrend_history(sid: str, session: requests.Session, exchange: int = 
     return rows or None
 
 
-def write_fintrend_history(conn, symbol: str, rows: list, fetched_at: str) -> int:
+def load_known_max_dates(conn) -> dict[str, str]:
+    """symbol -> max stored date, as ISO text. Same rationale as marketsmojo_technical_fetcher.py's
+    fetcher of the same name (recurring-bugs.md's write-amplification class): the API returns the
+    whole series every call with no since-param, so this is what lets a rerun skip the dates it
+    already has instead of re-upserting the whole history every time.
+    """
+    rows = conn.execute(
+        "SELECT symbol, MAX(date) FROM marketsmojo_fintrend_history GROUP BY symbol"
+    ).fetchall()
+    return {
+        r[0]: (r[1].isoformat() if hasattr(r[1], "isoformat") else str(r[1]))
+        for r in rows if r[1] is not None
+    }
+
+
+def write_fintrend_history(conn, symbol: str, rows: list, fetched_at: str,
+                            known: dict[str, str] | None = None) -> int:
+    since = (known or {}).get(symbol)
     written = 0
     for row in rows:
+        row_date = row.get("date")
+        if since and row_date and row_date <= since:  # ISO dates, lexicographic == chronological
+            continue
         conn.execute(
             """
             INSERT INTO marketsmojo_fintrend_history
@@ -73,7 +113,7 @@ def write_fintrend_history(conn, symbol: str, rows: list, fetched_at: str) -> in
                 fin_txt        = excluded.fin_txt,
                 fetched_at     = excluded.fetched_at
             """,
-            (symbol, row["date"], row.get("score"), row.get("fin_trend_dir"),
+            (symbol, row_date, row.get("score"), row.get("fin_trend_dir"),
              row.get("fin_txt"), fetched_at),
         )
         written += 1
@@ -81,29 +121,42 @@ def write_fintrend_history(conn, symbol: str, rows: list, fetched_at: str) -> in
     return written
 
 
-def run(symbols: list[str] | None = None) -> None:
+def run(symbols: list[str] | None = None, full: bool = False) -> None:
     sid_map = load_sid_map()
     symbols = [s.upper() for s in symbols] if symbols else sorted(sid_map.keys())
     session = requests.Session()
     session.headers.update(HEADERS)
     conn = connect()
     fetched_at = date.today().isoformat()
+    known = None if full else load_known_max_dates(conn)
+    if known is not None:
+        print(f"[marketsmojo fintrend] {len(known)} symbols known -- fetching new dates only")
+
+    def _fetch_one(symbol):
+        sid = sid_map.get(symbol)
+        if not sid:
+            return symbol, None, "no stockid mapping"
+        return symbol, fetch_fintrend_history(sid, session), None
 
     total_rows = 0
     ok = 0
-    for symbol in symbols:
-        sid = sid_map.get(symbol)
-        if not sid:
-            print(f"  [marketsmojo fintrend] {symbol}: no stockid mapping, skipped")
-            continue
-        rows = fetch_fintrend_history(sid, session)
-        if not rows:
-            print(f"  [marketsmojo fintrend] {symbol}: empty response")
-            continue
-        n = write_fintrend_history(conn, symbol, rows, fetched_at)
-        total_rows += n
-        ok += 1
-        print(f"  [marketsmojo fintrend] {symbol}: {n} rows")
+    # Fetch in parallel (network only); DB writes stay single-threaded on the main thread as
+    # futures resolve -- matches mc_pricefeed_fetcher.py's batch pattern, avoids any
+    # DB-connection thread-safety hazard from writing off multiple worker threads.
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = [pool.submit(_fetch_one, symbol) for symbol in symbols]
+        for fut in as_completed(futures):
+            symbol, rows, skip_reason = fut.result()
+            if skip_reason:
+                print(f"  [marketsmojo fintrend] {symbol}: {skip_reason}, skipped")
+                continue
+            if not rows:
+                print(f"  [marketsmojo fintrend] {symbol}: empty response")
+                continue
+            n = write_fintrend_history(conn, symbol, rows, fetched_at, known)
+            total_rows += n
+            ok += 1
+            print(f"  [marketsmojo fintrend] {symbol}: {n} rows")
 
     conn.close()
     print(f"[marketsmojo fintrend] done -- {total_rows} rows, {ok}/{len(symbols)} symbols succeeded")
@@ -112,5 +165,12 @@ def run(symbols: list[str] | None = None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbols", nargs="*", help="restrict to these NSE symbols (default: full universe)")
+    parser.add_argument("--full", action="store_true", help="force a complete re-upsert (backfill/vendor restatement)")
     args = parser.parse_args()
-    run(args.symbols)
+    run(args.symbols, full=args.full)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

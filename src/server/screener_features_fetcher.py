@@ -18,12 +18,28 @@ Features written (all into technical_signals):
 Run daily after screener sync.
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class ScreenerFeaturesFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class ScreenerFeaturesFetcherBaseFetcher(BaseFetcher[ScreenerFeaturesFetcherSchema]):
+    fetcher_name = 'ScreenerFeaturesFetcher'
+    domain = 'general'
+    schema = ScreenerFeaturesFetcherSchema
+    min_interval_sec = 0.5
+
+
 import re
 import time
 import datetime
 from collections import defaultdict
 from db_compat import connect
 from as_of import logical_trading_date
+import sys
 
 # ── NLP keyword mappings for screener names ──────────────────────────────────
 
@@ -121,7 +137,7 @@ def load_screener_meta(con, as_of: str | None = None) -> dict:
                 pit[(source, sid)] = (score, tier, alpha)
         except Exception as e:
             print(f"[ScreenerFeatures] PIT scores unavailable ({e}); "
-                  f"falling back to full-sample bayesian_score")
+                  f"falling back to full-sample bayesian_score", file=sys.stderr)
 
     # sm.source is required on both joins: MC and ETnow independently hand out overlapping
     # small-integer scan_ids (see the 2026-08-04 screener_master memory) -- an unscoped join
@@ -342,7 +358,7 @@ def stamp_features(con, features_by_symbol: dict, streaks: dict):
             ))
             updated += 1
         except Exception as e:
-            print(f"  [WARN] {symbol}: {e}")
+            print(f"  [WARN] {symbol}: {e}", file=sys.stderr)
     return updated
 
 
@@ -370,7 +386,7 @@ def run():
             print(f"[ScreenerFeatures] snapshotted {n_snap} (symbol, screener) memberships "
                   f"for {as_of}")
         except Exception as e:
-            print(f"[ScreenerFeatures] membership snapshot failed: {e}")
+            print(f"[ScreenerFeatures] membership snapshot failed: {e}", file=sys.stderr)
 
         print(f"[ScreenerFeatures] Loading streaks...")
         streaks = load_streaks(con)
@@ -402,3 +418,9 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

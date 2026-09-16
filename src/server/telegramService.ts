@@ -59,6 +59,17 @@ export class TelegramNotificationService {
    * Send custom Markdown message to Telegram Chat
    */
   public async sendMarkdownMessage(text: string): Promise<boolean> {
+    // Under vitest, an unmocked send must NEVER reach the real Telegram API: a test that forgot
+    // to vi.mock this module would otherwise message the production chat. Found 2026-09-09 —
+    // addJobWithCatchupReclaims.test.ts (fixture job 'orphan' on 'fake-queue') sent 15 live
+    // "[ALERT] Orphaned job reclaimed" messages during ordinary `vitest run` passes because the
+    // dynamic import in registerJob.ts's alert path resolved to THIS real module. Belt to the
+    // per-file vi.mock braces: this guard covers every current and future test file at once.
+    if (process.env.VITEST) {
+      console.warn('[TelegramService] send suppressed under vitest (unmocked test path)');
+      return false;
+    }
+    text = balanceMarkdownEntities(text);
     const { botToken, chatId, enabled } = await this.getSettings();
     if (!enabled || !botToken || !chatId) {
       console.warn('[TelegramService] Dispatched but botToken/chatId is missing or disabled');
@@ -66,18 +77,66 @@ export class TelegramNotificationService {
     }
 
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-    try {
-      await axios.post(url, {
-        chat_id: chatId,
-        text: text,
-        parse_mode: 'Markdown',
-      });
-      console.log('[TelegramService] Telegram message sent successfully');
-      return true;
-    } catch (error: any) {
-      console.error('[TelegramService] Failed to dispatch telegram notification:', error.response?.data || error.message);
-      return false;
+    const MAX_LEN = 4000;
+    const chunks: string[] = [];
+    if (text.length <= MAX_LEN) {
+      chunks.push(text);
+    } else {
+      let current = '';
+      const flush = () => { if (current) { chunks.push(current); current = ''; } };
+      for (const line of text.split('\n')) {
+        // A single line longer than MAX_LEN can't be appended whole -- slicing off just the
+        // first MAX_LEN chars and discarding the remainder would silently drop content, the
+        // exact failure this chunking exists to prevent. Split it into its own MAX_LEN pieces.
+        if (line.length > MAX_LEN) {
+          flush();
+          for (let i = 0; i < line.length; i += MAX_LEN) {
+            chunks.push(line.slice(i, i + MAX_LEN));
+          }
+          continue;
+        }
+        if ((current + '\n' + line).length > MAX_LEN) {
+          flush();
+          current = line;
+        } else {
+          current = current ? current + '\n' + line : line;
+        }
+      }
+      flush();
     }
+
+    let allSuccess = true;
+    for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await sleep(TELEGRAM_CHUNK_PACE_MS);
+      const chunk = chunks[i];
+      try {
+        await postWithRateLimitRetry(url, {
+          chat_id: chatId,
+          text: chunk,
+          parse_mode: 'Markdown',
+        });
+        console.log('[TelegramService] Telegram message chunk sent successfully');
+      } catch (error: any) {
+        console.error('[TelegramService] Failed to dispatch telegram notification:', error.response?.data || error.message);
+        // Fallback: If Telegram rejected Markdown formatting (e.g. unescaped underscores/asterisks),
+        // retry once sending as plain text so the notification is never dropped.
+        const desc = error.response?.data?.description || '';
+        if (desc.includes("can't parse entities") || desc.includes("entity")) {
+          try {
+            await postWithRateLimitRetry(url, {
+              chat_id: chatId,
+              text: chunk,
+            });
+            console.log('[TelegramService] Telegram message chunk sent via plain-text fallback');
+            continue;
+          } catch (retryErr: any) {
+            console.error('[TelegramService] Plain-text fallback also failed:', retryErr.response?.data || retryErr.message);
+          }
+        }
+        allSuccess = false;
+      }
+    }
+    return allSuccess;
   }
 
   /**
@@ -122,3 +181,73 @@ _${sanitizeMarkdown(reasoning)}_
 }
 
 export const telegramService = new TelegramNotificationService();
+
+// Telegram rate-limits per chat (~20 msgs/min sustained, ~1/s burst guidance). A 429 response
+// names its own retry_after; before 2026-09-09 a 429 here simply failed the chunk — which is how
+// the 2026-09-08 08:15 IST morning digest died ("Too Many Requests: retry after 8") and the
+// heartbeat recorded a digest nobody received. Bounded, retry_after-honouring retries plus a
+// small inter-chunk pace keep one busy minute from silently dropping a report.
+const TELEGRAM_CHUNK_PACE_MS = 1_100;  // stay under Telegram's ~1 msg/s per-chat guidance
+const MAX_RATE_LIMIT_RETRIES = 2;      // per chunk; each retry honours the fresh retry_after
+const MAX_RETRY_AFTER_MS = 35_000;     // never sleep longer than this on a single attempt
+
+export function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Milliseconds to wait before retrying a 429, or null when the error is not a rate limit. */
+export function rateLimitWaitMs(error: any): number | null {
+  if (error?.response?.status !== 429) return null;
+  const retryAfter = Number(error?.response?.data?.parameters?.retry_after);
+  if (Number.isFinite(retryAfter) && retryAfter >= 0) {
+    return Math.min(retryAfter * 1000 + 250, MAX_RETRY_AFTER_MS);
+  }
+  return 1_000; // 429 without a retry_after — short default backoff
+}
+
+async function postWithRateLimitRetry(url: string, payload: Record<string, unknown>): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await axios.post(url, payload);
+      return;
+    } catch (error: any) {
+      const waitMs = rateLimitWaitMs(error);
+      if (waitMs === null || attempt >= MAX_RATE_LIMIT_RETRIES) throw error;
+      console.warn(`[TelegramService] HTTP 429 rate-limited — retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt + 1}/${MAX_RATE_LIMIT_RETRIES})`);
+      await sleep(waitMs);
+    }
+  }
+}
+
+/**
+ * Neutralises UNTERMINATED Telegram legacy-Markdown entities, leaving balanced ones intact.
+ *
+ * Telegram rejects a message with an unclosed entity: HTTP 400 "can't parse entities: Can't
+ * find end of the entity starting at byte offset N". Live 2026-09-05 14:08:08 the ml-daily-ops
+ * completion notice read `19 ok, 1 failed: analyst_revision` -- one underscore, read as the
+ * start of an italic run that never closes. Every job step, table and script name here is
+ * snake_case, so any notification naming one is a coin flip on whether the count is even.
+ *
+ * There is already a plain-text retry, so nothing is ever LOST -- which is exactly why this
+ * went unfixed: the cost is a permanent error-level log line plus silently dropped formatting
+ * in precisely the messages that report failures. Same shape as recurring-bugs.md's
+ * "a monitor that fires on every run", one layer down: a recurring error nobody can act on
+ * trains you to ignore the error level.
+ *
+ * Escaping only on an ODD count is deliberate: a blanket escape would destroy the intentional
+ * `*bold*` headers every digest uses, and Telegram honours backslash escapes for these
+ * characters in legacy Markdown.
+ */
+export function balanceMarkdownEntities(text: string): string {
+  let out = text;
+  for (const d of ['`', '*', '_']) {
+    const unescaped = new RegExp(`(^|[^\\\\])\\${d}`, 'g');
+    const count = (out.match(unescaped) || []).length;
+    if (count % 2 === 1) out = out.replace(unescaped, (_m, p) => `${p}\\${d}`);
+  }
+  // A link is `[label](url)`: an opening bracket with no matching `](` can never terminate.
+  const opens = (out.match(/(^|[^\\])\[/g) || []).length;
+  const closes = (out.match(/\]\(/g) || []).length;
+  if (opens !== closes) out = out.replace(/(^|[^\\])\[/g, (_m, p) => `${p}\\[`);
+  return out;
+}

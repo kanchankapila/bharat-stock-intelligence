@@ -14,6 +14,8 @@ Usage:
   python bse_event_classifier.py              # today's 30-day window
   python bse_event_classifier.py --backfill   # score every ts row historically
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 import sys, json, re, argparse
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -207,3 +209,9 @@ if __name__ == '__main__':
         run_backfill(con, lookback_days=args.lookback)
     else:
         run_daily(con)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

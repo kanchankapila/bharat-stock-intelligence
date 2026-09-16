@@ -8,6 +8,7 @@ plus a timestamped config backup, mirroring ml_ensemble.py's pattern. train_lstm
 saves each version to its own versioned .pt path, so a rejected version's weights are
 naturally preserved as a candidate with no extra file-management needed.
 """
+import datetime
 import json
 import os
 import sys
@@ -16,6 +17,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import dl_engine as dle
+
+
+def _iso_days_ago(days: float) -> str:
+    return (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat()
 
 
 class TestPromoteLstmVersion:
@@ -131,5 +136,185 @@ class TestSaturationGate:
         monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
         monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
 
-        promoted = dle._promote_lstm_version(1, {"roc_auc": 0.65, "frac_saturated": 0.5})
+        # ceiling lowered 0.5 -> 0.25 on 2026-09-13 (AF-20260913-10): v5 passed at 0.32 and served 40%
+        promoted = dle._promote_lstm_version(1, {"roc_auc": 0.65, "frac_saturated": 0.25})
         assert promoted is True, "exactly at the ceiling should not be blocked (only strictly above it)"
+
+    def test_v5_validation_saturation_is_now_refused(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
+        promoted = dle._promote_lstm_version(1, {"roc_auc": 0.65, "frac_saturated": 0.32})
+        assert promoted is False, "v5's 0.32 validation saturation cleared the old 0.5 bar"
+
+    def test_served_saturation_of_the_final_model_blocks_even_when_folds_look_fine(self, monkeypatch, tmp_path):
+        """The fold models are fresh 30-epoch copies, not the model being promoted. v5's folds
+        read 0.32 while the final model served 40% -- gate on the worse of the two."""
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
+        promoted = dle._promote_lstm_version(
+            1, {"roc_auc": 0.65, "frac_saturated": 0.10, "serve_frac_saturated": 0.40})
+        assert promoted is False
+
+    def test_nan_served_saturation_falls_back_to_the_fold_figure(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
+        promoted = dle._promote_lstm_version(
+            1, {"roc_auc": 0.65, "frac_saturated": 0.10, "serve_frac_saturated": float("nan")})
+        assert promoted is True
+
+
+class TestServeSaturation:
+    def test_measures_the_given_model_on_served_windows(self, monkeypatch):
+        seen = []
+
+        def fake_seq(sym, n_features=None):
+            seen.append((sym, n_features))
+            return (np.zeros((1, 3, 2), dtype=np.float32), "2026-09-11") if sym != "EMPTY" else (None, None)
+
+        probs = iter([0.995, 0.5, 0.004, 0.6])
+
+        def fake_predict(model, X):
+            p = next(probs)
+            return {"dir_5d": np.array([[1 - p, p]])}
+
+        monkeypatch.setattr(dle, "load_inference_sequence", fake_seq)
+        monkeypatch.setattr(dle, "_predict_batch", fake_predict)
+        frac = dle.serve_saturation(object(), ["A", "B", "EMPTY", "C", "D"], n_features=85)
+        assert frac == 0.5
+        assert all(n == 85 for _, n in seen), "must feed the model its own width"
+
+    def test_no_windows_is_nan_not_zero(self, monkeypatch):
+        monkeypatch.setattr(dle, "load_inference_sequence", lambda s, n_features=None: (None, None))
+        assert np.isnan(dle.serve_saturation(object(), ["A"], n_features=85))
+
+
+class TestStalenessOverride:
+    """ml-promotion-gate-review, 2026-08-15: this file's baseline lives in a local JSON
+    config, not model_registry, so it had no equivalent to ml_ensemble.py/cs_ranker.py's
+    safety valve against a permanently-unbeatable stale baseline."""
+
+    def _seed_stale_baseline(self, config_path, active_version=1, roc_auc=0.65,
+                              rejection_count=12, first_rejected_at=None):
+        config_path.write_text(json.dumps({
+            "lstm_version": active_version,
+            "lstm_metrics": {
+                str(active_version): {
+                    "roc_auc": roc_auc,
+                    "rejection_count": rejection_count,
+                    "first_rejected_at": first_rejected_at or _iso_days_ago(10),
+                },
+            },
+        }))
+
+    def test_first_rejection_stamps_bookkeeping(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        config_path = tmp_path / "dl_model_config.json"
+        monkeypatch.setattr(dle, "CONFIG_PATH", config_path)
+        config_path.write_text(json.dumps({"lstm_version": 1, "lstm_metrics": {"1": {"roc_auc": 0.65}}}))
+
+        promoted = dle._promote_lstm_version(2, {"roc_auc": 0.50})  # well below v1
+
+        assert promoted is False
+        cfg = json.loads(config_path.read_text())
+        assert cfg["lstm_metrics"]["1"]["rejection_count"] == 1
+        assert "first_rejected_at" in cfg["lstm_metrics"]["1"]
+
+    def test_stale_and_repeatedly_rejected_baseline_gets_overridden(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        config_path = tmp_path / "dl_model_config.json"
+        monkeypatch.setattr(dle, "CONFIG_PATH", config_path)
+        self._seed_stale_baseline(config_path)
+
+        promoted = dle._promote_lstm_version(2, {"roc_auc": 0.50})  # doesn't beat baseline
+
+        assert promoted is True, (
+            "a candidate that doesn't clear the bar must still be promoted once the baseline "
+            "is stale enough AND has been rejected against enough times"
+        )
+        cfg = json.loads(config_path.read_text())
+        assert cfg["lstm_version"] == 2
+
+    def test_stale_but_not_enough_rejections_still_rejects(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        config_path = tmp_path / "dl_model_config.json"
+        monkeypatch.setattr(dle, "CONFIG_PATH", config_path)
+        self._seed_stale_baseline(config_path, rejection_count=1)
+
+        promoted = dle._promote_lstm_version(2, {"roc_auc": 0.50})
+
+        assert promoted is False
+        cfg = json.loads(config_path.read_text())
+        assert cfg["lstm_version"] == 1
+        assert cfg["lstm_metrics"]["1"]["rejection_count"] == 2
+
+
+class TestValidationMethodChange:
+    """A baseline measured a different way is not evidence, and letting it set the bar freezes
+    the gate by construction rather than on merit.
+
+    Every roc_auc recorded in dl_model_config.json before 2026-09-10 came from
+    walk_forward_validate's row-sliced, symbol-major split: it trained on ~40 stocks and tested
+    on ~3 others over the SAME calendar dates (measured: 100% of test dates also present in the
+    training slice from fold 1 on). That read 0.6459-0.6578 where every other engine on this
+    platform ceilings at 0.52-0.55. An honestly-validated candidate cannot beat those numbers,
+    so without this carve-out the DL model could never be replaced again.
+
+    Same shape as model_promotion.promotion_decision's `label_changed` branch, and the same
+    incident ml-model-bugs.md records for ml_ensemble.py's label switch (CV 0.7664 -> 0.5203,
+    "a gate comparing 0.5203 against a 0.7664 baseline rejects every candidate of the new
+    label, permanently, by construction rather than on merit").
+    """
+
+    def _cfg(self, tmp_path, baseline_metrics):
+        path = tmp_path / "dl_model_config.json"
+        path.write_text(json.dumps({"lstm_version": 3, "lstm_metrics": {"3": baseline_metrics}}))
+        return path
+
+    def test_a_legacy_baseline_cannot_block_an_honestly_validated_candidate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", self._cfg(tmp_path, {"roc_auc": 0.58}))
+
+        promoted = dle._promote_lstm_version(
+            4, {"roc_auc": 0.52, "directional_accuracy": 0.51,
+                "validation_method": dle.VALIDATION_METHOD},
+        )
+
+        assert promoted is True, (
+            "an untagged (pre-2026-09-10, inflated) baseline must not gate a candidate measured "
+            "by the purged date split"
+        )
+
+    def test_a_baseline_from_the_same_method_still_blocks_a_worse_candidate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", self._cfg(
+            tmp_path, {"roc_auc": 0.58, "validation_method": dle.VALIDATION_METHOD}))
+
+        promoted = dle._promote_lstm_version(
+            4, {"roc_auc": 0.52, "validation_method": dle.VALIDATION_METHOD},
+        )
+
+        assert promoted is False, "like-for-like comparison must still apply"
+
+    def test_two_untagged_versions_are_compared_normally(self, monkeypatch, tmp_path):
+        """The carve-out keys on a CHANGE of method, not on the absence of a tag. Reading
+        'untagged' as 'incomparable' would promote anything at all on zero evidence -- the
+        guard ml-model-bugs.md demands alongside every override of this kind."""
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", self._cfg(tmp_path, {"roc_auc": 0.58}))
+
+        promoted = dle._promote_lstm_version(4, {"roc_auc": 0.52})
+
+        assert promoted is False
+
+    def test_the_promoted_candidate_records_how_it_was_measured(self, monkeypatch, tmp_path):
+        """Without the tag on the stored row, the NEXT retrain cannot tell whether the new
+        baseline is comparable to it -- the bookkeeping gap that made this carve-out necessary
+        in the first place."""
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", self._cfg(tmp_path, {"roc_auc": 0.58}))
+
+        dle._promote_lstm_version(
+            4, {"roc_auc": 0.52, "validation_method": dle.VALIDATION_METHOD})
+
+        cfg = json.loads(dle.CONFIG_PATH.read_text())
+        assert cfg["lstm_metrics"]["4"]["validation_method"] == dle.VALIDATION_METHOD

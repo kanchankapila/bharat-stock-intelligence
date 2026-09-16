@@ -91,7 +91,11 @@ export const technicalsRouter = router({
 
   // Renamed from getUnifiedSignals (2026-08) -- despite the old name, this has never read the
   // unified_signals table. It reads technical_signals LEFT JOIN confluence_signals and computes
-  // its own ad-hoc unified_score, unrelated to unified_signals or unified_recommendations.
+  // its own ad-hoc blend, unrelated to unified_signals or unified_recommendations. The blended
+  // column is named confluence_composite_score (not unified_score) specifically to avoid
+  // colliding with unified_recommendations.unified_score, the real canonical column
+  // (AF-20260818-39) -- the 0.4/0.4/0.2 weighting itself is unchanged, this is a naming/
+  // disclosure fix only; changing the weights needs verify-gate.mjs's backtest-evidence bar.
   getTechnicalConfluenceSignals: publicProcedure
     .input(z.object({
       date:          z.string().optional(),
@@ -122,7 +126,11 @@ export const technicalsRouter = router({
               + 0.4 * COALESCE(ts.win_probability, 0.5)
               + 0.2 * (COALESCE(cs.confluence_score, 0) / 100.0),
               3
-            ) AS unified_score
+            ) AS confluence_composite_score,
+            -- AF-20260827-09: disclosure only, not a weight/formula change (that needs
+            -- verify-gate.mjs backtest evidence) -- lets the UI show reduced confidence when
+            -- the composite above leaned on a COALESCE default instead of a real input.
+            (ts.win_probability IS NULL OR cs.confluence_score IS NULL) AS confluence_composite_partial
           FROM technical_signals ts
           LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
           -- Was date(cs.computed_at) = ? -- wrapping confluence_signals' TimescaleDB
@@ -130,14 +138,24 @@ export const technicalsRouter = router({
           -- Timescale's own chunk-exclusion pruning (same bug class already fixed for
           -- ml.router.ts's getSignalReportCard). A half-open range on the bare column is
           -- sargable and lets Timescale skip every chunk outside [d, d+1).
-          LEFT JOIN confluence_signals cs
-                 ON cs.symbol = ts.symbol AND cs.computed_at >= ?::timestamptz AND cs.computed_at < ?::timestamptz
+          -- LATERAL + LIMIT 1, not a plain LEFT JOIN (AF-20260818-46): confluence_signals
+          -- recomputes every ~30min year-round (confluence-compute, 24/7 cadence), so a plain
+          -- join on the day range matched ~20 rows/symbol/day and fanned out into 20 duplicate
+          -- output rows per symbol -- live-confirmed for BIL/RISHABH/RAYMOND, 08-17. This keeps
+          -- the same sargable half-open range, just takes the latest row inside it per symbol.
+          LEFT JOIN LATERAL (
+            SELECT confluence_score, conviction_level
+            FROM confluence_signals cs2
+            WHERE cs2.symbol = ts.symbol AND cs2.computed_at >= ?::timestamptz AND cs2.computed_at < ?::timestamptz
+            ORDER BY cs2.computed_at DESC
+            LIMIT 1
+          ) cs ON true
           WHERE ts.date = ?
             AND COALESCE(cs.confluence_score, 0) >= ?
         )
         SELECT * FROM scored
-        WHERE unified_score >= ?
-        ORDER BY unified_score DESC
+        WHERE confluence_composite_score >= ?
+        ORDER BY NULLIF(confluence_composite_score, 'NaN'::float8) DESC
         LIMIT ?
       `, [d, dExclusive, d, input.minConfluence, input.minUnified, input.limit]);
     }),
@@ -255,22 +273,28 @@ export const technicalsRouter = router({
       return result;
     }),
 
+  // Both proxy alphaquant :8002 per call — getTvScreener triggers a full TradingView scan on
+  // the Python side on EVERY request. 60s cache absorbs page-remount re-requests; a hit is
+  // never staler than the chart's own refresh cycle, and upstream errors are not cached
+  // (fetchWithCache drops failed fetches).
   getTvTa: publicProcedure
     .input(z.object({ symbol: z.string(), exchange: z.string().optional().default('NSE') }))
-    .query(async ({ input }) => {
-      try {
-        return await alphaQuant.getTvTa({ symbol: input.symbol, exchange: input.exchange });
-      } catch (err: any) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
-      }
-    }),
+    .query(({ input }) =>
+      fetchWithCache(`tv:ta:${input.exchange}:${input.symbol}`, async () => {
+        try {
+          return await alphaQuant.getTvTa({ symbol: input.symbol, exchange: input.exchange });
+        } catch (err: any) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
+        }
+      }, 60)),
 
   getTvScreener: publicProcedure
-    .query(async () => {
-      try {
-        return await alphaQuant.getTvScreener();
-      } catch (err: any) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
-      }
-    }),
+    .query(() =>
+      fetchWithCache('tv:screener', async () => {
+        try {
+          return await alphaQuant.getTvScreener();
+        } catch (err: any) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
+        }
+      }, 60)),
 });

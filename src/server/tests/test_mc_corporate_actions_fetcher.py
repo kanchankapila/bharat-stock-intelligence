@@ -10,6 +10,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import mc_corporate_actions_fetcher as mca
 
@@ -125,7 +126,7 @@ class TestParsePayload:
 
 class TestSchemaAndStorage:
     def test_ensure_schema_creates_table(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         mca.ensure_schema(con)
         tables = {r[0] for r in con.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
@@ -133,7 +134,7 @@ class TestSchemaAndStorage:
         assert "stock_corporate_action_history" in tables
 
     def test_upsert_is_idempotent(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         mca.ensure_schema(con)
         rows = mca.parse_payload("RELIANCE", RELIANCE_DATA)
         assert mca.store(con, rows) == len(rows)
@@ -144,7 +145,7 @@ class TestSchemaAndStorage:
     def test_different_symbols_with_same_ratio_never_collide(self):
         """The PK is (symbol, action_type, event_key) -- two different stocks declaring the
         same 1:1 bonus on the same date must both be stored, not overwrite each other."""
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         mca.ensure_schema(con)
         rows_a = mca.parse_bonus("AAA", RELIANCE_DATA["bonus"])
         rows_b = mca.parse_bonus("BBB", RELIANCE_DATA["bonus"])

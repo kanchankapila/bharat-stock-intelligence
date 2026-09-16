@@ -1,3 +1,4 @@
+import polars as pl
 """One-time historical FII/DII backfill from the TradeBrains portal into fii_dii_flow.
 FII endpoint field equity_net_investment -> fii_net; DII net_value -> dii_net. Published EOD
 data (point-in-time). Run once: python fii_dii_backfill.py"""
@@ -84,3 +85,9 @@ def run() -> int:
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

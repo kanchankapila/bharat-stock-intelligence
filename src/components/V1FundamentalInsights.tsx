@@ -85,9 +85,9 @@ export const V1FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) 
             <div key={ratio.label} className="p-4 glass border border-slate-800/50 rounded-2xl">
                <div className="flex justify-between items-start mb-2">
                   <ratio.icon className="w-4 h-4 text-blue-400" />
-                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest border border-slate-800/50 px-1.5 py-0.5 rounded">Ratios</span>
+                  <span className="text-[8px] font-black text-slate-400 font-display uppercase tracking-widest border border-slate-800/50 px-1.5 py-0.5 rounded">Ratios</span>
                </div>
-               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{ratio.label}</p>
+               <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">{ratio.label}</p>
                <p className="text-xl font-black text-white italic tracking-tighter mt-1">{getRatio(ratio.name, (ratio as any).fallbacks)}</p>
             </div>
           ))}
@@ -104,7 +104,7 @@ export const V1FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) 
                   { type: 'Public', val: publicHolding }
                 ].map(item => (
                   <div key={item.type} className="space-y-1.5">
-                    <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
+                    <div className="flex justify-between text-[10px] font-black font-display uppercase tracking-widest">
                        <span className="text-slate-400">{item.type}</span>
                        <span className="text-white">{item.val}%</span>
                     </div>
@@ -131,7 +131,7 @@ export const V1FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) 
                 {corpActions.length > 0 ? corpActions.map((action: any, i: number) => (
                   <div key={i} className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/30 hover:border-slate-800/30 transition-colors">
                      <div>
-                        <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest">{action.purpose || 'Action'}</p>
+                        <p className="text-[10px] font-black text-blue-500 font-display uppercase tracking-widest">{action.purpose || 'Action'}</p>
                         <p className="text-xs font-bold text-slate-200 mt-0.5">{action.details || 'N/A'}</p>
                      </div>
                      <span className="text-[9px] font-black text-slate-400 glass px-2 py-1 rounded">
@@ -139,7 +139,7 @@ export const V1FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) 
                      </span>
                   </div>
                 )) : (
-                  <p className="text-center py-10 text-slate-400 italic text-xs font-bold uppercase tracking-widest">No recent actions recorded</p>
+                  <p className="text-center py-10 text-slate-400 italic text-xs font-bold font-display uppercase tracking-widest">No recent actions recorded</p>
                 )}
              </div>
           </Card>

@@ -28,14 +28,33 @@ Run:
   python block_deal_fetcher.py --date 2026-06-24
 """
 
+import polars as pl
 import argparse
 import time
 from datetime import date, datetime, timedelta
 
 import requests
 
+from as_of import logical_trading_date, trading_days_back
 from db_compat import connect
 from fetch_utils import retry_get
+import sys
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher
+
+class BlockDealRowSchema(BaseModel):
+    symbol: str
+    date: str
+    price: float | None = None
+    qty: int | None = None
+    value_cr: float | None = None
+
+class BlockDealFetcher(BaseFetcher[BlockDealRowSchema]):
+    fetcher_name = "BlockDealFetcher"
+    domain = "nseindia.com"
+    schema = BlockDealRowSchema
+    min_interval_sec = 0.5
+
 
 LIVE_URL  = "https://www.nseindia.com/api/block-deal"
 HIST_URL  = "https://www.nseindia.com/api/historical/block-deals"
@@ -88,8 +107,8 @@ def ensure_schema(con) -> None:
     """)
     con.commit()  # commit tables/indexes before ALTER
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN block_deal_net_qty   BIGINT",
-        "ALTER TABLE technical_signals ADD COLUMN block_deal_value_cr  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS block_deal_net_qty   BIGINT",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS block_deal_value_cr  REAL",
     ]:
         try:
             cur.execute(ddl)
@@ -114,7 +133,7 @@ def fetch_live(session: requests.Session) -> list[dict]:
         data = r.json()
         return data.get("data", [])
     except Exception as e:
-        print(f"[Block] Live fetch error after retries: {e}")
+        print(f"[Block] Live fetch error after retries: {e}", file=sys.stderr)
         return []
 
 
@@ -126,9 +145,9 @@ def fetch_historical(trade_date: date, session: requests.Session) -> list[dict]:
     except Exception as e:
         status = getattr(getattr(e, 'response', None), 'status_code', None)
         if status in (401, 403):
-            print(f"[Block] {trade_date}: auth required for historical API")
+            print(f"[Block] {trade_date}: auth required for historical API", file=sys.stderr)
         else:
-            print(f"[Block] {trade_date}: historical fetch error after retries: {e}")
+            print(f"[Block] {trade_date}: historical fetch error after retries: {e}", file=sys.stderr)
         return []
     try:
         data = r.json()
@@ -137,7 +156,7 @@ def fetch_historical(trade_date: date, session: requests.Session) -> list[dict]:
             return data.get("data", [])
         return data if isinstance(data, list) else []
     except Exception as e:
-        print(f"[Block] {trade_date}: historical parse error: {e}")
+        print(f"[Block] {trade_date}: historical parse error: {e}", file=sys.stderr)
         return []
 
 
@@ -256,15 +275,45 @@ def backfill_technical_signals(today: str, con) -> int:
     return updated
 
 
-def _calendar_days_back(n: int) -> list[date]:
-    """Return last n calendar days (weekdays only), most recent first."""
-    days = []
-    d = date.today() - timedelta(days=1)
-    while len(days) < n:
-        if d.weekday() < 5:
-            days.append(d)
-        d -= timedelta(days=1)
-    return days
+def _calendar_days_back(n: int, conn=None) -> list[date]:
+    """Return last n REAL trading sessions INCLUDING today, most recent first.
+
+    Was anchored at today - 1 unconditionally -- with the live-endpoint branch below matching
+    "trade_date >= today - 1", that made the --days 1 default (a single date: yesterday) fetch
+    from the LIVE endpoint (which can only ever return TODAY's session) and stamp the result
+    with yesterday's date. Live-confirmed 2026-08-14 (fetcher-accuracy-review): byte-identical
+    deals for BIOCON/METROPOLIS/SUDEEPPHRM/THYROCARE/URBANCO filed under two adjacent dates --
+    one real capture mislabeled a day early, the other correct if NSE's feed still showed it the
+    next day. Anchoring at today (not today-1) plus the tightened live-endpoint condition below
+    fixes both the --days 1 case and the corresponding slot in any larger --days N backfill.
+
+    "Today" is `as_of.logical_trading_date()`, not the bare calendar date: this fetcher is one
+    of ~30 sequential steps inside ml-daily-ops, which regularly finishes after midnight IST
+    (see logical_trading_date's own docstring). A bare date.today() run at e.g. 00:30 IST would
+    anchor on the NEXT calendar day, route to fetch_live() (which only ever reflects that day's
+    still-empty pre-market session) and mislabel the day that just closed -- the same failure
+    shape this function was written to fix, from the opposite direction.
+
+    The rest of the window used to be a hand-rolled "step back a day, keep it if weekday() < 5"
+    walk -- holiday-blind, so --days 90 silently covered fewer than 90 real sessions whenever a
+    holiday fell in range (found 2026-08-19, /temporal-correctness-audit). as_of.trading_days_back()
+    is the same fix already applied to delivery_volume_fetcher.py/fno_rollover_fetcher.py for
+    this exact shape; it reads the real session list from stock_ohlcv and excludes today itself,
+    so today is prepended separately here.
+    """
+    if n <= 0:
+        return []
+    today = date.fromisoformat(logical_trading_date())
+    # logical_trading_date() should always resolve to a real trading session; this defensive
+    # walk-to-weekday is only for that assumption ever being wrong (mirrors the pre-fix code's
+    # own weekday() < 5 guard). The part that actually needed the real trading calendar was the
+    # N-1 days behind it, which trading_days_back() now supplies.
+    while today.weekday() >= 5:
+        today -= timedelta(days=1)
+    days = [today]
+    if n > 1:
+        days.extend(trading_days_back(n - 1, conn))
+    return days[:n]
 
 
 def main() -> None:
@@ -285,16 +334,18 @@ def main() -> None:
     if args.date:
         dates = [datetime.strptime(args.date, "%Y-%m-%d").date()]
     else:
-        dates = _calendar_days_back(args.days)
+        dates = _calendar_days_back(args.days, con)
 
-    today = date.today()
+    today = date.fromisoformat(logical_trading_date())
     total = 0
 
     for i, trade_date in enumerate(dates):
         print(f"[Block] Fetching {trade_date} ({i+1}/{len(dates)})…")
 
-        if trade_date >= today - timedelta(days=1):
-            # Use live endpoint for today/yesterday
+        if trade_date >= today:
+            # Live endpoint only ever reflects TODAY's session -- using it for any earlier date
+            # (yesterday included) mislabels today's deals with that earlier date. Everything
+            # before today must come from the historical endpoint instead.
             raw_list = fetch_live(session)
         else:
             raw_list = fetch_historical(trade_date, session)
@@ -317,3 +368,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

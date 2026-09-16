@@ -29,6 +29,8 @@ For each mover, pull the system's **pre-move** call — the snapshot dated stric
 
 **`unified_recommendations.computed_at` is a bare TEXT date.** A same-day manual re-run silently overwrites the 07:30 cron row, so grading a session against its own date's row can be look-ahead. Filter `generated_at < computed_at 03:45 UTC` (NSE opens 09:15 IST). Rows predating that column are NULL and cannot be trusted as pre-market.
 
+**`unified_signals` where `signal_source='technical'` needs a DIFFERENT entry convention than every other source — found 2026-08-22, do not re-derive.** `technical_analysis_engine.py` stamps `signal_date` to the session it just analyzed (`logical_write_floor()`, by design, not a bug), but the job runs post-close the same day (`created_at` ~18:00-19:30 IST). So a `technical` row's `signal_date` is the day it *describes*, not a forecast — it's only tradeable at the *next* session's open. Grading it at its own `signal_date`'s open (the convention every other source uses) is look-ahead-safe but throws almost the entire source away: it had zero rows with `created_at` before that day's 03:45 UTC open on 5 of 6 trading days checked. For `signal_source='technical'` specifically, enter at the NEXT trading session's open (no `created_at` provenance filter needed — same-evening writes are trivially before the next day's open); every other source (`AI`, `screener`, `technical_scan`) keeps the same-`signal_date`-open convention above. Full derivation: `.claude/rules/measurement.md`'s "Weekly re-measurement, 2026-08-22" section.
+
 ## 3. Classify every miss
 
 Three buckets, and the distinction matters more than the hit rate:
@@ -45,10 +47,14 @@ For anything in the first bucket, trace *where* the symbol dropped out by walkin
 
 Report per-date, then average. **Never pooled** — pooling has flipped or inflated a conclusion three separate times in this repo.
 
-State plainly:
-- hit rate and wrong-direction count, with the date count behind them
+State plainly, as an explicit percentage breakdown across all three buckets from step 3 (not just a
+single "hit rate"), per date and then averaged:
+- **% matched** — correctly flagged, direction agreed with what the market did
+- **% opposite** — wrong-direction (rated Sell and rallied, or Buy and fell)
+- **% not flagged** — absent from every list
+- the raw counts and date count behind each percentage — a percentage with n<20 is decoration, say so
 - whether the sample is large enough to mean anything (over ~39 ranker dates, mostly it isn't)
-- named examples with their traced cause
+- named examples with their traced cause, especially every "opposite" one — that bucket is the one plain recall hides
 
 ## 5. The thing to expect
 

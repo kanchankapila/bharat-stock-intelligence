@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import pg from 'pg';
 import { createPool, closeRun, openRun } from '@greenfield/db';
+import { computeRankerArtifactHash } from './artifact-hash.js';
 import {
   checkFeatureSnapshotCoverage, checkFeatureSnapshotFreshness, checkFeatureSuspectExclusion, checkModelArtifactHash,
 } from './dq-checks.js';
@@ -121,17 +122,42 @@ test('feature-suspect-exclusion: fails when facts_cutoff is after the session cl
   expect(violating.status).toBe('fail');
 }, 30_000);
 
-test('model-artifact-hash: reports "no active model" honestly, then reports one once it exists -- never fabricates a pass', async () => {
+test('model-artifact-hash: reports "no active model" honestly, then verifies a real one by recomputation -- never fabricates a pass', async () => {
   const none = await checkModelArtifactHash(pool);
   // Could be 'info: no active model' OR reference a REAL Stage-5 model if
   // one has since been promoted -- either way must never crash or fabricate.
   expect(none.status).toBe('info');
 
+  const variant = 'weighted';
+  const version = 'v1';
+  const factors = [{ factor: 'zztest_factor', rebalanceDays: 5, netTStat: 3.2, weight: 3.2, direction: 1 }];
+  const correctHash = computeRankerArtifactHash({ variant, version, factors });
+  const metrics = { variant, factors, unvalidated: false, rationale: 'zztest fixture' };
+
+  await pool.query(
+    `INSERT INTO model_version (model, version, state, artifact_uri, artifact_hash, trained_at, train_window, embargo_days, metrics, code_commit)
+     VALUES ('zztest-model', $1, 'active', 'local://test', $2, now(), daterange('2021-01-01','2021-01-02'), 0, $3::jsonb, 'test')`,
+    [version, correctHash, JSON.stringify(metrics)],
+  );
+  const matching = await checkModelArtifactHash(pool);
+  expect(matching.status).toBe('info');
+  expect(matching.detail).toContain('zztest-model');
+  expect(matching.detail).toContain('matches a recomputation');
+
+  // Negative control: corrupt the stored hash without touching the spec it
+  // was computed from -- the check must now fail, not keep reporting 'info'.
+  await pool.query(`UPDATE model_version SET artifact_hash = 'deadbeef' WHERE model = 'zztest-model'`);
+  const tampered = await checkModelArtifactHash(pool);
+  expect(tampered.status).toBe('fail');
+  expect(tampered.detail).toContain('does NOT match');
+}, 30_000);
+
+test('model-artifact-hash: fails (never passes silently) when the active row has no reconstructable spec', async () => {
   await pool.query(
     `INSERT INTO model_version (model, version, state, artifact_uri, artifact_hash, trained_at, train_window, embargo_days, code_commit)
      VALUES ('zztest-model', 'v1', 'active', 'local://test', 'deadbeef', now(), daterange('2021-01-01','2021-01-02'), 0, 'test')`,
   );
-  const active = await checkModelArtifactHash(pool);
-  expect(active.status).toBe('info');
-  expect(active.detail).toContain('zztest-model');
+  const outcome = await checkModelArtifactHash(pool);
+  expect(outcome.status).toBe('fail');
+  expect(outcome.detail).toContain('no reconstructable spec');
 }, 30_000);

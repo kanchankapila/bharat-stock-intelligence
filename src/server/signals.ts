@@ -185,6 +185,57 @@ export async function createSignal(signal: Omit<Signal, "id" | "createdAt" | "up
   ]);
 }
 
+/**
+ * COMPLETED / FAILED / null (still open) for one signal at `currentPrice`.
+ *
+ * Direction is derived from the signal's OWN GEOMETRY (is the target above or below the stop),
+ * not from a list of signal_type spellings. That matters because unified_signals has no single
+ * signal_type vocabulary and never has: technical_analysis_engine.py writes
+ * 'Bullish'/'Bearish'/'Neutral', screener_signal_generator.py writes 'SCREENER_ENTRY' and
+ * 'SECTOR_SCREENER_CONFLUENCE', everything else writes 'BUY'/'SELL'.
+ *
+ * The previous `if BUY ... else if SELL` matched none of those, so they fell through with
+ * status unchanged and could never resolve. Measured live 2026-08-16:
+ *
+ *   technical           24,442 rows   100% ACTIVE   0 COMPLETED   0 FAILED
+ *   SCREENER_SURFACING   1,243 rows   100% ACTIVE   0 COMPLETED   0 FAILED
+ *
+ * against AI (363/192), technical_scan (108/52) and screener (11/19), which all resolve
+ * normally. 25,685 signals were parked ACTIVE forever.
+ *
+ * Deriving from geometry rather than extending the string list is deliberate: a hand-enumerated
+ * allowlist "only guards what someone remembered to list" (.claude/rules/recurring-bugs.md), and
+ * this column has now grown a new spelling twice. Geometry reproduces the old behaviour exactly
+ * for BUY (target above stop -> long) and SELL (target below stop -> short), and additionally
+ * covers every vocabulary without needing to know it.
+ */
+export function resolveSignalOutcome(
+  currentPrice: number,
+  targetPrice: number | null | undefined,
+  stopLoss: number | null | undefined,
+): 'COMPLETED' | 'FAILED' | null {
+  if (!Number.isFinite(currentPrice)) return null;
+  // Null-check BEFORE Number(): Number(null) is 0, not NaN, so a missing stop_loss would pass
+  // the isFinite guard as a real level at zero and make every long look like a short. Same
+  // family as recurring-bugs.md's `float(x or 0)` coercion trap.
+  if (targetPrice == null || stopLoss == null) return null;
+  const target = Number(targetPrice);
+  const stop = Number(stopLoss);
+  // Unresolvable rather than guessed: SECTOR_SCREENER_CONFLUENCE rows carry neither level, and
+  // target == stop gives no direction to read.
+  if (!Number.isFinite(target) || !Number.isFinite(stop) || target === stop) return null;
+
+  const isLong = target > stop;
+  if (isLong) {
+    if (currentPrice >= target) return 'COMPLETED';
+    if (currentPrice <= stop) return 'FAILED';
+  } else {
+    if (currentPrice <= target) return 'COMPLETED';
+    if (currentPrice >= stop) return 'FAILED';
+  }
+  return null;
+}
+
 export async function updateSignalAccuracy(symbol: string, currentPrice: number) {
   const rows = await dbAll<any>('SELECT id, signal_type, target_price, stop_loss, status FROM unified_signals WHERE symbol = ? AND status = ?', [symbol, 'ACTIVE']);
 
@@ -192,19 +243,8 @@ export async function updateSignalAccuracy(symbol: string, currentPrice: number)
     for (const row of rows) {
       let newStatus = row.status;
 
-      if (row.signal_type === "BUY") {
-        if (currentPrice >= row.target_price) {
-          newStatus = "COMPLETED";
-        } else if (currentPrice <= row.stop_loss) {
-          newStatus = "FAILED";
-        }
-      } else if (row.signal_type === "SELL") {
-        if (currentPrice <= row.target_price) {
-          newStatus = "COMPLETED";
-        } else if (currentPrice >= row.stop_loss) {
-          newStatus = "FAILED";
-        }
-      }
+      const resolved = resolveSignalOutcome(currentPrice, row.target_price, row.stop_loss);
+      if (resolved) newStatus = resolved;
 
       if (newStatus !== "ACTIVE") {
         await tx.run(`UPDATE unified_signals SET status = ? WHERE id = ?`, [newStatus, row.id]);

@@ -18,11 +18,27 @@ symbol resolution and headers are shared with marketsmojo_technical_fetcher.py (
 stocklist.json-backed stockid map, same 403-without-headers endpoint family).
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MarketsmojoFinancialsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MarketsmojoFinancialsFetcherBaseFetcher(BaseFetcher[MarketsmojoFinancialsFetcherSchema]):
+    fetcher_name = 'MarketsmojoFinancialsFetcher'
+    domain = 'marketsmojo.com'
+    schema = MarketsmojoFinancialsFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import json
 import sys
 import time
-from datetime import date
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -34,6 +50,19 @@ from marketsmojo_technical_fetcher import HEADERS, load_sid_map  # noqa: E402
 BASE_URL = "https://frapi.marketsmojo.com/apiv1/financials/get-financials"
 RATE_LIMIT_SEC = 0.5
 MAX_PAGES = 8  # confirmed real data through page 5 for HDFCBANK; page 6 already empty
+# Same host/rate profile as marketsmojo_technical_fetcher.py, which measured 8 concurrent
+# workers with zero throttling. Each worker here walks its own up-to-8-page sequence with its
+# own intra-symbol RATE_LIMIT_SEC pacing -- cross-symbol parallelism is orthogonal to that.
+MAX_WORKERS = 8
+
+# AF-20260816-20 / FIX 2026-09-09: quarterly-cadence data (the vendor only restates these on
+# results/filing days) fetched by a WEEKLY job. The data does NOT change within a quarter, so
+# re-fetching weekly was both pointless AND the cause of the ml-weekly-retrain 40-min timeout on
+# an uncached run (2000 symbols x ~11s/symbol = ~47 min). Staleness now matches the data cadence:
+# a symbol checked within the quarter is skipped, so after the initial full crawl the weekly job
+# becomes a near-no-op (sub-second) and only genuinely-new symbols get fetched. Live measurement:
+# 5 fresh symbols = 56.5s on 2026-09-09. See docs/audit-findings.md AF-20260909-15.
+STALENESS_DAYS = 90
 
 
 def _flatten_statement(stmt_key: str, rows: list, period_keys: list) -> list[tuple[str, str, str]]:
@@ -84,7 +113,7 @@ def fetch_financials_history(
                 break
             snapshot = payload.get("data", {}).get("snapshot", {})
         except Exception as e:
-            print(f"  [marketsmojo financials] sid={sid} page={page} error: {e}")
+            print(f"  [marketsmojo financials] sid={sid} page={page} error: {e}", file=sys.stderr)
             break
         finally:
             time.sleep(RATE_LIMIT_SEC)
@@ -110,11 +139,57 @@ def fetch_financials_history(
     return out or None
 
 
-def write_financials_history(conn, symbol: str, rows: list, fetched_at: str) -> int:
+def load_recently_checked(conn, staleness_days: int = STALENESS_DAYS) -> set[str]:
+    """Symbols checked within the staleness window -- see marketsmojo_financials_checked's own
+    migration comment for why this can't be derived from marketsmojo_financials_history."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=staleness_days)).isoformat()
+    rows = conn.execute(
+        "SELECT symbol FROM marketsmojo_financials_checked WHERE checked_at >= ?", (cutoff,)
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def mark_checked(conn, symbol: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO marketsmojo_financials_checked (symbol, checked_at) VALUES (?, ?)
+        ON CONFLICT(symbol) DO UPDATE SET checked_at = excluded.checked_at
+        """,
+        (symbol, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+
+
+def load_known_values(conn, symbol: str) -> dict[tuple[str, str, str], float | None]:
+    """(statement, period_label, line_item) -> stored value, for one symbol.
+
+    This table has no date column to bound a "since" query by (PK is symbol/statement/
+    period_label/line_item, not date) -- old reported quarters essentially never change, so the
+    write-amplification fix here is "skip the write if the value hasn't changed" rather than
+    technical_fetcher.py's "skip dates already held". Scoped per-symbol (not the whole table) to
+    keep this cheap. Same write-amplification class as recurring-bugs.md's marketsmojo entry.
+    """
+    rows = conn.execute(
+        "SELECT statement, period_label, line_item, value FROM marketsmojo_financials_history "
+        "WHERE symbol = ?", (symbol,)
+    ).fetchall()
+    return {(r[0], r[1], r[2]): r[3] for r in rows}
+
+
+def write_financials_history(conn, symbol: str, rows: list, fetched_at: str,
+                              known: dict[tuple[str, str, str], float | None] | None = None) -> int:
     """rows: [(statement, period_label, line_item, raw_value), ...]. Upserts one row per
-    (symbol, statement, period_label, line_item). Returns rows written."""
+    (symbol, statement, period_label, line_item). Returns rows actually written (changed/new)."""
     written = 0
     for statement, period_label, line_item, raw_value in rows:
+        value = _parse_numeric(raw_value)
+        key = (statement, period_label, line_item)
+        # known.get(key) == value would also match a key NEVER SEEN before (dict.get's default
+        # is None, same as an unparseable raw_value) -- silently skipping the first write for
+        # any new cell whose value happens to be unparseable. `key in known` first makes "new"
+        # and "already stored as NULL" distinguishable.
+        if known is not None and key in known and known[key] == value:
+            continue
         conn.execute(
             """
             INSERT INTO marketsmojo_financials_history
@@ -124,43 +199,82 @@ def write_financials_history(conn, symbol: str, rows: list, fetched_at: str) -> 
                 value      = excluded.value,
                 fetched_at = excluded.fetched_at
             """,
-            (symbol, statement, period_label, line_item, _parse_numeric(raw_value), fetched_at),
+            (symbol, statement, period_label, line_item, value, fetched_at),
         )
         written += 1
     conn.commit()
     return written
 
 
-def run(symbols: list[str] | None = None) -> None:
+def run(symbols: list[str] | None = None, full: bool = False) -> None:
     sid_map = load_sid_map()
+    explicit_symbols = bool(symbols)
     symbols = [s.upper() for s in symbols] if symbols else sorted(sid_map.keys())
     session = requests.Session()
     session.headers.update(HEADERS)
     conn = connect()
     fetched_at = date.today().isoformat()
 
-    total_rows = 0
-    ok = 0
+    # AF-20260816-20: skip a symbol checked within STALENESS_DAYS without paying its HTTP
+    # round-trip -- only for the default full-universe sweep. --full (explicit re-upsert) and an
+    # explicit --symbols list both mean "I want these checked now regardless of when we last
+    # asked", so neither is filtered.
+    recently_checked = (
+        set() if full or explicit_symbols else load_recently_checked(conn)
+    )
+    skipped_fresh = 0
+
+    pending = []
     for symbol in symbols:
+        if symbol in recently_checked:
+            skipped_fresh += 1
+            continue
         sid = sid_map.get(symbol)
         if not sid:
             print(f"  [marketsmojo financials] {symbol}: no stockid mapping, skipped")
             continue
-        rows = fetch_financials_history(sid, session)
-        if not rows:
-            print(f"  [marketsmojo financials] {symbol}: empty response")
-            continue
-        n = write_financials_history(conn, symbol, rows, fetched_at)
-        total_rows += n
-        ok += 1
-        print(f"  [marketsmojo financials] {symbol}: {n} cells")
+        pending.append((symbol, sid))
+
+    def _fetch_one(item):
+        symbol, sid = item
+        return symbol, fetch_financials_history(sid, session)
+
+    total_rows = 0
+    ok = 0
+    # Fetch in parallel (network only, each worker walking its own up-to-MAX_PAGES sequence);
+    # DB reads/writes (mark_checked, load_known_values, write_financials_history) stay
+    # single-threaded on the main thread as futures resolve -- same pattern as
+    # mc_pricefeed_fetcher.py / marketsmojo_fintrend_fetcher.py.
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = [pool.submit(_fetch_one, item) for item in pending]
+        for fut in as_completed(futures):
+            symbol, rows = fut.result()
+            mark_checked(conn, symbol)
+            if not rows:
+                print(f"  [marketsmojo financials] {symbol}: empty response")
+                continue
+            known = None if full else load_known_values(conn, symbol)
+            n = write_financials_history(conn, symbol, rows, fetched_at, known)
+            total_rows += n
+            ok += 1
+            print(f"  [marketsmojo financials] {symbol}: {n} cells")
 
     conn.close()
-    print(f"[marketsmojo financials] done -- {total_rows} cells, {ok}/{len(symbols)} symbols succeeded")
+    print(
+        f"[marketsmojo financials] done -- {total_rows} cells, {ok}/{len(symbols)} symbols "
+        f"succeeded, {skipped_fresh} skipped (checked within {STALENESS_DAYS}d)"
+    )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbols", nargs="*", help="restrict to these NSE symbols (default: full universe)")
+    parser.add_argument("--full", action="store_true", help="force a complete re-upsert (backfill/vendor restatement)")
     args = parser.parse_args()
-    run(args.symbols)
+    run(args.symbols, full=args.full)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -17,6 +17,8 @@ Run:
     python live_screener_ml_ranker.py --train   # fit + honest held-out AUC, promote or reject
     python live_screener_ml_ranker.py --score   # write win_probability for the latest collection cycle
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 import argparse
 import datetime
 import json
@@ -27,7 +29,8 @@ import numpy as np
 import pandas as pd
 
 from db_compat import execute, executemany, query_one, read_df
-from model_promotion import clears_promotion_bar
+from model_promotion import clears_promotion_bar, file_staleness_override_applies
+import sys
 
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_models", "live_screener_intraday_clf.pkl")
 CANDIDATE_PATH = MODEL_PATH.replace(".pkl", "_candidate.pkl")
@@ -71,7 +74,7 @@ def _live_auc() -> tuple:
             WHERE o.return_intraday IS NOT NULL AND s.win_probability IS NOT NULL
         """)
     except Exception as e:
-        print(f"[LiveScreenerMLRanker] live-AUC lookup failed: {str(e)[:100]}")
+        print(f"[LiveScreenerMLRanker] live-AUC lookup failed: {str(e)[:100]}", file=sys.stderr)
         return None, 0
     if df is None or df.empty or len(df) < LIVE_AUC_MIN_ROWS:
         return None, 0 if df is None or df.empty else len(df)
@@ -207,7 +210,7 @@ def _load_reversal_features(run_asof: pd.DataFrame) -> pd.DataFrame:
         try:
             bars = _load_intraday_bars_for_date(session_date)
         except Exception as e:
-            print(f"[LiveScreenerMLRanker] reversal features skipped for {session_date}: {str(e)[:100]}")
+            print(f"[LiveScreenerMLRanker] reversal features skipped for {session_date}: {str(e)[:100]}", file=sys.stderr)
             continue
         out.append(_asof_reversal_for_date(bars, day_asof[['run_id', 'symbol', 'ts']]))
     return pd.concat(out, ignore_index=True) if out else _empty_reversal_frame()
@@ -291,9 +294,32 @@ def _load_active_metrics() -> dict | None:
         # rejected candidate's numbers. See _persist_live_edge_status.
         return {k: art.get(k) for k in
                 ("test_auc", "trained_at", "cv_auc", "test_acc", "base_rate",
-                 "n_samples", "feature_names")}
+                 "n_samples", "feature_names", "rejection_count", "first_rejected_at")}
     except Exception:
         return None
+
+
+def _bump_rejection_bookkeeping(model_path: str) -> int:
+    """Increments rejection_count / stamps first_rejected_at directly onto the active pickle
+    (ml-promotion-gate-review, 2026-08-15: this file's baseline lives in a pickle, not
+    model_registry, so it had no equivalent to ml_ensemble.py/cs_ranker.py's safety valve
+    against a permanently-unbeatable stale baseline). Loads and rewrites the FULL artifact --
+    not the trimmed _load_active_metrics() view -- so the live model/feature_names/etc. are
+    preserved untouched. Returns the new rejection count (0 if there's no active model yet)."""
+    if not os.path.exists(model_path):
+        return 0
+    try:
+        with open(model_path, "rb") as f:
+            art = pickle.load(f)
+    except Exception:
+        return 0
+    rejection_count = int(art.get("rejection_count") or 0) + 1
+    art["rejection_count"] = rejection_count
+    if not art.get("first_rejected_at"):
+        art["first_rejected_at"] = datetime.datetime.now().isoformat()
+    with open(model_path, "wb") as f:
+        pickle.dump(art, f)
+    return rejection_count
 
 
 def _persist_live_edge_status(active: dict, live_auc: float | None, live_n: int,
@@ -425,6 +451,12 @@ def train():
     baseline_test_auc = baseline.get("test_auc") if baseline else None
     promote = clears_promotion_bar(test_auc, baseline_test_auc, margin)
 
+    # STALENESS OVERRIDE (ml-promotion-gate-review, 2026-08-15): see
+    # model_promotion.file_staleness_override_applies()'s docstring for the full contract.
+    staleness_override, age_days, rejection_count = (False, 0.0, 0)
+    if not promote and baseline is not None:
+        staleness_override, age_days, rejection_count = file_staleness_override_applies(baseline)
+
     # Refit on ALL data (train + test windows) for the artifact that actually goes live --
     # matches the OOF/held-out probe above, same as breakout_classifier.py's convention.
     final_model = _make_model(spw)
@@ -444,7 +476,7 @@ def train():
     }
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 
-    if promote:
+    if promote or staleness_override:
         with open(MODEL_PATH, "wb") as f:
             pickle.dump(artifact, f)
         # Surfaced so consumers (the Live Screener page's "Intraday Edge" tab) can tell a
@@ -455,8 +487,12 @@ def train():
              "feature_names": feature_cols},
             live_auc, live_n, live_edge_proven,
         )
-        print(f"[LiveScreenerMLRanker] Model ACTIVATED (test_auc={test_auc:.4f}"
-              + (f", beat baseline {baseline['test_auc']:.4f})" if baseline and baseline.get('test_auc') is not None else ", no prior model)"))
+        if staleness_override and not promote:
+            print(f"[LiveScreenerMLRanker] STALENESS OVERRIDE — baseline unbeaten {age_days:.1f}d "
+                  f"across {rejection_count} rejections -- promoting anyway (test_auc={test_auc:.4f}).")
+        else:
+            print(f"[LiveScreenerMLRanker] Model ACTIVATED (test_auc={test_auc:.4f}"
+                  + (f", beat baseline {baseline['test_auc']:.4f})" if baseline and baseline.get('test_auc') is not None else ", no prior model)"))
         if not live_edge_proven and live_auc is not None:
             print("[LiveScreenerMLRanker] WARNING: activated model's family has NO demonstrated "
                   f"live edge (live AUC {live_auc:.4f} < {LIVE_AUC_FLOOR}). Scores remain "
@@ -464,6 +500,7 @@ def train():
     else:
         with open(CANDIDATE_PATH, "wb") as f:
             pickle.dump(artifact, f)
+        rejection_count = _bump_rejection_bookkeeping(MODEL_PATH)
         # 2026-08-07 fix: refresh the DEPLOYED model's live-edge status even though this
         # candidate was rejected -- live_auc/live_edge_proven describe whatever's still in
         # MODEL_PATH (unchanged by a rejection), and that signal must keep reaching
@@ -472,7 +509,8 @@ def train():
         _persist_live_edge_status(baseline, live_auc, live_n, live_edge_proven)
         print(f"[LiveScreenerMLRanker] Candidate REJECTED: test_auc={test_auc:.4f} did not "
               f"beat active model's {baseline['test_auc']:.4f} + {margin} margin. "
-              f"Saved to {CANDIDATE_PATH} for inspection; active model unchanged.")
+              f"Saved to {CANDIDATE_PATH} for inspection; active model unchanged "
+              f"(rejection bookkeeping updated: {rejection_count} rejections so far).")
 
 
 # ── scoring ──────────────────────────────────────────────────────────────────
@@ -556,3 +594,9 @@ if __name__ == "__main__":
         score()
     if not (args.train or args.score):
         parser.print_help()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

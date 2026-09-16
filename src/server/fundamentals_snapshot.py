@@ -20,6 +20,7 @@ Run:  python fundamentals_snapshot.py
       python fundamentals_snapshot.py --as-of 2026-06-21
 """
 
+import polars as pl
 import argparse
 import datetime
 
@@ -29,8 +30,8 @@ from as_of import logical_write_floor
 # ── Schema migrations (idempotent ADD COLUMN) ────────────────────────────────
 
 _SCHEMA_MIGRATIONS = [
-    "ALTER TABLE fundamentals_history ADD COLUMN pledge_pct REAL",
-    "ALTER TABLE technical_signals ADD COLUMN pledge_chg_90d REAL",
+    "ALTER TABLE fundamentals_history ADD COLUMN IF NOT EXISTS pledge_pct REAL",
+    "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pledge_chg_90d REAL",
 ]
 
 # ── Snapshot SQL ─────────────────────────────────────────────────────────────
@@ -185,3 +186,9 @@ if __name__ == "__main__":
     parser.add_argument("--as-of", help="Snapshot date YYYY-MM-DD (default: today)")
     args = parser.parse_args()
     run(as_of=args.as_of)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

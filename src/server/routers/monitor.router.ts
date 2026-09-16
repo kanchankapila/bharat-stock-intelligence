@@ -7,7 +7,7 @@ import { runPython } from '../pythonRunner';
 import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetchEODMarketScreener } from '../marketIntelService';
 import * as queueModule from '../queues';
 import { MONITOR_SCRIPTS } from '../monitorScripts';
-import { computeCronLateness } from '../jobHeartbeat';
+import { computeCronLateness, getRecentTradingSessions } from '../jobHeartbeat';
 import { CronExpressionParser } from 'cron-parser';
 import { fetchWithCache } from '../cacheService';
 
@@ -173,9 +173,6 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
       case 'reward-engine':
         row = await dbGet("SELECT MAX(last_updated) as t FROM signal_type_weights");
         break;
-      case 'rl-agent-update':
-        row = await dbGet("SELECT MAX(last_updated) as t FROM rl_q_table");
-        break;
       case 'dl-engine-infer':
         row = await dbGet("SELECT MAX(created_at) as t FROM deep_learning_predictions");
         break;
@@ -280,9 +277,14 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
         return w ? { winRate: (w.optimized_win_rate * 100).toFixed(1) + '%', improvement: w.improvement_pct?.toFixed(2) + '%' } : {};
       }
       case 'ohlcv-backfill':
+        // Display-only magnitudes — a live COUNT(*) here scanned the 42M-row hypertable on
+        // every dashboard refresh (AF-20260902-16). The planner's own estimates
+        // (pg_class.reltuples / pg_stats.n_distinct, kept current by autovacuum) are the
+        // cheap honest source for a stats card. PostgreSQL stores negative n_distinct as a
+        // fraction of reltuples, so normalize it before exposing the estimate.
         return {
-          symbols: ((await dbGet("SELECT COUNT(DISTINCT symbol) as n FROM stock_ohlcv")) as any)?.n ?? 0,
-          rows: ((await dbGet("SELECT COUNT(*) as n FROM stock_ohlcv")) as any)?.n ?? 0,
+          symbols: ((await dbGet("SELECT CASE WHEN s.n_distinct < 0 THEN CEIL(-s.n_distinct * c.reltuples) ELSE s.n_distinct END::bigint AS n FROM pg_stats s JOIN pg_class c ON c.relname = s.tablename AND c.relnamespace = current_schema()::regnamespace WHERE s.schemaname = current_schema() AND s.tablename = 'stock_ohlcv' AND s.attname = 'symbol'")) as any)?.n ?? 0,
+          rows: ((await dbGet("SELECT reltuples::bigint AS n FROM pg_class WHERE relname = 'stock_ohlcv' AND relnamespace = current_schema()::regnamespace")) as any)?.n ?? 0,
         };
       case 'regime-detector': {
         const r = await dbGet("SELECT regime, COUNT(*) as n FROM market_regimes GROUP BY regime ORDER BY n DESC LIMIT 1") as any;
@@ -290,8 +292,8 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
         return r ? { days: total, latest: r.regime } : { days: 0 };
       }
       case 'feature-engineering': {
-        const sRow = await dbGet("SELECT COUNT(DISTINCT symbol) as n FROM feature_store") as any;
-        const rRow = await dbGet("SELECT COUNT(*) as n FROM feature_store") as any;
+        const sRow = await dbGet("SELECT CASE WHEN s.n_distinct < 0 THEN CEIL(-s.n_distinct * c.reltuples) ELSE s.n_distinct END::bigint AS n FROM pg_stats s JOIN pg_class c ON c.relname = s.tablename AND c.relnamespace = current_schema()::regnamespace WHERE s.schemaname = current_schema() AND s.tablename = 'feature_store' AND s.attname = 'symbol'") as any;
+        const rRow = await dbGet("SELECT reltuples::bigint AS n FROM pg_class WHERE relname = 'feature_store' AND relnamespace = current_schema()::regnamespace") as any;
         return {
           symbols: sRow?.n ?? 0,
           rows: rRow?.n ?? 0,
@@ -299,11 +301,6 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
       }
       case 'reward-engine':
         return { types: ((await dbGet("SELECT COUNT(*) as n FROM signal_type_weights")) as any)?.n ?? 0 };
-      case 'rl-agent-update':
-        return {
-          states: ((await dbGet("SELECT COUNT(DISTINCT state_key) as n FROM rl_q_table")) as any)?.n ?? 0,
-          entries: ((await dbGet("SELECT COUNT(*) as n FROM rl_q_table")) as any)?.n ?? 0,
-        };
       case 'dl-engine-infer':
         return {
           symbols: ((await dbGet("SELECT COUNT(DISTINCT symbol) as n FROM deep_learning_predictions")) as any)?.n ?? 0,
@@ -346,7 +343,8 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
       case 'tickertape-scorecard':
         return { rows: ((await dbGet("SELECT COUNT(*) as n FROM proprietary_scores_history WHERE source = 'tickertape' AND date = (SELECT MAX(date) FROM proprietary_scores_history WHERE source = 'tickertape')")) as any)?.n ?? 0 };
       case 'intraday-breadth-capture':
-        return { snapshotsToday: ((await dbGet("SELECT COUNT(*) as n FROM intraday_breadth_snapshots WHERE date = CURRENT_DATE::text")) as any)?.n ?? 0 };
+        return { snapshotsToday: ((await dbGet("SELECT COUNT(*) as n FROM intraday_breadth_snapshots WHERE date = CURRENT_DATE")) as any)?.n ?? 0 };
+
       default:
         return {};
     }
@@ -393,9 +391,13 @@ export async function getSystemStatus(now: Date = new Date()) {
     // ~30 scripts in MONITOR_SCRIPTS this whole map is already running concurrently (Promise.all
     // over the map, not a true N+1 loop), so this halves the critical-path depth per script
     // rather than the total round-trip count.
-    const [dbLastRunAt, stats] = await Promise.all([
+    const [dbLastRunAt, stats, sessions] = await Promise.all([
       getLastRunAt(s.id as ScriptId),
       getScriptStats(s.id as ScriptId),
+      // Holiday-aware lateness (2026-09-14): a sessionless weekday inside the window is a
+      // trading holiday the skip family was planned to idle through, not a miss. Cached in
+      // jobHeartbeat.ts, so this adds no extra DB load beyond the first caller per 15 min.
+      getRecentTradingSessions(now),
     ]);
     // Take the LATEST of three independent pieces of evidence that the script ran, rather than
     // `dbLastRunAt ?? storedRanAt`. Preferring the output-table probe is only correct when a
@@ -454,6 +456,7 @@ export async function getSystemStatus(now: Date = new Date()) {
           (s as any).graceMinutes ?? 60,
           toComparableMs(lastRunAt),
           now,
+          sessions,
         ).late;
       } else {
         const ageHours = (now.getTime() - toComparableMs(lastRunAt)) / 3600000;
@@ -599,7 +602,7 @@ export const monitorRouter = router({
     }),
 
   triggerAllDaily: adminProcedure.mutation(async () => {
-    const dailyScripts = ['fii-dii-fetcher', 'regime-detector', 'feature-engineering', 'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker', 'reward-engine', 'rl-agent-update', 'ml-ensemble-score', 'dl-engine-infer', 'signal-type-stats'];
+    const dailyScripts = ['fii-dii-fetcher', 'regime-detector', 'feature-engineering', 'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker', 'reward-engine', 'ml-ensemble-score', 'dl-engine-infer', 'signal-type-stats'];
     const upsert = async (key: string, val: string, errorMsg?: string) => {
       try {
         await dbRun("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [key, val]);
@@ -1023,6 +1026,37 @@ export const monitorRouter = router({
       });
 
       return { asOf: runRow?.created_at ?? null, stocks, mlEdgeProven };
+    }),
+
+  // The ONE setup on this platform with a validated, cost-aware, positive forward edge --
+  // see measurement.md's "capitulation triple" entry (gap_down AND open_eq_low AND top_loser,
+  // next-session open->close, re-confirmed 2026-08-20 at t=+3.48/p=0.0005 across 430 days).
+  // Every other page-level score here (unified_score, win_probability, screener consensus)
+  // has been measured null-to-negative net of costs -- this procedure exists so the frontend
+  // has ONE place to show a signal alongside the actual evidence for it, rather than another
+  // unvalidated badge. Evidence comes from screener_combo_finder.py's own persisted backtest
+  // (app_settings.screener_combo_finder_tier1, same value getScreenerComboFinderStatus reads);
+  // live matches come from live_capitulation_screener.py's 15-min intraday scan, written under
+  // filter_key='todayCapitulation' into the existing live_screener_appearances table.
+  getCapitulationSignal: publicProcedure
+    .query(async () => {
+      const evidenceRow = await dbGet<{ value: string }>(
+        "SELECT value FROM app_settings WHERE key = 'screener_combo_finder_tier1'"
+      );
+      let evidence: any = null;
+      try { evidence = evidenceRow ? JSON.parse(evidenceRow.value) : null; } catch { evidence = null; }
+
+      const latestRun = await dbGet<{ id: number; timestamp: string }>(
+        "SELECT id, timestamp FROM live_screener_runs WHERE status IN ('SUCCESS','PARTIAL') ORDER BY id DESC LIMIT 1"
+      );
+      const matches = latestRun
+        ? await dbAll<{ symbol: string; price: number; change_per: number; volume: number }>(
+            "SELECT symbol, price, change_per, volume FROM live_screener_appearances WHERE run_id = ? AND filter_key = 'todayCapitulation'",
+            [latestRun.id]
+          )
+        : [];
+
+      return { asOf: latestRun?.timestamp ?? null, matches, evidence };
     }),
 
   // Status of the currently-ACTIVE live_screener_intraday_clf model. The trained_at/cv_auc/

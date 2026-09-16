@@ -13,6 +13,8 @@ whatever is actually working — the loop that lets the strategy improve over ti
 
 Run:  python intraday_strategy_learner.py [--days 60]
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 import argparse
 import json
 from datetime import date, timedelta
@@ -131,3 +133,9 @@ if __name__ == "__main__":
     ap.add_argument("--days", type=int, default=60)
     args = ap.parse_args()
     run(days=args.days)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

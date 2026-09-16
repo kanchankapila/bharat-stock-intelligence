@@ -1,11 +1,9 @@
-"""
-Dual-mode data-access layer for the Python engines (Phase 3 / P3f).
+﻿"""
+PostgreSQL-only data-access layer for the Python engines (Phase 3 / P3f).
 
 The Python analog of the TypeScript `dbAsync` facade. Exposes a small synchronous API
 (connect / query_all / query_one / query_scalar / execute / executemany / transaction /
-read_df / get_engine) that routes to either SQLite or PostgreSQL, selected by the
-USE_POSTGRES env var. Engines converted to this API keep running on SQLite today; the
-SQLite->Postgres cutover is then a single env flip — no further code change.
+read_df / get_engine) backed exclusively by PostgreSQL via SQLAlchemy + psycopg2.
 
 Everything executes through a SQLAlchemy `text()` connection so dialect/paramstyle
 differences are handled by SQLAlchemy and the sql_translate translator. Rows are returned
@@ -14,11 +12,11 @@ access (row[0]), matching the sqlite3.Row surface the engines already rely on.
 
 Conversion notes for P3f:
   - Pass parameters as a positional tuple/list: query_all(sql, [a, b]).
-  - For an inserted id on Postgres, add `RETURNING id` and read it (lastrowid is SQLite-only).
-  - `conn.row_factory = sqlite3.Row` lines become unnecessary — remove them.
+  - For an inserted id on Postgres, add `RETURNING id` and read it.
   - SQLite-only SQL (INSERT OR REPLACE, strftime, PRAGMA table_info) must be hand-converted.
 """
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -40,19 +38,35 @@ if "db_compat:_dotenv_loaded" not in _sys.modules:
         pass
 
 try:  # works whether run as a script (src/server on sys.path) or imported as a package
-    from sql_translate import translate, build_params, use_postgres
+    from sql_translate import translate, build_params
 except ImportError:  # pragma: no cover
-    from .sql_translate import translate, build_params, use_postgres
+    from .sql_translate import translate, build_params
 
 
-# ─── Connection URL / engine ───────────────────────────────────────────────────
+# PostgreSQL is the only database (SQLite fully decommissioned 2026-08-16).
+# ~30 Python engines still `from db_compat import use_postgres`; this shim keeps them
+# working and reads as the cleared-for-takeoff signal. Both URL resolution and every
+# query path are hard-wired to Postgres — this symbol is a compatibility no-op.
+def use_postgres() -> bool:
+    return True
 
-def _sqlite_url() -> str:
-    env = os.environ.get("DATABASE_URL")
-    if env and env.startswith("sqlite"):
-        return env
-    db_path = Path(__file__).resolve().parent.parent.parent / "database.sqlite"
-    return f"sqlite:///{db_path}"
+
+# AF-20260831-04: psycopg2 casts a native DATE column to a Python datetime.date object by
+# default, but every caller here (and its predecessor, the pre-2026-08-16 SQLite path) has
+# always received a plain 'YYYY-MM-DD' string -- a datetime.date breaks any code doing
+# string slicing/comparison on the value, and json.dumps() raises on it outright
+# ("Object of type date is not JSON serializable"). pgClient.ts already registers the
+# mirror-image override (types.setTypeParser(types.builtins.DATE, val => val)) for exactly
+# this reason. Registered globally (not per-engine/per-connection) so it applies to every
+# psycopg2 connection this process opens, matching that TS-side scope. 1082 is Postgres's
+# well-known builtin OID for the `date` type (stable across versions, not schema-dependent).
+import psycopg2 as _psycopg2  # noqa: E402
+_DATE_OID = 1082
+_DATE_AS_STR = _psycopg2.extensions.new_type((_DATE_OID,), "DATE_AS_STR", lambda value, cursor: value)
+_psycopg2.extensions.register_type(_DATE_AS_STR)
+
+
+# --- Connection URL / engine ---
 
 
 def _pg_url() -> str:
@@ -77,7 +91,7 @@ def _pg_url() -> str:
 
 
 def database_url() -> str:
-    return _pg_url() if use_postgres() else _sqlite_url()
+    return _pg_url()
 
 
 _engines: dict = {}
@@ -93,7 +107,28 @@ def get_engine():
     return eng
 
 
-# ─── Row: dual-access (name + positional) ──────────────────────────────────────
+def dispose_engines() -> None:
+    """Close every pooled connection and clear the engine cache.
+
+    A fixture that repoints POSTGRES_URL at a throwaway schema MUST call this BEFORE its
+    `DROP SCHEMA ... CASCADE`. Pooled connections opened against that schema hold
+    AccessShareLocks on its tables; DROP SCHEMA needs AccessExclusiveLock, so it blocks
+    behind them for as long as the pool keeps them alive -- measured 2026-08-21 at 5-10
+    minutes per test, which is what made the Python suite look like it was stalling under
+    "memory pressure" when it was really waiting on a lock (free RAM was 5.4/23 GB).
+
+    `importlib.reload(db_compat)` does NOT do this: it rebinds the module and abandons the
+    old `_engines` dict with its sockets still open and its transactions still idle.
+    """
+    for eng in _engines.values():
+        try:
+            eng.dispose()
+        except Exception:  # best-effort teardown: a dead socket must not fail the fixture
+            pass
+    _engines.clear()
+
+
+# â”€â”€â”€ Row: dual-access (name + positional) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class Row(dict):
     """Mapping + sequence, mirroring sqlite3.Row. Supports name access (row['col']),
@@ -112,6 +147,19 @@ class Row(dict):
     def __iter__(self):
         return iter(self._values)
 
+    def __eq__(self, other):
+        # sqlite3.Row compares equal to a plain tuple of its values, and ~10 pytest files
+        # assert `row == ('SYM', 1416.5)`. Without this they see a dict and fail on a
+        # difference that is purely how the row is spelled, not what it holds.
+        if isinstance(other, (tuple, list)):
+            return self._values == tuple(other)
+        return super().__eq__(other)
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    __hash__ = None  # matches dict: unhashable
+
 
 def _rows(result):
     cols = list(result.keys())
@@ -124,11 +172,11 @@ def _one(result):
     return Row(cols, tuple(r)) if r is not None else None
 
 
-# ─── Cursor / connection wrappers (legacy sqlite3 surface) ─────────────────────
+# â”€â”€â”€ Cursor / connection wrappers (legacy sqlite3 surface) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _EmptyResult:
     """Stand-in for a SQLAlchemy CursorResult when executemany() is called with zero
-    rows — sqlite3 treats that as a no-op, but passing an empty list to
+    rows â€” sqlite3 treats that as a no-op, but passing an empty list to
     Connection.execute() makes SQLAlchemy compile a single no-params execution instead
     of "executemany with 0 iterations", raising a spurious missing-bind-parameter error."""
     rowcount = 0
@@ -143,6 +191,59 @@ class _EmptyResult:
         return []
 
 
+def _transaction_is_aborted(conn) -> bool:
+    """True only when Postgres has put this connection's transaction in the error state.
+
+    Asking the driver rather than inferring it from the exception is what keeps the rollback
+    below safe. A statement can fail WITHOUT aborting anything -- translate() rejecting
+    `INSERT OR REPLACE`, build_params() choking on a bad argument, any Python-side error before
+    the server is reached. In those cases the caller's pending work is still perfectly
+    committable, and rolling back would destroy it.
+    """
+    try:
+        import psycopg2.extensions as _ext
+
+        raw = conn.connection.dbapi_connection
+        return raw.info.transaction_status == _ext.TRANSACTION_STATUS_INERROR
+    except Exception:                                            # noqa: BLE001
+        return False
+
+
+@contextmanager
+def _usable_after_failure(conn):
+    """Roll back an ABORTED transaction so the connection survives it, then re-raise.
+
+    sqlite3 -- the API this module mimics, and the API every engine here was written against --
+    leaves a connection perfectly usable after a statement errors. Postgres does not: ONE failed
+    statement aborts the whole transaction, and every subsequent query returns
+    InFailedSqlTransaction until someone rolls back.
+
+    That difference silently breaks the `try: ... except Exception: print(...)` degrade-gracefully
+    pattern this codebase uses everywhere (unified_ranker.py alone has 33). On SQLite each
+    swallowed error is local, and the run continues with partial data exactly as the surrounding
+    docstrings promise. On Postgres the FIRST one kills the connection, so every later read fails
+    too -- and because those are swallowed as well, the job reports success having read almost
+    nothing. Measured 2026-08-17: one missing advisory table made unified_ranker classify its
+    entire universe as Hold with 0 bull/bear counts, printing 10 "unavailable" lines and exit 0.
+
+    `recurring-bugs.md` warns that a rollback inside a SHARED helper can discard a caller's
+    pending work. That warning is why this is gated on `_transaction_is_aborted()` rather than on
+    "an exception happened": once Postgres has aborted the transaction, the earlier statements in
+    it can never commit, so the rollback destroys nothing that was not already lost -- and when
+    the transaction is NOT aborted, nothing happens at all. It never suppresses the error either;
+    the caller still sees it.
+    """
+    try:
+        yield
+    except Exception:
+        if _transaction_is_aborted(conn):
+            try:
+                conn.rollback()
+            except Exception:                                    # noqa: BLE001
+                pass
+        raise
+
+
 class CursorWrapper:
     """Mimics the subset of sqlite3.Cursor the engines use: execute/executemany +
     fetchone/fetchall + rowcount/lastrowid."""
@@ -152,16 +253,18 @@ class CursorWrapper:
         self._result = None
 
     def execute(self, sql, params=()):
-        self._result = self._conn.execute(text(translate(sql)), build_params(params))
+        with _usable_after_failure(self._conn):
+            self._result = self._conn.execute(text(translate(sql)), build_params(params))
         return self
 
     def executemany(self, sql, seq_of_params):
         if not seq_of_params:
             self._result = _EmptyResult()
             return self
-        self._result = self._conn.execute(
-            text(translate(sql)), [build_params(p) for p in seq_of_params]
-        )
+        with _usable_after_failure(self._conn):
+            self._result = self._conn.execute(
+                text(translate(sql)), [build_params(p) for p in seq_of_params]
+            )
         return self
 
     def fetchone(self):
@@ -169,6 +272,18 @@ class CursorWrapper:
 
     def fetchall(self):
         return _rows(self._result) if self._result is not None else []
+
+    def __iter__(self):
+        # sqlite3.Cursor is iterable, and call sites rely on it: `for r in conn.execute(...)`.
+        return iter(self.fetchall())
+
+    @property
+    def description(self):
+        # DB-API 2.0 7-tuple per column; pandas.read_sql_query reads col[0] (the name) off this
+        # when handed a raw DBAPI connection rather than a SQLAlchemy connectable.
+        if self._result is None:
+            return None
+        return [(k, None, None, None, None, None, None) for k in self._result.keys()]
 
     @property
     def rowcount(self):
@@ -195,6 +310,49 @@ class ConnWrapper:
 
     def executemany(self, sql, seq_of_params):
         return CursorWrapper(self._conn).executemany(sql, seq_of_params)
+
+    def executescript(self, script: str):
+        """Run a multi-statement script, mirroring sqlite3.Connection.executescript.
+
+        SQLAlchemy/psycopg2 accept only one statement per execute(), so a script has to be
+        split. Added 2026-08-16 for SQLITE_DECOMMISSION_PLAN Phase 2: it was the single
+        largest blocker to moving the pytest suite off SQLite (18 of 44 unconvertible files
+        used it and nothing else).
+
+        The split is naive on purpose -- semicolons outside quotes, comments stripped -- which
+        is sufficient for the schema-setup scripts this is used for and is NOT a SQL parser.
+        Do not feed it statements containing a semicolon inside a dollar-quoted body
+        (PL/pgSQL, DO blocks); those need conn.execute() one at a time.
+        """
+        import re as _re
+
+        cleaned = _re.sub(r"--[^\n]*", "", script)
+        out, buf, quote = [], [], None
+        for ch in cleaned:
+            if quote:
+                buf.append(ch)
+                if ch == quote:
+                    quote = None
+                continue
+            if ch in ("'", '"'):
+                quote = ch
+                buf.append(ch)
+                continue
+            if ch == ";":
+                stmt = "".join(buf).strip()
+                if stmt:
+                    out.append(stmt)
+                buf = []
+                continue
+            buf.append(ch)
+        tail = "".join(buf).strip()
+        if tail:
+            out.append(tail)
+
+        cur = CursorWrapper(self._conn)
+        for stmt in out:
+            cur.execute(stmt)
+        return cur
 
     def cursor(self):
         return CursorWrapper(self._conn)
@@ -227,7 +385,41 @@ def connect() -> ConnWrapper:
     return ConnWrapper(get_engine().connect())
 
 
-# ─── Convenience helpers (open + use + close internally) ───────────────────────
+def reconnect(conn):
+    """Discard a possibly-dead connection and return a fresh one.
+
+    Use this wherever a connection has sat IDLE across a long stretch of work done through a
+    DIFFERENT handle (a grid search, a fold loop, a multi-minute backtest). Such a connection
+    gets closed server-side and `pool_pre_ping` cannot catch it -- pre_ping validates at pool
+    CHECKOUT, and this one was checked out once and never returned.
+
+    The reason this is a shared helper rather than a two-line idiom at each call site: the
+    obvious idiom (`conn.close(); conn = connect()`) has THE SAME failure mode as the problem
+    it fixes. `ConnWrapper.close()` delegates to SQLAlchemy's `Connection.close()`, which
+    issues a ROLLBACK before returning the DBAPI connection to the pool, and on a dead socket
+    that rollback raises the very "server closed the connection unexpectedly" the reconnect
+    exists to work around. That bit twice, in two files, six weeks apart:
+    `strategy_optimizer.py` (2026-08-29, after a full grid search + 888 computed overrides)
+    and `backtest_optimizer.py` (2026-09-10, at the first post-loop statement -- which WAS the
+    reconnect). The first was fixed in place; the second had been fixed for the ORIGINAL bug
+    two days earlier and never received the follow-up.
+
+    We are discarding this connection either way, so a failing `close()` is not a reason to
+    abort -- it is expected when the server already dropped it. Failing to open the NEW
+    connection IS a reason to abort, so that is deliberately not caught: swallowing it would
+    hand the caller a dead handle and move the crash somewhere less diagnosable.
+    """
+    try:
+        conn.close()
+    except Exception as e:  # noqa: BLE001 -- see docstring: discarding it regardless
+        # stderr specifically: the subprocess wrappers that run these jobs only inspect
+        # stderr, so a stdout notice here would be invisible (see recurring-bugs.md).
+        print(f"[db_compat] Stale connection close() failed (expected if the server already "
+              f"dropped it): {e}", file=_sys.stderr)
+    return connect()
+
+
+# â”€â”€â”€ Convenience helpers (open + use + close internally) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def now_utc_iso() -> str:
     """Timezone-aware UTC timestamp string, safe to write into any TIMESTAMPTZ column.
@@ -272,49 +464,45 @@ def safe_alter(conn_or_none, ddl: str) -> bool:
 
     On PostgreSQL: rewrites the statement to use ``IF NOT EXISTS`` syntax,
     e.g. ``ALTER TABLE t ADD COLUMN IF NOT EXISTS col TYPE``. This is a
-    completely silent no-op when the column is already present — no server-log
+    completely silent no-op when the column is already present â€” no server-log
     ERROR, no transaction abort.
 
-    On SQLite: uses a plain try/except (SQLite does not support IF NOT EXISTS
-    for ADD COLUMN, but its errors don't abort the transaction anyway).
-
     Args:
-        conn_or_none: Accepted for API compatibility, ignored on Postgres path.
+        conn_or_none: Accepted for API compatibility, ignored (Postgres-only).
         ddl:          The DDL string, e.g.
                       ``"ALTER TABLE technical_signals ADD COLUMN foo REAL"``
 
     Returns:
-        True  — column was added (or IF NOT EXISTS made it a no-op on PG).
-        False — column already existed on SQLite (error silenced).
+        True  â€” column was added (or IF NOT EXISTS made it a no-op on PG).
+        False â€” the DDL still failed after IF NOT EXISTS (warning printed).
     """
-    if use_postgres():
-        # Inject "IF NOT EXISTS" between "ADD COLUMN" and the column name.
-        # Works for any case variant of "add column".
-        import re as _re
-        pg_ddl = _re.sub(
-            r"(?i)\bADD\s+COLUMN\b",
-            "ADD COLUMN IF NOT EXISTS",
-            ddl,
-            count=1,
-        )
-        try:
-            with get_engine().begin() as conn:
-                conn.execute(text(pg_ddl))
-            return True
-        except Exception as exc:
-            # Fallback: eat any remaining error (e.g., other DDL constraint)
-            print(f"[db_compat] safe_alter warning: {exc}")
-            return False
-    else:
-        # SQLite path — simple try/except
-        try:
-            if conn_or_none is not None:
-                conn_or_none.execute(ddl)
-            else:
-                execute(ddl)
-            return True
-        except Exception:
-            return False
+    # Inject "IF NOT EXISTS" between "ADD COLUMN" and the column name, but ONLY when the
+    # caller has not already written it. 8 of the 9 ADD COLUMN call sites in src/server do
+    # include it, and the unconditional injection turned those into
+    # "ADD COLUMN IF NOT EXISTS IF NOT EXISTS <col>" -- a syntax error, swallowed by the
+    # except below into a print() and a False return, so the column was silently never added
+    # and the caller carried on to INSERT into it.
+    #
+    # Found 2026-09-04 via high_flyer_retrospective.py, which self-migrates 3 columns this way
+    # (direction/wrong_call/prior_classification) and then failed every ml-daily-ops run on
+    # `column "direction" does not exist`. The same 3 columns were removed from
+    # db/schema.postgres.sql by AF-20260903-04's regen as "phantom" -- they were phantom
+    # precisely BECAUSE this helper could never create them.
+    import re as _re
+    pg_ddl = _re.sub(
+        r"(?i)\bADD\s+COLUMN\b(?!\s+IF\s+NOT\s+EXISTS\b)",
+        "ADD COLUMN IF NOT EXISTS",
+        ddl,
+        count=1,
+    )
+    try:
+        with get_engine().begin() as conn:
+            conn.execute(text(pg_ddl))
+        return True
+    except Exception as exc:
+        # Fallback: eat any remaining error (e.g., other DDL constraint)
+        print(f"[db_compat] safe_alter warning: {exc}")
+        return False
 
 
 def execute_returning(sql, params=()):
@@ -332,13 +520,70 @@ def executemany(sql, seq_of_params):
         ).rowcount
 
 
+def executemany_batched(conn, sql, seq_of_params, page_size=1000) -> None:
+    """executemany() on `conn`'s own transaction, sending page_size statements per round trip.
+
+    ConnWrapper.executemany goes through SQLAlchemy's default psycopg2 mode: one network round
+    trip per row. Measured 2026-09-11 on this DB: a 14,000-row upsert 10.9s -> 1.7s and a
+    14,000-row UPDATE 11.3s -> 1.7s batched. Same SQL, same per-row semantics.
+
+    Returns nothing, deliberately: psycopg2's execute_batch leaves rowcount holding only the
+    LAST statement's count (1 instead of 14,000 in that measurement). That is also why this is
+    opt-in rather than an engine-wide executemany_mode -- analyst_revision.py's `n == 0`
+    matched-nothing guard and several logged counts read executemany's rowcount. Use this only
+    where the caller does not need the affected-row count. A failing statement raises the raw
+    psycopg2 error (it runs on the DBAPI cursor), not a sqlalchemy.exc wrapper.
+    """
+    from psycopg2.extras import execute_batch
+
+    params = [build_params(p) for p in seq_of_params]
+    if not params:
+        return
+    sa_conn = getattr(conn, "_conn", conn)
+    # SQLAlchemy only commits a transaction it knows it began: writing through the raw cursor
+    # on an idle connection would turn the caller's commit() into a silent no-op.
+    if not sa_conn.in_transaction():
+        sa_conn.begin()
+    # Compiling against the psycopg2 dialect renders the :pN binds as %(pN)s and escapes any
+    # literal % -- no hand-rolled placeholder rewriting.
+    stmt = str(text(translate(sql)).compile(dialect=sa_conn.dialect))
+    with _usable_after_failure(sa_conn):
+        with sa_conn.connection.dbapi_connection.cursor() as cur:
+            execute_batch(cur, stmt, params, page_size=page_size)
+
+
+def iter_rows(conn, sql, params=(), batch_size=50_000):
+    """Stream a large read on `conn` as plain tuples, batch_size rows at a time.
+
+    conn.execute(...).fetchall() materialises every row as a dict-subclass Row. Measured
+    2026-09-11 on ohlcv_quality's 2.7M-row stock_ohlcv read: 2,280MB peak Python heap that way
+    vs 380MB streamed as tuples, and ~2.5x faster. Uses a server-side cursor on the caller's own
+    connection and transaction, so it sees the caller's uncommitted writes. Do not commit on
+    that connection while iterating: the cursor is WITHOUT HOLD and dies with the transaction.
+    """
+    sa_conn = getattr(conn, "_conn", conn)
+    # Statement-level options: Connection.execution_options() mutates the connection in place in
+    # SQLAlchemy 2.0, which would turn every later statement on it into a server-side cursor
+    # (`DECLARE ... CURSOR FOR INSERT` -- a syntax error).
+    stmt = text(translate(sql)).execution_options(stream_results=True, yield_per=batch_size)
+    # The guard spans the iteration: with a server-side cursor a statement can fail at FETCH
+    # time (row N), and an aborted transaction left behind poisons every later statement.
+    with _usable_after_failure(sa_conn):
+        result = sa_conn.execute(stmt, build_params(params))
+        try:
+            for row in result:
+                yield tuple(row)
+        finally:
+            result.close()
+
+
 def read_df(sql, params=()):
     """pandas.read_sql wrapper using the active engine + translator."""
     with get_engine().connect() as conn:
         return pd.read_sql(text(translate(sql)), conn, params=build_params(params))
 
 
-# ─── Transactions ──────────────────────────────────────────────────────────────
+# â”€â”€â”€ Transactions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _Tx:
     def __init__(self, conn):
@@ -383,7 +628,7 @@ def transaction():
 # pg_advisory_lock is session-scoped: the unlock MUST run on the exact same physical
 # backend connection that took the lock. query_one()/execute() each check a connection
 # out of the pool and return it immediately, so a naive acquire-via-query_one +
-# release-via-execute pair almost always runs on two different pooled connections —
+# release-via-execute pair almost always runs on two different pooled connections â€”
 # the unlock then silently no-ops (that session never held the lock) and the lock stays
 # held by whatever connection acquired it, orphaned in the pool until it happens to be
 # reused for the same lock name. Pin one checked-out connection per held lock instead.
@@ -395,11 +640,8 @@ def try_advisory_lock(name: str) -> bool:
 
     Uses a Postgres session-level advisory lock keyed off a stable hash of
     `name`; returns False immediately (non-blocking) if another process
-    already holds it. No-op (always True) on SQLite — advisory locks are a
-    Postgres-only primitive and the SQLite dev path is single-process.
+    already holds it.
     """
-    if not use_postgres():
-        return True
     conn = get_engine().connect()
     try:
         row = conn.execute(text(translate("SELECT pg_try_advisory_lock(?)")), build_params((_advisory_lock_key(name),))).fetchone()
@@ -415,8 +657,6 @@ def try_advisory_lock(name: str) -> bool:
 
 
 def release_advisory_lock(name: str) -> None:
-    if not use_postgres():
-        return
     conn = _advisory_conns.pop(name, None)
     if conn is None:
         return

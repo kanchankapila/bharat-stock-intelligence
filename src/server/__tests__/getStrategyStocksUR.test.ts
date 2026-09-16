@@ -1,25 +1,23 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-process.env.DATABASE_URL = ':memory:';
-// Isolates this test from the host environment's USE_POSTGRES -- see backtestRunner.test.ts
-// for the full explanation of why this must be set before any dbAsync.ts import.
-process.env.USE_POSTGRES = 'false';
-const dbModule = await import('../db');
-const db = dbModule.default;
+const { dbExec, dbRun, dbGet, dbAll } = await import('../dbAsync');
 const { getStrategyStocks } = await import('../quantScoringService');
 
-beforeEach(() => {
-  ['quant_scores', 'unified_recommendations', 'nse_stocks', 'stock_fundamentals']
-    .forEach(table => db.exec(`DELETE FROM ${table}`));
+beforeEach(async () => {
+  for (const table of ['quant_scores', 'unified_recommendations', 'nse_stocks', 'stock_fundamentals']) {
+
+    await dbExec(`DELETE FROM ${table}`);
+
+  }
 });
 
 const insertQS = (symbol: string, rankComposite: number) =>
-  db.prepare(`INSERT INTO quant_scores (symbol, rank_composite) VALUES (?, ?)`).run(symbol, rankComposite);
+  dbRun(`INSERT INTO quant_scores (symbol, rank_composite) VALUES (?, ?)`, [symbol, rankComposite]);
 
 const insertUR = (symbol: string, computedAt: string, unifiedScore = 80) =>
-  db.prepare(`INSERT INTO unified_recommendations
+  dbRun(`INSERT INTO unified_recommendations
     (symbol, computed_at, regime, unified_score, conviction_level, classification)
-    VALUES (?, ?, 'BULL', ?, 'B_MEDIUM', 'Buy')`).run(symbol, computedAt, unifiedScore);
+    VALUES (?, ?, 'BULL', ?, 'B_MEDIUM', 'Buy')`, [symbol, computedAt, unifiedScore]);
 
 // unified_recommendations context for getStrategyStocks (score-consolidation, 2026-08). A
 // straight table swap (like getTopRatedStocks' UR-first/stock_scores-fallback) doesn't work
@@ -27,9 +25,9 @@ const insertUR = (symbol: string, computedAt: string, unifiedScore = 80) =>
 // columns plus an opt-in coverage gate that never changes default filtering/ranking.
 describe('getStrategyStocks unified_recommendations involvement', () => {
   it('surfaces ur_unified_score/ur_classification as extra context by default (no filtering change)', async () => {
-    insertQS('A', 90);
-    insertQS('B', 80);
-    insertUR('A', new Date().toISOString().split('T')[0], 77);
+    await insertQS('A', 90);
+    await insertQS('B', 80);
+    await insertUR('A', new Date().toISOString().split('T')[0], 77);
 
     const rows = await getStrategyStocks('composite', 10, {}) as any[];
 
@@ -42,9 +40,9 @@ describe('getStrategyStocks unified_recommendations involvement', () => {
   });
 
   it('requireUnifiedCoverage restricts to symbols in the latest UR snapshot when UR has rows', async () => {
-    insertQS('A', 90);
-    insertQS('B', 80);
-    insertUR('A', new Date().toISOString().split('T')[0]);
+    await insertQS('A', 90);
+    await insertQS('B', 80);
+    await insertUR('A', new Date().toISOString().split('T')[0]);
 
     const rows = await getStrategyStocks('composite', 10, { requireUnifiedCoverage: true }) as any[];
 
@@ -52,8 +50,8 @@ describe('getStrategyStocks unified_recommendations involvement', () => {
   });
 
   it('requireUnifiedCoverage falls back to the full quant_scores universe when UR is empty (cold start)', async () => {
-    insertQS('A', 90);
-    insertQS('B', 80);
+    await insertQS('A', 90);
+    await insertQS('B', 80);
 
     const rows = await getStrategyStocks('composite', 10, { requireUnifiedCoverage: true }) as any[];
 
@@ -61,11 +59,11 @@ describe('getStrategyStocks unified_recommendations involvement', () => {
   });
 
   it('requireUnifiedCoverage only matches the LATEST UR snapshot, not a stale earlier one', async () => {
-    insertQS('A', 90);
-    insertQS('B', 80);
-    insertUR('A', '2020-01-01'); // stale snapshot -- must not count as coverage
+    await insertQS('A', 90);
+    await insertQS('B', 80);
+    await insertUR('A', '2020-01-01'); // stale snapshot -- must not count as coverage
     const today = new Date().toISOString().split('T')[0];
-    insertUR('B', today);
+    await insertUR('B', today);
 
     const rows = await getStrategyStocks('composite', 10, { requireUnifiedCoverage: true }) as any[];
 

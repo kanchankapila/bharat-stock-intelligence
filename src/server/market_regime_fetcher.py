@@ -20,6 +20,21 @@ Run modes:
 Designed to run every 15 minutes during market hours (09:15–15:30 IST Mon–Fri).
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MarketRegimeFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MarketRegimeFetcherBaseFetcher(BaseFetcher[MarketRegimeFetcherSchema]):
+    fetcher_name = 'MarketRegimeFetcher'
+    domain = 'general'
+    schema = MarketRegimeFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import datetime
 import time
@@ -29,6 +44,7 @@ from curl_cffi import requests as cffi_requests
 from sqlalchemy import text
 
 from db_compat import get_engine, now_utc_iso
+import sys
 
 # ---------------------------------------------------------------------------
 # NSE session headers — same pattern used across NSE-sourced fetchers
@@ -50,7 +66,7 @@ NSE_INDICES_URL  = "https://www.nseindia.com/api/allIndices"
 # Fallback: NiftyTrader dashboard-data carries maxPain + expiry data but not spot/futures.
 # Basis is skipped gracefully when NSE is unavailable.
 NSE_FUTURES_URL  = "https://www.nseindia.com/api/liveEquity-derivatives?index=nifty50"
-NT_DASHBOARD_URL = "https://webapi.niftytrader.in/webapi/Option/dashboard-data"
+NT_DASHBOARD_URL = "https://www.niftytrader.in/api/niftytrader/Option/dashboard-data"
 NT_HEADERS_BASIS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json",
@@ -131,7 +147,7 @@ def _nse_session() -> requests.Session:
         session.get(NSE_HOME_URL, timeout=10)
         time.sleep(0.5)
     except Exception as e:
-        print(f"[MarketRegime] NSE session warm-up warning: {e}")
+        print(f"[MarketRegime] NSE session warm-up warning: {e}", file=sys.stderr)
     return session
 
 
@@ -146,7 +162,7 @@ def fetch_vix(session: requests.Session) -> float | None:
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        print(f"[MarketRegime] VIX fetch error: {e}")
+        print(f"[MarketRegime] VIX fetch error: {e}", file=sys.stderr)
         return None
 
     indices = data.get("data") or []
@@ -191,7 +207,7 @@ def fetch_usdinr() -> tuple[float | None, float | None]:
         resp.raise_for_status()
         payload = resp.json()
     except Exception as e:
-        print(f"[MarketRegime] USDINR fetch error: {e}")
+        print(f"[MarketRegime] USDINR fetch error: {e}", file=sys.stderr)
         return None, None
 
     # MC response structure: {"success": true, "data": [...]}
@@ -264,7 +280,7 @@ def _fetch_basis_from_nt() -> tuple[float | None, int | None]:
         basis = (fut - spot) / spot * 100 * (365 / days)
         return round(basis, 4), 1 if basis > 0 else 0
     except Exception as e:
-        print(f"[MarketRegime] NT dashboard fallback error: {e}")
+        print(f"[MarketRegime] NT dashboard fallback error: {e}", file=sys.stderr)
     return None, None
 
 
@@ -284,7 +300,7 @@ def fetch_nifty_basis(session: requests.Session) -> tuple[float | None, int | No
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        print(f"[MarketRegime] Nifty futures fetch error: {e} — trying NiftyTrader fallback")
+        print(f"[MarketRegime] Nifty futures fetch error: {e} — trying NiftyTrader fallback", file=sys.stderr)
         return _fetch_basis_from_nt()
 
     # Extract spot price (underlying value)
@@ -459,3 +475,9 @@ if __name__ == "__main__":
 
     engine = get_engine()
     run_all(engine, do_vix=do_vix, do_fx=do_fx, do_basis=do_basis)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

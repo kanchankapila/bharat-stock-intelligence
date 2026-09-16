@@ -14,7 +14,7 @@ import {
   testTrendlyneApiResponse,
   recategorizeAllScreeners,
 } from "../trendlyneScreener";
-import { router, publicProcedure, adminProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure, expensiveProcedure } from "../trpc";
 import { SCANNER_CATALOG } from "../config/scannerCatalog";
 
 // Real quant_scores columns runScreener is allowed to filter on (see db.ts's CREATE TABLE).
@@ -247,11 +247,11 @@ export const screenersRouter = router({
 
   // ── Screener Intelligence (Sub-project A) ─────────────────────────────────
 
-  // Both validated standalone paper screens, strongest first. value_book_to_price beats
-  // momentum_12_1 on every measured axis (t 2.67 vs 2.08, Sharpe 1.47 vs 1.10, turnover 0.28
-  // vs 0.35, max DD -17.9% vs -19.5%) but was unwired until 2026-08-10, so this endpoint
-  // could only ever show the weaker one. Shape kept backward compatible: the top-level fields
-  // still describe momentum_12_1 for any existing caller, with `factors` added alongside.
+  // RETRACTED 2026-08-12 (measurement.md's top banner): both factors' significance depended on
+  // factor_backtest.py's exit-pricing bug, now fixed -- neither clears significance any more
+  // (value_book_to_price t 2.67->1.99, momentum_12_1 t 2.08->1.10). Kept as paper screens for
+  // visibility, not as validated edges (AF-20260818-37). Shape kept backward compatible: the
+  // top-level fields still describe momentum_12_1 for any existing caller, `factors` alongside.
   getFactorPaperPicks: publicProcedure.query(async () => {
     const keys = ['value_book_to_price', 'momentum_12_1'] as const;
     const rows = await Promise.all(keys.map(f =>
@@ -313,7 +313,7 @@ export const screenersRouter = router({
         FROM screener_performance_v2 spv
         JOIN screener_master sm ON sm.scan_id = spv.screener_id AND sm.source = spv.source
         ${where}
-        ORDER BY spv.bayesian_score DESC
+        ORDER BY NULLIF(spv.bayesian_score, 'NaN'::float8) DESC
         LIMIT ? OFFSET ?
       `, params);
     }),
@@ -371,7 +371,7 @@ export const screenersRouter = router({
                target_1, risk_reward, trade_reasoning
         FROM unified_recommendations
         WHERE ${conditions.join(' AND ')}
-        ORDER BY unified_score DESC
+        ORDER BY NULLIF(unified_score, 'NaN'::float8) DESC
         LIMIT ?
       `, params);
 
@@ -505,34 +505,6 @@ export const screenersRouter = router({
       }
     }),
 
-  computeTimeframeScores: publicProcedure
-    .input(z.object({ runId: z.string().optional(), screenerId: z.string().optional(), timeframe: z.enum(['intraday','short','medium','long']).optional(), topN: z.number().optional() }))
-    .mutation(async ({ input }) => {
-      const scoring = await import('../scoringService');
-      const results = await scoring.computeTimeframeScores({ runId: input.runId, screenerId: input.screenerId, timeframe: input.timeframe as any, topN: input.topN });
-      return { success: true, results };
-    }),
-
-  getTimeframeRanking: publicProcedure
-    .input(z.object({ timeframe: z.enum(['intraday','short','medium','long']), runId: z.string().optional(), screenerId: z.string().optional(), limit: z.number().min(1).max(500).optional().default(100) }))
-    .query(async ({ input }) => {
-      const params: any[] = [input.timeframe];
-      let sql = `SELECT symbol, score, confidence, domains_json, reasons_json, suggested_holding_days FROM timeframe_scores WHERE timeframe = ?`;
-      if (input.runId) { sql += ` AND run_id = ?`; params.push(input.runId); }
-      if (input.screenerId) { sql += ` AND reasons_json LIKE ?`; params.push(`%${input.screenerId}%`); }
-      sql += ` ORDER BY score DESC LIMIT ?`;
-      params.push(input.limit);
-      return dbAll(sql, params);
-    }),
-
-  triggerBacktest: adminProcedure
-    .input(z.object({ runId: z.string().optional(), screenerId: z.string().optional(), timeframe: z.enum(['intraday','short','medium','long']).optional(), horizonDays: z.number().optional(), topN: z.number().optional() }))
-    .mutation(async ({ input }) => {
-      const bt = await import('../backtestRunner');
-      const res = await bt.runBacktest({ runId: input.runId, screenerId: input.screenerId, timeframe: input.timeframe as any, horizonDays: input.horizonDays, topN: input.topN });
-      return { success: true, result: res };
-    }),
-
   createScreenerRun: adminProcedure
     .input(z.object({
       screenerId: z.string(),
@@ -575,9 +547,15 @@ export const screenersRouter = router({
       sector: z.string().optional(),
     }))
     .query(async ({ input }) => {
+      // date('now', ? || ' days') never translated to Postgres -- sqlTranslate.ts's date('now',
+      // ...) rule only matches a bare quoted-string modifier, not a parameter concatenation, so
+      // this threw `function date(unknown, text) does not exist` on every call in production
+      // (trpc-surface-review full sweep, 2026-08-14). Same JS-computed-cutoff fix already
+      // applied to getScreenerSurfacingSignals in this file.
       const params: any[] = [];
-      let where = 'WHERE date >= date(\'now\', ? || \' days\')';
-      params.push(-input.days);
+      const cutoff = new Date(Date.now() - input.days * 24 * 3600_000).toISOString().slice(0, 10);
+      let where = 'WHERE date >= ?';
+      params.push(cutoff);
       if (input.sector) {
         where += ' AND sector = ?';
         params.push(input.sector);
@@ -618,7 +596,7 @@ export const screenersRouter = router({
         WHERE rn = 1
           AND screener_momentum_score >= ?
           AND screener_bull_count > screener_bear_count
-        ORDER BY screener_momentum_score DESC
+        ORDER BY NULLIF(screener_momentum_score, 'NaN'::float8) DESC
         LIMIT ?
       `, [input.minMomentum, input.topN]);
     }),
@@ -629,6 +607,11 @@ export const screenersRouter = router({
       limit: z.number().min(1).max(200).default(50),
     }))
     .query(async ({ input }) => {
+      // Cutoff computed in JS and bound as a parameter, not `NOW() - INTERVAL ...` -- this
+      // codebase has repeatedly been bitten by Postgres-only date arithmetic that doesn't
+      // survive sqlTranslate.ts's translation to the SQLite dev fallback (same pattern already
+      // proven safe at monitor.router.ts's news-sentiment stat).
+      const cutoff = new Date(Date.now() - input.days * 24 * 3600_000).toISOString();
       return dbAll(`
         SELECT symbol, signal_date, signal_type, confidence_score,
                entry_price, target_price, stop_loss,
@@ -636,10 +619,10 @@ export const screenersRouter = router({
                reasoning
         FROM unified_signals
         WHERE signal_source = 'SCREENER_SURFACING'
-          AND signal_date >= NOW() - (? || ' days')::interval
-        ORDER BY signal_date DESC, screener_momentum_score DESC
+          AND signal_date >= ?
+        ORDER BY signal_date DESC, NULLIF(screener_momentum_score, 'NaN'::float8) DESC
         LIMIT ?
-      `, [input.days, input.limit]);
+      `, [cutoff, input.limit]);
     }),
     
     // Ids here must be real quant_scores columns (see SCREENER_CRITERIA_COLUMNS below) --
@@ -669,7 +652,7 @@ export const screenersRouter = router({
       return criteria;
     }),
 
-  runScreener: publicProcedure
+  runScreener: expensiveProcedure
     .input(z.array(z.object({
       id: z.enum(SCREENER_CRITERIA_COLUMNS),
       operator: z.enum(['gt', 'lt', 'eq', 'gte', 'lte']),

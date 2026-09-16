@@ -18,7 +18,7 @@ const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
     <tr className="hover:bg-indigo-950/30 transition-colors even:bg-slate-800/20">{children}</tr>
   ),
   th: ({ children }) => (
-    <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap">
+    <th className="px-3 py-2.5 text-left text-[10px] font-bold font-display uppercase tracking-widest text-slate-400 whitespace-nowrap">
       {children}
     </th>
   ),
@@ -29,16 +29,16 @@ const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
     const isBlock = className?.startsWith('language-');
     return isBlock ? (
       <pre className="bg-slate-900/80 border border-slate-700/50 rounded-lg p-3 overflow-x-auto my-2 text-[11px]">
-        <code className="font-mono text-emerald-300">{children}</code>
+        <code className="font-data text-emerald-300">{children}</code>
       </pre>
     ) : (
-      <code className="bg-slate-700/50 px-1.5 py-0.5 rounded text-indigo-300 text-[11px] font-mono">{children}</code>
+      <code className="bg-slate-700/50 px-1.5 py-0.5 rounded text-indigo-300 text-[11px] font-data">{children}</code>
     );
   },
   strong: ({ children }) => <strong className="text-slate-100 font-semibold">{children}</strong>,
   h1: ({ children }) => <h1 className="text-slate-100 font-bold text-base mt-4 mb-2 border-b border-slate-700/40 pb-1">{children}</h1>,
   h2: ({ children }) => <h2 className="text-slate-100 font-bold text-sm mt-3 mb-1.5 border-b border-slate-700/30 pb-1">{children}</h2>,
-  h3: ({ children }) => <h3 className="text-indigo-300 font-semibold text-xs mt-3 mb-1 uppercase tracking-wide">{children}</h3>,
+  h3: ({ children }) => <h3 className="text-indigo-300 font-semibold text-xs mt-3 mb-1 font-display uppercase tracking-wide">{children}</h3>,
   p: ({ children }) => <p className="text-slate-300 leading-relaxed mb-2 last:mb-0">{children}</p>,
   ul: ({ children }) => <ul className="list-none space-y-1 my-2 text-sm">{children}</ul>,
   ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 my-2 text-sm text-slate-300">{children}</ol>,
@@ -252,7 +252,7 @@ export default function StockChatbot() {
   const isOnline = health?.status === 'ok' && health?.graph_ready;
 
   return (
-    <div className="flex flex-col h-full max-h-[calc(100vh-80px)] bg-slate-950/40 rounded-2xl border border-slate-800/50 overflow-hidden">
+    <div className="flex flex-col h-full max-h-[calc(100vh-80px)] v1-card overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800/50 bg-slate-900/60 shrink-0">
         <div className="flex items-center gap-2.5">
@@ -349,7 +349,7 @@ export default function StockChatbot() {
                   {!msg.streaming && msg.sources && msg.sources.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-slate-700/40">
                       {msg.sources.map((src, si) => (
-                        <span key={si} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700/60 text-slate-400 font-mono">
+                        <span key={si} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700/60 text-slate-400 font-data">
                           {src}
                         </span>
                       ))}

@@ -33,6 +33,21 @@ Run:
   python mc_pricefeed_fetcher.py --symbol BEL
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McPricefeedFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McPricefeedFetcherBaseFetcher(BaseFetcher[McPricefeedFetcherSchema]):
+    fetcher_name = 'McPricefeedFetcher'
+    domain = 'moneycontrol.com'
+    schema = McPricefeedFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -42,6 +57,7 @@ from curl_cffi import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
+import sys
 
 PRICEFEED_URL = "https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{scid}"
 
@@ -124,17 +140,17 @@ def ensure_schema(con) -> None:
 
     # Backfill new columns on existing mc_pricefeed_daily tables (no-op if already present)
     for ddl in [
-        "ALTER TABLE mc_pricefeed_daily ADD COLUMN ma_30           REAL",
-        "ALTER TABLE mc_pricefeed_daily ADD COLUMN ma_150          REAL",
-        "ALTER TABLE mc_pricefeed_daily ADD COLUMN ma30_dist_pct   REAL",
-        "ALTER TABLE mc_pricefeed_daily ADD COLUMN ma150_dist_pct  REAL",
-        "ALTER TABLE mc_pricefeed_daily ADD COLUMN ret_3d          REAL",
-        "ALTER TABLE mc_pricefeed_daily ADD COLUMN ret_ytd         REAL",
-        "ALTER TABLE mc_pricefeed_daily ADD COLUMN price_cash      REAL",
-        "ALTER TABLE mc_pricefeed_daily ADD COLUMN consensus_price_cash REAL",
-        "ALTER TABLE mc_pricefeed_daily ADD COLUMN cash_eps        REAL",
-        "ALTER TABLE mc_pricefeed_daily ADD COLUMN eps_vs_cons     REAL",
-        "ALTER TABLE mc_pricefeed_daily ADD COLUMN pe_fwd_discount REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN IF NOT EXISTS ma_30           REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN IF NOT EXISTS ma_150          REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN IF NOT EXISTS ma30_dist_pct   REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN IF NOT EXISTS ma150_dist_pct  REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN IF NOT EXISTS ret_3d          REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN IF NOT EXISTS ret_ytd         REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN IF NOT EXISTS price_cash      REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN IF NOT EXISTS consensus_price_cash REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN IF NOT EXISTS cash_eps        REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN IF NOT EXISTS eps_vs_cons     REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN IF NOT EXISTS pe_fwd_discount REAL",
     ]:
         try:
             cur.execute(ddl)
@@ -143,33 +159,33 @@ def ensure_schema(con) -> None:
             con.rollback()
 
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN mc_52w_high_dist_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_52w_low_dist_pct  REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_days_from_52wh    INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mc_cagr_3y           REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_cagr_5y           REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_cagr_10y          REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_ind_pe            REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_pe_vs_ind         REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_consensus_pe      REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_consensus_pb      REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_ma30_dist_pct     REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_ma50_dist_pct     REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_ma150_dist_pct    REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_ma200_dist_pct    REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_del_pct_3d        REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_del_pct_5d        REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_del_pct_20d       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_del_acceleration  REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_vol_ratio         REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_circuit_dist_pct  REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_fno_eligible      INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mc_3d_return         REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_ytd_return        REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_price_cash        REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_consensus_eps     REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_eps_vs_cons       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mc_pe_fwd_discount   REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_52w_high_dist_pct REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_52w_low_dist_pct  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_days_from_52wh    INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_cagr_3y           REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_cagr_5y           REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_cagr_10y          REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_ind_pe            REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_pe_vs_ind         REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_consensus_pe      REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_consensus_pb      REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_ma30_dist_pct     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_ma50_dist_pct     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_ma150_dist_pct    REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_ma200_dist_pct    REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_del_pct_3d        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_del_pct_5d        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_del_pct_20d       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_del_acceleration  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_vol_ratio         REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_circuit_dist_pct  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_fno_eligible      INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_3d_return         REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_ytd_return        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_price_cash        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_consensus_eps     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_eps_vs_cons       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_pe_fwd_discount   REAL",
     ]:
         try:
             cur.execute(ddl)
@@ -211,7 +227,7 @@ def _fetch(mcsymbol: str, session) -> dict | None:
             return None
         return payload.get("data", {})
     except Exception as e:
-        print(f"  [{mcsymbol}] pricefeed error: {e}")
+        print(f"  [{mcsymbol}] pricefeed error: {e}", file=sys.stderr)
         return None
 
 
@@ -295,8 +311,8 @@ def extract_features(d: dict) -> dict:
         "ret_ytd":              _sf(d.get("clYtdPerChange")),
         "high_52w":             h52,
         "low_52w":              l52,
-        "high_52w_date":        d.get("52HDate"),
-        "low_52w_date":         d.get("52LDate"),
+        "high_52w_date":        d.get("52HDate") if d.get("52HDate") else None,
+        "low_52w_date":         d.get("52LDate") if d.get("52LDate") else None,
         "dist_52w_high":        dist_52h,
         "dist_52w_low":         dist_52l,
         "days_from_52wh":       _days_since(d.get("52HDate")),
@@ -432,24 +448,24 @@ def backfill_technical_signals(symbol: str, ts_floor: str, f: dict, con) -> None
 
     cur.execute("""
         UPDATE technical_signals SET
-            mc_cagr_3y           = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_3y)           ELSE NULL END,
-            mc_cagr_5y           = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_5y)           ELSE NULL END,
-            mc_cagr_10y          = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_10y)          ELSE NULL END,
-            mc_ind_pe            = CASE WHEN date >= ? THEN COALESCE(?, mc_ind_pe)            ELSE NULL END,
-            mc_pe_vs_ind         = CASE WHEN date >= ? THEN COALESCE(?, mc_pe_vs_ind)         ELSE NULL END,
-            mc_consensus_pe      = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_pe)      ELSE NULL END,
-            mc_consensus_pb      = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_pb)      ELSE NULL END,
-            mc_del_pct_3d        = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_3d)        ELSE NULL END,
-            mc_del_pct_5d        = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_5d)        ELSE NULL END,
-            mc_del_pct_20d       = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_20d)       ELSE NULL END,
-            mc_del_acceleration  = CASE WHEN date >= ? THEN COALESCE(?, mc_del_acceleration)  ELSE NULL END,
-            mc_circuit_dist_pct  = CASE WHEN date >= ? THEN COALESCE(?, mc_circuit_dist_pct)  ELSE NULL END,
-            mc_fno_eligible      = CASE WHEN date >= ? THEN COALESCE(?, mc_fno_eligible)      ELSE NULL END,
-            mc_price_cash        = CASE WHEN date >= ? THEN COALESCE(?, mc_price_cash)        ELSE NULL END,
-            mc_consensus_eps     = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_eps)     ELSE NULL END,
-            mc_eps_vs_cons       = CASE WHEN date >= ? THEN COALESCE(?, mc_eps_vs_cons)       ELSE NULL END,
-            mc_pe_fwd_discount   = CASE WHEN date >= ? THEN COALESCE(?, mc_pe_fwd_discount)   ELSE NULL END
-        WHERE symbol = ?
+            mc_cagr_3y           = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_3y)           ELSE mc_cagr_3y END,
+            mc_cagr_5y           = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_5y)           ELSE mc_cagr_5y END,
+            mc_cagr_10y          = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_10y)          ELSE mc_cagr_10y END,
+            mc_ind_pe            = CASE WHEN date >= ? THEN COALESCE(?, mc_ind_pe)            ELSE mc_ind_pe END,
+            mc_pe_vs_ind         = CASE WHEN date >= ? THEN COALESCE(?, mc_pe_vs_ind)         ELSE mc_pe_vs_ind END,
+            mc_consensus_pe      = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_pe)      ELSE mc_consensus_pe END,
+            mc_consensus_pb      = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_pb)      ELSE mc_consensus_pb END,
+            mc_del_pct_3d        = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_3d)        ELSE mc_del_pct_3d END,
+            mc_del_pct_5d        = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_5d)        ELSE mc_del_pct_5d END,
+            mc_del_pct_20d       = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_20d)       ELSE mc_del_pct_20d END,
+            mc_del_acceleration  = CASE WHEN date >= ? THEN COALESCE(?, mc_del_acceleration)  ELSE mc_del_acceleration END,
+            mc_circuit_dist_pct  = CASE WHEN date >= ? THEN COALESCE(?, mc_circuit_dist_pct)  ELSE mc_circuit_dist_pct END,
+            mc_fno_eligible      = CASE WHEN date >= ? THEN COALESCE(?, mc_fno_eligible)      ELSE mc_fno_eligible END,
+            mc_price_cash        = CASE WHEN date >= ? THEN COALESCE(?, mc_price_cash)        ELSE mc_price_cash END,
+            mc_consensus_eps     = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_eps)     ELSE mc_consensus_eps END,
+            mc_eps_vs_cons       = CASE WHEN date >= ? THEN COALESCE(?, mc_eps_vs_cons)       ELSE mc_eps_vs_cons END,
+            mc_pe_fwd_discount   = CASE WHEN date >= ? THEN COALESCE(?, mc_pe_fwd_discount)   ELSE mc_pe_fwd_discount END
+        WHERE symbol = ? AND date >= ?
     """, (
         ts_floor, f.get("cagr_3y"), ts_floor, f.get("cagr_5y"), ts_floor, f.get("cagr_10y"),
         ts_floor, f.get("ind_pe"), ts_floor, f.get("pe_vs_ind"),
@@ -458,7 +474,9 @@ def backfill_technical_signals(symbol: str, ts_floor: str, f: dict, con) -> None
         ts_floor, del_acc, ts_floor, f.get("circuit_dist_pct"), ts_floor, fno_elig,
         ts_floor, f.get("price_cash"), ts_floor, f.get("consensus_eps"),
         ts_floor, f.get("eps_vs_cons"), ts_floor, f.get("pe_fwd_discount"),
-        symbol,
+        # Rows before the floor only ever took the ELSE (keep) branch, but WHERE symbol = ? alone
+        # still rewrote all of them: 115,629 tuples / 216MB WAL per run vs 2,535 / 6MB bounded.
+        symbol, ts_floor,
     ))
     con.commit()
 
@@ -504,6 +522,8 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", default=None)
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch even if data is already fresh for today")
     args = parser.parse_args()
 
     con = connect()
@@ -514,9 +534,17 @@ def main() -> None:
         print("[MCPricefeed] No stocks with mcsymbol found.")
         return
 
+    today = date.today().isoformat()
+    if not args.force and not args.symbol:
+        from fetch_utils import filter_stale_symbols
+        stocks = filter_stale_symbols(con, stocks, "mc_pricefeed_daily", date_col="date", as_of_date=today)
+        if not stocks:
+            print(f"[MCPricefeed] All stocks already up to date for {today}. Zero network calls needed.")
+            con.close()
+            return
+
     print(f"[MCPricefeed] Fetching {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)…")
     session = requests.Session()
-    today = date.today().isoformat()
     # ts_floor anchors backfill_technical_signals' write guard to the last completed trading
     # session (not raw date.today()) -- see that function's docstring for why. `today` above
     # is kept as-is for upsert_row/append_pe_pb_history, which genuinely want the actual
@@ -557,3 +585,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

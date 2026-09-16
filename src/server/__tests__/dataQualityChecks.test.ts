@@ -1,13 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockRow: { current: Record<string, any> | undefined } = { current: undefined };
+const mockRows: { current: Array<Record<string, any>> } = { current: [] };
+const dbRunCalls: Array<{ sql: string; params: any[] }> = [];
 vi.mock('../dbAsync', () => ({
   dbGet: vi.fn(async () => mockRow.current),
-  dbRun: vi.fn(async () => {}),
+  dbAll: vi.fn(async () => mockRows.current),
+  dbRun: vi.fn(async (sql: string, params: any[] = []) => { dbRunCalls.push({ sql, params }); }),
   dbExec: vi.fn(async () => {}),
 }));
 
-import { DATA_QUALITY_CHECKS, daysStale, tradingDaysStale, safeRatio, runDataQualityChecks } from '../dataQualityChecks';
+import {
+  DATA_QUALITY_CHECKS, daysStale, tradingDaysStale, safeRatio, runDataQualityChecks,
+  getLatestDataQualityResults, DQ_CHECK_CONCURRENCY,
+} from '../dataQualityChecks';
+import { dbGet } from '../dbAsync';
 
 describe('daysStale', () => {
   const now = new Date('2026-07-19T12:00:00Z');
@@ -130,6 +137,29 @@ describe('individual evaluate() functions', () => {
     expect(r.status).toBe('pass');
   });
 
+  it('ohlcv-exit-carryforward passes when no symbol carries bars past its exchange exit', () => {
+    const r = byId('ohlcv-exit-carryforward').evaluate(undefined, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toContain('no bars past');
+  });
+
+  it('ohlcv-exit-carryforward warns on a small post-exit residue', () => {
+    const r = byId('ohlcv-exit-carryforward').evaluate({ symbols: 3, bars: 12 }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('3 post-exit symbol');
+  });
+
+  it('ohlcv-exit-carryforward fails on the AF-20260914-05-shaped accumulation', () => {
+    const r = byId('ohlcv-exit-carryforward').evaluate({ symbols: 48, bars: 3199 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('fabricated bar');
+  });
+
+  it('ohlcv-exit-carryforward fails on many symbols even when each is small (the guard-fell-open shape)', () => {
+    const r = byId('ohlcv-exit-carryforward').evaluate({ symbols: 12, bars: 24 }, now);
+    expect(r.status).toBe('fail');
+  });
+
   it('ohlcv-freshness-coverage does not false-warn on a Monday morning check for Friday data (regression)', () => {
     const mondayMorning = new Date('2026-08-03T03:10:00Z'); // ~08:40 IST
     const r = byId('ohlcv-freshness-coverage').evaluate({ last_date: '2026-07-31', symbols: 2436 }, mondayMorning);
@@ -185,7 +215,7 @@ describe('individual evaluate() functions', () => {
     const r = byId('regime-edge-trust-floor').evaluate(
       { breached_count: 0, ready_count: 2, latest_computed_at: now.toISOString() }, now);
     expect(r.status).toBe('pass');
-    expect(r.detail).toMatch(/clear the live-edge trust floor/);
+    expect(r.detail).toMatch(/clear live-edge trust floor/);
   });
 
   it('regime-edge-trust-floor warns if its own snapshot has gone stale, even with no breach', () => {
@@ -194,6 +224,58 @@ describe('individual evaluate() functions', () => {
       { breached_count: 0, ready_count: 2, latest_computed_at: now.toISOString() }, fourDaysLater);
     expect(r.status).toBe('warn');
     expect(r.detail).toMatch(/refresh/);
+  });
+
+  it('screener-sentiment-catalog-master-divergence passes when nothing to compare yet', () => {
+    const r = byId('screener-sentiment-catalog-master-divergence').evaluate({ total: 0, mismatched: 0 }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('screener-sentiment-catalog-master-divergence passes when every pair agrees', () => {
+    const r = byId('screener-sentiment-catalog-master-divergence').evaluate({ total: 900, mismatched: 0 }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toMatch(/agree/);
+  });
+
+  it('screener-sentiment-catalog-master-divergence warns below the 5% floor', () => {
+    const r = byId('screener-sentiment-catalog-master-divergence').evaluate({ total: 1000, mismatched: 10 }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/10\/1000/);
+  });
+
+  it('screener-sentiment-catalog-master-divergence fails above the 5% floor (matches the live AF-20260829-12/20 reading)', () => {
+    const r = byId('screener-sentiment-catalog-master-divergence').evaluate({ total: 972, mismatched: 222 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/222\/972/);
+  });
+
+  it('NEGATIVE CONTROL: screener-sentiment-catalog-master-divergence SQL actually checks direction, not just inequality', () => {
+    // A bare `<>` would also flag two rows that mean the same thing with different casing/wording
+    // -- the check must specifically compare bullish/bearish/neutral, matching the class this
+    // repo's cross-writer-collision-audit exists to catch.
+    const sql = byId('screener-sentiment-catalog-master-divergence').sql!;
+    expect(sql).toMatch(/bullish/);
+    expect(sql).toMatch(/bearish/);
+    expect(sql).toMatch(/neutral/);
+    expect(sql).toMatch(/screener_catalog/);
+    expect(sql).toMatch(/screener_master/);
+  });
+
+  it('NEGATIVE CONTROL: regime-edge-trust-floor does not false-positive on a Friday snapshot checked Monday evening', () => {
+    // ml_calibration.py only runs weekdays (ml-daily-ops, '20 13 * * 1-5'). Friday 18:00 UTC to
+    // Monday 20:00 UTC is 3.083 RAW calendar days -- pre-fix (plain daysStale) that alone clears
+    // the >3 bar and prints the false "hasn't refreshed" warning purely off the Sat/Sun gap, even
+    // though only Monday's own not-yet-arrived run is missing. tradingDaysStale subtracts the
+    // 2 weekend days, giving ~1.08 -- correctly not stale. Live-caught 2026-08-17: this check's
+    // own message read "3.1d" on a Monday for a Friday snapshot that hadn't missed anything.
+    const fridaySnapshot = new Date('2026-08-14T18:00:00Z');
+    const mondayEvening = new Date('2026-08-17T20:00:00Z');
+    const r = byId('regime-edge-trust-floor').evaluate(
+      { breached_count: 1, ready_count: 2, latest_computed_at: fridaySnapshot.toISOString() }, mondayEvening);
+    // Must fall through to the breach-count branch (real signal), not the stale-refresh branch
+    // (false alarm) -- the tell is which message comes back.
+    expect(r.detail).toMatch(/1 of 2/);
+    expect(r.detail).not.toMatch(/hasn't refreshed/);
   });
 
   it('technical-signals-freshness-coverage fails on the exact silent-collapse regression (low coverage, job still "fresh")', () => {
@@ -213,6 +295,18 @@ describe('individual evaluate() functions', () => {
     const r = byId('technical-signals-freshness-coverage').evaluate(
       { total: 2200, scored: 1800, last_date: '2026-08-07' }, mondayMorning,
     );
+    expect(r.status).toBe('pass');
+  });
+
+  it('NEGATIVE CONTROL: mc-deals-news-freshness does not false-warn on a Friday row checked over the weekend', () => {
+    // MoneyControl Deals only publishes on trading days. Raw daysStale() read a Friday row as
+    // stale on the very next Sunday it was checked (>1 raw calendar day) -- live-confirmed
+    // 2026-08-19 (/temporal-correctness-audit): warn on 18/74 sampled Sundays, 1/3 Saturdays,
+    // 0/0 any weekday. tradingDaysStale() subtracts the Sat/Sun gap, same fix as
+    // technical-signals-freshness-coverage above.
+    const fridayRow = new Date('2026-08-14T18:00:00Z');
+    const sunday = new Date('2026-08-16T20:00:00Z');
+    const r = byId('mc-deals-news-freshness').evaluate({ last_date: fridayRow.toISOString() }, sunday);
     expect(r.status).toBe('pass');
   });
 
@@ -253,6 +347,68 @@ describe('individual evaluate() functions', () => {
   it('signal-outcomes-resolution-rate passes when the backlog is mostly resolved', () => {
     const r = byId('signal-outcomes-resolution-rate').evaluate({ total: 200, pending: 10 }, now);
     expect(r.status).toBe('pass');
+  });
+
+  describe('model-registry-active-ensemble (ml-promotion-gate-review, 2026-08-15)', () => {
+    it('fails when there is no active model at all', () => {
+      const r = byId('model-registry-active-ensemble').evaluate(
+        { active_trained_at: null, active_auc: null, last_run_at: null }, now);
+      expect(r.status).toBe('fail');
+    });
+
+    it('passes a fresh active model with a fresh run', () => {
+      const r = byId('model-registry-active-ensemble').evaluate(
+        { active_trained_at: '2026-07-15T00:00:00Z', active_auc: 0.65,
+          last_run_at: '2026-07-15T00:00:00Z' }, now);
+      expect(r.status).toBe('pass');
+    });
+
+    it('warns when the retrain job itself has not run in a long time', () => {
+      const r = byId('model-registry-active-ensemble').evaluate(
+        { active_trained_at: '2026-05-01T00:00:00Z', active_auc: 0.65,
+          last_run_at: '2026-05-01T00:00:00Z' }, now);
+      expect(r.status).toBe('warn');
+    });
+
+    it('does NOT warn when the active model is old but the job has kept running and correctly rejecting -- the fix', () => {
+      // The bug this check used to have: reading only the ACTIVE row's trained_at means a
+      // weekly retrain that keeps correctly rejecting a still-best stale baseline (the
+      // staleness-override safety valve hasn't fired yet) looked identical to a job that
+      // stopped running entirely. promote_or_register() writes a model_registry row on every
+      // run, promoted or rejected, so last_run_at is real evidence the job ran recently even
+      // though the ACTIVE row is 60 days old.
+      const r = byId('model-registry-active-ensemble').evaluate(
+        { active_trained_at: '2026-05-01T00:00:00Z', active_auc: 0.65,
+          last_run_at: '2026-07-15T00:00:00Z' }, now);
+      expect(r.status).toBe('pass');
+      expect(r.detail).toContain('active model is');
+    });
+  });
+
+  // ml-promotion-gate-review, 2026-08-19: 'ensemble' was the only model_registry model_name with
+  // a freshness check even though the other registry-backed engines write a row on
+  // every run the same way -- pins that all of them got the same check, and derives the list from
+  // DATA_QUALITY_CHECKS itself (not a hand-typed count) so a future model_promotion.py consumer
+  // silently missing this coverage would fail here, per this repo's own "a hand-enumerated
+  // allowlist only guards what someone remembered to list" lesson.
+  // (cs_ranker/online_sgd dropped from this list 2026-08-31 with their deactivation — their
+  // checks no longer exist in DATA_QUALITY_CHECKS by design, see dataQualityChecks.ts.)
+  describe('model-registry-active-* covers every model_registry consumer (ml-promotion-gate-review, 2026-08-19)', () => {
+    const now = new Date('2026-08-19T00:00:00Z');
+    for (const modelName of ['exit_policy', 'confluence_ml', 'BiLSTM']) {
+      it(`model-registry-active-${modelName} exists and passes on a fresh model + fresh run`, () => {
+        const r = byId(`model-registry-active-${modelName}`).evaluate(
+          { active_trained_at: '2026-08-15T00:00:00Z', active_auc: 0.6,
+            last_run_at: '2026-08-18T00:00:00Z' }, now);
+        expect(r.status).toBe('pass');
+      });
+
+      it(`model-registry-active-${modelName} fails when there is no active model at all`, () => {
+        const r = byId(`model-registry-active-${modelName}`).evaluate(
+          { active_trained_at: null, active_auc: null, last_run_at: null }, now);
+        expect(r.status).toBe('fail');
+      });
+    }
   });
 });
 
@@ -307,6 +463,52 @@ describe('trendlyne-screener-constituent-coverage (hand-rolled: per-screener, ag
   it('fails when discovery has never run, rather than dividing by zero into a false pass', () => {
     expect(check().evaluate({ total: 0, empty_count: 0 }, now).status).toBe('fail');
     expect(check().evaluate(undefined, now).status).toBe('fail');
+  });
+});
+
+describe('bulk-endpoint-fetcher-coverage (hand-rolled: a fresh table is not a delivered feature, AF-20260904-01/02/03)', () => {
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+  const check = () => byId('bulk-endpoint-fetcher-coverage');
+  const healthyRow = {
+    canon_universe: 2366, fno_universe: 210,
+    bhav_n: 2329, bhav_date: '2026-09-04',
+    preopen_n: 2364, preopen_date: '2026-09-04',
+    opt_n: 160, opt_date: '2026-09-04',
+  };
+
+  it('passes at the live-measured 2026-09-04 baseline for all three tables — must not cry wolf on correct data', () => {
+    expect(check().evaluate(healthyRow, new Date()).status).toBe('pass');
+  });
+
+  it('fails on the exact shape AF-20260904-01 measured: bhavcopy-style table collapses to a sliver of the canonical universe', () => {
+    // mc_pattern_signals' real 2,338 -> 68 collapse, reproduced against nse_universe_history's
+    // shape (not literally that table, which this check deliberately excludes per its own
+    // comment — the point is the mechanism, a bulk response containing only currently-active
+    // rows instead of one row per symbol).
+    const r = check().evaluate({ ...healthyRow, bhav_n: 68 }, new Date());
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('nse_universe_history');
+  });
+
+  it('fails on the exact shape this session measured live: preopen stuck at the F&O-only count for a week', () => {
+    const r = check().evaluate({ ...healthyRow, preopen_n: 210 }, new Date());
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('preopen_stock_snapshot');
+  });
+
+  it('does not fail so_option_chain at its normal ~72-78% F&O-coverage band', () => {
+    expect(check().evaluate({ ...healthyRow, opt_n: 151 }, new Date()).status).toBe('pass');
+  });
+
+  it('fails so_option_chain on the real 2026-09-01 dip (36/210), but not the normal band', () => {
+    const r = check().evaluate({ ...healthyRow, opt_n: 36 }, new Date());
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('so_option_chain');
+  });
+
+  it('fails outright when nse_stocks itself is empty rather than dividing by zero into a false pass', () => {
+    expect(check().evaluate({ ...healthyRow, canon_universe: 0 }, new Date()).status).toBe('fail');
+    expect(check().evaluate(undefined, new Date()).status).toBe('fail');
   });
 });
 
@@ -418,7 +620,149 @@ describe('runDataQualityChecks (orchestration)', () => {
       expect(['pass', 'warn', 'fail', 'error']).toContain(r.status);
     }
   });
+
+  // A removed check's last verdict stayed readable forever: persistResult() upserts per
+  // check_id and never deletes, so 'deploy-drift'/'port-drift' (removed 2026-08-29) were still
+  // being reported as failing by the daily digest on 2026-08-31. Both halves are guarded — the
+  // sweep purges, and the read filters — because either alone leaves one path exposed.
+  it('purges snapshot rows for check ids the sweep did not produce', async () => {
+    dbRunCalls.length = 0;
+    await runDataQualityChecks(new Date('2026-07-19T12:00:00Z'));
+
+    const purge = dbRunCalls.find(c => /DELETE FROM data_quality_results/i.test(c.sql));
+    expect(purge, 'sweep must delete rows for checks that no longer exist').toBeDefined();
+    expect(purge!.sql).toMatch(/NOT IN/i);
+    expect(purge!.params.length).toBe(DATA_QUALITY_CHECKS.length);
+    expect(purge!.params).toContain(DATA_QUALITY_CHECKS[0].id);
+    expect(purge!.params).not.toContain('deploy-drift');
+  });
+
+  // 169 checks ran strictly one at a time: 45.7s warm / 93.2s cold per sweep (measured
+  // 2026-09-11), every 15 minutes. Each check is an independent pool query, so a small fixed
+  // number may run at once -- bounded so a sweep never takes a large share of the 22-connection
+  // pool the request path also uses.
+  it('runs checks concurrently, bounded by DQ_CHECK_CONCURRENCY, in registry order', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    vi.mocked(dbGet).mockImplementation(async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise(r => setTimeout(r, 2));
+      inFlight--;
+      return mockRow.current;
+    });
+    try {
+      const results = await runDataQualityChecks(new Date('2026-07-19T12:00:00Z'));
+      expect(peak).toBeGreaterThan(1);
+      expect(peak).toBeLessThanOrEqual(DQ_CHECK_CONCURRENCY);
+      expect(results.map(r => r.id)).toEqual(DATA_QUALITY_CHECKS.map(c => c.id));
+    } finally {
+      vi.mocked(dbGet).mockImplementation(async () => mockRow.current);
+    }
+  });
+
+  it('persists every check before purging orphans', async () => {
+    dbRunCalls.length = 0;
+    await runDataQualityChecks(new Date('2026-07-19T12:00:00Z'));
+    const purgeAt = dbRunCalls.findIndex(c => /DELETE FROM data_quality_results/i.test(c.sql));
+    const snapshots = dbRunCalls.slice(0, purgeAt).filter(c => /INSERT INTO data_quality_results/i.test(c.sql));
+    expect(snapshots.length).toBe(DATA_QUALITY_CHECKS.length);
+  });
 });
+
+describe('getLatestDataQualityResults (decommissioned-check leakage)', () => {
+  beforeEach(() => { mockRows.current = []; });
+
+  it('drops persisted rows whose check no longer exists in the registry', async () => {
+    const liveId = DATA_QUALITY_CHECKS[0].id;
+    mockRows.current = [
+      { check_id: liveId, label: 'live', category: 'reference', critical: 1, status: 'pass', detail: 'ok' },
+      { check_id: 'deploy-drift', label: 'gone', category: 'reference', critical: 1, status: 'fail', detail: 'checker stopped' },
+    ];
+
+    const results = await getLatestDataQualityResults();
+
+    expect(results.map(r => r.id)).toEqual([liveId]);
+    expect(results.some(r => r.status === 'fail')).toBe(false);
+  });
+});
+
+// ── pg-backup-recency ────────────────────────────────────────────────────────────────
+// scripts/backup_pg.py existed since P5 hardening but was scheduled NOWHERE, so it had never
+// run — and no check could reveal that, because a backup leaves no trace in any data table.
+// The "never ran" case below is the one that was live until 2026-08-19; it must be a hard
+// fail, not a pass-by-absence, or this check reproduces the very blind spot it exists to close.
+describe('pg-backup-recency', () => {
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+  const now = new Date('2026-08-19T12:00:00Z');
+  const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
+
+  it('is critical — it is the only check watching whether the data still exists at all', () => {
+    expect(byId('pg-backup-recency').critical).toBe(true);
+  });
+
+  it('FAILS when no heartbeat row exists (the never-scheduled case, live until 2026-08-19)', () => {
+    const r = byId('pg-backup-recency').evaluate(undefined, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/never run/i);
+  });
+
+  it('FAILS when the job has run but never once succeeded', () => {
+    const r = byId('pg-backup-recency').evaluate(
+      { last_status: 'failed', last_run_at: daysAgo(0.5), last_success_at: null, last_error: 'disk full' },
+      now,
+    );
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/NEVER succeeded/i);
+    expect(r.detail).toMatch(/disk full/);
+  });
+
+  it('passes on a fresh verified backup', () => {
+    const r = byId('pg-backup-recency').evaluate(
+      { last_status: 'success', last_run_at: daysAgo(0.4), last_success_at: daysAgo(0.4), last_error: null },
+      now,
+    );
+    expect(r.status).toBe('pass');
+  });
+
+  it('warns after one missed nightly run, fails after three', () => {
+    const check = byId('pg-backup-recency');
+    const at = (d: number) => check.evaluate(
+      { last_status: 'success', last_run_at: daysAgo(d), last_success_at: daysAgo(d), last_error: null },
+      now,
+    ).status;
+    expect(at(2.5)).toBe('warn');
+    expect(at(4)).toBe('fail');
+  });
+
+  it('warns when a verified backup is recent but the LATEST run failed', () => {
+    // The dangerous middle state: yesterday's dump is fine, tonight's silently broke. Without
+    // this branch the check reads 'pass' and the failure is invisible until the gap widens.
+    const r = byId('pg-backup-recency').evaluate(
+      { last_status: 'failed', last_run_at: daysAgo(0.2), last_success_at: daysAgo(1.2),
+        last_error: 'pg_restore --list failed (corrupt dump?)' },
+      now,
+    );
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/MOST RECENT run failed/);
+  });
+
+  it('does NOT weekend-adjust — a Saturday disk loss costs as much as a Tuesday one', () => {
+    // Deliberately not tradingDaysStale(): the DB accumulates rows 24/7. If this ever gets
+    // "fixed" to be trading-day-aware, a Fri→Mon outage would read as ~1 day and pass.
+    const monday = new Date('2026-08-17T03:10:00Z');           // Monday
+    const r = byId('pg-backup-recency').evaluate(
+      { last_status: 'success', last_run_at: '2026-08-13T20:00:00Z',
+        last_success_at: '2026-08-13T20:00:00Z', last_error: null },
+      monday,
+    );
+    expect(r.status).toBe('fail');
+  });
+});
+
+// NOTE: the 'deploy-drift' describe block (and the 'port-drift' check, which had no
+// dedicated tests) were removed 2026-08-29 (AF-20260829-17) along with their DATA_QUALITY_CHECKS
+// entries — see dataQualityChecks.ts's note at the removal site for why.
 
 // ── Regression guards for the four defects the 2026-08-11 audit found live ────────────
 // Each was invisible for weeks because the table was fresh and full the whole time -- just
@@ -503,5 +847,204 @@ describe('audit regression guards (2026-08-11)', () => {
       'unified-recommendations-liquid-coverage',
       'stock-delivery-trades-not-duplicated',
     ]) expect(ids).toContain(id);
+  });
+});
+
+describe('technical-signals-provenance-timestamps', () => {
+  const check = DATA_QUALITY_CHECKS.find(c => c.id === 'technical-signals-provenance-timestamps')!;
+  const now = new Date('2026-08-15T12:00:00Z');
+
+  it('is registered', () => {
+    expect(check).toBeDefined();
+  });
+
+  it('NEGATIVE CONTROL: fails when the columns are dead — the exact pre-migration state', () => {
+    // All 73,563 rows had created_at/updated_at NULL before migration 1787040000000. This is the
+    // state that made the 2026-08-15 win_probability look-ahead undetectable; if this check
+    // cannot fail on it, it protects nothing.
+    const r = check.evaluate!({ todays_rows: 2192, created_at_set: 0, updated_at_set: 0 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('created_at');
+    expect(r.detail).toContain('updated_at');
+  });
+
+  it('fails when only updated_at is dead (DEFAULT applied but trigger missing)', () => {
+    // The realistic partial-failure mode: a DEFAULT fires on INSERT so created_at populates,
+    // while updated_at stays NULL because the BEFORE UPDATE trigger was dropped. That still
+    // destroys write-time provenance for the later enrichment UPDATEs, which is the whole point.
+    const r = check.evaluate!({ todays_rows: 2192, created_at_set: 2192, updated_at_set: 0 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('updated_at');
+    expect(r.detail).not.toContain('created_at and');
+  });
+
+  it('passes when both are populated', () => {
+    const r = check.evaluate!({ todays_rows: 2192, created_at_set: 2192, updated_at_set: 2192 }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('passes vacuously only when no rows exist yet today (holiday/pre-scan)', () => {
+    const r = check.evaluate!({ todays_rows: 0, created_at_set: 0, updated_at_set: 0 }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toContain('nothing to check');
+  });
+});
+
+describe('win-probability-scored-in-time', () => {
+  const check = DATA_QUALITY_CHECKS.find(c => c.id === 'win-probability-scored-in-time')!;
+  const now = new Date('2026-08-15T12:00:00Z');
+
+  it('is registered', () => expect(check).toBeDefined());
+
+  it('NEGATIVE CONTROL: fails on a multi-day scoring lag, whatever the cadence turns out to be', () => {
+    // A value written days after its signal date cannot have been traded on at the next open.
+    // That property is about the LAG, not about how often the scorer runs -- an earlier version
+    // of this comment asserted `--score` runs only in the weekly retrain, which measurement.md
+    // withdrew on 2026-08-15 (it runs daily via queues.ts:1037 `pythonApi.scorePending()`).
+    // The scenario below is valid either way; only the explanation was wrong.
+    const r = check.evaluate!({ scored: 2192, avg_lag_days: 5.2, max_lag_days: 8.9 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('look-ahead');
+  });
+
+  it('NEGATIVE CONTROL: refuses to render a verdict from a single manual write', () => {
+    // Live on 2026-08-16 exactly ONE row carried a stamp, at 1.41d -- which measurement.md
+    // records as "an artifact of a manual test write, NOT the real cadence". Without the
+    // minimum-sample floor this row alone drove a WARN on 36/36 consecutive runs, which is what
+    // put this check on the unvarying-verdict meta-check's list. Same shape as measurement.md's
+    // "dramatic number from a small filtered subsample" (t=-3.44 -> -1.28 once re-anchored).
+    // Pre-fix this returned 'warn'; it must now decline to judge.
+    const r = check.evaluate!({ scored: 1, avg_lag_days: 1.41, max_lag_days: 1.41 }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toMatch(/too thin to judge/i);
+  });
+
+  it('the minimum-sample floor does not swallow a real defect once a full batch lands', () => {
+    // 2,192 rows at a 5.2d lag is a genuine batch and must still FAIL, not be excused as thin.
+    const r = check.evaluate!({ scored: 2192, avg_lag_days: 5.2, max_lag_days: 8.9 }, now);
+    expect(r.status).toBe('fail');
+  });
+
+  it('warns when the write lands after the next open but is not yet a backfilled label', () => {
+    const r = check.evaluate!({ scored: 2192, avg_lag_days: 1.8, max_lag_days: 2.4 }, now);
+    expect(r.status).toBe('warn');
+  });
+
+  it('passes on same-evening scoring, which is genuinely actionable next-open', () => {
+    // The 1.41d lag measured live on 2026-08-15 sits in the warn band by design: a value written
+    // ~34h after the signal date has missed the next session's open.
+    const r = check.evaluate!({ scored: 2192, avg_lag_days: 0.4, max_lag_days: 0.9 }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('passes explicitly-uninformatively before the scorer has run at all', () => {
+    const r = check.evaluate!({ scored: 0, avg_lag_days: null, max_lag_days: null }, now);
+    expect(r.status).toBe('pass');
+    // Assert the BEHAVIOUR (it names the migration and says nothing has landed yet), not a
+    // substring of one sentence -- the previous assertion pinned the phrase "has not run" from
+    // wording that encoded the withdrawn weekly-cadence claim, so correcting the claim broke a
+    // test that was never about cadence.
+    expect(r.detail).toContain('1787050000000');
+  });
+});
+
+describe('dq-uninformative-checks', () => {
+  const check = DATA_QUALITY_CHECKS.find(c => c.id === 'dq-uninformative-checks')!;
+  const now = new Date('2026-08-17T12:00:00Z');
+
+  it('is registered', () => expect(check).toBeDefined());
+
+  it('NEGATIVE CONTROL: an always-PASS check with 200+ runs is now flagged (was invisible pre-fix)', () => {
+    // Found live 2026-08-17 (/threshold-calibration-audit): the SQL only ever computed
+    // stuck_bad, so a check that is structurally incapable of ever failing had no way to
+    // surface here no matter how much history accumulated. This is the "candidate list", not
+    // proof any one of them is broken -- status is 'warn', matching stuck_bad's severity.
+    const r = check.evaluate!({ judged: 50, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 3, stuck_good_ids: 'foo, bar, baz' }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('passed on EVERY one of their last 200+ runs');
+    expect(r.detail).toContain('foo, bar, baz');
+  });
+
+  it('does not flag stuck-good below the 200-run bar, even if the same check would clear the 10-run stuck-bad bar', () => {
+    // A check that has simply been healthy for a day or two must not read the same as one that
+    // can never fail -- that distinction is the entire point of the higher bar.
+    const r = check.evaluate!({ judged: 5, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 0, stuck_good_ids: '' }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('reports stuck-bad and stuck-good together when both fire in the same run', () => {
+    const r = check.evaluate!({ judged: 50, stuck_bad: 1, stuck_bad_ids: 'dead-check', stuck_good: 2, stuck_good_ids: 'a, b' }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('dead-check');
+    expect(r.detail).toContain('a, b');
+  });
+
+  it('passes when nothing is stuck either direction', () => {
+    const r = check.evaluate!({ judged: 120, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 0, stuck_good_ids: '' }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toContain('none stuck on a single verdict either direction');
+  });
+});
+
+describe('technical-signals-feature-coverage — self-baselining (AF-20260816-11)', () => {
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find((c) => c.id === id)!;
+  const now = new Date('2026-09-10T12:00:00Z');
+
+  // The check used to count columns that were 100% NULL on ONE anchor date and grade that
+  // scalar against a baseline of 53 (warn>55 / fail>65). Measured live 2026-09-10, that
+  // quantity's own healthy range is 5..50 across 12 consecutive dates — a spread of 45
+  // against a 10-wide warn band — because different writers land on different weekdays.
+  // Every date read `pass`, so a regression that killed 20 columns on a good day (5 -> 25)
+  // was invisible: `recurring-bugs.md`'s "a monitor that can never fire carries no
+  // information", which is harder to notice than a noisy one because silence reads healthy.
+  //
+  // Widening to a windowed scalar was measured too and REJECTED: the K=10 dead count over 25
+  // past anchors ran 4,4,4,7,8,8,7,28,...,76 — non-stationary, because the table gains and
+  // retires writers over time, so any fixed threshold rots exactly like the 53 did.
+  //
+  // The shipped design is a SET DIFFERENCE against the table's own recent past: a column is
+  // "newly dead" only if it was written at least once in the reference window and has zero
+  // non-null values across the whole recent window. Measured null over 18 anchors: 0,1,2
+  // (p50=1), and the non-zero cases are real, documented writer stops (`pead_score`, whose
+  // nightly schedule was retired 2026-08-20, and `flyer_probability`). A retirement ages out
+  // of the reference window on its own, so the warn is transient by construction.
+
+  it('passes when no column stopped being written', () => {
+    const r = byId('technical-signals-feature-coverage').evaluate(
+      { newly_dead_count: 0, newly_dead_cols: null, recent_dates: 10, ref_dates: 10 }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('warns and NAMES the column when one writer stops', () => {
+    const r = byId('technical-signals-feature-coverage').evaluate(
+      { newly_dead_count: 1, newly_dead_cols: 'pead_score', recent_dates: 10, ref_dates: 10 }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('pead_score');
+  });
+
+  it('fails when several writers stop at once', () => {
+    // >=3 is outside the measured null (max 2) and means a systemic regression, not one
+    // deliberate retirement.
+    const r = byId('technical-signals-feature-coverage').evaluate(
+      { newly_dead_count: 3, newly_dead_cols: 'a, b, c', recent_dates: 10, ref_dates: 10 }, now);
+    expect(r.status).toBe('fail');
+  });
+
+  it('does not fire before enough history exists to baseline against', () => {
+    // A young table has no reference window; firing there would be the false-positive the
+    // old fixed baseline produced. Must not report a regression it cannot have measured.
+    const r = byId('technical-signals-feature-coverage').evaluate(
+      { newly_dead_count: 7, newly_dead_cols: 'a, b', recent_dates: 3, ref_dates: 0 }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toMatch(/history/i);
+  });
+
+  it('no longer grades against the retired fixed baseline of 53', () => {
+    // Negative control for the actual defect: 50 columns dead on a single date was a NORMAL
+    // reading (measured 2026-08-26), and the old check called it pass purely because 50 < 55.
+    // The new check must not consult a scalar dead-count baseline at all.
+    const check = byId('technical-signals-feature-coverage');
+    expect(check.sql).not.toMatch(/baseline 53/);
+    expect(JSON.stringify(check.sql)).toMatch(/newly_dead/);
   });
 });

@@ -1,6 +1,6 @@
 import { trpc } from '../lib/trpc';
-import { Card } from './Card';
 import { RefreshCw, AlertCircle } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 export default function OptionsIntelligence() {
   const { data: pcrData, isLoading, error, refetch } = trpc.getOptionsIntelligence.useQuery(undefined, {
@@ -9,21 +9,21 @@ export default function OptionsIntelligence() {
   const fetchPcr = trpc.runPcrFetch.useMutation({ onSuccess: () => refetch() });
 
   if (isLoading) {
-    return <div className="text-gray-400 p-8 text-center animate-pulse">Loading Options Intelligence...</div>;
+    return <div className="text-slate-400 p-8 text-center animate-pulse">Loading Options Intelligence...</div>;
   }
 
   if (error) {
-    return <div className="text-red-400 p-8 text-center">Error loading PCR data: {error.message}</div>;
+    return <div className="text-rose-400 p-8 text-center">Error loading PCR data: {error.message}</div>;
   }
 
   if (!pcrData || pcrData.length === 0) {
     return (
       <div className="flex flex-col items-center gap-4 p-12 text-center">
-        <AlertCircle className="w-12 h-12 text-gray-500" />
+        <AlertCircle className="w-12 h-12 text-slate-500" />
         <div>
-          <p className="text-gray-300 font-medium mb-1">No PCR data available</p>
-          <p className="text-gray-500 text-sm">Click below to fetch live Put-Call Ratio data from NSE via the Python engine.</p>
-          <p className="text-gray-600 text-xs mt-1">Requires the Python backend to be running on port 8000.</p>
+          <p className="text-slate-300 font-medium mb-1">No PCR data available</p>
+          <p className="text-slate-500 text-sm">Click below to fetch live Put-Call Ratio data from NSE via the Python engine.</p>
+          <p className="text-slate-600 text-xs mt-1">Requires the Python backend to be running on port 8000.</p>
         </div>
         <button
           onClick={() => fetchPcr.mutate({})}
@@ -34,7 +34,7 @@ export default function OptionsIntelligence() {
           {fetchPcr.isPending ? 'Fetching…' : 'Fetch PCR Data'}
         </button>
         {fetchPcr.data && !fetchPcr.data.success && (
-          <p className="text-red-400 text-xs">{fetchPcr.data.error}</p>
+          <p className="text-rose-400 text-xs">{fetchPcr.data.error}</p>
         )}
       </div>
     );
@@ -44,15 +44,15 @@ export default function OptionsIntelligence() {
     <div className="space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-cyan-400">
+          <h2 className="v1-title-page">
             Options Intelligence
           </h2>
-          <p className="text-gray-400 text-sm mt-1">Live Put-Call Ratios for Nifty 50 constituents.</p>
+          <p className="text-slate-400 text-sm mt-1">Live Put-Call Ratios for Nifty 50 constituents.</p>
         </div>
         <button
           onClick={() => fetchPcr.mutate({})}
           disabled={fetchPcr.isPending}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-300 text-sm transition-colors"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-sm transition-colors"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${fetchPcr.isPending ? 'animate-spin' : ''}`} />
           {fetchPcr.isPending ? 'Refreshing…' : 'Refresh'}
@@ -62,54 +62,56 @@ export default function OptionsIntelligence() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {pcrData.map((item: any, idx: number) => {
           const pcrValue = parseFloat(item.pcr);
-          let pcrColor = 'text-gray-300';
-          let bgColor = 'bg-gray-800/50';
+          let pcrColor = 'text-slate-300';
+          let cardClass = 'v1-card-neutral';
           let statusText = 'Neutral';
 
           if (pcrValue > 1.5) {
             pcrColor = 'text-emerald-400';
-            bgColor = 'bg-emerald-900/20';
+            cardClass = 'v1-card-up';
             statusText = 'Oversold (Bullish)';
           } else if (pcrValue < 0.6) {
-            pcrColor = 'text-red-400';
-            bgColor = 'bg-red-900/20';
+            pcrColor = 'text-rose-400';
+            cardClass = 'v1-card-down';
             statusText = 'Overbought (Bearish)';
           } else if (pcrValue >= 1.0 && pcrValue <= 1.5) {
-            pcrColor = 'text-green-400';
+            pcrColor = 'text-emerald-400';
+            cardClass = 'v1-card-up';
             statusText = 'Mildly Bullish';
           } else if (pcrValue >= 0.6 && pcrValue < 1.0) {
             pcrColor = 'text-orange-400';
+            cardClass = 'v1-card-neutral';
             statusText = 'Mildly Bearish';
           }
 
           return (
-            <Card key={`${item.symbol}-${idx}`} className={`p-4 ${bgColor} border border-white/5`}>
+            <div key={`${item.symbol}-${idx}`} className={cn(cardClass, 'p-4')}>
               <div className="flex justify-between items-start mb-4">
                 <div>
                   <h3 className="font-semibold text-lg text-white">{item.symbol}</h3>
-                  <div className="text-xs text-gray-500">Exp: {item.expiry || 'N/A'}</div>
+                  <div className="text-xs text-slate-500">Exp: {item.expiry || 'N/A'}</div>
                 </div>
                 <div className={`text-right ${pcrColor}`}>
                   <div className="text-2xl font-bold">{pcrValue.toFixed(2)}</div>
-                  <div className="text-xs uppercase tracking-wider">{statusText}</div>
+                  <div className="text-xs font-display uppercase tracking-wider">{statusText}</div>
                 </div>
               </div>
 
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-400">Total Call OI:</span>
-                  <span className="text-gray-200">{item.total_call_oi?.toLocaleString() || '0'}</span>
+                  <span className="text-slate-400">Total Call OI:</span>
+                  <span className="text-slate-200">{item.total_call_oi?.toLocaleString() || '0'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-400">Total Put OI:</span>
-                  <span className="text-gray-200">{item.total_put_oi?.toLocaleString() || '0'}</span>
+                  <span className="text-slate-400">Total Put OI:</span>
+                  <span className="text-slate-200">{item.total_put_oi?.toLocaleString() || '0'}</span>
                 </div>
                 <div className="flex justify-between pt-2 mt-2 border-t border-white/5">
-                  <span className="text-gray-400">Market PCR:</span>
-                  <span className="text-gray-200">{item.market_pcr ? parseFloat(item.market_pcr).toFixed(2) : 'N/A'}</span>
+                  <span className="text-slate-400">Market PCR:</span>
+                  <span className="text-slate-200">{item.market_pcr ? parseFloat(item.market_pcr).toFixed(2) : 'N/A'}</span>
                 </div>
               </div>
-            </Card>
+            </div>
           );
         })}
       </div>

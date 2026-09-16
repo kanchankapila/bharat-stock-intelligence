@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 from src.server.strategy_optimizer import StrategyOptimizer, CATEGORIES, SOURCES
 
 
@@ -58,7 +59,7 @@ class TestTemporalSplit:
         # method to capture what train/test dataframes are passed to it.
         import sqlite3
 
-        conn = sqlite3.connect(':memory:')
+        conn = pg_memory_conn()
         # StrategyOptimizer._read_df() builds DataFrames via dict(row), which needs a mapping
         # row type (matches the row_factory convention every other test file in this suite
         # already uses for connections passed into production code) -- a plain tuple isn't one.
@@ -196,6 +197,49 @@ class TestPromotionGate:
         opt, calls = self._make_optimizer(monkeypatch, result)
         opt.run(dry_run=False, apply=True)
         assert calls['saved'] is True
+
+    def test_stale_connection_close_raising_does_not_lose_the_computed_result(self, monkeypatch):
+        """2026-08-29: live-observed -- a full grid search (888 computed overrides) was
+        discarded because self.conn.close() itself raised 'server closed the connection
+        unexpectedly' on the SAME stale connection the reconnect exists to replace, and that
+        raise happened BEFORE save_to_history/apply_to_scoring_engine. A failing close() must
+        not prevent the fresh connection from being opened or the writes from happening."""
+        result = {
+            'category_weights': {}, 'source_weights': {},
+            'optimised_test_objective': 0.60, 'baseline_test_objective': 0.55,
+            'baseline_win_rate': 0.5, 'optimised_win_rate': 0.6, 'improvement_pct': 9.1,
+        }
+        opt, calls = self._make_optimizer(monkeypatch, result)
+
+        class _DeadConn:
+            def close(self):
+                raise Exception("server closed the connection unexpectedly")
+
+        opt.conn = _DeadConn()
+        fresh_conn = object()
+        # 2026-09-10: the reconnect moved into the shared `db_compat.reconnect()` (the same
+        # guard had been written here and NOT propagated to backtest_optimizer.py, which then
+        # failed the identical way six weeks later), so the seam moved with it -- the call to
+        # intercept is now db_compat's OWN module-global `connect`, not the name
+        # strategy_optimizer imported.
+        #
+        # Patch the module OBJECT, not a dotted string. This package is importable under two
+        # distinct module identities -- `db_compat` (src/server is on sys.path) and
+        # `src.server.db_compat` (repo root is too) -- which are different objects with
+        # different attributes. `strategy_optimizer` resolves the top-level one, so patching
+        # the dotted `src.server.db_compat.connect` silently intercepts NOTHING: the real
+        # connect() runs and the test opens a live PRODUCTION connection while still looking
+        # like an ordinary assertion failure. Verified by the failure repr naming
+        # `db_compat.ConnWrapper`. Importing the object removes the ambiguity.
+        #
+        # The behaviour under test is unchanged: a failing close() must not cost the result.
+        import db_compat as _db_compat
+        monkeypatch.setattr(_db_compat, 'connect', lambda *a, **k: fresh_conn)
+
+        opt.run(dry_run=False, apply=True)  # must not raise
+
+        assert opt.conn is fresh_conn
+        assert calls == {'saved': True, 'applied_scoring': True, 'applied_screeners': True}
 
 
 class TestScreenerOverrideHoldoutGate:

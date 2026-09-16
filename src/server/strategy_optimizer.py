@@ -21,6 +21,8 @@ Run:  python strategy_optimizer.py
       python strategy_optimizer.py --dry-run      # show weights without saving
       python strategy_optimizer.py --apply         # also writes to screener_master
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import os, sys, json, datetime, argparse, warnings
 warnings.filterwarnings('ignore')
@@ -28,7 +30,7 @@ warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 
-from db_compat import connect
+from db_compat import connect, reconnect
 
 # Default weights — mirrors scoring_engine.py defaults
 DEFAULT_CATEGORY_WEIGHTS = {
@@ -70,6 +72,15 @@ class StrategyOptimizer:
         (tests) since both are mapping-like, so this needs no hardcoded column list even for
         the `SELECT sp.*` case in load_performance."""
         rows = self.conn.execute(sql, params).fetchall()
+        if not rows:
+            return pd.DataFrame()
+        first = rows[0]
+        if hasattr(first, 'keys'):
+            cols = list(first.keys())
+            return pd.DataFrame([tuple(r) for r in rows], columns=cols)
+        elif hasattr(first, '_fields'):
+            cols = list(first._fields)
+            return pd.DataFrame([tuple(r) for r in rows], columns=cols)
         return pd.DataFrame([dict(r) for r in rows])
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -183,7 +194,7 @@ class StrategyOptimizer:
         try:
             from scipy.optimize import differential_evolution
         except ImportError:
-            print("[Optimizer] scipy not installed. Run: pip install scipy")
+            print("[Optimizer] scipy not installed. Run: pip install scipy", file=sys.stderr)
             sys.exit(1)
 
         df = self.load_signal_outcomes_with_factors(horizon_days)
@@ -282,6 +293,9 @@ class StrategyOptimizer:
         # trendlyne_screener_stocks, but without scoping the join, a scan_id that happens to
         # numerically collide with an MC/ETnow screener_master row (2026-08-04 memory) could
         # pull in that unrelated provider's name/category instead of Trendlyne's own.
+        # PIT alignment (2026-09-14): filter to horizon_days=15 and ensure signal_date falls
+        # between first_seen and last_seen. Without this, unbounded Cartesian product generated
+        # 13.5M rows across all unconstrained dates and horizons, causing MemoryError (>20GB RAM).
         q = """
             SELECT sm.scan_id, sm.name, sm.source, sm.inferred_category,
                    so.signal_date, so.symbol, so.outcome
@@ -290,6 +304,9 @@ class StrategyOptimizer:
             JOIN signal_outcomes so ON so.symbol = tss.symbol
             WHERE so.outcome IN ('WIN','LOSS','NEUTRAL') AND so.signal_source = 'technical'
               AND sm.source = 'Trendlyne'
+              AND so.horizon_days = 15
+              AND (tss.first_seen IS NULL OR so.signal_date >= CAST(tss.first_seen AS date))
+              AND (tss.last_seen IS NULL OR so.signal_date <= CAST(tss.last_seen AS date))
         """
         raw = self._read_df(q)
         if raw.empty:
@@ -471,6 +488,33 @@ class StrategyOptimizer:
                   "NOT saving to screener_weight_history or applying to scoring_engine/screener_master.")
             return result
 
+        # Reconnect before writing. self.conn has been held open since __init__, including
+        # across the differential_evolution call above (potentially several minutes of pure
+        # CPU work) -- a connection idle that long can be closed server-side (Postgres
+        # idle/network timeout) without pool_pre_ping ever catching it, since pre_ping only
+        # validates a connection at POOL CHECKOUT and this one was checked out once and never
+        # returned. Live-observed twice (2026-08-25, 2026-08-26): save_to_history's INSERT
+        # failing with "server closed the connection unexpectedly" right after optimise()
+        # returned. Reconnecting here forces a fresh, pre_ping-validated connection for the
+        # write phase.
+        # Guarded on hasattr rather than unconditional: test_strategy_optimizer.py builds
+        # StrategyOptimizer via __new__ (bypassing __init__/self.conn entirely) and monkeypatches
+        # the three write methods below to no-ops, so there is nothing real to reconnect there.
+        # In production __init__ always sets self.conn, so the guard is a no-op and this always runs.
+        if hasattr(self, 'conn'):
+            # 2026-08-29: close() itself can throw here -- it's the SAME stale connection
+            # this comment already identified as potentially dead, and SQLAlchemy's close()
+            # tries a rollback first, which fails with the identical "server closed the
+            # connection unexpectedly" error the reconnect exists to work around.
+            # Live-observed: this crashed the run AFTER a full grid search + 888 computed
+            # overrides, discarding all of it, because the crash sits BEFORE
+            # save_to_history/apply_to_scoring_engine below.
+            # 2026-09-10: the guard moved into `db_compat.reconnect()`. It had been written
+            # here and NOT propagated to the sibling backtest_optimizer.py, which then failed
+            # the same way six weeks later -- one class, two files, one fixed. Sharing the
+            # helper is what stops a third instance.
+            self.conn = reconnect(self.conn)
+
         self.save_to_history(result, overrides)
         self.apply_to_scoring_engine(result)
         if apply:
@@ -521,3 +565,9 @@ if __name__ == "__main__":
         )
     finally:
         opt.close()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

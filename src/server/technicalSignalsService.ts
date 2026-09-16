@@ -20,6 +20,7 @@ import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { wsSignalService } from './websocketService';
 import { fetchDeliveryMap } from './deliveryFetcher';
 import { getAtrBarriers } from './atrBarriers';
+import { telegramService } from './telegramService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1069,6 +1070,21 @@ export function deriveTimeHorizon(signals: TechSignal[]): 'Positional (2-4W)' | 
   return signals.some(s => TREND_SIGNAL_TYPES.has(s.type)) ? 'Positional (2-4W)' : 'Swing (3-7D)';
 }
 
+// AF: technical_signals.stop_loss/targets are read back as NUMBERS by two different
+// consumers -- outcome_resolver.py's `CAST(ts.stop_loss AS REAL)` and the frontend's
+// `Number(pick.stop_loss)` (TodaysPicks.tsx) -- but getTradingSetup() below returns a
+// money-formatted display string ("₹60.33") for the Telegram digest. Writing that same
+// formatted string straight into the DB broke both readers: the SQL cast threw
+// `invalid input syntax for type double precision: "₹60.33"` and the frontend rendered
+// "SL ₹NaN" (Number() can't parse a string that already has a ₹ prefix baked in).
+// unifiedUpsertSql already regex-extracted a clean number for THIS reason (slNumeric,
+// below) -- this is that same extraction, shared, and applied to technical_signals too.
+export function parseMoneyToNumber(s: string | undefined | null): number | null {
+  if (!s) return null;
+  const m = s.match(/[\d,]+(?:\.\d+)?/);
+  return m ? parseFloat(m[0].replace(/,/g, '')) : null;
+}
+
 export async function getTradingSetup(r: SignalResult): Promise<{
   aiInsight: string; entryZone: string; stopLoss: string;
   targets: string; setupQuality: string; timeHorizon: string;
@@ -1128,19 +1144,30 @@ const BEARISH_SIGNAL_TYPES = new Set<SignalType>([
   'DEATH_CROSS', 'RSI_BEARISH_DIVERGENCE', 'DISTRIBUTION_DAY',
 ]);
 
-async function sendTelegramSignals(results: SignalResult[], date: string): Promise<void> {
-  const token  = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  if (!token || !chatId) return;
+// One digest per scan date. The scan fires every 30 minutes during market hours but this message
+// is the DAILY scan; the date is marked only after a successful send, so a failed dispatch is
+// retried by the next 30-min slot instead of being silently lost. Until 2026-09-09 this gate read
+// r.winProbability — a field the scan never populates (always undefined → 0) — against 0.85 on a
+// 0–1 scale whose live maximum is ~0.41, so the "NSE DAILY SCAN" Telegram digest never sent a
+// single message; a log review (0 sends across the last 5 days of logs, 0 rows with a
+// win_probability on the latest technical_signals date) is what surfaced it.
+let lastScanDigestSentDate: string | null = null;
 
-  const buySignals = results.filter(r =>
-    (r.winProbability ?? 0) >= 0.85 &&
+export async function sendTelegramSignals(results: SignalResult[], date: string): Promise<void> {
+  if (lastScanDigestSentDate === date) return;
+
+  // Same actionable threshold the scan itself uses to mirror rows into recommendation_log
+  // (signalScore >= 5, tightened to 7 in BEAR): the digest reports what the platform actually
+  // recorded as actionable today, not a private second opinion. Bearish-labeled signal types
+  // are excluded from a BUY-picks digest for the same reason they are excluded from the mirror.
+  const actionable = results.filter(r =>
+    r.signalScore >= (r.niftyRegime === 'BEAR' ? 7 : 5) &&
     r.signals.every(s => !BEARISH_SIGNAL_TYPES.has(s.type))
   );
-  if (buySignals.length === 0) return;
+  if (actionable.length === 0) return;
 
   let body = '';
-  for (const r of buySignals.slice(0, 6)) {
+  for (const r of actionable.slice(0, 6)) {
     const e   = r.changePct >= 0 ? '📈' : '📉';
     const sig = r.signals.map(s => `${STRENGTH_EMOJI[s.strength]} ${SIG_SHORT[s.type]}`).join('  ');
     body += `*${r.name ?? r.symbol}* (${r.symbol})\n`;
@@ -1154,16 +1181,12 @@ async function sendTelegramSignals(results: SignalResult[], date: string): Promi
 
   const message = `🇮🇳 *NSE DAILY SCAN — ${date}*\n${'─'.repeat(28)}\n\n${body}⚠️ _Educational only. Not SEBI advice. DYOR._`;
 
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'Markdown' }),
-      signal: AbortSignal.timeout(10000),
-    });
-    console.log('[SIGNALS] Telegram notification sent');
-  } catch (e) {
-    console.error('[SIGNALS] Telegram delivery failed:', (e as Error).message);
+  const sent = await telegramService.sendMarkdownMessage(message);
+  if (sent) {
+    lastScanDigestSentDate = date;
+    console.log('[SIGNALS] Telegram daily scan digest sent');
+  } else {
+    console.error('[SIGNALS] Telegram daily scan digest failed to send; the next scan slot will retry');
   }
 }
 
@@ -1583,8 +1606,12 @@ export async function runTechnicalSignalScan(options: {
           sector_ret_21d,
           r.aiInsight    ?? null,
           r.entryZone    ?? null,
-          r.stopLoss     ?? null,
-          r.targets      ?? null,
+          // stop_loss/targets are read back as NUMBERS downstream (outcome_resolver.py's
+          // CAST(... AS REAL), the frontend's Number()) -- store the clean value, not the
+          // ₹-formatted display string. entryZone stays a formatted range; nothing parses
+          // it numerically.
+          parseMoneyToNumber(r.stopLoss) ?? null,
+          parseMoneyToNumber(r.targets) != null ? JSON.stringify([parseMoneyToNumber(r.targets)]) : null,
           r.setupQuality ?? null,
           r.timeHorizon  ?? null,
         ]);
@@ -1592,15 +1619,15 @@ export async function runTechnicalSignalScan(options: {
         // Mirror actionable signals to unified_signals for cross-source tracking
         if (r.signalScore > 0) {
           const signalTs = new Date().toISOString();
-          const slNumeric = r.stopLoss
-            ? (() => { const m = r.stopLoss!.match(/[\d,]+(?:\.\d+)?/); return m ? parseFloat(m[0].replace(/,/g, '')) : null; })()
-            : null;
+          const slNumeric = parseMoneyToNumber(r.stopLoss);
           await tx.run(unifiedUpsertSql, [
             r.symbol,
             r.cmp ?? null,
             null,                        // target_price — not computed by technical scanner
             slNumeric,
-            r.signalScore / 10.0,        // normalise 0–10 score to 0–1 confidence
+            r.signalScore * 10.0,        // 0–10 score → 0–100 confidence (db.ts: "0-100, from
+                                         // any source"). Was /10.0, which put this writer on a
+                                         // 0–1 scale in a column the AI path fills 0–100.
             JSON.stringify(r.signals) ?? null,
             r.signalScore,
             signalTs,
@@ -1818,7 +1845,7 @@ export async function computeSignalTypeStats(): Promise<{ updated: number }> {
     SELECT so.symbol, so.horizon_days, so.return_pct, so.outcome, so.signals_json,
            ts.nifty_regime
     FROM signal_outcomes so
-    LEFT JOIN technical_signals ts ON ts.symbol = so.symbol AND ts.date = so.signal_date
+    LEFT JOIN technical_signals ts ON ts.symbol = so.symbol AND so.signal_date = ts.date
     WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL') AND so.signal_source = 'technical'
   `) as {
     symbol: string; horizon_days: number; return_pct: number;

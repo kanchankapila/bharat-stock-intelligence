@@ -3,27 +3,13 @@
 BiLSTM + TFT deep learning models for multi-horizon stock prediction.
 Reads from feature_store, writes to deep_learning_predictions.
 """
-
 import os
 import sys
-import json
-import math
-import pickle
-import argparse
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Tuple
-
-from db_compat import connect, read_df
-from model_promotion import clears_promotion_bar
-from as_of import logical_trading_date
+import time
 
 # Must be set before torch/cuBLAS initialises
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-
-import numpy as np
-import pandas as pd
 
 try:
     import torch
@@ -43,13 +29,59 @@ except (ImportError, OSError) as _torch_err:
         # But we must ensure downstream code doesn't crash on missing torch.
         torch = None
 
+        # `torch = None` alone was NOT enough: every `class X(nn.Module)` below is evaluated at
+        # import time, so a missing torch turned this "graceful" path into
+        # `NameError: name 'nn' is not defined` at dl_engine.py:181 -- a confusing crash that
+        # looks nothing like the real cause (observed 2026-09-03 while pyarrow was breaking
+        # torch's DLL load, AF-20260829-21). Bind a minimal stand-in so the module still
+        # imports; anything that actually tries to BUILD or RUN a model fails loudly and
+        # specifically instead, rather than pretending it degraded cleanly.
+        class _TorchUnavailable:
+            """Stand-in for torch.nn when torch could not be imported."""
+            class Module:  # noqa: D106 - just enough for class definitions to evaluate
+                def __init__(self, *_a, **_kw):
+                    raise RuntimeError(
+                        "PyTorch is unavailable in this process, so DL models cannot be "
+                        f"instantiated. Original import error: {_torch_err}"
+                    )
+
+            def __getattr__(self, name):  # any other nn.* attribute touched at import time
+                return type(name, (), {})
+
+        nn = _TorchUnavailable()
+        autocast = GradScaler = None
+
+import polars as pl
+
+
+import json
+import math
+import pickle
+import argparse
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Tuple
+
+from db_compat import connect, read_df
+from model_promotion import clears_promotion_bar, file_staleness_override_applies
+from as_of import logical_trading_date
+
+import numpy as np
+import pandas as pd
+
 from sklearn.metrics import roc_auc_score, accuracy_score
+from sklearn.preprocessing import RobustScaler
 
 MODEL_DIR = Path(__file__).parent / "ml_models"
 CONFIG_PATH = MODEL_DIR / "dl_model_config.json"
 
 SEQUENCE_LEN = 60
-N_FEATURES   = 78
+# 78 legacy channels + 7 added 2026-08-24 + 11 added 2026-09-14 (positions 85-95).
+# Positions 0-84 are frozen: champion checkpoints trained at narrower widths
+# continue to run via _checkpoint_input_width slicing FEATURE_COLS to the model's width.
+# Bumping this constant alone must never break daily inference.
+N_FEATURES        = 96
+N_FEATURES_LEGACY = 78
 
 # Defensive winsorization bound for raw engineered features fed to the LSTM (2026-08-06).
 # nan_to_num below only catches true NaN/+-inf; it does nothing for an extreme-but-finite
@@ -87,18 +119,103 @@ FEATURE_COLS = [
     # one-hot trend_1d (3): UP, DOWN, SIDEWAYS encoded as floats above, use numeric
     # mtf cols already numeric; pad to 84
     "pcr_oi","pcr_vol","iv_rank","delivery_pct",
-    "pb","rev_growth","eps_growth","advance_decline_ratio","nifty_pe",
+    # price_to_book (NOT legacy "pb"): feature_store.pb has never been written by
+    # feature_engineering -- 0 non-null values across the entire table -- so this slot has
+    # been a COALESCE(0) constant since inception. price_to_book went live 2026-08-24
+    # (_merge_fundamentals Gap #4 follow-up, sourced PIT from fundamentals_history).
+    # Same list position => identical tensor width, so existing checkpoints and the saved
+    # scaler stay valid; the channel simply starts reading real data.
+    "price_to_book","rev_growth","eps_growth","advance_decline_ratio","nifty_pe",
     "max_pain",
+    # ── 2026-08-24 widening (+7, positions 78-84) ──────────────────────────────
+    # APPENDED, never inserted: positions 0-77 stay byte-identical so a pre-widening
+    # champion checkpoint scores identically through the width-agnostic loader
+    # (_checkpoint_input_width + loaders' FEATURE_COLS[:width] slice).
+    # All 7 locked through the density gate (fresh non-null coverage on fs_recent):
+    # ret_12m_ex1m ~100% / iv_skew 78% / call_wall_dist_pct 76% / put_wall_dist_pct 75%
+    # / insider_buy_pct_90d 28% / block_deal_net_qty 24% (fresh to 8/21) /
+    # near_expiry_gamma 24% (accepted sparse gap -- see _merge_flow_features docstring).
+    # sector_ret_5d/21d deliberately NOT added: their fallback producer
+    # (_compute_sector_momentum) landed same day but the columns are ~constant per sector,
+    # near-duplicating momentum channels already present; revisit only with evidence.
+    "ret_12m_ex1m",
+    "iv_skew",
+    "call_wall_dist_pct","put_wall_dist_pct",
+    "insider_buy_pct_90d","block_deal_net_qty",
+    "near_expiry_gamma",
+    # ── 2026-09-14 widening (+11, positions 85-95) ──────────────────────────────
+    # APPENDED, never inserted: positions 0-84 stay byte-identical.
+    # Step-2/3 merges: analyst consensus (4), earnings clock (4), delivery dynamics (2),
+    # and market-wide options sentiment (1). Sourced PIT from analyst_estimates_history,
+    # stock_earnings_dates, stock_financials_annual, nse_delivery_data, and nifty_option_chain.
+    # Excluded (3): analyst_target_mean (absolute rupee scale; needs normalization),
+    # last_beat_score (redundant with last_eps_surprise_pct), delivery_qty_5d (absolute shares;
+    # delivery_z_20d captures this scale-invariantly).
+    "analyst_buy_pct",
+    "analyst_target_upside_pct",
+    "analyst_n",
+    "broker_recos_90d",
+    "days_to_next_earnings",
+    "days_since_last_earnings",
+    "last_eps_surprise_pct",
+    "earnings_in_5d",
+    "delivery_z_20d",
+    "delivery_pct_chg_5d",
+    "nifty_pcr",
 ]
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-if DEVICE.type == "cuda":
-    torch.backends.cudnn.enabled = False   # cuDNN LSTM backward broken on Windows/cu124; use PyTorch-native path
-    torch.backends.cudnn.benchmark = False
-    print(f"[DL] Device: cuda ({torch.cuda.get_device_name(0)}) "
-          f"{torch.cuda.get_device_properties(0).total_memory // 1024**2} MB VRAM (cudnn disabled)")
+if torch is not None:
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if DEVICE.type == "cuda":
+        torch.backends.cudnn.enabled = False   # cuDNN LSTM backward broken on Windows/cu124; use PyTorch-native path
+        torch.backends.cudnn.benchmark = False
+        print(f"[DL] Device: cuda ({torch.cuda.get_device_name(0)}) "
+              f"{torch.cuda.get_device_properties(0).total_memory // 1024**2} MB VRAM (cudnn disabled)")
+    else:
+        print("[DL] Device: cpu")
 else:
-    print("[DL] Device: cpu")
+    DEVICE = None
+    print("[DL] PyTorch not loaded; DEVICE is None")
+
+
+# ── Checkpoint width handling ────────────────────────────────────────────────
+
+# Input width of the currently cached checkpoint (set by run_inference when it loads a
+# model; None outside inference). The sequence loaders slice FEATURE_COLS to this so a
+# legacy-width champion keeps running unchanged after the feature widening.
+_INFERENCE_INPUT_WIDTH: int | None = None
+
+
+def _checkpoint_input_width(state_dict: Dict) -> int:
+    """Infer a BiLSTMModel checkpoint's input width from its own weights.
+
+    lstm1.weight_ih_l0 has shape (4*hidden, n_features) -- bidirectional LSTM weight
+    tensors are stored per direction, so the forward direction's input projection carries
+    exactly the channel count the model was trained with. Width-agnostic loading keeps
+    daily inference alive when today's N_FEATURES no longer matches the ACTIVE champion:
+    after the 2026-08-24 widening (78 -> 85) the promoted config can still point at a
+    pre-widening checkpoint until a wider candidate clears the promotion bar, and
+    constructing a default-width model for it used to crash load_state_dict with a
+    size-mismatch RuntimeError -- killing every deep_learning_predictions write for the
+    whole stale-champion window.
+    """
+    w = state_dict.get("lstm1.weight_ih_l0")
+    if w is None or w.dim() != 2:
+        raise RuntimeError(
+            "Checkpoint has no recognisable lstm1.weight_ih_l0 tensor -- cannot infer "
+            "input width. Is this actually a BiLSTMModel state_dict?"
+        )
+    return int(w.shape[1])
+
+
+def _resolve_input_width(n_features: int = None) -> int:
+    """Column count the sequence loaders should emit: an explicit argument wins (training
+    always passes N_FEATURES so it never inherits a stale champion's narrower width);
+    otherwise follow the active checkpoint's input width if one is loaded in-process;
+    otherwise today's N_FEATURES."""
+    if n_features is not None:
+        return int(n_features)
+    return _INFERENCE_INPUT_WIDTH or N_FEATURES
 
 
 # ── Model Architecture ───────────────────────────────────────────────────────
@@ -161,14 +278,55 @@ def _onehot_vol_regime(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _scale_features_per_symbol(df: pd.DataFrame, cols: List[str],
+                               train_frac: float = 0.8,
+                               fit_mask: Optional[np.ndarray] = None) -> pd.DataFrame:
+    """RobustScale ONE symbol's feature columns, fit on its earliest train_frac of rows.
+
+    feature_store persisted per-symbol RobustScaler output until 2026-09-10; it now holds raw
+    values, so the normalization an LSTM needs moved here. Per-symbol is the right kind of
+    normalization at this layer -- each sequence is one symbol's own history, so centering on
+    that symbol's median is meaningful (unlike in ml_ensemble/factor_backtest, which compare
+    symbols against each other and were silently handed incommensurable units).
+
+    Fit on the earliest rows only so no future statistic leaks backward into the scaling, and
+    touch FEATURES ONLY. Scaling the target is precisely what made `target_ret_5d > 0` mean
+    "beat this symbol's own median 5-day return" rather than "rose".
+    """
+    present = [c for c in cols if c in df.columns]
+    # fit_mask selects which rows define "the earliest train_frac" (default: all rows).
+    # Inference passes the target-bearing rows so its scaler is fit on exactly the rows
+    # training fit on, while still transforming the newest rows that have no target yet.
+    fit_idx = np.arange(len(df)) if fit_mask is None else np.flatnonzero(np.asarray(fit_mask))
+    if not present or len(fit_idx) < 10:
+        return df
+    # log1p the heavy-tailed volume ratios first (feature_engineering._apply_scaler used to)
+    for col in ("volume_ratio_5d", "volume_ratio_20d"):
+        if col in df.columns:
+            df[col] = np.log1p(df[col].clip(lower=0))
+    block = (df[present].astype(np.float64)
+             .replace([np.inf, -np.inf], np.nan)
+             .fillna(0.0))
+    cutoff = max(1, int(len(fit_idx) * train_frac))
+    scaler = RobustScaler()
+    scaler.fit(block.iloc[fit_idx[:cutoff]])
+    df[present] = scaler.transform(block)
+    return df
+
+
+from dl_sequence_loader import load_sequences_bounded
+
+
 def load_symbol_sequences(
-    symbol: str, seq_len: int = SEQUENCE_LEN
+    symbol: str, seq_len: int = SEQUENCE_LEN, n_features: int = None
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[str]]:
     """
     Returns: X (N, seq_len, n_feat), y_dir5 (N,), y_dir15 (N,), y_ret5 (N,), dates list
     Only returns rows where all target columns are non-null (training mode).
+    n_features overrides the emitted column count (see _resolve_input_width); training
+    callers must pass N_FEATURES explicitly.
     """
-    feat_cols = FEATURE_COLS[:N_FEATURES]
+    feat_cols = FEATURE_COLS[:_resolve_input_width(n_features)]
     numeric_cols = [c for c in feat_cols if c not in _VOL_ONEHOT]
     cols_sql = ", ".join(
         f'COALESCE(CAST("{c}" AS REAL), 0.0) as "{c}"' if c in ("trend_1d", "trend_1w", "trend_1m")
@@ -192,6 +350,8 @@ def load_symbol_sequences(
     # derives target_dir from, so recomputing here is always consistent with {0,1}.
     df = df.dropna(subset=["target_ret_5d", "target_ret_15d"])
     df = df.fillna(0)
+    # feature_store now stores RAW values, so normalize here -- features only, never targets.
+    df = _scale_features_per_symbol(df, numeric_cols)
 
     # A ratio-style feature (e.g. dist_sma200_pct, pe, vwap_dist_pct) computed off a near-zero
     # denominator or an implausible bad bar (this codebase has documented cases of >100,000%
@@ -227,10 +387,18 @@ def load_symbol_sequences(
 
 
 def load_inference_sequence(
-    symbol: str, seq_len: int = SEQUENCE_LEN
+    symbol: str, seq_len: int = SEQUENCE_LEN, n_features: int = None
 ) -> Tuple[np.ndarray, str]:
-    """Load last seq_len rows for inference. Returns (1, seq_len, n_feat) and latest date."""
-    feat_cols = FEATURE_COLS[:N_FEATURES]
+    """Load last seq_len rows for inference. Returns (1, seq_len, n_feat) and latest date.
+    Defaults to the ACTIVE CHECKPOINT's input width (not today's N_FEATURES): loaders
+    always build the full widened frame, then slice, so a legacy-width champion reads
+    FEATURE_COLS[:78] -- byte-identical to its training-time columns because the widening
+    appended, never inserted.
+
+    Reads the symbol's FULL history, not just the last seq_len rows: the per-symbol scaler
+    training applies is fit on the earliest 80% of target-bearing rows, and serving has to
+    reproduce that fit or the model sees raw prices it never trained on (AF-20260913-01)."""
+    feat_cols = FEATURE_COLS[:_resolve_input_width(n_features)]
     numeric_cols = [c for c in feat_cols if c not in _VOL_ONEHOT]
     cols_sql = ", ".join(
         f'COALESCE(CAST("{c}" AS REAL), 0.0) as "{c}"' if c in ("trend_1d", "trend_1w", "trend_1m")
@@ -238,15 +406,20 @@ def load_inference_sequence(
         for c in numeric_cols
     )
     df = read_df(
-        f"""SELECT date, {cols_sql}, vol_regime
+        f"""SELECT date, {cols_sql}, vol_regime,
+               target_ret_5d, target_ret_15d
             FROM feature_store WHERE symbol=? AND timeframe='D'
-            ORDER BY date DESC LIMIT {int(seq_len)}""",
+            ORDER BY date""",
         (symbol,),
     )
     if len(df) < seq_len:
         return None, None
-    df = df.sort_values("date")
-    df = _onehot_vol_regime(df).fillna(0)
+    df = df.sort_values("date").reset_index(drop=True)
+    has_target = (df["target_ret_5d"].notna() & df["target_ret_15d"].notna()).values
+    df = _onehot_vol_regime(df)
+    df[numeric_cols] = df[numeric_cols].fillna(0)
+    df = _scale_features_per_symbol(df, numeric_cols, fit_mask=has_target)
+    df = df.iloc[-seq_len:]
     # Same non-finite + extreme-outlier guard as load_symbol_sequences (training) -- must match
     # exactly, or inference sees a different feature distribution than training did (train/serve
     # skew). A live inf/extreme feature here would otherwise produce an inf/NaN prediction,
@@ -259,10 +432,135 @@ def load_inference_sequence(
 
 # ── Walk-Forward Validation ──────────────────────────────────────────────────
 
+
+def clone_model_like(model: "BiLSTMModel") -> "BiLSTMModel":
+    """An independent copy of `model` at ITS input width, not the module default.
+
+    walk_forward_validate previously did `BiLSTMModel()` -- today's N_FEATURES -- and then
+    loaded the source's weights into it, which raises a size-mismatch RuntimeError for any
+    model of a different width. Latent in production (train_lstm passes the model it just built
+    at N_FEATURES, so the widths always match) but fatal for the one case that matters when
+    auditing the promotion gate: validating an EXISTING champion. lstm_v3.pt, the active
+    champion, is a pre-widening 78-input checkpoint, so AF-20260906-02's measurement could not
+    run at all until this was fixed.
+
+    Same defect the inference loader already fixed after the 2026-08-24 widening via
+    _checkpoint_input_width; the fix was applied there and not here.
+    """
+    width = model.lstm1.weight_ih_l0.shape[1]
+    clone = BiLSTMModel(n_features=width).to(DEVICE)
+    clone.load_state_dict(model.state_dict())
+    return clone
+
+
+# The longest forward label any validation fold trains on. `dir_5d` is what this function
+# grades, but `_train_one_fold` fits the 15d head on the same rows, so a row at date D carries
+# a label that does not resolve until D+15. Purging only 5 dates would leave training labels
+# overlapping the validation window.
+LABEL_HORIZON_DAYS = 15
+WALK_FORWARD_SPLITS = 5
+
+# Stamped onto every metrics dict so _promote_lstm_version can tell a number produced by
+# today's purged date split from the row-sliced ones recorded before 2026-09-10, which are
+# not comparable to it. Same idea as model_promotion.promotion_decision's `label_changed`
+# carve-out: a baseline measured a different way is not evidence, and letting it set the bar
+# freezes the gate by construction rather than on merit.
+VALIDATION_METHOD = "purged_date_walkforward_v1"
+LEGACY_VALIDATION_METHOD = "row_sliced_symbol_major"
+
+
+def _date_folds(dates: Sequence, horizon_days: int = LABEL_HORIZON_DAYS,
+                n_splits: int = WALK_FORWARD_SPLITS) -> List[Tuple[np.ndarray, np.ndarray]]:
+    """Expanding-window folds over whole DATE groups, purged by the label horizon.
+
+    Delegates to `purged_cv`, which ml_ensemble.py, breakout_classifier.py and
+    flyer_classifier.py already use for the same panel shape; dl_engine was the one model
+    still splitting by row position. Taking a date means taking every symbol on that date, so
+    a fold is cross-sectionally complete and strictly earlier than the fold it validates.
+
+    Raises ValueError when the panel holds too few distinct dates to split at all.
+    """
+    from purged_cv import make_purged_group_time_series_split
+
+    splitter = make_purged_group_time_series_split(
+        dates, horizon_days=horizon_days, n_splits=n_splits,
+    )
+    folds = list(splitter.split(np.arange(len(dates))))
+
+    # Assert the invariant rather than trusting the splitter to keep holding it. This class
+    # has now bitten three architecturally unrelated places in this codebase (see
+    # ml-model-bugs.md), always silently and always while looking like a working validation,
+    # and recurring-bugs.md's own header records that written-down prose does not stop it.
+    # One set intersection per fold; it must never fire.
+    date_list = list(dates)
+    for i, (train_idx, test_idx) in enumerate(folds):
+        overlap = {date_list[j] for j in train_idx} & {date_list[j] for j in test_idx}
+        if overlap:
+            raise ValueError(
+                f"_date_folds: fold {i} has {len(overlap)} date(s) in BOTH its train and test "
+                f"slices (e.g. {sorted(overlap)[:3]}) -- that is a cross-sectional split, not a "
+                f"walk-forward, and any AUC it produces is inflated"
+            )
+    return folds
+
+
+def fresh_model_like(model: "BiLSTMModel") -> "BiLSTMModel":
+    """A randomly-initialised model at `model`'s input width -- the honest starting point for
+    a walk-forward fold.
+
+    Cloning the source weights (clone_model_like) starts each fold from a network already fit
+    on the WHOLE universe, test dates included, so the fold is graded on a period its starting
+    weights had memorised. A walk-forward number answers "how does a model trained only on the
+    past do on the future"; that requires starting where a real forward-in-time fit would.
+    """
+    width = model.lstm1.weight_ih_l0.shape[1]
+    return BiLSTMModel(n_features=width).to(DEVICE)
+
+
+SATURATION_EPS = 0.01
+
+
+def serve_saturation(model, symbols, n_features: int) -> float:
+    """Fraction of `model`'s served prob_up_5d within SATURATION_EPS of 0 or 1, on each symbol's
+    latest inference window built by the production loader.
+
+    walk_forward_validate's frac_saturated describes the FOLD models -- fresh copies trained 30
+    epochs each -- not the model that gets promoted. v5 read 0.32 there and 40% when served
+    (AF-20260913-10), so the gate needs a reading of the final model on the inputs it will see.
+    NaN when no symbol yields a window, so a missing reading can never pass as 0.
+    """
+    probs = []
+    for sym in symbols:
+        X, _ = load_inference_sequence(sym, n_features=n_features)
+        if X is None:
+            continue
+        probs.append(float(_predict_batch(model, X)["dir_5d"][0, 1]))
+    if not probs:
+        return float("nan")
+    p = np.asarray(probs)
+    return float(np.mean((p <= SATURATION_EPS) | (p >= 1 - SATURATION_EPS)))
+
+
 def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
-                           y15: np.ndarray, yr5: np.ndarray,
-                           fold_size: int = 30) -> Dict:
-    """Expanding window walk-forward. Returns mean metrics across folds.
+                           y15: np.ndarray, yr5: np.ndarray, dates: Sequence,
+                           *, horizon_days: int = LABEL_HORIZON_DAYS,
+                           n_splits: int = WALK_FORWARD_SPLITS,
+                           seed_from_model: bool = False) -> Dict:
+    """Purged, date-grouped expanding-window validation. Returns mean metrics across folds.
+
+    `dates` is REQUIRED and is the whole point. Until 2026-09-10 this function took a
+    `fold_size` row count and sliced `X[:train_end]` / `X[val_end:test_end]` by position --
+    but `train_lstm` builds its panel by concatenating whole per-symbol arrays, so row
+    position carried no time information. Measured against production before the fix (50
+    symbols, 59,702 sequences): from fold 1 onward **100% of test dates also appeared in the
+    training slice**, train and test both spanning 2021-03-31..2026-09-09, with zero symbols
+    shared between them. It was an expanding CROSS-SECTIONAL split -- train on ~40 stocks,
+    test on ~3 others over the same days -- presented as a walk-forward. Daily equity
+    direction is dominated by a market-wide common factor, so that leaks heavily: it is why
+    this engine reported roc_auc 0.6459-0.6578 while every other engine on the platform
+    ceilings at 0.52-0.55 (measurement.md). Every roc_auc recorded in dl_model_config.json
+    before this date carries that inflation; see `_promote_lstm_version`, which no longer
+    lets those numbers act as a baseline.
 
     Also tracks frac_saturated -- the fraction of held-out predictions within
     SATURATION_EPS of 0 or 1 -- across ALL folds' predictions pooled together. Live bug,
@@ -273,31 +571,43 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
     with output then barely changing day-to-day -- a real regression the AUC-only gate missed
     entirely. See _promote_lstm_version's MAX_SATURATION_FRAC check.
     """
-    n = len(X)
-    min_train = 300
-    if n < min_train + fold_size * 2:
-        return {"directional_accuracy": np.nan, "roc_auc": np.nan, "frac_saturated": np.nan}
+    if dates is None or len(dates) != len(X):
+        raise ValueError(
+            f"walk_forward_validate: dates length {0 if dates is None else len(dates)} does "
+            f"not match X length {len(X)} -- every sequence needs the date it was taken on, "
+            f"or the split degenerates to row position"
+        )
+
+    unusable = {"directional_accuracy": np.nan, "roc_auc": np.nan,
+                "n_folds": 0, "frac_saturated": np.nan}
+    try:
+        folds = _date_folds(dates, horizon_days=horizon_days, n_splits=n_splits)
+    except ValueError as e:
+        # Too few distinct dates to purge and still leave a training window. NaN metrics make
+        # _promote_lstm_version refuse ("cannot confirm safe to promote"), which is the right
+        # answer -- but a thin panel must not abort an otherwise-complete training run.
+        print(f"[DL] Walk-forward validation not possible: {e}", file=sys.stderr)
+        return unusable
+    if not folds:
+        print("[DL] Walk-forward validation produced no usable folds", file=sys.stderr)
+        return unusable
 
     accs, aucs, all_probs = [], [], []
-    fold = 0
-    while True:
-        train_end = min_train + fold * fold_size
-        val_end   = train_end + fold_size
-        test_end  = val_end  + fold_size
-        if test_end > n:
-            break
+    for train_idx, test_idx in folds:
+        X_tr, y_tr = X[train_idx], y5[train_idx]
+        X_te, y_te = X[test_idx], y5[test_idx]
 
-        X_tr, y_tr = X[:train_end], y5[:train_end]
-        X_te, y_te = X[val_end:test_end], y5[val_end:test_end]
-
-        model_copy = BiLSTMModel().to(DEVICE)
-        model_copy.load_state_dict(model.state_dict())
+        # Fresh weights at the SOURCE model's width by default; `seed_from_model` keeps the
+        # old leaky arm reachable for scripts/measure_dl_walkforward_leak.py, which exists to
+        # size the difference. Either way the width comes from `model`, never from today's
+        # N_FEATURES -- see clone_model_like.
+        model_copy = clone_model_like(model) if seed_from_model else fresh_model_like(model)
         # Fresh scaler per fold: reusing a stale scaler across folds can accumulate scale
         # adjustments and destabilize the loss (observed: late folds failed with NaN even
         # with scaling, likely due to scaler state corruption across prior fold iterations).
         fold_scaler = GradScaler('cuda') if DEVICE.type == "cuda" else None
-        _train_one_fold(model_copy, X_tr, y_tr, yr5[:train_end], epochs=30, y15=y15[:train_end],
-                         scaler=fold_scaler)
+        _train_one_fold(model_copy, X_tr, y_tr, yr5[train_idx], epochs=30,
+                         y15=y15[train_idx], scaler=fold_scaler)
 
         preds = _predict_batch(model_copy, X_te)
         del model_copy
@@ -310,9 +620,7 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
         if len(np.unique(y_te)) > 1:
             aucs.append(roc_auc_score(y_te, prob_up))
         all_probs.extend(prob_up.tolist())
-        fold += 1
 
-    SATURATION_EPS = 0.01
     frac_saturated = (
         float(np.mean([(p <= SATURATION_EPS or p >= 1 - SATURATION_EPS) for p in all_probs]))
         if all_probs else np.nan
@@ -320,8 +628,9 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
     return {
         "directional_accuracy": float(np.mean(accs)) if accs else np.nan,
         "roc_auc":              float(np.mean(aucs)) if aucs else np.nan,
-        "n_folds":              fold,
+        "n_folds":              len(accs),
         "frac_saturated":       frac_saturated,
+        "validation_method":    VALIDATION_METHOD,
     }
 
 
@@ -457,15 +766,30 @@ def train_lstm(version: int = 1) -> Dict:
         _train_one_fold(model, X_c, y5_c, yr5_c, epochs=30, y15=y15_c, scaler=amp_scaler)
         chunk_X.clear(); chunk_y5.clear(); chunk_y15.clear(); chunk_yr5.clear()
 
-    for i, sym in enumerate(symbols):
-        try:
-            X, y5, y15, yr5, _ = load_symbol_sequences(sym)
-            if len(X) > 0:
-                chunk_X.append(X); chunk_y5.append(y5)
-                chunk_y15.append(y15); chunk_yr5.append(yr5)
-        except Exception as e:
-            print(f"[DL] Skip {sym}: {e}")
-        if (i + 1) % _CHUNK_SIZE == 0:
+    # Parallel + time-bounded. Serial per-symbol loading is what made dl-retrain-weekly run
+    # 14h48m and produce nothing on 2026-09-05 (AF-20260906-01): the GPU idled at 15-24% while
+    # ~8 CPU cores waited on ~2,300 individual Postgres round-trips. The work is I/O-bound, so
+    # a small thread pool hides that latency; the deadline exists because train_lstm() is called
+    # IN-PROCESS by dl_trainer, where _run()'s 1800s subprocess cap does not apply and nothing
+    # bounded it but the 24h BullMQ lock.
+    #
+    # Explicit N_FEATURES: training data MUST be today's full widened width even if an old
+    # legacy-width champion happens to be loaded in-process -- otherwise a candidate trained
+    # after the 2026-08-24 widening would silently inherit the active checkpoint's narrower
+    # column count via _resolve_input_width().
+    load_budget = float(os.environ.get("DL_LOAD_BUDGET_SEC", str(90 * 60)))
+    load_deadline = time.monotonic() + load_budget if load_budget > 0 else None
+
+    def _load(sym):
+        X, y5, y15, yr5, _ = load_symbol_sequences(sym, n_features=N_FEATURES)
+        return (X, y5, y15, yr5) if len(X) > 0 else None
+
+    loaded = 0
+    for X, y5, y15, yr5 in load_sequences_bounded(symbols, _load, deadline=load_deadline):
+        chunk_X.append(X); chunk_y5.append(y5)
+        chunk_y15.append(y15); chunk_yr5.append(yr5)
+        loaded += 1
+        if loaded % _CHUNK_SIZE == 0:
             _flush_chunk()
 
     _flush_chunk()  # remaining symbols
@@ -475,25 +799,36 @@ def train_lstm(version: int = 1) -> Dict:
 
     print(f"[DL] Total sequences trained: {total_seqs}")
 
-    # Walk-forward validation: load a held-out sample (up to 50 symbols) fresh from DB.
+    # Walk-forward validation panel. The held-out dimension is TIME, not symbols: these 50
+    # names were also in the training universe above, so a symbol split would prove nothing.
+    # walk_forward_validate splits them by date, which is why every sequence's own date has to
+    # travel with it -- discarding the loader's 5th return value is what let the old row-index
+    # slicing look like a walk-forward while being a cross-sectional split.
+    #
+    # n_features=N_FEATURES for the same reason the training loader pins it: without it,
+    # _resolve_input_width falls through to _INFERENCE_INPUT_WIDTH -- a module global that
+    # run_inference sets to the ACTIVE champion's width. python_api.py and
+    # backend-python/main.py both serve train and infer from one process, so an infer-then-train
+    # sequence there would hand 78-wide validation rows to an 85-wide model and the size
+    # mismatch would be swallowed as "validation failed (non-fatal)".
     metrics: Dict = {"directional_accuracy": float("nan"), "roc_auc": float("nan")}
     val_symbols = symbols[:min(50, len(symbols))]
-    val_X, val_y5, val_y15, val_yr5 = [], [], [], []
-    for sym in val_symbols:
-        try:
-            Xv, y5v, y15v, yr5v, _ = load_symbol_sequences(sym)
-            if len(Xv) > 0:
-                val_X.append(Xv); val_y5.append(y5v)
-                val_y15.append(y15v); val_yr5.append(yr5v)
-        except Exception:
-            pass
+    val_X, val_y5, val_y15, val_yr5, val_dates = [], [], [], [], []
+
+    def _load_val(sym):
+        Xv, y5v, y15v, yr5v, dv = load_symbol_sequences(sym, n_features=N_FEATURES)
+        return (Xv, y5v, y15v, yr5v, dv) if len(Xv) > 0 else None
+
+    for Xv, y5v, y15v, yr5v, dv in load_sequences_bounded(val_symbols, _load_val):
+        val_X.append(Xv); val_y5.append(y5v)
+        val_y15.append(y15v); val_yr5.append(yr5v); val_dates.extend(dv)
     if val_X:
         X_val   = np.concatenate(val_X)
         y5_val  = np.concatenate(val_y5)
         y15_val = np.concatenate(val_y15)
         yr5_val = np.concatenate(val_yr5)
         try:
-            metrics = walk_forward_validate(model, X_val, y5_val, y15_val, yr5_val, fold_size=2000)
+            metrics = walk_forward_validate(model, X_val, y5_val, y15_val, yr5_val, val_dates)
             print(f"[DL] Walk-forward metrics: {metrics}")
         except Exception as e:
             # Validation phase is fragile (NaN in metrics, label edge cases); don't let it abort
@@ -501,6 +836,19 @@ def train_lstm(version: int = 1) -> Dict:
             # let the quality gate rely on training stability instead.
             print(f"[DL] Walk-forward validation failed (non-fatal): {e}")
             print(f"[DL] Training completed successfully; metrics unavailable")
+
+    # Persist held-out metrics so monitoring finally sees what training computed. Before
+    # 2026-08-24 NOTHING wrote dl_model_performance's directional_accuracy/roc_auc columns
+    # (drift_detector only ever wrote drift_score), so the router/UI served an all-NULL AUC
+    # history and drift_detector.check_accuracy_drift had no fresh baseline. Runs even when
+    # validation failed above: NaN metrics are skipped inside write_training_metrics, and
+    # that function swallows its own DB errors -- a monitoring write must never fail a
+    # completed training run.
+    try:
+        from drift_detector import write_training_metrics
+        write_training_metrics(metrics, model_version=f"lstm_v{version}")
+    except Exception as me:
+        print(f"[DL] Held-out metric persistence skipped: {me}")
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     path = MODEL_DIR / f"lstm_v{version}.pt"
@@ -520,6 +868,11 @@ def train_lstm(version: int = 1) -> Dict:
 
     torch.save(model.state_dict(), path)
     print(f"[DL] Model saved to {path}")
+    try:
+        metrics["serve_frac_saturated"] = serve_saturation(model, val_symbols, N_FEATURES)
+        print(f"[DL] Served saturation of the final model: {metrics['serve_frac_saturated']:.3f}")
+    except Exception as e:
+        print(f"[DL] Served-saturation check failed (gate falls back to folds): {e}", file=sys.stderr)
     return metrics
 
 
@@ -574,12 +927,30 @@ def run_inference(prediction_date: str = None) -> None:
         or _DL_MODEL_CACHE.get('path') != str(model_path)
         or _DL_MODEL_CACHE.get('mtime') != mtime
     ):
-        _m = BiLSTMModel().to(DEVICE)
-        _m.load_state_dict(torch.load(model_path, map_location=DEVICE, weights_only=True))
+        state_dict = torch.load(model_path, map_location=DEVICE, weights_only=True)
+        # Width-agnostic loading (2026-08-24 feature widening): infer the input width from
+        # the checkpoint itself instead of assuming BiLSTMModel() == N_FEATURES. The daily
+        # inference chain runs the ACTIVE champion, which after the 78→85 widening can
+        # legitimately be either width -- a pre-widening checkpoint (e.g. lstm_v3.pt) while
+        # no retrained candidate has cleared the +0.005 AUC promotion bar yet. Constructing
+        # the default-width model here used to crash every load_state_dict with a
+        # size-mismatch RuntimeError and take down ALL deep_learning_predictions writes for
+        # as long as the stale champion stayed active.
+        ckpt_width = _checkpoint_input_width(state_dict)
+        _m = BiLSTMModel(n_features=ckpt_width).to(DEVICE)
+        _m.load_state_dict(state_dict)
         _m.eval()
-        _DL_MODEL_CACHE = {'model': _m, 'path': str(model_path), 'mtime': mtime}
+        _DL_MODEL_CACHE = {'model': _m, 'path': str(model_path), 'mtime': mtime,
+                           'input_width': ckpt_width}
 
     model = _DL_MODEL_CACHE['model']
+    # Feed the model the column count IT was trained on, not today's N_FEATURES: loaders
+    # always build the full widened frame, then slice. A legacy 78-input champion reads
+    # FEATURE_COLS[:78] -- byte-identical to its training-time columns because the widening
+    # appended, never inserted. A promoted 85-input candidate reads all of them.
+    input_width = _DL_MODEL_CACHE.get('input_width', getattr(model.lstm1, "input_size"))
+    global _INFERENCE_INPUT_WIDTH
+    _INFERENCE_INPUT_WIDTH = input_width
 
     con = connect()
     symbols = [r[0] for r in con.execute(
@@ -739,12 +1110,19 @@ def _promote_lstm_version(new_version: int, metrics: Dict) -> bool:
     # day, then barely varied day-to-day -- a real regression this gate did not catch. 0.5 is a
     # deliberately generous ceiling (well above the 19% baseline, well below the 70% regression)
     # so a model with a genuinely high-conviction minority of predictions isn't blocked.
-    MAX_SATURATION_FRAC = 0.5
-    frac_saturated = metrics.get("frac_saturated")
-    if frac_saturated is not None and not (isinstance(frac_saturated, float) and np.isnan(frac_saturated)) \
-            and frac_saturated > MAX_SATURATION_FRAC:
+    #
+    # Lowered 0.5 -> 0.25 on 2026-09-13 (AF-20260913-10): v5 was promoted at 0.32 and, once its
+    # inference inputs were correct, pinned 40% of served predictions. 0.25 still passes the 19%
+    # healthy baseline above. The gate also reads serve_frac_saturated -- the FINAL model on its
+    # served windows -- because the fold models it otherwise measures are not the promoted model.
+    MAX_SATURATION_FRAC = 0.25
+    readings = [metrics.get(k) for k in ("frac_saturated", "serve_frac_saturated")]
+    readings = [float(v) for v in readings if v is not None and np.isfinite(float(v))]
+    frac_saturated = max(readings) if readings else None
+    if frac_saturated is not None and frac_saturated > MAX_SATURATION_FRAC:
         print(f"[DL] REFUSED: v{new_version} frac_saturated={frac_saturated:.2f} exceeds "
-              f"{MAX_SATURATION_FRAC} -- {frac_saturated:.0%} of walk-forward predictions are "
+              f"{MAX_SATURATION_FRAC} -- {frac_saturated:.0%} of predictions (worst of the "
+              f"walk-forward folds and the final model served) are "
               f"within 1% of 0 or 1, regardless of roc_auc={new_auc:.4f}. Weights saved to "
               f"lstm_v{new_version}.pt but NOT activated.")
         return False
@@ -752,6 +1130,7 @@ def _promote_lstm_version(new_version: int, metrics: Dict) -> bool:
     cfg = _load_config()
     active_version = cfg.get("lstm_version")
     version_metrics = cfg.get("lstm_metrics", {})
+    baseline = None
     baseline_auc = None
     if active_version is not None:
         baseline = version_metrics.get(str(active_version))
@@ -760,18 +1139,59 @@ def _promote_lstm_version(new_version: int, metrics: Dict) -> bool:
         ):
             baseline_auc = float(baseline["roc_auc"])
 
+    # A baseline measured a DIFFERENT way is not evidence, and letting it set the bar freezes
+    # this gate by construction rather than on merit. Every roc_auc recorded here before
+    # 2026-09-10 came from walk_forward_validate's row-sliced, symbol-major split -- ~40 stocks
+    # trained, ~3 others tested, over the SAME dates (measured: 100% of test dates also in the
+    # training slice from fold 1 on), reading 0.6459-0.6578 where every other engine on this
+    # platform ceilings at 0.52-0.55. Nothing honestly validated can beat that, so without this
+    # the DL champion could never be replaced again.
+    #
+    # Keyed on a CHANGE of method, never on the mere absence of a tag: two untagged versions
+    # are compared normally, or "untagged" would silently mean "promote anything".
+    # Same carve-out as model_promotion.promotion_decision's `label_changed` branch.
+    candidate_method = metrics.get("validation_method", LEGACY_VALIDATION_METHOD)
+    baseline_method = (baseline.get("validation_method", LEGACY_VALIDATION_METHOD)
+                       if isinstance(baseline, dict) else None)
+    if baseline_auc is not None and baseline_method != candidate_method:
+        print(f"[DL] Baseline v{active_version} was validated as '{baseline_method}' but "
+              f"v{new_version} as '{candidate_method}' -- the two roc_auc values are not "
+              f"comparable, so the metric bar is skipped for this promotion.")
+        baseline_auc = None
+
     promote = clears_promotion_bar(new_auc, baseline_auc, LSTM_PROMOTION_MARGIN)
+
+    # STALENESS OVERRIDE (ml-promotion-gate-review, 2026-08-15): this file's baseline lives in
+    # a local JSON config, not model_registry, so it had no equivalent to ml_ensemble.py/
+    # cs_ranker.py's safety valve against a baseline that's become permanently unbeatable --
+    # every future honest retrain would reject forever. Bookkeeping lives inside the active
+    # version's own metrics dict (mutating `baseline` in place also updates `version_metrics`/
+    # `cfg`, since `.get()` returns the same dict object, not a copy). See model_promotion.
+    # file_staleness_override_applies()'s docstring for the full contract.
+    staleness_override, age_days, rejection_count = (False, 0.0, 0)
+    if not promote and baseline is not None:
+        staleness_override, age_days, rejection_count = file_staleness_override_applies(baseline)
+        if not staleness_override:
+            rejection_count += 1
+            baseline["rejection_count"] = rejection_count
+            baseline.setdefault("first_rejected_at", datetime.now().isoformat())
 
     version_metrics[str(new_version)] = {k: (None if isinstance(v, float) and np.isnan(v) else v)
                                           for k, v in metrics.items()}
     cfg["lstm_metrics"] = version_metrics
 
-    if not promote:
+    if not promote and not staleness_override:
         print(f"[DL] REFUSED: v{new_version} roc_auc={new_auc:.4f} did not beat active "
               f"v{active_version}'s {baseline_auc:.4f} + {LSTM_PROMOTION_MARGIN} margin. "
-              f"Weights saved to lstm_v{new_version}.pt for inspection; active version unchanged.")
+              f"Weights saved to lstm_v{new_version}.pt for inspection; active version unchanged. "
+              f"(rejection bookkeeping updated: {rejection_count} rejections so far)")
         _save_config(cfg)  # still persist this version's metrics for future comparisons
         return False
+
+    if staleness_override and not promote:
+        print(f"[DL] STALENESS OVERRIDE: v{active_version}'s baseline unbeaten {age_days:.1f}d "
+              f"across {rejection_count} rejections -- promoting v{new_version} "
+              f"(roc_auc={new_auc:.4f}) anyway.")
 
     if CONFIG_PATH.exists():
         backup_path = MODEL_DIR / f"dl_model_config.{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak.json"
@@ -800,3 +1220,4 @@ if __name__ == "__main__":
     elif args.mode == "validate":
         metrics = train_lstm(version=args.version)
         print(f"[DL] Validation metrics: {metrics}")
+

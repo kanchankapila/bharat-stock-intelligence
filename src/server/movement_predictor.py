@@ -37,6 +37,7 @@ Run:
     python movement_predictor.py --score             # write today's movement_probability
 """
 
+import polars as pl
 import argparse
 import datetime
 import json
@@ -47,8 +48,31 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, translate
-from breakout_classifier import compute_ohlcv_features, FEATURE_COLS as OHLCV_FEATURE_COLS
-from model_promotion import decide_promotion_with_nan_guard
+from breakout_classifier import compute_ohlcv_features, FEATURE_COLS as BC_FEATURE_COLS
+from model_promotion import decide_promotion_with_nan_guard, file_staleness_override_applies
+import sys
+
+# movement_predictor's feature set is deliberately FROZEN at breakout_classifier's OHLCV-only
+# features. breakout_classifier.FEATURE_COLS gained sector-relative columns
+# (rs_vs_sector_21d/63d, 2026-09-02) that compute_ohlcv_features() does not produce -- the
+# shared constant silently changed shape under this importer and the nightly train died on
+# KeyError in _lag_by_symbol (2026-09-02 20:47 IST, job_run_history). Pinning the explicit
+# list keeps this model's feature set stable across upstream extensions; adopting a new
+# feature here is a measured modelling decision, not a silent import.
+OHLCV_FEATURE_COLS = [
+    "ret_5d", "ret_21d", "ret_63d", "ret_126d",
+    "rs_rank_21d", "rs_rank_63d",
+    "dist_sma20", "dist_sma50", "dist_sma200", "above_sma200",
+    "rsi14", "hv20", "vol_ratio", "atr_pct", "dist_52w_high", "range_pct_10d",
+    "dist_20d_high", "vol_surge_5v20", "range_contraction",
+    "up_vol_ratio_10", "consec_up", "hv_ratio_10_60",
+]
+_missing = [c for c in OHLCV_FEATURE_COLS if c not in BC_FEATURE_COLS]
+if _missing:
+    raise ImportError(
+        f"breakout_classifier no longer defines OHLCV feature(s) {_missing} -- "
+        "movement_predictor's frozen list is stale; update it deliberately, not silently"
+    )
 
 TOP_PCT = 0.90            # top decile of day-range = "high movement"
 MIN_PRICE = 20.0
@@ -381,8 +405,48 @@ def _load_baseline_test_auc(model_path: str) -> float | None:
         return existing.get("test_auc")
     except Exception as e:
         print(f"[Movement] Could not read existing model at {model_path} for comparison "
-              f"({e}) -- treating as no baseline.")
+              f"({e}) -- treating as no baseline.", file=sys.stderr)
         return None
+
+
+def _load_baseline_metrics(model_path: str) -> dict | None:
+    """Full baseline dict (not just test_auc) -- needed for the staleness-override rejection
+    bookkeeping (first_rejected_at/rejection_count, ml-promotion-gate-review 2026-08-15).
+    Mirrors breakout_classifier.py's helper of the same name."""
+    if not os.path.exists(model_path):
+        return None
+    try:
+        with open(model_path, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
+def _staleness_check_and_bookkeep(model_path: str, baseline: dict | None, promote: bool
+                                   ) -> tuple[bool, float, int]:
+    """STALENESS OVERRIDE (ml-promotion-gate-review, 2026-08-15): this file's baseline lives in
+    a pickle, not model_registry, so it had no equivalent to ml_ensemble.py/cs_ranker.py's
+    safety valve against a baseline that's become permanently unbeatable -- every future honest
+    retrain would reject forever. See model_promotion.file_staleness_override_applies() for the
+    full contract. Extracted from train() (whose own promotion block is entangled with feature/
+    fit logic specific to this file) so the bookkeeping-write path is directly testable.
+
+    If `promote` is already True, does nothing and returns (False, 0.0, 0) -- no rejection to
+    record. Otherwise checks the override and, if it does NOT apply, writes the incremented
+    rejection bookkeeping back into the baseline file so the next retrain sees it.
+
+    Returns (override_applies, age_days, rejection_count_after_this_call).
+    """
+    if promote:
+        return False, 0.0, 0
+    staleness_override, age_days, rejection_count = file_staleness_override_applies(baseline)
+    if not staleness_override and baseline is not None:
+        rejection_count += 1
+        baseline["rejection_count"] = rejection_count
+        baseline.setdefault("first_rejected_at", datetime.datetime.now().isoformat())
+        with open(model_path, "wb") as f:
+            pickle.dump(baseline, f)
+    return staleness_override, age_days, rejection_count
 
 
 def _movement_promotion_decision(test_auc: float, baseline_test_auc: float | None) -> tuple[bool, str | None]:
@@ -504,10 +568,15 @@ def train(report_only: bool = False, enrich: bool = False, leak_check: bool = Fa
     # retrain that regresses (bad fold, unlucky init) silently replaced a better production
     # model with a worse one. Mirrors live_screener_ml_ranker.py's
     # _load_active_metrics()/PROMOTION_MARGIN pattern, which this sibling file didn't reuse.
-    baseline_test_auc = _load_baseline_test_auc(MODEL_PATH)
+    baseline = _load_baseline_metrics(MODEL_PATH)
+    baseline_test_auc = baseline.get("test_auc") if baseline else None
     promote, refusal_reason = _movement_promotion_decision(test_auc, baseline_test_auc)
-    if not promote:
-        print(f"[Movement] REFUSED: {refusal_reason} Active model at {MODEL_PATH} left unchanged.")
+    staleness_override, age_days, rejection_count = _staleness_check_and_bookkeep(
+        MODEL_PATH, baseline, promote)
+
+    if not promote and not staleness_override:
+        print(f"[Movement] REFUSED: {refusal_reason} Active model at {MODEL_PATH} left unchanged "
+              f"(rejection bookkeeping updated: {rejection_count} rejections so far).")
         result["trained"] = False
         result["promoted"] = False
         return result
@@ -522,9 +591,13 @@ def train(report_only: bool = False, enrich: bool = False, leak_check: bool = Fa
         pickle.dump({"model": prod, "feature_names": OHLCV_FEATURE_COLS,
                      "trained_at": datetime.date.today().isoformat(), "oof_auc": auc,
                      "test_auc": test_auc}, f)
-    print(f"[Movement] saved model (core OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}"
-          + (f", beat baseline {baseline_test_auc:.4f}" if baseline_test_auc is not None else ", no prior model")
-          + f") -> {MODEL_PATH}")
+    if staleness_override and not promote:
+        print(f"[Movement] STALENESS OVERRIDE — baseline unbeaten {age_days:.1f}d across "
+              f"{rejection_count} rejections ({refusal_reason}) -- promoting anyway -> {MODEL_PATH}")
+    else:
+        print(f"[Movement] saved model (core OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}"
+              + (f", beat baseline {baseline_test_auc:.4f}" if baseline_test_auc is not None else ", no prior model")
+              + f") -> {MODEL_PATH}")
     result["trained"] = True
     result["promoted"] = True
     return result
@@ -542,7 +615,7 @@ def score() -> int:
     conn = connect()
     cur = conn.cursor()
     try:
-        cur.execute(translate("ALTER TABLE technical_signals ADD COLUMN movement_probability REAL"))
+        cur.execute(translate("ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS movement_probability REAL"))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -551,7 +624,11 @@ def score() -> int:
     ohlcv = _load_ohlcv(cutoff)
     if ohlcv.empty:
         return 0
-    feats = compute_ohlcv_features(ohlcv)
+    # Same lag as load_training_data(): the model was trained on yesterday's-close features
+    # predicting today's own day-range, so scoring must use the identical lagged view --
+    # using today's own (already-closed) features to predict today's own label is a same-day
+    # leak, not a live prediction (train/serve skew; see recurring-bugs.md).
+    feats = _lag_by_symbol(compute_ohlcv_features(ohlcv), art["feature_names"])
     d = feats["date"].max()
     today = feats[feats["date"] == d]
     if today.empty:
@@ -583,3 +660,9 @@ if __name__ == "__main__":
         score()
     if not (args.train or args.report or args.score):
         train(report_only=True, enrich=True)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

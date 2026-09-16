@@ -3,6 +3,7 @@ import sqlite3
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import trendlyne_overview_fetcher as tof
 
 
@@ -74,7 +75,7 @@ def test_sh_floor_lags_the_period_end_and_defaults_to_today():
 
 
 def test_backfill_technical_signals_is_point_in_time():
-    con = sqlite3.connect(":memory:")
+    con = pg_memory_conn()
     try:
         con.execute("CREATE TABLE technical_signals (symbol TEXT, date TEXT)")
         tof.ensure_schema(con)
@@ -103,7 +104,7 @@ def test_backfill_technical_signals_is_point_in_time():
 
 
 def test_upsert_profile_persists_shareholding_changes():
-    con = sqlite3.connect(":memory:")
+    con = pg_memory_conn()
     try:
         con.execute("CREATE TABLE technical_signals (symbol TEXT)")
         tof.ensure_schema(con)

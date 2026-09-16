@@ -131,12 +131,13 @@ with `getaddrinfo ENOTFOUND base`. Not part of this skill's unit; see
   only proves the shell painted — screenshot too early and you get a page
   full of skeleton loaders, not the real data. Give it 3-4s after that
   before the screenshot that's supposed to prove real content loaded.
-- **`App.tsx`'s `dashboardVersion` (localStorage) picks which of 6 dashboard
-  shells renders; a fresh session with no localStorage lands on `v6`
-  ("Workbench", `WB` in the bottom-left switcher) — that's what the driver
-  screenshots above are.** If you need a different shell, `eval` a
-  `localStorage.setItem('dashboardVersion', 'v2')` before `nav`, or click
-  the `V1`/`V2`/`V3`/`V5` buttons in the sidebar.
+- **There is only ONE shell since the 2026-08-29 consolidation.** `App.tsx`
+  force-migrates any stored `dashboardVersion` to `'v1'` on mount; every page
+  renders through `V1Routes`/`AppShell` and the old v2–v6 shells were folded into
+  `src/components/v{2,4,5,6}/` — so the driver screenshots above are always the
+  v1 shell, and there are no `V1`/`V2`/`V3`/`V5` switcher buttons to click.
+  (Any doc you find describing six switchable shells or a `v6` default
+  predates the consolidation.)
 - **This app has no demo/offline mode.** Every screen is live production
   data off Postgres via tRPC — there's no seeded fixture state to reset
   between runs, so a screenshot today will show different numbers tomorrow.

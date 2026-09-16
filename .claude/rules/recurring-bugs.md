@@ -1,10 +1,10 @@
 # Recurring Bug Classes
 
-Each of these has bitten this codebase **more than once**. Grep for the signature before you write, and again before you claim a fix is done.
+Each of these has bitten this codebase **more than once**. Grep for the signature before you write, and again before you claim a fix is done. Full forensic detail (exact dates, investigation steps, specific numbers) for every entry below: `docs/recurring-bugs-history.md` (split out 2026-08-28 for length — that file is the derivation, this one is what to grep before writing).
 
 **🤖 = enforced by `scripts/check_recurring_bugs.py`** (runs in CI on changed files). Everything unmarked is enforced only by you remembering to read this file — and the recurrence counts below were all recorded *after* the class was documented here, so assume prose alone does not hold. If you fix a class that recurs again, the durable move is a check in that script, not another paragraph here.
 
-Currently automated: `date.today()` write-anchor, raw `%s` placeholder, missing `live_datasource` test, `x != x` NaN test in SQL, multi-word `::` cast, skip-path-stamped-as-success (`.ts`, `check_skip_not_success`). Also automated, in `verify-gate.mjs` rather than `check_recurring_bugs.py`: unmeasured signal/scoring changes require backtest evidence before "done" is accepted. Deliberately not automated: `float(x or 0)` — measured at 50 matches repo-wide, mostly legitimate `None`→0 on DB aggregates; catching it needs type information the script doesn't have.
+Currently automated (9 checks): `date.today()` write-anchor, short calendar-day read cutoff (`check_short_calendar_lookback`), raw `%s` placeholder, missing `live_datasource` test, `x != x` NaN test in SQL, multi-word `::` cast, skip-path-stamped-as-success (`.ts`, `check_skip_not_success`), unqualified `information_schema` query (`check_information_schema_missing_table_schema`), degraded-read `print()` to stdout (`check_degraded_print_to_stdout`). Also automated, in `verify-gate.mjs` rather than `check_recurring_bugs.py`: unmeasured signal/scoring changes require backtest evidence before "done" is accepted. (That class, and every other model/harness class, lives in `.claude/rules/ml-model-bugs.md`.) Deliberately not automated: `float(x or 0)` — measured at 50 matches repo-wide, mostly legitimate `None`→0 on DB aggregates; catching it needs type information the script doesn't have.
 
 ## Dates & scheduling
 
@@ -14,95 +14,823 @@ Currently automated: `date.today()` write-anchor, raw `%s` placeholder, missing 
 | 🤖 `date.today()` anchoring a `CASE WHEN date >= x ELSE NULL` guard | On any weekend/holiday the anchor matches nothing and the `ELSE` **nulls the column's entire history**. Anchor to `MAX(date) FROM stock_ohlcv`. | 10 |
 | Raw `daysStale()` on a freshness check | Monday morning reads Friday data as 3 days stale. Use `tradingDaysStale()`. | 4 |
 | Hand-rolled "step back N weekdays" | Skips no holidays, so `--days 90` covers 87 sessions. Use `as_of.trading_days_back()`. | 2 |
-| A `cronPattern` mirrored into `jobRegistry.ts` / `monitorScripts.ts` | Drifts from the real registration → phantom "late"/"stale" alerts forever. Guarded now by 5 mirror-consistency test suites — keep them passing. | 6 |
-| A coverage/completeness **ratio** (not just a staleness gap) computed over a window that includes **today** | Same root cause as `daysStale()` above, different shape: if today's rows are written by one job (e.g. a morning scan) and enriched by a later one (e.g. an evening ML-scoring pass), a same-day denominator reads as a false collapse for the whole gap between the two — every weekday, not just Mondays. `technical-signals-freshness-coverage`'s win_probability ratio had exactly this bug even after its *staleness* half was already fixed for the Monday case (2026-08-10) — fixed 2026-08-11 by measuring the ratio over the most recently **completed** day (`date = MAX(date) WHERE date < today`), not "last N days" inclusive of today. | 2 |
+| 🤖 `date.today() - timedelta(days=N)` as a **read** cutoff, N<=4, over a trading-day table | A Fri->Mon gap is 3 calendar days, a long weekend 4 — the window can contain NO trading session, so the read returns `{}` and the caller silently degrades instead of erroring. Distinct from the write-anchor row above (this check does NOT cover read windows). **Worst live instance**: `scoring_engine.py`'s `win_prob_map` going empty on Mondays dropped Factor 3 from mean 17.71/20 to 8/20 uniformly — invisible to rank-based diagnostics. Triage every hit: does the caller degrade/no-op, or is it benign (an age-threshold, a read of the script's own output, a source that genuinely writes weekends)? A genuinely benign site gets a line-level `trading-day-exempt: <reason>` marker, never a file-level allowlist (which would blind the check to future real instances in the same file). Use `as_of.trading_days_back(n, conn)[-1]`. | 12 sites, 9 fixed 2026-08-23, 3 exempt |
+| A `cronPattern` mirrored into `jobRegistry.ts` / `monitorScripts.ts` | Drifts from the real registration → phantom "late"/"stale" alerts forever. Guarded by 5 mirror-consistency test suites — keep them passing. | 6 |
+| A coverage/completeness **ratio** computed over a window that includes **today** | Same root cause as `daysStale()` above, different shape: if today's rows are written by one job and enriched by a later one, a same-day denominator reads as a false collapse for the whole gap between the two jobs, every weekday. Measure the ratio over the most recently **completed** day (`date = MAX(date) WHERE date < today`), not "last N days" inclusive of today. | 2 |
 
 ## NaN & null
 
 | Signature | Why it breaks |
 |---|---|
 | `float(x or 0)` / `int(x or 0)` on a model-output column | **NaN is truthy** — `nan or 0` is `nan`. Use `math.isfinite`, and **skip** rather than coerce to 0 (coercing fabricates the worst possible score). |
-| 🤖 `x != x` to detect NaN in Postgres | Postgres defines `NaN = NaN` as TRUE for total btree ordering. The IEEE self-inequality matches nothing and reports "clean". (In plain Python `x != x` is correct and is used on purpose in ~10 fetchers — the checker only flags the SQL form.) |
+| 🤖 `x != x` to detect NaN in Postgres | Postgres defines `NaN = NaN` as TRUE for total btree ordering. The IEEE self-inequality matches nothing and reports "clean". (Plain Python `x != x` is correct and used on purpose in ~10 fetchers — the checker only flags the SQL form.) |
 | A NaN-detection test on SQLite | SQLite coerces NaN to NULL on insert, so the test passes against unfixed code. Use a throwaway Postgres schema. |
 | `ORDER BY col DESC` with possible NaN | Postgres sorts NaN **highest** — NaN rows rank #1. Wrap in `NULLIF(col, 'NaN'::float8)`. |
-| Fixing NaN at the source | Does **not** clean rows the bug already wrote. `run()` purges only the `computed_at` it is currently writing; 13,505 poisoned rows survived a source fix for weeks. |
+| Fixing NaN at the source | Does **not** clean rows the bug already wrote. `run()` purges only the `computed_at` it is currently writing; poisoned historical rows survive a source fix for weeks. |
+
+- **`pd.DataFrame(rows_of_dicts)` converts Python `None` to `NaN` in any column that also holds
+  a real float — so an `if x is None` guard downstream can never fire, and the NaN then reaches
+  the database.** Found 2026-09-05 in `analyst_revision.py`: `compute_revisions()` correctly
+  emitted `None` for a missing metric, `write_revisions()` correctly checked `is None` before
+  writing, and the check was dead code because the value was `NaN` by the time it was read. The
+  failure surfaced two layers away as `psycopg2.errors.NumericValueOutOfRange: bigint out of
+  range` — because `technical_signals.analyst_count_chg` is `bigint` and Postgres cannot cast NaN
+  to an integer type. That error reads like an overflow and sends you hunting for a huge number
+  that does not exist.
+  **Two things make this class nasty:** (1) it only appears when the column has a MIX of floats
+  and Nones — a column of all-`None` stays `object` dtype and keeps its Nones, so a naive test
+  fixture passes against unfixed code and proves nothing (this happened here on the first
+  attempt, and the suite caught it); (2) the module already had NaN-safe `_float`/`_int` helpers
+  and already used them on the INPUT side, so a reviewer greps, sees the helpers, and moves on.
+  **Tell:** any `pd.DataFrame(...)` built from dicts that may contain `None`, whose values are
+  later tested with `is None` or passed to `executemany`. Coerce at the DB boundary with an
+  explicit `math.isfinite` check, and write NULL — never 0.0, which fabricates a real-looking
+  reading (see the sentinel-instead-of-NULL entry above).
 
 ## SQL dialect (`db_compat` / `sqlTranslate`)
 
 | Signature | Why it breaks |
 |---|---|
-| 🤖 Raw `%s` placeholders in a Postgres branch | Bypasses `translate()`, which expects `?`. psycopg2 throws on the literal `%`. | 
-| 🤖 Multi-word casts (`::double precision`) | `stripPgCasts` only matches single-token type names; leaves a dangling ` precision` on the SQLite path. Use `::float8`. (Checker covers `.py` only — `sqlTranslate` itself is `.ts` and is not scanned.) |
+| 🤖 Raw `%s` placeholders in a Postgres branch | Bypasses `translate()`, which expects `?`. psycopg2 throws on the literal `%`. |
+| 🤖 Multi-word casts (`::double precision`) | `stripPgCasts` only matches single-token type names; leaves a dangling ` precision` on the SQLite path. Use `::float8`. (Checker covers `.py` only.) |
 | `STDDEV`, `DISTINCT ON`, `NOW()`, `ANY(ARRAY[])` | Postgres-only. On the SQLite fallback the whole query fails and the caller silently gets `{}` — which can **disable a gate entirely** rather than error. |
 | `pd.read_sql(raw_string, conn)` containing a literal `%` | Different execution path from `db_compat`; the `%` is read as a param marker. Wrap in `sqlalchemy.text()`. |
 | `CREATE TABLE IF NOT EXISTS` after adding a column | No-ops on an existing table. Needs an explicit `safe_alter`. |
-| A column type assumed from `db.ts` | `db.ts` is the SQLite schema-of-record; live Postgres has native `DATE`/`TIMESTAMPTZ` columns. Check `information_schema.columns`. |
+| A column type assumed from `db.ts` | `db.ts` is deleted (`a2a20d2`, 2026-08-16) — schema-of-record is `db/schema.postgres.sql` (`npm run schema:regen`); live Postgres has native `DATE`/`TIMESTAMPTZ` columns your SQLite-heritage intuition will get wrong. Check `information_schema.columns` before trusting a column's type. **Recurred 6 times through 2026-08-26** across TS/Python cross-type comparisons (`date` vs `text`, most recently a wave of 12 sites across 8 engines the day after a TEXT→DATE migration only partially swept its own blast radius). Convention: cast the DATE side to `::text` at the call site, not the TEXT side to `::date` — pytest fixtures declare these columns TEXT, so the `::date` direction is red under tests even though it passes live Postgres. **Diagnostic shortcut:** the PG error string names which side needed the cast — `operator does not exist: X op Y` — read it before guessing. **Inverted recurrence, 2026-09-03 (AF-20260831-04): converting a TEXT column to native DATE breaks every EXISTING defensive `::text` cast written for the old type, and the blast radius is bigger than the migration's own row-count estimate.** A 131-column/112-table TEXT→DATE migration found 20+ call sites across 9 `.py` files (`ml_ensemble.py` alone had ~35 occurrences across 4 near-duplicate query blocks) and 4 `.ts` files that had correctly cast one side to `::text` to match the *old* TEXT column — post-migration, that same cast now forces a mismatch against the *new* DATE type (`operator does not exist: date >= text`, mirror image of the original class). One shared helper (`as_of.py`'s `as_of_join_sql()`) had the assumption baked into its own parameter name (`base_date_is_text`) and needed its cast-direction formula inverted, not just its call sites patched. **Tell:** after any TEXT→DATE migration, grep for `<newly-date-column>::text` AND for a bare `col1 = col2` where col2 used to need casting — the safe check is running the FULL test suite (both languages) before declaring the migration's application-code impact "none," not just spot-checking the tables the migration touched. A migration comment claiming "no application code changes" is a hypothesis, not a verified fact, until both suites are green. |
+| A bulk `unnest($1::text[], ...)` insert with one array-*typed* column alongside scalar-array columns | `unnest()` flattens **every** dimension of a multidimensional array argument — an array-typed column (e.g. `text[]`) does not get treated as "one array value per row" the way scalar-array params do. Pass the array column as `jsonb[]` instead (a scalar type for a 1-D array parameter) and reconstitute inside the `SELECT` with `ARRAY(SELECT jsonb_array_elements_text(col))`. |
 
 ## Writes & keys
 
-- **Any table written as "today's full recomputation" needs a purge of rows the run did not produce**, not just an upsert. A row that a newly-added gate now excludes keeps its stale row and stays visible to every consumer. (3 recurrences: `unified_recommendations`, `intraday_outcome_resolver`, `stock_event_triggers`.)
+- **A one-shot script calling `openRun` must seed its own `job_definition` row first** (`ON CONFLICT DO NOTHING`), the same as every sibling script in its directory — `ingestion_run.job_id` FKs to it, so a missing seed throws on the script's first real invocation. Pair with a try/finally around the body (`pool.end()` in the finally) — an uncaught error outside a try/catch propagates to `main().catch()`, which sets `process.exitCode` but never closes the pool, so the process hangs on open connection timers instead of exiting with a clear error.
+- **Any table written as "today's full recomputation" needs a purge of rows the run did not produce**, not just an upsert — a row a newly-added gate now excludes keeps its stale row and stays visible to every consumer. (3 recurrences: `unified_recommendations`, `intraday_outcome_resolver`, `stock_event_triggers`.)
 - **A backfill loop that gates re-selection on one of several columns it fills** permanently excludes rows that got the first column filled but not the rest. (2 recurrences.)
 - **A provider-issued id needs the provider in the PK.** (4 recurrences — see `data-sources.md`.)
-- 🤖 **A job whose skip path falls through to the same "completed/success" handler as a real run will erase that day's failures.** The `technical-signals` worker returned early outside market hours; the post-close runs then stamped `success` over 13 genuine failures earlier the same day, every day, for two sessions. Have the skip path return a marker (`{ skipped: true }`) and make the success handler decline it. Same class as the "success heartbeat on a step that wrote nothing" warning in `measurement.md`. **Recurred 5 times, not once**: fixing `technical-signals` (2026-08-12) and then writing the static check for it (`check_skip_not_success` in `check_recurring_bugs.py`) immediately found 4 more live, previously-unknown instances in the same file, same shape, same day — `intraday-fetcher`, `live-screener-collect`, `trendlyne-intraday-scan`, and `trendlyne-checklist-cycle` (the last one found by the checker itself, not by manual review, after a bare-eyes pass of the surrounding code had already stopped at 3). A code-review pass that finds N instances of a class should not be trusted as complete; write the check and let it look everywhere the class's own shape can hide.
-- **A freshness monitor that probes a job's OUTPUT TABLE reports a gated job as "stale" every time the gate correctly rejects.** `strategy-optimizer` writes to `screener_weight_history` only when the optimised weights beat baseline on held-out data, so two consecutive correct rejections (2026-08-09, 2026-08-10) got reported as "stale since Aug 03" while the job ran clean weekly. Derive last-run from the LATEST of the output probe, the stored `_ran_at`, and `job_heartbeat.last_success_at` -- never the output table alone. Applies to any promotion-gated script.
-- **A data-quality check that fires on a bare count > 0 will fail on correct data.** `stock_delivery_data.trades = delivery_qty` is legitimately true for an illiquid name (ASTAR: 4 shares in 4 trades, 100% delivery). Compare a SHARE of rows against a floor sized to the real defect (that one was 100% of 664,006 rows, so a 5% floor has enormous margin). A check that cries wolf on real data stops being read -- same argument as the ungated live-network test in `data-sources.md`.
+- **A `CASE WHEN date >= floor THEN <new value> ELSE NULL END` write guard, where `floor` is
+  `logical_write_floor()` (`MAX(date) FROM stock_ohlcv`, which advances by one trading day every
+  run), silently re-nulls EVERY historical row on EVERY run — including rows a PRIOR run had just
+  correctly set. Each run's `floor` is later than the last, so `date >= floor` stops matching
+  yesterday's row the moment today exists, and `ELSE NULL` then wipes it. Net effect: no matter
+  how often (even daily) the job runs, only the single most-recent date ever stays populated —
+  looks exactly like "the column has no signal" to anything reading the table, including a
+  cross-sectional feature-coverage check. Found 2026-09-01 (data/model audit) in
+  `index_membership_fetcher.py` (`is_nifty50`/`is_nifty100`/`is_nifty200`/`is_midcap150`/
+  `is_smallcap250`/`nifty_tier`): `job_run_history` showed `'success'` every weekday for two
+  weeks straight, yet `technical_signals` held real values on only the single most-recent date at
+  any moment — every earlier date read `NULL` despite its own "successful" run. Grepping the
+  exact template (`date >= ? THEN COALESCE(?, col) ELSE NULL END`) found the **identical**
+  mistake, evidently copied fetcher-to-fetcher, in 8 more files (77 more columns):
+  `mc_chart_patterns_fetcher.py`, `mc_pricefeed_fetcher.py`, `nt_dashboard_fetcher.py`,
+  `trendlyne_adv_tech_fetcher.py`, `trendlyne_fundamentals_fetcher.py`,
+  `trendlyne_overview_fetcher.py`, `trendlyne_price_analysis_fetcher.py`,
+  `working_capital_fetcher.py`. Fixed uniformly: `ELSE NULL END` → `ELSE <col> END` (preserve the
+  row's own current value instead of nulling it), so each run becomes additive — bless today,
+  leave every other already-blessed day alone — matching what "run it daily" was already assumed
+  to achieve (a prior fix, AF-20260828-21, moved `index-membership` to a daily schedule
+  specifically to close this gap, and never noticed the `ELSE NULL` branch defeated it).
+  **Not every `date >= floor` guard is this bug** — `financial_ratios_fetcher.py` and
+  `working_capital_fetcher.py`'s OWN primary floor (`as_of_floor()`, keyed on a fiscal-year-end
+  disclosure date) barely advances, so `ELSE NULL` there rarely fires in the erosion-causing
+  direction; `mf_holdings_fetcher.py`/`mf_stock_holdings_fetcher.py` are the same shape. Preserving
+  instead of nulling is still strictly safer for these (never worse, closes a rarer fallback-path
+  version of the same bug), so they were fixed too where touched, but the acute, guaranteed-daily
+  version of this class needs `logical_write_floor()` as the PRIMARY (not fallback) floor input —
+  check which one a file uses before assuming urgency. **Tell:** cross-check `job_run_history`
+  showing repeated `'success'` against the actual per-date fill-rate of the column it's supposed
+  to write (`GROUP BY date`) — a job that "succeeds" daily but only ever shows ONE populated date
+  in the table it writes is this bug, not a scheduling gap. A mocked-cursor unit test cannot catch
+  it (only checks SQL text, not row-level effect across two runs) — needs a real UPDATE evaluated
+  against real rows across two sequential floor values (`pg_memory_conn()`, not `_FakeConn`).
+- 🤖 **A job whose skip path falls through to the same "completed/success" handler as a real run will erase that day's failures.** Have the skip path return a marker (`{ skipped: true }`) and make the success handler decline it. Same class as `measurement.md`'s "success heartbeat on a step that wrote nothing" warning. **Recurred 6 times**, not once: fixing the first instance and writing the static check (`check_skip_not_success`) immediately found 4 more live in the same file, then a 6th in a completely different shape — a SHARED `.on('completed')` handler (`jobs/registerJob.ts`) the checker structurally can't see because the processor and its handler live in different files. **When you write a static check for a class, note in the check's own comment what file layout makes the class invisible to it** — "the checker is clean" is not "the class is extinct."
+- **A lateness/deadline branch anchored on the CURRENT cadence boundary can never fire, for any input** — `now - boundary` is by construction less than `everyMs`, so any `graceMinutes` larger than the cadence puts the deadline permanently in the future. A heartbeat seeded 7 months stale still reported `late=false`. Anchor on the most recent boundary whose grace has **already expired**. Same family as "a monitor that fires on EVERY run carries no information," inverted — one that can never fire carries none either, and is harder to notice because silence reads as health.
+- **A "don't queue a duplicate catch-up" guard matching on `data.isCatchup` alone doesn't recognize the job's own currently-active legitimate run** — only another catch-up. A server restart mid-real-run sees nothing catch-up-shaped pending, concludes "missed," and queues a duplicate behind the real one. Match a currently-`active` job of the same name regardless of `isCatchup`, not just the marker field.
+- **A fetcher failing most requests despite correct headers, sane rate limiting, and an intact request-count allowance may be blocked on TLS fingerprint (JA3), not content or rate.** Some WAFs fingerprint the TLS ClientHello independently of headers/UA. `tl_fetch.py` is a ready-made `curl_cffi`/Scrapling adapter (real Chrome fingerprint, `requests.Session`-shaped shim) for any fetcher that turns out to need it.
+- **`dict.get(key, default)` returns the default only when the key is MISSING, not when it's present with an explicit `null`.** A provider is free to send `null` where it used to send nothing. Use `.get(k) or {}` / `or []`, not `.get(k, {})`.
+- **An import-time environment variable set inside a function is set too late.** Some libraries (e.g. `huggingface_hub`) snapshot env vars into module constants at import — a `setdefault` inside a loader function has no effect on an already-imported library. Move the `setdefault` to module top. **The test trap this causes**: asserting `os.environ["X"]` after import passes identically against the broken ordering, because `setdefault` sets the var either way — assert the library's own resolved constant instead (in a clean subprocess), not `os.environ`.
+- **A monkeypatched stub whose signature is hand-copied from the real function is a second declaration of the same interface that nothing keeps honest.** Prefer `functools.wraps`/signature-checked fakes, or accept `*args, **kwargs` so a new real kwarg can't break the stub while the call site is fine.
+- **A freshness monitor probing a job's OUTPUT TABLE reports a gated job as "stale" every time the gate correctly rejects.** Derive last-run from the LATEST of the output probe, a stored `_ran_at`, and `job_heartbeat.last_success_at` — never the output table alone.
+- **A data-quality check that fires on a bare `count > 0` will fail on correct data.** Compare a SHARE of rows against a floor sized to the real defect's magnitude. A check that cries wolf on real data stops being read.
+- **A column referenced in SQL that doesn't exist** nulls not just its own output but potentially the WHOLE batched `SELECT` it sits in (Postgres aborts the entire statement on `UndefinedColumn`), and if that's wrapped in a blanket `except: pass`, it does so silently. Check `information_schema.columns` before ordering/partitioning by a column you assume exists, and grep every reader of the table — this recurred 3 times in the same table (`quant_scores`, which has no `date` column).
+- 🤖 **`except Exception: pass` around a failed statement does NOT contain the failure on Postgres — it aborts the WHOLE transaction**, and every later statement on that connection dies with `current transaction is aborted`, naming a table that's perfectly fine. SQLite tolerates this (a failed statement is local there), which is why it survives — 5+ separate instances found in one day once someone checked. Fix at the source with `conn.rollback()` inside the `except` (only where the function owns its transaction — a shared helper can discard a caller's pending work). A generic backstop exists (`db_compat.ConnWrapper` rolls back before re-raising, gated on actually querying transaction status rather than inferring from the exception type) but does not restore data an earlier swallowed read should have returned. **Tell:** an error naming a table/column that demonstrably exists, or a "graceful" fallback returning empty instead of falling back — look for an earlier swallowed failure on the same connection.
+- **A connection checked out once at the top of a long function and then left idle while a separate connection does 10+ minutes of real work can be closed server-side, and `pool_pre_ping` will not catch it** — pre_ping only validates a connection at POOL CHECKOUT, not while it sits checked-out-but-unused. Recurred twice (`strategy_optimizer.py` 2026-08-25/26, `backtest_optimizer.py` 2026-08-27, both fixed the same way): reconnect (`conn.close(); conn = connect()`) right before the gap's first post-loop use. **Tell:** `psycopg2.OperationalError: server closed the connection unexpectedly` on the FIRST statement after a long CPU-bound loop that used a different connection/handle, plus orphaned scratch rows from the prior crashed run (the crash lands after the loop's own work committed via its own connection, but before this function's own cleanup could run).
+- **A function that takes a `conn` argument and then ignores it (opens its own connection/pool instead) silently defeats every caller's isolation** — including schema scoping in tests, which can make a "test" write directly into production. Grep any function whose signature takes `conn`/`con` for `get_engine()`/`connect()`/a module-level pool inside its own body.
+- **Restricting a universe upstream re-tunes every absolute threshold downstream.** An engine fix that deflates one score can collapse actionable output under an unchanged floor (612→22 Buys, one incident). **A related, subtler cause: a multiplier whose INPUT is degenerate**, not the multiplier's own calibration — a crowding discount fired on 98.6% of the universe because 5 upstream factor columns were accidentally constant, and a uniform multiplier is invisible to every rank-based diagnostic since it can't change any ranking, only shift the population against absolute thresholds. **Two tells, either enough:** a gate/veto/discount firing on ~100% of its population carries zero information (check prevalence directly, don't assume miscalibration); a final blended score landing BELOW every component that fed it is not a weighted blend (grep for a `*=` applied after the blend). Measure the input's distribution before "fixing" the multiplier's threshold.
 
-- **A column referenced in SQL is not a column that exists.** `quant_scores` is `PRIMARY KEY (symbol)`, one row per symbol, and has no `date` column -- but two queries added in one sweep wrapped it in `ORDER BY date DESC` (a latest-per-symbol window that was never needed). One aborted the entire technical scan for two days; the other sat behind `.catch(() => null)` writing NULLs in silence. Check `information_schema.columns` before ordering/partitioning by a date column, and grep **every** reader of the table -- this arrived twice in the same commit.
-  **Recurred a third time, 2026-08-13, same file family:** `scoring_engine.py`'s `_log_recommendations` batched price/ATR lookup (added 2026-08-07, per its own comment, specifically to fix an *earlier* incarnation of this exact null-enrichment problem) added `(SELECT qs.rank_composite FROM quant_scores qs ... ORDER BY qs.date DESC LIMIT 1)` as a correlated subquery inside a larger 5-column `SELECT`. Because it's one statement, Postgres aborts the *entire* query on `UndefinedColumn`, not just that subquery -- and the whole thing sits behind a blanket `except Exception` that only logs a warning. Live-confirmed 2026-08-13: 100% of `recommendation_log` rows from `scoring_engine` had NULL `entry_price`/`target_1-3`/`stop_loss`/`news_sentiment_score`/`quant_score` -- not just the `rank_composite` column the broken subquery directly touched, but everything else in the same batched query too, silently re-breaking the exact `entry_price` null-enrichment bug the 2026-08-07 comment says was fixed 2026-07-30. **Tell that made this findable:** the fetcher's own log line, `[ScoringEngine] price/ATR lookup for recommendation_log failed (entry_price will be null): column qs.date does not exist` -- printed, but to stdout only, with no alerting/freshness check watching for it, so it ran silently for however long the 2026-08-07 change had been live. Fixed by dropping the bogus `ORDER BY qs.date DESC LIMIT 1` (quant_scores has no history, one row per symbol, nothing to order). Live-verified: re-ran `process_scoring()`, `recommendation_log` rows for the day went from 0/1584 to **1,492/1,584 (94%) with `entry_price`/`quant_score` populated**. **One query touching a nonexistent column doesn't just null its own output column -- it can null every sibling column selected in the same statement.** When a batched multi-column lookup like this fails, don't assume partial data; check whether the whole `SELECT` aborted.
+## Signals, writes & job runtime
 
-- **Restricting a universe upstream** re-tunes every absolute threshold downstream. An engine fix that deflates one score collapsed actionable Buys 612 → 22 under an unchanged floor.
+> The 21 ML/model/measurement-harness classes that used to sit here (promotion gates, training
+> labels, train/serve skew, sklearn `cv=`, fabricated backtest scripts, drift thresholds, panel
+> slicing) moved to **`.claude/rules/ml-model-bugs.md`** on 2026-08-27 — load that when touching
+> a model, a gate, or a measurement harness.
 
-## Models & measurement
+- **The same per-item computation implemented twice — a single-item path and a batched/parallel path — drifts the moment a feature or fix lands on only one of them, and the scheduled job almost always runs the batched one.** 2026-09-14 (AF-20260914-01): `feature_engineering.py`'s worker `_compute_symbol_unscaled` (the ONLY compute path the nightly full-universe `dl-feature-refresh` job runs) carried 8 of `process_symbol`'s 13 merges, so the nightly `ON CONFLICT DO UPDATE` upsert rewrote NULL over the analyst/earnings-clock/delivery/options/block-deal columns every day while each merge's own unit test stayed green — they test the merge, not the wiring into both paths. One day earlier, same class on the model side: `load_inference_sequence` missing the scaler step `load_symbol_sequences` got (AF-20260913-01, recorded in `.claude/rules/ml-model-bugs.md`). **Guard shape that worked: a source-level parity test** — `inspect.getsource()` both call sites, extract the call sequence, assert equal (`test_feature_wiring.py::TestWorkerPathMergeParity`), plus a per-item presence test for the symmetric-drop shape that equality alone cannot see. When you add a step to one path, the parity test fails until it lands in the other.
+- **A processor's own `catch`/`.catch()` block that logs `'failed'` to `job_heartbeat`/`recordHeartbeat`/`updateMonitorState` and then rethrows will ALWAYS be followed by the worker's `.on('failed', ...)` handler logging the SAME failure again, if that handler also calls the same logger.** `withJobTimeout` is `Promise.race([fn(), timeout])` — a rethrow from inside `fn()` propagates through the race exactly like an outer timeout does, so BOTH reach BullMQ's rejection path and fire `.on('failed')` regardless of which one already logged. Found 2026-09-10 in `quant-eod-sync` (confirmed: two `job_run_history` rows 9ms apart, identical error text, for one real budget-timeout failure — inflating its 7-day fail-rate metric) and, by the same shape, latent in `mover-screener-capture` (not yet manifested in observed history). The worker's `.on('failed')` handler is a strict superset of "the processor's own catch already logged it" — it fires for BOTH the inner-rethrow case AND a true outer-timeout the processor's own catch can never see, so it alone is sufficient; the processor's own catch should `console.error` + `throw`, never also call the logger. **Tell:** a job name appearing in more than one call site logging `'failed'` with a literal string in the same file/module — `check_recurring_bugs.py`-adjacent, immunized by repo-doctor's `dual-failure-log` check (scans for a job name logged `'failed'` from 2+ literal call sites).
+- **A UNION half that supplies NULL for the column the consumer keys on is inert, and its row count hides that** — the query returns rows, a `processed` counter grows, the job logs success, but that half's contribution is silently discarded at the accumulate step. **Write a control assertion** that a row from the "included" half actually changes the output — a test that only checks the excluded half stayed out passes identically against a filter that excludes everything.
+- **An enum-ish column with two spellings differing only by case silently defeats an `IN`/`NOT IN` list**, and worse, if the column is also part of a composite PK, both spellings survive forever as separate rows that never collide. Recurred in `signal_source` (`technical` vs `TECHNICAL`, two producers) and again worse in `screener_catalog` (3 producers, 3 different casings on the same PK, 67% of rows had a same-name-different-casing duplicate that could disagree on `signal_bias`). Re-run `SELECT name, count(DISTINCT val) ... HAVING count(DISTINCT val) > 1` before trusting any consensus number built by grouping on such a column, not just once after a new producer is added.
+- **An upsert keyed on a value DERIVED from a name (a slug), not the provider's own numeric id, silently discards the provider's id whenever the provider reassigns it** — whichever id a batch loop processes last wins the row, with no error. Low severity if content is never actually lost (only the old id value vanishes), but look up by name/derived key rather than trusting a specific historical id still resolves.
+- **A ternary branching on `== 'bullish'` (or similar) silently treats every OTHER value — including a legitimate third state like `'neutral'` — as the opposite pole.** Extract a single 3-way polarity mapping (`1 if bullish else (-1 if bearish else 0)`) and share it across every call site that needs the same classification, so the direction and the reasons-bucketing can't disagree with each other.
+- **A "generated at" column listed in `ON CONFLICT DO UPDATE SET` stops being a generation time and becomes a last-seen time** on every re-run — and it stays 100% populated, so no NULL/freshness check catches it. Tell: a value later than its own `created_at`. Remove the column from the update list (first write wins). A corrupted provenance column doesn't just shrink your sample when you filter on it — it can hand you a confident, wrong answer from a biased slice.
+- **A frontend null-check layered on a column that already defaults to a wrong non-null value (e.g. `0.0` instead of `NULL`) is dead code**, and `tsc`/a green suite/a screenshot cannot tell you that — query the actual column, not the rendered page.
+- **A value formatted for ONE display consumer (currency-prefixed, unit-suffixed) can silently become the stored value every OTHER consumer reads as a number.** Check every reader of a column for a numeric cast before assuming a formatting change is presentation-only.
+- **A step that only runs at the END of a script that routinely gets killed by its timeout never runs at all** — and the wasted runtime and the missing data are the same bug. A `runPython` step logging "killed by timeout" on a recurring basis means check what comes AFTER the kill point in that script and assume it has never executed. Put a slow producer's dependent parse step in its own queue step so it degrades to "parse what landed," not "parse nothing."
+- **A per-call API with no since-parameter turns an upsert into quadratic write amplification**, and the row count hides it (millions of rows written for a handful of genuinely new ones). Read `MAX(date)` per key once and skip what you already hold — the fix is on the write side, not the fetch side.
+- **A `dict.get(key) == value` skip-check on a write-amplification guard can't distinguish "never written" from "already stored as NULL"** — both come back `None`. Use `key in known and known[key] == new_value`, not a bare `.get()` comparison, whenever the column can legitimately hold NULL.
+- **A THROTTLED vendor response and a genuinely-empty one must not collapse to the same value —
+  otherwise "we got rate-limited on every symbol" is indistinguishable from "this universe has no
+  data", and the run reports a clean success over nothing.** Recurred twice, and the second time
+  only because the first fix was recorded in memory instead of here:
+  (1) `insider_transactions_fetcher` (2026-07-31) — `fetch_nse_insider()` returned `[]` both when
+  NSE throttled and when a symbol genuinely had no filings; fixed to `None` vs `[]`.
+  (2) `finstack_cashflow_fetcher` (2026-09-10, AF-20260910-06) — finstack wraps yfinance, and
+  Yahoo answers a throttled caller with `{"error": true, "message": "Too Many Requests. Rate
+  limited."}`, the SAME envelope shape as "no quarterly cash flow for this ticker". Both flattened
+  to `[]` and were tallied as "no vendor coverage"; with 6 parallel workers and no backoff a single
+  throttle burned the whole ~2,000-symbol universe, printed `0 wrote / 2000 had no vendor
+  coverage`, and `main()` returned 0 unconditionally so the step recorded success. The table holds
+  **59 rows / 15 symbols** since 2026-09-01 and how much of that gap is real coverage vs.
+  accumulated throttling is now unknowable for the historical rows.
+  **The fix shape:** classify the throttle explicitly BEFORE parsing (the parser flattening every
+  error envelope to `[]` is fine and should stay pure), count it separately, back off, **abort once
+  throttling is sustained** — continuing burns the rest of the universe for nothing and keeps the
+  throttle warm — and exit non-zero so the step cannot report success. **Tell:** a fetcher whose
+  "no coverage" count is a large round fraction of its universe, or a vendor-coverage claim in a
+  docstring that nobody re-derived after the fetcher started running at scale. Related but
+  distinct: `data-sources.md`'s Trendlyne cumulative-allowance entry (there, no amount of backoff
+  converges — only a bounded slice + resume-from-DB does).
+- **A full-universe fetcher with no resumability turns "retried on catch-up" into "always starts from zero"** — a killed run's real progress is thrown away every retry, compounding any transient slowdown into total failure instead of graceful degradation. Track `MAX(date)`-per-key against wall-clock cost the same way the write-amplification fix does against write volume.
+- **`keep_alive: 0` on a repeated local-LLM/embedding call forces a full reload between EVERY call in the same run**, even with zero external contention. Drop it (default keep-alive) for any script calling the same endpoint in a loop.
+- **A provider-issued id column that silently holds the wrong shape (e.g. a symbol instead of the provider's numeric id) is a permanent, self-concealing 404** for every row with that shape, while also burning retry/backoff budget that masks a real transient outage in the noise floor. `SELECT count(*) FROM t WHERE provider_id !~ '^[0-9]+$'` (or whatever shape the provider actually uses) before trusting a column `data-sources.md` calls opaque/numeric.
+- **A timestamp used as a uniqueness key is only as fine-grained as the SYSTEM CLOCK TICK, not as precise as its ISO output implies** (Windows: 15.6ms; two calls in the same tick return the SAME value). If that key backs `ON CONFLICT DO NOTHING`, the second write in a tick is silently discarded. Bump by 1µs on collision if the constraint depends on strict ordering. The answer differs by platform (Linux ~1ns) — "it never happens in prod" can be true on Linux and false in dev, or the reverse.
+- **A test dismissed as an "order-dependent flake" can be a real defect whose trigger is timing** — before labelling anything flaky, reproduce deterministically and read the actual assertion message; it may name the bug outright. Instrumentation that widens timing (e.g. `-s` adding I/O) can hide a timing bug rather than reveal it.
+- **A value written as a SENTINEL (e.g. `0.0`) instead of NULL for "missing" is invisible to every freshness/coverage check and silently poisons any measurement built on that column** — and the fix can't be retroactive (a `0.0` is indistinguishable after the fact from a genuine zero; rewriting historical rows fabricates evidence). Tell: `count(*) FILTER (WHERE col = 0)` as a large round fraction of the universe. Record the fix date as a population boundary and source measurements from raw tables for anything before it.
 
-- **A UNION half that supplies NULL for the column the consumer keys on is inert, and its row count hides that.** `reward_engine.py`'s `update_weights()` unions `signal_outcomes` with `unified_signal_outcomes`, but the second half selects `NULL AS signals_json` while weights are only ever accumulated per signal *type* parsed out of that column (`_parse_signal_types(None)` → `[]`). Every row that half contributes is counted in the returned `processed` figure and then silently discarded at the accumulate step — so the reward engine **cannot learn from AI/QUANT outcomes at all**, for any source, however many rows accumulate. It looks alive from the outside: the query returns rows, `processed` grows, the job logs success. Found 2026-08-12 only because a test written for a *different* bug (the `NOT IN ('TECHNICAL')` case-collision, below) had a control assertion that a non-technical source *should* change the weight — and it didn't. **Write the control assertion.** A test that only checks "the thing I excluded stayed out" passes identically against a filter that excludes everything. Pinned by `test_unified_signal_outcomes_half_cannot_affect_weights`; making it functional is an RL-weighting change and needs backtest evidence first.
-- **An enum-ish column with two spellings differing only by case will silently defeat an `IN`/`NOT IN` list.** `unified_signals.signal_source` carried `technical` (technical_analysis_engine.py) and `TECHNICAL` (technicalSignalsService.ts) — two different producers. `reward_engine.py` excluded `NOT IN ('TECHNICAL')`; when Cluster B-lite folded the Python engine in under the lowercase spelling, 25,740 rows began passing a filter written to stop them and nothing errored. Renamed to `technical_scan` (migration `1786930000000`) and now guarded by the `signal-source-case-collision` data-quality check. Same family as the composite-key collisions in `data-sources.md`: the defect is that two things that must be distinguishable aren't, and no constraint expresses it.
-  **Recurred 2026-08-13 in a second table, worse in shape**: `screener_catalog`'s PK is `(screener_id, source)`, and three independent writers (`screener_catalog_enricher.py`, `trendlyne_screener_discovery.py`, `unified_ranker.py`'s CSV loader) each picked their own casing for `source` (`trendlyne`/`Trendlyne`, `moneycontrol`/`MoneyControl`, `etnow`/`ETnow`). Because the PK includes the differently-cased string, the rows never collide and both survive forever — worse than the `signal_source` case, where at least `IN`/`NOT IN` failed loudly enough to be traceable. Measured: 1,707 of 2,539 rows (67%) belonged to a screener_name with >1 catalog row, and 212 of those disagreed on `signal_bias` — e.g. `'All Stars: High Scorers Across Metrics'` was `bullish` under `trendlyne` and `bearish` under `Trendlyne`, and which one a stock got depended on which producer's `screener_id` slug its `trendlyne_screener_stocks` membership row happened to carry (the two producers ALSO slugify screener names differently — one strips punctuation, one keeps it — so this isn't even a clean `LOWER(source)` merge; the `screener_id`s differ too). Separately, two readers (`intraday_ranker.py`, `movement_predictor.py`) joined with exact-case `sc.source='trendlyne'`, silently missing 25–49% of the catalog depending on source. Fixed by harmonizing `signal_bias` across every row sharing an identical `screener_name` (script: `fix_screener_catalog_source_casing.py`, dry-run reviewed before `--apply`) rather than merging rows by `screener_id` (which would have required resolving the slug mismatch too) — lower-risk, and every membership row now resolves to an agreeing label regardless of which producer's ID/casing it references. **Tell:** `SELECT screener_name, count(DISTINCT signal_bias) FROM screener_catalog GROUP BY 1 HAVING count(DISTINCT signal_bias) > 1` — re-run this before trusting any screener-consensus number, not just once after a producer is added.
+- **A BullMQ job left in `active` state by a killed worker is a ZOMBIE that looks exactly like a
+  healthy long-running job, and for a weekly queue it silently eats the entire week's slot.**
+  Found 2026-08-30: `dl-retrain-weekly`'s Saturday 2026-08-29 11:30 IST run still showed
+  `active` ~29h later, with `getJobCounts()` reporting `active: 2`. There was no corresponding
+  `python.exe` in the OS process table — a pm2 restart had killed the worker mid-run, and BullMQ
+  keeps the job in `active` until its `stalledInterval`/`maxStalledCount` reclaim fires (here
+  masked further by a 24h `lockDuration` chosen for a genuinely long training job). The job
+  therefore neither ran nor reported failure, and the *consequence* surfaced somewhere else
+  entirely: `model_registry`'s last BiLSTM row was 5 days stale, which reads as "the DL model
+  isn't improving" rather than "the trainer never executed". **Tell:** cross-check any long-
+  `active` job against the OS process table before believing it is running — an `active` BullMQ
+  job with no matching child process is a zombie, and the older it is the more certain that is.
+  Same family as this file's `cron_restart` "Registered != running" entry (a dormant job that
+  looks idle-healthy) and its "lateness branch that can never fire" entry: silence reads as
+  health in all three. Do NOT diagnose from `pm2 list`/`getJobCounts()` alone.
 
-- **An upsert keyed on a derived value (not the provider's own id) silently discards the provider's id on every re-derivation, with no error.** `trendlyne_screener_discovery.py`'s `upsert_screener()` writes `trendlyne_screeners` `ON CONFLICT(screener_id) DO UPDATE` where `screener_id` is `name.lower().replace(' ', '-')...` — a slug derived from the screener's *name*, not its numeric `screenpk`. Trendlyne periodically reassigns a new `screenpk` to the same logical screener (same name, same slug) as it refreshes its own catalog, and `KNOWN_PKS` (the ~1,050-entry hardcoded seed list) accumulates both the old and the new pk for the same screener over time. Since both resolve to the identical `screener_id`, whichever one `sync_pks()`'s batch loop (`range(0, len(pks), BATCH_SIZE)`, strictly list-order) processes **last** wins the row — the earlier pk is overwritten in the `screenpk` column and vanishes, with no error, no skip logged, nothing to distinguish it from a screener that was never in `KNOWN_PKS` at all. Found 2026-08-13 checking a user-supplied list of screenpks against the catalog: 9 pks (16, 30, 9193, 15543, 15697, 17183, 82586, 186840, 198018) read as "missing" from `trendlyne_screeners`, but every one of their screener *names* was present and current — just filed under a different, newer pk (16 to 82476, 30 to 422013, 9193 to 422030, 15543 to 422031, 15697 to 697683, 17183 to 497215, 82586 to 422033, 186840 to 371829, 198018 to 372090). **Low severity — no screener content is actually lost**; the current pk's fetch always wins and the stocks/metadata are correctly captured. The only casualty is the *old* pk value itself, which matters only to something checking "is pk X captured" rather than "is screener named X captured." **Not fixed** — the practical mitigation is to look up a screener by name (or via `screener_id`) rather than assuming a specific historical pk still resolves; a real fix would need `sync_pks()` to detect a screener_id collision across two different pks and either keep the newest by an explicit freshness signal (not batch order) or track pk history, neither implemented.
+- **A timeout budget is calibrated against the query the step ran WHEN THE BUDGET WAS SET, and
+  widening a SHARED query helper silently invalidates every caller's budget at once.** The
+  2026-08-30 feature-completeness fix repointed `online_learner.load_recent_outcomes()` (plus
+  `cs_ranker.py`/`exit_policy.py`) at `ml_ensemble.full_feature_train_sql()` — ~30 hand-rolled
+  columns to ~275. `online_learner`'s ml-daily-ops budget stayed at the 120_000 chosen for the
+  narrow query; live-measured after the fix it takes **3m34.8s (215s)**, so the step could never
+  again pass, and because it is a `T.run()` step it fails the whole `ml-daily-ops` parent rather
+  than degrading. It had in fact ALREADY timed out at 120s on 2026-08-28, before the widening —
+  so the fix converted an intermittent failure into a guaranteed one. **When you change a shared
+  query/feature helper, grep every caller for its own timeout constant and re-measure each one
+  — the helper's own callers are the blast radius, not just the file you edited.** Sibling of
+  this file's "measured 119s against a 120_000 budget — a 1-second margin" cases: the recurring
+  defect is choosing a budget with no headroom, then never revisiting it when the work grows.
+## Provider identifiers, reverse maps and "the vendor is dead" (2026-09-12 pm2 warn/error sweep)
 
-- **A ternary that branches on `== 'bullish'` silently treats every other value — including a legitimate third state — as the opposite pole.** `scoring_engine.py`'s screener-scoring loop (`sentiment_mult = 1 if meta['sentiment'] == 'bullish' else -1`, line 854) scores any screener tag whose `signal_bias` is `'neutral'` (a real, populated value — 707/2,539 = 27.8% of `screener_catalog` rows) as if it were `'bearish'`, and files it into `negative_screeners` (line 883, same binary check) rather than excluding it. Found 2026-08-13 via the signal-accuracy-review reverse-engineering practice: MOREPENLAB (`quant_scores.composite_class='Strong Buy'`, rank 85.4) and SENCO (a real -13.86% loser with zero coverage anywhere else) both carried `stock_scores.timeframe='long_term'` rows pinned at the score floor (`score=0.0`, `classification='Strong Sell'`) built mostly from purely descriptive/neutral tags (sector-theme, large-cap-style, ownership-institutional membership) with no real bearish content. Quantified platform-wide: of all tags counted as "negative" across every `long_term` row, **66.0% (23,458/35,519) are actually `sentiment='neutral'`**, and of the **1,125 rows (22.6% of the long_term universe) pinned at the exact `score=0.0` floor**, **85.2% (959) have more neutral tags than genuine bearish tags** driving them there. The bug is asymmetric — only the bearish branch absorbs the neutral state (the news-sentiment path a few lines up, `mult = 1 if positive else (-1 if negative else 0)`, already does this correctly and was not affected) — so it's a standing downward bias on `stock_scores`, one of `unified_recommendations`'s three blended inputs (`scoring-authority.md`). **Fixed 2026-08-13** — extracted the polarity mapping into a single `_screener_polarity(sentiment)` staticmethod (`1 if bullish else (-1 if bearish else 0)`, plus the matching 3-way `positive_screeners`/`negative_screeners`/neither bucket) that both call sites now share, so the score-direction and the reasons-bucketing can no longer disagree with each other. Negative-controlled (`test_scoring_engine.py`: 5 new tests, all fail with `AttributeError` against the pre-fix code — confirmed live by stashing the fix and re-running — all pass restored). Live-verified read-only against the 7 traced symbols (real `screener_master` metadata, real `CATEGORY_WEIGHTS`/`SOURCE_WEIGHTS`, real `_screener_polarity`/`_source_cat_key`, no production write): every one moves off the score floor, and the new scores now agree with `quant_scores`'s independent read where they disagreed before (SENCO: Strong Sell/0.0 → Hold/59.7, matching `quant_scores`'s Hold/50.9 exactly; MOREPENLAB: Sell/27.9 → Buy/78.65, matching `quant_scores`'s Strong Buy/85.4 in direction — the stock that had actually rallied +10.11%). Full table (all 7 symbols, old vs new score/classification) in `docs/session-log.md`'s 2026-08-13 entry. **Update, same day: run live for real.** `process_scoring()` + `unified_ranker.py` both re-run against production (6,009 `stock_scores` rows, 2,188 `unified_recommendations` rows, `computed_at=2026-08-14`). Full-universe Sell:Buy ratio barely moved (29.6:1 -> 34.1:1 -> 32.2:1 across 08-12/08-13/08-14) — only ~1% of the universe moved off the Sell side into Hold, so **this bug explains a real but small slice of the platform's Sell-heavy skew, not the bulk of it; something else dominant remains unfound.** Per-symbol: MOREPENLAB/COROMANDEL (directly caused by this bug) moved Sell->Hold as predicted; KERNEX/RMC (correct pre-existing Sell calls) stayed Sell, undisturbed; **PNGSREVA (the other traced wrong-direction Strong Sell) is unchanged — NOT explained by this bug**; SENCO/SGIL's total coverage gaps are also unchanged and unrelated. Full table: `docs/session-log.md`'s "(cont. 5)" entry. A separate, unrelated bug surfaced live during the `process_scoring()` run — `column qs.date does not exist` (quant_scores has no date column, a third occurrence of this file's own "column referenced in SQL is not a column that exists" entry) — spawned as its own follow-up task rather than fixed here.
+- **A wrapper around a vendor SDK does not inherit this repo's identifier discipline — check
+  what identifier the wrapped library actually needs.** `finstack_cashflow_fetcher.py` called an
+  MCP tool with the bare NSE symbol; finstack wraps `yfinance`, whose id for an NSE listing is
+  `<symbol>.NS`. A bare Indian ticker does not merely miss on Yahoo — **it resolves to whichever
+  US-listed company owns that ticker**. Measured 2026-09-12: `IEX` -> IDEX Corporation,
+  `HAL` -> Halliburton, `CUB` -> Lionheart Holdings. 13 of 17 stored symbols held a foreign
+  company's cash-flow statements, and ~2,000 others 404'd (AF-20260912-01). **Tell, and it was
+  visible in the table for 11 days: a `currency` column reading USD for names that report in
+  INR.** Whenever a fetcher goes through a wrapper/MCP server/SDK rather than a URL you can
+  read, print the exact argument it sends and check it against `data-sources.md`'s provider-ID
+  table. Also: **a docstring calling something "source honesty" is not evidence** — this one
+  recorded `INFY returns 4 quarters (reported in USD)` as a documented quirk when it was the
+  NYSE ADR.
 
-- **A "generated at" column listed in an `ON CONFLICT DO UPDATE SET` stops being a generation time and becomes a last-seen time — and nothing errors.** All three writers of `unified_signals` (`signals.ts`'s `upsertUnifiedSignal`, `technicalSignalsService.ts`'s `unifiedUpsertSql`, `technical_analysis_engine.py`) carried `signal_generated_at=excluded.signal_generated_at`, so every re-run walked the stamp forward. `technical-signals` re-runs **every 30 minutes** from 03:00 UTC, so the 03:00 pre-market stamp was reliably overwritten by the last intraday run. Measured live 2026-08-12: **29,433 of 55,736 rows had a `signal_generated_at` LATER than their own `created_at`** — logically impossible if the column meant what its name says — including **100%** of `signal_source='technical'` (19,480 rows, drift up to 24h), 57% of `TECHNICAL`, 23% of `AI`. **The tell is not a NULL. The column was 100% populated.** It is a timestamp later than the row's own `created_at`, which no NOT NULL constraint, freshness check, or schema-drift check can catch. Fixed by removing the column from all three update lists (first write wins, same shape as `screener_appearances.appeared_at`) plus migration `1786920000000` repairing history from `created_at`, which the upserts never touched. **The damage was to measurement, and it was severe and self-concealing:** anchoring a provenance filter on the corrupted column admitted only the 2.4% of rows that had never been re-run — a biased slice — and that slice produced an apparently decisive "live signals are significantly wrong-way, t=−3.44" result that **evaporated to t=−1.28 once re-anchored on `created_at`** (sample 7.5× larger). A corrupted provenance column does not merely shrink your sample; it hands you a confident, wrong answer. Check what a provenance filter actually selects before believing what it returns. Related, found in the same pass: `signal_source` carries both `technical` and `TECHNICAL` as distinct values (19,482 vs 5,922 rows) written by two different producers — any consumer filtering on one silently drops the other, same class as the composite-key collisions in `data-sources.md`. Also: `unified_recommendations.generated_at` was only populated from 2026-08-10, and the 08-10 (18:23 UTC) and 08-11 (20:02 UTC) batches were generated *post-close* — the canonical ranker had **zero** gradeable pre-market dates as of 2026-08-12. **Update 2026-08-13: now 2** (08-12, 08-13) — see `measurement.md`'s "canonical ranker" section for the first real grading pass.
+- **A reverse map built from a provider-id column is ambiguous unless you prove the column is
+  unique, and a dict comprehension silently resolves the ambiguity by file position.**
+  `mcsymbol` in `stocklist.json` looks like a unique MoneyControl code and is not: **39 of 1,940
+  codes map to more than one NSE symbol** — `API` -> {ASIANPAINT, AGROPHOS}, `LC03` -> {LUPIN,
+  LAXMICOT}, `CI29` -> {COALINDIA, COMPINFO}, `TEL` -> {TMPV, TOUCHWOOD}. `{e['mcsymbol']:
+  e['symbol'] for e in entries}` keeps whichever entry came LAST, so a real institutional deal in
+  Asian Paints would be booked against Agrophos with no error anywhere. **Build the map as
+  `code -> set(symbols)` and keep only the singletons**, dropping ambiguous codes the way the
+  ISIN issuer-prefix resolver does (`ml-model-bugs.md`) — never guessing is the rule, and
+  "whichever one the file listed last" is a guess. **Tell:** any `{x[k]: x[v] for x in ...}` over
+  a provider-id field; assert `len(by_code) == len(map)` or print the difference.
 
-- 🤖 **An unmeasured signal/scoring change gets merged with a green test suite, and is only caught later by a dedicated salvage/audit session.** `verify-gate.mjs` blocks completion on tests-passed, but tests-passed proves the code runs, not that its output is any good — a diff to `unified_ranker.py` with a clean `pytest` run satisfies the gate whether or not anyone re-ran the backtest. Recurred at least 3 times: a prior session's PEAD boost / delivery-in-ranker / screener-sentiment / news-date-shift changes all had to be reviewed and rejected post-hoc (`bd40156`); two separate `factor_backtest.py` benchmark bugs (exit-pricing, `--rebalance 1`) sat undetected long enough to make dead factors look alive until a manual review caught them (`32f9676`, `12be159` — full diagnosis in `docs/measurement-history.md`). Fixed 2026-08-12: `verify-gate.mjs` now also requires backtest evidence (a `factor_backtest.py` run, or a same-session edit to `measurement.md`/`measurement-history.md`) whenever the diff touches `unified_ranker.py`, `scoring_engine.py`, `factor_backtest.py`, `multi_factor_scorer.py`, `institutional_quant_engine.py`, or `quantScoringService.ts`.
-- **A bug in the measurement tooling itself is worse than no measurement, because it looks like evidence.** Both `factor_backtest.py` bugs above were in the code that's supposed to *catch* signal-logic bugs, not in signal logic itself — one inflated a dead factor to look significant, the other deflated the whole universe by ~35pp/yr at daily rebalance. Treat a change to any backtest/measurement script with at least as much suspicion as a change to the thing it measures: reproduce at least one already-known result before trusting a harness change's new ones.
-- **A "verification"/"audit"/"backtest" script that never actually connects to the database or touches real data, but formats plausible numbers and logs a success message, is worse than doing nothing — it produces evidence-shaped output that gets committed and cited as real.** Found 2026-08-12 reviewing an incoming merge: 5 of ~12 new scripts (`automated_system_audit.py`, `quantitative_stress_test.py`, `trendlyne_smart_money_backtest.py`, `live_market_simulation.py`, `automated_market_simulation_alerts.py`) had zero DB connections despite docstrings claiming to use "the production PostgreSQL database," with hardcoded results (one MarketsMojo row-count claim, 16.7M, was ~22,500× the real measured depth in `measurement.md`) written to `docs/audit-2026-08-12/*.json`/`*.md` as if genuine. One even had its own comment admitting it (`# Mocking comprehensive integrity checks`). A 6th script (`fix_provider_scan_collisions.py`) claimed to verify composite-PK integrity but ran zero queries — same shape as the "success heartbeat on a step that wrote nothing" class above, in verification-script form. A 7th (`migrate_date_types.py`) claimed a schema migration that, checked live against production, never applied to any of its 4 target columns. **Tell:** does the script's own diff add an import of `db_compat`/`psycopg2`/an ORM, and does at least one code path call `.execute()`/`.query()` on it before formatting the "result"? A script whose numbers exist before any query runs is fabricated, not measured — this is fable-brain.md's "plausible number" and "survivor story" patterns in script form, and it is *more* dangerous than the prose versions because committed JSON/MD output reads exactly like this repo's real measured evidence at a glance. All 5 fabricated scripts and their outputs were deleted rather than fixed; the 2 real-but-broken ones (`fix_provider_scan_collisions.py`, `migrate_date_types.py`) were rewritten/reverted respectively.
-- **A metric-based promotion gate cannot catch weight divergence or output saturation.** All-NaN weights make validation *raise*, which a handler swallows; a 70%-saturated model still scores AUC 0.66. Gate on the artifact, not only its score.
-- **AUC can be excellent and useless.** `flyer_classifier` holds AUC 0.81 with IC −0.041 (t=−9.02) — it measures *who* flies, not *when*.
-- **Grouping training rows by day when scoring reads one snapshot** is train/serve skew. Found in 3 files; `test_auc` 0.641 → 0.486 once honest.
-- **A flat cost-per-rebalance systematically reorders factors by turnover** and can invert the ranking. Two conclusions sign-flipped.
-- **A champion/challenger gate is meaningless if run-to-run seed noise is wider than the champion/challenger gap.** `regime_detector.train_hmm` fit one EM seed (`random_state=42`) and compared it to the incumbent on held-out likelihood. Measured 2026-08-11, the same retrain across 6 seeds scored 9.95 / 10.12 / 9.98 / 11.17 / 10.87 / 10.75 against an incumbent at 11.02 -- the spread straddles the champion, so the verdict was seed luck, not model quality. Use multiple restarts and pick the best by the **training** objective; picking by the holdout is selecting on the gate's own metric and turns its out-of-sample test in-sample. Before trusting any promotion decision, check the metric's run-to-run spread against the gap it is judging.
-- **An `InconsistentVersionWarning` on an unpickled estimator is not itself evidence of corruption -- verify before retraining on account of it.** The regime HMM's `StandardScaler` warned 1.9.0-under-1.8.0 for weeks; its `mean_`/`scale_`/`var_`/`n_samples_seen_` were all intact and `transform()` reproduced `(x-mean_)/scale_` to 0.000e+00. Retraining purely to silence it would have swapped a good model for a worse one. Check the fitted attributes and a round-trip transform first; retrain if they actually differ.
+- **A retired symbol left in the universe master reads as "this stock has no data" rather than
+  "we are asking for the wrong ticker".** `TATAMOTORS` had **zero `stock_ohlcv` rows ever** while
+  `TMPV` — the renamed PV entity that kept ISIN `INE155A01022` — had 1,417. `nseStocks.ts`
+  already knew TMPV and 101 tables already held TMPV rows; only the provider-mapping master was
+  stale (AF-20260912-10). **RENAME the entry, never delete it** — deleting drops the row's 7
+  provider mappings with it. And **verify each provider id individually rather than assuming
+  they all moved**: here MoneyControl `sc_id`, Trendlyne `tlid`, Tickertape `sid` and MarketsMojo
+  `stockid` all carried over unchanged and only `tlname` changed. **Tell:** a symbol in
+  `stocklist.json` with zero rows in `stock_ohlcv`; cross-check against `nseStocks.ts` and
+  against the ISIN before believing the stock is untraded.
 
-- **A stale baseline can become permanently unbeatable** and block every honest retrain. See `model_promotion.staleness_override_applies`.
+- **Adding a token to a request can LOWER your access, so isolate headers one at a time before
+  concluding a route needs auth.** `fetch_niftytrader()` opened with `if not bearer: return []`
+  on the strength of an in-code comment asserting the route "401s unconditionally now, even with
+  a valid token". Measured route-by-route: **`sec-fetch-*` + token -> 200; `sec-fetch-*` with NO
+  token -> 200 (identical bytes); token WITHOUT `sec-fetch-*` -> 403; neither -> 403.** The
+  `sec-fetch-site/mode/dest` trio was the discriminator and the token was irrelevant, so the
+  guard converted any future token lapse into silent zero rows from a fully-open endpoint
+  (AF-20260912-09). This is `data-sources.md`'s "determine the MINIMUM the new call needs",
+  applied to a route already believed understood — **re-derive it rather than trusting the
+  comment, including a comment written by a previous careful session.**
 
-- **An `int` passed as `cv=` to any sklearn meta-estimator silently means `StratifiedKFold`, which shuffles time order.** `_base_models` built six `CalibratedClassifierCV(..., cv=3)` and handed them to `_fit_stack`, whose outer loop is a `TimeSeriesSplit(gap=embargo)` — so the embargo was enforced on the stack and ignored by every base model's own calibration, which fit isotonic/sigmoid on folds containing future rows. Nothing errors and the code reads as deliberate. Pass the splitter object, not a count, anywhere a nested `cv=` sits inside a time-series harness — and grep for `cv=` as an int whenever you see `TimeSeriesSplit` in the same file.
+- **Before asking the user for a vendor capture, grep the repo for an alternate source and probe
+  it — the answer is often already integrated.** Prompted by the user on 2026-09-12, a sweep of
+  in-codebase URLs resolved two of three "dead vendor" gaps with no ask at all: NSE bulk-deals
+  was covered by MoneyControl `deals/list` (200, carries `deal_type: bulk`) **and NSE's own
+  `/api/block-deal` still returned 200 — only the bulk route retired**; movers were covered by
+  `frapi.marketsmojo.com/market_Gainersloser/getData` (200, already wired as `MOJO_MOVERS_URL`)
+  plus MC `price-shockers` and NT's EOD screener. Only ET was genuinely unreachable
+  (host-wide 503 `DNS failure`, unchanged under chrome/chrome124/safari17_0 impersonation, so not
+  a fingerprint block; **re-probed 2026-09-13: `screener.indiatimes.com` screener POST is back —
+  200, 167 records** — so recheck before treating ET as down). **Sequence: grep for sibling endpoints -> probe each -> THEN ask, with
+  the per-route breakdown.** Asking first is cheap but reporting "3 vendors are dead" when 2 are
+  already covered in-tree is misleading.
 
-- **A step that only runs at the END of a script that routinely gets killed never runs at all — and the wasted runtime and the missing data are the SAME bug.** `extra_endpoints_fetcher.py` called `extra_features_parser.run()` as its last statement; the script was SIGKILLed at its 30-min job budget every single night, so 419 MB of responses accumulated while all 14 `ext_*` feature columns stayed at ~0% and `ml_ensemble.py` read them as hardcoded constants. Nothing errored: the fetcher's own table passed its freshness check nightly because it *was* getting fresh rows. **Tell:** a `runPython` step whose log line is `Timed out after Nms (killed by timeout)` on a recurring basis is not "a bit slow" — check what comes after the kill point in that script's source and assume it has never executed. Put the consumer in its own queue step so a slow producer degrades to "parse what landed" instead of "parse nothing". Same family as the skip-path-stamped-as-success class above: the pipeline reports health while producing nothing.
+- **A vendor payload can be byte-identical for two different query params — check before relying
+  on the split.** MarketsMojo's movers endpoint returned the same 181,942 bytes for
+  `type=gainer` and `type=loser`, both keyed `"losers"`. The param looks ignored and the body
+  appears to carry both sides.
 
-- **A per-call API with no since-parameter turns an upsert into quadratic write amplification, and the row count hides it.** `marketsmojo_technical_fetcher.py` re-upserted each stock's entire ~9,900-row history nightly to gain ~13 new rows — measured 2,010,101 writes for 2,787 genuinely new ones (721:1) against a 3.4 GB table, which made one symbol cost ~11s of DB time and got the step killed at 12% of the universe. It looked healthy from outside: rows written was in the millions. **The fix is on the write side, not the fetch side** — the payload arrives whole either way, so read `MAX(date)` per key once and skip what you already hold. Before adding any "fetch the full series per symbol" fetcher, ask what fraction of each response is new; if it is <1%, the upsert is the bottleneck. Guarded by `test_marketsmojo_incremental_write.py`.
+## Limits in the wrong unit, and orderings that are only a comment (2026-09-12)
 
-- **A provider-issued id column that silently holds the SYMBOL instead of the provider's id is a permanent, self-concealing 404.** `nse_stocks.tlid` held the ticker for 412 of 2,234 rows, so every Trendlyne fetcher built `.../adv-technical-analysis/AARTECH/24/` and failed forever for 18.4% of the universe — while also burning 3 `retry_get` attempts with exponential backoff per row per run, which inflated the reported failure rate enough that a REAL transient upstream outage was indistinguishable from the standing noise floor. **Tell:** `SELECT count(*) FROM t WHERE provider_id !~ '^[0-9]+$'` (or whatever the provider's id shape is) on any column `data-sources.md` describes as opaque/numeric. Do not filter these out silently — log the count, or the gap becomes invisible instead of merely broken. Same root cause as the composite-key collisions: a column whose values are not what its name promises, with no constraint expressing the difference.
+- **A COUNT limit does not bound MEMORY, and a PER-PROCESS ceiling does not bound the HOST — two
+  jobs can each be legal and jointly kill the box.** `MAX_PYTHON_CONCURRENT = 5` caps how many
+  Python subprocesses run; `PY_CHILD_MEM_LIMIT_MB = 20480` caps each process TREE. Neither is a
+  host budget. Measured 2026-09-12 (AF-20260912-13): `strategy_optimizer.py` at 16,870MB peak
+  commit ran alongside `dl_trainer.py` at 13,820MB on a 23.5GB host — both comfortably under the
+  20GB per-tree ceiling, together 30.4GB. Commit hit **94.3% of 82GB**, available memory **339MB**,
+  **102,856 pages/sec**. This is the same host-commit exhaustion that killed the WSL2 VM six times
+  on 09-06..11 (AF-20260911-01), except the cause was CONCURRENCY, not one runaway process — so
+  every per-process guard added after that incident was structurally incapable of catching it.
+  **Tell:** any limit whose unit differs from the resource you are worried about. Ask "5 of WHAT,
+  and 5 times HOW BIG?" — if the answer to the second question is unbounded, the cap bounds
+  nothing that matters. Fixed with an exclusive slot for scripts over `PY_HEAVY_THRESHOLD_MB`,
+  seeded from measured `peakMemMb`, not estimates.
+  **A full byte budget is the obvious fix and it is a trap**: with strict FIFO a 16GB job at the
+  head blocks every small job behind it; with first-fit the big job starves instead. Either way
+  the loser hits `SLOT_WAIT_TIMEOUT_MS` (3 min) and FAILS — you trade a memory bug for a mass
+  job-failure bug. Serialise only the heavy population against itself and leave everything else
+  on the untouched count semaphore.
+
+- **A comment asserting a safety property is not the property, and a WRONG one actively prevents
+  the fix — because the next reader stops looking.** `queues.ts` said "pythonRunner caps global
+  Python concurrency at 5, so this can't oversubscribe the box" while `pythonRunner.ts` said, of
+  the same mechanism, "It is per job tree, not per host: 5 slots can still sum past RAM." Both
+  comments were in the repo for weeks; the second is correct. **Tell:** two files describing the
+  same guard in incompatible terms — grep the guard's own definition before trusting either, and
+  when you find the wrong one, FIX THE COMMENT in the same pass, or the next session re-derives
+  the same false conclusion. Same family as this file's stale-`dataQualityChecks.ts`-comment
+  entry, where a comment claiming warn 60 / fail 80 sent a session chasing a discrepancy that
+  did not exist.
+
+- **A cron offset is not a dependency. `B` scheduled 60 minutes after `A` does not run "after A"
+  unless A is guaranteed to finish in under 60 minutes — and a job chain's own step budgets tell
+  you immediately whether that is possible.** `dl-retrain-weekly` was `0 6 * * 6` carrying the
+  comment "after ml retrain"; `ml-weekly-retrain` fires at `0 5 * * 6` and its last three runs
+  measured **87.4 / 110.7 / 192.7 min**, with ~853 min of summed runPython budget. The DL job
+  therefore started mid-chain **every single week**, and the comment made it look intentional.
+  **Tell:** any "after X" / "once X has finished" comment on a `repeat: { pattern: ... }`. Check
+  it against `job_run_history`'s measured `duration_ms` for X, not against the intent. **Prefer
+  day-separation over a cross-job guard** when a whole day is free — there is no guard to get
+  wrong, and the two heaviest jobs here simply cannot coexist any more. If they must share a day,
+  the ordering has to be a real completion trigger, never an offset.
+
+- **A train job that fetches cannot be scheduled around its own resource profile.** `ml-weekly-retrain`'s first 15 steps were fetchers and labellers (~513 min of budget) ahead of
+  ~340 min of training, so the job was I/O-bound for hours and then abruptly 17GB-RAM-bound, and
+  nothing downstream could reason about when the expensive part started. Split fetch from train:
+  the train half reads the DB only. Label prep (`outcome_resolver`, `exit_labeler`) belongs with
+  the FETCH half even though it writes no vendor data — `exit_policy.py --train` depends on it,
+  so landing labels a day earlier strengthens the ordering instead of racing it.
+
+- **Market data cannot change while the market is closed — a weekend re-fetch is re-reading
+  Friday.** `stock_ohlcv` holds **zero Saturday/Sunday bars** (verified live 2026-09-12). Any
+  price/volume/OI-derived job on a weekend slot is doing at best a rare-correction sweep at
+  full-universe cost. Separately and more expensively, **fetch cadence must match the DATA's own
+  cadence, not the job's convenience**: measured the same day, `finstack_cashflow_history` held 6
+  distinct periods with a newest `period_end` of **2026-06-30** while being re-fetched weekly
+  across ~2,000 symbols — ~13 full-universe crawls per one quarter of new data. **Tell:** compare
+  `count(DISTINCT <period column>)` against `count(DISTINCT fetched_at::date)`. If fetch days far
+  exceed data periods, the schedule is wrong, not the fetcher. Gate on
+  `max(period_end) < expected_current_period` and skip entirely otherwise (the
+  `finstack_cashflow_checked` marker pattern — and note the skip marker must be its OWN table,
+  never the history table, or names with no vendor coverage are re-crawled forever).
 
 ## Monitoring blind spots
 
-- **A table-freshness check cannot see whether the FEATURE that table exists to produce ever landed.** These are different questions and this repo had ~90 checks answering only the first. Measured 2026-08-12: `extra_endpoint_responses` took 21,461 fresh rows a night (check passes, green) while all 14 `ext_*` columns it feeds were 0% populated; platform-wide, 21 of `ml_ensemble.py`'s 254 declared `technical_signals` inputs were 100% NULL on every one of the last 10 trading dates — i.e. a hardcoded default fed to every stock — and 106 more were under 50%, with the monitor reading 86 pass / 1 fail throughout. **A fresh table is not a delivered feature.** `technical-signals-feature-coverage` now counts 100%-NULL columns on the last COMPLETED day (generic, via `jsonb_each` over the row — an enumerated column list would only ever guard what someone remembered to add). When adding a fetcher whose whole purpose is to stamp a column, the freshness check on its own table is necessary and not sufficient.
+- **An inline wrapper that declares fewer parameters than its caller passes silently drops the
+  extras.** `registerJob` calls `monitorFn(name, status, detail, durationMs)`; three wrappers in
+  `dl.jobs.ts` were written `(_name, status, detail) => updateMonitorState(...)`, so
+  `job_run_history.duration_ms` was NULL on every run of `dl-engine-infer`/`dl-trainer`/
+  `regime-detector` -- 8 jobs in total once direct call sites were counted (AF-20260913-06). It
+  made a trainer run look like ~0 minutes and blocked measuring a widened inference read against
+  its budget. **Tell:** `SELECT job_name FROM job_run_history GROUP BY 1 HAVING count(duration_ms)=0`.
+  Immunized by `monitorFnForwardsDuration.test.ts`. Note `bullJobDurationMs(job)` needs
+  `finishedOn`, so it returns undefined INSIDE a running processor -- measure from `processedOn`.
 
-- **A data-quality check's own assumption goes stale, silently, when the source logic it guards grows a new legitimate case.** `unified-recommendations-trading-day` tested "does `computed_at` have a matching `stock_ohlcv` row" — correct when the only way to get a bad `computed_at` was a weekend/holiday mislabel (all such dates are permanently unbacked). `as_of.logical_session_date()` later (2026-08-12) gained a second, legitimate behavior: rolling a post-open run forward to the *next* session, so a real evening re-run correctly stamps tomorrow's date — a real future weekday that simply has no bar *yet*. The check couldn't tell that apart from a true mislabel and fired every night until the bar landed (caught live 2026-08-13, one snapshot/2,188 rows on a Friday). Fixed by splitting the predicate: a weekend is knowable bad in advance (`EXTRACT(ISODOW) IN (6,7)`); a non-weekend date only counts as bad once it's strictly in the past and still unbacked. **Different shape from the freshness-vs-feature blind spot above** — that one is a check answering a too-narrow question; this one is a check whose answer was correct on the day it was written and silently stopped being correct when a dependency's semantics changed underneath it. When editing any date/provenance-rollforward function (`as_of.py`, `logical_*`), grep for every data-quality check reading the column it stamps — a check's SQL doesn't know when its premise changes.
+- **A vendor time series' newest point is the in-progress one, and storing it under the run's
+  calendar date writes rounded values on non-trading days.** MoneyControl's index fundamentals
+  graph ends at "today": every `nifty_pe_fetcher` run stored it -- NIFTY50 pb **2.0** against ~2.9,
+  under Saturday/Sunday dates (504 weekend rows, 94 indices). The same feed returns isolated
+  glitches (pe 1.1 among 21.8; pe == pb = 26.0). **Guard at the write boundary, and measure the
+  guard before trusting it**: the rule set flagged 0 of 5,889 points on 23 years of clean history
+  (incl. 2008/2020) and 0.3% of stored values -- and the measurement caught a first draft that
+  would have deleted BSETELECOM's genuinely negative P/B (AF-20260913-08). Related: MC's
+  `duration` enum is `1M,3M,6M,1Y,5Y,Max`, case-sensitive, and longer windows are COARSER (5Y
+  weekly, Max monthly) -- read the 422 message, it lists the enum.
 
+- **A comment saying a step "moved to" another job is a CLAIM, not a schedule — and when the move
+  never lands, the step runs nowhere and leaves no heartbeat to notice.** 2026-09-10
+  (AF-20260910-16): `insider_transactions_fetcher.py` was taken off the nightly chain on
+  2026-08-13 for costing 14m47 of the critical path, and `queues.ts` recorded
+  `insider_transactions_fetcher.py moved to the weekly retrain (processMlWeeklyRetrain)`. It was
+  never added there. Measured 28 days later: **zero** invocations anywhere in `.ts`/`.cjs`, **no
+  `job_heartbeat` row and no `job_run_history` entry at all**, and `insider_transactions` frozen
+  at 2026-05-02 (~131 days stale, roughly double the 75.3d recorded when it was first flagged).
+  **The absence of a heartbeat row is the tell, and it is easy to misread**: every other dead-job
+  class here shows a heartbeat that is stale or `failed`; a job that was never registered has no
+  row at all, so a query for stale/failed jobs returns it in neither. Ask "which scripts have no
+  heartbeat row?", not only "which heartbeats are stale?".
+  **The masking condition is worth its own line:** the matching data-quality check
+  (`insider-trades-recency`) is deliberately **warn-only** because SEBI PIT filings are genuinely
+  event-driven and sparse — `data-sources.md`'s documented "sparse by nature" exemption. A
+  warn-only freshness check structurally cannot distinguish "sparse" from "the writer is gone",
+  so every sparse-by-nature datasource is a place this class can hide indefinitely. The fix is
+  not a tighter threshold (that would re-introduce the false positives the exemption exists to
+  prevent) — it is asserting the schedule exists.
+  **Immunized** by `src/server/__tests__/queuesMovedStepsAreScheduled.test.ts`, which parses
+  `queues.ts`'s own "moved to/off" comments and asserts each named script has a real `runPython`
+  call. Two build-time lessons from it: the scheduler surface is **not** just `queues.ts`
+  (registrations are decomposed into `jobs/*.jobs.ts` — scanning only `queues.ts` produced two
+  false positives), and a `RegExp` assembled inside a **template literal** loses its backslashes
+  (`\(` becomes `(`), so it silently matches nothing and reports every case as a failure, which
+  looks exactly like a real finding. Prefer substring matching, and always include a non-vacuity
+  assertion that the scan found something.
+
+
+- **Removing a monitor does not remove its last verdict — a snapshot table keyed on the monitor's
+  own id keeps that verdict readable forever, and every consumer reads it as current.**
+  `data_quality_results` holds one upserted row per `check_id` and never deletes;
+  `getLatestDataQualityResults()` (what the daily digest reads, deliberately, so it need not re-run
+  168 queries) returned every row with no filter against `DATA_QUALITY_CHECKS`. So `deploy-drift`
+  and `port-drift`, switched off on purpose (pm2 apps dropped 2026-08-27 `b27e588`, checks removed
+  2026-08-29 AF-20260829-17), still reported `status='fail'` stamped 2026-08-29 in the 2026-08-30
+  digest — red for monitoring nobody wanted. **The tell is arithmetic, and it was sitting in the
+  digest itself:** the snapshot table held 170 rows while the same message's data-integrity section
+  reported 168 checks. Whenever a "latest status per X" table disagrees on COUNT with the registry
+  that defines X, the difference is dead rows being reported as live.
+  **What makes this a class and not an incident:** it was the THIRD patch for one removal —
+  `dataQualityChecks.ts` and `jobHeartbeat.ts`'s `getStaleJobs()` had each already grown a bespoke
+  `['deploy-drift','port-drift']` exclusion list, each with a comment citing the "deleting a thing
+  does not delete the checks pointing at it" entry below. **Two hand-maintained exclusion lists for
+  one removal is the signal that the generic fix is missing** — a third consumer you have not
+  thought of is reading the same stale rows. Fix it at the shape, not per consumer: purge rows the
+  run did not produce (the full-recomputation rule under "Writes & keys"), AND filter the read to
+  the live registry so it is self-cleaning before the next sweep. Leave the append-only *history*
+  table alone — it records what was true then, which is a different question.
+
+- **A table-freshness check cannot see whether the FEATURE that table exists to produce ever landed.** A fresh table is not a delivered feature — count 100%-NULL columns on the last COMPLETED day, generically (via `jsonb_each` over the row), not via a hand-enumerated column list that only guards what someone remembered to add.
+- **A data-quality check's own assumption goes stale, silently, when the source logic it guards grows a new legitimate case.** When editing any date/provenance-rollforward function, grep every data-quality check reading the column it stamps — a check's SQL doesn't know when its premise changed underneath it.
+- 🤖 **A degraded-read message printed to stdout (not stderr) defeats the one hook that would surface it** — subprocess wrappers that only inspect stderr for "finished with warnings" never see a `print()`'d degradation message. Use `print(..., file=sys.stderr)` inside anything invoked via a subprocess wrapper that only checks stderr.
+
+- 🤖-adjacent **`const reason = stderr || stdout` discards the real failure reason for every
+  script that emits a harmless warning.** `pythonRunner.ts`'s non-zero-exit branch chose ONE
+  stream with `||`. Any script importing torch writes UserWarnings to stderr on literally every
+  run ('expandable_segments not supported', 'PYTORCH_CUDA_ALLOC_CONF is deprecated'), so `err` is
+  never empty for the ML scripts, the `||` short-circuits, and the stdout tail holding the actual
+  error is thrown away. Found 2026-08-30: `dl-retrain-weekly`'s make-up run was recorded — in
+  `job_run_history`, in the BullMQ `failedReason` AND in the heartbeat — with a 448-character
+  'error' consisting of nothing but those two torch warnings. No error text existed anywhere in
+  the system. The irony is that the branch's own comment already described the stdout case it was
+  failing to handle (`dl_trainer.py` prints `[TRAINER] Done: {...'error':...}` to stdout and THEN
+  `sys.exit(1)`, deliberately, so a swallowed exception cannot be logged as success). Fixed by
+  concatenating both tails, labelled, instead of choosing one.
+  **Tell:** any `a || b` where both operands are diagnostic output. A warning is enough to make
+  the first operand truthy, and warnings are the norm, not the exception. This is the mirror image
+  of the existing 'degraded-read `print()` to stdout' entry above: there the message went to the
+  stream nothing read; here the message went to the right stream and was discarded anyway because
+  the *other* stream happened to be non-empty. Both produce the same end state — a failure with no
+  recoverable reason — so check both directions when a job reports an error you cannot act on.
+- **A process the OS killed writes NOTHING to either stream, so a runner that builds its failure
+  message from stdout/stderr falls through to a bare magic number that reads exactly like a script
+  crash.** 2026-09-10: `[PY] exit_policy.py encountered an error ... exit code 1073807364` and
+  `ml_ensemble.py ... exit code 3221225794`, with `fullStderr` containing nothing but that same
+  sentence. Neither script had a bug — `0x40010004` is DBG_TERMINATE_PROCESS and `0xC0000142` is
+  STATUS_DLL_INIT_FAILED, i.e. Windows tearing down the process tree during a planned Windows
+  Update restart (System event 1074, TrustedInstaller, confirmed against `LastBootUpTime`).
+  **Decode the exit code before believing the script failed.** The ones seen on this box:
+  `1073807364`/`0x40010004` terminated by the OS, `3221225794`/`0xC0000142` DLL init failed (host
+  shutting down, or out of memory/desktop heap), `3221225786`/`0xC000013A` console closed/Ctrl+C,
+  `3221225477`/`0xC0000005` genuine native crash, `137` OOM-killer. `pythonRunner.describeExitCode()`
+  / `isHostTeardownExit()` now do this automatically, so the log says `HOST/OS TERMINATION: ...`.
+  **Tell:** a failure whose captured stderr *is* the "Command failed with exit code N" sentence —
+  that means both streams were empty, which a failing Python script essentially never produces
+  (it leaves a traceback). Cross-check the host's `LastBootUpTime` and System event log 1074/6008
+  before opening the script. Same family as the `stderr || stdout` and degraded-`print()`-to-stdout
+  entries above: a failure recorded with no recoverable reason.
+- **The whole platform silently stops when the host sleeps or reboots, and every heartbeat check
+  still reads "healthy" — because a job that never ran writes no failure row.** Same 2026-09-10
+  incident: pm2 has no Windows service and no scheduled task (`pm2 startup` does not support
+  Windows), so after the update restart the platform stayed down **4.4h** until a human started it,
+  and this was the *fourth-largest* such window in 14 days — nine gaps over 2h, ~40h total, against
+  a measured healthy inter-job gap of p50 0.23min / p95 5.2min / p99 14.5min. Not one existing
+  check noticed, because they all ask "did this job fail?" and never "did anything run at all?".
+  **Tell:** query the gap, not the failures — `lag(ran_at) OVER (ORDER BY ran_at)` across ALL of
+  `job_run_history`; any window with zero runs of any kind is downtime, not idleness. Immunized by
+  repo-doctor's `platform-outage-gaps` (WARN >90min, ~6x measured p99). Fix the cause with
+  `scripts/install-pm2-autostart.ps1`, and re-run `pm2 save` whenever the running app set changes.
+- **A Telegram send that treats a 429 as final silently drops the report it was sending.** Telegram's
+  `sendMessage` answers `HTTP 429 {retry_after: N}` with the exact wait it wants; `telegramService.sendMarkdownMessage`
+  used to log the error and report failure, so when the 2026-09-08 08:15 IST morning digest hit
+  `retry after 8`, the digest was simply lost (`job-digest-morning failed: job digest failed to send to Telegram`
+  in `job_run_history`). **Tell:** a daily report that "randomly" fails on a schedule with no code change, and
+  `[TelegramService] Failed to dispatch` bodies containing `error_code: 429` in the app log. Fixed 2026-09-09:
+  bounded retries honoring `retry_after` (+ per-chunk ~1.1s pacing) inside `sendMarkdownMessage`, so every
+  caller (digests, watchdog alerts, recommendations digest, accuracy digest) inherits the fix.
+- **A notification gate that reads a field its pipeline never populates is not a strict gate — it is an
+  always-false dead report.** `technicalSignalsService.sendTelegramSignals` gated on `r.winProbability >= 0.85`,
+  but NOTHING in `runTechnicalSignalScan` ever sets `r.winProbability` (the column `technical_signals.win_probability`
+  it would write is NULL platform-wide, live-verified 2026-09-09) — so the "NSE DAILY SCAN" Telegram digest
+  had never sent a single message, while the code, the scan, and the docs all implied it worked. This is the
+  second instance of the shape (the websocket `confidence >= 85` gate died the same way on 2026-07-12 when the
+  confidence scale was swapped for win_probability). **Tell:** a report channel with zero sends since a known
+  scale/route change; grep for the WRITER of the gated field, not just the reader, before touching the
+  threshold. Fixed 2026-09-09: gate reuses the scan's own actionable threshold (`signalScore >= 5`, 7 in BEAR —
+  the same values that mirror into `recommendation_log`), one digest per date with retry-on-failure, and the
+  send routed through `telegramService` so balancing/chunking/429-retry/DB-configured settings all apply.
+- **A test that can reach a network side effect without a mock WILL, on some full-suite run, perform it against production.**
+  `addJobWithCatchupReclaims.test.ts` drove the real reclaim→requeue path; the dynamic `import('../telegramService')` inside
+  `alertOrphanedJob` resolved to the REAL service, so `vitest run` sent live `job: orphan (queue fake-queue)` alerts to the
+  production chat — 15 of them on 2026-09-09, with zero test failures, because no test asserted on sends. This is the test-side
+  twin of "a developer's Postgres IS production": side effects need the same isolation as data. **Tell:** Telegram messages
+  whose job/queue names match test fixtures (no production queue is named `fake-queue`); a chat that receives N identical
+  alerts after a `vitest run`. Fixed 2026-09-09 at two layers: per-file `vi.mock('../telegramService')` on every
+  registerJob-importing test (policy), and a runtime guard in `sendMarkdownMessage` (`process.env.VITEST` → no-op) so any
+  future unmocked test is inert. Immunized by repo-doctor's `tests-mock-telegram` + `tg-vitest-guard` checks.
+- **A digest/lateness flag is a snapshot — cross-check the LIVE state before chasing it.** The 09-09 evening digest flagged
+  `nt-live-filter-capture` "~16h late" and ml dispersion "dying (ml 100%)" while both were already healthy (32/32 capture
+  slots that day; latest DQ read ml 0% after the recovered runs). Digests build from state that 15-min pollers keep moving;
+  verify against the log's latest completed slot and a fresh heartbeat before spending a session on the flag. Related
+  measurement trap: `job_heartbeat` stores naive-UTC epochs and pg's JSON rendering appends a bogus `Z` to
+  `AT TIME ZONE`-converted values — UTC instants read as IST wall times and vice versa; use raw epoch math (repo-doctor does).
+- **A buy/sell inversion can exist at the DISPLAY layer while the data is correct — check the mapping when a report "looks backwards".**
+  The 2026-09-09 accuracy-digest audit: the ranker was monotone-correct (avg unified_score Strong Buy 85.6 → Strong Sell 14.0),
+  class strings title-case, retrospective class sets pinned by tests — but the Grafana "top losers" panel mapped
+  `Strong Sell → dark-green / Strong Buy → dark-red`, the exact mirror of the correct gainers panel. A user asking "is buy/sell
+  defined opposite?" was right — about the dashboard, not the data. **Tell:** two panes in the same dashboard that colour the same
+  classification differently; a "correct call" rendered green in one view and red in another. Fix the mapping; and reach for the
+  cause the user actually suspected (grep the WRITER, check monotonicity of `classification` vs `unified_score`) before blaming a
+  direction bug that isn't there. Immunized by repo-doctor's `grafana-systemcall-colors` (greps for the inverted
+  `Strong Sell → dark-green` signature in `grafana/*.json`).
+- **A one-sided accuracy report hides the system's real hit rate — report BOTH halves of a directional confusion.** Before 2026-09-09
+  the Signal Accuracy digest only surfaced flyers rated Sell/Strong Sell that rallied (wrong-direction) but not the flyers rated
+  Buy/Strong Buy that made high "as recommended" — so a reader could not distinguish "we are inverted" from "we are right sometimes
+  and only showing the misses". The digest now buckets every mover by prior call (correct/wrong/neutral) and lists the top confirmed
+  as-recommended calls next to the worst wrong calls. **Tell:** an accuracy report whose only named examples are failures cannot
+  separate a directional bug from a low-but-real hit rate.
+## Noise floors, and metrics that overflow into a plausible wrong number
+
+- **A log-level classifier that recognises exactly ONE logging format reports ordinary progress
+  output as a crash, and a loud noise floor is what trains everyone to skip the warnings that
+  matter.** `classifyStderr`'s benign pattern required `INFO:` **with a colon** directly after
+  the timestamp. Python's own default format (`%(asctime)s %(levelname)s %(message)s`) emits
+  `INFO panel: 27608 rows` with no colon, and any logger with a name field emits
+  `[finstack] INFO:`. Neither matched, so both fell through to the `real_error` default:
+  measured over a 3-day pm2 window, **14 of 57 `real_error` events were false alarms** across 7
+  scripts whose runs had succeeded (AF-20260912-02). **Tell:** grep a classifier's own output for
+  scripts whose ENTIRE stderr is progress lines. **When widening such a pattern, add a
+  counter-case in the same commit** asserting a genuine failure from the same script still
+  classifies as real (`[DeliveryTrend] Fetch error ... 503`) — otherwise the widening quietly
+  becomes a mute button. Keep ERROR/CRITICAL out of the benign set so they still fall through.
+
+- **A warning that names no subject is unactionable, and "returns empty on a degraded read" makes
+  it invisible.** `trendlyneScreener.ts` logged the bare string `Unexpected API response format`
+  and returned `{ success: false, data: [] }` — no screener, no id, no status, no payload shape,
+  so three occurrences could not be attributed to a screener or a cause (AF-20260912-05). A
+  degraded-read message must name the subject and say how the response differed from the
+  contract the code checked.
+
+- **A `cumprod` over a long panel overflows to `inf`, and `Series.min()`/`.max()` SKIP NaN — so
+  the metric returns a plausible, finite, correctly-signed number computed from only the rows
+  before the overflow.** `performance_tracker`'s `max_drawdown_pct` compounded the h=15 group
+  (**93,278 rows, mean clipped return +2.216%**) via `(1 + r/100).cumprod()`; past the overflow
+  `(cum - peak)/peak` is `inf/inf = NaN`, `.min()` skipped it, and the existing non-finite guard
+  therefore never fired. All 41 groups over 5,000 signals were pinned at exactly `-100.0`
+  (AF-20260912-04). **Compute any drawdown/cumulative ratio in LOG space** —
+  `exp(cumsum(log1p(r)) - cummax(cumsum(log1p(r)))) - 1` is algebraically identical with an
+  exponent `<= 0` by construction, so it cannot overflow. **Tell:** a metric that is suspiciously
+  round or identical across many groups (`-100.0` for all of them). **And do not write
+  `assert x is not None` as the test** — that is what passed against this bug on the first
+  attempt; assert that **no overflow warning is raised**, since NaN-skipping means the value
+  looks fine either way.
+
+- **A throwaway test schema leaks into production whenever the runner is killed before its own
+  teardown, and an unqualified `information_schema` read then sees it as a second copy of every
+  real table.** Two `vitest_%` schemas with 227 tables each were live, with **no reaper of any
+  kind** — and they bit the same session that found them: a PK inspection of `bulk_block_deals`
+  came back with every column listed twice (AF-20260912-12). Stamp each throwaway schema with
+  its own `created_at` and reap siblings **by AGE** (not "anything that is not mine" —
+  concurrent runs are legitimate and dropping a sibling mid-run fails it with a hundred
+  `relation does not exist` errors). The pytest side (`src/server/conftest.py`) has the same
+  shape and still has no reaper.
+
+## Repairs, fallbacks and skip-lists that don't do what they say
+
+- **A repair path can share the exact failure mode it repairs — and then the repair IS the crash
+  site.** The idiom for discarding a possibly-dead connection is `conn.close(); conn = connect()`.
+  But `ConnWrapper.close()` delegates to SQLAlchemy's `Connection.close()`, which issues a
+  **ROLLBACK** before returning the DBAPI connection to the pool, and on a dead socket that
+  rollback raises the very `psycopg2.OperationalError: server closed the connection unexpectedly`
+  the reconnect was written to prevent. Bit twice, six weeks apart: `strategy_optimizer.py`
+  (2026-08-29, discarding a full grid search + 888 computed overrides) and `backtest_optimizer.py`
+  (2026-09-10, AF-20260910-24). **The tell is where the output stops**: captured stdout ended on
+  the grid loop's own last print and stderr was a `do_rollback` traceback — i.e. the first
+  post-loop statement, which was the reconnect itself.
+  **The compounding failure is organisational, not technical:** the guard was written into
+  `strategy_optimizer.py` and never propagated to its sibling, which had been fixed for the
+  ORIGINAL bug *two days earlier*. One class, two files, one fixed. That is why it now lives in
+  shared **`db_compat.reconnect()`** — a guard re-typed per call site is a guard that will be
+  missing from the next call site. **Use `db_compat.reconnect(conn)` anywhere a connection sat
+  idle while a DIFFERENT handle did minutes of work; never hand-roll close-then-connect.**
+  Related, same file: a cleanup `conn.close()` inside a `finally` raises on a dead handle and a
+  raise from `finally` **REPLACES the propagating exception** — so the real failure is swallowed
+  and reported as a connection error at teardown. Wrap cleanup closes.
+
+- **A skip-list built from rows successfully WRITTEN can never contain the things that never
+  write — so those are re-fetched on every run, forever.** `mf_holdings_fetcher`'s staleness skip
+  read the symbols present in its output table; a symbol the vendor has no data for is never
+  written, so it never enters the list. Measured 2026-09-10: of the fetcher's own 1,969-symbol
+  universe, 1,403 had ever been written and **566 (29%) were re-crawled every single run** at
+  ~1s each — ~9-17min of pure waste against a 20-min budget, which is what finally tipped it into
+  `Timed out after 1200000ms` and failed `ml-weekly-retrain` (AF-20260910-28).
+  **The fix is a negative cache, and the naive version is a trap this file already names**
+  ("a THROTTLED vendor response and a genuinely-empty one must not collapse to the same value"):
+  the fetcher returned a bare `None` for HTTP!=200 (incl. 429), a clean 200 carrying no data, AND
+  any exception. Caching that indiscriminately turns a transient rate-limit into **silent
+  permanent data loss**. Classify first (`ok` / `empty` / `error`), cache ONLY `empty`, give it a
+  TTL matched to the data's real cadence (90d here, quarterly disclosures), count errors
+  separately and abort on sustained ones.
+  **Tell:** a fetcher whose runtime grows monotonically while its output row count does not, or
+  whose "no data" count is a large stable fraction of its universe. **Measure against the JOB'S
+  OWN universe, not the master list** — the first count here was 1,037 against `nse_stocks`
+  (2,366), but 397 of those have no vendor id and are never attempted; the real figure was 566.
+
+- **A `try/catch` placed around the statement that CANNOT fail, while the privileged statement
+  sits outside it, is a fallback that never fires — and its docstring will confidently promise
+  the degradation it never performs.** `scripts/install-pm2-autostart.ps1` wrapped
+  `New-ScheduledTaskTrigger -AtStartup` (constructing a trigger object, which succeeds
+  unelevated) and left `Register-ScheduledTask` — the call that actually needs elevation —
+  outside the catch. So the boot trigger was always included, every unelevated install died with
+  a raw `CimException`, and the NOTES claimed "the logon trigger alone works unelevated"
+  (AF-20260910-26). **Tell:** read which statement the guard actually encloses, then ask which
+  statement exercises the privilege/IO/network. They are frequently not the same one. And when
+  you fix it, **re-run and check the fallback path actually executes** — here it then revealed
+  that this box refuses task registration unelevated for ANY trigger set, so the promise was
+  doubly false.
+
+- **A dotted-string monkeypatch target silently stops intercepting when the package is
+  importable under two module identities — and the test then performs the real side effect
+  against production while still looking like an ordinary assertion failure.** This repo is on
+  `sys.path` twice (src/server, and the repo root), so `db_compat` and `src.server.db_compat` are
+  DIFFERENT module objects with different attributes. When a guard moved from
+  `strategy_optimizer` into shared `db_compat`, the existing
+  `monkeypatch.setattr('src.server.db_compat.connect', ...)` matched nothing, the real
+  `connect()` ran, and the test **opened a live production connection** (AF-20260910-25).
+  **Tell:** the failure repr names a REAL object where a sentinel was expected —
+  `assert <db_compat.ConnWrapper object at 0x...> is <object object at 0x...>`; the module prefix
+  in that repr tells you which identity actually loaded. **Fix:** import the module and patch the
+  OBJECT (`monkeypatch.setattr(_db_compat, 'connect', ...)`), which is immune to aliasing. Same
+  family as this file's "a test that can reach a side effect WILL perform it against production",
+  reached through module aliasing rather than a missing mock.
+
+- **"We could not measure this" is usually "we did not look in the right stream."** `queues.ts`
+  carried a comment saying a step's budget was "headroom based on the observed failure rate, not
+  a re-measured confirmation" because a standalone script can't pick up the live auth token — yet
+  `quantStep`'s own `finally` had been logging `[QUANT EOD] <label> took X.Xmin` all along, to
+  **pm2 stdout** (`logs/pm2-out.log`), not the structured app log everyone greps. The numbers
+  were there: niftytrader-scores 23.8min / 25.4min against a 45min budget, with the one failure
+  having run to exactly 45.0min (it hit the cap; it did not merely exceed a tight one) — so the
+  right action was **no change**, not a defensive bump. **Before declaring a runtime
+  unmeasurable, grep the process-manager's stdout log as well as the application log**, and
+  before raising any budget, check whether the SUCCESSFUL runs have actually moved.
+
+- **A generator fed by an executor that has EVERY task submitted is not bounded by how slowly
+  its consumer reads — the pool keeps working while the generator is suspended, and every
+  finished result sits in memory unread.** `dl_sequence_loader.load_sequences_bounded` did
+  `{pool.submit(f, s) for s in symbols}` then `as_completed(...)`; `train_lstm` read it in
+  100-symbol chunks and trained each for minutes, so during every pause the pool loaded the rest
+  of the ~2,300-symbol universe. The caller's own docstring said "streaming in chunks to bound
+  RAM". Measured: one process at 38-52.7GB of commit on a 23GB host, which exhausted Windows
+  commit, killed the WSL2 VM, and took TimescaleDB and Redis down uncleanly 6 times
+  (AF-20260911-01). **Tell:** `submit` in a comprehension or loop over the full input, feeding a
+  consumer that does slow work per item. Fix: a sliding window — keep at most N futures pending
+  (`wait(pending, FIRST_COMPLETED)`), submit the next only as one is yielded. **A unit test with an
+  instant loader and an instant consumer passes either way.** Stall the consumer and count how
+  far the loader ran ahead (it was 199 of 200).
+- **An automatic retry with no limit on the retry-of-a-retry turns a job that crashes the host
+  into a crash loop.** The orphan-requeue (AF-20260909-06) relaunched the memory-exhausting DL
+  retrain on each boot after it had just killed the VM: 3 make-ups in 7 hours (AF-20260911-02).
+  Its "already in flight" guard cannot see this, because the dead make-up is no longer in flight.
+  Mark retries (`orphanRequeue: true`) and refuse to retry anything already carrying the mark.
+- **A verification that reads a file's HEADER cannot detect a missing TAIL.** `pg_restore --list`
+  read a dump truncated at 1.55GB of ~4.3GB and listed 496 tables, because a streamed `-Fc`
+  dump writes its TOC first (AF-20260911-03). Verify by reading the whole artifact
+  (`pg_restore -f /dev/null`), and prove the check on a real truncated file, not a fresh one.
+
+## Investigating production without breaking it
+
+- **A client-side timeout does NOT cancel the server-side query — it orphans it**, and on a big table that orphan can hold a lock that blocks the whole platform for hours, which then gets misdiagnosed as a storage-engine cost problem. Diagnose lock contention (`pg_stat_activity`, `wait_event_type = 'Lock'`) before theorizing about decompression/storage cost — a query "hanging" on one specific table while others respond normally is lock contention until proven otherwise. Prevent it with a server-side `SET LOCAL statement_timeout`, not a client-side `timeout` wrapper.
+
+- **Matching a `pg_stat_activity` row to a suspected-orphan bug BY QUERY TEXT ALONE, without checking its `query_start` against wall-clock time, can kill the wrong connection — including the very job you're trying to unblock.** 2026-08-30: a genuinely orphaned `idle in transaction` connection from an earlier killed script (matching the exact bug class above) was found and `pg_terminate_backend()`'d — but a SECOND `pg_stat_activity` snapshot, taken right after relaunching the real job, showed another `idle in transaction` row with the same `INSERT INTO feature_store...` query text and a `duration` that read as suspiciously small (single-digit/negative milliseconds from a JS `now() - query_start` computation). That row was pattern-matched to "another instance of the same orphan bug" and killed too — except a near-zero duration is the opposite signal: it meant the transaction had JUST started, i.e. it was the newly-launched legitimate job's own connection caught mid-batch between commits, not a stale orphan. Killing it crashed the job (`sqlalchemy.exc.PendingRollbackError: Can't reconnect until invalid transaction is rolled back`). No data was lost (the writes were `ON CONFLICT DO UPDATE`, so already-committed rows survived), but the job had to be restarted from scratch. **Tell:** `idle in transaction` alone is not evidence of an orphan — a live batch job legitimately sits `idle in transaction` between statements while accumulating a batch before its next `commit()`. Before terminating any backend PID, cross-check `query_start` against `now()` on the SAME query (not two separate snapshots minutes apart) and prefer `pg_blocking_pids(pid)` / a `wait_event_type = 'Lock'` read on some OTHER session to confirm something is actually blocked ON this connection, not just that this connection's query text looks familiar.
+- **A migration's own "files remaining" progress counter cannot count the files it never reaches** — derive coverage counts from the source tree (`grep -rl`), never from the instrument measuring its own coverage.
+- **A test that WRITES through one engine (a raw driver) and READS through another (an app-level facade) asserts nothing**, and stays green as long as both happen to land on the same backend. Pick one; if the code under test uses the facade, the fixture must too.
+- **Moving a test substrate onto the real dialect is not fixture churn — budget for real production bugs it will surface**, because the old substrate structurally could not fail on them (wrong column names, wrong PK assumptions, methods the driver doesn't support all passed silently under a more forgiving engine).
+- **A test parser that reads another file by hardcoded PATH and swallows the read error (`except OSError: continue`) degrades silently**, and the failure surfaces somewhere unrelated with a message that reads like a different bug entirely. Assert the file exists; don't silently continue on a missing input.
+- **A schema DDL file that qualifies some statements to a schema but not others (e.g. indexes but not `CREATE TABLE`) creates tables where you point it and then indexes production's copy** when applied anywhere but the default schema. Schema-qualify everything or assert nothing outside the target schema was touched.
+
+## Write amplification & memory on the hot paths (2026-09-11 performance sweep)
+
+- **`CASE WHEN date >= floor THEN new ELSE col END ... WHERE symbol = ?` rewrites the symbol's
+  WHOLE history to change one row.** For every older row the SET is `col = col`, but Postgres
+  still writes a new tuple. Measured on `mc_pricefeed_fetcher`'s statement over the live
+  universe: 115,629 tuples / 216MB WAL per run unbounded vs 2,535 / 6MB with `AND date >= floor`
+  in the WHERE — identical data, and nine fetchers had this shape (~2GB WAL/night on a 362MB
+  table). Bound the WHERE with the SAME floor (the lower one if a statement uses two). An
+  `ELSE NULL` statement is NOT this class — bounding it changes what it writes. 🤖-adjacent:
+  `src/server/tests/test_case_update_date_bounded.py` scans every such statement.
+- **An `ELSE col` recompute over all history writes rows whose value didn't change.**
+  `ml_calibration.py` re-fit and rewrote all 115,284 scored rows nightly; only 31.6% changed.
+  Compare against the stored value and send the changes (`xmin` is the test observable: any
+  UPDATE, even to an identical value, gives the row a new one).
+- **One network round trip per row is the default for `executemany` through db_compat** —
+  SQLAlchemy's psycopg2 dialect falls through to `cursor.executemany` for `text()`. Batched
+  (`db_compat.executemany_batched`) a 14k-row upsert went 10.9s → 1.7s. It is opt-in, NOT an
+  engine-wide `executemany_mode='values_plus_batch'`, because batching makes `rowcount` report only
+  the LAST statement (1 instead of 14,000) and `analyst_revision.py`'s `n == 0` "matched nothing"
+  guard reads it. Use the helper only where the caller ignores the count.
+- **`conn.execute(...).fetchall()` on a multi-million-row read builds a dict-subclass `Row` per
+  row.** 2.7M `stock_ohlcv` rows: 2,280MB peak Python heap vs 380MB streamed as tuples via
+  `db_compat.iter_rows`. When you add streaming, set `stream_results` on the STATEMENT:
+  `Connection.execution_options()` mutates a SQLAlchemy 2.0 connection in place, turning every
+  later statement into a server-side cursor (`DECLARE ... CURSOR FOR INSERT` → syntax error).
+- **A memo cache keyed on generated SQL is a leak.** `translateSql`'s cache assumed static
+  call-site SQL, but `bulkUpsert` builds a new string per chunk row count: ~2.7MB retained per
+  30-column entry, never evicted. Size-capped and entry-capped since; the same audit applies to
+  any cache keyed on a string that embeds a variable-length list.
+- **`date::text >= date('now', ...)` on a native DATE column defeats the index and, on a
+  hypertable, chunk exclusion.** `stock_ohlcv`'s freshness check: 1,220ms / 42 chunks scanned vs
+  207ms / 40 excluded, every 15 minutes. Compare DATE to DATE (`col >= current_date - N`) after
+  verifying the column type. 🤖-adjacent for dataQualityChecks.ts via
+  `dataQualityChecksSargable.test.ts`.
+- **Two `registerRepeatableJob()` calls on one queue delete each other's schedule on every boot**
+  — it clears EVERY repeatable on its queue before adding its own. The nightly job digest had not
+  fired on its cron since a morning digest was added to its queue (2026-09-02); it only ran as a
+  boot-time catch-up. 🤖-adjacent: `repeatableQueuesUnique.test.ts`.
+
+## Connection budgets
+
+- **A connection-pool `max` sized for the production server is wrong inside a test process, and
+  the symptom is a TEST TIMEOUT with zero assertion failures -- which reads as flakiness, not
+  exhaustion.** `pgClient.ts` built every pool with `max: 22`, including in test processes.
+  vitest runs TWO projects (`unit` + `live`), each a `singleFork` process building its own pool
+  from that same function, so the suite alone demanded up to 44 connections on top of a running
+  `bharat-server` claiming another 22 -- against `max_connections = 60` with ~37 already in use
+  at rest (pm2 stack + TimescaleDB background workers). The file's own budget comment
+  (`bharat-server 22 + alphaquant 5 + ml-api 5 + chatbot 3 + Python 10 = 45 / 60`) had never
+  counted the test processes at all. Months of "intermittent vitest flakiness" were this.
+  **Three tells, and the first two are what make it hard to see:**
+  (1) *every* failure is `Test timed out in 5000ms/10000ms` and *no* failure is an assertion --
+  a real logic bug produces assertion failures, starvation never does;
+  (2) the failing FILES change from run to run while the count stays similar -- which file loses
+  the race is random, the mechanism is constant, so chasing the named file finds nothing;
+  (3) every one of those files passes in isolation.
+  **Do not use peak `pg_stat_activity` count as the discriminator** -- a refused or timed-out
+  connection never registers a backend, so peak-in-use reads LOWER during starvation than during
+  a healthy run (measured here: 33 while failing vs 45 while passing). Pass/fail and wall-clock
+  duration are the honest signals. **Fix at the pool, not the worker count:** capping
+  `--maxWorkers` does nothing when the config already uses `singleFork`. Size the pool by role --
+  `max: Number(process.env.PG_POOL_MAX ?? (process.env.VITEST ? 5 : 22))` -- and whenever you
+  change a service's pool size, re-add up the whole budget against `SHOW max_connections`,
+  including tests, or the next process to start is the one that gets refused.
+
+## Automated bulk-edit passes
+
+- **A script that injects the same lines into hundreds of files will land them in the wrong
+  place in a handful, and the wrong place is not distributed evenly -- it clusters on the files
+  with an unusual header.** A 2026-08-28 pass inserted `import polars as pl` at absolute line 1
+  of ~200 `src/server/*.py`. In 17 files that put it ABOVE the shebang (making `#!` inert), and
+  in `event_triggers.py` it pushed `from __future__ import annotations` out of first-statement
+  position -- a hard `SyntaxError` that failed pytest at COLLECTION, so **the entire suite ran
+  zero tests while the session-log recorded it as "running green."** In one more
+  (`investsights_fundamentals_fetcher.py`) the injected class block landed INSIDE the module
+  docstring, where it is inert text that no import error ever reports.
+  **Tells, in the order they are cheap to check:** (1) `py_compile` every file the pass touched
+  -- not a sampled few, and note that `pytest -q`'s summary line does NOT distinguish "collected
+  and passed" from "aborted during collection", so read for `Interrupted:`/`ERROR collecting`
+  specifically; (2) `head -1` every touched file and confirm nothing precedes a `#!`;
+  (3) AST-walk for the injected symbol rather than grepping for it -- a grep matches the copy
+  sitting dead inside a docstring, an `ast.ImportFrom` walk does not.
+- **An import-time dependency added by a bulk pass must be declared where CI installs from, and
+  in this repo that is `backend-python/requirements.txt`, NOT the repo-root `requirements.txt`.**
+  The same pass made `polars`/`tenacity` import-time deps of ~200 modules and declared them only
+  at the root, so every one of them would `ModuleNotFoundError` on a clean checkout while passing
+  locally purely because the dev venv already had both. Sibling of "Declared != installed" below,
+  inverted: installed where you are testing, undeclared where it runs.
+- **"Onboarded N files" is a count of files EDITED, never of capability delivered -- verify the
+  injected construct is actually reachable before recording it as done.** The same pass added a
+  `BaseFetcher` subclass to 74 fetchers and a `WorkflowDAG` import to 37 engines; measured
+  afterwards, **zero of the 74 classes were instantiated, `@governed_fetcher` decorated zero
+  functions, zero DAGs were built, and the injected `to_polars_df` helper had zero call sites
+  across all 199 copies.** Nothing behaved differently than before the pass. The check is one
+  grep per construct (instantiation, decorator application, call site) -- and it is the
+  difference between scaffolding and a feature. Same family as ml-model-bugs.md's
+  "evidence-shaped output" class, in bulk-refactor form.
+
+- **A test that locates a value in SOURCE TEXT by character distance from a marker breaks when
+  you add a COMMENT — and the failure names the source, not your comment.**
+  `jobRegistryGraceMinutesConsistency.test.ts` finds each job's `lockDuration` by scanning
+  forward from the first occurrence of its jobName marker, capped at `MAX_LOOKAHEAD = 4000`
+  chars. Adding a 3-line explanatory comment INSIDE `addJobWithCatchup(regimeQueue, ...)`'s opts
+  object pushed `'regime-intraday'` -> `lockDuration` from 3933 to 4189 and failed two cases with
+  "no lockDuration found near marker ... source shape may have changed" (CI 2026-08-31). Nothing
+  about the behaviour changed; only the whitespace between two tokens did.
+  **Second instance in this file** — `queues.ts` already carries an inline warning about the
+  same hazard for the `'ml-daily-ops'` marker, which is what makes this a class and not an
+  accident. It was documented, read, and walked into anyway.
+  **Two traps when fixing it, both hit here on the first attempt (which made it WORSE, 4646):**
+  (1) moving the comment ABOVE the call is the right fix — text before the marker costs zero
+  distance — but (2) if your new comment QUOTES the marker string, the comment becomes the
+  FIRST occurrence and moves the search origin earlier, which is worse than where you started.
+  The test's own docstring warns about a stray reference to the same string; that warning applies
+  to comments you add while fixing it. Refer to the marker descriptively, and assert the literal
+  still appears exactly the expected number of times.
+  **Margins here are thin by nature** (~100 chars after the fix; only 67 on main beforehand), so
+  measure rather than eyeball: compute `src.indexOf(marker)` and the nearest `lockDuration` match
+  offset directly, and compare against the pre-change baseline from `git show <ref>:<file>` — not
+  merely against the cap, or you will land back at the edge without noticing.
+  **How it reached CI:** the comment edits were followed by `tsc --noEmit` only. CLAUDE.md
+  requires vitest for ANY `.ts` change, and the green vitest run being relied on predated the
+  edits. A typecheck cannot see a source-text-parsing test. **Re-run the suite after the LAST
+  edit, not after the last edit you considered risky** — this one looked like a pure comment.
 ## Environment & deploy
 
-- **Declared ≠ installed.** `node-pg-migrate` in `package.json` but not `npm install`ed; `nse` in `requirements.txt` but not in the venv. Both silently broke a live job for days.
-- **Written ≠ applied.** A migration verified against a throwaway local cluster is not applied to production. Confirm `npm run migrate:up` ran against the real `POSTGRES_URL`.
-- **Committed ≠ deployed.** `.ts` is not hot-reloaded; `pm2 restart bharat-server` is required. Check `pm_uptime` against the fix commit's timestamp before believing a fix is live.
-- **A standalone `tsx` script that imports `dbAsync` without `import 'dotenv/config'` silently talks to SQLite, not production Postgres — and it will happily print convincing numbers.** `USE_POSTGRES` lives in `.env`, which the pm2 server loads at boot but a hand-run script does not, so the facade falls back to the dev SQLite DB. Hit 2026-08-12 while "live-verifying" a fix: the script reported 121,669 `screener_appearances` rows for Trendlyne and 26 carrying the new column; Postgres actually had **435,700 rows and 0**. It even resolved a *different* `screenpk` for the same screener (24700 vs 358883), which is the cheapest tell. **Verify the connection before trusting the result** — print `process.env.USE_POSTGRES` and assert a row count against a figure you already know from `psql`/`db_compat`. Same family as the two-venvs trap below and `infra_gotchas`' "AlphaQuant writing SQLite". `PYTHON_PATH=backend-python/venv` is what production uses. Bare `python` on PATH is a different install with a different sklearn. Never run a training script with the wrong one.
-- **A manual `UPDATE app_settings` is not a fix.** It reverts on any fresh DB and is invisible to every other environment. Seed it in a migration.
+- **Declared ≠ installed.** A dependency in `package.json`/`requirements.txt` but not actually installed silently breaks a live job for days.
+- **Written ≠ applied.** A migration verified against a throwaway cluster is not applied to production. Confirm `npm run migrate:up` ran against the real `POSTGRES_URL`.
+- **Committed ≠ deployed.** `.ts` is not hot-reloaded; `pm2 restart bharat-server` is required. Check `pm_uptime` against the fix commit's timestamp.
+- **pm2 on Windows watches the PID it LAUNCHED, and here that is never the real process — so
+  `max_memory_restart` and `node_args` silently apply to a wrapper.** `venv\Scripts\python.exe` is
+  a redirector that spawns the real interpreter; `tsx`'s CLI spawns a child node. Measured
+  2026-09-11: pm2 reported 1MB per Python service while the real interpreters held 2.0-2.6GB
+  private, and 18MB for bharat-server whose real node held 0.7GB without the
+  `--max-old-space-size` flag (the default V8 limit, 4,288MB here, is the cap that actually
+  applies). And `runPython` children are invisible to pm2 entirely — which is how dl_trainer
+  reached 38-52.7GB commit and killed the WSL2 VM three times. **Tell:** `pm2 list` memory in the
+  single-digit MB for a process that imports torch. **The ceiling that works is kernel-enforced on
+  the real process:** `src/server/pyboot/sitecustomize.py` (Windows Job Object, whole process
+  tree) — on every runPython child via `pythonRunner.ts` (`PY_CHILD_MEM_LIMIT_MB`, default
+  20480, observe-first until measured peaks justify tightening) and on the four Python services
+  via `ecosystem.config.cjs`'s `pyService` env. Every
+  runPython run now logs `peakMemMb`; set ceilings from those, not from estimates.
+- **Registered ≠ running, for a pm2 `cron_restart` job specifically.** `pm2 start` launches it immediately once regardless of schedule; if that first launch fails (dependency not up yet), it settles into `stopped`/`pid 0` and waits for its NEXT cron slot with zero retries — up to 7 days of silent dormancy for a weekly job, indistinguishable in `pm2 list` from healthy idling. Check `pm2 describe <name>` / `pm2 logs` for the actual last failure before concluding "no scheduler exists." After fixing the underlying cause, a `cron_restart` job does not self-heal — `pm2 restart <name>` manually.
+- **A standalone script that imports the DB facade without loading `.env` can silently talk to the wrong backend and print convincing wrong numbers.** Print the resolved connection target and assert a row count against a number you already know from a trusted client before believing an ad hoc script's output. (Structurally closed here 2026-08-15 — `usePostgres()`/`use_postgres()` now default to Postgres unconditionally with no env-var override for any real process, so this specific failure mode is history; the general lesson — verify the connection before trusting the result — still applies to any future default-selection logic.)
+- **A server that binds its port LAST will restart forever on `EADDRINUSE` without pm2 ever detecting instability**, if the crash happens after `min_uptime` has already elapsed (e.g. after initializing other services first). Attach an explicit error handler to the listener so a bind failure surfaces immediately instead of escalating through generic exception handling with the real cause buried in noise.
+- **A manual `UPDATE app_settings` is not a fix** — it reverts on any fresh DB and is invisible to every other environment. Seed it in a migration.
+- **Deleting a thing does not delete the checks and instructions that point at it — and an orphaned check does not go quiet, it starts emitting false signals in the opposite direction.** Grep the removed identifier across `.md`, `.claude/commands/`, `.claude/skills/`, and validator/bootstrap code whenever you remove an env var, column, file, or fallback — a stale check can crash a correct process, or a freshness check pointed at a superseded table can warn on every run forever while the table nothing reads sits there as the actual bug. **Tell for the latter:** a freshness check that has NEVER passed is more likely watching an abandoned table than reporting a real outage — grep who actually reads the table before fixing the fetcher.
+
+- **A hook that cannot run exits 0 and prints nothing — indistinguishable from a hook that passed.** Measured 2026-09-15: all three `.claude/settings.json` hook commands were dead on this Windows host. `bash` on PATH resolves to WSL's `bash.exe`, which cannot open a Windows path (`/bin/bash: d:\Github\...\session-start.sh: No such file or directory`, exit 127), and where it did start, `session-start.sh`'s own `cd "$CLAUDE_PROJECT_DIR" || exit 0` hit the same mismatch and exited 0 — so the session-start environment/Definition-of-done check and both `graphify` PreToolUse reminders were documented in `CLAUDE.md` and every skill while enforcing nothing. **The two graphify hooks were inline bash one-liners wrapping `python3`**, and WSL bash could not parse their embedded `\"` quoting at all (`syntax error near unexpected token '('`, exit 127). **Tell:** a rule stated in three separate places with zero observed effect; test the hook by replaying its declared command with the payload on stdin and asserting stdout (`npx vitest run .claude/hooks/settings-hooks.replay.test.mjs`). Fix: a hook must be a `node .claude/hooks/*.mjs` module with a vitest suite beside it (the repo's other three already were — the two that broke were the two without tests), and a shell script it calls must be launched by a bash that resolves the repo (Git Bash) with a RELATIVE path from the repo root, never through `$CLAUDE_PROJECT_DIR`, which is a Windows path. A hook must never exit non-zero: bricking a session is worse than the problem it reports.
+- **CRLF from a Windows checkout breaks every bash script under `.claude/hooks/`.** git's `core.autocrlf=true` rewrote `session-start.sh` to CRLF on checkout, so bash rejected it outright (`$'\r': command not found`, `set: pipefail: invalid option name`) — and the failure re-appears on every fresh clone until the repository pins it. `* text=auto` (if previously set) does not survive: the file must be pinned `*.sh text eol=lf` in `.gitattributes`, and re-normalized in the working copy (`scratch_verify/lf_fix.py`). `.mjs` hooks are immune (node tolerates CRLF); this is why hooks here should be node modules.
+
+## Placeholder credential in an executable alert path = registered-but-never-delivered monitoring (2026-09-14)
+
+A hardcoded placeholder credential (chat id `-100123456789`, token `123456:ABC-DEF...`) inside a
+script that REGISTERS alerting (crons, webhooks, digests) does not fail — it succeeds, writes its
+config, and every future alert silently routes to a nonexistent destination. Worse than no
+monitoring: the dashboard/ledger says alerts are wired. Rule: **executable alert paths source
+real credentials from the repo `.env` and fail loudly (`: "${VAR:?...}"`) at registration time;
+templates/templates-docs may be EMPTY with a "copy from repo .env" pointer, never fake.** Found in
+the Hermes integration batch (AF-20260914-04); the same class as "Registered != running" — a
+successful registration is not evidence of a working delivery path.
 
 ## Testing
 
-- **Negative-control every new test**: revert the fix, confirm the test fails, restore. Three separate suites here were 100% green while protecting nothing.
-- **A test that reimplements the logic under test** passes against the unfixed source. Call the real function. **Recurred 2026-08-13**: a regression test for `screener_catalog_enricher.py`'s category-collapse bug hand-copied the `cat_norm`/`CATEGORY_DEFAULTS` resolution logic into the test file itself instead of importing it — negative-controlling the *source* left the test green, because the mirror never saw the fix or the bug. Caught only by insisting on negative-controlling every new test per the rule above; fixed by extracting the real logic into an importable `resolve_screener_defaults()` and calling that.
+- **A warning printed by a test runner is not a verdict — CI and hooks read the EXIT CODE.** A suite that skips everything it can't reach (e.g. no DB) and still exits 0 is advisory-only to any automation consuming it; flip the exit code non-zero when a test was skipped for a reason that shouldn't be silently tolerated (e.g. an unreachable required dependency).
+- **A `live_datasource`-gated test is code that DOES NOT RUN by default, so it rots silently** — the gate must stay (a third-party outage must never redden CI), but treat these files as needing a periodic manual full run, and after any bulk change touching test fixtures, explicitly check which of the gated files it did not execute. A stub that dispatches on its input (not a blanket return) fails loudly on an unexpected call instead of confidently answering with someone else's data.
+- **An unqualified `information_schema.columns`/`information_schema.tables` query can silently read a leaked throwaway test schema as a second copy of a real table**, producing duplicate column names that break downstream code with an error naming no table or schema. 🤖 Automated — `check_information_schema_missing_table_schema`. Fix: `AND table_schema = current_schema()`, not a hardcoded `'public'` (which breaks inside test fixtures that deliberately scope into their own schema).
+- **Negative-control every new test**: revert the fix, confirm the test fails, restore. Suites here have been 100% green while protecting nothing.
+- **A test that reimplements the logic under test** (hand-copies the resolution logic into the test file instead of importing it) passes against the unfixed source, because the mirror never sees the fix or the bug. Call the real function.
 - **A test that derives its expectation from the constant it is testing** passes vacuously (`all([])` is `True`).
-- **A test that relies on a library's inferred default** to manufacture its own precondition silently stops testing anything when the library changes. Construct the condition explicitly.
-- **Env vars a shared facade reads are shared state.** `USE_POSTGRES` is read fresh per call; a suite running in one process leaks whichever file set it last. Pin it in the fixture. **Same class, TS-specific instance, 2026-08-13**: a static top-level `import 'dotenv/config'` in a new live-datasource test file loads real credentials into `process.env` for the entire vitest worker process the moment the file is *collected*, not just when it *runs* — so even a `describe.runIf(RUN_LIVE)`-skipped suite still pollutes every other test file sharing that worker. Broke `niftytraderAuthService.test.ts`'s "no credentials configured" case this way (a real `NIFTYTRADER_EMAIL`/`PASSWORD` from `.env` overrode the test's own `delete process.env...`). Fix: check the plain shell env var (`RUN_LIVE_DATASOURCE_TESTS`, not anything `.env` provides) first, and only `await import('dotenv/config')` conditionally inside that guard — never as a static top-level import in a file that might load real secrets other tests don't expect.
-- **A guard test built on a hand-enumerated allowlist only guards what someone remembered to list.** `screenerAppearedAt.test.ts` opened with "pins that all three screener syncs record `appeared_at`" and listed three — there are **four** writers, and the omitted one (`trendlyneScreener.ts`) is the largest, 435,700 of the table's 741,251 rows. Result: `appeared_at` was populated on **10 rows platform-wide** while the suite stayed green and the column looked delivered. Same shape as the "grep EVERY reader of the table" rule above, in test clothing. Derive the list from the source tree (scan for the INSERT/call and assert the scan equals the allowlist) so adding a 5th provider fails the test instead of silently writing NULLs forever.
+- **A test that relies on a library's inferred default to manufacture its own precondition** silently stops testing anything when the library changes its default. Construct the condition explicitly.
+- **Env vars a shared facade reads are shared state across a test worker process** — a static top-level `import`/env-set in one test file can pollute every other test file sharing that worker, even in a suite that's itself skipped. Guard any real-credential-loading import inside the same conditional that gates the suite, never as a static top-level import.
+- **A config env var a library snapshots at IMPORT time is a no-op if set after the import, and the obvious test for it passes against the broken ordering** — `os.environ["X"] == "1"` after import passes whether or not the setting took effect if a `setdefault` was used. Assert the library's own resolved constant (in a clean subprocess), not `os.environ`.
+- **A guard test built on a hand-enumerated allowlist only guards what someone remembered to list.** Derive the list from the source tree (scan for the pattern and assert the scan equals the allowlist) so a new instance fails the test instead of silently slipping through.
+- **A tokenizer/AST-based check whose logic silently depends on which Python version parses it** (e.g. PEP 701 f-string tokenization changed in 3.12) can pass on a dev venv and fail on CI with neither side erroring. Keep a local venv matching CI's actual interpreter version for testing changes to any such check; write the check's own emptiness self-test (assert it finds what it's meant to guard) so a silent 0-matches failure mode can't hide behind a merely-passing suite.
+- **A daily job's output read before its upstream landed looks exactly like broken wiring.** feature_store's latest-day rows showed pcr_oi 3.5% / delivery/fii/max_pain 0% while the same joins measured 78-100% over the prior week - the refresh (17:26 IST) simply ran before the option-chain/PCR writers (18:30 IST), and a holiday removed the T-1 source entirely (NULLs are NEVER_FILL semantics, not a defect). Coverage verdicts need a WINDOW of dates plus an upstream max(date) cross-check, never the latest day alone; after upstream lands, a same-day targeted rebuild (`feature_engineering.py --date today`) repairs the rows.
+- **A legacy display-format TEXT date column twinned with a parsed ISO column poisons every ad-hoc max(date)/min(date).** insider_trades `date` held '31 Oct, 2025' display strings beside ISO rows, so string sort made the table read 10.5 months stale in three separate audits while `date_iso` (the column every reader actually uses) was fresh. When a table carries both, normalize the display column to ISO at the writer AND backfill the rows; update any test that pins the display format - the pin is the bug.

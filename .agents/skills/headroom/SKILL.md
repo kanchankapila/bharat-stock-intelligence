@@ -15,16 +15,16 @@ This skill enforces token optimization, context window budget control, and minim
 ## Guidelines for Token Optimization
 
 ### 1. Targeted File Reading
-- **Never read a whole file if you only need a snippet.** Always use `StartLine` and `EndLine` parameters when calling `view_file`.
-- **Estimate range first:** If you're looking for a specific function, class, or section, use `grep_search` to find the exact line numbers first, then read only that range (+/- 10 lines of context).
+- **Never read a whole file if you only need a snippet.** Always pass `start_line`/`end_line` bounds on the file read (this environment's `read_files` supports per-file ranges).
+- **Estimate range first:** if you're looking for a specific function, class, or section, run the regex code search (`search_codebase`) to find exact line numbers first, then read only that range (+/- 10 lines of context).
 - **Avoid viewing binary files** or large raw data logs unless absolutely necessary.
 
 ### 2. Output and Log Management
-- When executing terminal commands (`run_command`), keep the output clean. Use filters like `head`, `tail`, or grep to output only relevant lines.
+- When executing shell commands (`run_commands`), keep the output clean: pipe through `Select-Object -First/-Last`, `head`, `tail`, or `grep` so only relevant lines return (output is middle-truncated around ~48k chars — filtering also avoids truncation loss).
 - Limit paging length: avoid listing thousands of lines from logs or lists.
 
 ### 3. Redundancy Prevention
-- Before reading a file, check if its content has already been retrieved in previous turns or if it's already open in the active documents tab.
+- Before reading a file, check if its content has already been retrieved in previous turns — do not re-read it.
 - Do not repeat standard setup steps or verification queries if they were run recently and their results are visible in the history transcript.
 
 ### 4. Code Generation Efficiency

@@ -9,6 +9,7 @@ feature_engineering.py. This is the ONE place that pattern lives now. A test
 (tests/test_as_of_no_hand_rolled_joins.py) fails CI if a new hand-rolled "as of date" join is
 added anywhere else under src/server, so this doesn't quietly re-drift.
 """
+import polars as pl
 from typing import Sequence
 
 import pandas as pd
@@ -17,7 +18,7 @@ from db_compat import read_df
 
 
 def as_of_join_sql(hist_table: str, alias: str, base_alias: str, base_symbol_col: str,
-                    base_date_col: str) -> str:
+                    base_date_col: str, base_date_is_text: bool = True) -> str:
     """A LEFT JOIN fragment pulling the most recent `hist_table` row for
     `base_alias.base_symbol_col` as of `base_alias.base_date_col` (inclusive).
 
@@ -34,15 +35,31 @@ def as_of_join_sql(hist_table: str, alias: str, base_alias: str, base_symbol_col
 
     `hist_table` is a fixed set of internal table names (never user input) -- safe to
     interpolate directly, matching every call site's existing convention.
+
+    `hist_table.as_of_date` (fundamentals_history, analyst_estimates_history) is now native
+    DATE (AF-20260831-04, 2026-09-03 migration -- was TEXT when this helper was written, which
+    is why the parameter below is named the way it is). Every current caller's base column is
+    also DATE (technical_signals.date since 2026-08-25; signal_outcomes/signal_excursions
+    .signal_date since this same migration), so in practice no cast is ever needed today --
+    `base_date_is_text=True` (the default, kept for every signal_date-based caller so no call
+    site needed touching) casts the base ref to `::date` defensively, which is a no-op on an
+    already-DATE column; `base_date_is_text=False` (technical_signals callers) skips the cast
+    since both sides are already DATE. If a FUTURE hist_table or base column is genuinely TEXT
+    again, this needs re-deriving, not blindly trusting either flag's name.
     """
     alias2 = f"{alias}2"
+    # Cast ONLY the inner point-in-time predicate's right-hand side. MAX() must stay on the raw
+    # DATE column so the outer equality ({alias}.as_of_date = (SELECT MAX(...))) remains
+    # DATE = DATE -- casting inside MAX() would flip the outer comparison to a mismatched type.
+    base_ref = f"{base_alias}.{base_date_col}"
+    rhs = f"{base_ref}::date" if base_date_is_text else base_ref
     return (
         f"LEFT JOIN {hist_table} {alias}\n"
         f"       ON {alias}.symbol = {base_alias}.{base_symbol_col}\n"
         f"      AND {alias}.as_of_date = (\n"
         f"          SELECT MAX({alias2}.as_of_date) FROM {hist_table} {alias2}\n"
         f"          WHERE {alias2}.symbol = {base_alias}.{base_symbol_col} "
-        f"AND {alias2}.as_of_date <= {base_alias}.{base_date_col}\n"
+        f"AND {alias2}.as_of_date <= {rhs}\n"
         f"      )"
     )
 
@@ -263,3 +280,9 @@ def trading_days_back(n: int, conn=None) -> list:
                 conn.close()
             except Exception:
                 pass
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

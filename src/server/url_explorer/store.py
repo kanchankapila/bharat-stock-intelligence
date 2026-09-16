@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
+
 from db_compat import execute, query_all, query_one
 from sql_translate import use_postgres
 
@@ -44,6 +46,36 @@ _DDL = [
         pearson REAL, spearman REAL, ic REAL)""",
     "CREATE INDEX IF NOT EXISTS ix_url_fetches_ep ON url_fetches(endpoint_id, fetched_at)",
     "CREATE INDEX IF NOT EXISTS ix_url_fields_ep ON url_fields(endpoint_id, run_at)",
+    # Consolidation metadata (2026-09-13, url_explorer.ingest): discovery-corpus enrichment
+    # lives on the shared catalog row so "which other endpoints cover this feature target"
+    # is one query instead of a repo-wide grep. IF NOT EXISTS keeps ensure_schema idempotent
+    # over catalogs created before this pass (the live one has 251 rows).
+    "ALTER TABLE url_endpoints ADD COLUMN IF NOT EXISTS provider TEXT",
+    "ALTER TABLE url_endpoints ADD COLUMN IF NOT EXISTS category TEXT",
+    "ALTER TABLE url_endpoints ADD COLUMN IF NOT EXISTS description TEXT",
+    "ALTER TABLE url_endpoints ADD COLUMN IF NOT EXISTS feature_targets_json TEXT",
+    "ALTER TABLE url_endpoints ADD COLUMN IF NOT EXISTS sources_json TEXT",
+    "ALTER TABLE url_endpoints ADD COLUMN IF NOT EXISTS refs_json TEXT",
+    "ALTER TABLE url_endpoints ADD COLUMN IF NOT EXISTS updated_at TEXT",
+    "ALTER TABLE url_endpoints ADD COLUMN IF NOT EXISTS verified_json TEXT",
+    # Per-screener instance database (2026-09-13, url_explorer.screeners): the layer
+    # between endpoint families and concrete captures — one row per (provider, scan_id)
+    # with its captured payload and taxonomy. ue_* columns are urls-explorer's own
+    # measured results, external evidence like verified_json.
+    """CREATE TABLE IF NOT EXISTS screener_instances (
+        provider TEXT NOT NULL,
+        scan_id TEXT NOT NULL,
+        name TEXT,
+        category TEXT,
+        sentiment TEXT,
+        timeframe TEXT,
+        endpoint TEXT,
+        query_condition TEXT,
+        description TEXT,
+        ue_status TEXT,
+        ue_stocks_count INTEGER,
+        updated_at TEXT,
+        PRIMARY KEY (provider, scan_id))""",
 ]
 
 
@@ -77,6 +109,47 @@ def upsert_params(endpoint_id: int, params) -> None:
             (endpoint_id, p.name, p.location, p.inferred_type,
              1 if p.is_variable else 0, p.distinct_count, json.dumps(p.sample_values)),
         )
+
+
+def update_endpoint_meta(endpoint_id: int, *, provider, category, description,
+                         feature_targets, sources, refs, verified=None) -> None:
+    execute(
+        """UPDATE url_endpoints SET provider = ?, category = ?, description = ?,
+             feature_targets_json = ?, sources_json = ?, refs_json = ?, verified_json = ?,
+             updated_at = ?
+           WHERE id = ?""",
+        (provider, category, description,
+         json.dumps(feature_targets), json.dumps(sources), json.dumps(refs),
+         json.dumps(verified) if verified is not None else None,
+         datetime.now(timezone.utc).isoformat(), endpoint_id),
+    )
+
+
+def upsert_screener_instance(inst: dict) -> None:
+    execute(
+        """INSERT INTO screener_instances (provider, scan_id, name, category, sentiment,
+             timeframe, endpoint, query_condition, description, ue_status,
+             ue_stocks_count, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (provider, scan_id) DO UPDATE SET
+             name = excluded.name, category = excluded.category,
+             sentiment = excluded.sentiment, timeframe = excluded.timeframe,
+             endpoint = excluded.endpoint, query_condition = excluded.query_condition,
+             description = excluded.description, ue_status = excluded.ue_status,
+             ue_stocks_count = excluded.ue_stocks_count, updated_at = excluded.updated_at""",
+        (inst["provider"], inst["scan_id"], inst.get("name"), inst.get("category"),
+         inst.get("sentiment"), inst.get("timeframe"), inst.get("endpoint"),
+         inst.get("query_condition"), inst.get("description"), inst.get("ue_status"),
+         inst.get("ue_stocks_count"), datetime.now(timezone.utc).isoformat()),
+    )
+
+
+def record_health(endpoint_id: int, ok: bool, error: str | None = None) -> None:
+    status = "ok" if ok else f"fail: {error or 'unknown'}"[:160]
+    execute(
+        "UPDATE url_endpoints SET last_run_at = ?, last_status = ? WHERE id = ?",
+        (datetime.now(timezone.utc).isoformat(), status, endpoint_id),
+    )
 
 
 def insert_fetch(endpoint_id, concrete_url, params_json, http_status,

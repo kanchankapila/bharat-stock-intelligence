@@ -6,14 +6,18 @@ import { router, publicProcedure, protectedProcedure } from "../trpc";
 // SQLite (current) and Postgres (post-cutover, which folds unquoted identifiers to lowercase).
 
 export const userRouter = router({
-  syncUser: publicProcedure
+  // `id` is intentionally NOT accepted from the client — same rule as the watchlist
+  // procedures below. It was a publicProcedure taking a client-supplied `id` until
+  // 2026-08-22, so any unauthenticated caller could overwrite ANY user's email/name/photo
+  // just by posting their uid. The only caller (App.tsx's handleLogin) already runs after
+  // signInWithPopup and was passing its own result.user.uid, so ctx.uid is the same value.
+  syncUser: protectedProcedure
     .input(z.object({
-      id: z.string(),
       email: z.string().nullable(),
       name: z.string().nullable(),
       photoURL: z.string().nullable(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       await dbRun(`
         INSERT INTO users (id, email, name, "photoURL")
         VALUES (?, ?, ?, ?)
@@ -21,7 +25,7 @@ export const userRouter = router({
           email = excluded.email,
           name = excluded.name,
           "photoURL" = excluded."photoURL"
-      `, [input.id, input.email, input.name, input.photoURL]);
+      `, [ctx.uid, input.email, input.name, input.photoURL]);
       return { success: true };
     }),
 

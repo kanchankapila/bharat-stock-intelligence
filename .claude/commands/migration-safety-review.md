@@ -36,14 +36,24 @@ SELECT * FROM timescaledb_information.compression_settings WHERE hypertable_name
   is a documented no-op in this repo (`recurring-bugs.md`'s SQL-dialect table) if the table already
   exists; needs an explicit `safe_alter` pattern instead.
 
-## 3. SQLite/Postgres dual-schema drift
+## 3. Schema drift against live
 
-`db.ts` is the SQLite schema-of-record used in dev/fallback, not the live Postgres shape. Confirm
-the migration's target table/columns actually match what's live in production
-(`information_schema.columns`), not what `db.ts` implies — a column type assumed from `db.ts` has
-been wrong before. If the migration also needs a mirrored change in `db.ts` for local/dev parity,
-confirm that's included; if it deliberately isn't (Postgres-only feature), say so explicitly rather
-than leaving an implicit gap for the next session to rediscover.
+**The schema to trust is `db/schema.postgres.sql`**, regenerated from live by
+`npm run schema:regen`. It is the only schema of record.
+
+⚠ **Corrected 2026-08-17 (third revision).** `src/server/db.ts` — the 3,316-line SQLite schema
+this section used to warn you away from — **no longer exists on this branch**; it was deleted by
+`a2a20d2` (SQLITE_DECOMMISSION_PLAN Phases 1-3). The previous correction said the retiring branch
+"was discarded"; it was not, it was `sqlite-decommission`, pushed to origin the whole time, and it
+is merged here. The standing instruction survives all three revisions: **verify the file exists
+before trusting any claim about it, including this one.**
+
+Confirm the migration's target table/columns match what's actually live
+(`information_schema.columns`) — that file is only as good as its last regeneration, and tables
+created by self-creating DDL (`data_quality_history`) or by a migration that was never reflected
+back have been missing from it before. Run `npm run schema:drift` after; it is a
+test-correctness check now, not just tidiness, because the vitest suite builds its throwaway
+schema from that file.
 
 ## 4. Data safety on the migrating column/table
 

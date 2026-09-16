@@ -5,6 +5,7 @@ import sys
 
 SERVER_DIR = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, SERVER_DIR)
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 from endpoint_registry import (  # noqa: E402
     CURATED_EXTRA_ENDPOINTS,
@@ -183,7 +184,7 @@ def test_fetchable_registry_keeps_current_parser_ready_pipeline(tmp_path):
 
 
 def test_registry_sync_persists_curated_and_memory_rows():
-    con = sqlite3.connect(":memory:")
+    con = pg_memory_conn()
     cur = con.cursor()
     entries = list(CURATED_EXTRA_ENDPOINTS) + [
         validate_ai_memory_record(

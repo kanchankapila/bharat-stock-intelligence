@@ -24,6 +24,21 @@ Run:
   python delivery_volume_fetcher.py --date 2026-06-24
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class DeliveryVolumeFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class DeliveryVolumeFetcherBaseFetcher(BaseFetcher[DeliveryVolumeFetcherSchema]):
+    fetcher_name = 'DeliveryVolumeFetcher'
+    domain = 'general'
+    schema = DeliveryVolumeFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import io
 import time
@@ -33,6 +48,7 @@ import requests
 
 from db_compat import connect, safe_alter
 from fetch_utils import retry_get
+import sys
 
 MTO_URL = "https://nsearchives.nseindia.com/archives/equities/mto/MTO_{date}.DAT"
 
@@ -76,6 +92,7 @@ def ensure_schema(con) -> None:
     safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN delivery_pct REAL")
 
 
+
 def _trading_days_back(n: int, con=None) -> list[date]:
     """Real trading sessions, newest first. Delegates to the shared helper -- the old
     weekday-only version was holiday-blind, so --days 30 silently covered fewer than 30 real
@@ -98,7 +115,7 @@ def fetch_mto(trade_date: date, session: requests.Session) -> list[dict] | None:
             # holidays -- the same silent-partial-failure contract bug fixed in
             # insider_transactions_fetcher.py.
             return []
-        print(f"[Delivery] {trade_date}: download failed after retries — {e}")
+        print(f"[Delivery] {trade_date}: download failed after retries — {e}", file=sys.stderr)
         return None
 
     rows = []
@@ -153,20 +170,39 @@ def upsert_rows(rows: list[dict], con) -> None:
 
 
 def backfill_technical_signals(today: str, con) -> int:
-    """Copy today's delivery_pct into technical_signals for the ML pipeline."""
+    """Copy delivery_pct into technical_signals for the ML pipeline.
+
+    Heals BOTH `today` and the previous sourced session (2026-08-25): MTO files are
+    typically published ~18:00-19:30 IST and this runs in the evening chain, but a
+    15:30 IST intraday scan can already have written that day's grid rows with an
+    empty deliveryMap (deliveryFetcher.ts returns Map() silently when NSE hasn't
+    published yet). Measured live 2026-08-24: delivery_pct was 0/2,198 rows on the
+    Monday grid even though Friday's data existed and tonight's fetch succeeded --
+    the copy only ever targeted `today`'s rows, so the gap persisted until the next
+    day. Writing the prior session too closes that window without any second job.
+    """
     cur = con.cursor()
-    cur.execute("""
-        UPDATE technical_signals
-        SET delivery_pct = (
-            SELECT delivery_pct FROM stock_delivery_volume
-            WHERE symbol = technical_signals.symbol AND date = ?
-            LIMIT 1
-        )
-        WHERE date = ?
-    """, (today, today))
-    updated = cur.rowcount
+    total = 0
+    sessions = [str(r['d'])[:10] for r in con.execute(
+        "SELECT DISTINCT date AS d FROM stock_delivery_volume "
+        "WHERE date <= ? ORDER BY d DESC LIMIT 2", (today,)).fetchall()]
+    if today not in sessions:
+        sessions = [today] + sessions
+    for d in dict.fromkeys(sessions):
+        cur.execute("""
+            UPDATE technical_signals
+            SET delivery_pct = (
+                SELECT delivery_pct FROM stock_delivery_volume
+                WHERE symbol = technical_signals.symbol AND date = ?
+                LIMIT 1
+            )
+            WHERE date = ? AND delivery_pct IS NULL
+        """, (d, d))
+        n = cur.rowcount
+        total += max(n, 0)
+        print(f"[Delivery] {d}: filled delivery_pct on {n} technical_signals rows")
     con.commit()
-    return updated
+    return total
 
 
 def main() -> None:
@@ -175,7 +211,10 @@ def main() -> None:
                         help="Backfill last N trading days (default: 1)")
     parser.add_argument("--date", type=str, default=None,
                         help="Fetch a single date (YYYY-MM-DD)")
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch even if data is already populated")
     args = parser.parse_args()
+
 
     con = connect()
     ensure_schema(con)
@@ -191,8 +230,19 @@ def main() -> None:
 
     total = failed = 0
     for i, trade_date in enumerate(dates):
+        # Delta check: if bhavcopy or prior run already stored >= 1000 stocks for trade_date, skip MTO download
+        if not args.force:
+            cur = con.cursor()
+            cur.execute("SELECT count(*) FROM stock_delivery_volume WHERE date = ?", (trade_date.isoformat(),))
+            c = cur.fetchone()
+            count = c[0] if isinstance(c, (tuple, list)) else (c['count'] if hasattr(c, '__getitem__') and 'count' in c else list(dict(c).values())[0])
+            if count and int(count) >= 1000:
+                print(f"[Delivery] {trade_date}: already has {count} rows (from bhavcopy/prior fetch) — skipped redundant MTO download.")
+                continue
+
         print(f"[Delivery] Fetching {trade_date} ({i+1}/{len(dates)})…")
         rows = fetch_mto(trade_date, session)
+
         if rows is None:
             failed += 1
             print(f"[Delivery] {trade_date}: FETCH FAILED (not a holiday — investigate)")
@@ -217,3 +267,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

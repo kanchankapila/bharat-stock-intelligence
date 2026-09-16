@@ -1981,3 +1981,15 @@ https://api.moneycontrol.com/swiftapi/v1/stockvitals/historical?scId=BE03&metric
 https://api.moneycontrol.com/swiftapi/v1/stockvitals/historical?scId=BE03&metric=ohlson&responseType=json
 https://api.moneycontrol.com/swiftapi/v1/stockvitals/historical?scId=BE03&metric=graham&responseType=json
 https://api.moneycontrol.com/swiftapi/v1/stockvitals/historical?scId=BE03&metric=dupont&responseType=json
+https://stocks.sapphirebroking.com/api/market/NSE/RELIANCE/meta
+https://stocks.sapphirebroking.com/api/market/ban-list
+https://stocks.sapphirebroking.com/api/market/NSE/RELIANCE/forensics
+https://stocks.sapphirebroking.com/api/market/NSE/RELIANCE/financials
+https://stocks.sapphirebroking.com/api/market/NSE/RELIANCE/intraday
+https://stocks.sapphirebroking.com/api/market/NSE/RELIANCE/shareholdings
+https://stocks.sapphirebroking.com/api/market/NSE/RELIANCE/price
+https://stocks.sapphirebroking.com/api/market/NSE/RELIANCE/revenue-mix
+https://stocks.sapphirebroking.com/api/market/NSE/RELIANCE/peers
+https://stocks.sapphirebroking.com/api/market/corporate/RELIANCE/actions
+https://stocks.sapphirebroking.com/api/market/index/NIFTY%2050
+https://stocks.sapphirebroking.com/api/market/breadth

@@ -17,6 +17,21 @@ Run:  python mc_broker_reco_fetcher.py             # fetch + backfill (7-day win
       python mc_broker_reco_fetcher.py --days 14   # wider backfill window
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McBrokerRecoFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McBrokerRecoFetcherBaseFetcher(BaseFetcher[McBrokerRecoFetcherSchema]):
+    fetcher_name = 'McBrokerRecoFetcher'
+    domain = 'moneycontrol.com'
+    schema = McBrokerRecoFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import datetime
 import sys
@@ -83,7 +98,7 @@ def ensure_schema(con) -> None:
             con.rollback()
         except Exception:
             pass
-        print(f"[BrokerReco] WARN: could not create mc_broker_reco: {exc}")
+        print(f"[BrokerReco] WARN: could not create mc_broker_reco: {exc}", file=sys.stderr)
 
     # Feature columns on technical_signals
     feature_cols = [
@@ -94,7 +109,7 @@ def ensure_schema(con) -> None:
     for col, dtype in feature_cols:
         try:
             con.execute(translate(
-                f"ALTER TABLE technical_signals ADD COLUMN {col} {dtype}"
+                f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} {dtype}"
             ))
             con.commit()
             print(f"[BrokerReco] Added column technical_signals.{col}")
@@ -139,7 +154,7 @@ def fetch_recos(lookback_days: int = FETCH_LOOKBACK_DAYS) -> list[dict]:
             resp = retry_get(cffi_req, url, headers=HEADERS, impersonate="chrome120", timeout=30)
             payload = resp.json()
         except Exception as exc:
-            print(f"[BrokerReco] WARN: page {page} fetch failed after retries: {exc}")
+            print(f"[BrokerReco] WARN: page {page} fetch failed after retries: {exc}", file=sys.stderr)
             break
 
         if not payload.get("success"):
@@ -352,3 +367,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

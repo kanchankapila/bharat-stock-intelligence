@@ -68,3 +68,13 @@ class TestComputeHoldoutSplitFinding18:
         embargo = 5
         tr_end, n_test, n_val = _compute_holdout_split(X, dates, embargo=embargo, min_samples=30)
         assert tr_end == len(X) - n_test - n_val - embargo
+
+    def test_ml_ensemble_uses_date_grouped_splitter_when_dates_exist(self):
+        import inspect
+        import src.server.ml_ensemble as me
+
+        fit_src = inspect.getsource(me._fit_stack)
+        tune_src = inspect.getsource(me.tune_hyperparameters)
+
+        assert "make_purged_group_time_series_split(" in fit_src
+        assert "make_purged_group_time_series_split(" in tune_src

@@ -19,14 +19,29 @@ import { runPython } from '../pythonRunner';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
 import { shouldSkipOnTradingHoliday } from '../marketStatusService';
+import { StepTracker } from '../jobSteps';
 
 export const QUEUE_SCREENER_PERFORMANCE = 'screener-performance';
 export const QUEUE_COMPANY_PROFILES_SYNC = 'company-profiles-sync';
 export const QUEUE_TICKERTAPE_SCORECARD = 'tickertape-scorecard';
 export const QUEUE_NSE_SYNC = 'nse-sync';
 export const QUEUE_CORPORATE_ACTIONS_INGEST = 'corporate-actions-ingest';
+export const QUEUE_INDEX_MEMBERSHIP = 'index-membership';
+export const QUEUE_ANALYST_ESTIMATES_SYNC = 'analyst-estimates-sync';
 
-async function processCorporateActionsIngest(_job: Job): Promise<{ success: boolean }> {
+async function processAnalystEstimatesSync(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
+  // Upgraded to high-speed hybrid engine (~2.5 min across whole 2,300+ universe)
+  // No .catch here on purpose: this job IS this one step, so swallowing the failure and
+  // returning success:true made a dead fetcher indistinguishable from a healthy one. Letting it
+  // throw marks the BullMQ job failed and stamps the heartbeat 'failed' via registerJob.ts's
+  // 'failed' handler. (Multi-step jobs use StepTracker instead — one bad step must not abort
+  // the siblings there; here there are no siblings to protect.)
+  await runPython('analyst_estimates_snapshot.py', [], 8 * 60_000);
+  return { success: true };
+}
+
+
+async function processCorporateActionsIngest(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   // corporate_actions.ratio fix (2026-08-07, dead-column sweep): ohlcv_quality.py's
   // ingest_corporate_actions() genuinely writes real split ratios from yfinance's own
   // .splits data (live-verified: HDFCBANK 2025 1:2, WIPRO 2024 1:2, RELIANCE 2024 1:2 --
@@ -39,96 +54,158 @@ async function processCorporateActionsIngest(_job: Job): Promise<{ success: bool
   // extrapolated ~70min for the ~2,366-symbol universe; budget below is a generous multiple
   // of that estimate (not yet confirmed against a real full-universe run), matching this
   // codebase's convention of erring wide rather than under-budgeting an unmeasured full run.
-  await runPython('ohlcv_quality.py', [], 150 * 60_000)
-    .catch(e => console.warn('[QUEUE] ohlcv_quality (full ingest) failed:', (e as Error).message));
+  // Single-step job: a .catch here reported success:true while the only thing this job does
+  // had failed. Let it throw so BullMQ marks the run failed and the heartbeat says so.
+  await runPython('ohlcv_quality.py', [], 150 * 60_000);
   return { success: true };
 }
 
-async function processScreenerPerf(job: Job): Promise<void> {
+async function processScreenerPerf(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] } | void> {
   // 2026-08-07: skip entirely on a trading holiday -- every phase here (discovery/enrichment,
   // Bayesian tier scoring, PIT snapshot, live-screener train/backtest) re-derives from
   // screener_appearances/signal_outcomes/stock_ohlcv, none of which gained a new row on a day
   // the exchange never opened. Same reasoning as processStockScoring/processQuantScoring.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] screener-performance skipped — trading holiday, nothing new to re-derive');
-    return;
+    return { success: true, skipped: true };
   }
+  // Every step below reports through T (2026-09-04). It used to wrap only step 8b
+  // (ml-promotion-gate-review, 2026-08-19) while the other ten ended in a bare
+  // .catch(console.warn) -- so this whole function never threw and never reported a failure,
+  // and a step that stopped writing entirely still left the job green. Named to match this
+  // job's own monitorName ('screener-performance') so finish()'s job-level write agrees with
+  // (not duplicates) the one registerJob.ts's completed handler writes from the returned verdict.
+  //
+  // T.fail() (not T.run) for the .catch sites so the surrounding await/void shape is untouched;
+  // both are quiet — see jobSteps.ts's runQuiet docstring for why per-step heartbeats are wrong
+  // here. Step 3 gets T.run because it had NO .catch at all: a failure there aborted the seven
+  // steps after it, which is the opposite failure mode but the same silent outcome.
+  const T = new StepTracker('screener-performance');
   // 1. Sync newly discovered Trendlyne screener PKs. "known" mode only re-fetches PKs
   // missing from the DB, but with ~612 known PKs and a 0.4s rate limit that can still
   // run 20+ minutes in practice — the old 10-min timeout routinely SIGTERM'd it mid-run
   // (execFile kills before any stderr flushes, logged as an opaque "Command failed").
   await runPython('trendlyne_screener_discovery.py', [], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] trendlyne_screener_discovery failed:', (e as Error).message));
+    .catch(e => T.fail('trendlyne_screener_discovery', e));
 
   // 2. Bulk-enrich signal_keywords + screener_url; INSERT 858 missing catalog entries; fix sector_theme bias
   await runPython('screener_catalog_enricher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_catalog_enricher failed:', (e as Error).message));
+    .catch(e => T.fail('screener_catalog_enricher', e));
 
   // 2b. Backfill OHLCV for any symbols that appeared in screeners but are missing from stock_ohlcv
   await runPython('screener_ohlcv_backfill.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_ohlcv_backfill failed:', (e as Error).message));
+    .catch(e => T.fail('screener_ohlcv_backfill', e));
 
   // 3. Compute performance metrics for all screeners (K_PRIOR adaptive; phase_e updates confidence)
-  // 45 min: the run includes per-screener Ollama classification calls and routinely
-  // outlives the old 15-min budget now that screener_appearances has months of history
-  // (12 of its last 14 runs were timeout-killed with an empty "Command failed").
-  await runPython('screener_performance.py', [], 45 * 60_000);
+  // 45 min: this routinely outlives the old 15-min budget now that screener_appearances has
+  // months of history (12 of its last 14 runs were timeout-killed with an empty "Command failed").
+  await T.run('screener-performance-compute', () => runPython('screener_performance.py', [], 45 * 60_000));
 
   // 4. Stamp per-stock screener ML features into technical_signals
   await runPython('screener_features_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_features_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('screener_features_fetcher', e));
 
   // 5. Aggregate sector screener rotation signals
   await runPython('screener_sector_rotation.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_sector_rotation failed:', (e as Error).message));
+    .catch(e => T.fail('screener_sector_rotation', e));
 
   // 6. Generate screener surfacing alerts → unified_signals
   await runPython('screener_signal_generator.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_signal_generator failed:', (e as Error).message));
+    .catch(e => T.fail('screener_signal_generator', e));
 
   // 7. Resolve live screener outcomes (needs ohlcv data to be fresh first)
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_screener_resolver failed:', (e as Error).message));
+    .catch(e => T.fail('live_screener_resolver', e));
 
   // 8. Recompute optimal filter combinations using the latest resolved outcomes. Trains both
   // the swing-horizon model and an isolated same-day intraday model in one run (see
   // live_screener_optimizer.py's optimize_combinations()).
   await runPython('live_screener_optimizer.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_screener_optimizer failed:', (e as Error).message));
+    .catch(e => T.fail('live_screener_optimizer', e));
 
   // 8b. Retrain the ML win-probability classifier on the same freshly-resolved outcomes.
   // Gated behind a held-out-AUC promotion check inside the script itself, so a worse
   // retrain never silently replaces a better live model.
-  await runPython('live_screener_ml_ranker.py', ['--train'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_screener_ml_ranker --train failed:', (e as Error).message));
+  // AF-20260911-16. Budget raised 10 -> 30min from MEASURED runtimes, not a guess: the training
+  // set grows daily and the last five runs read 3.0, 3.3, 7.9, 5.1 and 10.0min, the last of
+  // which is the 10min cap itself (2026-09-10, "Timed out after 600000ms"). p95 was 9.6min --
+  // i.e. the budget had no headroom left at all, which recurring-bugs.md records as the
+  // repeated defect: a budget sized against the work as it was when the budget was set, then
+  // never revisited as the work grew. A timeout here throws away work already done.
+  await T.run('live-screener-ml-train', () => runPython('live_screener_ml_ranker.py', ['--train'], 30 * 60_000));
 
   // 9. Auto-backtest top combinations so frontend cockpit always has fresh performance data
   await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] backtest_live_screener auto-backtest failed:', (e as Error).message));
+    .catch(e => T.fail('backtest_live_screener', e));
   await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5', '--intraday'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] backtest_live_screener intraday auto-backtest failed:', (e as Error).message));
+    .catch(e => T.fail('backtest_live_screener_intraday', e));
 
-  try {
+  await T.runQuiet('screener-classification', async () => {
     const { classifyAllScreeners } = await import('../screenerClassifier');
     await classifyAllScreeners();
-  } catch (e: unknown) {
-    console.error('[QUEUE] screener classification failed:', (e as Error).message);
-  }
+  });
+
+  const verdict = T.finish();
+  return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
-async function processCompanyProfilesSync(_job: Job): Promise<void> {
+async function processCompanyProfilesSync(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
   const { syncAndAnalyzeCompanyProfiles } = await import('../companyProfileSyncService');
-  await syncAndAnalyzeCompanyProfiles();
+  // Was Promise<void>, which discarded the verdict entirely -- so even after
+  // syncAndAnalyzeCompanyProfiles stopped hardcoding success:true, the job would still have
+  // reported success on a total failure. Both halves are needed for the failure to surface.
+  const verdict = await syncAndAnalyzeCompanyProfiles();
+  // verdict.processed/failed were computed and logged to console but never left the process --
+  // a real success:false run (e.g. 2026-09-09T15:30) landed in job_run_history with error=''.
+  // registerRepeatableJob's completed handler builds its message from failedSteps, so surface
+  // the counts there instead of just the boolean.
+  return {
+    success: verdict.success,
+    failedSteps: verdict.success ? undefined : [`0/${verdict.processed + verdict.failed} profiles synced (${verdict.failed} failed)`],
+  };
 }
 
-async function processTickertapeScorecard(_job: Job): Promise<{ success: boolean }> {
-  await runPython('tickertape_scorecard_fetcher.py', [], 60 * 60_000)
-    .catch(e => console.warn('[QUEUE] tickertape_scorecard_fetcher failed:', (e as Error).message));
+async function processTickertapeScorecard(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
+  // Single-step job: a .catch here reported success:true while the only thing this job does
+  // had failed. Let it throw so BullMQ marks the run failed and the heartbeat says so.
+  await runPython('tickertape_scorecard_fetcher.py', [], 60 * 60_000);
   return { success: true };
 }
 
-async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount: number }> {
+async function processIndexMembership(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
+  // AF-20260828-21: index_membership_fetcher.py was only invoked from nse-sync-weekly
+  // (Saturday), so its own date-guarded write (`date >= logical_write_floor()`, added
+  // 2026-07-19 specifically to stop overwriting HISTORICAL rows with today's membership --
+  // see that fetcher's own comment) only ever blessed the single trading day the job
+  // happened to run on. Every technical_signals row created on the other 4-5 trading days
+  // of the week defaulted is_nifty50/is_nifty100/is_nifty200/is_midcap150/is_smallcap250/
+  // nifty_tier to the column's raw schema DEFAULT (0) -- indistinguishable from "confirmed
+  // not a member" -- until the following Saturday. Root-caused this, not just re-scheduled
+  // around it: NSE's own index-constituent CSVs (nsearchives.nseindia.com) are cheap (5
+  // small static-file requests, no per-symbol iteration, no documented WAF/rate-limit
+  // history unlike Trendlyne) and already 0/15 failures in job_heartbeat, so there was no
+  // reliability reason to look for an alternate provider -- the fix is cadence, not source.
+  // Kept as its own job (not folded into nse-sync-weekly, which stays weekly for its other,
+  // genuinely-weekly-cadence steps) so this doesn't risk that job's existing budget/timeout.
+  // Single-step job: a .catch here reported success:true while the only thing this job does
+  // had failed. Let it throw so BullMQ marks the run failed and the heartbeat says so.
+  // Budget raised 60s -> 180s (2026-09-05). Measured the SAME script twice on the same day:
+  // 28.2s standalone (writing 108,109 rows) via the job sweep, but it blew the 60s budget and
+  // was killed when run inside ml-daily-ops alongside other steps -- and had already been
+  // killed identically in production on 2026-09-04. A budget calibrated against an idle box
+  // has no headroom under the contention the job actually runs in. 180s is ~6x the measured
+  // standalone cost, matching this file's sibling budgets.
+  await runPython('index_membership_fetcher.py', [], 180_000);
+  return { success: true };
+}
+
+async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount: number; failedSteps?: string[] }> {
   console.log('[QUEUE] Starting NSE master data sync...');
+  // Five backfill sub-steps below were each `(non-blocking)` .catch/try-catch handlers, so the
+  // job returned success:true with every one of them dead. Non-blocking is right -- one bad
+  // backfill must not abort the others -- but silent is not, so they report through T and
+  // degrade the job verdict via registerJob.ts's success===false branch.
+  const T = new StepTracker('nse-sync');
   try {
     const { syncNSEStocksToDatabase } = await import('../nseService');
     const result = await syncNSEStocksToDatabase();
@@ -149,41 +226,58 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
     // incremental mode in the script) -- acceptable at this job's weekly cadence, since sector
     // classification changes rarely and a full weekly refresh also self-heals any transient
     // per-symbol MC miss from the prior run.
-    await runPython('backfill_sector_mc.py', ['--enumerate', '--write', '--report-unmapped'], 900_000)
-      .catch(err => console.warn('[QUEUE] MC sector backfill failed (non-blocking):', (err as Error).message));
+    // Split into two steps 2026-09-12 (AF-20260912-16). Both phases used to share one 900s
+    // budget, and the enumerate alone measures ~895s -- so when it ran long the kill landed on
+    // the WRITE, which is the phase that actually lands data. Measured on the 09-12 07:45
+    // failure: the cache file was complete (2,340 symbols, 2,174 with a sector) at 07:44:56 and
+    // the process died at 07:45:00, four seconds later, having written nothing to the DB. The
+    // whole 15 minutes of MoneyControl traffic was discarded for want of ten seconds.
+    // enumerate_sectors() flushes mc_sector_cache.json every 200 symbols and again at the end,
+    // and --write reads only that cache, so the write step now lands whatever the enumerate
+    // managed even when the enumerate times out -- "parse what landed", not "parse nothing"
+    // (recurring-bugs.md). Budgets are measured, not guessed: enumerate 1200s (~34% over the
+    // 895s observed), write 120s (12x the 10s measured live on the full 2,340-symbol cache).
+    await runPython('backfill_sector_mc.py', ['--enumerate'], 1_200_000)
+      .catch(err => T.fail('backfill_sector_mc_enumerate', err));
+    await runPython('backfill_sector_mc.py', ['--write', '--report-unmapped'], 120_000)
+      .catch(err => T.fail('backfill_sector_mc_write', err));
     // Backfill canonical nse_stocks.sector from already-resolved confluence data, then
     // propagate to historical signal tables. Keeps sector segmentation healthy over time.
-    await runPython('backfill_sectors.py', [], 120_000)
-      .catch(err => console.warn('[QUEUE] sector backfill failed (non-blocking):', (err as Error).message));
+    // Budget 120s -> 600s (2026-09-05). Killed at 120s inside nse-sync on 2026-09-05 (that
+    // run reported '2 ok, 2 failed'), and this step is not a handful of API calls -- it
+    // backfills nse_stocks.sector and then PROPAGATES it across historical signal tables,
+    // i.e. bulk SQL over multi-million-row tables, several of which are compressed
+    // hypertables where a wide UPDATE has to decompress. Its own sibling two lines above
+    // (backfill_sector_mc.py, a ~9-10 min measured enumerate) already carries 900s; 120s
+    // here was the outlier, not the norm.
+    await runPython('backfill_sectors.py', [], 600_000)
+      .catch(err => T.fail('backfill_sectors', err));
     // Provider-mapping backfill (2026-08-05): mcsymbol/tlid resolution -- npm run sync:mappings
     // was manual-only (a package.json script, never scheduled), so newly-added nse_stocks rows
     // (this same job's syncNSEStocksToDatabase() call, above, can insert brand-new symbols)
     // silently accumulated with no provider mapping forever. Live production had 544/2366
     // ACTIVE symbols missing mcsymbol or tlid before this was first run by hand. Imported
     // rather than shelled out to, matching how syncNSEStocksToDatabase itself is called above.
-    try {
+    await T.runQuiet('stock-mapping-sync', async () => {
       const { syncMappings } = await import('../../../scripts/syncAllStockMappings');
       const mapResult = await syncMappings();
       console.log(`[QUEUE] stock-mapping sync completed (updated ${mapResult.updatedCount}, `
         + `skipped ${mapResult.skippedCount}, failed ${mapResult.failedCount})`);
-    } catch (err) {
-      console.warn('[QUEUE] stock-mapping sync failed (non-blocking):', (err as Error).message);
-    }
+    });
     // Index membership flags (Nifty50/100/200/Midcap150/Smallcap250) — passive ETF flow signal.
-    await runPython('index_membership_fetcher.py', [], 60_000)
-      .catch(err => console.warn('[QUEUE] index_membership_fetcher failed (non-blocking):', (err as Error).message));
+    await runPython('index_membership_fetcher.py', [], 180_000)
+      .catch(err => T.fail('index_membership_fetcher', err));
     // nse_stocks.market_cap/pe_ratio/dividend_yield fallback backfill (2026-08-07, dead-column
     // sweep) — see backfillNseStocksFundamentalsFallback()'s own doc comment in nseService.ts.
     // Pure DB-to-DB copy, no external call, so it costs nothing to run every week alongside the
     // sector backfills above.
-    try {
+    await T.runQuiet('nse-stocks-fundamentals-fallback', async () => {
       const { backfillNseStocksFundamentalsFallback } = await import('../nseService');
       const { updated } = await backfillNseStocksFundamentalsFallback();
       console.log(`[QUEUE] nse_stocks fundamentals-fallback backfill: ${updated} rows updated`);
-    } catch (err: any) {
-      console.warn('[QUEUE] nse_stocks fundamentals-fallback backfill failed (non-blocking):', err.message);
-    }
-    return { success: true, stockCount };
+    });
+    const verdict = T.finish();
+    return { success: verdict.ok, stockCount, failedSteps: verdict.failedSteps };
   } catch (err: any) {
     console.error('[QUEUE] NSE sync failed:', err.message);
     throw err;
@@ -208,7 +302,7 @@ export async function registerSyncJobs(connection: any) {
     //
     // 21:00 UTC (not 20:30) so it clears ohlcv-gap-fill-weekly, which fires Fri 20:30 UTC
     // = Sat 2:00 AM IST -- the one day-of-week where these two would otherwise collide.
-    repeat: { pattern: '0 21 * * 1-5' },
+    repeat: { pattern: '40 16 * * 1-5' }, // 10:10 PM IST (16:40 UTC)
     jobId: 'screener-performance-daily',
     removeOnComplete: 3,
     removeOnFail: 3,
@@ -280,8 +374,8 @@ export async function registerSyncJobs(connection: any) {
     connection,
     queueName: QUEUE_NSE_SYNC,
     jobName: 'nse-sync-weekly',
-    // Weekly on Sunday at 2 AM UTC (7:30 AM IST) for low load time.
-    repeat: { pattern: '0 2 * * 0' },
+    // Weekly on Saturday at 2 AM UTC (7:30 AM IST) for low load time.
+    repeat: { pattern: '0 2 * * 6' },
     jobId: 'nse-sync-weekly-repeatable',
     removeOnComplete: { age: 86400 },   // Keep for 1 day
     removeOnFail: { age: 604800 },      // Keep failures for 7 days
@@ -291,10 +385,18 @@ export async function registerSyncJobs(connection: any) {
     monitorName: 'nse-sync',
     concurrency: 1,
     // Was 180000 (3 min, NSE API calls only) -- bumped 2026-08-05 to cover the new
-    // backfill_sector_mc.py step (measured ~9-10 min live enumerate against the full
-    // mcsymbol-bearing universe) plus backfill_sectors.py (120s) and
-    // index_membership_fetcher.py (60s), with real margin above the sum.
-    lockDuration: 20 * 60_000,
+    // backfill_sector_mc.py step, then 20 -> 60 min on 2026-09-12 (AF-20260912-16).
+    // The 20-min value had silently stopped covering the sum: its own comment budgeted
+    // "backfill_sectors.py (120s) and index_membership_fetcher.py (60s)", but backfill_sectors
+    // was raised to 600s on 2026-09-05 and index_membership to 180s, and neither bump revisited
+    // this lock. Current step budgets sum to ~35 min (sector_mc enumerate 20 + write 2 +
+    // backfill_sectors 10 + index_membership 3) against a 20-min lock, so BullMQ would consider
+    // the worker dead partway through and reclaim a job that was running fine -- the exact
+    // failure processScreenerPerf's lockDuration comment above records. 60 min is real margin
+    // over the sum, not over the largest single step.
+    // Raising ANY runPython budget in processNSESync means re-checking this number
+    // (recurring-bugs.md: a budget is calibrated against what the step did when it was set).
+    lockDuration: 60 * 60_000,
     lockRenewTime: 5 * 60_000,
     // Preserves the original handler's extra `(${stockCount} stocks)` detail in the completed
     // log line (the standard helper logs a plain '... completed' line above it).
@@ -321,5 +423,48 @@ export async function registerSyncJobs(connection: any) {
     monitorFn: updateMonitorState,
   });
 
-  return { screenerPerf, companyProfilesSync, tickertapeScorecard, nseSync, corporateActionsIngest };
+  const indexMembership = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_INDEX_MEMBERSHIP,
+    jobName: 'index-membership-daily',
+    // AF-20260828-21: daily, weekdays only -- nse-sync-weekly's own Saturday run stays as a
+    // redundant safety net (the fetcher is idempotent), this is what actually closes the
+    // Mon-Thu coverage gap. 15:35 UTC = 21:05 IST -- same off-hours slot family as
+    // company-profiles-sync-daily (15:30 UTC), just after that day's 15:30 IST close and
+    // clear of the 22:00-23:35 IST EOD job cluster; offset by 5 min to avoid an exact
+    // simultaneous start with company-profiles-sync-daily. Needs logical_write_floor() to
+    // resolve to TODAY's date (i.e. today's stock_ohlcv/technical_signals rows must already
+    // exist), which they do well before this slot -- EOD OHLCV ingestion runs earlier in the
+    // evening cluster.
+    repeat: { pattern: '35 15 * * 1-5' },
+    jobId: 'index-membership-daily',
+    removeOnComplete: 3,
+    removeOnFail: 3,
+    processor: processIndexMembership,
+    monitorName: 'index-membership',
+    concurrency: 1,
+    lockDuration: 10 * 60_000,
+    lockRenewTime: 2 * 60_000,
+  });
+  const analystEstimatesSync = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_ANALYST_ESTIMATES_SYNC,
+    jobName: 'analyst-estimates-sync-daily',
+    jobId: 'analyst-estimates-sync-daily',
+    // Daily Mon-Fri at 14:15 UTC (7:45 PM IST) after market close
+    repeat: { pattern: '15 14 * * 1-5' },
+    removeOnComplete: 3,
+    removeOnFail: 3,
+    processor: processAnalystEstimatesSync,
+    monitorName: 'analyst-estimates-sync',
+    concurrency: 1,
+    lockDuration: 10 * 60_000,
+    lockRenewTime: 2 * 60_000,
+  });
+
+
+  return {
+    screenerPerf, companyProfilesSync, tickertapeScorecard, nseSync, corporateActionsIngest,
+    indexMembership, analystEstimatesSync,
+  };
 }

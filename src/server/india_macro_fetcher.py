@@ -25,6 +25,21 @@ Usage:
   python india_macro_fetcher.py --days 90
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class IndiaMacroFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class IndiaMacroFetcherBaseFetcher(BaseFetcher[IndiaMacroFetcherSchema]):
+    fetcher_name = 'IndiaMacroFetcher'
+    domain = 'general'
+    schema = IndiaMacroFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import re
 import sys
@@ -128,7 +143,7 @@ def _fetch_actual_events(days: int) -> list[dict]:
         resp.raise_for_status()
         payload = resp.json()
     except Exception as exc:
-        print(f"[IndiaMacro] WARN eco-calendar fetch error: {exc}")
+        print(f"[IndiaMacro] WARN eco-calendar fetch error: {exc}", file=sys.stderr)
         return events
 
     if not payload.get("success"):
@@ -267,7 +282,7 @@ def _fetch_repo_from_eco_calendar() -> float | None:
         if rows:
             return _parse_numeric(rows[0]["actual"] or rows[0][0])
     except Exception as exc:
-        print(f"[IndiaMacro] WARN eco_calendar repo fallback error: {exc}")
+        print(f"[IndiaMacro] WARN eco_calendar repo fallback error: {exc}", file=sys.stderr)
     return None
 
 
@@ -314,3 +329,9 @@ if __name__ == "__main__":
                         help="Number of past days of eco-calendar actuals to scan (default: 60)")
     args = parser.parse_args()
     main(args.days)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

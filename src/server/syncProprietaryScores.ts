@@ -177,7 +177,7 @@ async function stampDvmOntoTechnicalSignals(): Promise<void> {
         dvm_momentum   = d.m_score
       FROM trendlyne_dvm_scores AS d
       WHERE d.symbol = ts.symbol
-        AND d.date = ts.date::text
+        AND d.date = ts.date
         AND (ts.dvm_durability IS NULL OR ts.dvm_valuation IS NULL OR ts.dvm_momentum IS NULL)
     `));
     console.log(`[TRENDLYNE SCORES] Stamped DVM onto technical_signals (${(res as any)?.changes ?? '?'} rows).`);

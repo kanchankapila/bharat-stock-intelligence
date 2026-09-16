@@ -164,13 +164,20 @@ describe('holiday-skip guard is wired into every targeted evening/night job', ()
   const dlJobsSrc = read('jobs/dl.jobs.ts');
   const syncJobsSrc = read('jobs/sync.jobs.ts');
 
+  const NL = String.fromCharCode(10);
   function assertGuarded(src: string, functionName: string) {
     const fnStart = src.indexOf(`function ${functionName}(`);
     expect(fnStart, `${functionName} not found`).toBeGreaterThanOrEqual(0);
-    // Look at the next ~700 chars of the function body for the guard call -- generous enough
-    // to cover a short explanatory comment block before it, tight enough to prove it's early.
-    const body = src.slice(fnStart, fnStart + 700);
-    expect(body, `${functionName} does not call shouldSkipOnTradingHoliday early in its body`)
+    // Scan the first N LINES of the function, not the first N CHARACTERS. The character form
+    // (previously 700) measures distance in a unit nothing in the source controls: widening
+    // this function's own return-type annotation to carry `skipped?: boolean` on 2026-09-05
+    // pushed the guard past the 700-char mark and failed this test without changing any
+    // behaviour it exists to protect. That is the source-text-distance trap recurring-bugs.md
+    // already records for jobRegistryGraceMinutesConsistency.test.ts, hit a second time here.
+    // Lines are stable against signature length and comment width, and still prove "early":
+    // the guard has to be among the function's opening statements, not buried after real work.
+    const lines = src.slice(fnStart).split(NL).slice(0, 18).join(NL);
+    expect(lines, `${functionName} does not call shouldSkipOnTradingHoliday early in its body`)
       .toContain('shouldSkipOnTradingHoliday');
   }
 
@@ -224,5 +231,14 @@ describe('holiday-skip guard is wired into every targeted evening/night job', ()
     const idx = queuesSrc.indexOf("Trading holiday — running daily pipeline early");
     expect(idx).toBeGreaterThanOrEqual(0);
     expect(queuesSrc.slice(idx - 400, idx)).toContain('isTradingHolidayToday()');
+  });
+
+  it('does not stamp a skipped stock-refresh as a successful data run', () => {
+    expect(queuesSrc).toContain('return { count: 0, persisted: 0, skipped: true }');
+    const completedIdx = queuesSrc.indexOf("stockWorker.on('completed'");
+    expect(completedIdx).toBeGreaterThanOrEqual(0);
+    const completedBody = queuesSrc.slice(completedIdx, completedIdx + 500);
+    expect(completedBody).toContain('if (result.skipped)');
+    expect(completedBody.indexOf('recordHeartbeat')).toBeGreaterThan(completedBody.indexOf('return;'));
   });
 });

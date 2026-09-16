@@ -45,6 +45,7 @@ USAGE
 """
 from __future__ import annotations
 
+import polars as pl
 import argparse
 import datetime as _dt
 
@@ -52,6 +53,7 @@ import pandas as pd
 
 from as_of import logical_trading_date
 from db_compat import connect, read_df, safe_alter, use_postgres
+import sys
 
 # Windows. 5 days matches the horizon each signal was measured at; changing one means
 # re-running the measurement, not just editing the constant.
@@ -88,7 +90,7 @@ def ensure_schema(con) -> None:
     # the first run needs an explicit ALTER or every insert dies on UndefinedColumn. Hit
     # exactly that while building this. safe_alter swallows the already-exists case per
     # dialect, which is why it exists.
-    for ddl in (f"ALTER TABLE {TABLE} ADD COLUMN bullish_exit_ratio_5d REAL",):
+    for ddl in (f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS bullish_exit_ratio_5d REAL",):
         safe_alter(con, ddl)
     con.commit()
 
@@ -265,7 +267,7 @@ def run(as_of: str | None = None, dry_run: bool = False) -> dict:
                 print(f"[EventTriggers] universe filter dropped {before - len(df):,} "
                       f"of {before:,} symbols not in nse_stocks")
     except Exception as e:                                      # noqa: BLE001
-        print(f"[EventTriggers] universe restriction unavailable ({str(e)[:60]}); unfiltered")
+        print(f"[EventTriggers] universe restriction unavailable ({str(e)[:60]}); unfiltered", file=sys.stderr)
     if df.empty:
         print('[EventTriggers] nothing left after the universe filter for', as_of)
         return {'rows': 0}
@@ -346,3 +348,9 @@ if __name__ == '__main__':
     ap.add_argument('--dry-run', action='store_true')
     a = ap.parse_args()
     print(run(as_of=a.date, dry_run=a.dry_run))
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

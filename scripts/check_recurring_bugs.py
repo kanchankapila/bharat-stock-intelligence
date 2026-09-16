@@ -41,6 +41,22 @@ recurrence count for each):
      failures behind a green heartbeat for two sessions; the other 3 were found live, in
      the same shape, while building this check. `.ts` only (BullMQ workers are all
      TypeScript); see check_skip_not_success.
+  7. An `information_schema.columns`/`information_schema.tables` query with no
+     `table_schema` filter. Every test fixture in this repo (`pg_conn`/`pg_schema`) scopes
+     production-shaped tables into their own throwaway schema and puts it FIRST on the
+     search_path -- an unqualified introspection query then silently resolves a leaked
+     interrupted-run schema (`pytest_<hash>`/`vitest_<hash>`, left behind when a killed
+     run skips its `DROP SCHEMA ... CASCADE` teardown) as if it were the real table.
+     Found 2026-08-18 in 4 files at once (`densify_feature_matrix.sparse_columns()`,
+     `ml_ensemble._table_columns()`, `backfill_sectors._has_column()`, plus one bare
+     `.fetchone()` type check) after one instance killed `ml-daily-ops` for 3 days with a
+     traceback naming no real table -- `pd.DataFrame` built from a triple-duplicated
+     column list raised on a duplicate label with no context pointing at the schema leak.
+     All 4 were fixed with `AND table_schema = current_schema()`, not a hardcoded
+     `'public'` (hardcoding would break the same query run through the test fixtures,
+     which deliberately scope OUT of public). recurring-bugs.md's own text asks for this
+     check by name: "grep for it whenever this class recurs, the same way
+     check_recurring_bugs.py does for the other SQL-dialect signatures."
 
 Deliberately NOT checked: `float(x or 0)` / `int(x or 0)` on a possibly-NaN column. It is a
 real bug class (NaN is truthy, so `nan or 0` is `nan`), but measured against this repo it
@@ -48,6 +64,23 @@ matches 50 sites and inspection showed most are legitimate None->0 coercions on 
 aggregates. A check that is ~90% false positive gets ignored within a week and then protects
 nothing while looking like it does. Catching it needs type information this script does not
 have.
+
+ 10. A job sub-step in queues.ts / *.jobs.ts whose only failure handler is a console.* log.
+     The chain stays fault-tolerant but the failure never reaches the job verdict or any
+     monitor, so a dead fetcher reads as a healthy job; see check_job_step_catch_console.
+
+  8. A `print()` inside an `except Exception` block ("degraded read" -- a query that falls
+     back to an empty/default result instead of raising, because a missing/renamed table
+     must not crash a nightly job) with no `file=sys.stderr`. `pythonRunner.ts`'s
+     `runPython()` only inspects STDERR to decide whether to log '[PY] <script> finished
+     successfully with warnings/stderr output' -- the one hook that surfaces a degraded-
+     but-"successful" run without a human reading the raw log by hand. Found 2026-08-18 in
+     `unified_ranker.py` (~30 read methods, all printing to stdout) and only partially
+     fixed (5 of 21 `print()` calls routed to stderr) before this check existed -- see
+     recurring-bugs.md's "A degraded-read message printed to the wrong stream defeats the
+     one hook..." entry. Scoped to files actually invoked via `runPython()` somewhere in
+     the `.ts` codebase; a script that is never run that way has no reason to route
+     diagnostics to stderr.
 
 Also deliberately NOT checked: a market-hours/skip guard that returns early with no
 follow-on 'success' stamp anywhere nearby (most of them -- see confluence.jobs.ts's
@@ -64,7 +97,8 @@ backlog.
 
 File scope is `src/server/*.py` for checks 1-5, plus `src/server/**/*.ts` (excluding tests)
 for check 6 only. The multi-word-cast class (check 5) also occurs in `.ts` (sqlTranslate is
-TypeScript); this script does not cover that side.
+TypeScript); this script does not cover that side. Check 8 covers `.py` files that appear
+as a `runPython('X.py', ...)` argument anywhere under `src/server/**/*.ts`.
 
 This is a standalone checker, not a git hook -- .git/hooks is shared across every worktree
 of this repository (confirmed: multiple concurrent Claude sessions each have their own
@@ -79,6 +113,7 @@ Usage:
   python scripts/check_recurring_bugs.py path/to/file.py   # check specific files
 """
 import argparse
+import ast
 import re
 import subprocess
 import sys
@@ -199,12 +234,105 @@ def check_date_anchor(path: Path, text: str) -> list[str]:
     return findings
 
 
+# A cutoff of N calendar days must span the largest possible gap between REAL trading
+# sessions. A weekend alone is 3 (Fri->Mon), and India has ~15 holidays a year, so a long
+# weekend is 4. At or below that, the window can contain NO trading session at all.
+MIN_SAFE_CALENDAR_LOOKBACK = 4
+
+
+def check_short_calendar_lookback(path: Path, text: str) -> list[str]:
+    """Flags `date.today() - timedelta(days=N)` for small N used as a lookback cutoff.
+
+    Distinct from check_date_anchor above, which deliberately covers only the write-guard
+    shape and explicitly declines to flag read-side lookback windows. That exemption is right
+    in general -- a stale calendar day usually just shifts a window by one session -- but it
+    is wrong when N is small enough that the window can contain NO trading day at all. Then
+    the read returns {} and the caller silently degrades rather than erroring.
+
+    Live instance this was written for (AF-20260823-70): unified_ranker._get_dl_scores used
+    days=1, so a Monday run asked for `prediction_date >= Sunday` and matched nothing. `dl`
+    carries 0.092-0.137 blend weight and _blend renormalizes over the engines PRESENT, so the
+    other engines silently absorbed it. Measured in production: `dl_score` was 0 on 100% of
+    rows for 5 of the last 8 Mondays (2,163/2,163 on 2026-08-17) against ~40 on every other
+    weekday. Nothing errored and the ranker exited 0 every time.
+
+    Fix: as_of.trading_days_back(n, conn) or as_of.logical_write_floor(conn), both of which
+    read the exchange's own session list out of stock_ohlcv.
+
+    Uses ast rather than a line regex on purpose -- the pattern is trivially confused by
+    prose in a docstring describing the bug (this file and recurring-bugs.md both contain
+    such prose), and an AST walk cannot see inside a string literal at all.
+    """
+    if "tests" in path.parts or path.name in DATE_ANCHOR_ALLOWLIST:
+        return []
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    def _is_today_call(node) -> bool:
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "today")
+
+    def _timedelta_days(node):
+        """Return N for a timedelta(days=<int literal>) call, else None."""
+        if not isinstance(node, ast.Call):
+            return None
+        fn = node.func
+        name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", None)
+        if name != "timedelta":
+            return None
+        for kw in node.keywords:
+            if kw.arg == "days" and isinstance(kw.value, ast.Constant) \
+                    and isinstance(kw.value.value, int):
+                return kw.value.value
+        return None
+
+    findings = []
+    lines = text.splitlines()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub)):
+            continue
+        if not _is_today_call(node.left):
+            continue
+        days = _timedelta_days(node.right)
+        if days is None or days > MIN_SAFE_CALENDAR_LOOKBACK:
+            continue
+        # Line-level opt-out, deliberately NOT a file-level allowlist entry: three real sites
+        # match this shape without being the bug (an age threshold for expiring rows, a read of
+        # a script's own output table, a source table that genuinely writes on weekends), and
+        # exempting their whole FILE would blind the check to any future genuine instance in it.
+        # Each suppression must carry its reason on the same line. Triage: AF-20260823-73.
+        # The marker may sit on the line itself or anywhere in the contiguous comment block
+        # directly above it -- the reason usually needs more room than a trailing comment.
+        i = node.lineno - 1
+        exempt = "trading-day-exempt:" in lines[i]
+        j = i - 1
+        while not exempt and j >= 0 and lines[j].strip().startswith("#"):
+            exempt = "trading-day-exempt:" in lines[j]
+            j -= 1
+        if exempt:
+            continue
+        findings.append(
+            f"{_display_path(path)}:{node.lineno}: `date.today() - timedelta(days={days})` "
+            f"as a lookback cutoff. A Fri->Mon gap is 3 calendar days and a long weekend is "
+            f"4, so this window can contain NO trading session and the read silently returns "
+            f"empty. Use as_of.trading_days_back()/logical_write_floor()."
+        )
+    return findings
+
+
 def check_raw_percent_s(path: Path, text: str) -> list[str]:
     """Flags a literal '%s' inside the SPAN of a single .execute(...) call -- scoped by
     paren-depth to that one statement, not a fixed line window, so it can't cross into an
     unrelated adjacent execute() call or a nearby log.info("...%s...", x) statement (both
     produced false positives with a naive N-line lookahead)."""
-    if "tests" in path.parts:
+    # Test plumbing is exempt: its `%s` are raw psycopg2 placeholders on a real cursor, not
+    # db_compat-mediated calls. `conftest.py`/`pg_test_support.py` are named explicitly because
+    # they sit in `src/server/`, not `src/server/tests/` -- moved there 2026-08-17 so the
+    # fixtures also cover `src/server/__tests__/`, which promptly made this check fire on two
+    # correct pre-existing lines.
+    if "tests" in path.parts or path.name in ("conftest.py", "pg_test_support.py"):
         return []
     findings = []
     lines = text.splitlines()
@@ -438,6 +566,199 @@ def check_skip_not_success(path: Path, text: str) -> list[str]:
     return findings
 
 
+_INFO_SCHEMA_RE = re.compile(r"\binformation_schema\.(columns|tables)\b", re.IGNORECASE)
+_TABLE_SCHEMA_RE = re.compile(r"\btable_schema\b", re.IGNORECASE)
+
+
+def check_information_schema_missing_table_schema(path: Path, text: str) -> list[str]:
+    """See class 7 in the module docstring. A window, not a statement-span parser (like
+    check_nan_self_inequality/check_multiword_pg_cast above) -- every real occurrence in this
+    repo puts `table_schema = current_schema()` within a few lines of the FROM, so a wide
+    window catches all of them without needing to track paren/quote depth across a
+    triple-quoted multi-line query.
+
+    Deliberately does NOT use _code_lines()'s triple-quote skip like the two checks above --
+    every real query this class matters for is itself written as a triple-quoted SQL block
+    passed to .execute(), which _code_lines() would misread as a Python docstring and skip
+    entirely, blinding the check to the exact shape it exists to catch. Only bare '#' comment
+    lines are skipped (checked live: zero prose mentions of information_schema.columns/.tables
+    exist in src/server/*.py today outside real queries, so this trade costs nothing right
+    now)."""
+    if "tests" in path.parts:
+        return []
+    findings = []
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith("#"):
+            continue
+        if not _INFO_SCHEMA_RE.search(line):
+            continue
+        window = "\n".join(lines[max(0, i - 4):i + 8])
+        if _TABLE_SCHEMA_RE.search(window):
+            continue
+        # Line-level exemption, mirroring check_short_calendar_lookback's
+        # `trading-day-exempt:` marker -- deliberately NOT a file-level allowlist, which
+        # would blind this check to a future genuine instance in the same file. The only
+        # legitimate case is a query that MUST look across schemas (e.g. reaping orphan
+        # throwaway schemas from crashed pytest runs), where current_schema() would defeat
+        # the query's entire purpose.
+        exempt = "cross-schema-exempt:" in lines[i]
+        j = i - 1
+        while not exempt and j >= 0 and lines[j].strip().startswith("#"):
+            exempt = "cross-schema-exempt:" in lines[j]
+            j -= 1
+        if exempt:
+            continue
+        findings.append(
+            f"{_display_path(path)}:{i + 1}: information_schema query with no `table_schema` "
+            f"filter -- a test fixture's throwaway schema (pg_conn/pg_schema, or a leaked "
+            f"interrupted-run schema like pytest_<hash>) sits first on the search_path, so "
+            f"this can silently resolve a DIFFERENT copy of the table than the one you mean. "
+            f"Add `AND table_schema = current_schema()`, not a hardcoded 'public' (that would "
+            f"break the same query run through the test fixtures)."
+        )
+    return findings
+
+
+_SCREENER_CATALOG_RE = re.compile(r"\bscreener_catalog\b")
+_EXACT_CASE_SOURCE_RE = re.compile(r"\bsource\s*=\s*['\"][A-Za-z]+['\"]")
+_LOWER_SOURCE_RE = re.compile(r"(?i)\blower\s*\(\s*\w*\.?source\b")
+
+
+def check_screener_catalog_exact_case_source(path: Path, text: str) -> list[str]:
+    """`screener_catalog.source` holds mixed-case values for the same provider live
+    (`trendlyne`/`Trendlyne`, `etnow`/`ETnow`, `moneycontrol`/`MoneyControl` -- AF-20260816-19,
+    877 of 2,539 rows mixed-case at last check). An exact-case `source = 'Trendlyne'` filter
+    silently drops the other spelling's rows (25.8% fewer for Trendlyne) with no error -- the
+    known readers (`intraday_ranker.py`, `movement_predictor.py`) fixed this with `LOWER()`;
+    this check exists so the next reader doesn't reintroduce it. Windowed, not a statement-span
+    parser, same tradeoff as check_information_schema_missing_table_schema above."""
+    if "tests" in path.parts:
+        return []
+    findings = []
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if not _SCREENER_CATALOG_RE.search(line):
+            continue
+        window = "\n".join(lines[max(0, i - 4):i + 8])
+        if _LOWER_SOURCE_RE.search(window):
+            continue
+        m = _EXACT_CASE_SOURCE_RE.search(window)
+        if not m:
+            continue
+        findings.append(
+            f"{_display_path(path)}:{i + 1}: `screener_catalog` referenced near an exact-case "
+            f"`{m.group(0)}` filter with no `LOWER(source)` in the same window -- "
+            f"screener_catalog.source holds mixed-case spellings for the same provider live "
+            f"(AF-20260816-19), so this silently drops ~26% of one provider's rows. Wrap in "
+            f"`LOWER(source) = 'lowercasevalue'`, matching intraday_ranker.py/"
+            f"movement_predictor.py."
+        )
+    return findings
+
+
+def _runpython_invoked_scripts() -> set[str]:
+    """.py filenames passed as runPython()'s first argument anywhere under src/server/**/*.ts
+    -- the set of scripts whose stdout pythonRunner.ts never inspects, so a diagnostic printed
+    there is invisible to the one hook ('[PY] <script> finished successfully with warnings/
+    stderr output') that would otherwise surface it. See class 8 in the module docstring."""
+    pattern = re.compile(r"runPython\(\s*['\"]([\w.]+\.py)")
+    scripts: set[str] = set()
+    for ts_path in SERVER_DIR.rglob("*.ts"):
+        if "node_modules" in ts_path.parts:
+            continue
+        text = ts_path.read_text(encoding="utf-8", errors="ignore")
+        scripts.update(pattern.findall(text))
+    return scripts
+
+
+def check_degraded_print_to_stdout(path: Path, text: str, runpython_scripts: set[str]) -> list[str]:
+    """See class 8 in the module docstring. Walks each `except` block's own body (bounded by
+    the block's indentation returning to the `except` line's own level or shallower) looking
+    for a `print(` call, then checks a short window after it for `file=sys.stderr` -- wide
+    enough to cover a print() whose f-string/args span a few continuation lines (every real
+    instance in this repo does), without trying to track paren depth exactly."""
+    if path.name not in runpython_scripts or "tests" in path.parts:
+        return []
+    findings = []
+    lines = text.splitlines()
+    except_re = re.compile(r"^\s*except\b")
+    print_re = re.compile(r"\bprint\(")
+    for i, line in enumerate(lines):
+        if not except_re.match(line):
+            continue
+        except_indent = len(line) - len(line.lstrip())
+        j = i + 1
+        while j < len(lines) and j < i + 25:
+            body_line = lines[j]
+            if body_line.strip() and (len(body_line) - len(body_line.lstrip())) <= except_indent:
+                break
+            if not body_line.strip().startswith("#") and print_re.search(body_line):
+                window = "\n".join(lines[j:j + 5])
+                if "file=sys.stderr" not in window and "file = sys.stderr" not in window:
+                    findings.append(
+                        f"{_display_path(path)}:{j + 1}: print() inside an except block with "
+                        f"no `file=sys.stderr` -- pythonRunner.ts's runPython() only inspects "
+                        f"stderr to flag a degraded-but-'successful' run as such; this message "
+                        f"is invisible to it. Add `file=sys.stderr`, or route through an "
+                        f"existing self._degraded()-style helper if this class already has one."
+                    )
+            j += 1
+    return findings
+
+
+def check_python_file_parses(path: Path, text: str) -> list[str]:
+    """A .py file that does not PARSE, and a line-1 import shoved above a shebang.
+
+    Both are the signature of an automated bulk-edit pass inserting a line at absolute
+    line 1 without looking at what was already there (recurring-bugs.md, "Automated
+    bulk-edit passes"). On 2026-08-28 such a pass put `import polars as pl` above
+    `event_triggers.py`'s docstring, displacing `from __future__ import annotations`
+    out of first-statement position; the resulting SyntaxError failed pytest at
+    COLLECTION, so the whole suite ran zero tests while reporting nothing obviously
+    wrong. 17 other files had their `#!` shebang demoted to line 2, where the kernel
+    stops honouring it.
+
+    This is the one check in this file that is not a heuristic: a parse failure is a
+    fact, and it cannot produce a false positive.
+    """
+    findings: list[str] = []
+
+    # Strip a leading BOM exactly as Python's own source loader does. Four trendlyne
+    # fetchers are UTF-8-with-BOM (and have been since long before this check existed);
+    # they import perfectly, but main() reads with plain utf-8, so the U+FEFF survives
+    # into the string and compile() rejects it. Not stripping it here reports four
+    # healthy files as unparseable -- a false positive that would redden CI forever.
+    text = text.lstrip("﻿")
+
+    try:
+        # compile(), NOT ast.parse(): ast.parse uses PyCF_ONLY_AST, which SKIPS
+        # __future__-placement validation, so it happily parses the exact file that
+        # broke pytest collection on 2026-08-28. compile() runs the full front-end
+        # (it produces bytecode and executes nothing) and does enforce it.
+        compile(text, str(path), "exec")
+    except SyntaxError as exc:
+        findings.append(
+            f"{path}:{exc.lineno}: file does not parse -- {exc.msg}. Python cannot import "
+            f"this module at all; if anything under src/server/__tests__ imports it, pytest "
+            f"aborts during COLLECTION and the entire suite runs zero tests."
+        )
+        return findings  # a non-parsing file makes every other check here meaningless
+
+    lines = text.splitlines()
+    for i, line in enumerate(lines[:5]):
+        if line.startswith("#!"):
+            if i > 0:
+                findings.append(
+                    f"{path}:{i + 1}: shebang is on line {i + 1}, not line 1 -- the kernel only "
+                    f"honours `#!` as the very first bytes of a file, so this script is no longer "
+                    f"directly executable. Move whatever precedes it below the docstring."
+                )
+            break
+
+    return findings
+
+
 def check_missing_live_datasource_test(fetcher_files: list[Path]) -> list[str]:
     tests_dir = SERVER_DIR / "tests"
     existing = {p.name for p in tests_dir.glob("test_live_datasource_*.py")} if tests_dir.exists() else set()
@@ -479,6 +800,58 @@ def check_missing_live_datasource_test(fetcher_files: list[Path]) -> list[str]:
     return findings
 
 
+
+# --- Class 10: a job sub-step whose only failure handler is a console.* log -------------------
+# queues.ts / jobs/*.jobs.ts are multi-step BullMQ processors. A sub-step written as
+#   await runPython('x.py', ...).catch(e => console.warn('[QUEUE] x failed:', ...));
+# keeps the chain fault-tolerant (correct) but makes the failure invisible to every monitor
+# (not correct): the processor returns normally, the worker's 'completed' handler stamps the
+# heartbeat 'success', and a fetcher can stop writing entirely with the job still green. That
+# is how mc_index_oi_fetcher sat 3 days stale. 157 such sites existed across these files on
+# 2026-09-03/04; all were converted to StepTracker (T.fail / T.run / T.runQuiet), which keeps
+# the don't-abort-the-siblings property AND degrades the job verdict.
+#
+# Deliberately scoped to the job-processor files -- a console.warn in a request handler or a
+# service module is not this class. An intentional exception carries a `swallow-ok:` marker on
+# the same line or the line above, with a reason (see dl.jobs.ts's chain-dispatch).
+_CATCH_CONSOLE_RE = re.compile(
+    r"\.catch\(\s*(?:\(\s*\w+\s*(?::[^)]*)?\)|\w+)\s*=>\s*console\.(?:warn|error|log)\b"
+)
+
+
+def check_job_step_catch_console(path: Path, text: str) -> list[str]:
+    """See class 10 in the module docstring."""
+    name = path.as_posix()
+    if not (name.endswith("queues.ts") or name.endswith(".jobs.ts")):
+        return []
+    findings = []
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if not _CATCH_CONSOLE_RE.search(line):
+            continue
+        if line.lstrip().startswith("//") or line.lstrip().startswith("*"):
+            continue
+        # The marker may sit anywhere in the contiguous comment block directly above the call,
+        # not just on the immediately preceding line: a real exception needs a real reason, and
+        # a reason worth writing rarely fits on one line (dl.jobs.ts's is five).
+        context = [line]
+        j = i - 1
+        while j >= 0 and (lines[j].lstrip().startswith("//") or lines[j].lstrip().startswith("*")):
+            context.append(lines[j])
+            j -= 1
+        if any("swallow-ok:" in c for c in context):
+            continue
+        findings.append(
+            f"{_display_path(path)}:{i + 1}: job sub-step failure is only console-logged, so the "
+            f"parent job still reports success and no monitor ever sees it. Route it through the "
+            f"processor's StepTracker instead -- `.catch(e => T.fail('<step>', e))` is a drop-in "
+            f"replacement that keeps the surrounding await/void shape. If it is genuinely not "
+            f"attributable to a job verdict, add a `swallow-ok: <reason>` marker in the comment "
+            f"block directly above it."
+        )
+    return findings
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("paths", nargs="*", help="specific files to check")
@@ -500,16 +873,26 @@ def main() -> int:
         py_files = [f for f in _tracked_python_files() if f.exists()]
         ts_files = [f for f in _tracked_ts_files() if f.exists()]
 
+    runpython_scripts = _runpython_invoked_scripts()
+
     all_findings: list[str] = []
     for path in py_files:
         text = path.read_text(encoding="utf-8", errors="ignore")
+        all_findings.extend(check_python_file_parses(path, text))
         all_findings.extend(check_date_anchor(path, text))
+        all_findings.extend(check_short_calendar_lookback(path, text))
         all_findings.extend(check_raw_percent_s(path, text))
         all_findings.extend(check_nan_self_inequality(path, text))
         all_findings.extend(check_multiword_pg_cast(path, text))
+        all_findings.extend(check_information_schema_missing_table_schema(path, text))
+        all_findings.extend(check_degraded_print_to_stdout(path, text, runpython_scripts))
+        all_findings.extend(check_screener_catalog_exact_case_source(path, text))
 
     for path in ts_files:
-        all_findings.extend(check_skip_not_success(path, path.read_text(encoding="utf-8", errors="ignore")))
+        ts_text = path.read_text(encoding="utf-8", errors="ignore")
+        all_findings.extend(check_skip_not_success(path, ts_text))
+        all_findings.extend(check_job_step_catch_console(path, ts_text))
+        all_findings.extend(check_screener_catalog_exact_case_source(path, ts_text))
 
     if not args.skip_live_datasource_check:
         all_findings.extend(check_missing_live_datasource_test(py_files))

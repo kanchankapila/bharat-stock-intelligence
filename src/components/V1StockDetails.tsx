@@ -6,7 +6,7 @@ import {
   Area, Bar, Line, ReferenceLine, ReferenceArea,
 } from 'recharts';
 import {
-  ArrowLeft, TrendingUp, TrendingDown, Heart, Info, Zap, Activity, AlertCircle,
+  ArrowLeft, ArrowUpRight, TrendingUp, TrendingDown, Heart, Info, Zap, Activity, AlertCircle,
   BrainCircuit, Bookmark, Bookmark as WatchlistIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -21,6 +21,11 @@ import { PageFallback } from './PageFallback';
 import { MCErrorBoundary } from './MCErrorBoundary';
 import MCStockInfoPanel from './MCStockInfoPanel';
 import { FinologyPanel } from './FinologyPanel';
+// Ported from v2's V2StockDetails (2026-08-20 v1 consolidation) -- self-contained, so reusable
+// as-is; genuinely absent from both this page and the separate Stock Intelligence Hub page.
+import { AiInsightsTab } from '../components/v2/views/stock-analysis/AiInsightsTab';
+import { V1PeadConcallWidget } from './V1PeadConcallWidget';
+import { V1TradeRiskCalculatorWidget } from './V1TradeRiskCalculatorWidget';
 
 // Same O(1) lookup maps App.tsx builds at module scope for the same purpose (avoids O(n)
 // .find() on every stock detail open) -- duplicated here rather than imported from App.tsx,
@@ -55,6 +60,9 @@ export const V1StockDetails: React.FC<{
   const [activeTab, setActiveTab] = useState('insights');
   const [report, setReport] = useState<any>(null);
   const { data: unifiedData } = trpc.getAlphaQuantDetail.useQuery({ symbol });
+  // AI Insights tab -- ported from v2's V2StockDetails (2026-08-20 v1 consolidation).
+  const { data: aiInsights } = trpc.getAiInsights.useQuery({ symbol });
+  const { data: profileAnalysis } = trpc.getCompanyProfileAnalysis.useQuery({ symbol });
   // Fixed 2026-07-30 (Finding #89, full-stack audit): the "Technical Scorecard" sidebar
   // below used to hardcode RSI/MACD/Bollinger/pivot points -- directly contradicting the
   // real values on this same page's Technical tab (TechnicalAnalysis component, which
@@ -224,10 +232,10 @@ export const V1StockDetails: React.FC<{
                       <span className="text-2xl font-black text-white tabular-nums">₹{stock?.price?.toLocaleString() ?? '—'}</span>
                       <span className={cn(
                         "font-bold text-sm flex items-center gap-1",
-                        (stock?.changePct ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"
+                        stock?.changePct == null ? "text-slate-400" : stock.changePct >= 0 ? "text-emerald-400" : "text-rose-400"
                       )}>
-                        {(stock?.changePct ?? 0) >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                        {(stock?.changePct ?? 0) >= 0 ? '+' : ''}{stock?.changePct ?? 0}%
+                        {stock?.changePct != null && (stock.changePct >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />)}
+                        {stock?.changePct == null ? '—' : `${stock.changePct >= 0 ? '+' : ''}${stock.changePct}%`}
                       </span>
                     </>
               }
@@ -236,7 +244,7 @@ export const V1StockDetails: React.FC<{
         </div>
 
         <div className="flex gap-3">
-          <button className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-2xl font-black text-sm transition-all shadow-[0_10px_20px_rgba(37,99,235,0.2)] uppercase tracking-widest">
+          <button className="flex-1 md:flex-none bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-2xl font-black text-sm transition-all shadow-[0_10px_20px_rgba(37,99,235,0.2)] font-display uppercase tracking-widest">
             Invest Now
           </button>
           <button className="p-3 glass border border-slate-800/50 rounded-2xl text-slate-400 hover:text-white transition-all">
@@ -249,6 +257,7 @@ export const V1StockDetails: React.FC<{
       <div className="flex gap-2 border-b border-slate-800/50 pb-px overflow-x-auto hide-scrollbar">
         {[
           { id: 'insights', label: 'Overview' },
+          { id: 'ai-insights', label: 'AI Insights' },
           { id: 'technicals', label: 'Technical' },
           { id: 'fundamentals', label: 'Fundamental' },
           { id: 'financials', label: 'Financials' },
@@ -263,8 +272,8 @@ export const V1StockDetails: React.FC<{
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              "px-6 py-3 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border-b-2",
-              activeTab === tab.id ? "border-blue-500 text-blue-500" : "border-transparent text-slate-400 hover:text-white"
+              "px-6 py-3 text-[10px] font-black font-display uppercase tracking-widest transition-all whitespace-nowrap border-b-2",
+              activeTab === tab.id ? "border-indigo-500 text-indigo-500" : "border-transparent text-slate-400 hover:text-white"
             )}
           >
             {tab.label}
@@ -286,22 +295,22 @@ export const V1StockDetails: React.FC<{
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="p-4 glass-strong border border-blue-500/20 rounded-2xl relative overflow-hidden"
+                  className="p-4 glass-strong border border-indigo-500/20 rounded-2xl relative overflow-hidden"
                 >
                   <div className="absolute top-0 right-0 p-3 opacity-10">
-                    <Activity className="w-16 h-16 text-blue-500" />
+                    <Activity className="w-16 h-16 text-indigo-500" />
                   </div>
                   <div className="relative z-10 flex items-start gap-4">
-                    <div className="p-3 bg-blue-500/10 rounded-xl">
-                      <Zap className="w-5 h-5 text-blue-400" />
+                    <div className="p-3 bg-indigo-500/10 rounded-xl">
+                      <Zap className="w-5 h-5 text-indigo-400" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">AI Pattern Recognition Engine</span>
+                        <span className="text-[10px] font-black text-indigo-400 font-display uppercase tracking-widest">AI Pattern Recognition Engine</span>
                         <div className="flex gap-1">
-                           <div className="w-1 h-1 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                           <div className="w-1 h-1 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '200ms' }} />
-                           <div className="w-1 h-1 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '400ms' }} />
+                           <div className="w-1 h-1 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                           <div className="w-1 h-1 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '200ms' }} />
+                           <div className="w-1 h-1 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '400ms' }} />
                         </div>
                       </div>
                       <h4 className="text-lg font-black text-white italic tracking-tighter uppercase">
@@ -312,7 +321,7 @@ export const V1StockDetails: React.FC<{
                       </p>
                       <div className="flex items-center gap-4 mt-3">
                          <div className="flex items-center gap-1.5">
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sentiment:</span>
+                            <span className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Sentiment:</span>
                             <span className={cn(
                               "text-[9px] font-black uppercase px-2 py-0.5 rounded",
                               patterns[patterns.length - 1].sentiment === 'bullish' ? "bg-emerald-500/10 text-emerald-400" :
@@ -322,7 +331,7 @@ export const V1StockDetails: React.FC<{
                             </span>
                          </div>
                          <div className="flex items-center gap-1.5">
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Confidence:</span>
+                            <span className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Confidence:</span>
                             <span className="text-[9px] font-black text-white uppercase">{patterns[patterns.length - 1].confidence}</span>
                          </div>
                       </div>
@@ -334,7 +343,7 @@ export const V1StockDetails: React.FC<{
               <Card title="Market Sentiment Summary" icon={Info}>
                    <div className="space-y-4">
                       <p className="text-xs text-slate-400 leading-relaxed italic">
-                        {stock?.name ?? displayName} is currently showing a {(stock?.changePct ?? 0) > 0 ? 'bullish' : 'bearish'} bias. The technical rating stands at <span className="text-slate-200 font-bold">{(unifiedData as any)?.technicalRating?.text || 'Neutral'}</span> with high institutional interest observed in recent sessions.
+                        {stock?.name ?? displayName} is currently showing a {stock?.changePct == null ? 'neutral' : stock.changePct > 0 ? 'bullish' : 'bearish'} bias. The technical rating stands at <span className="text-slate-200 font-bold">{(unifiedData as any)?.technicalRating?.text || 'Neutral'}</span> with high institutional interest observed in recent sessions.
                       </p>
                       <div className="flex gap-4">
                          <div className="flex-1 p-3 glass-strong rounded-xl border border-slate-800/50">
@@ -351,11 +360,11 @@ export const V1StockDetails: React.FC<{
 
               {/* AI Analyst Report Component */}
               <div className="mt-8">
-                 <Card title="AI Strategic Analyst Report" icon={Zap} className="border-blue-500/20">
+                 <Card title="AI Strategic Analyst Report" icon={Zap} className="border-indigo-500/20">
                     {!report ? (
                       <div className="py-12 flex flex-col items-center justify-center text-center">
-                        <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mb-4">
-                          <Activity className="w-8 h-8 text-blue-500 animate-pulse" />
+                        <div className="w-16 h-16 bg-indigo-500/10 rounded-full flex items-center justify-center mb-4">
+                          <Activity className="w-8 h-8 text-indigo-500 animate-pulse" />
                         </div>
                         <h4 className="text-lg font-black text-white italic uppercase tracking-tighter mb-2">Detailed Report Not Generated</h4>
                         <p className="text-slate-400 text-xs max-w-md mb-6 uppercase font-bold tracking-widest leading-loose">
@@ -365,7 +374,7 @@ export const V1StockDetails: React.FC<{
                           onClick={() => reportMutation.mutate({ symbol })}
                           disabled={reportMutation.isPending}
                           className={cn(
-                            "px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl transition-all shadow-lg flex items-center gap-2 uppercase text-xs tracking-widest",
+                            "px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl transition-all shadow-lg flex items-center gap-2 uppercase text-xs tracking-widest",
                             reportMutation.isPending && "opacity-50 cursor-not-allowed"
                           )}
                         >
@@ -383,11 +392,11 @@ export const V1StockDetails: React.FC<{
                           <div>
                             <h3 className="text-2xl font-black text-white italic tracking-tighter uppercase mb-1">{report.title}</h3>
                             <div className="flex items-center gap-4">
-                              <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest flex items-center gap-1">
+                              <span className="text-[10px] font-black text-indigo-500 font-display uppercase tracking-widest flex items-center gap-1">
                                 <Bookmark className="w-3 h-3" />
                                 Institutional Grade
                               </span>
-                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                              <span className="text-[10px] font-bold text-slate-400 font-display uppercase tracking-widest">
                                 Timestamp: {report.generatedAt ? format(new Date(report.generatedAt), 'MMM dd, yyyy HH:mm') : 'Live'}
                               </span>
                             </div>
@@ -397,7 +406,7 @@ export const V1StockDetails: React.FC<{
                             report.outlook === 'BULLISH' ? "bg-emerald-500/10 border-emerald-500/20" : "bg-rose-500/10 border-rose-500/20"
                           )}>
                              <div className="text-right">
-                               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Overall Outlook</p>
+                               <p className="text-[8px] font-black text-slate-400 font-display uppercase tracking-widest">Overall Outlook</p>
                                <p className={cn(
                                  "text-sm font-black italic",
                                  report.outlook === 'BULLISH' ? "text-emerald-400" : "text-rose-400"
@@ -410,14 +419,14 @@ export const V1StockDetails: React.FC<{
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                            <div className="lg:col-span-2 space-y-6">
                               <div>
-                                <h5 className="text-[11px] font-black text-slate-300 uppercase tracking-widest border-l-2 border-blue-500 pl-3 mb-3">Executive Summary</h5>
+                                <h5 className="text-[11px] font-black text-slate-300 font-display uppercase tracking-widest border-l-2 border-indigo-500 pl-3 mb-3">Executive Summary</h5>
                                 <p className="text-sm text-slate-400 leading-relaxed italic font-medium">
                                   {report.summary}
                                 </p>
                               </div>
 
                               <div>
-                                <h5 className="text-[11px] font-black text-slate-300 uppercase tracking-widest border-l-2 border-pink-500 pl-3 mb-3">Investment Thesis</h5>
+                                <h5 className="text-[11px] font-black text-slate-300 font-display uppercase tracking-widest border-l-2 border-pink-500 pl-3 mb-3">Investment Thesis</h5>
                                 <div className="p-5 glass-strong rounded-2xl border border-slate-800/50 relative overflow-hidden">
                                   <div className="absolute top-0 right-0 p-4 opacity-5">
                                     <Activity className="w-24 h-24 text-slate-400" />
@@ -431,7 +440,7 @@ export const V1StockDetails: React.FC<{
 
                            <div className="space-y-6">
                               <div>
-                                <h5 className="text-[11px] font-black text-slate-300 uppercase tracking-widest border-l-2 border-rose-500 pl-3 mb-3">Risk Assessment</h5>
+                                <h5 className="text-[11px] font-black text-slate-300 font-display uppercase tracking-widest border-l-2 border-rose-500 pl-3 mb-3">Risk Assessment</h5>
                                 <div className="space-y-3">
                                   {report.riskFactors.map((risk: string, i: number) => (
                                     <div key={i} className="flex gap-3 p-3 glass-strong rounded-xl border border-rose-500/10 group hover:border-rose-500/20 transition-all">
@@ -442,9 +451,9 @@ export const V1StockDetails: React.FC<{
                                 </div>
                               </div>
 
-                              <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
-                                <h6 className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                                  <Zap className="w-3 h-3 fill-blue-400" />
+                              <div className="p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl">
+                                <h6 className="text-[10px] font-black text-indigo-400 font-display uppercase tracking-widest mb-2 flex items-center gap-2">
+                                  <Zap className="w-3 h-3 fill-indigo-400" />
                                   AI Probability Core
                                 </h6>
                                 <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
@@ -468,8 +477,8 @@ export const V1StockDetails: React.FC<{
                 <div className="flex gap-4 mb-6 overflow-x-auto pb-2 hide-scrollbar">
                     {['1m', '5m', '15m', '1H', '1D', '1W'].map(tf => (
                       <button key={tf} className={cn(
-                        "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border",
-                        tf === '15m' ? "bg-blue-600 border-blue-600 text-white" : "glass-strong border-slate-800/50 text-slate-400 hover:text-white"
+                        "px-4 py-1.5 rounded-lg text-[10px] font-black font-display uppercase tracking-widest transition-all border",
+                        tf === '15m' ? "bg-indigo-600 border-indigo-600 text-white" : "glass-strong border-slate-800/50 text-slate-400 hover:text-white"
                       )}>
                         {tf}
                       </button>
@@ -481,8 +490,8 @@ export const V1StockDetails: React.FC<{
                       <ComposedChart data={chartData}>
                         <defs>
                           <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
-                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                            <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
@@ -497,7 +506,7 @@ export const V1StockDetails: React.FC<{
                               const data = payload[0].payload;
                               return (
                                 <div className="glass-strong border border-slate-800/50 p-3 rounded-xl shadow-2xl backdrop-blur-md">
-                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 border-b border-slate-800/50 pb-1">{data.time}</p>
+                                  <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest mb-2 border-b border-slate-800/50 pb-1">{data.time}</p>
                                   <div className="space-y-1.5">
                                     <div className="flex justify-between gap-4">
                                       <span className="text-[10px] font-bold text-slate-400">O:</span>
@@ -526,17 +535,17 @@ export const V1StockDetails: React.FC<{
                           type="monotone"
                           dataKey="bollinger"
                           stroke="none"
-                          fill="#3b82f6"
+                          fill="#6366f1"
                           fillOpacity={0.05}
                           name="Volatility Band"
                         />
                         <Bar
                           dataKey="price"
-                          fill="#3b82f6"
+                          fill="#6366f1"
                           opacity={0.1}
                           barSize={2}
                         />
-                        <Line type="monotone" dataKey="price" stroke="#fff" strokeWidth={2} dot={false} name="Price" activeDot={{ r: 4, fill: '#3b82f6', stroke: '#fff', strokeWidth: 2 }} />
+                        <Line type="monotone" dataKey="price" stroke="#fff" strokeWidth={2} dot={false} name="Price" activeDot={{ r: 4, fill: '#6366f1', stroke: '#fff', strokeWidth: 2 }} />
                         <Line type="monotone" dataKey="vwap" stroke="#ec4899" strokeWidth={1} dot={false} name="VWAP" strokeDasharray="3 3" />
 
                         <ReferenceLine
@@ -570,10 +579,54 @@ export const V1StockDetails: React.FC<{
                 </div>
               </Card>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <V1PeadConcallWidget symbol={symbol} />
+                <V1TradeRiskCalculatorWidget initialEntry={initialStock?.price ?? 1000} symbol={symbol} />
+              </div>
+
               <React.Suspense fallback={<PageFallback />}><V1TechnicalAnalysis symbol={symbol} /></React.Suspense>
               <MCErrorBoundary>
                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="technical" onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />
               </MCErrorBoundary>
+            </div>
+          )}
+          {activeTab === 'ai-insights' && (
+            <div className="space-y-6">
+              {profileAnalysis && (
+                <div className="v1-card p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-emerald-400 font-semibold flex items-center gap-2">
+                      <BrainCircuit className="w-5 h-5" /> AI Profile Analysis
+                    </h3>
+                    <div className="flex gap-2">
+                      {(profileAnalysis as any).high_growth_scope === 1 && (
+                        <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded-full border border-emerald-500/20 flex items-center gap-1">
+                          <ArrowUpRight className="w-3 h-3" /> High Growth Scope
+                        </span>
+                      )}
+                      {(profileAnalysis as any).in_news_for_growth === 1 && (
+                        <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-1 rounded-full border border-amber-500/20 flex items-center gap-1">
+                          <Zap className="w-3 h-3" /> In News for Growth
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-slate-300 text-sm leading-relaxed mb-4">
+                    {(profileAnalysis as any).ai_analysis}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 font-display uppercase tracking-wide">Growth Score</span>
+                    <div className="flex-1 bg-slate-900 rounded-full h-2 overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-emerald-600 to-emerald-400 h-full rounded-full transition-all duration-1000"
+                        style={{ width: `${(profileAnalysis as any).growth_score}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-data text-emerald-400">{(profileAnalysis as any).growth_score}/100</span>
+                  </div>
+                </div>
+              )}
+              <AiInsightsTab insights={aiInsights} />
             </div>
           )}
           {activeTab === 'fundamentals' && (
@@ -633,17 +686,17 @@ export const V1StockDetails: React.FC<{
                             <>
                               <div className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/50">
                                  <span className="text-xs font-bold text-slate-400">Net FII Position</span>
-                                 <span className={cn("font-black", (latest?.fii_net ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                 <span className={cn("font-black", latest?.fii_net == null ? "text-slate-400" : latest.fii_net >= 0 ? "text-emerald-400" : "text-rose-400")}>
                                    {fmtCr(latest?.fii_net)}
                                  </span>
                               </div>
                               <div className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/50">
                                  <span className="text-xs font-bold text-slate-400">DII Activity</span>
-                                 <span className={cn("font-black", (latest?.dii_net ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                 <span className={cn("font-black", latest?.dii_net == null ? "text-slate-400" : latest.dii_net >= 0 ? "text-emerald-400" : "text-rose-400")}>
                                    {fmtCr(latest?.dii_net)}
                                  </span>
                               </div>
-                              <p className="text-[9px] text-slate-400 italic text-center uppercase tracking-widest mt-2 font-bold">
+                              <p className="text-[9px] text-slate-400 italic text-center font-display uppercase tracking-widest mt-2 font-bold">
                                 {latest?.date ? `As of ${latest.date}` : 'No flow data captured yet'}
                               </p>
                             </>
@@ -656,7 +709,7 @@ export const V1StockDetails: React.FC<{
           )}
 
           {/* Other tabs can be implemented similarly */}
-          {activeTab !== 'insights' && activeTab !== 'fno' && activeTab !== 'technicals' && activeTab !== 'fundamentals' && activeTab !== 'financials' && activeTab !== 'peers' && activeTab !== 'mf' && activeTab !== 'news' && activeTab !== 'mc' && activeTab !== 'trendlyne' && (
+          {activeTab !== 'insights' && activeTab !== 'ai-insights' && activeTab !== 'fno' && activeTab !== 'technicals' && activeTab !== 'fundamentals' && activeTab !== 'financials' && activeTab !== 'peers' && activeTab !== 'mf' && activeTab !== 'news' && activeTab !== 'mc' && activeTab !== 'trendlyne' && (
             <div className="flex flex-col items-center justify-center py-20 glass-strong rounded-2xl border border-slate-800/50 border-dashed">
                <Activity className="w-12 h-12 text-slate-200 animate-pulse mb-4" />
                <h3 className="text-slate-400 font-black text-lg uppercase tracking-tighter italic">Coming to Bharat Stock Pro</h3>
@@ -684,13 +737,13 @@ export const V1StockDetails: React.FC<{
                     <>
                       <div>
                         <div className="flex justify-between items-center mb-2">
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">RSI (14)</span>
+                          <span className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest">RSI (14)</span>
                           <span className="text-amber-400 font-bold text-xs uppercase tracking-tighter">
                             {rsiInd ? `${rsiInd.indication} (${rsiVal})` : '—'}
                           </span>
                         </div>
                         <div className="w-full h-2 glass-strong rounded-full relative overflow-hidden border border-slate-800/50">
-                          <div className="absolute inset-y-0 left-[30%] right-[70%] bg-blue-500/10 border-x border-blue-500/20" />
+                          <div className="absolute inset-y-0 left-[30%] right-[70%] bg-indigo-500/10 border-x border-indigo-500/20" />
                           {rsiPct != null && (
                             <div className="absolute top-0 h-full w-1 bg-amber-400" style={{ left: `${rsiPct}%` }} />
                           )}
@@ -699,19 +752,19 @@ export const V1StockDetails: React.FC<{
 
                       <div className="grid grid-cols-2 gap-4">
                         <div className="p-3 glass-strong rounded-xl border border-slate-800/50">
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">MACD</p>
+                          <p className="text-[8px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">MACD</p>
                           <p className={cn("text-xs font-bold italic", macdInd?.indication === 'Bullish' ? "text-emerald-400" : macdInd?.indication === 'Bearish' ? "text-rose-400" : "text-slate-300")}>
                             {macdInd ? macdInd.indication : '—'}
                           </p>
                         </div>
                         <div className="p-3 glass-strong rounded-xl border border-slate-800/50">
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Bollinger</p>
+                          <p className="text-[8px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">Bollinger</p>
                           <p className="text-xs font-bold text-slate-300 italic">{bbInd ? bbInd.indication : '—'}</p>
                         </div>
                       </div>
 
                       <div className="space-y-2">
-                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Pivot Points (Classic)</p>
+                         <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest pl-1">Pivot Points (Classic)</p>
                          <div className="space-y-1">
                             {[
                               { label: 'R2', val: classicPivot?.r2, color: 'text-emerald-400' },
@@ -723,7 +776,7 @@ export const V1StockDetails: React.FC<{
                                const displayVal = typeof p.val === 'number' ? `₹${p.val.toFixed(2)}` : '—';
                                return (
                                  <div key={p.label} className="flex justify-between items-center px-4 py-2 glass-strong rounded-lg border border-slate-800/30">
-                                    <span className={cn("text-[9px] font-black uppercase tracking-widest", p.color)}>{p.label}</span>
+                                    <span className={cn("text-[9px] font-black font-display uppercase tracking-widest", p.color)}>{p.label}</span>
                                     <span className="text-xs font-bold tabular-nums text-slate-300">{displayVal}</span>
                                  </div>
                                );
@@ -736,18 +789,18 @@ export const V1StockDetails: React.FC<{
 
                 <div className="pt-2">
                   {aiAnalysisMutation.isPending ? (
-                    <div className="p-4 glass-strong border border-blue-500/20 rounded-xl space-y-2 animate-pulse">
+                    <div className="p-4 glass-strong border border-indigo-500/20 rounded-xl space-y-2 animate-pulse">
                       <div className="flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-blue-400 animate-spin" />
-                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">AI Analysing...</span>
+                        <Activity className="w-4 h-4 text-indigo-400 animate-spin" />
+                        <span className="text-[10px] font-black text-indigo-400 font-display uppercase tracking-widest">AI Analysing...</span>
                       </div>
                       <div className="h-2 bg-slate-800 rounded w-3/4" />
                       <div className="h-2 bg-slate-800 rounded w-1/2" />
                     </div>
                   ) : aiAnalysis && !aiAnalysis.error ? (
-                    <div className="p-4 glass-strong border border-blue-500/30 rounded-xl space-y-3">
+                    <div className="p-4 glass-strong border border-indigo-500/30 rounded-xl space-y-3">
                       <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-1">
+                        <span className="text-[9px] font-black text-indigo-400 font-display uppercase tracking-widest flex items-center gap-1">
                           <BrainCircuit className="w-3 h-3" /> AI Signal
                         </span>
                         <span className={cn(
@@ -758,7 +811,7 @@ export const V1StockDetails: React.FC<{
                       </div>
                       <div className="grid grid-cols-3 gap-1.5 text-center">
                         {[
-                          { label: 'Entry', val: aiAnalysis.entry, color: 'text-blue-400' },
+                          { label: 'Entry', val: aiAnalysis.entry, color: 'text-indigo-400' },
                           { label: 'Target', val: aiAnalysis.target, color: 'text-emerald-400' },
                           { label: 'SL', val: aiAnalysis.stopLoss, color: 'text-rose-400' },
                         ].map(({ label, val, color }) => (
@@ -771,9 +824,9 @@ export const V1StockDetails: React.FC<{
                       <div className="flex items-center gap-2">
                         <span className="text-[8px] font-black text-slate-400 uppercase">Confidence</span>
                         <div className="flex-1 bg-slate-900 rounded-full h-1.5 overflow-hidden">
-                          <div className="bg-blue-500 h-full rounded-full" style={{ width: `${aiAnalysis.confidence}%` }} />
+                          <div className="bg-indigo-500 h-full rounded-full" style={{ width: `${aiAnalysis.confidence}%` }} />
                         </div>
-                        <span className="text-[9px] font-black text-blue-400">{aiAnalysis.confidence}%</span>
+                        <span className="text-[9px] font-black text-indigo-400">{aiAnalysis.confidence}%</span>
                       </div>
                       <p className="text-[10px] text-slate-400 leading-relaxed italic line-clamp-3">{aiAnalysis.reasoning}</p>
                     </div>
@@ -781,7 +834,7 @@ export const V1StockDetails: React.FC<{
                     <button
                       onClick={() => stock && aiAnalysisMutation.mutate({ symbol, data: { price: stock.price, change: stock.change, changePct: stock.changePct, volume: stock.volume, high: stock.high, low: stock.low, name: stock.name } })}
                       disabled={!stock}
-                      className="w-full py-3 rounded-xl border font-black text-[10px] uppercase tracking-widest transition-all bg-blue-600 border-blue-600 text-white hover:bg-blue-700 shadow-[0_5px_15px_rgba(37,99,235,0.3)] disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="w-full py-3 rounded-xl border font-black text-[10px] font-display uppercase tracking-widest transition-all bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-700 shadow-[0_5px_15px_rgba(37,99,235,0.3)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Run AI Analysis
                     </button>
@@ -794,15 +847,15 @@ export const V1StockDetails: React.FC<{
              <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 hide-scrollbar">
                 {news.length > 0 ? news.map(item => (
                    <div key={item.id} className="group cursor-pointer">
-                      <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-1">{item.time}</p>
+                      <p className="text-[8px] font-bold text-slate-400 font-display uppercase tracking-widest mb-1">{item.time}</p>
                       <h4 className="text-xs font-bold text-slate-300 leading-snug group-hover:text-white transition-colors">
                         {item.title}
                       </h4>
-                      <div className="mt-2 text-[9px] text-blue-500 font-black uppercase tracking-tighter group-hover:underline">Read Full Insight</div>
+                      <div className="mt-2 text-[9px] text-indigo-500 font-black uppercase tracking-tighter group-hover:underline">Read Full Insight</div>
                    </div>
                 )) : (
                   <div className="text-center py-8">
-                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest italic">No specific news for {symbol}</p>
+                     <p className="text-[10px] text-slate-400 font-bold font-display uppercase tracking-widest italic">No specific news for {symbol}</p>
                   </div>
                 )}
              </div>

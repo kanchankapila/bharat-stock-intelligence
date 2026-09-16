@@ -1,0 +1,121 @@
+# Hermes Agent Configuration for Bharat Stock Intelligence
+# This file should be placed at ~/.hermes/config.yaml
+
+model:
+  default: "gemini-2.5-pro"
+  provider: "openrouter"
+  context_length: 200000
+  aliases:
+    # Faster models for quick queries
+    flash: "gemini-2.5-flash"
+    # Local model for privacy-sensitive tasks
+    local: "qwen2.5-coder:32b"
+
+agent:
+  max_turns: 100
+  tool_use_enforcement: "smart"
+  verify_on_stop: true
+
+terminal:
+  backend: "local"
+  timeout: 600
+  cwd: "D:/Github/bharat-stock-intelligence"
+
+compression:
+  enabled: true
+  threshold: 0.70
+  target_ratio: 0.30
+
+display:
+  interface: "cli"
+  skin: "default"
+  show_reasoning: false
+  show_cost: true
+  pet: "none"
+
+approvals:
+  mode: "smart"
+  timeout: 30
+  cron_mode: "auto"
+
+stt:
+  enabled: false
+
+tts:
+  provider: "edge"
+
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  write_approval: "ask"
+
+security:
+  redact_secrets: true
+  tirith_enabled: true
+
+delegation:
+  max_concurrent_children: 5
+  max_iterations: 100
+  max_spawn_depth: 3
+
+checkpoints:
+  enabled: true
+  max_snapshots: 50
+
+curator:
+  enabled: true
+  consolidate: false
+  interval_hours: 24
+  stale_after_days: 14
+  archive_after_days: 60
+
+# Toolsets enabled for this project
+toolsets:
+  enabled:
+    - "web"
+    - "search"
+    - "terminal"
+    - "file"
+    - "code_execution"
+    - "coding"
+    - "skills"
+    - "memory"
+    - "session_search"
+    - "project"
+    - "delegation"
+    - "cronjob"
+    - "clarify"
+    - "todo"
+    - "vision"
+    - "image_gen"
+
+# MCP Servers - connects to Bharat's MCP server
+mcp_servers:
+  bharat-intelligence:
+    command: "python"
+    args: ["-m", "mcp.market_intelligence_mcp"]
+    cwd: "D:/Github/bharat-stock-intelligence"
+    env:
+      POSTGRES_URL: "${POSTGRES_URL}"
+      PYTHONPATH: "D:/Github/bharat-stock-intelligence/src/server"
+      PATH: "D:/Github/bharat-stock-intelligence/backend-python/venv/Scripts;${PATH}"
+    timeout: 300
+    connect_timeout: 60
+
+# Platforms - Webhook for external triggers
+platforms:
+  webhook:
+    enabled: true
+    extra:
+      port: 8644
+      secret: "${WEBHOOK_SECRET}"
+
+# Project-specific settings
+project:
+  name: "bharat-stock-intelligence"
+  paths:
+    - "D:/Github/bharat-stock-intelligence"
+  default_skills:
+    - "bharat-fetcher-health"
+    - "bharat-backtest-runner"
+    - "bharat-model-promotion"

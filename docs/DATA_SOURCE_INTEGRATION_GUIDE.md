@@ -725,8 +725,8 @@ These are required to reproduce the operating environment, not the market datase
 
 | Service | Purpose | Configuration |
 |---|---|---|
-| PostgreSQL/TimescaleDB | Production persistence | `USE_POSTGRES`, `POSTGRES_URL` or `POSTGRES_*` |
-| SQLite | Development fallback | `DATABASE_URL` |
+| PostgreSQL/TimescaleDB | **The only database** — production and dev alike | `POSTGRES_URL` or `POSTGRES_*` |
+| ~~SQLite~~ | ~~Development fallback~~ | **Removed 2026-08-15.** No `.ts` path remains, and `USE_POSTGRES`/`DATABASE_URL` are read by no real process |
 | Redis/BullMQ | queues, cache, schedules | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` |
 | Firebase Admin | user authentication | Firebase application credentials or `FIREBASE_SERVICE_ACCOUNT_KEY` |
 | Telegram Bot API | alerts | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
@@ -769,11 +769,87 @@ large captured URL corpus. A faithful migration must carry both layers:
 | `updated_urls.json` / `updated_urls_verified.json` | Updated/verified subset | 919 rows each | Supplemental subset, not proof that the other 1,064 raw rows are absent |
 | `et_screeners.json` | ETNow POST request captures | 438 request bodies; one failed source-index capture | Exact `screenerId` + `queryCondition` definitions |
 | `et-marketstats-post-requests.json` | ET Marketstats POST request captures | 91 request bodies | Exact technical/intraday operand payloads; combine with four extras in `etMarketstats.ts` |
+| `unique_urls.txt` / `unique_urls_stats.json` | Deduplicated merged corpus (all captures) | 3,103 unique URLs of 9,837 lines | Input to the consolidated catalog (Section 9.2); loader repairs 15 malformed `https:////` URLs and splits whitespace-concatenated lines |
 
 `url_explorer.normalizer` groups by host, path structure, and query-key set. The original malformed
 corpus produces 250 structural templates, matching the historical field report. Running the same
 normalizer after canonical URL repair produces 248 templates because malformed-host/path variants
 and three duplicate URLs converge. Do not treat that reduction as lost coverage.
+
+### 9.2 Consolidated endpoint catalog (2026-09-13)
+
+`src/server/url_explorer/ingest.py` consolidates every artifact above (plus
+`ai_endpoint_memory.json`) into the Postgres `url_endpoints` table — **830 endpoint templates**,
+deduped by structural key (host + path-segment shape + query-key set). Each row carries provider,
+category, description, `feature_targets_json` (harmonized field names — the key that makes
+alternate-source lookup possible), `sources_json`, `refs_json` (EP-xxxx / registry ids), and
+`verified_json` (external per-URL HTTP evidence, deliberately separate from the `last_run_at` /
+`last_status` columns that only our own fetches write). Dry-run by default; `--apply` writes;
+`--catalog <datasource_catalog.md>` ingests external verification evidence.
+
+Triage lookup when a source stops returning data (run from `src/server`):
+
+```powershell
+python -m url_explorer.ingest --find-alternates "pcr,delivery_pct" --exclude <failing-host>
+```
+
+`docs/url_explorer/fetch_coverage_2026-09-13.md` additionally lists the 14 feature targets
+with no alternate provider and the templates with zero HTTP-200 evidence. Consolidation itself
+never hits the network; exploration fetching/profiling/correlation stays with `url_explorer.explore`
+and the polite sample-fetch pass `url_explorer.fetch_pass`.
+
+### 9.4 urls-explorer fetch mechanism ported + coverage parity (2026-09-13)
+
+The urls-explorer fetchers (`extract_urls.py`, `fetch_screeners.py`) were studied and their
+mechanism ported wholesale into `fetch_pass.make_fetch_fn`:
+1. **persistent impersonated session** (`curl_cffi.Session(chrome120)`) — cookies accumulate
+   across the pass like their `requests.Session` run;
+2. **patient retries**: 5 attempts on transport/429/5xx with 0.5→3s backoff (their
+   `HTTPAdapter(Retry(5, backoff 0.5, forcelist 500/502/503/504))`);
+3. **403 referer-fallback ladder** — own-domain referer, then portal-specific pages
+   (finology ticker pages, moneycontrol `/`+`/stocksmarketsindia/`, tickertape `/`+`/stocks/`)
+   each with `X-Requested-With: XMLHttpRequest` and `Accept-Encoding: gzip, deflate`;
+4. **URL normalization** — repairs browser-copied `https:///host//path` forms (6 malformed
+   catalog rows deleted — they were duplicates of correctly-formed rows);
+5. **proven-sample preference** — urls-explorer's own success lists
+   (`successful_urls.csv` 528 + `report_success.csv` 407 → 429 unique proven-200 URLs,
+   ingested as catalog members with 200-evidence by `load_ue_successes`) are sampled FIRST
+   for any template they belong to, so the pass reproduces requests that verifiably worked.
+
+**Coverage parity with urls-explorer:** of their 429 proven-success URLs, 242 map onto our
+templates and **240 (99.2%) are healthy here**. The 2 unhealthy are etmarketsapis.indiatimes.com
+requests the host is actively 503-throttling for this IP today (their runs used a different
+day/IP) — a cooled-down re-run resumes exactly those. Overall catalog coverage after the day's
+passes: **272 / 834 endpoints verified alive by our own fetch**, 403 measured-dead (dominated by
+`ai_endpoint_memory.json` synthetic cross-provider mashups that exist in neither urls-explorer's
+success list nor the live sites — proven phantom, not mechanism failures), 159 pending (host
+throttling; resumable). Full per-endpoint tables: `docs/url_explorer/fetch_coverage_2026-09-13.md`.
+
+### 9.3 Per-screener instance database + POST measurement (2026-09-13)
+
+`src/server/url_explorer/screeners.py` parses `screener_replicate_helper.md` (urls-explorer's
+master screener catalog, 813KB) into the Postgres `screener_instances` table: **1,624 instances**
+(Trendlyne 986 GET kayal, ETnow 529 POST, MoneyControl 109 GET proscanner) keyed
+`(provider, scan_id)` with name/category/sentiment/timeframe/captured payload/description, plus
+`ue_status`/`ue_stocks_count` — urls-explorer's own measured results (1,623/1,624 SUCCESS),
+external evidence like `verified_json`. `python -m url_explorer.screeners --apply` ingests.
+
+`fetch_pass` sends real POSTs for POST endpoint families using the captured payloads (ETnow
+recipe: `Content-Type: application/json` + ET Referer/Origin, `pagesize` widened to 250 per the
+urls-explorer bulk recipe), sampling up to `--post-samples` distinct instances per family and
+profiling the family row across all sampled responses. Measured: both ETnow POST families
+40/40 attempts OK, 118 field profiles.
+
+Fetch coverage after the 2026-09-13 passes (~1,100 measured attempts across runs): **~100
+endpoints verified alive by our own fetch** (www.moneycontrol widget family 32, MarketsMojo 7,
+the two ETnow POST screener families 40/40 attempts, trendlyne/api.moneycontrol/etapi singles),
+**~450 measured 404/403** — dominated by `ai_endpoint_memory.json`'s synthetic cross-provider
+path mashups (e.g. `nseindia.com/api/NextApi/*`, `bselivefeeds.../price-forecast`), now provably
+phantom — and **198 templates still never fetched** (skipped when hosts tripped the transport
+breaker after sustained throttling; a cooled-down re-run of `fetch_pass` resumes exactly those).
+`url_field_correlations` remains near-empty: the alive new endpoints are per-stock snapshots, so
+cross-sectional IC needs the market-scope screens (kayal/MC-scanner families — POST/pagination
+support is the next build).
 
 #### Concrete screener-request count
 
@@ -1076,3 +1152,56 @@ This guide was reconciled against:
 
 The counts describe repository search coverage, not an assertion that all third-party endpoints
 were reachable on 2026-08-12. Reachability is intentionally delegated to the gated live tests.
+
+## 17. Feature-store wiring of fetched sources (2026-09-13)
+
+Steps 1-3 wired previously fetch-only tables into `feature_store` via new merges in
+`feature_engineering.py`. Doctrine throughout: NEVER_FILL (sparse days stay NaN; hole-fill never
+clobbers upstream values), as-of joins with staleness tolerances, sanity bands on derived ratios.
+
+### 17.1 Block deals (step 1, commit 5210c30d)
+
+`_merge_block_deals` reads `block_deals` (table of record) directly; `block_deal_net_qty` is
+hole-fill-only into the technical_signals join, plus new `block_deal_value_cr`,
+`block_deal_net_qty_5d`, `block_deal_value_cr_5d` (rolling 5, min_periods=1). Side resolution:
+`trade_type` (8,590 rows) with NSE `session`-label fallback (67 rows).
+
+### 17.2 Analyst consensus + earnings clock + delivery dynamics (step 2)
+
+- `_merge_analyst_consensus` — `analyst_estimates_history` as-of (35-day staleness):
+  `analyst_buy_pct`, `analyst_target_mean`, `analyst_target_upside_pct`, `analyst_n`;
+  `broker_recos_90d` = trailing-90-day event count from `trendlyne_analyst_targets`.
+  **Trap:** buy/hold/sell columns are ALREADY percentages summing to ~100 (RELIANCE 96/0/4),
+  not counts — a count ratio produced 369% nonsense before the fix.
+- `_merge_earnings_clock` — `stock_earnings_dates` keyed by MoneyControl's opaque **scid**,
+  resolved to the NSE symbol through `nse_stocks.mcsymbol` first, then the `mc_scid_map`
+  fallback (scripts/sync_mc_scid_map.py backfills recently-listed names the universe tables
+  predate): `days_to_next_earnings`, `days_since_last_earnings`, `earnings_in_5d`
+  (flag only, never forward-filled). `stock_earnings_beats` is already symbol-keyed;
+  as-of (400-day staleness): `last_eps_surprise_pct`, `last_beat_score`.
+- `_merge_delivery` — `stock_delivery_data`: `delivery_z_20d` (min 10 obs), `delivery_pct_chg_5d`,
+  `delivery_qty_5d`.
+
+### 17.3 Options PCR backfill (step 3)
+
+`_merge_options_backfill` — `so_option_chain` aggregated to daily `SUM(pe_oi)/SUM(ce_oi)` (and
+volume analogue) hole-fills `pcr_oi`/`pcr_vol` only where technical_signals has no value
+(sanity band 0.05–20). `nifty_pcr` = daily last NIFTY50 reading from `nt_index_pcr_ts`, ffill
+limit 5. **Trap:** GIFTNIFTY rows in that feed carry the index LEVEL (~24,000) in the pcr
+column — excluded by the same band.
+
+### 17.4 Writer invariants
+
+`feature_engineering.py` keeps five column enumerations in sync (2 INSERT col-lists, 2 value/
+param dicts, `_FEATURE_STORE_CONFLICT` SET list) — a lagging conflict list silently NULLs new
+columns on re-write; `test_feature_wiring.py` regression-guards this. Both writer INSERTs must
+stay balanced (111 cols / 111 values as of step 3). Note `process_symbol` commits only when it
+owns the connection — callers passing `con=` must `con.commit()` themselves.
+And one more pair is kept in lock-step: the **merge-call SEQUENCES** of `process_symbol` and
+`_compute_symbol_unscaled`. The worker is the only compute path `run_full_pipeline` — i.e. the
+nightly `dl-feature-refresh` job — runs; on 2026-09-14 it was found five merges behind
+(`_merge_block_deals`, `_merge_analyst_consensus`, `_merge_earnings_clock`, `_merge_delivery`,
+`_merge_options_backfill` — landed 2026-09-13 on `process_symbol` only), so the nightly
+full-universe upsert NULLed every column those merges own, day after day (AF-20260914-01).
+`test_feature_wiring.py::TestWorkerPathMergeParity` extracts both sequences from source and
+asserts equality — adding a merge to one path fails the suite until it lands in the other.

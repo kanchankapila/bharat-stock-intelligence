@@ -4,9 +4,13 @@ comparison to pre-update state and no deactivation of prior rows -- model_regist
 accumulate multiple 'active' online_sgd rows, and a regressed update was indistinguishable
 from a good one to anything reading is_active. Fixed by deactivating the previous active
 row and only marking the new one active if cv_auc didn't regress beyond
-ONLINE_REGRESSION_TOLERANCE versus it. (partial_fit has already mutated the live SGD state
-by the time this runs -- unlike the other two engines there is no separate candidate file
-to withhold, so this fix keeps the registry honest rather than blocking the model update.)
+ONLINE_REGRESSION_TOLERANCE versus it.
+
+Extended 2026-08-15: partial_fit mutates the live SGD state in place with no undo, but that
+only means register_update() itself can't roll back the in-memory model -- the ON-DISK file
+is a separate question. register_update() now returns whether it marked the update active,
+and run() uses that to decide whether to persist the post-update state to disk or revert to
+its own pre-update snapshot (see TestRegisterUpdateReturnValue below).
 """
 import os
 import sys
@@ -89,3 +93,20 @@ class TestOnlineLearnerPromotionGate:
         conn = _FakeConn(baseline_auc=None)
         ol.register_update(conn, _fake_state(), n_new=50, cv_auc=0.65)
         assert conn.committed == 1
+
+
+class TestRegisterUpdateReturnValue:
+    """run() decides whether to persist the mutated (post-partial_fit) SGD state to disk or
+    revert to its own pre-update snapshot based on this return value -- if it silently went
+    back to returning None, run()'s `state if is_active else pre_update_state` would always
+    take the pre-update branch (None is falsy), permanently freezing the on-disk model."""
+
+    def test_returns_true_when_marked_active(self):
+        conn = _FakeConn(baseline_auc=0.60)
+        result = ol.register_update(conn, _fake_state(), n_new=50, cv_auc=0.65)
+        assert result is True
+
+    def test_returns_false_when_regressed_beyond_tolerance(self):
+        conn = _FakeConn(baseline_auc=0.65)
+        result = ol.register_update(conn, _fake_state(), n_new=50, cv_auc=0.55)
+        assert result is False

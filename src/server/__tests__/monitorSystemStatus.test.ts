@@ -27,6 +27,7 @@ vi.mock('../dbAsync', () => ({
 
 import { getSystemStatus } from '../routers/monitor.router';
 import { MONITOR_SCRIPTS } from '../routers/monitor.router';
+import { dbGet } from '../dbAsync';
 
 describe('getSystemStatus (extracted)', () => {
   it('returns one entry per MONITOR_SCRIPTS item with a runState', async () => {
@@ -47,6 +48,19 @@ describe('getSystemStatus (extracted)', () => {
     const midweek = status.find(s => s.id === 'trendlyne-midweek');
     expect(midweek).toBeDefined();
     expect(midweek!.runState).not.toBe('stale');
+  });
+
+  it('uses schema-scoped, normalized planner estimates for large-table stats', async () => {
+    vi.mocked(dbGet).mockClear();
+    await getSystemStatus();
+
+    const statsQueries = vi.mocked(dbGet).mock.calls
+      .map(([sql]) => sql)
+      .filter(sql => sql.includes('pg_stats') || sql.includes('pg_class'));
+    expect(statsQueries.length).toBeGreaterThan(0);
+    expect(statsQueries.every(sql => sql.includes('current_schema()'))).toBe(true);
+    expect(statsQueries.some(sql => sql.includes('s.n_distinct < 0'))).toBe(true);
+    expect(statsQueries.every(sql => !sql.includes("'public."))).toBe(true);
   });
 
   // 2026-08-11: runState used to be computed purely from app_settings.monitor_<id> (rawState),

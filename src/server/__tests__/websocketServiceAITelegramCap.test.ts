@@ -2,8 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // vi.mock() calls are hoisted above all other statements -- see jobWatchdog.test.ts for the
 // established pattern this file follows.
-const { mockSendSignalNotification } = vi.hoisted(() => ({
+const { mockSendSignalNotification, mockWebSocketServer } = vi.hoisted(() => ({
   mockSendSignalNotification: vi.fn(async () => true),
+  mockWebSocketServer: vi.fn(() => ({
+    on: vi.fn(),
+    close: vi.fn(),
+  })),
 }));
 
 vi.mock('../telegramService', () => ({
@@ -14,7 +18,7 @@ vi.mock('../telegramService', () => ({
 // never calls initialize(), so no server is ever created, but stub it out anyway to keep the
 // import side-effect-free and consistent with how other server tests avoid touching real I/O.
 vi.mock('ws', () => ({
-  WebSocketServer: vi.fn(),
+  WebSocketServer: mockWebSocketServer,
   WebSocket: { OPEN: 1 },
 }));
 
@@ -98,5 +102,13 @@ describe('AI-signal Telegram daily cap (defense-in-depth, 2026-08-06)', () => {
     resetAITelegramCapForTests(); // simulates the day rolling over
     wsSignalService.broadcastNewSignal(buyAlert('D2SYM'));
     expect(mockSendSignalNotification).toHaveBeenCalledTimes(AI_SIGNAL_TELEGRAM_DAILY_CAP + 1);
+  });
+
+  it('restricts upgrades to the documented signals path', () => {
+    const httpServer = {} as any;
+    wsSignalService.initialize(httpServer);
+
+    expect(mockWebSocketServer).toHaveBeenCalledWith({ server: httpServer, path: '/signals' });
+    wsSignalService.shutdown();
   });
 });

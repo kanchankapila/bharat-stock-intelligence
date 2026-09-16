@@ -48,6 +48,8 @@ Run:
   python mc_stockvitals_history_fetcher.py --symbol BEL
 """
 
+import polars as pl
+
 import argparse
 import time
 from collections import Counter, defaultdict
@@ -59,6 +61,7 @@ from curl_cffi import requests
 from db_compat import connect
 from et_stats_client import as_of_floor
 from as_of import logical_trading_date
+import sys
 
 HISTORY_URL = (
     "https://api.moneycontrol.com/swiftapi/v1/stockvitals/historical"
@@ -141,7 +144,7 @@ def _fetch_metric(mcsymbol: str, metric: str, session) -> list[dict] | None:
             return None
         return payload.get("data", {}).get("barData", []) or []
     except Exception as e:
-        print(f"  [{mcsymbol}] stockvitals history error ({metric}): {e}")
+        print(f"  [{mcsymbol}] stockvitals history error ({metric}): {e}", file=sys.stderr)
         return None
 
 
@@ -255,3 +258,22 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McStockvitalsHistoryFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McStockvitalsHistoryFetcherBaseFetcher(BaseFetcher[McStockvitalsHistoryFetcherSchema]):
+    fetcher_name = 'McStockvitalsHistoryFetcher'
+    domain = 'moneycontrol.com'
+    schema = McStockvitalsHistoryFetcherSchema
+    min_interval_sec = 0.5
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

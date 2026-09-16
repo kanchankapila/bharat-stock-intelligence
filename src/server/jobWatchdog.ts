@@ -7,15 +7,119 @@
  * appearing in the once-daily digest. Deliberately does not introduce a third job registry:
  * see docs/superpowers/specs/2026-07-02-job-monitoring-telegram-alerts-design.md.
  */
-import { getLateJobs, wasAlreadyAlerted, markAlerted } from './jobHeartbeat';
+import fs from 'fs';
+import path from 'path';
+import {
+  getLateJobs,
+  wasAlreadyAlerted,
+  markAlerted,
+  getRecentTradingSessions,
+  isDeliberatelyIdleOccurrence,
+  isJobSupposedToRunOnDate,
+  hasOccurrenceOnIstDate,
+  istDateStr,
+  patternsAreWeekdayOnly,
+} from './jobHeartbeat';
 import { JOB_REGISTRY } from './jobRegistry';
 import { getSystemStatus } from './routers/monitor.router';
 import { telegramService, sanitizeMarkdown } from './telegramService';
-import { dbGet, dbRun } from './dbAsync';
+import { dbGet, dbRun, dbAll } from './dbAsync';
 import { runDataQualityChecks, getLatestDataQualityResults } from './dataQualityChecks';
 
+// Needs a minimum sample so a job with 1 failure out of 2 runs doesn't false-positive.
+const FAIL_RATE_WARN = 0.25;
+const MIN_RUNS_FOR_FAIL_RATE = 5;
+
+/** job-runtime-audit (2026-08-19) found ml-daily-ops failing ~49% of runs and traced it to
+ *  addJobWithCatchup queuing a duplicate full pipeline run behind the still-active real one on
+ *  restart -- fixed in registerJob.ts, but nothing was watching for this SHAPE of problem
+ *  recurring (here or in any other job routed through the same helper). These two checks are
+ *  the deterministic, dailyable slice of that audit; the reasoning-heavy part (root-causing a
+ *  new pattern) still needs an actual /job-runtime-audit pass by hand.
+ *
+ *  Rewritten 2026-09-02 to read job_run_history over a rolling 7-day window instead of
+ *  job_heartbeat's LIFETIME run_count/fail_count: the lifetime ratio reported long-repaired
+ *  jobs as currently failing (2026-09-01 digest showed deploy-drift "failing 25% (186/737)" —
+ *  a job decommissioned 2026-08-28 with zero runs since — and stock-scoring/unified-ranker/
+ *  data-quality-daily all at ~30% off failures mostly weeks old). job_run_history rows exist
+ *  per actual run (job_name/status/ran_at), so removed jobs drop out of the window naturally
+ *  and the percentage means "is this job failing NOW". */
+async function getJobFailRateFlags(): Promise<string[]> {
+  const rows = await dbAll<{ job_name: string; total: number; fails: number }>(
+    `SELECT job_name,
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE status <> 'success') AS fails
+     FROM job_run_history
+     WHERE ran_at > now() - interval '7 days'
+     GROUP BY job_name
+     HAVING COUNT(*) >= ?`,
+    [MIN_RUNS_FOR_FAIL_RATE],
+  );
+  return rows
+    .filter(r => r.fails / r.total > FAIL_RATE_WARN)
+    .map(r => `📉 \`${sanitizeMarkdown(r.job_name)}\` failing ${Math.round(100 * r.fails / r.total)}% of runs (${r.fails}/${r.total}, last 7d)`);
+}
+
+/** Counts REAL catch-up queuings (not the already-deduped "skipping duplicate" path — see
+ *  registerJob.ts's addJobWithCatchup) per job name from the last ~24h of the winston app log.
+ *  More than one real catch-up for the same job in a day means something keeps re-concluding
+ *  "missed" rather than one genuine outage being caught once. */
+function getRecentCatchupCounts(now: Date): Map<string, number> {
+  const logDir = path.join(process.cwd(), 'logs');
+  const counts = new Map<string, number>();
+  for (const d of [now, new Date(now.getTime() - 86_400_000)]) {
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(logDir, `app-${d.toISOString().slice(0, 10)}.log`), 'utf8');
+    } catch {
+      continue; // log rotated away or not yet created -- not an error
+    }
+    for (const line of text.split('\n')) {
+      const m = line.match(/Job (\S+) in \S+ missed its scheduled run\. Catch-up queued/);
+      if (m) counts.set(m[1], (counts.get(m[1]) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/**
+ * True when the platform has been deliberately taken off its schedule.
+ *
+ * Must match `registerJob.ts`'s own gate exactly (`=== '1'`). If the two ever disagree the
+ * platform can end up half-paused -- jobs unscheduled while the watchdog still alerts on them,
+ * or the reverse -- which is worse than either state alone.
+ */
+export function schedulerIsPaused(): boolean {
+  return process.env.SCHEDULER_PAUSED === '1';
+}
+
+/**
+ * Filters the late list down to what is worth alerting a human about.
+ *
+ * A deliberately-unscheduled job is not late. SCHEDULER_PAUSED clears every repeatable and
+ * drains every queue, so getLateJobs() -- which asks "what has missed its cron slot" -- returns
+ * essentially the whole registry, and the watchdog then sent one "Job running late" Telegram per
+ * critical job every 15 minutes for the length of the pause. Measured live 2026-09-05, that was
+ * the mechanical cause of the delay/miss alerts being investigated: the jobs were fine, they had
+ * been switched off on purpose, and the alerting layer was never told.
+ *
+ * Deliberately NOT a blanket mute -- the caller reports the pause itself once instead, so a
+ * pause is visible rather than a blind spot.
+ */
+export function lateJobsToAlert<T>(late: T[]): T[] {
+  return schedulerIsPaused() ? [] : late;
+}
+
 export async function checkAndAlertLateJobs(now: Date = new Date()): Promise<void> {
-  const late = await getLateJobs(now);
+  const allLate = await getLateJobs(now);
+  const late = lateJobsToAlert(allLate);
+  if (schedulerIsPaused()) {
+    // One line, not one Telegram per job: the pause stays visible without a 15-minute alert
+    // storm about jobs that were switched off on purpose.
+    console.log(`[WATCHDOG] SCHEDULER_PAUSED=1 — suppressing ${allLate.length} late-job alert(s); ` +
+                `jobs are deliberately unscheduled, not late.`);
+    return;
+  }
   const registryByName = new Map(JOB_REGISTRY.map(j => [j.jobName, j]));
 
   for (const item of late) {
@@ -127,20 +231,44 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
   const scriptStatuses = await getSystemStatus(now);
   const dqResults = await getLatestDataQualityResults();
 
+  // Holiday context (2026-09-14): on a closed-session weekday the whole skip family was
+  // planned to idle, so "nothing changed / all on schedule" reads as alarming silence unless
+  // the reader knows why. Judged with the SAME window getLateJobs() used (cached), so the
+  // banner and the lateness verdicts can never disagree.
+  const sessions = await getRecentTradingSessions(now).catch(() => null);
+  const isTradingHolidayToday = isDeliberatelyIdleOccurrence(now, sessions);
+
+  // Filter registry jobs to ONLY those supposed to run on this IST date
+  const todaysScheduledJobs = scheduledRegistry.filter(j => isJobSupposedToRunOnDate(j, now, isTradingHolidayToday));
+
+  // Filter MONITOR_SCRIPTS to those scheduled / supposed to run on this IST date
+  const istToday = istDateStr(now.getTime());
+  const todaysScriptStatuses = (scriptStatuses as any[]).filter(s => {
+    const cronPatterns = s.cronPatterns as string[] | undefined;
+    if (!cronPatterns || !cronPatterns.length) return true;
+    if (isTradingHolidayToday && patternsAreWeekdayOnly(cronPatterns)) return false;
+    return cronPatterns.some(p => hasOccurrenceOnIstDate(p, istToday));
+  });
+
   const prevState = await loadDigestState();
-  const currState: Record<string, string> = {};
+  const currState: Record<string, string> = { ...prevState };
   const attention: string[] = [];
   const changed: string[] = [];
   let unchangedHealthy = 0;
 
-  for (const j of scheduledRegistry) {
+  for (const j of todaysScheduledJobs) {
     const key = `registry:${j.jobName}`;
     const lateEntry = lateByName.get(j.jobName);
     const state = lateEntry ? 'late' : 'ontime';
     currState[key] = state;
     const prev = prevState[key];
 
-    if (state === 'late') attention.push(`⚠️ ${j.label} (~${lateEntry!.hoursLate}h late)`);
+    if (state === 'late') {
+      const delayText = lateEntry!.hoursLate >= 1
+        ? `~${lateEntry!.hoursLate}h late`
+        : `~${Math.max(1, Math.round(lateEntry!.hoursLate * 60))}m late`;
+      attention.push(`⚠️ ${j.label} (${delayText})`);
+    }
 
     if (prev === undefined) continue; // first time this key is tracked — nothing to diff yet
     if (prev !== state) {
@@ -150,7 +278,7 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
     }
   }
 
-  for (const s of scriptStatuses as any[]) {
+  for (const s of todaysScriptStatuses) {
     const key = `script:${s.id}`;
     const state: string = s.runState;
     currState[key] = state;
@@ -201,6 +329,15 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
 
   const lines = [`📋 *Daily Job Health Digest* — ${now.toISOString().slice(0, 10)}`, ''];
 
+  if (isTradingHolidayToday) {
+    lines.push(
+      '🇮🇳 *Trading holiday* — the exchange never opened, so every weekday job was planned ' +
+      'to skip today (closed-day-early-batch ran the critical pipeline in the morning). ' +
+      'Nothing below counts as late for that reason.',
+      '',
+    );
+  }
+
   if (attention.length) {
     lines.push(`*Needs attention (${attention.length}):*`, ...attention, '');
   }
@@ -212,10 +349,32 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
   }
   lines.push(`_${unchangedHealthy} other job(s) healthy and unchanged._`);
 
+  const failRateFlags = await getJobFailRateFlags().catch(err => {
+    console.warn('[WATCHDOG] getJobFailRateFlags failed:', (err as Error).message);
+    return [] as string[];
+  });
+  const catchupFlags = [...getRecentCatchupCounts(now).entries()]
+    .filter(([, n]) => n > 1)
+    .map(([job, n]) => `🔁 \`${sanitizeMarkdown(job)}\` queued ${n} catch-ups in the last 24h — likely repeated missed-run detection, not one real outage`);
+  if (failRateFlags.length || catchupFlags.length) {
+    lines.push('', '*Job-runtime health:*', ...failRateFlags, ...catchupFlags);
+  }
+
   if (eventDriven.length) {
     lines.push('', '*Event-driven (no fixed schedule):*', ...eventDriven.map(j => `⏳ ${j.label}`));
   }
 
+  // A pause makes essentially every scheduled job read as "late". Silently filtering that out
+  // would turn a pause into a blind spot -- the digest would look green while nothing ran. State
+  // it once, at the top, so the reader knows why the section below says what it says.
+  if (schedulerIsPaused()) {
+    lines.unshift(
+      '⏸️ *SCHEDULER PAUSED* (`SCHEDULER_PAUSED=1`) — every job below is deliberately ' +
+      'unscheduled, so "late" here means "switched off", not "failed". Per-job late alerts ' +
+      'are suppressed while this is set.',
+      '',
+    );
+  }
   return lines.join('\n');
 }
 

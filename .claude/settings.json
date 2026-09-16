@@ -20,6 +20,17 @@
     ]
   },
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/run-session-start.mjs",
+            "timeout": 900
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Edit|Write",
@@ -27,6 +38,28 @@
           {
             "type": "command",
             "command": "node .claude/hooks/rules-pointer.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/env-guard.mjs"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/graphify-pointer.mjs"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/graphify-pointer.mjs"
           }
         ]
       }
@@ -43,6 +76,7 @@
     ]
   },
   "enabledPlugins": {
-    "frontend-design@claude-plugins-official": true
+    "frontend-design@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true
   }
 }

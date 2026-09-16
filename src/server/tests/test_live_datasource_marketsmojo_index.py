@@ -13,6 +13,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 from marketsmojo_technical_fetcher import HEADERS  # noqa: E402
 from marketsmojo_index_fetcher import (  # noqa: E402
     INDEX_NAMES,
@@ -28,7 +29,7 @@ REAL_INDEX_ID = 1  # SENSEX
 
 
 def _make_test_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE marketsmojo_index_history (

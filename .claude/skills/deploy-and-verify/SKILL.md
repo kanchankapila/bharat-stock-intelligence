@@ -58,16 +58,16 @@ silently broke a live job for days in this repo before.
 ## 4. The hand-run script trap
 
 Any standalone `tsx`/`python` script used to verify the above must actually be talking to
-production, not silently falling back to dev SQLite/a different venv. Before trusting anything
-a verification script prints:
+production, not a different venv.
 
-```bash
-# TypeScript: does the script load dotenv, and does USE_POSTGRES actually read true?
-node -e "require('dotenv').config(); console.log(process.env.USE_POSTGRES)"
-```
+**Do NOT check `process.env.USE_POSTGRES` — that check is dead as of 2026-08-15 and now misleads
+in the opposite direction.** `usePostgres()`/`use_postgres()` consult no environment variable for
+any real process; they return Postgres unconditionally. A correct script prints `undefined` for
+that variable. The SQLite fallback that made the check necessary no longer exists outside a test
+runner.
 
-Then assert a row count in the script's own output against a number you already know from a
-direct `psql`/`db_compat` query. A script that reports numbers wildly off from what you know to
+What still needs verifying is the *number*, not the dialect: assert a row count in the script's
+own output against a number you already know from a direct `psql`/`db_compat` query. A script that reports numbers wildly off from what you know to
 be true (an order of magnitude, a different resolved id, a suspiciously round number) is talking
 to the wrong database — this exact mistake reported 121,669 rows once against a real 435,700, and
 resolved a *different* provider id for the same entity than production held. For Python, confirm

@@ -10,6 +10,7 @@
 
 import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { getStockMapping, getStockMappingByTLId, getStockMappingByName } from './stockMapping';
+import { delay } from './lib/async';
 
 const TRENDLYNE_BASE_URL = 'https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/';
 
@@ -565,7 +566,7 @@ export async function fetchTrendlyneScreenerData(
 
     // Apply jitter delay for polite fetching
     const jitterDelay = getJitter(TRENDLYNE_CONFIG.BASE_DELAY_MS, TRENDLYNE_CONFIG.JITTER_PERCENT);
-    await new Promise(resolve => setTimeout(resolve, jitterDelay));
+    await delay(jitterDelay);
 
     const params = new URLSearchParams({
       perPageCount: '1000',
@@ -739,7 +740,18 @@ export async function fetchTrendlyneScreenerData(
       return result;
     }
 
-    console.warn(`⚠️ Unexpected API response format`);
+    // A degraded read that returns zero rows for a named screener. The message used to
+    // carry NO context at all -- no screener, no status, no payload shape -- so the three
+    // occurrences in the 2026-09-10..12 pm2 window could not be attributed to a screener or
+    // a cause (AF-20260912-05). Log what is needed to act: which screener, and how the
+    // response actually differed from the `head.status === '0' && body` contract above.
+    console.warn(
+      `⚠️ Trendlyne screener "${screenerName}" (screenpk ${screenpk}, page ${pageNumber}): ` +
+      `unexpected response shape - head.status=${JSON.stringify(json?.head?.status)}, ` +
+      `head.statusDesc=${JSON.stringify(json?.head?.statusDesc)}, ` +
+      `body=${json?.body ? `present(keys: ${Object.keys(json.body).slice(0, 8).join(',')})` : 'MISSING'}. ` +
+      `Returning 0 rows.`
+    );
     return {
       success: false,
       data: [],
@@ -803,7 +815,7 @@ export async function fetchAllTrendlyneScreenerNames(forceRefresh = false): Prom
 
       // Apply jitter delay for polite fetching
       const jitterDelay = getJitter(TRENDLYNE_CONFIG.BASE_DELAY_MS, TRENDLYNE_CONFIG.JITTER_PERCENT);
-      await new Promise(resolve => setTimeout(resolve, jitterDelay));
+      await delay(jitterDelay);
 
       try {
         const params = new URLSearchParams({
@@ -1147,7 +1159,7 @@ export async function syncAllScreenerStocksToDB(timeframeFilter?: 'intraday' | '
         }
         
         // Polite delay
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await delay(500);
       } catch (err) {
         console.error(`  ❌ Error syncing screener ${screener.screener_name}:`, err);
       }
@@ -1454,25 +1466,54 @@ export async function runIntradayScreenerScan(): Promise<{
 
         highScoringStocksFound++;
 
-        // 4. Deduplicate active signals
-        let existingActive = 0;
+        // 4. Handle active signal deduplication, confluence upgrades, and conflict resolution (TODAY only)
+        const todayIso = new Date().toISOString().split('T')[0];
+        const newType = sentiment === 'bearish' ? 'SELL' : 'BUY';
+        const entry = stock.ltp || 0;
+        const target = newType === 'BUY' ? parseFloat((entry * 1.05).toFixed(2)) : parseFloat((entry * 0.95).toFixed(2));
+        const stopLoss = newType === 'BUY' ? parseFloat((entry * 0.97).toFixed(2)) : parseFloat((entry * 1.03).toFixed(2));
+
+        let existingActiveSignal: any = null;
         try {
-          const check = await dbGet("SELECT COUNT(*) as count FROM unified_signals WHERE symbol = ? AND status = 'ACTIVE' AND signal_source = 'screener'", [symbol]) as any;
-          existingActive = check?.count || 0;
+          existingActiveSignal = await dbGet(
+            "SELECT id, signal_type, confidence_score, reasoning FROM unified_signals WHERE symbol = ? AND status = 'ACTIVE' AND signal_source = 'screener' AND signal_date = ?",
+            [symbol, todayIso]
+          );
         } catch (err) {
           console.error(`❌ [INTRADAY SCAN] Error checking active signals for ${symbol}:`, err);
         }
 
-        if (existingActive > 0) {
-          console.log(`⏭️ [INTRADAY SCAN] Symbol ${symbol} has score ${score.toFixed(1)}% but already has an ACTIVE signal. Skipping.`);
-          continue;
+        if (existingActiveSignal) {
+          if (existingActiveSignal.signal_type !== newType) {
+            // Directional conflict: previous signal is BUY and new is SELL (or vice versa).
+            // Invalidate the conflicting previous signal.
+            try {
+              await dbRun("UPDATE unified_signals SET status = 'INVALIDATED_CONFLICT' WHERE id = ?", [existingActiveSignal.id]);
+              console.log(`⚠️ [INTRADAY SCAN] Conflicting directional signal detected for ${symbol} (Existing: ${existingActiveSignal.signal_type}, New: ${newType}). Invalidated previous signal ID ${existingActiveSignal.id}.`);
+            } catch (err) {
+              console.error(`❌ [INTRADAY SCAN] Failed to invalidate conflicting signal for ${symbol}:`, err);
+            }
+            // Proceed to generate fresh signal for new direction below
+          } else {
+            // Confirming confluence signal: Upgrade confidence (+3% boost, capped at 98%) and append reasoning
+            const baseConfidence = Math.max(existingActiveSignal.confidence_score || 0, Math.round(score));
+            const upgradedConfidence = Math.min(98, baseConfidence + 3);
+            const updatedReasoning = `${existingActiveSignal.reasoning || ''} | Additional confirmation from '${name}' (${score.toFixed(1)}% score).`.trim();
+
+            try {
+              await dbRun(
+                "UPDATE unified_signals SET confidence_score = ?, reasoning = ?, entry_price = ?, target_price = ?, stop_loss = ? WHERE id = ?",
+                [upgradedConfidence, updatedReasoning, entry, target, stopLoss, existingActiveSignal.id]
+              );
+              console.log(`🔄 [INTRADAY SCAN] UPGRADED CONFLUENCE SIGNAL FOR ${symbol}! Confidence: ${upgradedConfidence}% | Added Screener: '${name}'`);
+            } catch (err) {
+              console.error(`❌ [INTRADAY SCAN] Failed to upgrade signal for ${symbol}:`, err);
+            }
+            continue;
+          }
         }
 
         // 5. Generate and save trading signal
-        const type = sentiment === 'bearish' ? 'SELL' : 'BUY';
-        const entry = stock.ltp || 0;
-        const target = type === 'BUY' ? parseFloat((entry * 1.05).toFixed(2)) : parseFloat((entry * 0.95).toFixed(2));
-        const stopLoss = type === 'BUY' ? parseFloat((entry * 0.97).toFixed(2)) : parseFloat((entry * 1.03).toFixed(2));
         const confidence = Math.round(score);
         const reasoning = `Strong quantitative score of ${score.toFixed(1)}% and active intraday breakout spotted in Trendlyne screener '${name}'.`;
 
@@ -1480,17 +1521,17 @@ export async function runIntradayScreenerScan(): Promise<{
           const { upsertUnifiedSignal } = await import('./signals');
           await upsertUnifiedSignal('screener', {
             symbol,
-            signalDate: new Date().toISOString().split('T')[0],
-            signalType: type,
+            signalDate: todayIso,
+            signalType: newType,
             entryPrice: entry,
             targetPrice: target,
             stopLoss,
-            confidenceScore: confidence / 100,
+            confidenceScore: confidence,
             reasoning,
           });
 
           newSignalsGenerated++;
-          console.log(`🎯 [INTRADAY SCAN] GENERATED ${type} SIGNAL FOR ${symbol}! Score: ${score.toFixed(1)}% | Entry: ₹${entry} | Target: ₹${target} | SL: ₹${stopLoss}`);
+          console.log(`🎯 [INTRADAY SCAN] GENERATED ${newType} SIGNAL FOR ${symbol}! Score: ${score.toFixed(1)}% | Entry: ₹${entry} | Target: ₹${target} | SL: ₹${stopLoss}`);
         } catch (err) {
           console.error(`❌ [INTRADAY SCAN] Failed to save signal for ${symbol}:`, err);
         }

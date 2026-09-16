@@ -24,6 +24,21 @@ Run:
   python fno_rollover_fetcher.py --date 2026-06-24  # specific date
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class FnoRolloverFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class FnoRolloverFetcherBaseFetcher(BaseFetcher[FnoRolloverFetcherSchema]):
+    fetcher_name = 'FnoRolloverFetcher'
+    domain = 'general'
+    schema = FnoRolloverFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import io
 import sys
@@ -92,6 +107,7 @@ def ensure_schema(con) -> None:
     ]:
         safe_alter(con, ddl)
 
+
     con.commit()
 
 
@@ -113,7 +129,7 @@ def fetch_bhavcopy(trade_date: date, session: requests.Session) -> pd.DataFrame 
         status = getattr(getattr(e, 'response', None), 'status_code', None)
         if status == 404:
             return None  # holiday / non-trading day
-        print(f"[Rollover] {trade_date}: download failed after retries — {e}")
+        print(f"[Rollover] {trade_date}: download failed after retries — {e}", file=sys.stderr)
         return None
     try:
         z = zipfile.ZipFile(io.BytesIO(r.content))
@@ -121,7 +137,7 @@ def fetch_bhavcopy(trade_date: date, session: requests.Session) -> pd.DataFrame 
             df = pd.read_csv(f, dtype=str)
         return df
     except Exception as e:
-        print(f"[Rollover] {trade_date}: parse failed — {e}")
+        print(f"[Rollover] {trade_date}: parse failed — {e}", file=sys.stderr)
         return None
 
 
@@ -252,6 +268,8 @@ def main() -> None:
                         help="Backfill last N trading days (default: 1 = yesterday)")
     parser.add_argument("--date",  type=str, default=None,
                         help="Fetch a single specific date (YYYY-MM-DD)")
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch and re-compute even if date is already populated")
     args = parser.parse_args()
 
     con = connect()
@@ -265,8 +283,19 @@ def main() -> None:
     else:
         dates = _trading_days_back(args.days)
 
+    cur = con.cursor()
     total_rows = 0
     for i, trade_date in enumerate(dates):
+        d_str = trade_date.isoformat()
+        if not args.force:
+            cur.execute("SELECT count(*) FROM fno_rollover WHERE date = ?", (d_str,))
+            row = cur.fetchone()
+            existing_cnt = row[0] if row else 0
+            if existing_cnt and existing_cnt >= 180:
+                print(f"[Rollover] {trade_date}: already populated with {existing_cnt} symbols. Skipping download.")
+                total_rows += existing_cnt
+                continue
+
         print(f"[Rollover] Fetching {trade_date} ({i+1}/{len(dates)})…")
         raw = fetch_bhavcopy(trade_date, session)
         if raw is None:
@@ -277,6 +306,7 @@ def main() -> None:
         upsert_rows(rows, con)
         print(f"[Rollover] {trade_date}: {len(rows)} symbols saved")
         total_rows += len(rows)
+
 
         if i < len(dates) - 1:
             time.sleep(RATE_LIMIT_SEC)
@@ -293,3 +323,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

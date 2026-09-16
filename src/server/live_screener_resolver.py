@@ -4,6 +4,8 @@ Live Screener Outcome Resolver.
 Resolves EOD outcomes (1d, 3d, 5d returns) plus a same-day (intraday) return for
 live_screener_appearances.
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import sys
 import datetime
@@ -215,7 +217,7 @@ def resolve_outcomes(dry_run=False):
             prune_old_appearances(conn)
 
     except Exception as e:
-        print(f"[LiveScreenerResolver] Error: {e}")
+        print(f"[LiveScreenerResolver] Error: {e}", file=sys.stderr)
         conn.rollback()
         raise
     finally:
@@ -262,9 +264,15 @@ def prune_old_appearances(conn, retention_days: int = RETENTION_DAYS) -> int:
     except Exception as e:
         # Retention must never fail the resolve run -- the outcomes it just wrote matter more.
         conn.rollback()
-        print(f"[LiveScreenerResolver] Retention skipped: {str(e)[:120]}")
+        print(f"[LiveScreenerResolver] Retention skipped: {str(e)[:120]}", file=sys.stderr)
         return 0
 
 
 if __name__ == "__main__":
     resolve_outcomes("--dry-run" in sys.argv)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

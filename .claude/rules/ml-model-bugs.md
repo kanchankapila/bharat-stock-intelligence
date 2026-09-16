@@ -1,0 +1,352 @@
+# ML, Model & Measurement-Harness Bug Classes
+
+Split out of `recurring-bugs.md` on 2026-08-27. Everything here has bitten this codebase before,
+but **only ever while training a model, running a promotion gate, or building/using a measurement
+harness** — so it was 44% of a file CLAUDE.md tells every session to skim before writing any Python
+or SQL, and irrelevant to most of them.
+
+**Read this when you are touching:** `ml_ensemble.py`, `dl_engine.py`, `cs_ranker.py`,
+`model_promotion.py`, `drift_detector.py`, any `*_classifier.py` / `*_predictor.py`, any promotion
+or champion/challenger gate, `factor_backtest.py` / `factor_edge.py` / `assembly_ablation.py` /
+`blend_walkforward.py`, or any script that produces an accuracy / win-rate / IC / AUC number.
+
+Pair it with `.claude/rules/measurement.md`, which holds the *verdicts*; this file holds the
+*failure modes*. `recurring-bugs.md` keeps every class that can bite ordinary Python/SQL work.
+
+**🤖 = enforced by a static check.** The `verify-gate.mjs` Stop hook enforces the first entry
+below (backtest evidence for signal-surface diffs); `scripts/check_recurring_bugs.py`'s 9 checks
+cover classes that stayed in `recurring-bugs.md`.
+
+> **The rule that governs this whole file:** a number a model reports about itself is never
+> evidence. Grade stored predictions against realized outcomes. See `measurement.md`'s
+> "Accuracy comes from realized returns, never a proxy".
+
+## Evidence, harnesses & measurement tooling
+
+- **A rank IC averaged over DAILY dates at horizon h has ~dates/h independent observations, not
+  `dates` — so a reliability gate applied to the raw date count passes panels that miss it by an
+  order of magnitude.** Consecutive daily dates graded at h=21 share 20 of their 21 forward days,
+  so their per-date ICs are autocorrelated and the standard error of the mean IC is understated
+  by roughly sqrt(h). Found 2026-09-12 (AF-20260912-15): `factor_edge.py` applied
+  `MIN_DATES_RELIABLE = 20` to the raw count, and **every `USABLE` verdict it had ever produced
+  was an artifact of that.** Measured live across all 895 current readings: 24 read `USABLE`,
+  **exactly 1 survives the corrected count**, and that one is `movement_probability` — which this
+  same file already documents as a train/serve-skew artifact (AUC 0.894). Only **46 of 895**
+  readings carry 20+ independent periods.
+  **The tell is a horizon discontinuity, and it is diagnostic, not noise:** `mf_big_fund_flow`
+  read AUC **0.4682 at h=10** (44 dates) and **0.6203 at h=21** (33 dates). A factor does not
+  invert and then triple its edge across horizons; the h=21 panel simply had 1.6 effective points
+  to the h=10 panel's 4.4. Whenever a column looks dead at a short horizon and strong at a long
+  one **on fewer dates**, compute dates/h before believing the long one.
+  **Scope, and this matters — the correction does NOT apply to every harness here.**
+  `factor_edge.py` samples DAILY and overlaps, so it is affected. `factor_backtest.py` forms a
+  portfolio and holds it to the next rebalance, so its periods are DISJOINT and its `n periods`
+  is already an independent count — its cost/turnover rows need no adjustment. Before applying
+  this correction to any number, ask whether the observations overlap; applying it to
+  non-overlapping periods would discard real evidence.
+  **A second, independent precondition the same guard was missing: cross-sectional WIDTH.**
+  `pledge_chg_qoq` read rank_IC +0.19 / AUC 0.605 on a universe of **26 symbols**, and six
+  banking-ratio columns read `USABLE` on 41 — `--min-per-date` defaults to 10, so a 26-name panel
+  clears it, while `factor_backtest.py` forms top-50 portfolios that universe cannot fill. A rank
+  correlation across 26 names is not a cross-sectional factor reading.
+  **How the fix was kept from becoming a mute button, which is the reusable part:** the first
+  draft of this guard keyed on within-symbol variance (a constant-per-symbol column also
+  overstates independence). Measured before shipping, it flagged **159 of ~165 columns** — this
+  file's own "a monitor that fires on EVERY run carries no information", in guard form. It was
+  discarded for the two narrow, measurable preconditions above, which flag 7 and 24 respectively
+  and leave a well-powered panel reading `USABLE`. **Measure what a proposed guard would flag
+  before writing it**, exactly as you would measure a threshold before trusting it.
+  Fixed by `MIN_SYMBOLS_XS = 50` (new `DEGENERATE-XS` verdict) and `_effective_dates()`, with
+  `eff_dates`/`symbols` persisted so a reader sees how far from reliable a reading is instead of
+  a flat label. Historical rows keep NULL and are deliberately NOT backfilled — a retroactive
+  `eff_dates` would fabricate a precondition that was never applied to that row's verdict.
+  Immunized by `src/server/tests/test_factor_edge_degenerate_panels.py` (negative-controlled,
+  including a non-vacuity case that a wide, long panel still reads `USABLE`).
+
+- 🤖 **An unmeasured signal/scoring change gets merged with a green test suite, and is only caught later by a dedicated salvage/audit session.** `verify-gate.mjs` blocks completion on tests-passed, but tests-passed proves the code runs, not that its output is any good — a diff to `unified_ranker.py` with a clean `pytest` run satisfies the gate whether or not anyone re-ran the backtest. Recurred at least 3 times: a prior session's PEAD boost / delivery-in-ranker / screener-sentiment / news-date-shift changes all had to be reviewed and rejected post-hoc (`bd40156`); two separate `factor_backtest.py` benchmark bugs (exit-pricing, `--rebalance 1`) sat undetected long enough to make dead factors look alive until a manual review caught them (`32f9676`, `12be159` — full diagnosis in `docs/measurement-history.md`). Fixed 2026-08-12: `verify-gate.mjs` now also requires backtest evidence (a `factor_backtest.py` run, or a same-session edit to `measurement.md`/`measurement-history.md`) whenever the diff touches `unified_ranker.py`, `scoring_engine.py`, `factor_backtest.py`, `multi_factor_scorer.py`, `institutional_quant_engine.py`, or `quantScoringService.ts`.
+
+- **A bug in the measurement tooling itself is worse than no measurement, because it looks like evidence.** Both `factor_backtest.py` bugs above were in the code that's supposed to *catch* signal-logic bugs, not in signal logic itself — one inflated a dead factor to look significant, the other deflated the whole universe by ~35pp/yr at daily rebalance. Treat a change to any backtest/measurement script with at least as much suspicion as a change to the thing it measures: reproduce at least one already-known result before trusting a harness change's new ones.
+
+- **A "verification"/"audit"/"backtest" script that never actually connects to the database or touches real data, but formats plausible numbers and logs a success message, is worse than doing nothing — it produces evidence-shaped output that gets committed and cited as real.** Found 2026-08-12 reviewing an incoming merge: 5 of ~12 new scripts (`automated_system_audit.py`, `quantitative_stress_test.py`, `trendlyne_smart_money_backtest.py`, `live_market_simulation.py`, `automated_market_simulation_alerts.py`) had zero DB connections despite docstrings claiming to use "the production PostgreSQL database," with hardcoded results (one MarketsMojo row-count claim, 16.7M, was ~22,500× the real measured depth in `measurement.md`) written to `docs/audit-2026-08-12/*.json`/`*.md` as if genuine. One even had its own comment admitting it (`# Mocking comprehensive integrity checks`). A 6th script (`fix_provider_scan_collisions.py`) claimed to verify composite-PK integrity but ran zero queries — same shape as the "success heartbeat on a step that wrote nothing" class above, in verification-script form. A 7th (`migrate_date_types.py`) claimed a schema migration that, checked live against production, never applied to any of its 4 target columns. **Tell:** does the script's own diff add an import of `db_compat`/`psycopg2`/an ORM, and does at least one code path call `.execute()`/`.query()` on it before formatting the "result"? A script whose numbers exist before any query runs is fabricated, not measured — this is fable-brain.md's "plausible number" and "survivor story" patterns in script form, and it is *more* dangerous than the prose versions because committed JSON/MD output reads exactly like this repo's real measured evidence at a glance. All 5 fabricated scripts and their outputs were deleted rather than fixed; the 2 real-but-broken ones (`fix_provider_scan_collisions.py`, `migrate_date_types.py`) were rewritten/reverted respectively.
+
+- **Quantile-based winsorization with the default LINEAR interpolation does not actually clip a lone extreme value — it clips to a point ~1% of the way toward the outlier, and the mean still blows out.** `measurement.md`'s panel spec mandates winsorizing everything computed off `stock_ohlcv`, so this is a trap for every future implementation of it. With one corrupt bar in n=100, `series.quantile(0.99)` interpolates between the 99th and 100th sorted values: for 99 names at +1% and one at +249,900%, the cutoff lands at ~+25%, the clip leaves the outlier at +25%, and the "winsorized" mean comes out +26% instead of +1%. Caught 2026-08-13 by a test written for exactly this case in `trade_journal.py` — the test failed against the first implementation, which is the only reason it was found; the code read as correct. Fix: `quantile(pct, interpolation="higher")` / `quantile(1-pct, interpolation="lower")` so the cutoff is an actually-observed value. **Checked repo-wide at the time and no other instance existed** — `dl_engine.py`, `unified_ranker.py` and `factor_backtest.py`'s `RETURN_CLAMP_PCT` all use fixed absolute bounds (±40%, etc.) rather than quantiles, which is immune to this. The entry is here for the next person who implements the panel spec's winsorization step the quantile way. **Tell:** a winsorization whose output mean is still orders of magnitude away from the median.
+
+- **A monitor that fires on EVERY run carries no information — and if anything downstream consumes its output, that consumer is silently reading a constant.** `drift_detector.py` was replayed over 16 historical evaluation points spanning 14 months (2026-08-15): `EMERGENCY_RETRAIN` fired **16/16 = 100%**, in every market condition on record. Root cause was a threshold borrowed from a different domain rather than measured — `PSI_CRIT=0.25` is the credit-scoring convention for stable demographic features, but `feature_store` holds z-scored financial series with volatility clustering, whose measured per-feature PSI null on this panel is p50=0.53 / p90=2.71 / p95=3.60. At 0.25, **66.8% of features "breach" when nothing is wrong**, against a `PSI_FRAC` of 20%: the alarm sat below the data's own noise floor, so it could never not fire. Compounded by two siblings in the same file: (a) the SAME constant was used to threshold two different statistics on different scales — `get_drift_multiplier` compares `drift_score` (= `avg_psi`, the MEAN across features, measured null 0.647-1.477) against the PER-FEATURE bar, making its 0.85x haircut unconditional on every run ever made; (b) after recalibration the `WARNING` tier was still stuck at 16/16 because it keyed off `max_psi > PSI_WARN`, and the max of ~62 correlated features is an extreme-value statistic that trips essentially always against any per-feature bar. **The damage was not the log line.** That permanent haircut multiplied a *calibrated* probability (isotonic-fit, so 0.60 is supposed to mean a 60% empirical win rate) and fed hard thresholds in `scoring_engine.apply_ml_score_adjustment` (0.55/0.40/0.30) — every symbol truly in [0.55, 0.647] silently lost a +10% bonus it earned, [0.40, 0.47] took a penalty it didn't. **Tells:** (1) grep any monitor's own history for a status that never varies — `SELECT status, count(*) FROM <results> GROUP BY 1` with one row is the signature; (2) any threshold constant with no recorded derivation, especially a round industry-convention number, applied to data it wasn't calibrated on; (3) the same constant thresholding two quantities that aren't the same statistic. **Before trusting OR fixing a threshold, measure the null**: replay the detector over history and look at what it says when nothing is wrong. Fixing it needs the same discipline as the bug — after recalibration, re-replay and confirm the detector now *discriminates* (75% OK / 25% WARNING / 0% EMERGENCY here) rather than merely having moved to never firing, which is the identical defect inverted.
+
+- **⚠ CORRECTED 2026-08-15 — the incident below was misdiagnosed; the real lesson is the opposite one. A writer is not found by grepping its CLI flag: a job can be invoked over HTTP/a service call, and the grep will confidently show you nothing.** `win_probability` was concluded to be weekly-written because `--score` appeared only in the weekly retrain. It is in fact written **daily** by `queues.ts:1037`'s `pythonApi.scorePending()` → ml-api → `ml_ensemble.run(do_train=False, do_score=True)`, which no `--score` grep can find. Two cheap checks would each have caught it in seconds and neither was done: (a) **ask the data** — `COUNT(*) - COUNT(col)` per date showed `unscored = 0` on every recent date, impossible under weekly writes; (b) **read the existing comments** — `dataQualityChecks.ts:653` already stated the cadence and the evening timing in prose. A wrong provenance conclusion is as damaging as a wrong measurement: it caused a *correct* positive finding to be retracted. **Before concluding how often a column is written: grep the column name (not the flag) across `.ts` and `.py`, include service/HTTP call sites, and cross-check against a per-date populated-count.** The original entry follows, kept because the train-then-score shape IS still a real hazard to check for — it just was not what happened here.
+
+- **A column written by a job that TRAINS and then SCORES in the same invocation can never be graded as a forward signal — and its write cadence, not its row date, decides whether it was knowable in time.** `technical_signals.win_probability` is written only by `ml_ensemble.py --train --tune --score`, which appears in exactly one scheduled place: the WEEKLY retrain. `run()` trains first on every resolved `signal_outcomes` row (no cutoff excluding the week it is about to score), then scores `WHERE win_probability IS NULL` — the backlog since the last run. So (a) the model is fitted on the outcomes of the rows it then scores, and (b) a Monday row's value is typically written the following weekend, days after any next-day entry. Graded naively against next-open→close returns this produced a clean-looking **h=1d rank IC +0.0364, t=+2.58** (2026-08-15) that is entirely artifact; it was retracted the same day. **What made it deceptive:** the obvious provenance column looked fine — `computed_at` is 100% populated and correctly shows same-day row CREATION — while `created_at`/`updated_at`, which would have shown the actual write, are 100% NULL dead columns. A lower-bound timestamp cannot establish that a later UPDATE happened in time. **Tells:** before grading any column, grep for every scheduled invocation of its writer and check the cadence and the flag combination — `--train ... --score` in one command is the signature; and confirm the timestamp you are trusting records the write you care about, not the row's birth. Same family as the `signal_generated_at` incident: a provenance column that does not mean what its name implies hands you a confident, wrong answer rather than an obviously broken one.
+
+- **`.iloc[-N:]` on a long `(symbol, date)` panel slices the last N ROWS, not the last N DATES — and it is silently wrong every time a table has more than one row per date.** `drift_detector.py`'s `check_feature_drift()` took `df.iloc[-30:]` meaning "last 30 days" (its own docstring says so), but `feature_store` has ~2,400 rows per date, so it sliced the last 30 *symbols of a single date*. Any market-wide column broadcast identically to every symbol on a date (`fii_10d_net`, `dxy`, `nifty_vix`, …) then had near-zero variance in that single-date sample against a real multi-date baseline, pinning PSI far above the critical threshold on every run regardless of actual drift — found 2026-08-14 via routine log review: `EMERGENCY_RETRAIN` had fired every single day since at least 2026-08-01, `max_psi` stuck at ~12.4-12.9 (real drift moves; this didn't). Not cosmetic: `scoring_engine.py` reads the same `drift_score` and applied a real 0.85x haircut to every stock's `win_probability` whenever it exceeded `PSI_CRIT` — this was very likely permanently active for weeks. Fixed by slicing on `df["date"].isin(...)` against the sorted distinct dates instead of row position. **Tell:** any `.iloc[-N:]`/`.head(N)`/`.tail(N)` on a dataframe read from a table that isn't one-row-per-date — check `information_schema` or just `df['some_key'].value_counts()` before trusting a row-based window means what its comment says. Same family as measurement.md's "judge a datasource by dates PER SYMBOL, never by raw row count" panel-shape rule, in monitoring-script form rather than a backtest.
+
+- **A dispersion/variance threshold is calibrated for ONE scale and is silently meaningless on another.** `ZERO_DISPERSION_MIN_SD = 5.0` in `unified_ranker.py` is written for 0–100 engine scores. Applied to raw model outputs — `win_probability` is 0–1 with sd ≈ 0.07 — *every* engine reads as collapsed. A 2026-08-22 ablation did exactly that, dropped `ml` on 33 of 43 dates and `technical` on 33, and flipped its own equal-weight arm negative, producing a confident wrong result that looked like a finding about the ranker. Same family as this file's "the same constant thresholding two quantities that aren't the same statistic" entry (`drift_detector`'s `PSI_CRIT` against both a per-feature and a mean-across-features statistic), and as measurement.md's flat-cost-per-rebalance reordering. **Tell:** any comparison of a raw model output against a constant whose sibling usages read a normalized/percentile column — check what the constant's *other* call sites are measuring before reusing it. Note the real-scale reading is a genuine finding in its own right and is now monitored (`ur-engine-dispersion-collapse`): on the correct 0–100 scale `dl` collapses on 39% of ranker dates, `ml` 34%, `technical` 18% — intended behaviour for an honestly-flat engine, but nothing was reporting the rate.
+
+- **A "D-1" / lagged feature built by joining a table to itself on a `prev_date` key silently
+  carries the CURRENT day's value whenever the source column is an as-of quantity rather than a
+  pre-lagged one — and every downstream robustness test will pass.** Found 2026-09-06 reviewing
+  an intraday research report that claimed **+3.6%/day net, t=+14.9, 86% win rate, profit factor
+  49.6** on an untouched holdout. Measured directly against the study's own panel:
+
+      corr(d1_ret, return of day D  ) = 1.000000   exact match 100.0000%
+      corr(d1_ret, return of day D-1) = 0.031025   exact match   0.1736%
+
+  The variable the whole study ranked on WAS the return of the day being traded. Mechanism:
+  `daily["prev_close"] = g["close"].shift(1)` is pre-lagged, but `daily["ret_1d"] =
+  g["close"].pct_change()` is as-of day D. A single join on `prev_date` pulls the date-D row and
+  relabels every column `*_d1`, which is correct for the `prev_*` family and look-ahead for
+  every as-of column (`ret_1d`, `rsi14`, `atr14`, `vol_surge`, `hi_252`...). The two families
+  must be joined differently and were not.
+
+  **Why nothing caught it, which is the part worth remembering:**
+  1. **The script's own sanity check validated the family that could not fail.** It asserted
+     `ph_d1 == prev_high` — a pre-lagged column — so it passed and conferred false confidence
+     while every as-of column was wrong.
+  2. **The "decisive" robustness test addressed the wrong failure mode.** Delaying entry to
+     11:45 was presented as ruling out a price-print artifact. It rules out contamination in the
+     ENTRY PRICE; it cannot rule out contamination in the SELECTION VARIABLE, because if you
+     already know the day's winner, entering later still works.
+  3. **Train ≈ holdout was read as robustness.** +3.72% vs +3.64% is the opposite tell: a real
+     edge decays out of sample, and identical magnitude means the same bug is in both arms.
+
+  **Tells, cheapest first — any one of these beats reading the join:**
+  - an IC above ~0.15 on a price-derived factor (published equity factors run 0.02-0.05; 0.56
+    means something is correlated with itself);
+  - `P(pick lands in the top decile)` far above the 10% base rate — 87% here;
+  - a daily return that compounds to an absurd annual figure (+3.6%/day is ~6.6 million %/yr);
+  - a profit factor above ~5, or a long-only daily win rate above ~65%.
+
+  **The standing check to add to any such harness:** before running a backtest, assert
+  `abs(corr(selection_variable, same_day_return)) < 0.2`. One line, and it would have caught
+  this in seconds. Same family as this file's `movement_predictor` entry, where an implausibly
+  HIGH score (AUC 0.894) was the tell that `score()` skipped the lag `load_training_data()`
+  applied — an implausibly good number is at least as suspicious as an implausibly bad one.
+
+## Models, labels & promotion gates
+
+- **Moving a transform out of a table and into the TRAINING loader creates train/serve skew
+  unless the INFERENCE loader gets the identical step in the same change.** 2026-09-10 made
+  `feature_store` raw and moved per-symbol `RobustScaler` into `dl_engine.load_symbol_sequences`;
+  `load_inference_sequence` kept reading the last 60 raw rows. Measured live 2026-09-13 on
+  RELIANCE: `sma200` 0.949 trained vs **1,386 served**, `obv` -2.48 vs -10,000 (the clip bound)
+  -- every `dl_score` for three days (AF-20260913-01). **Tell:** print `median(abs(X))` and
+  `max(abs(X))` for one symbol through BOTH loaders; a scaled matrix sits near 1, a raw one in the
+  hundreds. **Fix shape:** the serve path must reproduce the fit, not approximate it -- a per-symbol
+  scaler fit on "the earliest 80% of target-bearing rows" needs the full history at inference and a
+  `fit_mask` selecting those rows. **Assert parity against the real training loader** on shared
+  dates (max abs diff was 0.0 after the fix), never against a re-implementation.
+  **Two consequences that were NOT obvious and each changed a decision:**
+  (1) **fixing the input exposes the model** -- with correct inputs the promoted v5 saturated 40%
+  of predictions (23% even on its own last training window), while the v3 it replaced stayed at
+  2.8%; the gate's `MAX_SATURATION_FRAC=0.5` on validation let a 0.32 through (AF-20260913-05).
+  (2) **a per-symbol scaler fit on early history makes ANY rewrite of a feature's history a
+  serve-time shift** -- replacing 7 sparse columns with deep-history sources moved served
+  `prob_up_5d` to rank-corr 0.59 after ONE daily refresh. Pair such a change with a retrain;
+  jobs run from the working tree, so "merged" is "deployed" (AF-20260913-02).
+
+- **A skew fix applied to a SHARED helper does not fix the caller that keeps its own inline
+  query.** The 2026-08-30 `cr_upgrades`/`cr_downgrades` fix (entry below) went into
+  `full_feature_score_sql()`, which only `cs_ranker.py` calls; `ml_ensemble.load_pending_signals()`
+  -- the ensemble's actual scorer -- has its own inline SQL and stayed skewed for two weeks
+  (AF-20260913-04). **Verify a skew fix on the path that writes the production column**, and make
+  the check structural: `test_ml_ensemble_train_score_columns.py` reads both loaders' column sets
+  from Postgres (`LIMIT 0` on an empty production schema) instead of parsing SQL text.
+
+- **A transform that selects its columns by DTYPE (`select_dtypes`, "all numeric", `df.columns`)
+  rather than by an explicit NAME LIST will silently include the LABEL columns — and a scaled
+  label is not a label.** Found 2026-09-10 (AF-20260910-18). `feature_engineering._apply_scaler`
+  did `feat.select_dtypes(include=[np.number]).columns.tolist()` and `_fit_scaler` ran PER SYMBOL
+  inside the write loop, so `feature_store`'s stored target was
+  `(raw − that symbol's median) / that symbol's IQR`. Three separate things broke, and each hid
+  the others:
+  1. **The label stopped being a return.** `dl_engine.py`'s `y5 = (target_ret_5d > 0)` therefore
+     meant *"beat its own historical median"*, not *"rose"*.
+  2. **The FEATURES stopped being comparable across symbols.** A per-symbol affine transform
+     preserves within-symbol ordering and REORDERS the cross-section — so every cross-sectional
+     reader (`ml_ensemble.py`'s wide queries, `factor_backtest.py`) was ranking incommensurable
+     units, and every factor reading sourced from the table graded the self-normalized column
+     rather than the factor (AF-20260910-20).
+  3. **`fillna(0)` in the same two functions** turned "no data" into a literal `0` — a column
+     absent for a symbol gives IQR 0, so `RobustScaler` centers at 0 and stores exactly 0. Live:
+     `roe` 77.8% zeros, `piotroski_f` 83.8%. Fill rates read 88–100% because `count()` counts
+     zeros. This is the sentinel-instead-of-NULL class in `recurring-bugs.md`, reached from the
+     preprocessing side.
+
+  **Tells, cheapest first — any one beats reading the pipeline:**
+  - **Check a column against its own construction bounds.** `rsi_14` is 0–100 by definition and
+    was stored across **−4.09M to +6.23M**. A bounded quantity outside its bounds is proof.
+  - **Check a return against the −1 floor.** `close[a]/close[b] − 1` cannot go below −1;
+    **230,572 rows did.** One `WHERE col < -1` and the diagnosis is finished.
+  - **A "normalized" store whose values are not centered near 0, or a raw store whose values
+    are** — print `min/median/max` per column before trusting either.
+
+  **Do not conclude "the labels are noisy" from a low corr against a recomputed truth.** Two
+  things will fool you at that step, and both did here on the first pass: the recomputed
+  "truth" is usually built with a DIFFERENT entry convention (this code deliberately uses
+  `pct_change(5).shift(-6)` = a T+1 entry; a naive `close[t+5]/close[t]` overlaps it by only 4
+  of 5 days AND cannot be traded), and a per-symbol affine transform depresses POOLED
+  correlation while leaving WITHIN-symbol correlation at ~1.0. **Correlate within symbol and
+  across symbols separately — the gap between the two IS the signature.** Here: within-symbol
+  0.995, pooled 0.994 against the right convention, but 0.735 against the wrong one.
+
+  **Fix shape:** name the label columns explicitly and exclude them; push normalization to the
+  consumer that actually needs it (an LSTM legitimately wants per-symbol scaling, a
+  cross-sectional ranker never does); and coerce non-finite values to NULL at the DB boundary,
+  never to 0.0. **A scaler fit inside a per-item write loop is refit on whatever window that run
+  used**, so the same row holds different values across rebuilds — within-symbol corr came back
+  0.995, not 1.000, which is itself the tell that the transform is not reproducible.
+
+  **Immunized** by `src/server/tests/test_feature_store_targets_unscaled.py`. Note what made this
+  survivable for so long: the existing suite stubbed `_apply_scaler` to the identity, so **every
+  test of that write path ran against a pipeline with the bug switched off.** A stub that
+  neutralizes the code under test is worse than no test — it reports green over the exact line
+  that is wrong.
+
+
+- **A second script that hand-rolls its own training-data SQL instead of importing the canonical feature-engineering function's OWN query silently drifts to a fraction of the real feature set, and the decline shows up as "the model is getting worse," not as an obvious bug.** `cs_ranker.py` and `exit_policy.py` both `import build_features` from `ml_ensemble.py` (correctly sharing the feature-*transform* code) but each wrote its own SELECT for the training *query* feeding it — `build_features()`'s `num(col, default)` silently defaults any column the caller's SQL didn't fetch to a constant, so neither script errored, both just trained on hollowed-out data. Measured 2026-08-30: `cs_ranker.py` used 29 of `build_features()`'s 304 raw inputs, `exit_policy.py` used 23 — and both had multiple consecutive promotion-gate REJECTIONs with declining metrics (`cs_ranker` rho trending 0.161→0.161→0.133→0.158→0.081→0.088 over 6 rejections; `exit_policy` MFE holdout MAE 4.76→4.91→5.00 across 2), which read as "the model doesn't work" rather than "the query is starving it." Fixed by extracting `ml_ensemble.py`'s own maintained ~275-column query into shared `full_feature_train_sql()`/`full_feature_score_sql()` functions (parameterized on anchor table/date column) and rewiring both scripts to use them, `load_training_data()` itself left untouched. **The fix did not uniformly help — this is the finding, not a footnote**: re-trained live 2026-08-30, `cs_ranker` improved (rho 0.0875→0.1403, still short of baseline 0.1758) but `exit_policy` got WORSE (MFE MAE 4.998→5.66, moving further from baseline 4.7642) — the extra features added noise for that specific regression target rather than signal. **Tell:** any second/third script importing a shared feature-*engineering* function should also import (or call) that module's own training-data *query*, not reimplement a narrower one by hand; a `num()`/`.get(col, default)`-style silent-default pattern anywhere in the shared function means a caller's incomplete SELECT fails silently, so diff the caller's SELECT columns against every `num('col', ...)`/`row.get('col')` call in the shared function before trusting either script's metrics. **Corollary: "give the model more features" is not a one-way lever** — verify the effect per model, not per fix, exactly as `measurement.md`'s discipline already demands for any other scoring change. **Third instance, found same day by directly checking every other `build_features` importer after this entry was written**: `online_learner.py`'s `load_recent_outcomes()` — feeding the DAILY SGD/PassiveAggressive online-learning update (`ml-daily-ops`'s `online-learner` step, not weekly), not the score-time path — had the same ~30-column hand-rolled SELECT, and its own docstring wrongly claimed it matched `ml_ensemble.load_training_data`'s columns. **A worse shape than the first two**: this file's sibling `load_pending_signals()` already correctly delegated to the canonical wide query, so the online model trained on a narrow constant-padded vector but scored on the real wide one — a genuine train/serve feature-distribution skew, not just a narrower fit. Fixed the same way. Grepping every `build_features` importer found no further instances after this fix, but nothing prevents a newly-written script from reintroducing the pattern — the tell above is the durable check, not "count now equals zero."
+
+- **Extracting a shared train query and a shared score query as SEPARATE functions does not make
+  them agree — diff their column sets, because any column in one and not the other is train/serve
+  skew by construction.** Found 2026-08-30 reviewing `ml_ensemble.py`'s new
+  `full_feature_train_sql()` / `full_feature_score_sql()` pair (the fix for the starved-query bug
+  in the entry above). Parsing both and differencing the aliases: **311 columns common, but
+  `cr_upgrades` and `cr_downgrades` were train-only.** `build_features()` reads them via
+  `num('cr_upgrades', 0.0)`, so at score time they silently defaulted to zero and THREE features
+  -- `credit_trend`, `credit_upgraded`, `credit_x_score` -- carried real values while training and
+  a constant 0.0 while serving. **This was PRE-EXISTING, not introduced by the extraction**
+  (`git show HEAD` -- the committed `load_pending_signals()` had no `cr_upgrades` either); the
+  extraction just made it mechanically visible for the first time. Fixed by adding the same two
+  `credit_rating_events` subqueries to the score helper, anchored on `ts.date::date`.
+  **Two things make this class nastier than the starved-query one it sits next to:**
+  (1) `drop_untrainable_features()` structurally CANNOT catch it -- the columns are perfectly
+  well-behaved in the training matrix and only degenerate on the serving side, which is exactly
+  where nothing is measuring them; (2) it produces no error, no NaN and no warning, just a model
+  splitting on a feature that is always zero in production.
+  **Tell / cheap check:** whenever a module exposes a train query and a score query as separate
+  strings, parse the aliases out of both and assert the sets are equal -- one throwaway script,
+  and it is the only thing that finds this. Do NOT rely on the score path's
+  `for col in feature_names: if col not in X: X[col] = 0.0` alignment loop to tell you: that loop
+  is what SILENTLY manufactures the skew, and it looks like defensive hygiene.
+  Live-verified after the fix against production (negative control, not a vacuous all-zero pass):
+  AFCONS `cr_downgrades=1`, GABRIEL `cr_upgrades=1`, NAVINFLUOR `cr_upgrades=1` at the score-time
+  anchor, where all three read 0 before.
+  **Separate defect found the same way, PARTIALLY FIXED 2026-09-10 (AF-20260910-15):** the
+  blank-`symbol` rate on `credit_rating_events` was 279/323 (86%) when this was written and
+  403/862 (47%) when re-measured. Root cause of one slice of it: the ISIN issuer-prefix
+  fallback keyed on `isin[:8]`, but an Indian ISIN is `INE` + a **4-char issuer code**
+  (chars 4-7) + a **2-char instrument code** (chars 8-9), so 8 characters swept in the first
+  DIGIT of the instrument code. A rated bond only matched its issuer's equity ISIN when both
+  codes shared that digit -- the 07/08 debenture families against equity '01' all start '0'
+  and worked, so the bug was invisible; the 14/16 families start '1' and could never match.
+  Widened to the real 7-char issuer: measured live, **+18 rows recovered, ZERO symbol changes,
+  and NO change in ambiguity** (2330 unambiguous / 18 ambiguous at both widths), so this was
+  strictly a recovery. Live after: blank 403 -> 385, distinct real symbols 98 -> 100.
+  **Still only 100 distinct symbols, and that is now mostly CORRECT, not a bug** -- of the 385
+  remaining blanks, 46 carry a non-INE sentinel ISIN and 38 hit issuer prefixes that map to
+  more than one listed symbol (deliberately dropped, never guessed, per `data-sources.md`);
+  the rest are genuinely unlisted issuers, trusts and InvITs. **`credit_trend`/`credit_upgraded`/
+  `credit_x_score` remain thin and still should not be read as a measured edge**, but the cause
+  is now the universe (credit ratings are issued mostly against unlisted debt), not a resolver
+  defect. Same shape as `data-sources.md`'s `trendlyne_screener_discovery.py` incident (an
+  identifier column silently holding the wrong thing), with the same lesson: the bug hid because
+  the majority case happened to work. **Tell:** a fixed-width slice of a structured identifier
+  that does not line up with the identifier's own documented field boundaries -- the docstring
+  here stated the 4+2 layout correctly one line above the code that took 8 characters.
+- **Row-position slicing on a panel built by CONCATENATING PER-SYMBOL ARRAYS is a
+  cross-sectional split wearing a walk-forward's name — train and test cover the same dates,
+  and nothing errors.** Third instance of this family in this file (see the `drop_duplicates()`
+  splitter below and the `.iloc[-N:]` panel-slice above), and the first where the function was
+  *called* a walk-forward. `dl_engine.walk_forward_validate` took a `fold_size` ROW COUNT and
+  sliced `X[:train_end]` / `X[val_end:test_end]`, while its caller `train_lstm` built `X` by
+  `np.concatenate`-ing whole per-symbol arrays (`load_sequences_bounded` yields "in completion
+  order") and **discarded the loader's dates**, so row position carried no time information at
+  all. Measured live 2026-09-10 (50 symbols, 59,702 sequences, its own min_train=300/
+  fold_size=2000): fold 0 22.1% test-date overlap, fold 1 99.9%, **folds 2-27 100.0%**, train
+  and test both spanning 2021-03-31..2026-09-09, **zero shared symbols** — i.e. train on ~40
+  stocks, test on ~3 others on the same days. Daily equity direction is dominated by a
+  market-wide common factor, so this leaks hard.
+  **The tell was sitting in plain sight for weeks and nobody read it as one:** the engine
+  reported `roc_auc` 0.6459-0.6578 while every other engine on this platform ceilings at
+  0.52-0.55 (`measurement.md`) — this file's own "an ML score that grades far better than every
+  comparable engine is at least as suspicious as one that grades far worse", which it records
+  for `movement_predictor`'s AUC 0.894. An implausibly good number IS the diagnostic.
+  **Two cheap checks, either enough:** (1) for any train/test index pair, assert
+  `set(dates[train]) & set(dates[test]) == set()` — one line, and it is now asserted at runtime
+  inside `_date_folds`; (2) ask what the unit of the split is. If a function slices by row and
+  the panel has more than one row per date, the answer is "not time".
+  **Fix shape:** `purged_cv.make_purged_group_time_series_split` already existed for exactly
+  this and its own docstring names the hazard ("a row-count gap can split a trading day in
+  half"); `ml_ensemble.py`, `breakout_classifier.py` and `flyer_classifier.py` used it and
+  `dl_engine.py` did not. **Before writing a splitter, grep for `purged_cv` — the answer to
+  "how do I split a (symbol, date) panel" in this repo is already written.** Purge by the
+  LONGEST label the fold trains on, not the one being graded: `walk_forward_validate` grades
+  `dir_5d` but `_train_one_fold` also fits the 15d head on the same rows, so the gap is 15.
+  **Sibling defect in the same function, fixed the same day:** each fold was seeded from the
+  fully-trained model via `load_state_dict`, i.e. from weights already fit on that fold's own
+  test period. A walk-forward number means "trained only on the past"; folds must start from
+  fresh weights (at the SOURCE model's width, never today's `N_FEATURES`).
+  **And when you fix a validation methodology, fix the BASELINE in the same change** — the
+  stored champion AUC was produced the old way, so an honest candidate can never beat it and
+  the gate freezes by construction rather than on merit (the identical deadlock this file
+  records for `ml_ensemble.py`'s label switch). Tag metrics with the method that produced them
+  and skip the metric bar when the tag changes.
+
+
+- **A splitter that derives its time order from `drop_duplicates()` inherits FIRST-APPEARANCE
+  order, not chronological order — so it silently trains on the future the moment a caller hands
+  it an unsorted panel.** Found 2026-08-30 reviewing the new `purged_cv.py`. `split()` built
+  `unique_groups = list(pd.Series(groups).dropna().drop_duplicates())` and then treated
+  `unique_groups[:train_end]` as "before" and `unique_groups[test_start:test_end]` as "after".
+  Measured against a rotated 20-date panel: **2 of 3 folds trained on dates that post-date their
+  own validation fold** — the exact leak the class exists to prevent — with no exception, no
+  warning, and a perfectly normal-looking AUC. Production callers happen to sort
+  (`load_training_data` orders by `signal_date ASC`, and `_fit_stack`'s docstring states the
+  assumption), so this was never live; but it was an unguarded contract in the one module whose
+  entire purpose is temporal ordering, and any future caller passing a regime subset, a resampled
+  panel or a `groupby` result would have reintroduced it invisibly. Fixed by sorting the unique
+  groups (a no-op for already-chronological input, so production folds are unchanged) and raising
+  loudly on mutually non-comparable date types rather than falling back to insertion order.
+  **Tell:** any temporal splitter, embargo or as-of helper that establishes order from the
+  *arrival order of rows* rather than by sorting the key. Grep for `drop_duplicates()`,
+  `dict.fromkeys()`, `pd.unique()` and `set()` feeding anything that is subsequently sliced as if
+  it were a timeline. **Verify with a rotation, not a shuffle, and check EVERY fold** — a first
+  fold can look clean while later folds leak (the first probe here inspected only fold 0 and
+  reported "chronological order preserved", which was wrong).
+
+- **A purge/embargo width that is silently CLAMPED to fit a short panel is a leak that reports
+  itself as a successful CV.** Same review: `make_purged_group_time_series_split()` reduces the
+  split count to fit the requested gap, but if even the minimum split count does not fit it
+  quietly returns `gap = min(desired_gap, first_test_start - min_train_groups)` — a purge
+  narrower than the label horizon, i.e. validation rows whose labels overlap training. Measured:
+  at the **production panel size (78 distinct dates) every horizon 1–21 gets its full gap**, so
+  this is not firing today; at 40 dates a 21-day horizon clamps to 13 (an 8-day overlap) and at
+  40 dates a 15-day horizon clamps to 13. Now warns to **stderr** (not stdout — the subprocess
+  wrapper only inspects stderr, see `recurring-bugs.md`). The warning was checked for
+  DISCRIMINATION, not just for firing: silent on all 13 adequately-purged configurations, loud on
+  exactly the 2 clamped ones — per this file's own "a monitor that fires on EVERY run carries no
+  information" rule. **Tell:** any `min(desired, available)` on a safety margin. Clamping a
+  correctness parameter to whatever fits is not degradation, it is a silent correctness change,
+  and it must say so.
+- **AUC can be excellent and useless.** `flyer_classifier` holds AUC 0.81 with IC −0.041 (t=−9.02) — it measures *who* flies, not *when*.
+
+- **Grouping training rows by day when scoring reads one snapshot** is train/serve skew. Found in 3 files; `test_auc` 0.641 → 0.486 once honest.
+  **4th instance found 2026-08-20, and via the opposite tell — an impossibly HIGH score, not a low one.** `movement_predictor.py`'s `load_training_data()` correctly wraps features in `_lag_by_symbol()` before merging against the same-day `moved` label (a legitimate day-d-1-features-predict-day-d-label design), but `score()` — the live path that actually writes `technical_signals.movement_probability` — called `compute_ohlcv_features(ohlcv)` directly and skipped the lag, so every production score used the day's OWN just-closed OHLCV bar to "predict" that same day's own label. Found while re-grading the column against its real native target (a same-day volatility classifier, not a forward-return one) as part of a "which models actually add value" review: the resulting AUC was 0.894 — implausibly higher than any other engine graded anywhere in `measurement.md`, which was the tell that led to reading `score()` line by line rather than trusting the number. **Tell, generalized: an ML score that grades far better than every comparable engine in the same file is at least as suspicious as one that grades far worse — check the scoring path's feature composition against the training path's before trusting either.** Fixed by composing `score()` identically to `load_training_data()`; all pre-fix `movement_probability` values are tainted and were flagged as such in `measurement.md` rather than silently superseded.
+
+- **A flat cost-per-rebalance systematically reorders factors by turnover** and can invert the ranking. Two conclusions sign-flipped.
+
+- **A champion/challenger gate is meaningless if run-to-run seed noise is wider than the champion/challenger gap.** `regime_detector.train_hmm` fit one EM seed (`random_state=42`) and compared it to the incumbent on held-out likelihood. Measured 2026-08-11, the same retrain across 6 seeds scored 9.95 / 10.12 / 9.98 / 11.17 / 10.87 / 10.75 against an incumbent at 11.02 -- the spread straddles the champion, so the verdict was seed luck, not model quality. Use multiple restarts and pick the best by the **training** objective; picking by the holdout is selecting on the gate's own metric and turns its out-of-sample test in-sample. Before trusting any promotion decision, check the metric's run-to-run spread against the gap it is judging.
+
+- **An `InconsistentVersionWarning` on an unpickled estimator is not itself evidence of corruption -- verify before retraining on account of it.** The regime HMM's `StandardScaler` warned 1.9.0-under-1.8.0 for weeks; its `mean_`/`scale_`/`var_`/`n_samples_seen_` were all intact and `transform()` reproduced `(x-mean_)/scale_` to 0.000e+00. Retraining purely to silence it would have swapped a good model for a worse one. Check the fitted attributes and a round-trip transform first; retrain if they actually differ.
+
+- **A stale baseline can become permanently unbeatable** and block every honest retrain. See `model_promotion.staleness_override_applies`.
+
+- **A promotion gate that compares self-reported CV/held-out AUC cannot detect overfitting, and the better the overfit the harder the gate defends it.** Measured live 2026-08-21: the active ensemble (`model_registry` id=220) held the **best `cv_roc_auc` of all 59 registered ensemble candidates — 0.7664** — while the very same model's live output, graded against realized forward returns in `factor_edge_history`, scored `hit_auc` **0.493 / 0.512 / 0.535** at 1/5/21d. Chance. **`staleness_override_applies()` structurally cannot break this deadlock**, and that is the part worth remembering: it fires on `age_days>=7` AND `rejections>=10`, but a baseline that keeps *winning* on CV never accumulates rejections, so the safety valve built for "baseline is not real" never opens for the case where the baseline is not real *because it is overfit* rather than because a leak was since fixed. Fixed by adding `live_edge_verdict()`/`live_edge_is_unproven()` to `model_promotion.py`: when the incumbent's own realized reading fails `factor_edge.py`'s `_verdict()` bar (`|rank_IC|>=0.03 AND hit_AUC>=0.55`), its CV number stops being treated as evidence. **Tell:** any gate whose only input is a number the candidate computed about itself — ask what independent, realized measurement exists, and whether anything would ever contradict the self-report. **Two guards this needs and the obvious implementation omits:** "never graded" must NOT be read as "no edge" (otherwise a brand-new column overrides its own baseline on zero evidence), and a reading below the harness's own reliability floor (`MIN_DATES_RELIABLE=20`) must not count either.
+
+- **Changing a model's training label silently freezes its promotion gate forever, because CV AUC is only comparable within one target.** Same 2026-08-21 change: switching `ml_ensemble.py` from the `horizon` label (`signal_outcomes.outcome`, which for `signal_source='technical'` is 100% `path_barrier` — a max-favourable-excursion rule, **71.65% base rate**, median `return_pct` +3.69% on a *WIN/LOSS* label) to the cost-aware `triple_barrier` label (`signal_excursions.tb_label`, **40.07% base rate**) moved honest CV from **0.7664 to 0.5203**. The new number is not a regression — it lands exactly on the live realized AUC the platform had been reporting all along — but a gate comparing 0.5203 against a 0.7664 baseline rejects **every** candidate of the new label, permanently, **by construction rather than on merit**, and the registry then looks like "accuracy is stuck". **Tell:** any promotion/champion-challenger comparison where the two sides' metrics were computed against different targets, horizons, label definitions, or universes — the comparison is meaningless before it is unfavourable. Record the label on the registry row (this one only had it in free-text `notes`, which had to be regex-parsed back out) and skip the metric bar when it changes. Related, same family: `measurement.md`'s standing rule to **check `label_definition` before comparing any two win rates** — same defect, one layer up.
+
+- **A model whose training label is a max-favourable-excursion rule scores a high AUC for predicting volatility, not profit.** The `path_barrier` label above books a WIN when a name merely *traded through* a level intraday and gave it all back: `signal_outcomes` at h=15 reads 18,096 WIN / 2,476 LOSS (88%) at an average "return" of **+18.8%**, and at h=1 an average of +10.6% — impossible as a realized one-day return for a broad universe. Volatility is genuinely predictable from the ATR/vol features already in the matrix, so the model learns it and the CV number looks excellent. This is the same family as this file's existing "**AUC can be excellent and useless**" entry (`flyer_classifier`, AUC 0.81 / IC −0.041 — "it measures *who* flies, not *when*"), reached from the label side rather than the score side. **Tell:** a WIN/LOSS label whose own `return_pct` column has a median far from zero, or a base rate far from 50% that nobody chose deliberately — print `base_rate` and `median(return_pct)` for any label before training on it.
+
+- **An `int` passed as `cv=` to any sklearn meta-estimator silently means `StratifiedKFold`, which shuffles time order.** `_base_models` built six `CalibratedClassifierCV(..., cv=3)` and handed them to `_fit_stack`, whose outer loop is a `TimeSeriesSplit(gap=embargo)` — so the embargo was enforced on the stack and ignored by every base model's own calibration, which fit isotonic/sigmoid on folds containing future rows. Nothing errors and the code reads as deliberate. Pass the splitter object, not a count, anywhere a nested `cv=` sits inside a time-series harness — and grep for `cv=` as an int whenever you see `TimeSeriesSplit` in the same file.
+
+- **`getattr(est, 'estimator', est)` on a fitted `CalibratedClassifierCV` returns the UNFITTED prototype, not the fitted model — so a `hasattr(inner, 'booster_')`-style introspection silently finds nothing.** `ml_ensemble.py`'s `incremental_update()` (added 2026-08-14 to gate the warm-start path) looks for an LGBM base model this way to warm-start it; live-verified 2026-08-15 running it for real against production: "No LGBM model found in saved ensemble" on every base model, because `CalibratedClassifierCV.estimator` is the original constructor-time prototype (sklearn only clones-and-fits it internally). The real fitted booster lives at `calibrated_classifiers_[i].estimator.booster_` — and there are as many of them as `cv=` folds (3 here, matching the sibling finding above), not one, since each CV fold gets its own independently-fitted estimator. **Consequence: the entire incremental-warm-start feature was dead code in production since it was added** — always a safe no-op (falls through to `return False` before any write), not a corrupting bug, but silently inert exactly like this file's "monitoring blind spots" class.
+
+**CORRECTED 2026-08-19 — this entry's "deliberately not fixed further" line went stale; the detection itself WAS fixed, 2026-08-16 (`5261de8`), before this session, and it is more than a lookup fix.** Live code today: the loop correctly walks `calibrated_classifiers_[i].estimator` per CV fold (the fix this entry itself prescribes) — but the function does NOT warm-start unconditionally once it finds a booster. It now prints what it found (`"Found fitted LGBM '{name}' ({n_folds} calibrated fold(s))"`) and checks `os.environ.get('ML_INCREMENTAL_WARMSTART') != '1'` — defaulting OFF, returning `False`, writing nothing, unless that var is explicitly set. This is the exact shape the modeling-decision concern below calls for: an EXPLICIT no-op with a clear message, not an accidental one via broken introspection. `promote_or_register()`'s backup-before-overwrite pattern was also added for the day this does fire. **Still true and unchanged: nobody has gathered the backtest evidence to actually flip the gate on** — re-fitting `calibrators_` after a warm-start, or deciding to reuse them, is still an open modeling question, and `ML_INCREMENTAL_WARMSTART=1` should not be set without that evidence first. Found stale by a 2026-08-19 session that read this entry's prose instead of the live file before repeating the same "not fixed" claim in a fresh synthesis — the tell this repo's own MASTER RULE exists to catch, applied to a rule file this time instead of a code claim.

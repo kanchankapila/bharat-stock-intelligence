@@ -16,6 +16,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import investsights_announcement_intel_fetcher as ai
 from live_datasource_helpers import assert_non_empty_response, assert_looks_like_ticker
@@ -42,7 +43,7 @@ class TestInvestsightsAnnouncementIntelLiveDataSource:
         rows = ai.parse_rows("WEBELSOLAR", payload)
         assert rows, "no filing rows parsed from a real response"
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         ai.ensure_schema(con)
         assert ai.store_rows(con, rows) == len(rows)
 
@@ -65,7 +66,7 @@ class TestInvestsightsAnnouncementIntelLiveDataSource:
         rows = ai.parse_rows("WEBELSOLAR", payload)
         assert rows
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         ai.ensure_schema(con)
         ai.store_rows(con, rows)
         ai.store_rows(con, rows)  # re-store the identical batch

@@ -12,7 +12,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from db_compat import connect as db_connect
 
 # DB_PATH is handled centrally by db_compat via USE_POSTGRES env var.
-DB_PATH = os.getenv("DB_PATH", "database.sqlite")
+# Dead SQLite-era parameter, NOT a live file path. Every chatbot tool's `_connect(db_path)`
+# ignores its argument and returns db_compat.connect() (Postgres) -- see tests/chatbot/conftest.py,
+# which documents the same no-op. Retained only because ~30 agent.py call sites and the chatbot
+# test suite still thread the argument; the old "database.sqlite" default made a decommissioned
+# file look load-bearing and nearly caused it to be treated as live (AF-20260910-14).
+DB_PATH = os.getenv("DB_PATH", "<unused:postgres-only>")
 
 
 def _connect(db_path: str = None):
@@ -69,7 +74,19 @@ def get_news_sentiment(
             return _summarise(symbol, articles, source="news_sentiment_items")
 
     except Exception:
-        pass
+        # The rollback is what makes the fallback below reachable AT ALL on Postgres. psycopg2
+        # puts the connection in "current transaction is aborted, commands ignored until end of
+        # transaction block" after any failed statement, so a bare `pass` here guaranteed that
+        # the news_articles query underneath ALSO failed -- i.e. the resilience fallback was
+        # dead code, and get_news_sentiment silently returned empty instead of degrading.
+        # Safe to roll back here specifically: this function only reads, so there is no caller
+        # work to discard. Found 2026-08-16 running the suite against an empty database, where
+        # news_sentiment_items does not exist; against production it is masked, because the
+        # first query succeeds and the fallback is never needed.
+        try:
+            conn.rollback()
+        except Exception:
+            pass
 
     # ── Fallback: legacy news_articles ───────────────────────────────────────
     try:

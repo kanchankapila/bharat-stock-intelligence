@@ -31,8 +31,11 @@ Run:  python ml_ensemble.py
       python ml_ensemble.py --retrain-full      # discard saved model, retrain from scratch
       python ml_ensemble.py --min-samples 30
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import os, sys, json, math, datetime, argparse, pickle, shutil, warnings
+import re
 warnings.filterwarnings('ignore')
 
 import numpy as np
@@ -42,7 +45,12 @@ from db_compat import connect, read_df, use_postgres, ConnWrapper, now_utc_iso
 from as_of import as_of_join_sql
 from model_promotion import (clears_promotion_bar, rejections_since,
                               staleness_override_applies,
+                              live_edge_verdict, live_edge_is_unproven, promotion_decision,
                               DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
+try:
+    from purged_cv import make_purged_group_time_series_split
+except ImportError:  # package import path used by some pytest modules
+    from src.server.purged_cv import make_purged_group_time_series_split
 
 # Script-relative, not os.getcwd()-relative (2026-08-09): the old cwd-relative join silently
 # wrote/read the model at a doubled src/server/src/server/ml_models path when this script was
@@ -54,6 +62,19 @@ ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
 # Promotion bar: a retrain must beat the active model's purged-OOF CV AUC by this margin to go
 # live, else the current model is kept (rejected candidate is saved here + registered inactive).
 PROMOTION_MARGIN = 0.005
+# Where this ensemble's own output lands, and therefore which factor_edge_history reading tells
+# us whether the CURRENTLY ACTIVE model has any realized forward edge worth defending.
+# 2026-09-11: flipped to the __open_entry grades (panel-spec convention: enter at d+1's
+# open — the first price actually purchasable). The close-entry rows credit the untradeable
+# overnight gap and read optimistic (measured 2026-08-22, measurement-history.md: h=1 IC
+# more than halves under open entry). unified_ranker.load_engine_edge_verdicts already
+# reads open-entry; this constant was the last gate consumer still grading on the biased
+# convention. Missing open rows for a column => live_edge_verdict returns None =>
+# "ungraded" branch => CV alone cannot promote. That is the designed conservative path,
+# NOT a regression: grade the column with `python factor_edge.py --table technical_signals
+# --scores <cols> --entry open --persist` to make it answerable.
+LIVE_EDGE_TABLE  = 'technical_signals__open_entry'
+LIVE_EDGE_COLUMN = 'win_probability'
 CANDIDATE_PATH = ENSEMBLE_PATH + '.candidate'
 
 # Finding #19 (2026-07-28 audit): previously only {'BULL':1.0,'SIDEWAYS':0.0,'BEAR':-1.0} —
@@ -125,7 +146,7 @@ def _results_season_flag(dates: pd.Series) -> pd.Series:
 
 
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    X = pd.DataFrame(index=df.index)
+    feat: dict = {}
 
     def num(col, default):
         """Numeric Series for `col`, robust to the column being absent entirely. Production SQL
@@ -143,123 +164,133 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                 errors='coerce',
             ).fillna(default)
 
-    X['signal_score']  = num('signal_score', 5)
-    X['rsi']           = num('rsi', 50)
-    X['adx']           = num('adx', 20)
-    X['volume_ratio']  = num('volume_ratio', 1.0)
-    X['horizon_days']  = num('horizon_days', 15)
+    feat['signal_score']  = num('signal_score', 5)
+    feat['rsi']           = num('rsi', 50)
+    feat['adx']           = num('adx', 20)
+    feat['volume_ratio']  = num('volume_ratio', 1.0)
+    feat['horizon_days']  = num('horizon_days', 15)
 
     regime_raw  = df['nifty_regime'] if 'nifty_regime' in df.columns else pd.Series(['UNKNOWN'] * len(df), index=df.index)
-    X['regime'] = regime_raw.map(REGIME_MAP).fillna(0.0)
+    feat['regime'] = regime_raw.map(REGIME_MAP).fillna(0.0)
 
     cmp_   = num('cmp', np.nan)
     sma200 = num('sma200', np.nan)
-    X['sma200_dist'] = ((cmp_ - sma200) / sma200.replace(0, np.nan) * 100).fillna(0)
+    feat['sma200_dist'] = ((cmp_ - sma200) / sma200.replace(0, np.nan) * 100).fillna(0)
 
     # Interaction: score strength in current regime
-    X['score_x_regime'] = X['signal_score'] * X['regime']
+    feat['score_x_regime'] = feat['signal_score'] * feat['regime']
     # Rsi deviation from neutral zone
-    X['rsi_deviation']  = (X['rsi'] - 50).abs()
+    feat['rsi_deviation']  = (feat['rsi'] - 50).abs()
+
+    # ── Dynamic triple-barrier regime (vol_rank) ────────────────────────────────
+    # ATR percentile rank vs. trailing ~20 sessions (exit_labeler.compute_vol_rank,
+    # leak-free). Labels are generated with barriers that WIDEN in high-vol regimes and
+    # NARROW in low-vol ones, so a model that can see the same regime driver has a fair
+    # shot at learning "when the label class is predictably easier/harder". Supplied at
+    # training time by signal_outcomes⋈signal_excursions.se.vol_rank; at score time it is
+    # recomputed from stock_ohlcv in score_pending(). Default 0.5 = neutral (mid-barrier
+    # fallback from exit_labeler when history is insufficient), never stale-NULL.
+    feat['vol_rank'] = num('vol_rank', 0.5).clip(0, 1)
 
     # Market breadth — used as interaction term only (standalone was noise, tested 2026-06)
-    X['breadth_x_score'] = (
-        num('pct_above_200dma', 0.5).clip(0, 1) * X['signal_score']
+    feat['breadth_x_score'] = (
+        num('pct_above_200dma', 0.5).clip(0, 1) * feat['signal_score']
     )
-    X['breadth_thrust'] = num('adv_decline_ratio', 0.5).clip(0, 1)
+    feat['breadth_thrust'] = num('adv_decline_ratio', 0.5).clip(0, 1)
 
     # FII flow — normalized (Cr), negative = selling pressure
-    X['fii_3d_net'] = num('fii_3d_net', 0) / 10000.0
+    feat['fii_3d_net'] = num('fii_3d_net', 0) / 10000.0
 
     # Above SMA200 binary flag
-    X['above_sma200'] = num('above_sma200', 0).clip(0, 1)
+    feat['above_sma200'] = num('above_sma200', 0).clip(0, 1)
 
     # Distance from 52-week high (as % — negative means below the high)
     hi52 = num('fifty_two_week_high', np.nan)
-    X['dist_52w_high'] = ((cmp_ - hi52) / hi52.replace(0, np.nan) * 100).fillna(0)
+    feat['dist_52w_high'] = ((cmp_ - hi52) / hi52.replace(0, np.nan) * 100).fillna(0)
 
     # PCR — put/call ratio (stock level and market level)
-    X['pcr_oi']  = num('pcr_oi', 1.0)
-    X['pcr_vol'] = num('pcr_vol', 1.0)
+    feat['pcr_oi']  = num('pcr_oi', 1.0)
+    feat['pcr_vol'] = num('pcr_vol', 1.0)
 
     # Extended FII/DII flows (normalized to 10K Cr scale)
-    X['fii_10d_net'] = num('fii_10d_net', 0) / 10000.0
-    X['dii_3d_net']  = num('dii_3d_net', 0) / 10000.0
+    feat['fii_10d_net'] = num('fii_10d_net', 0) / 10000.0
+    feat['dii_3d_net']  = num('dii_3d_net', 0) / 10000.0
 
     # Delivery % (institutional conviction proxy, normalized to 0-1)
-    X['delivery_pct'] = num('delivery_pct', 50) / 100.0
+    feat['delivery_pct'] = num('delivery_pct', 50) / 100.0
 
     # Mutual fund holding — AMFI monthly disclosures via ET Markets
     # High MF ownership = institutional validation; rising MF holding = accumulation signal
-    X['mf_holding_pct']    = num('mf_holding_pct', 5.0).clip(0, 60) / 60.0
-    X['mf_fund_count_log'] = np.log1p(num('mf_fund_count', 0).clip(lower=0))
-    X['mf_chg_vs_prev']    = num('mf_chg_vs_prev', 0.0).clip(-5, 5)
-    X['mf_x_score']        = X['mf_holding_pct'] * X['signal_score']
+    feat['mf_holding_pct']    = num('mf_holding_pct', 5.0).clip(0, 60) / 60.0
+    feat['mf_fund_count_log'] = np.log1p(num('mf_fund_count', 0).clip(lower=0))
+    feat['mf_chg_vs_prev']    = num('mf_chg_vs_prev', 0.0).clip(-5, 5)
+    feat['mf_x_score']        = feat['mf_holding_pct'] * feat['signal_score']
 
     # Sector relative momentum
-    X['sector_ret_5d']  = num('sector_ret_5d', 0)
-    X['sector_ret_21d'] = num('sector_ret_21d', 0)
+    feat['sector_ret_5d']  = num('sector_ret_5d', 0)
+    feat['sector_ret_21d'] = num('sector_ret_21d', 0)
 
     # Sector-global benchmark correlation (sector return vs SP500/GOLD/CRUDE/DXY rolling 21d)
-    X['sector_global_corr_21d'] = num('sector_global_corr_21d', 0.0).clip(-1, 1)
-    X['corr_x_sector_ret']      = X['sector_global_corr_21d'] * X['sector_ret_5d']
+    feat['sector_global_corr_21d'] = num('sector_global_corr_21d', 0.0).clip(-1, 1)
+    feat['corr_x_sector_ret']      = feat['sector_global_corr_21d'] * feat['sector_ret_5d']
 
     # ── Fundamental factors: Quality / Value / Growth / Size (from stock_fundamentals) ──
     # Point-in-time caveat: stock_fundamentals is a current snapshot keyed by symbol (same
     # join as fifty_two_week_high above), so historical training rows see latest fundamentals
     # — mild look-ahead for slow quarterly metrics, fully leak-free at predict time. Price-
     # derived/fast fields are deliberately excluded (those would be real leakage).
-    X['piotroski']         = num('piotroski_f_score', 4)
-    X['debt_to_equity']    = num('debt_to_equity', 0.5).clip(0, 10)
-    X['operating_margins'] = num('operating_margins', 0)
-    X['return_on_equity']  = num('return_on_equity', 0)
-    X['revenue_growth']    = num('revenue_growth', 0)
-    X['earnings_growth']   = num('earnings_growth', 0)
-    X['earnings_yield']    = num('earnings_yield', 0)
-    X['price_to_book']     = num('price_to_book', 3).clip(0, 50)
-    X['log_market_cap']    = np.log1p(num('market_cap', 0).clip(lower=0))
+    feat['piotroski']         = num('piotroski_f_score', 4)
+    feat['debt_to_equity']    = num('debt_to_equity', 0.5).clip(0, 10)
+    feat['operating_margins'] = num('operating_margins', 0)
+    feat['return_on_equity']  = num('return_on_equity', 0)
+    feat['revenue_growth']    = num('revenue_growth', 0)
+    feat['earnings_growth']   = num('earnings_growth', 0)
+    feat['earnings_yield']    = num('earnings_yield', 0)
+    feat['price_to_book']     = num('price_to_book', 3).clip(0, 50)
+    feat['log_market_cap']    = np.log1p(num('market_cap', 0).clip(lower=0))
 
     # Interaction: delivery conviction × signal score
-    X['delivery_x_score'] = X['delivery_pct'] * X['signal_score']
+    feat['delivery_x_score'] = feat['delivery_pct'] * feat['signal_score']
 
     # ── Options-implied volatility (from stock_options_oi → iv_features.py) ──
     # iv_rank: where today's ATM IV sits in its trailing 252d range (0-1). Low IV-rank on a
     # breakout = cheap optionality / coiled move; high IV-rank = priced-in / fade risk.
     # iv_skew: put_iv − call_iv at ~25-delta. Positive = downside fear (crash hedging bid).
-    X['iv_rank'] = num('iv_rank', 0.5).clip(0, 1)
-    X['iv_skew'] = num('iv_skew', 0.0)
+    feat['iv_rank'] = num('iv_rank', 0.5).clip(0, 1)
+    feat['iv_skew'] = num('iv_skew', 0.0)
     # Interaction: a strong signal into cheap IV is the highest-quality entry
-    X['score_x_low_iv'] = X['signal_score'] * (1.0 - X['iv_rank'])
+    feat['score_x_low_iv'] = feat['signal_score'] * (1.0 - feat['iv_rank'])
 
     # Options call/put walls (from iv_features.compute_options_walls → technical_signals)
     # call_wall_dist_pct: % distance from spot to nearest peak call OI strike (resistance)
     # put_wall_dist_pct:  % distance from spot to nearest peak put OI strike (support)
     # near_expiry_gamma:  1.0 if ≤7 days to nearest expiry (gamma risk zone)
-    X['call_wall_dist_pct'] = num('call_wall_dist_pct', 5.0).clip(0, 20)
-    X['put_wall_dist_pct']  = num('put_wall_dist_pct',  5.0).clip(0, 20)
-    X['near_expiry_gamma']  = num('near_expiry_gamma',  0.0).clip(0, 1)
+    feat['call_wall_dist_pct'] = num('call_wall_dist_pct', 5.0).clip(0, 20)
+    feat['put_wall_dist_pct']  = num('put_wall_dist_pct',  5.0).clip(0, 20)
+    feat['near_expiry_gamma']  = num('near_expiry_gamma',  0.0).clip(0, 1)
     # Within 2% of call wall = resistance; within 2% = support zone
-    X['near_call_wall']     = (X['call_wall_dist_pct'] < 2.0).astype(np.float32)
-    X['near_put_wall']      = (X['put_wall_dist_pct']  < 2.0).astype(np.float32)
+    feat['near_call_wall']     = (feat['call_wall_dist_pct'] < 2.0).astype(np.float32)
+    feat['near_put_wall']      = (feat['put_wall_dist_pct']  < 2.0).astype(np.float32)
     # Strong signal near put wall = support-confirmed entry (highest-quality setup)
-    X['wall_x_score']       = (1.0 / (X['call_wall_dist_pct'].clip(lower=0.5))) * X['signal_score'] / 2.0
+    feat['wall_x_score']       = (1.0 / (feat['call_wall_dist_pct'].clip(lower=0.5))) * feat['signal_score'] / 2.0
 
     # Max pain distance: how far spot is from max pain strike
     # Negative = below max pain (put writers dominate → likely support)
     # Positive = above max pain (call writers dominate → likely resistance)
     cmp_vals = df['cmp'].where(df['cmp'] > 0, np.nan) if 'cmp' in df.columns else pd.Series(np.nan, index=df.index)
     max_pain_vals = num('max_pain', np.nan)
-    X['max_pain_dist_pct'] = ((cmp_vals - max_pain_vals) / max_pain_vals.replace(0, np.nan) * 100).fillna(0).clip(-20, 20)
-    X['below_max_pain'] = (X['max_pain_dist_pct'] < 0).astype(np.float32)
+    feat['max_pain_dist_pct'] = ((cmp_vals - max_pain_vals) / max_pain_vals.replace(0, np.nan) * 100).fillna(0).clip(-20, 20)
+    feat['below_max_pain'] = (feat['max_pain_dist_pct'] < 0).astype(np.float32)
 
     # ── Cross-sectional relative strength (from relative_strength.py) ──
     # Universe percentile of trailing return (0=worst, 1=best). Absolute momentum (sector_ret)
     # can't tell a stock leading the tape from one merely floating up with it; rank can.
-    X['rs_rank_21d'] = num('rs_rank_21d', 0.5).clip(0, 1)
-    X['rs_rank_63d'] = num('rs_rank_63d', 0.5).clip(0, 1)
+    feat['rs_rank_21d'] = num('rs_rank_21d', 0.5).clip(0, 1)
+    feat['rs_rank_63d'] = num('rs_rank_63d', 0.5).clip(0, 1)
 
     # 12-1 momentum (12-month return minus last month — academia-validated factor)
-    X['ret_12m_ex1m']    = num('ret_12m_ex1m', 0.0).clip(-60, 60)
-    X['momentum_x_score'] = X['ret_12m_ex1m'].clip(-30, 30) * X['signal_score'] / 10.0
+    feat['ret_12m_ex1m']    = num('ret_12m_ex1m', 0.0).clip(-60, 60)
+    feat['momentum_x_score'] = feat['ret_12m_ex1m'].clip(-30, 30) * feat['signal_score'] / 10.0
 
     # ── Analyst consensus (from analyst_estimates_history, AS-OF join) ──
     # analyst_buy_pct: fraction of bullish (BUY+OUTPERFORM) ratings — neutral default 0.5.
@@ -267,343 +298,368 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # target_upside_pct: consensus price target vs current price — forward-return signal.
     n_analysts = num('n_analysts', 0)
     n_buy      = num('buy_count', 0)
-    X['n_analysts_log']    = np.log1p(n_analysts)
-    X['analyst_buy_pct']   = (n_buy / n_analysts.replace(0, np.nan)).fillna(0.5).clip(0, 1)
-    X['target_upside_pct'] = ((num('target_mean', np.nan) - cmp_) / cmp_.replace(0, np.nan) * 100).fillna(0)
+    feat['n_analysts_log']    = np.log1p(n_analysts)
+    feat['analyst_buy_pct']   = (n_buy / n_analysts.replace(0, np.nan)).fillna(0.5).clip(0, 1)
+    feat['target_upside_pct'] = ((num('target_mean', np.nan) - cmp_) / cmp_.replace(0, np.nan) * 100).fillna(0)
+
 
     # ── MC Vitals: financial distress scores (AS-OF from proprietary_scores_history) ──
     # Altman Z-Score: > 2.99 = safe zone, 1.23–2.99 = grey zone, < 1.23 = distress zone.
     # Neutral default 2.0 = mid-grey (avoids penalising stocks not yet in 150-stock batch).
-    X['altman_z']        = num('altman_z', 2.0).clip(-5, 15)
-    X['altman_distress'] = (num('altman_z', 2.0) < 1.23).astype(np.float32)
+    feat['altman_z']        = num('altman_z', 2.0).clip(-5, 15)
+    feat['altman_distress'] = (num('altman_z', 2.0) < 1.23).astype(np.float32)
     # Ohlson O-Score: log-odds of failure; negative = lower failure probability.
     # Neutral default -2.0 (moderate safety, representative of a typical listed company).
-    X['ohlson_o']        = num('ohlson_o', -2.0).clip(-10, 5)
+    feat['ohlson_o']        = num('ohlson_o', -2.0).clip(-10, 5)
     # Graham Number: Graham's intrinsic-value estimate is an absolute price, not directly
     # usable by the model at the stock's own price scale -- expressed as % discount/premium
     # vs current price, same pattern as target_upside_pct above. Positive = undervalued
     # (price below Graham fair value); negative = overvalued. Neutral default 0.0 (fairly
     # valued) rather than dropping the row when either side of the ratio is missing/zero.
-    X['graham_discount_pct'] = ((num('graham_number', np.nan) - cmp_) / cmp_.replace(0, np.nan) * 100) \
+    feat['graham_discount_pct'] = ((num('graham_number', np.nan) - cmp_) / cmp_.replace(0, np.nan) * 100) \
         .fillna(0).clip(-100, 200)
     # DuPont ROE: MC's 3-way decomposed ROE (margin x turnover x leverage), distinct from
     # stock_fundamentals.return_on_equity (a different vendor/methodology) -- kept as its own
     # feature rather than merged, so the model can weigh them independently. Neutral default
     # 12.0 (a representative mid-range ROE for a typical listed company).
-    X['dupont_roe'] = num('dupont_score', 12.0).clip(-50, 100)
+    feat['dupont_roe'] = num('dupont_score', 12.0).clip(-50, 100)
 
     # ── Insider activity (from insider_features.py → technical_signals) ──
     # > 0.5 = promoters/directors accumulating (strong India signal: insider buying rarely occurs
     # without conviction). Neutral 0.5 = no data; never penalises uncovered stocks.
-    X['insider_buy_pct_90d'] = num('insider_buy_pct_90d', 0.5).clip(0, 1)
-    X['insider_x_score']     = X['insider_buy_pct_90d'] * X['signal_score']
+    feat['insider_buy_pct_90d'] = num('insider_buy_pct_90d', 0.5).clip(0, 1)
+    feat['insider_x_score']     = feat['insider_buy_pct_90d'] * feat['signal_score']
 
     # ── Intraday microstructure (from intraday_features.py → technical_signals) ──
     # opening_range_break: trend direction relative to first 30-min range.
     # 1.0 = upside breakout; -1.0 = breakdown; 0.0 = no data or inside range.
-    X['opening_range_break']  = num('opening_range_break',  0.0).clip(-1, 1)
+    feat['opening_range_break']  = num('opening_range_break',  0.0).clip(-1, 1)
     # vwap_deviation_pct: close vs session VWAP. Positive = institutional demand bid.
-    X['vwap_deviation_pct']   = num('vwap_deviation_pct',   0.0).clip(-10, 10)
+    feat['vwap_deviation_pct']   = num('vwap_deviation_pct',   0.0).clip(-10, 10)
     # first_hour_vol_share: front-loaded volume (institutional activity at the open).
-    X['first_hour_vol_share'] = num('first_hour_vol_share', 0.5).clip(0, 1)
+    feat['first_hour_vol_share'] = num('first_hour_vol_share', 0.5).clip(0, 1)
 
     # ── Anchored VWAP (from avwap_features.py) ──
     # avwap_deviation_pct: (close − 20d rolling VWAP) / vwap * 100.
     # Positive = price above multi-day supply/demand equilibrium (bullish structure).
     # Neutral default 0.0 (at equilibrium); capped at ±15% (extreme overextension).
-    X['avwap_deviation_pct'] = num('avwap_deviation_pct', 0.0).clip(-15, 15)
+    feat['avwap_deviation_pct'] = num('avwap_deviation_pct', 0.0).clip(-15, 15)
     # Interaction: strong signal with price already extended above AVWAP → mean-reversion risk
-    X['avwap_x_score'] = X['avwap_deviation_pct'] * X['signal_score'] / 10.0
+    feat['avwap_x_score'] = feat['avwap_deviation_pct'] * feat['signal_score'] / 10.0
+
+    # ── Microstructure signals (OFI, VPIN, VWAP z-score, relative volume) ──
+    # ofi_20: 20-period order flow imbalance (signed volume / total volume).
+    # Positive = buying pressure accumulation; negative = distribution.
+    # Normalized to [-1, 1]; neutral default 0.0.
+    feat['ofi_20'] = num('ofi_20', 0.0).clip(-1, 1)
+    # vpin_50: 50-period Volume-Synchronized Probability of Informed Trading proxy.
+    # Higher = more informed trading (toxic flow) → wider spreads, worse fills.
+    # Range [0, 1]; neutral default 0.3 (typical daily-bar background).
+    feat['vpin_50'] = num('vpin_50', 0.3).clip(0, 1)
+    # vwap_zscore_20: z-score of VWAP deviation over 20-day lookback.
+    # |z| > 2 = statistically extended from VWAP (mean-reversion risk).
+    # Neutral default 0.0 (at VWAP); capped at ±4.
+    feat['vwap_zscore_20'] = num('vwap_zscore_20', 0.0).clip(-4, 4)
+    # rel_vol_20: current volume / 20-day average volume.
+    # > 1.5 = unusually high activity (institutional); < 0.5 = low interest.
+    # Neutral default 1.0; capped at 5.0.
+    feat['rel_vol_20'] = num('rel_vol_20', 1.0).clip(0, 5)
+    # Interaction: high OFI × high relative volume = strong volume-confirmed buying
+    feat['ofi_x_relvol'] = feat['ofi_20'] * (feat['rel_vol_20'] - 1.0).clip(-1, 4) / 4.0
+    # Interaction: high VPIN × strong signal = potential adverse selection (fade)
+    feat['vpin_x_score'] = feat['vpin_50'] * feat['signal_score'] / 10.0
 
     # ── OI-change delta (from oi_delta_features.py) ──
     # oi_net_change_pct: day-over-day % change in total open interest (calls + puts).
     # > 0 = OI building (new directional positions) → confirms the current move.
     # < 0 = OI unwinding (covering) → potential reversal / reduced conviction.
     # Neutral default 0.0; capped at ±30% (1 SD ≈ 5%, rare spikes excluded).
-    X['oi_net_change_pct'] = num('oi_net_change_pct', 0.0).clip(-30, 30)
+    feat['oi_net_change_pct'] = num('oi_net_change_pct', 0.0).clip(-30, 30)
 
     # ── Earnings beat/miss history (from earnings_beat_features.py) ──
     # eps_beat_last_q: most recent quarter result vs consensus (+1 beat / 0 inline / -1 miss).
     # Neutral default 0 (inline/unknown). Sustained beats signal management credibility.
-    X['eps_beat_last_q']    = num('eps_beat_last_q',    0.0).clip(-1, 1)
+    feat['eps_beat_last_q']    = num('eps_beat_last_q',    0.0).clip(-1, 1)
     # eps_beat_streak_4q: consecutive beats over last 4 quarters (0-4).
-    X['eps_beat_streak_4q'] = num('eps_beat_streak_4q', 0.0).clip(0, 4)
+    feat['eps_beat_streak_4q'] = num('eps_beat_streak_4q', 0.0).clip(0, 4)
     # eps_miss_streak_4q: consecutive misses over last 4 quarters (0-4).
-    X['eps_miss_streak_4q'] = num('eps_miss_streak_4q', 0.0).clip(0, 4)
+    feat['eps_miss_streak_4q'] = num('eps_miss_streak_4q', 0.0).clip(0, 4)
     # eps_surprise_last_yr: actual EPS vs consensus for most recent annual period (%).
     # Positive = beat; negative = miss. Neutral default 0 (no data / inline).
     # Capped at ±30% (larger moves are typically data anomalies or tiny-cap stocks).
-    X['eps_surprise_last_yr'] = num('eps_surprise_last_yr', 0.0).clip(-30, 30)
+    feat['eps_surprise_last_yr'] = num('eps_surprise_last_yr', 0.0).clip(-30, 30)
     # eps_estimate_dispersion: (high − low) / avg for most recent annual EPS estimate.
     # Low = tight analyst consensus (high conviction); high = wide disagreement (uncertain).
     # Neutral default 0.2 (typical mid-cap dispersion); capped at 1.0.
-    X['eps_estimate_dispersion'] = num('eps_estimate_dispersion', 0.2).clip(0, 1)
+    feat['eps_estimate_dispersion'] = num('eps_estimate_dispersion', 0.2).clip(0, 1)
 
     # ── F&O Rollover (from fno_rollover_fetcher.py → technical_signals) ──
     # rollover_pct: next_month_OI / (near + next) × 100.
     # High rollover (>55%) near expiry = institutions staying long → bullish continuation.
     # cost_of_carry_ann: annualised futures basis (%). Positive = contango; negative = backwardation.
-    X['rollover_pct']      = num('rollover_pct',      40.0).clip(0, 100) / 100.0
-    X['cost_of_carry_ann'] = num('cost_of_carry_ann',  0.0).clip(-30, 30)
+    feat['rollover_pct']      = num('rollover_pct',      40.0).clip(0, 100) / 100.0
+    feat['cost_of_carry_ann'] = num('cost_of_carry_ann',  0.0).clip(-30, 30)
     # High rollover + strong upward carry → smart money positioned bullish
-    X['rollover_x_score']  = X['rollover_pct'] * X['signal_score']
+    feat['rollover_x_score']  = feat['rollover_pct'] * feat['signal_score']
 
     # ── Block Deals (from block_deal_fetcher.py → technical_signals) ──
     # block_deal_net_qty: buy_qty − sell_qty on NSE block-deal window.
     # Positive = accumulation; negative = distribution. Log-scaled to handle outliers.
     block_raw = df.get('block_deal_net_qty', pd.Series(0, index=df.index)).fillna(0).astype(float)
-    X['block_deal_net_log']   = np.sign(block_raw) * np.log1p(block_raw.abs())
-    X['block_deal_value_cr']  = num('block_deal_value_cr', 0.0).clip(0, 500) / 500.0
+    feat['block_deal_net_log']   = np.sign(block_raw) * np.log1p(block_raw.abs())
+    feat['block_deal_value_cr']  = num('block_deal_value_cr', 0.0).clip(0, 500) / 500.0
 
     # ── Trendlyne EPS TTM + DVM (from trendlyne_fundamentals_fetcher.py → technical_signals) ──
     # EPS growth is the single strongest fundamental momentum signal in literature.
     # YoY: consistent improvement in earnings power; QoQ: short-term acceleration.
     # Acceleration (delta-of-delta) captures inflection points missed by level/growth alone.
-    X['eps_ttm']          = num('eps_ttm',         5.0).clip(0, 500) / 500.0  # normalised level
-    X['eps_growth_yoy']   = num('eps_growth_yoy',  0.0).clip(-100, 200)       # %
-    X['eps_growth_qoq']   = num('eps_growth_qoq',  0.0).clip(-50, 100)        # %
-    X['eps_acceleration'] = num('eps_acceleration', 0.0).clip(-100, 100)       # Δ%YoY
+    feat['eps_ttm']          = num('eps_ttm',         5.0).clip(0, 500) / 500.0  # normalised level
+    feat['eps_growth_yoy']   = num('eps_growth_yoy',  0.0).clip(-100, 200)       # %
+    feat['eps_growth_qoq']   = num('eps_growth_qoq',  0.0).clip(-50, 100)        # %
+    feat['eps_acceleration'] = num('eps_acceleration', 0.0).clip(-100, 100)       # Δ%YoY
     # EPS momentum × signal conviction interaction
-    X['eps_yoy_x_score']  = X['eps_growth_yoy'].clip(-50, 100) * X['signal_score'] / 50.0
+    feat['eps_yoy_x_score']  = feat['eps_growth_yoy'].clip(-50, 100) * feat['signal_score'] / 50.0
 
     # Trendlyne DVM scores (0–100, higher = better on each dimension):
     #   dvm_durability = business quality / consistency
     #   dvm_valuation  = cheapness vs fair value (high = cheap)
     #   dvm_momentum   = price + earnings momentum
-    X['dvm_durability'] = num('dvm_durability', 50.0).clip(0, 100) / 100.0
-    X['dvm_valuation']  = num('dvm_valuation',  50.0).clip(0, 100) / 100.0
-    X['dvm_momentum']   = num('dvm_momentum',   50.0).clip(0, 100) / 100.0
+    feat['dvm_durability'] = num('dvm_durability', 50.0).clip(0, 100) / 100.0
+    feat['dvm_valuation']  = num('dvm_valuation',  50.0).clip(0, 100) / 100.0
+    feat['dvm_momentum']   = num('dvm_momentum',   50.0).clip(0, 100) / 100.0
     # High durability + high signal = confirmation from fundamentals
-    X['dvm_dur_x_score'] = X['dvm_durability'] * X['signal_score']
+    feat['dvm_dur_x_score'] = feat['dvm_durability'] * feat['signal_score']
 
     # PE TTM: valuation context — high P/E means market priced-in growth (risk of miss)
-    X['pe_ttm'] = num('pe_ttm', 25.0).clip(0, 100) / 100.0  # normalised; >100 capped
+    feat['pe_ttm'] = num('pe_ttm', 25.0).clip(0, 100) / 100.0  # normalised; >100 capped
 
     # ── PE/PB percentile ranks (from trendlyne_fundamentals_fetcher.py) ──
     # Percentile rank vs own 252d history is more predictive than raw P/E — it captures
     # whether the stock is cheap/expensive relative to its own historical norm.
-    X['pe_pct_rank_252d']  = num('pe_pct_rank_252d', 50.0).clip(0, 100) / 100.0
-    X['pe_vs_median_1yr']  = num('pe_vs_median_1yr', 0.0).clip(-50, 100)
-    X['pb_pct_rank_252d']  = num('pb_pct_rank_252d', 50.0).clip(0, 100) / 100.0
-    X['div_yield_ttm']     = num('div_yield_ttm', 1.0).clip(0, 10)
+    feat['pe_pct_rank_252d']  = num('pe_pct_rank_252d', 50.0).clip(0, 100) / 100.0
+    feat['pe_vs_median_1yr']  = num('pe_vs_median_1yr', 0.0).clip(-50, 100)
+    feat['pb_pct_rank_252d']  = num('pb_pct_rank_252d', 50.0).clip(0, 100) / 100.0
+    feat['div_yield_ttm']     = num('div_yield_ttm', 1.0).clip(0, 10)
     # Valuation headroom × conviction: cheap PE percentile + strong signal = better odds
-    X['pe_rank_x_score']   = (1.0 - X['pe_pct_rank_252d']) * X['signal_score']
+    feat['pe_rank_x_score']   = (1.0 - feat['pe_pct_rank_252d']) * feat['signal_score']
 
     # ── Trendlyne Advanced Technical (from trendlyne_adv_tech_fetcher.py) ──
     # MA and oscillator consensus from Trendlyne's computed signals (16 MAs, 9 oscillators).
-    X['ma_bull_frac']       = num('ma_bull_frac', 0.5).clip(0, 1)
-    X['osc_bull_frac']      = num('osc_bull_frac', 0.5).clip(0, 1)
-    X['adx_tl']             = num('adx_tl', 25.0).clip(0, 100) / 100.0
-    X['atr_pct_tl']         = num('atr_pct_tl', 2.0).clip(0, 10) / 10.0
-    X['mfi_tl']             = num('mfi_tl', 50.0).clip(0, 100) / 100.0
-    X['pivot_dist_pct_tl']  = num('pivot_dist_pct_tl', 0.0).clip(-10, 10)
-    X['delivery_avg_1m_tl'] = num('delivery_avg_1m_tl', 50.0).clip(0, 100) / 100.0
-    X['beta_1y_tl']         = num('beta_1y_tl', 1.0).clip(0, 3)
+    feat['ma_bull_frac']       = num('ma_bull_frac', 0.5).clip(0, 1)
+    feat['osc_bull_frac']      = num('osc_bull_frac', 0.5).clip(0, 1)
+    feat['adx_tl']             = num('adx_tl', 25.0).clip(0, 100) / 100.0
+    feat['atr_pct_tl']         = num('atr_pct_tl', 2.0).clip(0, 10) / 10.0
+    feat['mfi_tl']             = num('mfi_tl', 50.0).clip(0, 100) / 100.0
+    feat['pivot_dist_pct_tl']  = num('pivot_dist_pct_tl', 0.0).clip(-10, 10)
+    feat['delivery_avg_1m_tl'] = num('delivery_avg_1m_tl', 50.0).clip(0, 100) / 100.0
+    feat['beta_1y_tl']         = num('beta_1y_tl', 1.0).clip(0, 3)
     # Price momentum by horizon (Trendlyne computes vs Nifty-adjusted)
-    X['ret_1m_tl']          = num('ret_1m_tl', 0.0).clip(-30, 50)
-    X['ret_3m_tl']          = num('ret_3m_tl', 0.0).clip(-40, 80)
-    X['ret_6m_tl']          = num('ret_6m_tl', 0.0).clip(-50, 100)
-    X['ret_1y_tl']          = num('ret_1y_tl', 0.0).clip(-60, 150)
+    feat['ret_1m_tl']          = num('ret_1m_tl', 0.0).clip(-30, 50)
+    feat['ret_3m_tl']          = num('ret_3m_tl', 0.0).clip(-40, 80)
+    feat['ret_6m_tl']          = num('ret_6m_tl', 0.0).clip(-50, 100)
+    feat['ret_1y_tl']          = num('ret_1y_tl', 0.0).clip(-60, 150)
     # Strong trend + high MA alignment = momentum confirmation
-    X['ma_x_adx']           = X['ma_bull_frac'] * X['adx_tl']
+    feat['ma_x_adx']           = feat['ma_bull_frac'] * feat['adx_tl']
 
     # ── Analyst Consensus (from trendlyne_overview_fetcher.py) ──
     # Broker target upside is a direct measure of fundamental analyst conviction.
     # analyst_upside_pct > 20% = strong buy zone; < 0 = overvalued per consensus.
-    X['analyst_upside_pct'] = num('analyst_upside_pct', 0.0).clip(-50, 100)
-    X['analyst_count_log']  = np.log1p(num('analyst_count', 0).clip(lower=0))
+    feat['analyst_upside_pct'] = num('analyst_upside_pct', 0.0).clip(-50, 100)
+    feat['analyst_count_log']  = np.log1p(num('analyst_count', 0).clip(lower=0))
     # NOTE: distinct from analyst_buy_pct above (MC's analyst_estimates_history AS-OF join) —
     # this is Trendlyne's own reported consensus, a different source. Was accidentally assigned
     # the SAME column name as the MC feature, silently overwriting it (the MC value was computed
     # then immediately discarded on every row, since Trendlyne coverage is close to universal and
     # this line always ran last) — that bug meant the MC AS-OF analyst_buy_pct never reached the
     # model despite the E1 data-gap program shipping it. Keep both as separate features.
-    X['analyst_buy_pct_tl'] = num('analyst_buy_pct', 50.0).clip(0, 100) / 100.0
+    feat['analyst_buy_pct_tl'] = num('analyst_buy_pct', 50.0).clip(0, 100) / 100.0
     # Upside × signal conviction: high analyst target + strong signal = high-confidence entry
-    X['analyst_x_score']    = X['analyst_upside_pct'].clip(0, 100) * X['signal_score'] / 100.0
+    feat['analyst_x_score']    = feat['analyst_upside_pct'].clip(0, 100) * feat['signal_score'] / 100.0
+
 
     # ── Fundamental Profile (from trendlyne_overview_fetcher.py) ──
     # Quality factors: ROE/ROCE capture returns on capital; margins capture pricing power.
-    X['roe_annual']      = num('roe_annual', 15.0).clip(0, 100) / 100.0
-    X['roce_annual']     = num('roce_annual', 15.0).clip(0, 100) / 100.0
-    X['ebitda_margin']   = num('ebitda_margin', 15.0).clip(0, 60) / 60.0
-    X['np_margin']       = num('np_margin', 8.0).clip(-20, 40) / 40.0
-    X['promoter_pct']    = num('promoter_pct', 50.0).clip(0, 100) / 100.0
-    X['fii_pct_tl']      = num('fii_pct', 10.0).clip(0, 80) / 80.0
-    X['mf_pct_tl']       = num('mf_pct', 5.0).clip(0, 60) / 60.0
-    X['pledge_pct']      = num('pledge_pct', 5.0).clip(0, 100) / 100.0
-    X['promoter_chg_qoq'] = num('promoter_chg_qoq', 0.0).clip(-10, 10) / 10.0
-    X['fii_chg_qoq']      = num('fii_chg_qoq', 0.0).clip(-10, 10) / 10.0
-    X['mf_chg_qoq_tl']    = num('mf_chg_qoq', 0.0).clip(-10, 10) / 10.0
-    X['pledge_chg_qoq']   = num('pledge_chg_qoq', 0.0).clip(-10, 10) / 10.0
-    X['inst_chg_qoq']     = (X['fii_chg_qoq'] + X['mf_chg_qoq_tl']).clip(-2, 2)
+    feat['roe_annual']      = num('roe_annual', 15.0).clip(0, 100) / 100.0
+    feat['roce_annual']     = num('roce_annual', 15.0).clip(0, 100) / 100.0
+    feat['ebitda_margin']   = num('ebitda_margin', 15.0).clip(0, 60) / 60.0
+    feat['np_margin']       = num('np_margin', 8.0).clip(-20, 40) / 40.0
+    feat['promoter_pct']    = num('promoter_pct', 50.0).clip(0, 100) / 100.0
+    feat['fii_pct_tl']      = num('fii_pct', 10.0).clip(0, 80) / 80.0
+    feat['mf_pct_tl']       = num('mf_pct', 5.0).clip(0, 60) / 60.0
+    feat['pledge_pct']      = num('pledge_pct', 5.0).clip(0, 100) / 100.0
+    feat['promoter_chg_qoq'] = num('promoter_chg_qoq', 0.0).clip(-10, 10) / 10.0
+    feat['fii_chg_qoq']      = num('fii_chg_qoq', 0.0).clip(-10, 10) / 10.0
+    feat['mf_chg_qoq_tl']    = num('mf_chg_qoq', 0.0).clip(-10, 10) / 10.0
+    feat['pledge_chg_qoq']   = num('pledge_chg_qoq', 0.0).clip(-10, 10) / 10.0
+    feat['inst_chg_qoq']     = (feat['fii_chg_qoq'] + feat['mf_chg_qoq_tl']).clip(-2, 2)
     # Revenue and profit growth (quarterly YoY)
-    X['rev_growth_yoy_q'] = num('rev_growth_yoy_q', 0.0).clip(-50, 100)
-    X['np_growth_yoy_q']  = num('np_growth_yoy_q', 0.0).clip(-100, 200)
+    feat['rev_growth_yoy_q'] = num('rev_growth_yoy_q', 0.0).clip(-50, 100)
+    feat['np_growth_yoy_q']  = num('np_growth_yoy_q', 0.0).clip(-100, 200)
     # Quality × price: high-ROE stock with bullish signal = higher success probability
-    X['roe_x_score']     = X['roe_annual'] * X['signal_score']
+    feat['roe_x_score']     = feat['roe_annual'] * feat['signal_score']
     # Days since last dividend (freshness of income signal)
-    X['div_recency']     = np.log1p(num('days_since_dividend', 90).clip(0, 365))
-    X['last_div_log']    = np.log1p(num('last_dividend_amt', 0.0).clip(lower=0))
+    feat['div_recency']     = np.log1p(num('days_since_dividend', 90).clip(0, 365))
+    feat['last_div_log']    = np.log1p(num('last_dividend_amt', 0.0).clip(lower=0))
     # Forward-looking: ex-div in <7 days → mechanical price drop risk; board meeting soon → pre-earnings drift.
-    X['near_ex_div']     = (num('days_to_ex_div', 999).clip(0, 30) < 3).astype(float)
-    X['days_to_ex_div']  = num('days_to_ex_div', 30).clip(0, 30) / 30.0     # 0=today, 1=30d+
-    X['upcoming_div_yield'] = num('upcoming_div_pct', 0.0).clip(0, 15)      # % yield (attractive if >2%)
-    X['near_board_mtg']  = (num('days_to_board_meeting', 999).clip(0, 30) <= 5).astype(float)
+    feat['near_ex_div']     = (num('days_to_ex_div', 999).clip(0, 30) < 3).astype(float)
+    feat['days_to_ex_div']  = num('days_to_ex_div', 30).clip(0, 30) / 30.0     # 0=today, 1=30d+
+    feat['upcoming_div_yield'] = num('upcoming_div_pct', 0.0).clip(0, 15)      # % yield (attractive if >2%)
+    feat['near_board_mtg']  = (num('days_to_board_meeting', 999).clip(0, 30) <= 5).astype(float)
 
     # ── MC Pricefeed (from mc_pricefeed_fetcher.py) ──
     # 52-week position: near 52w high = momentum; near 52w low = reversal candidate
-    X['mc_52w_high_dist'] = num('mc_52w_high_dist_pct', -10.0).clip(-60, 0)      # dist from 52wH (≤0)
-    X['mc_52w_low_dist']  = num('mc_52w_low_dist_pct',  20.0).clip(0, 100)       # dist from 52wL (≥0)
-    X['mc_days_from_52wh']= np.log1p(num('mc_days_from_52wh', 90).clip(0, 365))  # log-days since peak
+    feat['mc_52w_high_dist'] = num('mc_52w_high_dist_pct', -10.0).clip(-60, 0)      # dist from 52wH (≤0)
+    feat['mc_52w_low_dist']  = num('mc_52w_low_dist_pct',  20.0).clip(0, 100)       # dist from 52wL (≥0)
+    feat['mc_days_from_52wh']= np.log1p(num('mc_days_from_52wh', 90).clip(0, 365))  # log-days since peak
     # CAGR: long-run price trend (quality of business compound growth)
-    X['mc_cagr_3y']       = num('mc_cagr_3y', 10.0).clip(-30, 100)
-    X['mc_cagr_5y']       = num('mc_cagr_5y', 10.0).clip(-30, 100)
+    feat['mc_cagr_3y']       = num('mc_cagr_3y', 10.0).clip(-30, 100)
+    feat['mc_cagr_5y']       = num('mc_cagr_5y', 10.0).clip(-30, 100)
     # Industry P/E and relative valuation (IND_PE = avg PE of entire sector)
-    X['mc_ind_pe']        = num('mc_ind_pe', 30.0).clip(5, 100) / 100.0
-    X['mc_pe_vs_ind']     = num('mc_pe_vs_ind', 0.0).clip(-0.5, 1.0)   # PE/IND_PE - 1
-    X['mc_consensus_pe']  = num('mc_consensus_pe', 25.0).clip(0, 100) / 100.0
+    feat['mc_ind_pe']        = num('mc_ind_pe', 30.0).clip(5, 100) / 100.0
+    feat['mc_pe_vs_ind']     = num('mc_pe_vs_ind', 0.0).clip(-0.5, 1.0)   # PE/IND_PE - 1
+    feat['mc_consensus_pe']  = num('mc_consensus_pe', 25.0).clip(0, 100) / 100.0
     # MA distance: price above/below 50 and 200 DMA
-    X['mc_ma50_dist']     = num('mc_ma50_dist_pct', 0.0).clip(-20, 20)
-    X['mc_ma200_dist']    = num('mc_ma200_dist_pct', 0.0).clip(-30, 30)
+    feat['mc_ma50_dist']     = num('mc_ma50_dist_pct', 0.0).clip(-20, 20)
+    feat['mc_ma200_dist']    = num('mc_ma200_dist_pct', 0.0).clip(-30, 30)
     # Delivery % 20-day average (institutional quality of trading)
-    X['mc_del_pct_20d']   = num('mc_del_pct_20d', 50.0).clip(0, 100) / 100.0
+    feat['mc_del_pct_20d']   = num('mc_del_pct_20d', 50.0).clip(0, 100) / 100.0
     # Volume ratio (today vs 20d avg): >1 = unusual activity
-    X['mc_vol_ratio_log'] = np.log1p(num('mc_vol_ratio', 1.0).clip(lower=0))
+    feat['mc_vol_ratio_log'] = np.log1p(num('mc_vol_ratio', 1.0).clip(lower=0))
     # Distance to upper circuit limit: near circuit = high volatility risk
-    X['mc_circuit_dist']  = num('mc_circuit_dist_pct', 10.0).clip(0, 20)
+    feat['mc_circuit_dist']  = num('mc_circuit_dist_pct', 10.0).clip(0, 20)
     # MA golden/death cross indicator: both above 200DMA = uptrend confirmation
-    X['mc_above_200dma']  = (X['mc_ma200_dist'] > 0).astype(float)
-    X['mc_above_50dma']   = (X['mc_ma50_dist'] > 0).astype(float)
+    feat['mc_above_200dma']  = (feat['mc_ma200_dist'] > 0).astype(float)
+    feat['mc_above_50dma']   = (feat['mc_ma50_dist'] > 0).astype(float)
     # 30DMA and 150DMA fill the gap between 50DMA and 200DMA (trend regime)
-    X['mc_ma30_dist']     = num('mc_ma30_dist_pct',  0.0).clip(-15, 15)
-    X['mc_ma150_dist']    = num('mc_ma150_dist_pct', 0.0).clip(-25, 25)
-    X['mc_above_150dma']  = (X['mc_ma150_dist'] > 0).astype(float)
+    feat['mc_ma30_dist']     = num('mc_ma30_dist_pct',  0.0).clip(-15, 15)
+    feat['mc_ma150_dist']    = num('mc_ma150_dist_pct', 0.0).clip(-25, 25)
+    feat['mc_above_150dma']  = (feat['mc_ma150_dist'] > 0).astype(float)
 
     # Delivery % at 3d vs 20d baseline: rising = institutional accumulation accelerating
-    X['mc_del_pct_3d']     = num('mc_del_pct_3d',    50.0).clip(0, 100) / 100.0
-    X['mc_del_acceleration']= num('mc_del_acceleration', 0.0).clip(-0.5, 1.0)  # (d3/d20-1)
+    feat['mc_del_pct_3d']     = num('mc_del_pct_3d',    50.0).clip(0, 100) / 100.0
+    feat['mc_del_acceleration']= num('mc_del_acceleration', 0.0).clip(-0.5, 1.0)  # (d3/d20-1)
     # F&O eligibility proxy: indices/large-cap = higher liquidity + institutional tracking
-    X['mc_fno_eligible']   = num('mc_fno_eligible', 0).clip(0, 1)
+    feat['mc_fno_eligible']   = num('mc_fno_eligible', 0).clip(0, 1)
 
     # 3-day and YTD returns: very recent price action + calendar momentum
-    X['mc_3d_return']      = num('mc_3d_return',  0.0).clip(-15, 15)
-    X['mc_ytd_return']     = num('mc_ytd_return', 0.0).clip(-50, 100)
+    feat['mc_3d_return']      = num('mc_3d_return',  0.0).clip(-15, 15)
+    feat['mc_ytd_return']     = num('mc_ytd_return', 0.0).clip(-50, 100)
 
     # Consensus earnings vs actual: positive = stock beating analyst consensus EPS (key signal)
-    X['mc_eps_vs_cons']    = num('mc_eps_vs_cons', 0.0).clip(-30, 30)       # % beat/miss
+    feat['mc_eps_vs_cons']    = num('mc_eps_vs_cons', 0.0).clip(-30, 30)       # % beat/miss
     # Forward PE discount: negative = analysts expect earnings growth (price looks cheap fwd)
-    X['mc_pe_fwd_discount']= num('mc_pe_fwd_discount', 0.0).clip(-0.5, 0.5)
+    feat['mc_pe_fwd_discount']= num('mc_pe_fwd_discount', 0.0).clip(-0.5, 0.5)
     # Consensus P/B: analyst-mean book value ratio (smoother than trailing PB)
-    X['mc_consensus_pb']   = num('mc_consensus_pb', 3.0).clip(0, 20) / 20.0
+    feat['mc_consensus_pb']   = num('mc_consensus_pb', 3.0).clip(0, 20) / 20.0
     # 10-year CAGR: very long-run quality signal (compound machines vs mean-reversion candidates)
-    X['mc_cagr_10y']       = num('mc_cagr_10y', 10.0).clip(-10, 50)
+    feat['mc_cagr_10y']       = num('mc_cagr_10y', 10.0).clip(-10, 50)
     # P/Cash earnings: less distorted by depreciation than P/E (capex-heavy sector signal)
-    X['mc_price_cash']     = num('mc_price_cash', 25.0).clip(0, 100) / 100.0
+    feat['mc_price_cash']     = num('mc_price_cash', 25.0).clip(0, 100) / 100.0
     # Interaction: EPS beat × signal score → conviction amplifier
-    X['mc_eps_x_score']    = X['mc_eps_vs_cons'].clip(0, 30) / 30.0 * X['signal_score']
+    feat['mc_eps_x_score']    = feat['mc_eps_vs_cons'].clip(0, 30) / 30.0 * feat['signal_score']
     # Consensus EPS (level): lower-than-market consensus = low bar to beat
-    X['mc_consensus_eps']  = num('mc_consensus_eps', 20.0).clip(0.1, 500)
-    X['mc_consensus_eps_log'] = np.log1p(X['mc_consensus_eps'])
+    feat['mc_consensus_eps']  = num('mc_consensus_eps', 20.0).clip(0.1, 500)
+    feat['mc_consensus_eps_log'] = np.log1p(feat['mc_consensus_eps'])
 
     # ── MC Chart Patterns (from mc_chart_patterns_fetcher.py) ──
     # MC's professional pattern analysis: bullish/bearish count from technical charts.
     # bull_count=3 means 3 active buy-side patterns; net_score=bull-bear.
-    X['mc_cp_bull_count'] = num('mc_cp_bull_count', 0).clip(0, 12) / 12.0    # normalised
-    X['mc_cp_bear_count'] = num('mc_cp_bear_count', 0).clip(0, 12) / 12.0
-    X['mc_cp_net_score']  = num('mc_cp_net_score', 0).clip(-12, 12) / 12.0
-    X['mc_cp_target_pct'] = num('mc_cp_avg_target_pct', 0.0).clip(0, 30)     # avg upside %
+    feat['mc_cp_bull_count'] = num('mc_cp_bull_count', 0).clip(0, 12) / 12.0    # normalised
+    feat['mc_cp_bear_count'] = num('mc_cp_bear_count', 0).clip(0, 12) / 12.0
+    feat['mc_cp_net_score']  = num('mc_cp_net_score', 0).clip(-12, 12) / 12.0
+    feat['mc_cp_target_pct'] = num('mc_cp_avg_target_pct', 0.0).clip(0, 30)     # avg upside %
     # Pattern conviction × signal conviction: overlapping bull signals
-    X['mc_cp_x_score']    = X['mc_cp_net_score'].clip(lower=0) * X['signal_score']
+    feat['mc_cp_x_score']    = feat['mc_cp_net_score'].clip(lower=0) * feat['signal_score']
 
     # ── Trendlyne Price Analysis (from trendlyne_price_analysis_fetcher.py) ──
     # Cross-sectional alpha: outperforming Nifty suggests stock-specific momentum
-    X['tl_alpha_nifty_1m'] = num('tl_vs_nifty_1m', 0.0).clip(-20, 30)
-    X['tl_alpha_nifty_3m'] = num('tl_vs_nifty_3m', 0.0).clip(-30, 50)
-    X['tl_alpha_nifty_6m'] = num('tl_vs_nifty_6m', 0.0).clip(-40, 70)
-    X['tl_alpha_ind_1m']   = num('tl_vs_ind_1m',   0.0).clip(-20, 30)
-    X['tl_alpha_ind_3m']   = num('tl_vs_ind_3m',   0.0).clip(-30, 50)
+    feat['tl_alpha_nifty_1m'] = num('tl_vs_nifty_1m', 0.0).clip(-20, 30)
+    feat['tl_alpha_nifty_3m'] = num('tl_vs_nifty_3m', 0.0).clip(-30, 50)
+    feat['tl_alpha_nifty_6m'] = num('tl_vs_nifty_6m', 0.0).clip(-40, 70)
+    feat['tl_alpha_ind_1m']   = num('tl_vs_ind_1m',   0.0).clip(-20, 30)
+    feat['tl_alpha_ind_3m']   = num('tl_vs_ind_3m',   0.0).clip(-30, 50)
     # Monthly seasonality: 5-year avg return for current calendar month
-    X['tl_seasonality']   = num('tl_seasonal_month_5y', 0.0).clip(-10, 20)
+    feat['tl_seasonality']   = num('tl_seasonal_month_5y', 0.0).clip(-10, 20)
     # Distance from quarterly high/low
-    X['tl_3m_high_dist']  = num('tl_dist_3m_high_pct', -5.0).clip(-40, 0)   # ≤0
-    X['tl_3m_low_dist']   = num('tl_dist_3m_low_pct',  10.0).clip(0, 80)    # ≥0
+    feat['tl_3m_high_dist']  = num('tl_dist_3m_high_pct', -5.0).clip(-40, 0)   # ≤0
+    feat['tl_3m_low_dist']   = num('tl_dist_3m_low_pct',  10.0).clip(0, 80)    # ≥0
     # Alpha persistence: positive 3M alpha + positive seasonal = sustained momentum
-    X['tl_alpha_x_season'] = X['tl_alpha_nifty_3m'].clip(0, 50) * X['tl_seasonality'].clip(0, 20) / 50.0
+    feat['tl_alpha_x_season'] = feat['tl_alpha_nifty_3m'].clip(0, 50) * feat['tl_seasonality'].clip(0, 20) / 50.0
 
     # ── NiftyTrader F&O Dashboard (from nt_dashboard_fetcher.py) ──
     # Max pain: price gravitates toward max_pain near expiry (market-maker pinning effect).
     # Negative dist = price below max pain = upward pull; large positive = sell pressure expected.
-    X['nt_max_pain_dist'] = num('nt_max_pain_dist_pct', 0.0).clip(-15, 15)
-    X['nt_near_max_pain'] = (X['nt_max_pain_dist'].abs() < 3.0).astype(float)  # within 3% = gravitational zone
+    feat['nt_max_pain_dist'] = num('nt_max_pain_dist_pct', 0.0).clip(-15, 15)
+    feat['nt_near_max_pain'] = (feat['nt_max_pain_dist'].abs() < 3.0).astype(float)  # within 3% = gravitational zone
     # OI direction: (puts_Δoi - calls_Δoi) / total_oi. Positive = put side building (bearish).
     # Negative = calls unwound faster than puts (bullish smart-money signal).
-    X['nt_oi_direction']  = num('nt_oi_direction', 0.0).clip(-0.3, 0.3)
+    feat['nt_oi_direction']  = num('nt_oi_direction', 0.0).clip(-0.3, 0.3)
     # PCR: <1 = more call OI than put OI (often contrarian bullish when extreme)
-    X['nt_pcr']           = num('nt_pcr', 1.0).clip(0, 3)
+    feat['nt_pcr']           = num('nt_pcr', 1.0).clip(0, 3)
     # Option volume: log-scaled activity — high volume = event anticipation / institutional move
-    X['nt_option_vol']    = num('nt_option_volume_log', 0.0).clip(0, 25)
+    feat['nt_option_vol']    = num('nt_option_volume_log', 0.0).clip(0, 25)
     # Interaction: bearish OI direction weakening an already-low signal score = conviction short
-    X['nt_oi_x_score']    = X['nt_oi_direction'] * X['signal_score']  # negative = bearish pile-on
+    feat['nt_oi_x_score']    = feat['nt_oi_direction'] * feat['signal_score']  # negative = bearish pile-on
 
     # ── Historical Volatility (from hv_features.py, computed on stock_ohlcv) ──
     # Low HV = calm stock, fewer false breakouts. iv_hv_ratio > 1 = options overpriced vs realized.
-    X['hv_20d']           = num('hv_20d', 20.0).clip(5, 80) / 80.0
-    X['hv_60d']           = num('hv_60d', 22.0).clip(5, 80) / 80.0
-    X['hv_ratio_60_20']   = (num('hv_60d', 22.0) / num('hv_20d', 20.0).replace(0, np.nan)).fillna(1.0).clip(0.5, 2.0)
-    X['iv_hv_ratio']      = num('iv_hv_ratio', 1.0).clip(0, 5) / 5.0
+    feat['hv_20d']           = num('hv_20d', 20.0).clip(5, 80) / 80.0
+    feat['hv_60d']           = num('hv_60d', 22.0).clip(5, 80) / 80.0
+    feat['hv_ratio_60_20']   = (num('hv_60d', 22.0) / num('hv_20d', 20.0).replace(0, np.nan)).fillna(1.0).clip(0.5, 2.0)
+    feat['iv_hv_ratio']      = num('iv_hv_ratio', 1.0).clip(0, 5) / 5.0
 
     # ── Analyst estimate revision (from analyst_revision.py) ──
     # Upward EPS revisions predict sustained demand (institutional mandate buying). Top quant factor.
-    X['eps_rev_3m']       = num('eps_revision_3m_pct', 0.0).clip(-30, 30)
-    X['target_rev_3m']    = num('target_revision_3m_pct', 0.0).clip(-20, 20)
-    X['analyst_chg']      = num('analyst_count_chg', 0).clip(-5, 5) / 5.0
+    feat['eps_rev_3m']       = num('eps_revision_3m_pct', 0.0).clip(-30, 30)
+    feat['target_rev_3m']    = num('target_revision_3m_pct', 0.0).clip(-20, 20)
+    feat['analyst_chg']      = num('analyst_count_chg', 0).clip(-5, 5) / 5.0
     # Interaction: rising estimates + strong score = high-conviction long
-    X['eps_rev_x_score']  = X['eps_rev_3m'].clip(0, 30) / 30.0 * X['signal_score']
+    feat['eps_rev_x_score']  = feat['eps_rev_3m'].clip(0, 30) / 30.0 * feat['signal_score']
+
 
     # ── Sector-relative RS (from relative_strength.py extension) ──
     # Distinguishes sector leaders from laggards — absolute RS can't see this.
-    X['rs_vs_sector_21d'] = num('rs_vs_sector_21d', 0.0).clip(-15, 15)
-    X['rs_vs_sector_63d'] = num('rs_vs_sector_63d', 0.0).clip(-20, 20)
-    X['sector_leader']    = (X['rs_vs_sector_21d'] > 2.0).astype(float)
+    feat['rs_vs_sector_21d'] = num('rs_vs_sector_21d', 0.0).clip(-15, 15)
+    feat['rs_vs_sector_63d'] = num('rs_vs_sector_63d', 0.0).clip(-20, 20)
+    feat['sector_leader']    = (feat['rs_vs_sector_21d'] > 2.0).astype(float)
 
     # ── Surveillance risk flags (from asm_gsm_fetcher.py) ──
     # ASM = 100% margin → institutional forced selling; GSM stage 5-6 = near-untradeable.
-    X['asm_flag']         = num('asm_flag', 0).clip(0, 1)
-    X['gsm_severity']     = num('gsm_stage', 0).clip(0, 6) / 6.0
-    X['surveillance_risk'] = X['asm_flag'] + X['gsm_severity']  # 0=clean, >0=risk
+    feat['asm_flag']         = num('asm_flag', 0).clip(0, 1)
+    feat['gsm_severity']     = num('gsm_stage', 0).clip(0, 6) / 6.0
+    feat['surveillance_risk'] = feat['asm_flag'] + feat['gsm_severity']  # 0=clean, >0=risk
 
     # ── Commodity / FX sensitivity (from commodity_sensitivity.py) ──
     # Sector-routing signal: crude_corr>0.4 = oil/aviation; dxy_corr<-0.3 = IT exporters.
-    X['crude_corr']       = num('crude_corr_90d', 0.0).clip(-1, 1)
-    X['gold_corr']        = num('gold_corr_90d', 0.0).clip(-1, 1)
-    X['dxy_corr']         = num('dxy_corr_90d', 0.0).clip(-1, 1)
-    X['sp500_corr']       = num('sp500_corr_90d', 0.0).clip(-1, 1)
+    feat['crude_corr']       = num('crude_corr_90d', 0.0).clip(-1, 1)
+    feat['gold_corr']        = num('gold_corr_90d', 0.0).clip(-1, 1)
+    feat['dxy_corr']         = num('dxy_corr_90d', 0.0).clip(-1, 1)
+    feat['sp500_corr']       = num('sp500_corr_90d', 0.0).clip(-1, 1)
 
     # ── Broker recommendation events (from mc_broker_reco_fetcher.py) ──
     # Fresh named-broker BUY initiations drive institutional mandate demand for 2-4 weeks.
-    X['broker_buy_7d']    = num('mc_broker_buy_7d', 0).clip(0, 10) / 10.0
-    X['broker_sell_7d']   = num('mc_broker_sell_7d', 0).clip(0, 10) / 10.0
-    X['broker_net_7d']    = X['broker_buy_7d'] - X['broker_sell_7d']
-    X['broker_upside']    = num('mc_broker_upside', 0.0).clip(0, 60) / 60.0
+    feat['broker_buy_7d']    = num('mc_broker_buy_7d', 0).clip(0, 10) / 10.0
+    feat['broker_sell_7d']   = num('mc_broker_sell_7d', 0).clip(0, 10) / 10.0
+    feat['broker_net_7d']    = feat['broker_buy_7d'] - feat['broker_sell_7d']
+    feat['broker_upside']    = num('mc_broker_upside', 0.0).clip(0, 60) / 60.0
     # Interaction: high upside target + good signal score = conviction
-    X['broker_x_score']   = X['broker_upside'] * X['signal_score']
+    feat['broker_x_score']   = feat['broker_upside'] * feat['signal_score']
 
     # ── Market-level macro regime (from global_macro_fetcher + preopen_fetcher) ──
     # These are cross-sectional constants (same for all stocks) but encode the risk regime.
-    X['gift_nifty_pct']   = num('gift_nifty_pct', 0.0).clip(-3, 3)
-    X['nifty_gex']        = num('nifty_gex', 0.0).clip(-50, 50) / 50.0  # dealer GEX in ₹B
-    X['nifty_long_gamma'] = (X['nifty_gex'] > 0).astype(float)  # 1=mean-rev, 0=trend
-    X['india_10y']        = num('india_10y', 6.5).clip(5, 9) / 9.0
-    X['india_us_spread']  = num('india_us_spread', 2.0).clip(0, 5) / 5.0
-    X['high_impact_3d']   = num('high_impact_3d', 0).clip(0, 5) / 5.0  # macro event risk
-    X['asia_sentiment']   = num('asia_sentiment', 0.0).clip(-3, 3)
-    X['global_risk']      = num('global_risk', 0.0).clip(-3, 3)
-    X['risk_on']          = (X['global_risk'] > 0).astype(float)  # 1=global risk-on
+    feat['gift_nifty_pct']   = num('gift_nifty_pct', 0.0).clip(-3, 3)
+    feat['nifty_gex']        = num('nifty_gex', 0.0).clip(-50, 50) / 50.0  # dealer GEX in ₹B
+    feat['nifty_long_gamma'] = (feat['nifty_gex'] > 0).astype(float)  # 1=mean-rev, 0=trend
+    feat['india_10y']        = num('india_10y', 6.5).clip(5, 9) / 9.0
+    feat['india_us_spread']  = num('india_us_spread', 2.0).clip(0, 5) / 5.0
+    feat['high_impact_3d']   = num('high_impact_3d', 0).clip(0, 5) / 5.0  # macro event risk
+    feat['asia_sentiment']   = num('asia_sentiment', 0.0).clip(-3, 3)
+    feat['global_risk']      = num('global_risk', 0.0).clip(-3, 3)
+    feat['risk_on']          = (feat['global_risk'] > 0).astype(float)  # 1=global risk-on
     # Interaction: risk-on regime × bullish signal = higher conviction
-    X['risk_x_score']     = X['global_risk'].clip(0, 3) / 3.0 * X['signal_score']
+    feat['risk_x_score']     = feat['global_risk'].clip(0, 3) / 3.0 * feat['signal_score']
     # Indian ADR overnight bullishness (0-100 → 0-1). >60 = institutional risk-on for India.
-    X['adrs_bullish']     = num('adrs_bullish_pct', 50.0).clip(0, 100) / 100.0
+    feat['adrs_bullish']     = num('adrs_bullish_pct', 50.0).clip(0, 100) / 100.0
 
     # Market Mood Index (mmi_fetcher.py → macro_asset_prices INDIA_MMI, 0-100 fear/greed).
     # A raw market-level scalar didn't help the per-stock model (see india_vix, below), so MMI
@@ -611,162 +667,163 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # own signal; (2) mmi_extreme_fear — contrarian flag, extreme-fear days historically precede
     # bounces. Candidate features: the ensemble.pkl promotion bar keeps them out of production
     # unless they improve held-out AUC. Neutral default 50 for the pre-collection history.
-    X['mmi_norm']         = num('india_mmi', 50.0).clip(0, 100) / 100.0
-    X['mmi_x_score']      = X['mmi_norm'] * X['signal_score']
-    X['mmi_extreme_fear'] = (X['mmi_norm'] < 0.30).astype(float)
+    feat['mmi_norm']         = num('india_mmi', 50.0).clip(0, 100) / 100.0
+    feat['mmi_x_score']      = feat['mmi_norm'] * feat['signal_score']
+    feat['mmi_extreme_fear'] = (feat['mmi_norm'] < 0.30).astype(float)
     # USD/INR daily return — negative = INR strengthening (bullish for importers, bearish for IT).
-    X['usdinr_ret']       = num('usdinr_ret_1d', 0.0).clip(-2, 2)
+    feat['usdinr_ret']       = num('usdinr_ret_1d', 0.0).clip(-2, 2)
     # Leading Asian indices (close before India opens) — strongest same-day predictor.
-    X['nikkei_ret']       = num('nikkei_ret_1d', 0.0).clip(-8, 8)
-    X['hangseng_ret']     = num('hangseng_ret_1d', 0.0).clip(-8, 8)
+    feat['nikkei_ret']       = num('nikkei_ret_1d', 0.0).clip(-8, 8)
+    feat['hangseng_ret']     = num('hangseng_ret_1d', 0.0).clip(-8, 8)
     # Composite Asia+ADR risk signal
-    X['asia_adr_risk']    = (X['asia_sentiment'] + X['adrs_bullish'] * 2 - 1).clip(-3, 3)
+    feat['asia_adr_risk']    = (feat['asia_sentiment'] + feat['adrs_bullish'] * 2 - 1).clip(-3, 3)
 
     # ── Earnings calendar & PEAD (from mc_earnings_fetcher.py) ──
     # Pre-earnings: stocks drift up avg 2-3% in 5 days before results (Jegadeesh-Livnat).
     # Post-earnings PEAD: BP category stocks drift up 60 days; NT drift down (Bernard 1992).
-    X['days_to_results']    = num('days_to_next_results', 30).clip(0, 30) / 30.0
-    X['near_results']       = (num('days_to_next_results', 30) <= 5).astype(float)
-    X['cat_yoy']            = num('earnings_category_yoy', 0).clip(-2, 2) / 2.0
-    X['cat_qoq']            = num('earnings_category_qoq', 0).clip(-2, 2) / 2.0
-    X['np_growth_yoy']      = num('earnings_np_growth_yoy', 0.0).clip(-50, 100) / 100.0
-    X['np_growth_qoq']      = num('earnings_np_growth_qoq', 0.0).clip(-50, 100) / 100.0
-    X['shocker_flag']       = num('earnings_shocker_flag', 0).clip(0, 1)
-    X['shocker_gain']       = num('earnings_shocker_gain', 0.0).clip(0, 200) / 200.0
+    feat['days_to_results']    = num('days_to_next_results', 30).clip(0, 30) / 30.0
+    feat['near_results']       = (num('days_to_next_results', 30) <= 5).astype(float)
+    feat['cat_yoy']            = num('earnings_category_yoy', 0).clip(-2, 2) / 2.0
+    feat['cat_qoq']            = num('earnings_category_qoq', 0).clip(-2, 2) / 2.0
+    feat['np_growth_yoy']      = num('earnings_np_growth_yoy', 0.0).clip(-50, 100) / 100.0
+    feat['np_growth_qoq']      = num('earnings_np_growth_qoq', 0.0).clip(-50, 100) / 100.0
+    feat['shocker_flag']       = num('earnings_shocker_flag', 0).clip(0, 1)
+    feat['shocker_gain']       = num('earnings_shocker_gain', 0.0).clip(0, 200) / 200.0
     # beat_pct: % above/below analyst consensus. Positive=beat, negative=miss.
-    X['mc_beat_pct']        = num('mc_eps_vs_cons', 0.0).clip(-100, 200) / 100.0
-    X['beat_magnitude']     = X['mc_beat_pct'].clip(0, 2)  # how much beat (0 if miss)
-    X['miss_magnitude']     = (-X['mc_beat_pct']).clip(0, 1)  # how much miss (0 if beat)
+    feat['mc_beat_pct']        = num('mc_eps_vs_cons', 0.0).clip(-100, 200) / 100.0
+    feat['beat_magnitude']     = feat['mc_beat_pct'].clip(0, 2)  # how much beat (0 if miss)
+    feat['miss_magnitude']     = (-feat['mc_beat_pct']).clip(0, 1)  # how much miss (0 if beat)
     # Turnaround stocks: high volatility + mean-reversion opportunity
-    X['positive_turnaround'] = num('positive_turnaround', 0).clip(0, 1)
-    X['negative_turnaround'] = num('negative_turnaround', 0).clip(0, 1)
+    feat['positive_turnaround'] = num('positive_turnaround', 0).clip(0, 1)
+    feat['negative_turnaround'] = num('negative_turnaround', 0).clip(0, 1)
     # Market earnings breadth: below 0.5 means majority of stocks disappointing
-    X['earnings_breadth']   = num('high_impact_3d', 0.5).clip(0, 1)  # reuse macro slot if needed
+    feat['earnings_breadth']   = num('high_impact_3d', 0.5).clip(0, 1)  # reuse macro slot if needed
     # Interaction: BP category + strong signal = highest PEAD conviction
-    X['pead_signal']        = X['cat_yoy'].clip(0, 1) * X['signal_score']
+    feat['pead_signal']        = feat['cat_yoy'].clip(0, 1) * feat['signal_score']
 
     # ── Sector earnings quality (from mc_sector_earnings via JOIN) ──
     # Stock in sector where NP growing >15% YoY = earnings tailwind for all stocks in that sector.
-    X['sector_np_yoy']      = num('sector_np_growth_yoy', 0.0).clip(-20, 40) / 40.0
-    X['sector_np_qoq']      = num('sector_np_growth_qoq', 0.0).clip(-20, 30) / 30.0
-    X['sector_rev_yoy']     = num('sector_rev_growth_yoy', 0.0).clip(-10, 20) / 20.0
-    X['sector_earnings_up'] = (X['sector_np_yoy'] > 0.25).astype(float)  # sector NP>10% tailwind
+    feat['sector_np_yoy']      = num('sector_np_growth_yoy', 0.0).clip(-20, 40) / 40.0
+    feat['sector_np_qoq']      = num('sector_np_growth_qoq', 0.0).clip(-20, 30) / 30.0
+    feat['sector_rev_yoy']     = num('sector_rev_growth_yoy', 0.0).clip(-10, 20) / 20.0
+    feat['sector_earnings_up'] = (feat['sector_np_yoy'] > 0.25).astype(float)  # sector NP>10% tailwind
 
     # ── Sector F&O sentiment (from sector_fo_sentiment via AS-OF JOIN) ──
     # sector_pcr > 1 = net put buying (bearish hedging); < 0.8 = call-heavy (bullish bias).
     # Neutral default 1.0 = balanced. Log of sector OI captures flow volume intensity.
     raw_pcr = num('sector_pcr', 1.0).clip(0.3, 3.0)
-    X['sector_pcr_norm']     = (raw_pcr - 1.0).clip(-1, 1)  # centred: negative = bullish flow
-    X['sector_oi_log']       = np.log1p(num('sector_call_oi', 0).clip(lower=0) +
+    feat['sector_pcr_norm']     = (raw_pcr - 1.0).clip(-1, 1)  # centred: negative = bullish flow
+    feat['sector_oi_log']       = np.log1p(num('sector_call_oi', 0).clip(lower=0) +
                                          num('sector_put_oi',  0).clip(lower=0))
-    X['sector_fo_bullish']   = (raw_pcr < 0.8).astype(np.float32)   # strong call OI dominance
+    feat['sector_fo_bullish']   = (raw_pcr < 0.8).astype(np.float32)   # strong call OI dominance
 
     # ── Market-level earnings breadth (from macro_snap + mc_earnings_fetcher dashboard) ──
-    X['mkt_np_yoy']         = num('market_np_yoy', 10.0).clip(-10, 40) / 40.0
-    X['earnings_breadth_m'] = num('earnings_breadth_mkt', 0.5).clip(0, 1)  # >0.5 = majority positive
+    feat['mkt_np_yoy']         = num('market_np_yoy', 10.0).clip(-10, 40) / 40.0
+    feat['earnings_breadth_m'] = num('earnings_breadth_mkt', 0.5).clip(0, 1)  # >0.5 = majority positive
 
     # ── Index membership (passive ETF flow signal) ──
-    X['is_nifty50']   = num('is_nifty50',  0.0).clip(0, 1)
-    X['is_nifty100']  = num('is_nifty100', 0.0).clip(0, 1)
-    X['nifty_tier']   = num('nifty_tier',  0.0).clip(0, 250) / 250.0  # 50=top→0.2, 0=none→0
+    feat['is_nifty50']   = num('is_nifty50',  0.0).clip(0, 1)
+    feat['is_nifty100']  = num('is_nifty100', 0.0).clip(0, 1)
+    feat['nifty_tier']   = num('nifty_tier',  0.0).clip(0, 250) / 250.0  # 50=top→0.2, 0=none→0
 
     # ── Promoter pledge trend (deleveraging = bullish, increasing = distress) ──
-    X['pledge_chg_90d']    = num('pledge_chg_90d', 0.0).clip(-10, 10) / 10.0
-    X['pledge_deleveraging'] = (X['pledge_chg_90d'] < -0.2).astype(float)
-    X['pledge_distress']     = (X['pledge_chg_90d'] > 0.2).astype(float)
+    feat['pledge_chg_90d']    = num('pledge_chg_90d', 0.0).clip(-10, 10) / 10.0
+    feat['pledge_deleveraging'] = (feat['pledge_chg_90d'] < -0.2).astype(float)
+    feat['pledge_distress']     = (feat['pledge_chg_90d'] > 0.2).astype(float)
 
     # ── Pre-open IEP signal (gap-up/gap-down expected at open) ──
-    X['iep_gap_pct']      = num('iep_gap_pct', 0.0).clip(-5, 5) / 5.0
-    X['preopen_imbalance']= num('preopen_imbalance', 0.0).clip(-1, 1)
-    X['gap_up_open']      = (X['iep_gap_pct'] > 0.1).astype(float)
+    feat['iep_gap_pct']      = num('iep_gap_pct', 0.0).clip(-5, 5) / 5.0
+    feat['preopen_imbalance']= num('preopen_imbalance', 0.0).clip(-1, 1)
+    feat['gap_up_open']      = (feat['iep_gap_pct'] > 0.1).astype(float)
 
     # ── Per-stock option chain (expected move + GEX proxy) ──
-    X['expected_move_pct'] = num('expected_move_pct', 3.0).clip(0.5, 15) / 15.0
-    X['stock_gex_proxy']   = num('stock_gex_proxy', 0.0).clip(-1, 1)  # >0=mean-rev, <0=trending
-    X['low_expected_move'] = (X['expected_move_pct'] < 0.15).astype(float)  # cheap options
+    feat['expected_move_pct'] = num('expected_move_pct', 3.0).clip(0.5, 15) / 15.0
+    feat['stock_gex_proxy']   = num('stock_gex_proxy', 0.0).clip(-1, 1)  # >0=mean-rev, <0=trending
+    feat['low_expected_move'] = (feat['expected_move_pct'] < 0.15).astype(float)  # cheap options
     # IV term structure (next-month ATM IV minus near-month) -- negative (backwardation,
     # near-term IV priced above far-term) often anticipates a near-term event; default 0
     # (contango-neutral) when the second leg wasn't fetched for this row.
-    X['iv_term_slope']      = num('iv_term_slope', 0.0).clip(-0.15, 0.15)
-    X['iv_term_backwardation'] = (X['iv_term_slope'] < -0.02).astype(float)
+    feat['iv_term_slope']      = num('iv_term_slope', 0.0).clip(-0.15, 0.15)
+    feat['iv_term_backwardation'] = (feat['iv_term_slope'] < -0.02).astype(float)
 
     # ── Provisional FII flow (T+0, available by 6 PM same day) ──
-    X['fii_net_today']  = num('fii_net_today', 0.0).clip(-5000, 5000) / 5000.0
-    X['fii_buying']     = (X['fii_net_today'] > 0.1).astype(float)
-    X['fii_selling']    = (X['fii_net_today'] < -0.1).astype(float)
+    feat['fii_net_today']  = num('fii_net_today', 0.0).clip(-5000, 5000) / 5000.0
+    feat['fii_buying']     = (feat['fii_net_today'] > 0.1).astype(float)
+    feat['fii_selling']    = (feat['fii_net_today'] < -0.1).astype(float)
+
 
     # ── India VIX (from macro_asset_prices — used in regime detection only) ──
     # Normalised to [0,1] over the 8-35 observable range. Used for regime-conditional
     # scoring layer; not fed to the per-stock classifier (tested, hurt held-out AUC).
-    # X['india_vix'] = num('india_vix', 15.0).clip(8, 35) / 35.0
-    # X['high_vix']  = (X['india_vix'] > 0.57).astype(float)  # > 20 normalised
+    # feat['india_vix'] = num('india_vix', 15.0).clip(8, 35) / 35.0
+    # feat['high_vix']  = (feat['india_vix'] > 0.57).astype(float)  # > 20 normalised
 
     # ── Second-order interactions (cross-signal alpha) ──────────────────────────
     # Analyst upgrade × sector RS: double-confirmation of institutional interest
-    X['eps_rev_x_rs']    = X['eps_rev_3m'].clip(-1, 1) * X.get('rs_vs_sector_21d', pd.Series(0.0, index=X.index)).clip(-1, 1)
+    feat['eps_rev_x_rs']    = feat['eps_rev_3m'].clip(-1, 1) * feat.get('rs_vs_sector_21d', pd.Series(0.0, index=df.index)).clip(-1, 1)
 
     # Broker buy × IEP gap-up: institutional recommendation + pre-market momentum
     broker_buy_norm = num('mc_broker_buy_7d', 0.0).clip(0, 5) / 5.0
-    X['broker_x_iep']    = broker_buy_norm * X['iep_gap_pct'].clip(0, 1)
+    feat['broker_x_iep']    = broker_buy_norm * feat['iep_gap_pct'].clip(0, 1)
 
     # EPS beat streak × near results: strongest PEAD setup
-    X['pead_confirmed']  = X.get('eps_beat_streak', pd.Series(0.0, index=X.index)).clip(0, 1) * X['near_results']
+    feat['pead_confirmed']  = feat.get('eps_beat_streak', pd.Series(0.0, index=df.index)).clip(0, 1) * feat['near_results']
 
     # Low expected move × high RS: options cheap on a relative strength leader
-    X['cheap_opts_rs']   = X['low_expected_move'] * X.get('sector_leader', pd.Series(0.0, index=X.index))
+    feat['cheap_opts_rs']   = feat['low_expected_move'] * feat.get('sector_leader', pd.Series(0.0, index=df.index))
 
     # FII buying × gift nifty positive: double market-risk-on confirmation
-    X['risk_on_confirm'] = X['fii_buying'] * (X['gift_nifty_pct'] > 0.1).astype(float)
+    feat['risk_on_confirm'] = feat['fii_buying'] * (feat['gift_nifty_pct'] > 0.1).astype(float)
 
     # High IV × earnings near: expensive options near results (sell premium signal)
-    X['iv_near_results'] = (num('iv_hv_ratio', 1.0) > 1.5).astype(float) * X['near_results']
+    feat['iv_near_results'] = (num('iv_hv_ratio', 1.0) > 1.5).astype(float) * feat['near_results']
 
     # Nifty50 index member × bull GEX: passive flow + mean-reverting gamma environment
-    X['index_bull_gex']  = X['is_nifty50'] * (1 - X['nifty_long_gamma'])  # nifty50 in long-gamma = flow support
+    feat['index_bull_gex']  = feat['is_nifty50'] * (1 - feat['nifty_long_gamma'])  # nifty50 in long-gamma = flow support
 
     # Pledge improving × strong FCF: deleveraging + cash generation = quality compound
     # TODO: enable once there's enough live fcf_yield_approx history to validate this interaction
     # (financial_ratios_fetcher.py now populates it via ET_Stats; was previously always 0 rows)
-    # X['quality_compound'] = X['pledge_deleveraging'] * num('fcf_yield', 0.0).clip(0, 0.2) / 0.2
+    # feat['quality_compound'] = feat['pledge_deleveraging'] * num('fcf_yield', 0.0).clip(0, 0.2) / 0.2
 
     # ── EPS surprise streak (from eps_surprise_fetcher.py) ──────────────────
     # TODO: enable once eps_surprise_fetcher populates eps_surprise_q1/q2 (currently 0 rows)
-    # X['eps_surprise_q1']      = num('eps_surprise_q1', 0.0).clip(-20, 20) / 20.0
-    # X['eps_surprise_q2']      = num('eps_surprise_q2', 0.0).clip(-20, 20) / 20.0
-    X['eps_beat_streak_norm'] = num('eps_beat_streak', 0.0).clip(0, 8) / 8.0
-    X['eps_miss_after_run']   = num('eps_miss_after_streak', 0.0).clip(0, 1)
-    X['rev_surprise_q1']      = num('rev_surprise_q1', 0.0).clip(-10, 10) / 10.0
-    # X['eps_momentum']         = X['eps_surprise_q1'] * X['eps_beat_streak_norm']  # streak × size — disabled: eps_surprise_q1 unpopulated
+    # feat['eps_surprise_q1']      = num('eps_surprise_q1', 0.0).clip(-20, 20) / 20.0
+    # feat['eps_surprise_q2']      = num('eps_surprise_q2', 0.0).clip(-20, 20) / 20.0
+    feat['eps_beat_streak_norm'] = num('eps_beat_streak', 0.0).clip(0, 8) / 8.0
+    feat['eps_miss_after_run']   = num('eps_miss_after_streak', 0.0).clip(0, 1)
+    feat['rev_surprise_q1']      = num('rev_surprise_q1', 0.0).clip(-10, 10) / 10.0
+    # feat['eps_momentum']         = feat['eps_surprise_q1'] * feat['eps_beat_streak_norm']  # streak × size — disabled: eps_surprise_q1 unpopulated
 
     # ── Financial quality: FCF + interest coverage (financial_ratios_fetcher.py) ──
-    X['fcf_yield_norm']    = num('fcf_yield', 0.0).clip(-5, 20) / 20.0
-    X['interest_cov']      = num('interest_coverage', 5.0).clip(0, 20) / 20.0
-    X['fcf_positive']      = num('fcf_positive', 0.0).clip(0, 1)
-    X['debt_risk']         = num('debt_coverage_risk', 0.0).clip(0, 1)
-    X['quality_score']     = X['fcf_positive'] * (1 - X['debt_risk'])  # FCF+safe = quality
+    feat['fcf_yield_norm']    = num('fcf_yield', 0.0).clip(-5, 20) / 20.0
+    feat['interest_cov']      = num('interest_coverage', 5.0).clip(0, 20) / 20.0
+    feat['fcf_positive']      = num('fcf_positive', 0.0).clip(0, 1)
+    feat['debt_risk']         = num('debt_coverage_risk', 0.0).clip(0, 1)
+    feat['quality_score']     = feat['fcf_positive'] * (1 - feat['debt_risk'])  # FCF+safe = quality
 
     # Ratio harvest (financial_ratios_fetcher.py — ET_Stats Ratio payload we already fetch).
     # Chosen to be orthogonal to the fundamentals_history block below (which already carries
     # ROE / D-E / margins / growth): ROCE + its YoY trend, quick ratio, EV/EBITDA, asset turnover,
     # CFO growth. Neutral-ish defaults so uncovered names are never penalised.
-    X['roce_norm']         = num('roce', 10.0).clip(-20, 50) / 50.0
-    X['roce_trend']        = num('roce_trend', 0.0).clip(-15, 15) / 15.0
-    X['quick_ratio_norm']  = num('quick_ratio', 1.0).clip(0, 3) / 3.0
-    X['ev_ebitda_norm']    = num('ev_ebitda', 15.0).clip(0, 50) / 50.0
-    X['asset_turnover']    = num('asset_turnover', 0.7).clip(0, 3) / 3.0
-    X['cfo_growth_norm']   = num('cfo_growth', 0.0).clip(-100, 100) / 100.0
+    feat['roce_norm']         = num('roce', 10.0).clip(-20, 50) / 50.0
+    feat['roce_trend']        = num('roce_trend', 0.0).clip(-15, 15) / 15.0
+    feat['quick_ratio_norm']  = num('quick_ratio', 1.0).clip(0, 3) / 3.0
+    feat['ev_ebitda_norm']    = num('ev_ebitda', 15.0).clip(0, 50) / 50.0
+    feat['asset_turnover']    = num('asset_turnover', 0.7).clip(0, 3) / 3.0
+    feat['cfo_growth_norm']   = num('cfo_growth', 0.0).clip(-100, 100) / 100.0
 
     # ── 2026-07-23 harvest: universal solvency (same financial_ratios_fetcher.py payload) ──
-    X['interest_cov_posttax'] = num('interest_coverage_post_tax', 5.0).clip(0, 20) / 20.0
-    X['lt_de_norm']           = num('lt_de_ratio', 0.3).clip(0, 3) / 3.0
-    X['cfi_growth_norm']      = num('cfi_growth', 0.0).clip(-100, 100) / 100.0
-    X['cff_growth_norm']      = num('cff_growth', 0.0).clip(-100, 100) / 100.0
-    X['cfo_cagr_3y_norm']     = num('cfo_cagr_3y', 0.0).clip(-50, 100) / 100.0
-    X['cfi_cagr_3y_norm']     = num('cfi_cagr_3y', 0.0).clip(-50, 100) / 100.0
-    X['cff_cagr_3y_norm']     = num('cff_cagr_3y', 0.0).clip(-50, 100) / 100.0
-    X['cfo_cagr_5y_norm']     = num('cfo_cagr_5y', 0.0).clip(-50, 100) / 100.0
-    X['cfi_cagr_5y_norm']     = num('cfi_cagr_5y', 0.0).clip(-50, 100) / 100.0
-    X['cff_cagr_5y_norm']     = num('cff_cagr_5y', 0.0).clip(-50, 100) / 100.0
+    feat['interest_cov_posttax'] = num('interest_coverage_post_tax', 5.0).clip(0, 20) / 20.0
+    feat['lt_de_norm']           = num('lt_de_ratio', 0.3).clip(0, 3) / 3.0
+    feat['cfi_growth_norm']      = num('cfi_growth', 0.0).clip(-100, 100) / 100.0
+    feat['cff_growth_norm']      = num('cff_growth', 0.0).clip(-100, 100) / 100.0
+    feat['cfo_cagr_3y_norm']     = num('cfo_cagr_3y', 0.0).clip(-50, 100) / 100.0
+    feat['cfi_cagr_3y_norm']     = num('cfi_cagr_3y', 0.0).clip(-50, 100) / 100.0
+    feat['cff_cagr_3y_norm']     = num('cff_cagr_3y', 0.0).clip(-50, 100) / 100.0
+    feat['cfo_cagr_5y_norm']     = num('cfo_cagr_5y', 0.0).clip(-50, 100) / 100.0
+    feat['cfi_cagr_5y_norm']     = num('cfi_cagr_5y', 0.0).clip(-50, 100) / 100.0
+    feat['cff_cagr_5y_norm']     = num('cff_cagr_5y', 0.0).clip(-50, 100) / 100.0
 
     # ── 2026-07-23 harvest: banking-only ratios (financial_ratios_fetcher.py ET_Stats
     # Ratio bucket, NULL for ~95% of the universe — non-bank/non-NBFC stocks). Neutral
@@ -776,95 +833,96 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # a raw headcount-style level correlated with bank size/market cap already in the
     # model, not a normalized quality ratio (see business_per_employee/branch below for
     # the per-unit versions that actually carry signal).
-    X['nim_norm']            = num('nim', 3.0).clip(-2, 8) / 8.0
-    X['cost_to_income_norm'] = num('cost_to_income', 45.0).clip(20, 90) / 90.0
-    X['int_inc_ea_norm']     = num('int_income_earning_assets', 7.0).clip(0, 15) / 15.0
-    X['non_int_inc_ea_norm'] = num('non_int_income_earning_assets', 1.0).clip(-2, 5) / 5.0
-    X['op_profit_ea_norm']   = num('op_profit_earning_assets', 0.3).clip(-2, 5) / 5.0
-    X['op_expense_ea_norm']  = num('op_expense_earning_assets', 1.5).clip(0, 5) / 5.0
-    X['int_exp_ea_norm']     = num('int_exp_earning_assets', 4.0).clip(0, 10) / 10.0
-    X['capital_adequacy_norm'] = num('capital_adequacy', 15.0).clip(5, 30) / 30.0
-    X['tier1_capital_norm']  = num('tier1_capital', 12.0).clip(0, 25) / 25.0
-    X['tier2_capital_norm']  = num('tier2_capital', 2.0).clip(0, 10) / 10.0
-    X['gross_npa_norm']      = num('gross_npa_pct', 3.0).clip(0, 20) / 20.0
-    X['net_npa_norm']        = num('net_npa_pct', 1.0).clip(0, 10) / 10.0
-    X['net_npa_adv_norm']    = num('net_npa_to_advances', 0.5).clip(0, 5) / 5.0
-    X['int_inc_per_emp_norm'] = num('int_income_per_employee', 0.1).clip(0, 1) / 1.0
-    X['np_per_emp_norm']     = num('np_per_employee', 0.05).clip(0, 1) / 1.0
-    X['biz_per_emp_norm']    = num('business_per_employee', 2.0).clip(0, 10) / 10.0
-    X['int_inc_per_branch_norm'] = num('int_income_per_branch', 2.0).clip(0, 10) / 10.0
-    X['np_per_branch_norm']  = num('np_per_branch', 0.5).clip(0, 5) / 5.0
+    feat['nim_norm']            = num('nim', 3.0).clip(-2, 8) / 8.0
+    feat['cost_to_income_norm'] = num('cost_to_income', 45.0).clip(20, 90) / 90.0
+    feat['int_inc_ea_norm']     = num('int_income_earning_assets', 7.0).clip(0, 15) / 15.0
+    feat['non_int_inc_ea_norm'] = num('non_int_income_earning_assets', 1.0).clip(-2, 5) / 5.0
+    feat['op_profit_ea_norm']   = num('op_profit_earning_assets', 0.3).clip(-2, 5) / 5.0
+    feat['op_expense_ea_norm']  = num('op_expense_earning_assets', 1.5).clip(0, 5) / 5.0
+    feat['int_exp_ea_norm']     = num('int_exp_earning_assets', 4.0).clip(0, 10) / 10.0
+    feat['capital_adequacy_norm'] = num('capital_adequacy', 15.0).clip(5, 30) / 30.0
+    feat['tier1_capital_norm']  = num('tier1_capital', 12.0).clip(0, 25) / 25.0
+    feat['tier2_capital_norm']  = num('tier2_capital', 2.0).clip(0, 10) / 10.0
+    feat['gross_npa_norm']      = num('gross_npa_pct', 3.0).clip(0, 20) / 20.0
+    feat['net_npa_norm']        = num('net_npa_pct', 1.0).clip(0, 10) / 10.0
+    feat['net_npa_adv_norm']    = num('net_npa_to_advances', 0.5).clip(0, 5) / 5.0
+    feat['int_inc_per_emp_norm'] = num('int_income_per_employee', 0.1).clip(0, 1) / 1.0
+    feat['np_per_emp_norm']     = num('np_per_employee', 0.05).clip(0, 1) / 1.0
+    feat['biz_per_emp_norm']    = num('business_per_employee', 2.0).clip(0, 10) / 10.0
+    feat['int_inc_per_branch_norm'] = num('int_income_per_branch', 2.0).clip(0, 10) / 10.0
+    feat['np_per_branch_norm']  = num('np_per_branch', 0.5).clip(0, 5) / 5.0
 
     # Mutual-fund ownership flow (mf_stock_holdings_fetcher.py). Net MoM change in MF-held shares
     # is an institutional accumulation/distribution signal; fund-count is ownership breadth.
-    X['mf_net_flow']       = num('mf_net_share_chg_pct', 0.0).clip(-25, 25) / 25.0
-    X['mf_accumulating']   = (X['mf_net_flow'] > 0).astype(float)
-    X['mf_breadth']        = (num('mf_fund_count', 0.0).clip(0, 500) / 500.0)
-    X['mf_add_breadth']    = (num('mf_funds_adding', 0.0).clip(0, 250) / 250.0)
-    X['mf_trim_breadth']   = (num('mf_funds_trimming', 0.0).clip(0, 250) / 250.0)
-    X['mf_add_trim_ratio'] = num('mf_add_trim_ratio', 1.0).clip(0, 10) / 10.0
-    X['mf_conviction']     = (X['mf_net_flow'].clip(0, 1) * X['mf_add_trim_ratio']).clip(0, 1)
+    feat['mf_net_flow']       = num('mf_net_share_chg_pct', 0.0).clip(-25, 25) / 25.0
+    feat['mf_accumulating']   = (feat['mf_net_flow'] > 0).astype(float)
+    feat['mf_breadth']        = (num('mf_fund_count', 0.0).clip(0, 500) / 500.0)
+    feat['mf_add_breadth']    = (num('mf_funds_adding', 0.0).clip(0, 250) / 250.0)
+    feat['mf_trim_breadth']   = (num('mf_funds_trimming', 0.0).clip(0, 250) / 250.0)
+    feat['mf_add_trim_ratio'] = num('mf_add_trim_ratio', 1.0).clip(0, 10) / 10.0
+    feat['mf_conviction']     = (feat['mf_net_flow'].clip(0, 1) * feat['mf_add_trim_ratio']).clip(0, 1)
     # Conviction depth (avg % of fund assets) + big-money direction (top-5 holders' net flow).
-    X['mf_pct_assets']     = num('mf_avg_pct_assets', 0.0).clip(0, 10) / 10.0
-    X['mf_big_fund_flow']  = num('mf_big_fund_flow', 0.0).clip(-25, 25) / 25.0
+    feat['mf_pct_assets']     = num('mf_avg_pct_assets', 0.0).clip(0, 10) / 10.0
+    feat['mf_big_fund_flow']  = num('mf_big_fund_flow', 0.0).clip(-25, 25) / 25.0
     # Peer-relative flow (ownership_relative.py): sector-demeaned flow + universe percentile.
-    X['mf_flow_vs_sector'] = num('mf_flow_vs_sector', 0.0).clip(-25, 25) / 25.0
-    X['mf_flow_rank']      = num('mf_flow_rank', 0.5).clip(0, 1)
+    feat['mf_flow_vs_sector'] = num('mf_flow_vs_sector', 0.0).clip(-25, 25) / 25.0
+    feat['mf_flow_rank']      = num('mf_flow_rank', 0.5).clip(0, 1)
 
     # ── Delivery % trend + block deals + short proxy (delivery_trend_fetcher.py) ──
-    X['delivery_trend']   = num('delivery_trend_30d', 0.0).clip(-20, 20) / 20.0
-    X['block_deal']       = num('block_deal_flag', 0.0).clip(0, 1)
-    X['block_sell']       = (num('block_deal_direction', 0.0) < -0.5).astype(float)
-    X['short_proxy']      = num('short_interest_proxy', 0.3).clip(0, 1)
-    X['high_short']       = (X['short_proxy'] > 0.55).astype(float)  # put-heavy = crowded short
+    feat['delivery_trend']   = num('delivery_trend_30d', 0.0).clip(-20, 20) / 20.0
+    feat['block_deal']       = num('block_deal_flag', 0.0).clip(0, 1)
+    feat['block_sell']       = (num('block_deal_direction', 0.0) < -0.5).astype(float)
+    feat['short_proxy']      = num('short_interest_proxy', 0.3).clip(0, 1)
+    feat['high_short']       = (feat['short_proxy'] > 0.55).astype(float)  # put-heavy = crowded short
 
     # ── Promoter insider transactions (insider_transactions_fetcher.py) ──────
-    X['promoter_net']      = num('promoter_net_90d', 0.0).clip(-50, 50) / 50.0
+    feat['promoter_net']      = num('promoter_net_90d', 0.0).clip(-50, 50) / 50.0
     # insider_buy_flag was genuinely 0 rows for 90+ days (2026-08-07: insider_transactions_
     # fetcher.py's own NSE per-symbol endpoint doesn't honor its from/to params -- fixed by
     # repointing that fetcher's feature computation at insider_trades instead; see its docstring).
     # NOT re-enabled here even though the data is now real: predict_proba_ensemble() passes X
     # straight to each base model, and adding a column changes the feature matrix's shape/order
     # against the CURRENTLY-ACTIVE trained model -- needs a coordinated retrain, not a live toggle.
-    # X['insider_buy']       = num('insider_buy_flag', 0.0).clip(0, 1)
-    X['insider_sell']      = num('insider_sell_flag', 0.0).clip(0, 1)
+    # feat['insider_buy']       = num('insider_buy_flag', 0.0).clip(0, 1)
+    feat['insider_sell']      = num('insider_sell_flag', 0.0).clip(0, 1)
 
     # ── Credit rating events (credit_rating_fetcher.py) ──────────────────────
-    X['rating_up']         = num('rating_upgrade_180d', 0.0).clip(0, 1)
-    X['rating_down']       = num('rating_downgrade_180d', 0.0).clip(0, 1)
-    X['rating_recency']    = (365.0 - num('days_since_upgrade', 365.0).clip(0, 365)) / 365.0
+    feat['rating_up']         = num('rating_upgrade_180d', 0.0).clip(0, 1)
+    feat['rating_down']       = num('rating_downgrade_180d', 0.0).clip(0, 1)
+    feat['rating_recency']    = (365.0 - num('days_since_upgrade', 365.0).clip(0, 365)) / 365.0
 
     # ── MF sector flow (mf_sector_flow_fetcher.py) ──────────────────────────
-    X['mf_sector_flow']    = num('mf_sector_flow_pct', 0.0).clip(-2, 2) / 2.0
-    X['mf_inflow']         = (X['mf_sector_flow'] > 0.1).astype(float)
+    feat['mf_sector_flow']    = num('mf_sector_flow_pct', 0.0).clip(-2, 2) / 2.0
+    feat['mf_inflow']         = (feat['mf_sector_flow'] > 0.1).astype(float)
 
     # ── Working capital cycle (working_capital_fetcher.py) ───────────────────
-    X['ccc_ttm_norm']      = num('ccc_ttm', 40.0).clip(0, 180) / 180.0
-    X['ccc_trend_norm']    = num('ccc_trend', 0.0).clip(-30, 30) / 30.0
-    X['wc_bad']            = num('wc_deteriorating', 0.0).clip(0, 1)
-    X['wc_good']           = num('wc_improving', 0.0).clip(0, 1)
+    feat['ccc_ttm_norm']      = num('ccc_ttm', 40.0).clip(0, 180) / 180.0
+    feat['ccc_trend_norm']    = num('ccc_trend', 0.0).clip(-30, 30) / 30.0
+    feat['wc_bad']            = num('wc_deteriorating', 0.0).clip(0, 1)
+    feat['wc_good']           = num('wc_improving', 0.0).clip(0, 1)
+
 
     # ── Screener features (screener_features_fetcher.py) ─────────────────────
     # Aggregated signal from 1521 screeners: how many bullish/bearish, quality-weighted momentum,
     # category diversity, persistence (streak), and alpha of screeners that flag this stock.
-    X['screener_bull']     = num('screener_bull_count', 0).clip(0, 50) / 50.0
-    X['screener_bear']     = num('screener_bear_count', 0).clip(0, 20) / 20.0
-    X['screener_breadth']  = num('screener_cat_breadth', 0).clip(0, 19) / 19.0   # distinct categories
-    X['screener_tier1']    = num('screener_tier1_count', 0).clip(0, 20) / 20.0   # A/B tier only
-    X['screener_momentum'] = num('screener_momentum_score', 0).clip(0, 30) / 30.0  # bayesian-weighted
-    X['screener_streak']   = num('screener_streak_days', 0).clip(0, 60) / 60.0   # persistence days
-    X['screener_name_sig'] = num('screener_name_signal', 1.0).clip(0, 2) / 2.0   # 0=bear,1=neutral,2=bull
-    X['screener_alpha']    = num('screener_alpha_score', 0.0).clip(-10, 20) / 20.0
-    X['screener_net_bias'] = (X['screener_bull'] - X['screener_bear']).clip(-1, 1)  # directional
+    feat['screener_bull']     = num('screener_bull_count', 0).clip(0, 50) / 50.0
+    feat['screener_bear']     = num('screener_bear_count', 0).clip(0, 20) / 20.0
+    feat['screener_breadth']  = num('screener_cat_breadth', 0).clip(0, 19) / 19.0   # distinct categories
+    feat['screener_tier1']    = num('screener_tier1_count', 0).clip(0, 20) / 20.0   # A/B tier only
+    feat['screener_momentum'] = num('screener_momentum_score', 0).clip(0, 30) / 30.0  # bayesian-weighted
+    feat['screener_streak']   = num('screener_streak_days', 0).clip(0, 60) / 60.0   # persistence days
+    feat['screener_name_sig'] = num('screener_name_signal', 1.0).clip(0, 2) / 2.0   # 0=bear,1=neutral,2=bull
+    feat['screener_alpha']    = num('screener_alpha_score', 0.0).clip(-10, 20) / 20.0
+    feat['screener_net_bias'] = (feat['screener_bull'] - feat['screener_bear']).clip(-1, 1)  # directional
     # Cross-signal: screener bull + good breadth + persistence = high conviction
-    X['screener_conviction'] = (
-        X['screener_momentum'] * X['screener_breadth'] * (1 + X['screener_streak'])
+    feat['screener_conviction'] = (
+        feat['screener_momentum'] * feat['screener_breadth'] * (1 + feat['screener_streak'])
     ).clip(0, 2)
 
     # ── Currency + futures basis (market_regime_fetcher.py) ──────────────────
-    X['usdinr_chg']        = num('usdinr_chg_pct', 0.0).clip(-2, 2) / 2.0
-    X['nifty_basis']       = num('nifty_basis_pct', 1.0).clip(-3, 5) / 5.0
-    X['nifty_contango']    = num('nifty_contango', 1.0).clip(0, 1)
+    feat['usdinr_chg']        = num('usdinr_chg_pct', 0.0).clip(-2, 2) / 2.0
+    feat['nifty_basis']       = num('nifty_basis_pct', 1.0).clip(-3, 5) / 5.0
+    feat['nifty_contango']    = num('nifty_contango', 1.0).clip(0, 1)
 
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
@@ -877,13 +935,13 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     if len(df) == 0:
         # Empty input (e.g. zero pending signals): the calendar helpers below divide an
         # empty datetime-typed Series, which raises. Emit empty float columns instead.
-        X['days_to_fno_expiry'] = pd.Series(dtype='float64')
-        X['results_season']     = pd.Series(dtype='float64')
+        feat['days_to_fno_expiry'] = pd.Series(dtype='float64')
+        feat['results_season']     = pd.Series(dtype='float64')
     else:
         sd = pd.to_datetime(df['signal_date'], errors='coerce') if 'signal_date' in df.columns else \
             pd.Series(pd.NaT, index=df.index)
-        X['days_to_fno_expiry'] = _days_to_fno_expiry(sd).fillna(15) / 30.0
-        X['results_season']     = _results_season_flag(sd).fillna(0)
+        feat['days_to_fno_expiry'] = _days_to_fno_expiry(sd).fillna(15) / 30.0
+        feat['results_season']     = _results_season_flag(sd).fillna(0)
 
     # ── Timing & momentum signals (from existing populated columns) ──────────────
     rsi_v       = num('rsi', 50)
@@ -900,71 +958,71 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     above_200   = num('above_sma200', 0)
 
     # RSI zone signals
-    X['rsi_oversold']      = (rsi_v < 35).astype(float)
-    X['rsi_momentum_zone'] = ((rsi_v >= 50) & (rsi_v <= 70)).astype(float)
-    X['rsi_overbought']    = (rsi_v > 75).astype(float)
+    feat['rsi_oversold']      = (rsi_v < 35).astype(float)
+    feat['rsi_momentum_zone'] = ((rsi_v >= 50) & (rsi_v <= 70)).astype(float)
+    feat['rsi_overbought']    = (rsi_v > 75).astype(float)
 
     # Volume confirmation
-    X['vol_spike']         = (vol_r > 2.0).astype(float)
-    X['vol_above_avg']     = (vol_r > 1.3).astype(float)
+    feat['vol_spike']         = (vol_r > 2.0).astype(float)
+    feat['vol_above_avg']     = (vol_r > 1.3).astype(float)
 
     # Trend strength
-    X['adx_strong']        = (adx_v > 25).astype(float)
-    X['above_200_vol']     = (above_200 * (vol_r > 1.2)).astype(float)
+    feat['adx_strong']        = (adx_v > 25).astype(float)
+    feat['above_200_vol']     = (above_200 * (vol_r > 1.2)).astype(float)
 
     # Options/PCR signals
-    X['pcr_bullish']       = (pcr < 0.75).astype(float)
-    X['pcr_bearish']       = (pcr > 1.2).astype(float)
-    X['iv_low_entry']      = (iv_r < 30).astype(float)
+    feat['pcr_bullish']       = (pcr < 0.75).astype(float)
+    feat['pcr_bearish']       = (pcr > 1.2).astype(float)
+    feat['iv_low_entry']      = (iv_r < 30).astype(float)
 
     # News sentiment
-    X['sentiment_pos']     = (sent > 0.3).astype(float)
-    X['sentiment_neg']     = (sent < -0.3).astype(float)
-    X['sentiment_score']   = sent.clip(-1, 1)
+    feat['sentiment_pos']     = (sent > 0.3).astype(float)
+    feat['sentiment_neg']     = (sent < -0.3).astype(float)
+    feat['sentiment_score']   = sent.clip(-1, 1)
 
     # FII/DII flow (raw units from fii_dii_fetcher, not normalised)
-    X['fii_buying_flow']   = ((fii_3 > 0) & (fii_10 > 0)).astype(float)
-    X['fii_selling_flow']  = ((fii_3 < 0) & (fii_10 < 0)).astype(float)
-    X['dii_buying_flow']   = (dii_3 > 0).astype(float)
-    X['fii_dii_agree']     = (((fii_3 > 0) & (dii_3 > 0)) | ((fii_3 < 0) & (dii_3 < 0))).astype(float)
+    feat['fii_buying_flow']   = ((fii_3 > 0) & (fii_10 > 0)).astype(float)
+    feat['fii_selling_flow']  = ((fii_3 < 0) & (fii_10 < 0)).astype(float)
+    feat['dii_buying_flow']   = (dii_3 > 0).astype(float)
+    feat['fii_dii_agree']     = (((fii_3 > 0) & (dii_3 > 0)) | ((fii_3 < 0) & (dii_3 < 0))).astype(float)
 
     # Sector momentum
-    X['sector_strong']     = ((sec_5 > 1.5) & (sec_21 > 3)).astype(float)
-    X['sector_weak']       = ((sec_5 < -1.5) & (sec_21 < -3)).astype(float)
+    feat['sector_strong']     = ((sec_5 > 1.5) & (sec_21 > 3)).astype(float)
+    feat['sector_weak']       = ((sec_5 < -1.5) & (sec_21 < -3)).astype(float)
 
     # Compound conviction signals
-    X['bull_trifecta']     = (X['rsi_momentum_zone'] * X['vol_above_avg'] * X['fii_buying_flow'])
-    X['trend_vol_confirm'] = (X['adx_strong'] * X['above_200_vol'])
+    feat['bull_trifecta']     = (feat['rsi_momentum_zone'] * feat['vol_above_avg'] * feat['fii_buying_flow'])
+    feat['trend_vol_confirm'] = (feat['adx_strong'] * feat['above_200_vol'])
 
     # ── PEAD + Event signals ─────────────────────────────────────────────────────
-    X['pead_score']        = num('pead_score', 0).clip(-1, 1)
-    X['event_score']       = num('event_signal_score', 0).clip(-3, 3) / 3.0
-    X['event_positive']    = (num('event_signal_score', 0) > 1.0).astype(float)
-    X['event_negative']    = (num('event_signal_score', 0) < -1.0).astype(float)
-    X['pead_x_event']      = (X['pead_score'] * X['event_score']).clip(-1, 1)
+    feat['pead_score']        = num('pead_score', 0).clip(-1, 1)
+    feat['event_score']       = num('event_signal_score', 0).clip(-3, 3) / 3.0
+    feat['event_positive']    = (num('event_signal_score', 0) > 1.0).astype(float)
+    feat['event_negative']    = (num('event_signal_score', 0) < -1.0).astype(float)
+    feat['pead_x_event']      = (feat['pead_score'] * feat['event_score']).clip(-1, 1)
 
     # Days to next earnings: signals near earnings have binary outcome risk
     dte = num('days_to_next_earnings', 999).clip(0, 90)
-    X['days_to_earnings']  = dte / 90.0
-    X['pre_earnings_3d']   = (dte <= 3).astype(float)
-    X['pre_earnings_10d']  = (dte <= 10).astype(float)
-    X['earnings_x_score']  = X['pre_earnings_10d'] * X['signal_score']
+    feat['days_to_earnings']  = dte / 90.0
+    feat['pre_earnings_3d']   = (dte <= 3).astype(float)
+    feat['pre_earnings_10d']  = (dte <= 10).astype(float)
+    feat['earnings_x_score']  = feat['pre_earnings_10d'] * feat['signal_score']
 
     # Credit rating trend: (upgrades - downgrades) / (total + 1) in past 12m
     cr_up  = num('cr_upgrades',   0.0).clip(0, 10)
     cr_dn  = num('cr_downgrades', 0.0).clip(0, 10)
-    X['credit_trend']    = ((cr_up - cr_dn) / (cr_up + cr_dn + 1.0)).clip(-1, 1)
-    X['credit_upgraded'] = (cr_up > cr_dn).astype(float)
-    X['credit_x_score']  = X['credit_trend'].clip(0, 1) * X['signal_score']
+    feat['credit_trend']    = ((cr_up - cr_dn) / (cr_up + cr_dn + 1.0)).clip(-1, 1)
+    feat['credit_upgraded'] = (cr_up > cr_dn).astype(float)
+    feat['credit_x_score']  = feat['credit_trend'].clip(0, 1) * feat['signal_score']
 
     # Signal type one-hot
     sig_col = df['signals_json'] if 'signals_json' in df.columns else pd.Series(['[]'] * len(df), index=df.index)
     type_sets = sig_col.apply(_parse_signal_types)
     for t in SIGNAL_TYPES:
-        X[f'sig_{t}'] = type_sets.apply(lambda s: 1 if t in s else 0).astype(np.int8)
+        feat[f'sig_{t}'] = type_sets.apply(lambda s: 1 if t in s else 0).astype(np.int8)
 
     # Signal count (complexity)
-    X['signal_count'] = type_sets.apply(len)
+    feat['signal_count'] = type_sets.apply(len)
 
     # ── Extra endpoints features (parsed from indiatimes/marketsmojo/trading80) ──
     # ext_mojo_{quality_rank,valuation_rank,financial_pts} are live-verified (2026-07-30, 15/15
@@ -975,27 +1033,28 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # destroyed most of the real variance on the mojo side. Ranges widened from a live sample that
     # showed q_rank 2-66 (plus a -99997 "no score" sentinel, now filtered in extra_features_parser.py)
     # and v_rank/f_pts running negative -- both previously clipped to a positive-only floor of 0.
-    X['ext_fii_holding_pct']    = num('ext_fii_holding_pct', 15.0).clip(0, 100) / 100.0
-    X['ext_dii_holding_pct']    = num('ext_dii_holding_pct', 15.0).clip(0, 100) / 100.0
-    X['ext_fii_qoq_chg']        = num('ext_fii_qoq_chg', 0.0).clip(-10, 10) / 10.0
-    X['ext_dii_qoq_chg']        = num('ext_dii_qoq_chg', 0.0).clip(-10, 10) / 10.0
-    X['ext_t80_tech_score']     = num('ext_t80_tech_score', 0.0).clip(-3, 3) / 3.0
-    X['ext_t80_quality_rank']   = num('ext_t80_quality_rank', 5.0).clip(0, 100) / 100.0
-    X['ext_t80_valuation_rank'] = num('ext_t80_valuation_rank', 2.0).clip(-5, 5) / 5.0
-    X['ext_t80_financial_pts']  = num('ext_t80_financial_pts', 5.0).clip(-50, 50) / 50.0
-    X['ext_mojo_quality_rank']  = num('ext_mojo_quality_rank', 5.0).clip(0, 100) / 100.0
-    X['ext_mojo_valuation_rank']= num('ext_mojo_valuation_rank', 2.0).clip(-5, 5) / 5.0
-    X['ext_mojo_financial_pts'] = num('ext_mojo_financial_pts', 5.0).clip(-50, 50) / 50.0
+    feat['ext_fii_holding_pct']    = num('ext_fii_holding_pct', 15.0).clip(0, 100) / 100.0
+    feat['ext_dii_holding_pct']    = num('ext_dii_holding_pct', 15.0).clip(0, 100) / 100.0
+    feat['ext_fii_qoq_chg']        = num('ext_fii_qoq_chg', 0.0).clip(-10, 10) / 10.0
+    feat['ext_dii_qoq_chg']        = num('ext_dii_qoq_chg', 0.0).clip(-10, 10) / 10.0
+    feat['ext_t80_tech_score']     = num('ext_t80_tech_score', 0.0).clip(-3, 3) / 3.0
+    feat['ext_t80_quality_rank']   = num('ext_t80_quality_rank', 5.0).clip(0, 100) / 100.0
+    feat['ext_t80_valuation_rank'] = num('ext_t80_valuation_rank', 2.0).clip(-5, 5) / 5.0
+    feat['ext_t80_financial_pts']  = num('ext_t80_financial_pts', 5.0).clip(-50, 50) / 50.0
+    feat['ext_mojo_quality_rank']  = num('ext_mojo_quality_rank', 5.0).clip(0, 100) / 100.0
+    feat['ext_mojo_valuation_rank']= num('ext_mojo_valuation_rank', 2.0).clip(-5, 5) / 5.0
+    feat['ext_mojo_financial_pts'] = num('ext_mojo_financial_pts', 5.0).clip(-50, 50) / 50.0
 
     # InvestSights/Tapetide (promoted 2026-07-30) -- two more independently-computed composite
     # scores. Both are documented 0-100 scales; unlike ext_t80_*/ext_mojo_*, these were NOT
     # found byte-identical to each other or to anything else in a live spot-check, but that
     # was not a rigorous factor_edge pass -- treat as unvalidated signal until enough
     # technical_signals history accumulates to run factor_edge.py against them too.
-    X['ext_is_overall_score']   = num('ext_is_overall_score', 50.0).clip(0, 100) / 100.0
-    X['ext_is_percentile_rank'] = num('ext_is_percentile_rank', 50.0).clip(0, 100) / 100.0
-    X['ext_tt_score']           = num('ext_tt_score', 50.0).clip(0, 100) / 100.0
+    feat['ext_is_overall_score']   = num('ext_is_overall_score', 50.0).clip(0, 100) / 100.0
+    feat['ext_is_percentile_rank'] = num('ext_is_percentile_rank', 50.0).clip(0, 100) / 100.0
+    feat['ext_tt_score']           = num('ext_tt_score', 50.0).clip(0, 100) / 100.0
 
+    X = pd.DataFrame(feat, index=df.index)
     return X.astype(np.float32)
 
 
@@ -1021,7 +1080,8 @@ def _table_columns(conn: ConnWrapper, table: str) -> list:
     """Engine-aware column list (replaces sqlite-only PRAGMA table_info)."""
     if use_postgres():
         rows = conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = ? AND table_schema = current_schema()",
             (table,),
         ).fetchall()
         return [r[0] for r in rows]
@@ -1029,43 +1089,58 @@ def _table_columns(conn: ConnWrapper, table: str) -> list:
     return [r[1] for r in rows]
 
 
-def load_training_data(label: str = 'horizon') -> pd.DataFrame:
-    """Load labeled training rows. `label`:
-      - 'horizon'        → so.outcome ∈ {WIN,LOSS} thresholded at the horizon (default).
-      - 'triple_barrier' → se.tb_label (vol-scaled first-touch label from signal_excursions).
-    """
-    # signal_source='technical' (2026-08): this whole query's feature set is a technical_signals
-    # LEFT JOIN (rsi/adx/nifty_regime/etc.) -- without this filter, a confluence-sourced outcome
-    # row sharing (symbol, signal_date) with an unrelated technical_signals row would be trained
-    # on as if it graded that signal, exactly the mispairing bug documented for ml_calibration.py.
-    if label == 'triple_barrier':
-        label_select = "se.tb_label AS outcome"
-        label_join = (
-            "LEFT JOIN signal_excursions se "
-            "ON se.symbol = so.symbol AND se.signal_date = so.signal_date "
-            "AND se.horizon_days = so.horizon_days"
-        )
-        label_where = "se.tb_label IS NOT NULL AND so.signal_source = 'technical'"
-    else:
-        label_select = "so.outcome"
-        label_join = ""
-        label_where = ("so.outcome IN ('WIN','LOSS','STOP_LOSS')\n          AND so.return_pct IS NOT NULL"
-                       "\n          AND so.signal_source = 'technical'")
+def own_news_fallback_join(anchor: str, date_col: str) -> str:
+    """LEFT JOIN LATERAL exposing `own_news.news_30d`: the mean sentiment of the platform's own
+    tagged news (news_symbol_link -- all 21 captured sources, pre-market-hour articles included)
+    for the symbol over the 30 days BEFORE the row's date.
 
-    if use_postgres():
-        q = f"""
-            SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
-                   so.signal_score, so.signals_json, so.return_pct,
+    news_sentiment_score's primary value is the same plain mean over a 2-day window
+    (technicalSignalsService.loadRecentNewsSentiment), so this is that feature with a longer
+    memory, used ONLY where the primary is NULL. It replaces GDELT (retired 2026-09-11): GDELT
+    throttled this host and filled 0 NULL rows over the last 10 trading dates, while own news
+    covered ~80% of them. Strictly `< date`: scoring runs on the evening of the row's date, so
+    nothing later is available at serve time -- the train and score queries must see the same.
+    Every training AND scoring query uses this one definition; see test_own_news_fallback.py.
+    """
+    return f"""
+            LEFT JOIN LATERAL (
+                SELECT AVG(nsl.sentiment_score) AS news_30d
+                FROM news_symbol_link nsl
+                WHERE nsl.symbol = {anchor}.symbol
+                  AND nsl.published_at >= ({anchor}.{date_col} - interval '30 days')
+                  AND nsl.published_at < {anchor}.{date_col}
+            ) own_news ON TRUE"""
+
+
+def full_feature_train_sql(anchor: str = 'so', date_col: str = 'signal_date') -> tuple:
+    """Returns (select_columns_sql, joins_sql) for the full technical/fundamental/analyst/
+    proprietary-scores/macro/sector feature set this platform has accumulated on
+    technical_signals -- the same ~275-column block load_training_data()'s Postgres branch
+    below selects inline. `anchor`/`date_col` let any table shaped like signal_outcomes/
+    signal_excursions (a `symbol` column plus a date column with the same as-of semantics)
+    join into this block; both tables have exactly that shape.
+
+    Extracted 2026-08-30 for cs_ranker.py and exit_policy.py, which were found training on
+    only 29/304 and 23/304 of build_features()'s raw inputs respectively (this query supplies
+    275/304, same as load_training_data() itself) -- see measurement.md's cs_ranker/exit_policy
+    feature-completeness finding. load_training_data() below is deliberately left untouched --
+    it already works and backs the live active ensemble model; this is a NEW, separately-used
+    copy for the two under-fed scripts, not a refactor of the original, to keep this fix's
+    blast radius to the two things that were actually broken. Postgres only (SQLite is
+    decommissioned platform-wide -- see CLAUDE.md).
+    """
+    A, D = anchor, date_col
+    select_cols = f"""
                    ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                    ts.fii_3d_net,
                    ts.above_sma200,
-                   COALESCE(ts.news_sentiment_score, gdelt.tone_scaled) AS news_sentiment_score,
+                   COALESCE(ts.news_sentiment_score, own_news.news_30d) AS news_sentiment_score,
                    ts.pcr_oi, ts.pcr_vol,
                    ts.fii_10d_net, ts.dii_3d_net,
                    ts.delivery_pct,
                    ts.sector_ret_5d, ts.sector_ret_21d,
                    ts.sector_global_corr_21d,
-                   ts.iv_rank, ts.iv_skew,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma,
                    ts.rs_rank_21d, ts.rs_rank_63d,
                    ts.insider_buy_pct_90d,
                    ts.opening_range_break,
@@ -1097,14 +1172,14 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
                    ts.days_since_dividend, ts.last_dividend_amt,
                    ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
-                   ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
-                   ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
-                   ts.mc_consensus_pe, ts.mc_consensus_pb,
-                   ts.mc_ma30_dist_pct, ts.mc_ma50_dist_pct, ts.mc_ma150_dist_pct, ts.mc_ma200_dist_pct,
-                   ts.mc_del_pct_3d, ts.mc_del_pct_5d, ts.mc_del_pct_20d, ts.mc_del_acceleration,
-                   ts.mc_vol_ratio, ts.mc_circuit_dist_pct, ts.mc_fno_eligible,
-                   ts.mc_3d_return, ts.mc_ytd_return,
-                   ts.mc_price_cash, ts.mc_consensus_eps, ts.mc_eps_vs_cons, ts.mc_pe_fwd_discount,
+                   COALESCE(ts.mc_52w_high_dist_pct, mp.dist_52w_high) AS mc_52w_high_dist_pct, COALESCE(ts.mc_52w_low_dist_pct, mp.dist_52w_low) AS mc_52w_low_dist_pct, COALESCE(ts.mc_days_from_52wh, mp.days_from_52wh) AS mc_days_from_52wh,
+                   COALESCE(ts.mc_cagr_3y, mp.cagr_3y) AS mc_cagr_3y, COALESCE(ts.mc_cagr_5y, mp.cagr_5y) AS mc_cagr_5y, COALESCE(ts.mc_cagr_10y, mp.cagr_10y) AS mc_cagr_10y, COALESCE(ts.mc_ind_pe, mp.ind_pe) AS mc_ind_pe, COALESCE(ts.mc_pe_vs_ind, mp.pe_vs_ind) AS mc_pe_vs_ind,
+                   COALESCE(ts.mc_consensus_pe, mp.consensus_pe) AS mc_consensus_pe, COALESCE(ts.mc_consensus_pb, mp.consensus_pb) AS mc_consensus_pb,
+                   COALESCE(ts.mc_ma30_dist_pct, mp.ma30_dist_pct) AS mc_ma30_dist_pct, COALESCE(ts.mc_ma50_dist_pct, mp.ma50_dist_pct) AS mc_ma50_dist_pct, COALESCE(ts.mc_ma150_dist_pct, mp.ma150_dist_pct) AS mc_ma150_dist_pct, COALESCE(ts.mc_ma200_dist_pct, mp.ma200_dist_pct) AS mc_ma200_dist_pct,
+                   COALESCE(ts.mc_del_pct_3d, mp.del_pct_3d) AS mc_del_pct_3d, COALESCE(ts.mc_del_pct_5d, mp.del_pct_5d) AS mc_del_pct_5d, COALESCE(ts.mc_del_pct_20d, mp.del_pct_20d) AS mc_del_pct_20d, ts.mc_del_acceleration,
+                   COALESCE(ts.mc_vol_ratio, mp.vol_ratio) AS mc_vol_ratio, COALESCE(ts.mc_circuit_dist_pct, mp.circuit_dist_pct) AS mc_circuit_dist_pct, ts.mc_fno_eligible,
+                   COALESCE(ts.mc_3d_return, mp.ret_3d) AS mc_3d_return, COALESCE(ts.mc_ytd_return, mp.ret_ytd) AS mc_ytd_return,
+                   COALESCE(ts.mc_price_cash, mp.price_cash) AS mc_price_cash, COALESCE(ts.mc_consensus_eps, mp.consensus_eps) AS mc_consensus_eps, COALESCE(ts.mc_eps_vs_cons, mp.eps_vs_cons) AS mc_eps_vs_cons, COALESCE(ts.mc_pe_fwd_discount, mp.pe_fwd_discount) AS mc_pe_fwd_discount,
                    ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
                    ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
                    ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
@@ -1119,7 +1194,538 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
                    ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
                    ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
-                   ts.mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
+                   ts.positive_turnaround, ts.negative_turnaround,
+                   ts.earnings_shocker_flag, ts.earnings_shocker_gain,
+                   ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
+                   ts.pledge_chg_90d,
+                   ts.iep_gap_pct, ts.preopen_imbalance,
+                   ts.expected_move_pct, ts.stock_gex_proxy, ts.iv_term_slope,
+                   ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
+                   ts.eps_miss_after_streak, ts.rev_surprise_q1,
+                   ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
+                   ts.interest_coverage_post_tax, ts.lt_de_ratio,
+                   ts.nim, ts.cost_to_income, ts.int_income_earning_assets, ts.non_int_income_earning_assets,
+                   ts.op_profit_earning_assets, ts.op_expense_earning_assets, ts.int_exp_earning_assets,
+                   ts.capital_adequacy, ts.tier1_capital, ts.tier2_capital,
+                   ts.gross_npa_pct, ts.net_npa_pct, ts.net_npa_to_advances, ts.num_branches,
+                   ts.int_income_per_employee, ts.np_per_employee, ts.business_per_employee,
+                   ts.int_income_per_branch, ts.np_per_branch,
+                   ts.cfi_growth, ts.cff_growth,
+                   ts.cfo_cagr_3y, ts.cfi_cagr_3y, ts.cff_cagr_3y, ts.cfo_cagr_5y, ts.cfi_cagr_5y, ts.cff_cagr_5y,
+                   ts.mf_net_share_chg_pct, ts.mf_fund_count,
+                   ts.mf_funds_adding, ts.mf_funds_trimming, ts.mf_add_trim_ratio,
+                   ts.mf_avg_pct_assets, ts.mf_big_fund_flow, ts.mf_flow_vs_sector, ts.mf_flow_rank,
+                   ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
+                   ts.short_interest_proxy,
+                   ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+                   ts.ext_fii_holding_pct, ts.ext_dii_holding_pct, ts.ext_fii_qoq_chg, ts.ext_dii_qoq_chg,
+                   ts.ext_t80_tech_score, ts.ext_t80_quality_rank, ts.ext_t80_valuation_rank, ts.ext_t80_financial_pts,
+                   ts.ext_mojo_quality_rank, ts.ext_mojo_valuation_rank, ts.ext_mojo_financial_pts,
+                   ts.ext_is_overall_score, ts.ext_is_percentile_rank, ts.ext_tt_score,
+                   ts.insider_buy_flag, ts.insider_sell_flag,
+                   ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
+                   ts.mf_sector_flow_pct,
+                   ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
+                   ts.wc_deteriorating, ts.wc_improving,
+                   ts.screener_bull_count, ts.screener_bear_count, ts.screener_cat_breadth,
+                   ts.screener_tier1_count, ts.screener_momentum_score, ts.screener_streak_days,
+                   ts.screener_name_signal, ts.screener_alpha_score,
+                   macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
+                   macro_snap.india_10y, macro_snap.india_us_spread,
+                   macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
+                   macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
+                   macro_snap.fii_net_today,
+                   macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
+                   macro_snap.india_vix, macro_snap.india_mmi,
+                   macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
+                   macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
+                   mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
+                   mse.rev_growth_yoy AS sector_rev_growth_yoy,
+                   fh.fifty_two_week_high, fh.piotroski_f_score, fh.debt_to_equity,
+                   fh.operating_margins, fh.return_on_equity, fh.revenue_growth,
+                   fh.earnings_growth, fh.earnings_yield, fh.price_to_book, fh.market_cap,
+                   aeh.n_analysts, aeh.buy_count, aeh.target_mean,
+                   psh_az.score_value AS altman_z,
+                   psh_oo.score_value AS ohlson_o,
+                   psh_gn.score_value AS graham_number,
+                   psh_ds.score_value AS dupont_score,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = {A}.symbol
+                       AND UPPER(cre.action) LIKE '%UPGRADE%'
+                       AND cre.announcement_date::date >= ({A}.{D}::date - interval '365 days')
+                       AND cre.announcement_date::date <= {A}.{D}::date) AS cr_upgrades,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = {A}.symbol
+                       AND UPPER(cre.action) LIKE '%DOWNGRADE%'
+                       AND cre.announcement_date::date >= ({A}.{D}::date - interval '365 days')
+                       AND cre.announcement_date::date <= {A}.{D}::date) AS cr_downgrades,
+                   sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
+    """
+    joins = f"""
+            LEFT JOIN LATERAL (
+                SELECT * FROM technical_signals ts2
+                WHERE ts2.symbol = {A}.symbol
+                  AND ts2.date <= {A}.{D}::date
+                  AND ts2.date >= ({A}.{D}::date - interval '7 days')
+                ORDER BY ts2.date DESC
+                LIMIT 1
+            ) ts ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT * FROM mc_pricefeed_daily mp2
+                WHERE mp2.symbol = {A}.symbol
+                  AND mp2.date <= {A}.{D}
+                  AND mp2.date >= ({A}.{D} - interval '7 days')
+                ORDER BY mp2.date DESC
+                LIMIT 1
+            ) mp ON TRUE
+            {as_of_join_sql('fundamentals_history', 'fh', A, 'symbol', D)}
+            {as_of_join_sql('analyst_estimates_history', 'aeh', A, 'symbol', D)}
+            {own_news_fallback_join(A, D)}
+            LEFT JOIN proprietary_scores_history psh_az
+                   ON psh_az.symbol = {A}.symbol
+                  AND psh_az.source = 'moneycontrol'
+                  AND psh_az.score_type = 'altman_z_score'
+                  AND psh_az.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = {A}.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'altman_z_score'
+                        AND p2.date <= {A}.{D}
+                  )
+            LEFT JOIN proprietary_scores_history psh_oo
+                   ON psh_oo.symbol = {A}.symbol
+                  AND psh_oo.source = 'moneycontrol'
+                  AND psh_oo.score_type = 'ohlson_o_score'
+                  AND psh_oo.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = {A}.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= {A}.{D}
+                  )
+            LEFT JOIN proprietary_scores_history psh_gn
+                   ON psh_gn.symbol = {A}.symbol
+                  AND psh_gn.source = 'moneycontrol'
+                  AND psh_gn.score_type = 'graham_number'
+                  AND psh_gn.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = {A}.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'graham_number'
+                        AND p2.date <= {A}.{D}
+                  )
+            LEFT JOIN proprietary_scores_history psh_ds
+                   ON psh_ds.symbol = {A}.symbol
+                  AND psh_ds.source = 'moneycontrol'
+                  AND psh_ds.score_type = 'dupont_score'
+                  AND psh_ds.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = {A}.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'dupont_score'
+                        AND p2.date <= {A}.{D}
+                  )
+            LEFT JOIN feature_store fs
+                   ON fs.symbol = {A}.symbol AND fs.date = {A}.{D} AND fs.timeframe = 'D'
+            LEFT JOIN market_breadth mb ON mb.date = {A}.{D}
+            LEFT JOIN historical_fno_sentiment hfs
+                   ON hfs.symbol = {A}.symbol AND hfs.date = {A}.{D}
+            LEFT JOIN (
+                SELECT
+                    date AS snap_date,
+                    MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
+                    MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
+                    MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
+                    MAX(CASE WHEN symbol='INDIA_US_SPREAD'       THEN close END) AS india_us_spread,
+                    MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
+                    MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
+                    MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
+                    MAX(CASE WHEN symbol='ADRS_BULLISH_PCT'      THEN close END) AS adrs_bullish_pct,
+                    MAX(CASE WHEN symbol='USDINR'                THEN ret_1d  END) AS usdinr_ret_1d,
+                    MAX(CASE WHEN symbol='NIKKEI'                THEN ret_1d  END) AS nikkei_ret_1d,
+                    MAX(CASE WHEN symbol='HANGSENG'              THEN ret_1d  END) AS hangseng_ret_1d,
+                    MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
+                    MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
+                    MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
+                    MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                    MAX(CASE WHEN symbol='INDIA_MMI'              THEN close END) AS india_mmi,
+                    MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
+                    MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
+                    MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
+                FROM macro_asset_prices
+                GROUP BY date
+            ) macro_snap ON macro_snap.snap_date = {A}.{D}
+            LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
+                SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = {A}.symbol LIMIT 1
+            )
+            LEFT JOIN LATERAL (
+                SELECT sfs2.sector_pcr, sfs2.total_call_oi, sfs2.total_put_oi
+                FROM sector_fo_sentiment sfs2
+                JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = {A}.symbol
+                WHERE sfs2.date <= {A}.{D}::date
+                ORDER BY sfs2.date DESC
+                LIMIT 1
+            ) sfs ON true
+    """
+    return select_cols, joins
+
+
+def full_feature_score_sql() -> tuple:
+    """Returns (select_columns_sql, joins_sql) for the same feature set as
+    full_feature_train_sql(), anchored directly on `ts` (technical_signals) for score-time
+    use -- mirrors load_pending_signals()'s Postgres query below. Uses the LIVE
+    stock_fundamentals snapshot (`sf`) rather than the as-of fundamentals_history join,
+    same convention load_pending_signals() uses, since at score time "latest known" is
+    correct (no point-in-time leakage risk -- the row being scored is today's).
+    Extracted 2026-08-30 for cs_ranker.py's score_batch(), which was scoring off the same
+    narrow ~29-column set its training query used -- see full_feature_train_sql()'s docstring.
+
+    cr_upgrades/cr_downgrades are selected here DELIBERATELY, and their absence was a real
+    (pre-existing, not introduced by the extraction) train/serve skew: the training query has
+    always emitted both credit-rating counts, but no score-time query ever did, so
+    build_features()'s num('cr_upgrades', 0.0) defaulted them to zero at inference. That made
+    THREE features -- credit_trend, credit_upgraded, credit_x_score -- carry real values while
+    training and constant 0.0 while scoring. drop_untrainable_features() cannot catch this:
+    the columns are perfectly well-behaved in the training matrix, and only degenerate on the
+    serving side. Verified against the committed file before fixing (git show HEAD -- the
+    score path had no cr_upgrades either), so this closes an old defect rather than a
+    regression. Keep the two subqueries in sync with full_feature_train_sql()'s copies; any
+    column present in one and not the other is skew by construction.
+    """
+    select_cols = """
+                   ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+                   ts.fii_3d_net,
+                   ts.above_sma200,
+                   COALESCE(ts.news_sentiment_score, own_news.news_30d) AS news_sentiment_score,
+                   ts.pcr_oi, ts.pcr_vol,
+                   ts.fii_10d_net, ts.dii_3d_net,
+                   ts.delivery_pct,
+                   ts.sector_ret_5d, ts.sector_ret_21d,
+                   ts.sector_global_corr_21d,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma,
+                   ts.rs_rank_21d, ts.rs_rank_63d,
+                   ts.insider_buy_pct_90d,
+                   ts.opening_range_break,
+                   ts.vwap_deviation_pct,
+                   ts.first_hour_vol_share,
+                   ts.avwap_deviation_pct,
+                   ts.oi_net_change_pct,
+                   ts.eps_beat_last_q,
+                   ts.eps_beat_streak_4q,
+                   ts.eps_miss_streak_4q,
+                   ts.eps_surprise_last_yr,
+                   ts.eps_estimate_dispersion,
+                   fs.ret_12m_ex1m,
+                   mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
+                   hfs.max_pain,
+                   ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
+                   ts.rollover_pct, ts.cost_of_carry_ann,
+                   ts.block_deal_net_qty, ts.block_deal_value_cr,
+                   ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
+                   ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
+                   ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
+                   ts.ma_bull_frac, ts.osc_bull_frac, ts.adx_tl, ts.atr_pct_tl, ts.mfi_tl,
+                   ts.pivot_dist_pct_tl, ts.delivery_avg_1m_tl, ts.beta_1y_tl,
+                   ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
+                   ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
+                   ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
+                   ts.promoter_pct, ts.fii_pct, ts.mf_pct, ts.pledge_pct,
+                   ts.promoter_chg_qoq, ts.fii_chg_qoq, ts.mf_chg_qoq, ts.pledge_chg_qoq,
+                   ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
+                   ts.days_since_dividend, ts.last_dividend_amt,
+                   ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
+                   COALESCE(ts.mc_52w_high_dist_pct, mp.dist_52w_high) AS mc_52w_high_dist_pct, COALESCE(ts.mc_52w_low_dist_pct, mp.dist_52w_low) AS mc_52w_low_dist_pct, COALESCE(ts.mc_days_from_52wh, mp.days_from_52wh) AS mc_days_from_52wh,
+                   COALESCE(ts.mc_cagr_3y, mp.cagr_3y) AS mc_cagr_3y, COALESCE(ts.mc_cagr_5y, mp.cagr_5y) AS mc_cagr_5y, COALESCE(ts.mc_cagr_10y, mp.cagr_10y) AS mc_cagr_10y, COALESCE(ts.mc_ind_pe, mp.ind_pe) AS mc_ind_pe, COALESCE(ts.mc_pe_vs_ind, mp.pe_vs_ind) AS mc_pe_vs_ind,
+                   COALESCE(ts.mc_consensus_pe, mp.consensus_pe) AS mc_consensus_pe, COALESCE(ts.mc_consensus_pb, mp.consensus_pb) AS mc_consensus_pb,
+                   COALESCE(ts.mc_ma30_dist_pct, mp.ma30_dist_pct) AS mc_ma30_dist_pct, COALESCE(ts.mc_ma50_dist_pct, mp.ma50_dist_pct) AS mc_ma50_dist_pct, COALESCE(ts.mc_ma150_dist_pct, mp.ma150_dist_pct) AS mc_ma150_dist_pct, COALESCE(ts.mc_ma200_dist_pct, mp.ma200_dist_pct) AS mc_ma200_dist_pct,
+                   COALESCE(ts.mc_del_pct_3d, mp.del_pct_3d) AS mc_del_pct_3d, COALESCE(ts.mc_del_pct_5d, mp.del_pct_5d) AS mc_del_pct_5d, COALESCE(ts.mc_del_pct_20d, mp.del_pct_20d) AS mc_del_pct_20d, ts.mc_del_acceleration,
+                   COALESCE(ts.mc_vol_ratio, mp.vol_ratio) AS mc_vol_ratio, COALESCE(ts.mc_circuit_dist_pct, mp.circuit_dist_pct) AS mc_circuit_dist_pct, ts.mc_fno_eligible,
+                   COALESCE(ts.mc_3d_return, mp.ret_3d) AS mc_3d_return, COALESCE(ts.mc_ytd_return, mp.ret_ytd) AS mc_ytd_return,
+                   COALESCE(ts.mc_price_cash, mp.price_cash) AS mc_price_cash, COALESCE(ts.mc_consensus_eps, mp.consensus_eps) AS mc_consensus_eps, COALESCE(ts.mc_eps_vs_cons, mp.eps_vs_cons) AS mc_eps_vs_cons, COALESCE(ts.mc_pe_fwd_discount, mp.pe_fwd_discount) AS mc_pe_fwd_discount,
+                   ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
+                   ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
+                   ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
+                   ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
+                   ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
+                   ts.hv_10d, ts.hv_20d, ts.hv_30d, ts.hv_60d, ts.iv_hv_ratio,
+                   ts.pead_score, ts.event_signal_score,
+                   ts.eps_revision_3m_pct, ts.target_revision_3m_pct, ts.analyst_count_chg,
+                   ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
+                   ts.asm_flag, ts.gsm_stage,
+                   ts.crude_corr_90d, ts.gold_corr_90d, ts.dxy_corr_90d, ts.sp500_corr_90d,
+                   ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
+                   ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
+                   ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
+                   ts.positive_turnaround, ts.negative_turnaround,
+                   ts.earnings_shocker_flag, ts.earnings_shocker_gain,
+                   ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
+                   ts.pledge_chg_90d,
+                   ts.iep_gap_pct, ts.preopen_imbalance,
+                   ts.expected_move_pct, ts.stock_gex_proxy, ts.iv_term_slope,
+                   ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
+                   ts.eps_miss_after_streak, ts.rev_surprise_q1,
+                   ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
+                   ts.interest_coverage_post_tax, ts.lt_de_ratio,
+                   ts.nim, ts.cost_to_income, ts.int_income_earning_assets, ts.non_int_income_earning_assets,
+                   ts.op_profit_earning_assets, ts.op_expense_earning_assets, ts.int_exp_earning_assets,
+                   ts.capital_adequacy, ts.tier1_capital, ts.tier2_capital,
+                   ts.gross_npa_pct, ts.net_npa_pct, ts.net_npa_to_advances, ts.num_branches,
+                   ts.int_income_per_employee, ts.np_per_employee, ts.business_per_employee,
+                   ts.int_income_per_branch, ts.np_per_branch,
+                   ts.cfi_growth, ts.cff_growth,
+                   ts.cfo_cagr_3y, ts.cfi_cagr_3y, ts.cff_cagr_3y, ts.cfo_cagr_5y, ts.cfi_cagr_5y, ts.cff_cagr_5y,
+                   ts.mf_net_share_chg_pct, ts.mf_fund_count,
+                   ts.mf_funds_adding, ts.mf_funds_trimming, ts.mf_add_trim_ratio,
+                   ts.mf_avg_pct_assets, ts.mf_big_fund_flow, ts.mf_flow_vs_sector, ts.mf_flow_rank,
+                   ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
+                   ts.short_interest_proxy,
+                   ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+                   ts.ext_fii_holding_pct, ts.ext_dii_holding_pct, ts.ext_fii_qoq_chg, ts.ext_dii_qoq_chg,
+                   ts.ext_t80_tech_score, ts.ext_t80_quality_rank, ts.ext_t80_valuation_rank, ts.ext_t80_financial_pts,
+                   ts.ext_mojo_quality_rank, ts.ext_mojo_valuation_rank, ts.ext_mojo_financial_pts,
+                   ts.ext_is_overall_score, ts.ext_is_percentile_rank, ts.ext_tt_score,
+                   ts.insider_buy_flag, ts.insider_sell_flag,
+                   ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
+                   ts.mf_sector_flow_pct,
+                   ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
+                   ts.wc_deteriorating, ts.wc_improving,
+                   ts.screener_bull_count, ts.screener_bear_count, ts.screener_cat_breadth,
+                   ts.screener_tier1_count, ts.screener_momentum_score, ts.screener_streak_days,
+                   ts.screener_name_signal, ts.screener_alpha_score,
+                   macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
+                   macro_snap.india_10y, macro_snap.india_us_spread,
+                   macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
+                   macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
+                   macro_snap.fii_net_today,
+                   macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
+                   macro_snap.india_vix, macro_snap.india_mmi,
+                   macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
+                   macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
+                   mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
+                   mse.rev_growth_yoy AS sector_rev_growth_yoy,
+                   sf.fifty_two_week_high,
+                   sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
+                   sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
+                   sf.earnings_yield, sf.price_to_book, sf.market_cap,
+                   aeh.n_analysts, aeh.buy_count, aeh.target_mean,
+                   psh_az.score_value AS altman_z,
+                   psh_oo.score_value AS ohlson_o,
+                   psh_gn.score_value AS graham_number,
+                   psh_ds.score_value AS dupont_score,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = ts.symbol
+                       AND UPPER(cre.action) LIKE '%UPGRADE%'
+                       AND cre.announcement_date::date >= (ts.date::date - interval '365 days')
+                       AND cre.announcement_date::date <= ts.date::date) AS cr_upgrades,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = ts.symbol
+                       AND UPPER(cre.action) LIKE '%DOWNGRADE%'
+                       AND cre.announcement_date::date >= (ts.date::date - interval '365 days')
+                       AND cre.announcement_date::date <= ts.date::date) AS cr_downgrades,
+                   sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
+    """
+    joins = """
+            LEFT JOIN LATERAL (
+                SELECT * FROM mc_pricefeed_daily mp2
+                WHERE mp2.symbol = ts.symbol
+                  AND mp2.date <= ts.date
+                  AND mp2.date >= (ts.date - interval '7 days')
+                ORDER BY mp2.date DESC
+                LIMIT 1
+            ) mp ON TRUE
+            LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
+            LEFT JOIN feature_store fs
+                   ON fs.symbol = ts.symbol AND fs.date = ts.date AND fs.timeframe = 'D'
+            LEFT JOIN market_breadth mb ON mb.date = ts.date
+            LEFT JOIN historical_fno_sentiment hfs
+                   ON hfs.symbol = ts.symbol AND hfs.date = ts.date
+            LEFT JOIN LATERAL (
+                SELECT * FROM analyst_estimates_history aeh2
+                WHERE aeh2.symbol = ts.symbol AND aeh2.as_of_date <= ts.date
+                ORDER BY aeh2.as_of_date DESC
+                LIMIT 1
+            ) aeh ON TRUE
+            LEFT JOIN proprietary_scores_history psh_az
+                   ON psh_az.symbol = ts.symbol
+                  AND psh_az.source = 'moneycontrol'
+                  AND psh_az.score_type = 'altman_z_score'
+                  AND psh_az.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'altman_z_score'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_oo
+                   ON psh_oo.symbol = ts.symbol
+                  AND psh_oo.source = 'moneycontrol'
+                  AND psh_oo.score_type = 'ohlson_o_score'
+                  AND psh_oo.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_gn
+                   ON psh_gn.symbol = ts.symbol
+                  AND psh_gn.source = 'moneycontrol'
+                  AND psh_gn.score_type = 'graham_number'
+                  AND psh_gn.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'graham_number'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_ds
+                   ON psh_ds.symbol = ts.symbol
+                  AND psh_ds.source = 'moneycontrol'
+                  AND psh_ds.score_type = 'dupont_score'
+                  AND psh_ds.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'dupont_score'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN (
+                SELECT
+                    MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
+                    MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
+                    MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
+                    MAX(CASE WHEN symbol='INDIA_US_SPREAD'       THEN close END) AS india_us_spread,
+                    MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
+                    MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
+                    MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
+                    MAX(CASE WHEN symbol='ADRS_BULLISH_PCT'      THEN close END) AS adrs_bullish_pct,
+                    MAX(CASE WHEN symbol='USDINR'                THEN ret_1d  END) AS usdinr_ret_1d,
+                    MAX(CASE WHEN symbol='NIKKEI'                THEN ret_1d  END) AS nikkei_ret_1d,
+                    MAX(CASE WHEN symbol='HANGSENG'              THEN ret_1d  END) AS hangseng_ret_1d,
+                    MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
+                    MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
+                    MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
+                    MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                    MAX(CASE WHEN symbol='INDIA_MMI'              THEN close END) AS india_mmi,
+                    MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
+                    MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
+                    MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
+                FROM macro_asset_prices
+                WHERE date::text = (SELECT MAX(date)::text FROM macro_asset_prices)
+            ) macro_snap ON 1=1
+            LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
+                SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = ts.symbol LIMIT 1
+            )
+            LEFT JOIN LATERAL (
+                SELECT sfs2.sector_pcr, sfs2.total_call_oi, sfs2.total_put_oi
+                FROM sector_fo_sentiment sfs2
+                JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = ts.symbol
+                ORDER BY sfs2.date DESC
+                LIMIT 1
+            ) sfs ON true
+    """ + own_news_fallback_join('ts', 'date')
+    return select_cols, joins
+
+
+def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
+    """Load labeled training rows. `label`:
+      - 'triple_barrier' → se.tb_label (vol-scaled first-touch label from signal_excursions).
+                           THE DEFAULT, and the only economically meaningful one: barriers are
+                           +2·ATR / -1·ATR with a ±0.15·ATR cost band, so a "win" means the trade
+                           actually cleared its stop and its costs (exit_labeler.py).
+      - 'horizon'        → so.outcome ∈ {WIN,LOSS}. Retained for reproducing historical runs
+                           ONLY. For signal_source='technical' this is label_definition=
+                           'path_barrier', a max-favourable-excursion rule: it books a win for a
+                           name that merely traded through a level intraday and gave it all back,
+                           which is why it reads an 88% win rate at h=15 and an average
+                           "return" of +18.8%. A model trained on it predicts volatility, not
+                           profit. Do not train on this.
+    """
+    # signal_source='technical' (2026-08): this whole query's feature set is a technical_signals
+    # LEFT JOIN (rsi/adx/nifty_regime/etc.) -- without this filter, a confluence-sourced outcome
+    # row sharing (symbol, signal_date) with an unrelated technical_signals row would be trained
+    # on as if it graded that signal, exactly the mispairing bug documented for ml_calibration.py.
+    if label == 'triple_barrier':
+        label_select = "se.tb_label AS outcome"
+        label_join = (
+            "LEFT JOIN signal_excursions se "
+            "ON se.symbol = so.symbol AND se.signal_date = so.signal_date "
+            "AND se.horizon_days = so.horizon_days"
+        )
+        label_where = "se.tb_label IS NOT NULL AND so.signal_source = 'technical'"
+    else:
+        label_select = "so.outcome"
+        label_join = ""
+        label_where = ("so.outcome IN ('WIN','LOSS','STOP_LOSS')\n          AND so.return_pct IS NOT NULL"
+                       "\n          AND so.signal_source = 'technical'")
+
+    if use_postgres():
+        # vol_rank rides the same signal_excursions join that supplies the label (se), so it
+        # only exists in the triple_barrier branch; the horizon branch (legacy, se never
+        # joined) leaves the feature NULL→0.5 via build_features' default.
+        vol_rank_select = "se.vol_rank AS vol_rank," if label == 'triple_barrier' else ""
+        q = f"""
+            SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
+                   {vol_rank_select}
+                   so.signal_score, so.signals_json, so.return_pct,
+                   ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+                   ts.fii_3d_net,
+                   ts.above_sma200,
+                   COALESCE(ts.news_sentiment_score, own_news.news_30d) AS news_sentiment_score,
+                   ts.pcr_oi, ts.pcr_vol,
+                   ts.fii_10d_net, ts.dii_3d_net,
+                   ts.delivery_pct,
+                   ts.sector_ret_5d, ts.sector_ret_21d,
+                   ts.sector_global_corr_21d,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma,
+                   ts.rs_rank_21d, ts.rs_rank_63d,
+                   ts.insider_buy_pct_90d,
+                   ts.opening_range_break,
+                   ts.vwap_deviation_pct,
+                   ts.first_hour_vol_share,
+                   ts.avwap_deviation_pct,
+                   ts.oi_net_change_pct,
+                   ts.eps_beat_last_q,
+                   ts.eps_beat_streak_4q,
+                   ts.eps_miss_streak_4q,
+                   ts.eps_surprise_last_yr,
+                   ts.eps_estimate_dispersion,
+                   fs.ret_12m_ex1m,
+                   mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
+                   hfs.max_pain,
+                   ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
+                   ts.rollover_pct, ts.cost_of_carry_ann,
+                   ts.block_deal_net_qty, ts.block_deal_value_cr,
+                   ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
+                   ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
+                   ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
+                   ts.ma_bull_frac, ts.osc_bull_frac, ts.adx_tl, ts.atr_pct_tl, ts.mfi_tl,
+                   ts.pivot_dist_pct_tl, ts.delivery_avg_1m_tl, ts.beta_1y_tl,
+                   ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
+                   ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
+                   ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
+                   ts.promoter_pct, ts.fii_pct, ts.mf_pct, ts.pledge_pct,
+                   ts.promoter_chg_qoq, ts.fii_chg_qoq, ts.mf_chg_qoq, ts.pledge_chg_qoq,
+                   ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
+                   ts.days_since_dividend, ts.last_dividend_amt,
+                   ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
+                   COALESCE(ts.mc_52w_high_dist_pct, mp.dist_52w_high) AS mc_52w_high_dist_pct, COALESCE(ts.mc_52w_low_dist_pct, mp.dist_52w_low) AS mc_52w_low_dist_pct, COALESCE(ts.mc_days_from_52wh, mp.days_from_52wh) AS mc_days_from_52wh,
+                   COALESCE(ts.mc_cagr_3y, mp.cagr_3y) AS mc_cagr_3y, COALESCE(ts.mc_cagr_5y, mp.cagr_5y) AS mc_cagr_5y, COALESCE(ts.mc_cagr_10y, mp.cagr_10y) AS mc_cagr_10y, COALESCE(ts.mc_ind_pe, mp.ind_pe) AS mc_ind_pe, COALESCE(ts.mc_pe_vs_ind, mp.pe_vs_ind) AS mc_pe_vs_ind,
+                   COALESCE(ts.mc_consensus_pe, mp.consensus_pe) AS mc_consensus_pe, COALESCE(ts.mc_consensus_pb, mp.consensus_pb) AS mc_consensus_pb,
+                   COALESCE(ts.mc_ma30_dist_pct, mp.ma30_dist_pct) AS mc_ma30_dist_pct, COALESCE(ts.mc_ma50_dist_pct, mp.ma50_dist_pct) AS mc_ma50_dist_pct, COALESCE(ts.mc_ma150_dist_pct, mp.ma150_dist_pct) AS mc_ma150_dist_pct, COALESCE(ts.mc_ma200_dist_pct, mp.ma200_dist_pct) AS mc_ma200_dist_pct,
+                   COALESCE(ts.mc_del_pct_3d, mp.del_pct_3d) AS mc_del_pct_3d, COALESCE(ts.mc_del_pct_5d, mp.del_pct_5d) AS mc_del_pct_5d, COALESCE(ts.mc_del_pct_20d, mp.del_pct_20d) AS mc_del_pct_20d, ts.mc_del_acceleration,
+                   COALESCE(ts.mc_vol_ratio, mp.vol_ratio) AS mc_vol_ratio, COALESCE(ts.mc_circuit_dist_pct, mp.circuit_dist_pct) AS mc_circuit_dist_pct, ts.mc_fno_eligible,
+                   COALESCE(ts.mc_3d_return, mp.ret_3d) AS mc_3d_return, COALESCE(ts.mc_ytd_return, mp.ret_ytd) AS mc_ytd_return,
+                   COALESCE(ts.mc_price_cash, mp.price_cash) AS mc_price_cash, COALESCE(ts.mc_consensus_eps, mp.consensus_eps) AS mc_consensus_eps, COALESCE(ts.mc_eps_vs_cons, mp.eps_vs_cons) AS mc_eps_vs_cons, COALESCE(ts.mc_pe_fwd_discount, mp.pe_fwd_discount) AS mc_pe_fwd_discount,
+                   ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
+                   ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
+                   ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
+                   ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
+                   ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
+                   ts.hv_10d, ts.hv_20d, ts.hv_30d, ts.hv_60d, ts.iv_hv_ratio,
+                   ts.pead_score, ts.event_signal_score,
+                   ts.eps_revision_3m_pct, ts.target_revision_3m_pct, ts.analyst_count_chg,
+                   ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
+                   ts.asm_flag, ts.gsm_stage,
+                   ts.crude_corr_90d, ts.gold_corr_90d, ts.dxy_corr_90d, ts.sp500_corr_90d,
+                   ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
+                   ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
+                   ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
+                   COALESCE(ts.mc_eps_vs_cons, mp.eps_vs_cons) AS mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
                    ts.earnings_shocker_flag, ts.earnings_shocker_gain,
                    ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
                    ts.pledge_chg_90d,
@@ -1190,7 +1796,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
             LEFT JOIN LATERAL (
                 SELECT * FROM technical_signals ts2
                 WHERE ts2.symbol = so.symbol
-                  AND ts2.date <= so.signal_date
+                  AND ts2.date <= so.signal_date::date
                   -- 7 days, not 3: the window only has to tolerate market closures (a long
                   -- weekend plus an adjacent holiday exceeds 3 days and used to return NO
                   -- feature row at all). Column sparsity is handled upstream by
@@ -1201,24 +1807,29 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                   -- label match a technical-indicator snapshot up to a month stale, and 30
                   -- days doesn't even reach quarterly fundamentals' true cadence anyway. If
                   -- fundamentals staleness is a real problem, fix densify_feature_matrix.py.)
-                  AND ts2.date >= (so.signal_date::date - interval '7 days')::text
+                  AND ts2.date >= (so.signal_date::date - interval '7 days')
                 ORDER BY ts2.date DESC
                 LIMIT 1
             ) ts ON TRUE
+            -- mc_pricefeed_daily carries the SAME MoneyControl fields as the ts.mc_*
+            -- columns above, but for every symbol on every trading day (2,243/date),
+            -- where the ts.mc_* copies land on roughly 1 date in 20 -- so over the
+            -- training panel those features were ~95% NULL and the model read them as a
+            -- single imputed constant. COALESCEd, not replaced: where the ts copy has a
+            -- value it still wins, so nothing that worked before changes.
+            -- Same <= date + 7-day-floor point-in-time convention as the ts LATERAL
+            -- above, deliberately -- one PIT rule for this query, not two.
+            LEFT JOIN LATERAL (
+                SELECT * FROM mc_pricefeed_daily mp2
+                WHERE mp2.symbol = so.symbol
+                  AND mp2.date <= so.signal_date
+                  AND mp2.date >= (so.signal_date - interval '7 days')
+                ORDER BY mp2.date DESC
+                LIMIT 1
+            ) mp ON TRUE
             {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
             {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}
-            -- GDELT tone (-100..+100, typically -10..+10) scaled to the same -1..1 range as
-            -- technical_signals.news_sentiment_score, used ONLY as a fallback (COALESCE above)
-            -- for rows that predate live finbert/RSS coverage -- gdelt_sentiment has history
-            -- back to 2015, closing the gap where those older training rows silently got a
-            -- fabricated 0 (== "confirmed neutral") instead of missing/unknown.
-            LEFT JOIN LATERAL (
-                SELECT AVG(g.avg_tone) / 10.0 AS tone_scaled
-                FROM gdelt_sentiment g
-                WHERE g.symbol = so.symbol
-                  AND g.date <= so.signal_date
-                  AND g.date >= (so.signal_date::date - interval '30 days')::text
-            ) gdelt ON TRUE
+            {own_news_fallback_join('so', 'signal_date')}
             LEFT JOIN proprietary_scores_history psh_az
                    ON psh_az.symbol = so.symbol
                   AND psh_az.source = 'moneycontrol'
@@ -1260,13 +1871,13 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                         AND p2.date <= so.signal_date
                   )
             LEFT JOIN feature_store fs
-                   ON fs.symbol = so.symbol AND fs.date::text = so.signal_date AND fs.timeframe = 'D'
+                   ON fs.symbol = so.symbol AND fs.date = so.signal_date AND fs.timeframe = 'D'
             LEFT JOIN market_breadth mb ON mb.date = so.signal_date
             LEFT JOIN historical_fno_sentiment hfs
                    ON hfs.symbol = so.symbol AND hfs.date = so.signal_date
             LEFT JOIN (
                 SELECT
-                    date::text AS snap_date,
+                    date AS snap_date,
                     MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
                     MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
                     MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
@@ -1329,7 +1940,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
             news_sent_sel = """COALESCE(ts.news_sentiment_score, (
                        SELECT AVG(g.avg_tone) / 10.0 FROM gdelt_sentiment g
                        WHERE g.symbol = so.symbol AND g.date <= so.signal_date
-                         AND g.date >= date(so.signal_date, '-30 days')
+                         AND g.date >= date(so.signal_date, '-30 days')::text
                    )) AS news_sentiment_score"""
         else:
             news_sent_sel = "ts.news_sentiment_score"
@@ -1361,7 +1972,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.delivery_pct,
                    ts.sector_ret_5d, ts.sector_ret_21d,
                    ts.sector_global_corr_21d,
-                   ts.iv_rank, ts.iv_skew,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma,
                    ts.rs_rank_21d, ts.rs_rank_63d,
                    ts.insider_buy_pct_90d,
                    ts.opening_range_break,
@@ -1590,6 +2201,45 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
     return df
 
 
+def _enrich_vol_rank(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute vol_rank (ATR percentile vs. trailing history) for each pending signal
+    from stock_ohlcv prior bars — mirrors exit_labeler.compute_vol_rank's leak-free logic.
+
+    At training time this feature comes from signal_excursions.vol_rank (populated by
+    exit_labeler.py). Pending signals have no excursions row yet, so we recompute it
+    on-the-fly here. Without this, the model scores every pending signal at the neutral
+    default (0.5), blind to the dynamic-barrier regime it was trained to recognize.
+    """
+    if df.empty:
+        return df
+
+    # Deferred import: exit_labeler imports db_compat only, no circular dependency,
+    # but keeping it local avoids pulling exit_labeler's module-level code at startup.
+    from exit_labeler import compute_vol_rank as _vol_rank
+
+    # Batch-fetch prior bars per symbol: ATR_WINDOW(14) + VOL_RANK_LOOKBACK(20) + buffer.
+    # exit_labeler uses 36; we use the same ceiling so the series is directly comparable.
+    PRIOR_BARS = 36
+    vol_ranks = []
+    for _, row in df.iterrows():
+        symbol = row['symbol']
+        signal_date = row['signal_date']
+        prior = read_df(
+            "SELECT high, low, close FROM stock_ohlcv "
+            "WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect,0) = 0 "
+            "ORDER BY date DESC LIMIT ?",
+            (symbol, signal_date, PRIOR_BARS),
+        )
+        if prior.empty:
+            vol_ranks.append(0.5)
+            continue
+        prior_bars = list(prior[["high", "low", "close"]].itertuples(index=False, name=None))[::-1]
+        vol_ranks.append(_vol_rank(prior_bars))
+
+    df['vol_rank'] = vol_ranks
+    return df
+
+
 def load_pending_signals() -> pd.DataFrame:
     if use_postgres():
         q = f"""
@@ -1597,13 +2247,13 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                    ts.fii_3d_net,
                    ts.above_sma200,
-                   ts.news_sentiment_score,
+                   COALESCE(ts.news_sentiment_score, own_news.news_30d) AS news_sentiment_score,
                    ts.pcr_oi, ts.pcr_vol,
                    ts.fii_10d_net, ts.dii_3d_net,
                    ts.delivery_pct,
                    ts.sector_ret_5d, ts.sector_ret_21d,
                    ts.sector_global_corr_21d,
-                   ts.iv_rank, ts.iv_skew,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma,
                    ts.rs_rank_21d, ts.rs_rank_63d,
                    ts.insider_buy_pct_90d,
                    ts.opening_range_break,
@@ -1635,14 +2285,14 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
                    ts.days_since_dividend, ts.last_dividend_amt,
                    ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
-                   ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
-                   ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
-                   ts.mc_consensus_pe, ts.mc_consensus_pb,
-                   ts.mc_ma30_dist_pct, ts.mc_ma50_dist_pct, ts.mc_ma150_dist_pct, ts.mc_ma200_dist_pct,
-                   ts.mc_del_pct_3d, ts.mc_del_pct_5d, ts.mc_del_pct_20d, ts.mc_del_acceleration,
-                   ts.mc_vol_ratio, ts.mc_circuit_dist_pct, ts.mc_fno_eligible,
-                   ts.mc_3d_return, ts.mc_ytd_return,
-                   ts.mc_price_cash, ts.mc_consensus_eps, ts.mc_eps_vs_cons, ts.mc_pe_fwd_discount,
+                   COALESCE(ts.mc_52w_high_dist_pct, mp.dist_52w_high) AS mc_52w_high_dist_pct, COALESCE(ts.mc_52w_low_dist_pct, mp.dist_52w_low) AS mc_52w_low_dist_pct, COALESCE(ts.mc_days_from_52wh, mp.days_from_52wh) AS mc_days_from_52wh,
+                   COALESCE(ts.mc_cagr_3y, mp.cagr_3y) AS mc_cagr_3y, COALESCE(ts.mc_cagr_5y, mp.cagr_5y) AS mc_cagr_5y, COALESCE(ts.mc_cagr_10y, mp.cagr_10y) AS mc_cagr_10y, COALESCE(ts.mc_ind_pe, mp.ind_pe) AS mc_ind_pe, COALESCE(ts.mc_pe_vs_ind, mp.pe_vs_ind) AS mc_pe_vs_ind,
+                   COALESCE(ts.mc_consensus_pe, mp.consensus_pe) AS mc_consensus_pe, COALESCE(ts.mc_consensus_pb, mp.consensus_pb) AS mc_consensus_pb,
+                   COALESCE(ts.mc_ma30_dist_pct, mp.ma30_dist_pct) AS mc_ma30_dist_pct, COALESCE(ts.mc_ma50_dist_pct, mp.ma50_dist_pct) AS mc_ma50_dist_pct, COALESCE(ts.mc_ma150_dist_pct, mp.ma150_dist_pct) AS mc_ma150_dist_pct, COALESCE(ts.mc_ma200_dist_pct, mp.ma200_dist_pct) AS mc_ma200_dist_pct,
+                   COALESCE(ts.mc_del_pct_3d, mp.del_pct_3d) AS mc_del_pct_3d, COALESCE(ts.mc_del_pct_5d, mp.del_pct_5d) AS mc_del_pct_5d, COALESCE(ts.mc_del_pct_20d, mp.del_pct_20d) AS mc_del_pct_20d, ts.mc_del_acceleration,
+                   COALESCE(ts.mc_vol_ratio, mp.vol_ratio) AS mc_vol_ratio, COALESCE(ts.mc_circuit_dist_pct, mp.circuit_dist_pct) AS mc_circuit_dist_pct, ts.mc_fno_eligible,
+                   COALESCE(ts.mc_3d_return, mp.ret_3d) AS mc_3d_return, COALESCE(ts.mc_ytd_return, mp.ret_ytd) AS mc_ytd_return,
+                   COALESCE(ts.mc_price_cash, mp.price_cash) AS mc_price_cash, COALESCE(ts.mc_consensus_eps, mp.consensus_eps) AS mc_consensus_eps, COALESCE(ts.mc_eps_vs_cons, mp.eps_vs_cons) AS mc_eps_vs_cons, COALESCE(ts.mc_pe_fwd_discount, mp.pe_fwd_discount) AS mc_pe_fwd_discount,
                    ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
                    ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
                    ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
@@ -1657,7 +2307,7 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
                    ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
                    ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
-                   ts.mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
+                   COALESCE(ts.mc_eps_vs_cons, mp.eps_vs_cons) AS mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
                    ts.earnings_shocker_flag, ts.earnings_shocker_gain,
                    ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
                    ts.pledge_chg_90d,
@@ -1714,16 +2364,44 @@ def load_pending_signals() -> pd.DataFrame:
                    psh_oo.score_value AS ohlson_o,
                    psh_gn.score_value AS graham_number,
                    psh_ds.score_value AS dupont_score,
+                   -- AF-20260913-04: the 2026-08-30 fix added these to full_feature_score_sql(),
+                   -- which only cs_ranker calls; this is the ensemble's own score query.
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = ts.symbol
+                       AND UPPER(cre.action) LIKE '%UPGRADE%'
+                       AND cre.announcement_date::date >= (ts.date::date - interval '365 days')
+                       AND cre.announcement_date::date <= ts.date::date) AS cr_upgrades,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = ts.symbol
+                       AND UPPER(cre.action) LIKE '%DOWNGRADE%'
+                       AND cre.announcement_date::date >= (ts.date::date - interval '365 days')
+                       AND cre.announcement_date::date <= ts.date::date) AS cr_downgrades,
                    sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
             FROM technical_signals ts
+            -- mc_pricefeed_daily carries the SAME MoneyControl fields as the ts.mc_*
+            -- columns above, but for every symbol on every trading day (2,243/date),
+            -- where the ts.mc_* copies land on roughly 1 date in 20 -- so over the
+            -- training panel those features were ~95% NULL and the model read them as a
+            -- single imputed constant. COALESCEd, not replaced: where the ts copy has a
+            -- value it still wins, so nothing that worked before changes.
+            -- Same <= date + 7-day-floor point-in-time convention as the ts LATERAL
+            -- above, deliberately -- one PIT rule for this query, not two.
+            LEFT JOIN LATERAL (
+                SELECT * FROM mc_pricefeed_daily mp2
+                WHERE mp2.symbol = ts.symbol
+                  AND mp2.date <= ts.date
+                  AND mp2.date >= (ts.date - interval '7 days')
+                ORDER BY mp2.date DESC
+                LIMIT 1
+            ) mp ON TRUE
             LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
             LEFT JOIN feature_store fs
-                   ON fs.symbol = ts.symbol AND fs.date::text = ts.date AND fs.timeframe = 'D'
+                   ON fs.symbol = ts.symbol AND fs.date = ts.date AND fs.timeframe = 'D'
             LEFT JOIN market_breadth mb ON mb.date = ts.date
             LEFT JOIN historical_fno_sentiment hfs
                    ON hfs.symbol = ts.symbol AND hfs.date = ts.date
             -- Latest analyst snapshot on/before today
-            {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date')}
+            {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date', False)}
             LEFT JOIN proprietary_scores_history psh_az
                    ON psh_az.symbol = ts.symbol
                   AND psh_az.source = 'moneycontrol'
@@ -1798,6 +2476,7 @@ def load_pending_signals() -> pd.DataFrame:
                 ORDER BY sfs2.date DESC
                 LIMIT 1
             ) sfs ON true
+            {own_news_fallback_join('ts', 'date')}
             WHERE ts.win_probability IS NULL
             -- Was `AND ts.signals_json IS NOT NULL` -- excluded every row the full-universe
             -- grid-ensurer (backfill_technical_features.py --full-today) writes, since those
@@ -2027,7 +2706,7 @@ def load_pending_signals() -> pd.DataFrame:
             LEFT JOIN market_breadth mb ON mb.date = ts.date
             LEFT JOIN historical_fno_sentiment hfs
                    ON hfs.symbol = ts.symbol AND hfs.date = ts.date
-            {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date')}
+            {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date', False)}
             LEFT JOIN proprietary_scores_history psh_az
                    ON psh_az.symbol = ts.symbol
                   AND psh_az.source = 'moneycontrol'
@@ -2103,7 +2782,7 @@ def load_pending_signals() -> pd.DataFrame:
         """
     df = read_df(q)
     df['horizon_days'] = 15
-    return df
+    return _enrich_vol_rank(df)
 
 
 # ── Model Building ────────────────────────────────────────────────────────────
@@ -2170,7 +2849,14 @@ def _xgboost_device() -> str:
     return 'cuda' if _torch_cuda_available() else 'cpu'
 
 
-def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None, cv=3):
+def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None, *, cv):
+    # No default: an int here silently means sklearn's StratifiedKFold inside
+    # CalibratedClassifierCV, which shuffles time order -- the exact embargo-violating bug this
+    # file's own outer TimeSeriesSplit exists to prevent (recurring-bugs.md, "An int passed as
+    # cv= ... silently means StratifiedKFold"). The one real call site already passes a real
+    # TimeSeriesSplit; a bare int default here was a latent trap for any future call site that
+    # forgot to, with nothing to catch it. Keyword-only + no default makes an omission a loud
+    # TypeError instead of a silent wrong split.
     from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
     from sklearn.linear_model import LogisticRegression
     from sklearn.calibration import CalibratedClassifierCV
@@ -2250,7 +2936,9 @@ def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None
 
 
 def tune_hyperparameters(X: pd.DataFrame, y: pd.Series, weights: np.ndarray | None,
-                          spw: float, embargo: int, n_splits: int = 5, n_trials: int = 20) -> dict:
+                          spw: float, embargo: int, n_splits: int = 5, n_trials: int = 20,
+                          dates: pd.Series | None = None,
+                          horizon_days: int | None = None) -> dict:
     """Run Optuna Bayesian hyperparameter search to find best parameters for LightGBM, XGBoost, and CatBoost."""
     import optuna
     from sklearn.model_selection import TimeSeriesSplit
@@ -2260,11 +2948,18 @@ def tune_hyperparameters(X: pd.DataFrame, y: pd.Series, weights: np.ndarray | No
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-    effective_embargo = min(embargo, len(X) // 10)
-    n_eff = n_splits
-    if effective_embargo > 0:
-        n_eff = max(2, min(n_splits, len(X) // max(1, effective_embargo + 1) - 1))
-    skf = TimeSeriesSplit(n_splits=n_eff, gap=effective_embargo)
+    if dates is not None and len(dates) == len(X) and pd.Series(dates).nunique() > 2:
+        skf = make_purged_group_time_series_split(
+            dates,
+            horizon_days=horizon_days if horizon_days is not None else max(1, embargo),
+            n_splits=n_splits,
+        )
+    else:
+        effective_embargo = min(embargo, len(X) // 10)
+        n_eff = n_splits
+        if effective_embargo > 0:
+            n_eff = max(2, min(n_splits, len(X) // max(1, effective_embargo + 1) - 1))
+        skf = TimeSeriesSplit(n_splits=n_eff, gap=effective_embargo)
     sw = weights if weights is not None else None
 
     def objective(trial):
@@ -2351,8 +3046,67 @@ def average_uniqueness(start_days, horizons) -> list:
     return out
 
 
+def feature_matrix_coverage_report(X: pd.DataFrame) -> dict:
+    """Cheap per-feature training diagnostics after build_features().
+
+    build_features() intentionally emits neutral defaults for scoring continuity.
+    Training needs a second gate so fully-defaulted or numerically-degenerate columns do
+    not become split candidates just because they are present in the schema.
+    """
+    clean = X.replace([np.inf, -np.inf], np.nan)
+    report = {}
+    for col in clean.columns:
+        s = clean[col]
+        report[col] = {
+            'non_null_pct': float(s.notna().mean()) if len(s) else 0.0,
+            'distinct_values': int(s.nunique(dropna=True)),
+            'std': float(s.std(skipna=True)) if s.notna().any() else 0.0,
+        }
+    return report
+
+
+def drop_untrainable_features(
+    X: pd.DataFrame,
+    *,
+    min_non_null_pct: float = 0.98,
+    min_distinct_values: int = 2,
+    min_std: float = 1e-12,
+    min_remaining_features: int = 10,
+) -> tuple[pd.DataFrame, dict]:
+    """Drop hollow engineered features for training while preserving score-time defaults."""
+    report = feature_matrix_coverage_report(X)
+    dropped: dict[str, str] = {}
+    for col, stats in report.items():
+        if stats['non_null_pct'] < min_non_null_pct:
+            dropped[col] = f"non_null_pct={stats['non_null_pct']:.3f}"
+        elif stats['distinct_values'] < min_distinct_values:
+            dropped[col] = f"distinct_values={stats['distinct_values']}"
+        elif abs(stats['std']) <= min_std:
+            dropped[col] = f"std={stats['std']:.3g}"
+
+    keep = [c for c in X.columns if c not in dropped]
+    if len(keep) < min_remaining_features:
+        return X, {
+            'enabled': False,
+            'reason': f"only {len(keep)} features would remain",
+            'dropped': {},
+            'kept_count': len(X.columns),
+            'original_count': len(X.columns),
+            'coverage': report,
+        }
+
+    return X[keep].copy(), {
+        'enabled': True,
+        'dropped': dropped,
+        'kept_count': len(keep),
+        'original_count': len(X.columns),
+        'coverage': report,
+    }
+
+
 def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits: int = 5,
-               sample_weight=None, tuned_params: dict | None = None):
+               sample_weight=None, tuned_params: dict | None = None,
+               dates: pd.Series | None = None, horizon_days: int | None = None):
     """
     Fit OOF-stacked base models + meta-learner on (X, y), purging `embargo` samples
     between each train/validation fold so overlapping forward-return windows cannot
@@ -2367,11 +3121,18 @@ def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits
     from sklearn.metrics import roc_auc_score
 
     sw = np.asarray(sample_weight, dtype=float) if sample_weight is not None else None
-    effective_embargo = min(embargo, len(X) // 10)
-    n_eff = n_splits
-    if effective_embargo > 0:
-        n_eff = max(2, min(n_splits, len(X) // max(1, effective_embargo + 1) - 1))
-    skf = TimeSeriesSplit(n_splits=n_eff, gap=effective_embargo)
+    if dates is not None and len(dates) == len(X) and pd.Series(dates).nunique() > 2:
+        skf = make_purged_group_time_series_split(
+            dates,
+            horizon_days=horizon_days if horizon_days is not None else max(1, embargo),
+            n_splits=n_splits,
+        )
+    else:
+        effective_embargo = min(embargo, len(X) // 10)
+        n_eff = n_splits
+        if effective_embargo > 0:
+            n_eff = max(2, min(n_splits, len(X) // max(1, effective_embargo + 1) - 1))
+        skf = TimeSeriesSplit(n_splits=n_eff, gap=effective_embargo)
     base = _base_models(scale_pos_weight=spw, tuned_params=tuned_params, cv=skf)
 
     oof     = np.zeros((len(X), len(base)))
@@ -2494,6 +3255,31 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
             regime_weights = np.clip(regime_weights, 0.2, 5.0)
             weights = (weights if weights is not None else np.ones(len(X))) * regime_weights
 
+    # Asymmetric false-breakout penalty: a false positive (predict WIN → actual LOSS) costs
+    # more than a false negative (predict LOSS → actual WIN) because capital is deployed and
+    # lost vs. merely preserved. Upweight LOSS samples so the model requires stronger evidence
+    # before predicting a WIN, reducing false breakouts at the cost of some missed winners.
+    # Applied multiplicatively with the two weights above — it corrects a different bias
+    # (asymmetric misclassification cost), not overlapping labels or regime imbalance.
+    try:
+        from asymmetric_loss import compute_asymmetric_weights_with_neutral
+        asym_weights = compute_asymmetric_weights_with_neutral(
+            y,
+            false_breakout_penalty=2.0,
+            neutral_weight=0.5,
+            positive_label=1,
+            neutral_label=0,
+        )
+        weights = (weights if weights is not None else np.ones(len(X))) * asym_weights
+    except Exception:
+        pass  # asymmetric loss is optional; training continues without it
+
+    X, feature_filter_report = drop_untrainable_features(X)
+    dropped_count = len(feature_filter_report.get('dropped', {}))
+    if dropped_count:
+        print(f"[Ensemble]   Dropped {dropped_count} untrainable/constant features "
+              f"({feature_filter_report['kept_count']}/{feature_filter_report['original_count']} kept).")
+
     # ── Honest held-out test: last 10% for reporting, prior 10% for threshold selection ──
     # Threshold is found on a dedicated val split (rows [tr_end : tr_end+n_val]), NOT the
     # test set. This keeps F1/Recall metrics unbiased on the held-out test window.
@@ -2511,9 +3297,12 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
     test = {'auc': None, 'precision': None, 'recall': None, 'f1': None, 'n': 0}
     tr_end, n_test, n_val = _compute_holdout_split(X, dates, embargo, min_samples)
     if n_test >= 10 and n_val >= 10:
+        train_dates = dates.iloc[:tr_end] if dates is not None and len(dates) == len(X) else None
         fb, mt, _, _, _ = _fit_stack(X.iloc[:tr_end], y.iloc[:tr_end], spw, embargo,
                                      sample_weight=(weights[:tr_end] if weights is not None else None),
-                                     tuned_params=tuned_params)
+                                     tuned_params=tuned_params,
+                                     dates=train_dates,
+                                     horizon_days=horizon_days)
         # Threshold selection on val split (not reused for reporting)
         X_val, y_val = X.iloc[tr_end : tr_end + n_val], y.iloc[tr_end : tr_end + n_val]
         val_proba = mt.predict_proba(
@@ -2554,7 +3343,9 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
         print(f"[Ensemble]   Insufficient data for a held-out test (n={len(X)}); reporting CV only.")
 
     # ── Production model: refit on ALL data; CV metric is the purged-OOF AUC ──
-    fitted, meta, auc, acc, imp = _fit_stack(X, y, spw, embargo, sample_weight=weights)
+    fitted, meta, auc, acc, imp = _fit_stack(
+        X, y, spw, embargo, sample_weight=weights, dates=dates, horizon_days=horizon_days
+    )
     print(f"[Ensemble]   Stacking purged-OOF AUC={auc:.4f}  Accuracy={acc:.4f}  (embargo={embargo})")
 
     return {
@@ -2572,6 +3363,7 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
         'optimal_threshold':  test.get('optimal_threshold', 0.45),
         'embargo':            embargo,
         'n_samples':          len(X),
+        'feature_filter':     feature_filter_report,
         # was naive datetime.datetime.now().isoformat() -- on this box (local clock IST) that
         # silently stored wall-clock IST into model_registry.trained_at (TIMESTAMPTZ, session
         # TimeZone=UTC), ~5.5h ahead of true UTC. See db_compat.now_utc_iso().
@@ -2673,16 +3465,20 @@ def _active_baseline(conn: ConnWrapper) -> dict | None:
     """id/cv_roc_auc/test_roc_auc/trained_at of the currently active ensemble, or None."""
     try:
         row = conn.execute(
-            "SELECT id, cv_roc_auc, test_roc_auc, trained_at FROM model_registry "
+            "SELECT id, cv_roc_auc, test_roc_auc, trained_at, notes FROM model_registry "
             "WHERE model_name = 'ensemble' AND is_active = 1 ORDER BY id DESC LIMIT 1"
         ).fetchone()
         if not row:
             return None
+        # The label is recorded only in the free-text notes ("label=triple_barrier; ..."), so it
+        # has to be parsed back out. Rows predating label tracking are all horizon-label runs.
+        m = re.search(r'label=([A-Za-z_]+)', row[4] or '')
         return {
             'id': row[0],
             'cv_auc': float(row[1]) if row[1] is not None else None,
             'test_auc': float(row[2]) if row[2] is not None else None,
             'trained_at': row[3],
+            'label': m.group(1) if m else 'horizon',
         }
     except Exception:
         conn.rollback()
@@ -2708,7 +3504,29 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
     leak fix dropped the honest ceiling to ~0.70-0.73)."""
     new_cv_auc = float(ensemble.get('cv_auc') or 0.0)
     new_test_auc = ensemble.get('test_auc')
+    new_label = ensemble.get('label', 'horizon')
     baseline = _active_baseline(conn)
+
+    # Two ways a baseline's CV AUC stops being evidence about anything. Both are checked BEFORE
+    # the CV comparison decides, because in both cases the comparison itself is the bug:
+    #
+    #  (a) The baseline was trained on a DIFFERENT label. CV AUC is only comparable within one
+    #      target -- the triple-barrier label is a genuinely harder question than the horizon
+    #      label (real vol-scaled barriers and a cost band, ~36% base rate, vs. an MFE-flavoured
+    #      WIN/LOSS at ~88%), so its honest ceiling is lower. Gating a triple_barrier candidate
+    #      on a horizon baseline's number rejects it forever by construction, not on merit.
+    #  (b) The baseline's LIVE edge, graded against realized forward returns, is no better than
+    #      chance. Then its CV number measures overfit, not skill, and defending the incumbent
+    #      with it is exactly backwards. See live_edge_is_unproven() in model_promotion.py.
+    label_changed = baseline is not None and baseline['label'] != new_label
+    edge = live_edge_verdict(conn, LIVE_EDGE_TABLE, LIVE_EDGE_COLUMN)
+    edge_unproven, edge_reason = live_edge_is_unproven(edge)
+
+    # A candidate whose own CV AUC is NaN must never ride either override into production: with
+    # the CV comparison bypassed there is nothing else left to catch it, and `float(nan or 0.0)`
+    # is NaN, not 0.0 (NaN is truthy -- this codebase's own recurring `float(x or 0)` trap).
+    candidate_scored = math.isfinite(new_cv_auc)
+    baseline_untrustworthy = (label_changed or edge_unproven) and candidate_scored
 
     clears_cv_bar = clears_promotion_bar(new_cv_auc, baseline['cv_auc'] if baseline else None, PROMOTION_MARGIN)
     # Only enforce the test-AUC gate when both sides have a real reading to compare.
@@ -2726,19 +3544,35 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
         staleness_override, age_days = staleness_override_applies(
             baseline['trained_at'], rejections, STALENESS_MAX_DAYS, STALENESS_MAX_REJECTIONS)
 
-    if baseline is not None and not clears_bar and not staleness_override:
+    # REALIZED edge decides, not self-reported CV. The incumbent once held the best cv_roc_auc
+    # of all 59 candidates (0.7664) while grading 0.493-0.535 against realized forward returns;
+    # a gate reading only the candidate's own number cannot see that, and the better the overfit
+    # the harder it defends it. clears_cv_bar/clears_test_gate remain NECESSARY (a candidate must
+    # not be worse) but are no longer SUFFICIENT. See model_promotion.promotion_decision.
+    decision = promotion_decision(
+        candidate_cv=new_cv_auc,
+        baseline_cv=baseline['cv_auc'] if baseline else None,
+        clears_cv_bar=clears_cv_bar,
+        clears_test_gate=clears_test_gate,
+        label_changed=label_changed,
+        edge=edge,
+        staleness_override=staleness_override,
+        has_baseline=baseline is not None,
+    )
+    if not decision.promote:
         try:
             with open(CANDIDATE_PATH, 'wb') as f:
                 pickle.dump(ensemble, f, protocol=pickle.HIGHEST_PROTOCOL)
         except Exception as e:
-            print(f"[Ensemble] Could not save candidate: {e}")
-        reasons = []
-        if not clears_cv_bar:
+            print(f"[Ensemble] Could not save candidate: {e}", file=sys.stderr)
+        reasons = [decision.reason]
+        if not clears_cv_bar and baseline is not None:
             reasons.append(f"cv_auc={new_cv_auc:.4f} < active {baseline['cv_auc']:.4f}+{PROMOTION_MARGIN}")
-        if not clears_test_gate:
+        if not clears_test_gate and baseline is not None:
             reasons.append(f"test_auc={new_test_auc} < active {baseline['test_auc']:.4f}-{TEST_AUC_TOLERANCE}")
-        note = (f"label={ensemble.get('label', 'horizon')}; REJECTED " + "; ".join(reasons) +
-                f" (baseline stale {age_days:.1f}d, {rejections} rejections so far)")
+        note = (f"label={new_label}; REJECTED " + "; ".join(reasons) +
+                f" (baseline stale {age_days:.1f}d, {rejections} rejections so far; "
+                f"baseline live edge: {edge_reason})")
         mid = register_model(conn, ensemble, activate=False, model_path=CANDIDATE_PATH, notes=note)
         print(f"[Ensemble] NOT promoted: {'; '.join(reasons)}. Live model kept; candidate at "
               f"{CANDIDATE_PATH}, registered inactive id={mid}.")
@@ -2750,10 +3584,19 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
             shutil.copy2(ENSEMBLE_PATH, backup)
             print(f"[Ensemble] Backed up current model to {backup}")
         except Exception as e:
-            print(f"[Ensemble] Backup failed (continuing): {e}")
+            print(f"[Ensemble] Backup failed (continuing): {e}", file=sys.stderr)
     save_ensemble(ensemble)
     if baseline is None:
         reason = "bootstrap (no active baseline)"
+    elif label_changed and baseline_untrustworthy:
+        reason = (f"LABEL CHANGED — baseline id={baseline['id']} was trained on "
+                   f"label={baseline['label']}, candidate on label={new_label}; CV AUCs are not "
+                   f"comparable across targets, so the CV bar is not applied "
+                   f"(candidate cv_auc={new_cv_auc:.4f})")
+    elif edge_unproven and baseline_untrustworthy:
+        reason = (f"LIVE EDGE OVERRIDE — baseline id={baseline['id']} cv_auc="
+                   f"{baseline['cv_auc']:.4f} is not defensible: {edge_reason}; adopting "
+                   f"candidate cv_auc={new_cv_auc:.4f}")
     elif staleness_override:
         reason = (f"STALENESS OVERRIDE — baseline id={baseline['id']} unbeaten {age_days:.1f}d "
                    f"across {rejections} rejections; adopting best-available candidate "
@@ -2909,8 +3752,16 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
     # as a value that passes IS NOT NULL, which then crashes calibration's roc_auc/isotonic
     # and silently corrupts the ranker's bet_size_from_probability. NULL is the honest
     # "unscored" marker every downstream reader already handles.
+    # win_probability_scored_at stamps THIS column's write time (migration 1787050000000).
+    # technical_signals.updated_at moves whenever any of ~300 columns changes and ~15 enrichment
+    # jobs touch these rows daily, so it is a row-level upper bound that cannot establish when
+    # win_probability specifically landed -- the only fact that decides whether the value was
+    # knowable at a given entry time. Its absence is what let the 2026-08-15 grading read as a
+    # genuine forward edge (IC +0.0364, t=+2.58) when this scorer only runs weekly, and the
+    # result had to be retracted. CURRENT_TIMESTAMP, not now(): valid on both dialects.
     cur.executemany(
-        "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND date = ?",
+        "UPDATE technical_signals SET win_probability = ?, win_probability_scored_at = CURRENT_TIMESTAMP "
+        "WHERE symbol = ? AND date = ?",
         [(round(float(prob), 4) if np.isfinite(prob) else None, row['symbol'], row['signal_date'])
          for (_, row), prob in zip(df.iterrows(), probs)],
     )
@@ -2958,7 +3809,10 @@ def _propagate_and_gate_recommendation_log(conn: ConnWrapper) -> None:
             SELECT COALESCE(ts.calibrated_win_probability, ts.win_probability)
             FROM technical_signals ts
             WHERE ts.symbol = recommendation_log.symbol
-              AND ts.date = recommendation_log.signal_date
+              -- ts.date is a native DATE (2026-08-25 migration); recommendation_log.signal_date
+              -- is TEXT -- compare like-for-like or PG raises "operator does not exist: date = text",
+              -- which surfaces as the /api/score-pending HTTP 500.
+              AND recommendation_log.signal_date = ts.date
             LIMIT 1
         )
         WHERE source = 'technical_scan'
@@ -2966,6 +3820,9 @@ def _propagate_and_gate_recommendation_log(conn: ConnWrapper) -> None:
           AND date(signal_date) >= date('now', '-14 days')
     """)
     default_threshold = regime_threshold(conn)   # fallback for rows with no stamped nifty_regime
+    # trading-day-exempt: not a lookback -- this is an AGE THRESHOLD passed to the expiry
+    # gates, used as `if signal_date < cutoff_date: expire`. An empty trading day just means
+    # marginally fewer recommendation_log rows expire this run, self-correcting the next.
     cutoff_date = (datetime.date.today() - datetime.timedelta(days=2)).isoformat()
 
     from ml_calibration import is_edge_adjustment_enabled
@@ -3100,11 +3957,11 @@ def check_drift(conn: ConnWrapper, auc_drop_threshold: float = 0.04,
 
 def run(do_train: bool = True, do_score: bool = True,
         retrain_full: bool = False, min_samples: int = 30,
-        label: str = 'horizon', do_tune: bool = False, dry_run: bool = False):
+        label: str = 'triple_barrier', do_tune: bool = False, dry_run: bool = False):
     try:
         from lightgbm import LGBMClassifier  # noqa: F401 — verify dependency at startup
     except ImportError:
-        print("[Ensemble] lightgbm not installed. Run: pip install lightgbm")
+        print("[Ensemble] lightgbm not installed. Run: pip install lightgbm", file=sys.stderr)
         sys.exit(1)
 
     conn = connect()
@@ -3177,9 +4034,13 @@ def run(do_train: bool = True, do_score: bool = True,
                     weights_tune = weights[:tune_tr_end] if weights is not None else None
 
                     try:
-                        tuned_params = tune_hyperparameters(X_tune, y_tune, weights_tune, spw, embargo, n_trials=30)
+                        tuned_dates = df['signal_date'].iloc[:tune_tr_end]
+                        tuned_params = tune_hyperparameters(
+                            X_tune, y_tune, weights_tune, spw, embargo, n_trials=30,
+                            dates=tuned_dates, horizon_days=_hz,
+                        )
                     except Exception as e:
-                        print(f"[Ensemble] Tuning failed: {e}. Falling back to default parameters.")
+                        print(f"[Ensemble] Tuning failed: {e}. Falling back to default parameters.", file=sys.stderr)
 
                 ensemble = train_ensemble(X, y, dates=df['signal_date'],
                                           horizon_days=_hz, min_samples=min_samples,
@@ -3223,8 +4084,41 @@ def run(do_train: bool = True, do_score: bool = True,
     print("[Ensemble] Done.")
 
 
-def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = False) -> bool:
-    """Warm-start LGBM on last `n_days` of new resolved outcomes. Returns True if applied."""
+INCREMENTAL_REGRESSION_TOLERANCE = 0.02  # matches online_learner.py's ONLINE_REGRESSION_TOLERANCE
+
+
+def incremental_gate_passes(pre_auc: float, post_auc: float,
+                             tolerance: float = INCREMENTAL_REGRESSION_TOLERANCE) -> bool:
+    """True if the updated model's held-out AUC didn't regress beyond tolerance vs. pre-update."""
+    return post_auc >= pre_auc - tolerance
+
+
+def incremental_update_predictions_are_finite(preds) -> bool:
+    """True if every warm-started prediction is finite. Extracted from incremental_update() for
+    testability, same reason incremental_gate_passes() is a standalone function above -- the AUC
+    gate alone can't catch weight/output divergence (recurring-bugs.md's BiLSTM-NaN class)."""
+    return bool(np.isfinite(preds).all())
+
+
+def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = False,
+                       label: str = 'triple_barrier') -> bool:
+    """Warm-start LGBM on last `n_days` of new resolved outcomes. Returns True if applied.
+
+    `label` MUST match what the live model was trained on. It previously hardcoded the horizon
+    label while the weekly retrain's default moved to triple_barrier -- warm-starting a
+    triple-barrier booster on horizon-label rows teaches it the opposite target a few hundred
+    rounds at a time, silently, with the held-out gate below comparing both sides on the same
+    wrong label so it cannot detect the mismatch.
+
+    Gated (2026-08-14, ml-promotion-gate-review finding): unlike the weekly --train path, which
+    routes through promote_or_register(), this used to overwrite the live ENSEMBLE_PATH
+    unconditionally -- no held-out AUC, no baseline comparison. A bad n_days batch (mislabeled
+    outcomes, a feature regression) would permanently degrade the model used for every
+    subsequent day's scoring with no detection or rollback. Now carves the most recent slice of
+    the incremental batch out as a held-out set, trains only on the rest, and discards the
+    updated booster (keeps the prior one on disk) if held-out AUC regresses beyond
+    INCREMENTAL_REGRESSION_TOLERANCE versus the pre-update model on the same holdout.
+    """
     if not os.path.exists(ENSEMBLE_PATH):
         print("[Ensemble] No saved model — run --train first.")
         return False
@@ -3232,7 +4126,7 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
     try:
         import lightgbm as lgb
     except ImportError:
-        print("[Ensemble] lightgbm not installed.")
+        print("[Ensemble] lightgbm not installed.", file=sys.stderr)
         return False
 
     cutoff = (datetime.datetime.now() - datetime.timedelta(days=n_days)).strftime('%Y-%m-%d')
@@ -3240,52 +4134,141 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
     # signal date) to avoid look-ahead bias when the scanner writes same-day indicator rows.
     # The Postgres path uses a LATERAL JOIN with the same semantics; this SQLite correlated
     # subquery mirrors that behaviour for the SQLite training-data fallback.
-    q = """
-        SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
-               so.signal_score, so.signals_json,
-               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
-               ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
-               ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
-               ts.sector_ret_5d, ts.sector_ret_21d,
-               ts.iv_rank, ts.iv_skew, ts.rs_rank_21d, ts.rs_rank_63d,
-               ts.insider_buy_pct_90d,
-               ts.opening_range_break, ts.vwap_deviation_pct, ts.first_hour_vol_share
-        FROM signal_outcomes so
-        LEFT JOIN technical_signals ts
-               ON ts.symbol = so.symbol
-              AND ts.date = (
-                  SELECT MAX(ts2.date) FROM technical_signals ts2
-                  WHERE ts2.symbol = so.symbol
-                    AND ts2.date <= so.signal_date
-              )
-        WHERE so.outcome IN ('WIN','LOSS')
-          AND so.signal_date >= ?
-          AND so.signal_source = 'technical'
-        ORDER BY so.signal_date ASC
-    """
+    #
+    # 2026-08-26: this query was executed UNCONDITIONALLY and died on Postgres with
+    # `operator does not exist: date <= text` -- technical_signals.date became a native DATE
+    # in the 08-25 migration while signal_outcomes.signal_date stayed TEXT. Branch on
+    # use_postgres() exactly like load_training_data() does.
+    # 2026-09-03 (AF-20260831-04): signal_outcomes.signal_date is now ALSO native DATE, so
+    # the ::text cast this comment used to describe is gone -- both sides are DATE = DATE
+    # directly. SQLite-heritage fixtures build from the same live-Postgres-mirrored
+    # db/schema.postgres.sql, so they're DATE too; no cast needed on either side anymore.
+    if use_postgres():
+        q = """
+            SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
+                   so.signal_score, so.signals_json,
+                   ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+                   ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
+                   ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
+                   ts.sector_ret_5d, ts.sector_ret_21d,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma, ts.rs_rank_21d, ts.rs_rank_63d,
+                   ts.insider_buy_pct_90d,
+                   ts.opening_range_break, ts.vwap_deviation_pct, ts.first_hour_vol_share
+            FROM signal_outcomes so
+            LEFT JOIN technical_signals ts
+                   ON ts.symbol = so.symbol
+                  AND ts.date = (
+                      SELECT MAX(ts2.date) FROM technical_signals ts2
+                      WHERE ts2.symbol = so.symbol
+                        AND ts2.date <= so.signal_date
+                  )
+            {label_join}
+            WHERE {label_where}
+              AND so.signal_date >= ?
+              AND so.signal_source = 'technical'
+            ORDER BY so.signal_date ASC
+        """
+    else:
+        q = """
+            SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
+                   {vol_rank_select}
+                   so.signal_score, so.signals_json,
+                   ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+                   ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
+                   ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
+                   ts.sector_ret_5d, ts.sector_ret_21d,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma, ts.rs_rank_21d, ts.rs_rank_63d,
+                   ts.insider_buy_pct_90d,
+                   ts.opening_range_break, ts.vwap_deviation_pct, ts.first_hour_vol_share
+            FROM signal_outcomes so
+            LEFT JOIN technical_signals ts
+                   ON ts.symbol = so.symbol
+                  AND ts.date = (
+                      SELECT MAX(ts2.date) FROM technical_signals ts2
+                      WHERE ts2.symbol = so.symbol
+                        AND ts2.date <= so.signal_date
+                  )
+            {label_join}
+            WHERE {label_where}
+              AND so.signal_date >= ?
+              AND so.signal_source = 'technical'
+            ORDER BY so.signal_date ASC
+        """
+    if label == 'triple_barrier':
+        q = q.format(
+            label_select="se.tb_label AS outcome",
+            label_join=("LEFT JOIN signal_excursions se ON se.symbol = so.symbol "
+                        "AND se.signal_date = so.signal_date "
+                        "AND se.horizon_days = so.horizon_days"),
+            label_where="se.tb_label IS NOT NULL",
+            vol_rank_select="se.vol_rank AS vol_rank,",
+        )
+    else:
+        q = q.format(label_select="so.outcome", label_join="",
+                     label_where="so.outcome IN ('WIN','LOSS')",
+                     vol_rank_select="")
     df = read_df(q, (cutoff,))
-    if len(df) < 5:
-        print(f"[Ensemble] Only {len(df)} new outcomes — skipping incremental.")
+    # Need enough rows for both a real incremental-training slice AND a held-out gate slice --
+    # the old threshold (5) left no room for a holdout at all, which is exactly how this used to
+    # apply every batch unconditionally.
+    if len(df) < 8:
+        print(f"[Ensemble] Only {len(df)} new outcomes — skipping incremental (need >=8 for a held-out gate).")
         return False
 
-    print(f"[Ensemble] Incremental: {len(df)} outcomes from last {n_days}d")
-    y = (df['outcome'] == 'WIN').astype(int).values
+    print(f"[Ensemble] Incremental: {len(df)} outcomes from last {n_days}d (label={label})")
+    if label == 'triple_barrier':
+        df = df[df['outcome'].notna()].copy()
+        y = pd.to_numeric(df['outcome'], errors='coerce').astype(int).values
+    else:
+        y = (df['outcome'] == 'WIN').astype(int).values
     X = build_features(df)
 
     with open(ENSEMBLE_PATH, 'rb') as f:
         ensemble = pickle.load(f)
 
+    # `getattr(est, 'estimator', est)` returns CalibratedClassifierCV's constructor-time
+    # PROTOTYPE, which is never fitted -- sklearn clones-and-fits it internally -- so it has no
+    # `booster_` and this loop found nothing on every run. The fitted boosters live one level
+    # down, one PER CV FOLD. The correct access is already used elsewhere in this file (see the
+    # `calibrated_classifiers_[0].estimator` read in the promotion path). Fixed 2026-08-16.
     lgbm_model = None
     lgbm_name  = None
+    n_folds    = 0
     for est_name, est in ensemble.get('base_models', []):
         inner = getattr(est, 'estimator', est)
-        if hasattr(inner, 'booster_'):
-            lgbm_model = inner
-            lgbm_name  = est_name
+        folds = getattr(est, 'calibrated_classifiers_', None)
+        if folds:
+            # As many independently-fitted boosters as `cv=` folds, not one.
+            fitted = [getattr(f, 'estimator', None) for f in folds]
+            fitted = [m for m in fitted if hasattr(m, 'booster_')]
+            if fitted:
+                lgbm_model, lgbm_name, n_folds = fitted[0], est_name, len(fitted)
+                break
+        if hasattr(inner, 'booster_'):          # bare, uncalibrated estimator
+            lgbm_model, lgbm_name, n_folds = inner, est_name, 1
             break
 
     if lgbm_model is None:
         print("[Ensemble] No LGBM model found in saved ensemble.")
+        return False
+
+    # The detection above was broken since this function was added, so the warm-start has been
+    # a silent no-op in production the whole time -- it has NEVER run against the live model.
+    # Turning it on is a real modelling change to a live trading signal, not a lookup fix:
+    # warm-starting shifts the score distribution each fold's calibrator was fitted against, so
+    # whether to refit `calibrators_` afterwards is an open question, and `n_folds` of them
+    # exist rather than one. Per .claude/rules/measurement.md and the verify-gate mandate that
+    # covers this file, it needs backtest evidence BEFORE it starts writing.
+    #
+    # So the gate is now EXPLICIT and defaults off, rather than the previous accidental gate of
+    # "the introspection silently fails". The difference matters: this now says out loud what it
+    # found and why it stopped, instead of claiming there was no model.
+    if os.environ.get('ML_INCREMENTAL_WARMSTART') != '1':
+        print(
+            f"[Ensemble] Found fitted LGBM '{lgbm_name}' ({n_folds} calibrated fold(s)). "
+            f"Warm-start is GATED OFF pending backtest evidence -- set "
+            f"ML_INCREMENTAL_WARMSTART=1 to enable. No model written."
+        )
         return False
 
     if dry_run:
@@ -3298,16 +4281,69 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
             X[col] = 0.0
     X_aligned = X[feature_names].astype(np.float32)
 
-    ds = lgb.Dataset(X_aligned, label=y, free_raw_data=False)
+    # Held-out gate: carve the most recent slice out of training (df/X/y are already sorted by
+    # signal_date ASC from the query), train only on what's left, and discard the update rather
+    # than commit it if held-out AUC regresses beyond tolerance versus the PRE-update model on
+    # the same holdout. Skip gating (apply ungated, prior behavior) only if the holdout doesn't
+    # have both outcome classes -- AUC is undefined there, not evidence of anything.
+    n = len(df)
+    holdout_n = max(3, int(n * 0.2))
+    train_n = n - holdout_n
+    X_train, y_train = X_aligned.iloc[:train_n], y[:train_n]
+    X_hold,  y_hold   = X_aligned.iloc[train_n:], y[train_n:]
+
+    can_gate = train_n >= 3 and len(set(y_hold)) > 1
+    pre_auc = None
+    if can_gate:
+        from sklearn.metrics import roc_auc_score
+        pre_pred = lgbm_model.booster_.predict(X_hold)
+        pre_auc = roc_auc_score(y_hold, pre_pred)
+
+    ds = lgb.Dataset(X_train if can_gate else X_aligned, label=y_train if can_gate else y, free_raw_data=False)
     lgbm_train_params = dict(lgbm_model.get_params())
     lgbm_train_params['device'] = _lightgbm_device(str(lgbm_train_params.get('device', 'cpu')))
-    lgbm_model.booster_ = lgb.train(
+    new_booster = lgb.train(
         lgbm_train_params,
         ds,
         num_boost_round=n_rounds,
         init_model=lgbm_model.booster_,
         callbacks=[lgb.log_evaluation(period=-1)],
     )
+
+    # Artifact-level check (ml-promotion-gate-review, 2026-08-19): the AUC gate below only
+    # catches accuracy regression, not weight/output divergence -- the exact bug class that left
+    # 15 of 18 BiLSTM versions ~100% NaN in dl_trainer.py while its own metric-only gate stayed
+    # silent (see recurring-bugs.md, "a metric-based promotion gate cannot catch weight
+    # divergence or output saturation").
+    if not incremental_update_predictions_are_finite(new_booster.predict(X_aligned)):
+        print("[Ensemble] Incremental update REJECTED: warm-started booster produced "
+              "non-finite predictions. Live model left unchanged.")
+        return False
+
+    if can_gate:
+        post_auc = roc_auc_score(y_hold, new_booster.predict(X_hold))
+        if not incremental_gate_passes(pre_auc, post_auc):
+            print(f"[Ensemble] Incremental update REJECTED: held-out AUC {pre_auc:.4f} -> {post_auc:.4f} "
+                  f"(regressed beyond {INCREMENTAL_REGRESSION_TOLERANCE} tolerance on {holdout_n} held-out rows). "
+                  f"Live model left unchanged.")
+            return False
+        print(f"[Ensemble] Held-out AUC {pre_auc:.4f} -> {post_auc:.4f} on {holdout_n} rows, applying.")
+    else:
+        print(f"[Ensemble] Held-out gate skipped (holdout lacks both classes or batch too small) -- applying ungated.")
+
+    lgbm_model.booster_ = new_booster
+
+    # Same backup-before-overwrite promote_or_register() already does for the weekly --train
+    # path -- this incremental path writes to the same live ENSEMBLE_PATH but had no backup at
+    # all (found live-verifying the gate, 2026-08-15). A bad write here (pickle corruption, an
+    # edge case the held-out gate's AUC check doesn't catch) had no rollback path before this.
+    if os.path.exists(ENSEMBLE_PATH):
+        backup = f"{ENSEMBLE_PATH}.{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
+        try:
+            shutil.copy2(ENSEMBLE_PATH, backup)
+            print(f"[Ensemble] Backed up current model to {backup}")
+        except Exception as e:
+            print(f"[Ensemble] Backup failed (continuing): {e}", file=sys.stderr)
 
     with open(ENSEMBLE_PATH, 'wb') as f:
         pickle.dump(ensemble, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -3328,12 +4364,14 @@ if __name__ == "__main__":
     parser.add_argument("--incr-rounds", type=int, default=20)
     parser.add_argument("--dry-run",     action="store_true")
     parser.add_argument("--min-samples", type=int, default=30)
-    parser.add_argument("--label", choices=['horizon', 'triple_barrier'], default='horizon',
-                        help="Training label: fixed-horizon WIN/LOSS (default) or triple-barrier")
+    parser.add_argument("--label", choices=['horizon', 'triple_barrier'], default='triple_barrier',
+                        help="Training label: triple-barrier (default, cost-aware) or the "
+                             "legacy fixed-horizon WIN/LOSS -- see load_training_data()")
     args = parser.parse_args()
 
     if args.incremental:
-        incremental_update(n_days=args.incr_days, n_rounds=args.incr_rounds, dry_run=args.dry_run)
+        incremental_update(n_days=args.incr_days, n_rounds=args.incr_rounds,
+                           dry_run=args.dry_run, label=args.label)
         sys.exit(0)
 
     if args.check_drift:
@@ -3350,3 +4388,9 @@ if __name__ == "__main__":
     run(do_train=do_train, do_score=do_score,
         retrain_full=args.retrain_full, min_samples=args.min_samples, label=args.label,
         do_tune=args.tune, dry_run=args.dry_run)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

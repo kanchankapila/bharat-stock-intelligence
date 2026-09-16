@@ -18,8 +18,8 @@
  * with body `{user_email, user_password, login_type: 1, social_flag: 0, platform_type: 1}`.
  * Two non-obvious findings along the way, worth keeping in mind for any future NiftyTrader
  * reverse-engineering: (1) auth lives on a DIFFERENT subdomain (onboarding.niftytrader.in)
- * than every market-data endpoint this codebase already uses (webapi.niftytrader.in) --
- * `https://webapi.niftytrader.in/webapi/Account/login` 404s even though it looks like the
+ * than every market-data endpoint this codebase already uses (www.niftytrader.in/api/niftytrader) --
+ * `https://www.niftytrader.in/api/niftytrader/Account/login` 404s even though it looks like the
  * natural extension of the existing convention. (2) the login FORM's field names (`email`/
  * `password`, visible in the page's own HTML/JS) do NOT match the actual API payload keys
  * (`user_email`/`user_password`) -- don't assume form field ids equal API field names for this
@@ -47,8 +47,6 @@
 import { dbGet, dbRun } from './dbAsync';
 
 const LOGIN_URL = process.env.NIFTYTRADER_LOGIN_URL || 'https://onboarding.niftytrader.in/webapi/Account/login';
-const EMAIL = process.env.NIFTYTRADER_EMAIL;
-const PASSWORD = process.env.NIFTYTRADER_PASSWORD;
 // Refresh proactively once the stored token has less than this much life left, not only once
 // it has fully expired -- avoids a request failing mid-flight right at the expiry boundary.
 const REFRESH_MARGIN_MS = Number(process.env.NIFTYTRADER_REFRESH_MARGIN_MS ?? 48 * 60 * 60 * 1000); // 48h
@@ -86,7 +84,7 @@ export function decodeJwtExpiryMs(token: string): number | null {
 }
 
 /** Digs a bearer-token-shaped string out of NiftyTrader's login response. The response envelope
- * shape ({result, resultMessage, resultData}) matches every other webapi.niftytrader.in
+ * shape ({result, resultMessage, resultData}) matches every other www.niftytrader.in/api/niftytrader
  * endpoint already used in this codebase, but the exact key holding the token inside
  * resultData was not confirmed against a real successful login (see module docstring) -- checks
  * the plausible candidates in order and returns null (with the raw shape logged by the caller)
@@ -114,6 +112,9 @@ export function extractToken(body: any): string | null {
 }
 
 export async function loginNiftyTrader(): Promise<string | null> {
+  const EMAIL = process.env.NIFTYTRADER_EMAIL;
+  const PASSWORD = process.env.NIFTYTRADER_PASSWORD;
+
   if (!EMAIL || !PASSWORD) {
     console.warn('[NIFTYTRADER AUTH] Missing NIFTYTRADER_EMAIL or NIFTYTRADER_PASSWORD — cannot auto-refresh; falling back to whatever token is already stored (set via saveNiftyTraderToken, if any).');
     return null;

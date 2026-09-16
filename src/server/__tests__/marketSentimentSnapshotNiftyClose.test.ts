@@ -7,7 +7,7 @@ import { join } from 'node:path';
  * nifty_last_close/nifty_support/nifty_resistance had zero real values (confirmed live,
  * 669/669 rows null) despite the write path looking fully wired -- the root cause was a
  * .find(d => symbol/country includes 'nifty'/'india') against fetchGlobalMarketData(), whose
- * real live response (webapi.niftytrader.in/webapi/usstock/global-market) is a global-EX-INDIA
+ * real live response (www.niftytrader.in/api/niftytrader/usstock/global-market) is a global-EX-INDIA
  * feed by design (SHANGHAI/HANG SENG/NIKKEI/CAC 40/DAX/FTSE 100/DOW JONES/NASDAQ FUTURES/
  * S&P 500 FUTURES -- confirmed live, zero India/Nifty entries ever). Fixed by reading NIFTY50's
  * own close from stock_ohlcv (this platform's canonical, already-collected source) instead.

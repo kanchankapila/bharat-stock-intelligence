@@ -9,6 +9,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import investsights_concall_fetcher as cc
 
@@ -71,7 +72,7 @@ class TestParseItem:
 
 class TestSchemaAndStorage:
     def test_ensure_schema_and_store_round_trip(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         cc.ensure_schema(con)
         row = cc.parse_item(REAL_ITEM, UNIVERSE)
         assert cc.store(con, [row]) == 1
@@ -85,7 +86,7 @@ class TestSchemaAndStorage:
     def test_upsert_is_idempotent_and_updates_on_re_fetch(self):
         """A re-generated summary for the same (symbol, fiscal_year, quarter) must UPDATE the
         existing row, not create a duplicate."""
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         cc.ensure_schema(con)
         row1 = cc.parse_item(REAL_ITEM, UNIVERSE)
         assert cc.store(con, [row1]) == 1
@@ -98,6 +99,6 @@ class TestSchemaAndStorage:
         assert takeaway == "Revised takeaway."
 
     def test_store_empty_list_is_a_noop(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         cc.ensure_schema(con)
         assert cc.store(con, []) == 0

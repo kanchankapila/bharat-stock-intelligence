@@ -18,13 +18,17 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import sql_translate
+from conftest import conn_is_postgres
 import mc_broker_reco_fetcher as mbr
 from live_datasource_helpers import assert_non_empty_response, assert_stored_row_ml_usable
 
 
 def _install_shims(monkeypatch, conn):
-    monkeypatch.setattr(sql_translate, "use_postgres", lambda: False)
+    # Keyed on the connection, not hardcoded False: the decommission shim makes this
+    # ":memory:" handle a Postgres ConnWrapper, and SQLite-only SQL then reaches Postgres.
+    monkeypatch.setattr(sql_translate, "use_postgres", lambda: conn_is_postgres(conn))
 
     def shim_executemany(sql, seq_of_params):
         conn.executemany(sql, seq_of_params)
@@ -57,7 +61,7 @@ class TestMcBrokerRecoLiveDataSource:
         nse_stocks row) purely to exercise the real join/aggregation logic in
         backfill_technical_signals() -- the mapping itself doesn't need to be the real-world
         correct one, only present."""
-        conn = sqlite3.connect(":memory:")
+        conn = pg_memory_conn()
         conn.row_factory = sqlite3.Row
         _install_shims(monkeypatch, conn)
 

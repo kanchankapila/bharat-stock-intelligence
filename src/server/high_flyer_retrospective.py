@@ -30,7 +30,9 @@ Run:  python high_flyer_retrospective.py            # latest completed session
       python high_flyer_retrospective.py --date 2026-07-08
 """
 
+import polars as pl
 import argparse
+import sys
 import json
 import math
 
@@ -66,9 +68,9 @@ def ensure_schema(con) -> None:
     """))
     # direction/wrong_call added after the table's initial ship — safe_alter is a no-op
     # once applied, so this stays correct on every run against an already-migrated DB.
-    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN direction TEXT DEFAULT 'up'")
-    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN wrong_call INTEGER DEFAULT 0")
-    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN prior_classification TEXT")
+    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT 'up'")
+    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS wrong_call INTEGER DEFAULT 0")
+    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS prior_classification TEXT")
     cur.execute(translate("""
         CREATE TABLE IF NOT EXISTS high_flyer_daily_stats (
             date                  TEXT PRIMARY KEY,
@@ -392,10 +394,24 @@ def _process_day(con, close, volume, day, prev_day) -> dict:
     stats = read_df(
         "SELECT flyer_n, universe_n, precursor_counts_json FROM high_flyer_daily_stats "
         "ORDER BY date DESC LIMIT ?", (LIFT_WINDOW_DAYS,))
-    lifts = compute_lifts([
-        {"flyer_n": int(s.flyer_n), "universe_n": int(s.universe_n),
-         "precursor_counts": json.loads(s.precursor_counts_json)}
-        for s in stats.itertuples(index=False)])
+    # SKIP rows with no precursor counts rather than coercing them: read_df returns a pandas
+    # frame, so a SQL NULL arrives as float NaN and json.loads(NaN) raises TypeError, killing
+    # the whole run. Live production has at least one such row (2026-08-11), and it aborted
+    # every high_flyer_retrospective run in ml-daily-ops. Skipping is the right call, not
+    # defaulting to {} -- an empty counts dict would be indistinguishable from a real day on
+    # which no precursor fired, and would silently dilute the lift denominators.
+    usable, skipped = [], 0
+    for s in stats.itertuples(index=False):
+        raw = s.precursor_counts_json
+        if not isinstance(raw, str) or not raw.strip():
+            skipped += 1
+            continue
+        usable.append({"flyer_n": int(s.flyer_n), "universe_n": int(s.universe_n),
+                       "precursor_counts": json.loads(raw)})
+    if skipped:
+        print(f"[HighFlyer] skipped {skipped}/{len(stats)} stat day(s) with no "
+              f"precursor_counts_json when computing lifts", file=sys.stderr)
+    lifts = compute_lifts(usable)
     cur.execute(translate(
         'INSERT INTO app_settings (key, value) VALUES (?, ?) '
         'ON CONFLICT (key) DO UPDATE SET value = excluded.value'),
@@ -460,3 +476,9 @@ if __name__ == "__main__":
                         help="Also process the N sessions before the target day (bootstraps lift stats)")
     args = parser.parse_args()
     run(target_date=args.date, backfill=args.backfill)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

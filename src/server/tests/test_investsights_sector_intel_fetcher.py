@@ -9,6 +9,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import investsights_sector_intel_fetcher as si
 
@@ -120,7 +121,7 @@ class TestParseStatsAndSummary:
 
 class TestSchemaAndStorage:
     def test_ensure_schema_creates_all_four_tables(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         si.ensure_schema(con)
         tables = {r[0] for r in con.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
@@ -129,7 +130,7 @@ class TestSchemaAndStorage:
                 "sector_correlation_stats", "sector_correlation_summary"} <= tables
 
     def test_upsert_is_idempotent(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         si.ensure_schema(con)
         rows = si.parse_rrg_rows(RRG_PAYLOAD, weeks=12)
         assert si.store_rrg(con, rows) == 3
@@ -139,7 +140,7 @@ class TestSchemaAndStorage:
         assert count == 3
 
     def test_full_pipeline_end_to_end(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         si.ensure_schema(con)
         rrg_rows = si.parse_rrg_rows(RRG_PAYLOAD, weeks=12)
         pair_rows = si.parse_correlation_pairs(CORR_PAYLOAD)

@@ -18,6 +18,7 @@ Run:
   python trendlyne_screener_discovery.py --pk 12345 # fetch a single PK
 """
 
+import polars as pl
 import re
 import sys
 import time
@@ -414,6 +415,16 @@ def upsert_screener(con, info: dict):
         len(info["stocks"]),
     ))
 
+    # trendlyne_screener_pk_history (migration 1787100000000) -- trendlyne_screeners.screenpk
+    # above just got overwritten with THIS pk if screener_id already existed under a different
+    # one. Record every pk ever seen for this screener_id so the old one stays discoverable
+    # instead of silently vanishing (recurring-bugs.md's screener-pk-collision entry).
+    con.execute("""
+        INSERT INTO trendlyne_screener_pk_history (screener_id, screenpk, first_seen, last_seen)
+        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT(screener_id, screenpk) DO UPDATE SET last_seen = CURRENT_TIMESTAMP
+    """, (info["screener_id"], str(info["pk"])))
+
     # screener_master (sync). ON CONFLICT target is (source, scan_id) -- screener_master's real
     # PK, not scan_id alone; scan_id collides across providers (2026-08-04 memory) and, after
     # that PK migration, ON CONFLICT(scan_id) no longer matches any unique constraint.
@@ -434,7 +445,7 @@ def upsert_screener(con, info: dict):
         VALUES (?,?,'Trendlyne',?,?,?,0.75,CURRENT_TIMESTAMP)
         ON CONFLICT(source, scan_id) DO UPDATE SET
             name               = excluded.name,
-            inferred_sentiment = excluded.inferred_sentiment,
+            inferred_sentiment = CASE WHEN screener_master.inferred_sentiment IN ('bullish', 'bearish') AND excluded.inferred_sentiment = 'neutral' THEN screener_master.inferred_sentiment ELSE excluded.inferred_sentiment END,
             inferred_category  = excluded.inferred_category,
             inferred_timeframe = excluded.inferred_timeframe,
             last_updated       = CURRENT_TIMESTAMP
@@ -449,11 +460,19 @@ def upsert_screener(con, info: dict):
     # screener-catalog-freshness's comment in dataQualityChecks.ts (that check proxies via
     # screener_master.last_updated; this stamp is a direct signal on screener_catalog itself).
     horizon = "intraday" if info["timeframe"] == "intraday" else "swing"
+    # Both the UPDATE's WHERE and the INSERT's source value are scoped to lowercase 'trendlyne'
+    # (cross-writer-collision-audit, 2026-08-14): screener_catalog's PK is (screener_id, source),
+    # and other providers (moneycontrol, etnow) independently issue their own screener ids that
+    # numerically overlap Trendlyne's screenpks. WHERE screener_id=? alone (no source filter)
+    # let this UPDATE silently overwrite a DIFFERENT provider's row sharing the same numeric id;
+    # the hardcoded "Trendlyne" (capitalized) INSERT also fought screener_catalog_enricher.py's
+    # lowercase convention, so the same logical screener could re-split into two catalog rows
+    # under different casing every time this and another writer both touched it.
     updated = con.execute("""
         UPDATE screener_catalog
         SET screener_name=?, category=?, subcategory=?, signal_bias=?,
             investment_horizon=?, signal_keywords=?, screener_url=?, fetched_at=CURRENT_TIMESTAMP
-        WHERE screener_id=?
+        WHERE screener_id=? AND LOWER(source)='trendlyne'
     """, (info["name"], info["category"], info["category"], info["sentiment"],
           horizon, keywords, info["screener_url"], info["screener_id"])).rowcount
     if not updated:
@@ -462,7 +481,7 @@ def upsert_screener(con, info: dict):
                 (screener_id, source, screener_name, category, subcategory,
                  signal_bias, investment_horizon, confidence, signal_keywords, screener_url, fetched_at)
             VALUES (?,?,?,?,?,?,?,0.75,?,?,CURRENT_TIMESTAMP)
-        """, (info["screener_id"], "Trendlyne", info["name"], info["category"],
+        """, (info["screener_id"], "trendlyne", info["name"], info["category"],
               info["category"], info["sentiment"], horizon, keywords, info["screener_url"]))
 
     # trendlyne_screener_stocks
@@ -613,7 +632,7 @@ def run(mode: str = "known", single_pk: int | None = None):
             print(f"[Discovery] Logged run to screener_runs: {run_id} ({n_stocks} distinct stocks)")
         except Exception as e2:
             con.rollback()
-            print(f"[Discovery] Could not log to screener_runs: {e2}")
+            print(f"[Discovery] Could not log to screener_runs: {e2}", file=sys.stderr)
 
     finally:
         con.close()
@@ -632,3 +651,9 @@ if __name__ == "__main__":
         run("full")
     else:
         run("known")
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

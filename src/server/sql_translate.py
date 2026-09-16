@@ -1,3 +1,4 @@
+import polars as pl
 """
 SQLite -> PostgreSQL SQL translation for the Python engines (Phase 3 / P3f).
 
@@ -45,8 +46,28 @@ from functools import lru_cache
 
 
 def use_postgres() -> bool:
-    """Cutover switch — strictly USE_POSTGRES == 'true' (mirrors pgConfig.ts)."""
-    return os.environ.get("USE_POSTGRES") == "true"
+    """PostgreSQL IS the database. This is no longer a switch. Mirrors pgConfig.ts's
+    usePostgres() -- keep the two identical.
+
+    Was `os.environ.get("USE_POSTGRES") == "true"`, which defaulted to SQLite whenever the
+    variable was absent. That default is why this project kept silently reading a stale local
+    database.sqlite from any process that did not load .env, while printing convincing numbers
+    (see pgConfig.ts's comment for the recorded instances, and .claude/rules/recurring-bugs.md's
+    Environment & deploy section). The local file is 3.49 GB and ~2 months stale, so the
+    fallback does not fail -- it answers, wrongly.
+
+    Postgres unconditionally for every process -- dev, prod, cron, hand-run script, AND pytest
+    -- with no environment variable consulted at all. The pytest-only carve-out (SQLite unless
+    USE_POSTGRES=true) that used to live here is gone (Phase 3 of the SQLite decommission,
+    2026-08): the last 6 test files structurally requiring it (temp-file SQLite fixtures, or
+    deliberately testing SQLite GLOB/AUTOINCREMENT semantics) were converted to
+    `pg_memory_conn()`/deleted. Every pytest fixture that needs a throwaway database now uses
+    `pg_memory_conn()`/`pg_conn`/`pg_db_conn` (see src/server/pg_test_support.py), which force
+    USE_POSTGRES=true on their own connection's lifetime regardless of this function.
+
+    Pinned by test_sql_translate.py's "Postgres-only guarantee" section.
+    """
+    return True
 
 
 def convert_placeholders(sql: str) -> str:
@@ -186,6 +207,18 @@ def map_sqlite_functions(sql: str) -> str:
     s = re.sub(r"date\(\s*'now'\s*\)", "current_date", s, flags=re.I)
     s = re.sub(r"date\(\s*'now'\s*,\s*'([^']+)'\s*\)",
                r"((current_date + interval '\1')::date)", s, flags=re.I)
+    # TWO-ARGUMENT forms over a column or a date LITERAL, i.e. everything the 'now' rules above
+    # do not catch: date(d, '-30 days'), datetime(ts, '+1 day'), date('2026-01-01', '-30 days').
+    # Must run BEFORE the single-argument date() rule below, which would otherwise swallow the
+    # whole "d, '-30 days'" argument list and emit `(d,'-30 days')::date` -- a row-expression
+    # cast that is NOT a translation-time error and reads as plausible SQL, so it fails only at
+    # the server. The all-literal form was left untranslated entirely and arrived as
+    # `function date(unknown, unknown) does not exist`.
+    s = re.sub(r"\bdatetime\(\s*([^,()']+|'[^']*')\s*,\s*'([^']+)'\s*\)",
+               r"((\1)::timestamp + interval '\2')", s, flags=re.I)
+    s = re.sub(r"\bdate\(\s*([^,()']+|'[^']*')\s*,\s*'([^']+)'\s*\)",
+               r"(((\1)::date + interval '\2')::date)", s, flags=re.I)
+
     # date(<column/expr>) -> (<expr>)::date  (after the 'now' forms; skips quoted args)
     s = re.sub(r"\bdate\(\s*([^'\")][^)]*?)\s*\)", r"(\1)::date", s, flags=re.I)
 
@@ -220,7 +253,84 @@ def map_sqlite_functions(sql: str) -> str:
     if re.search(r"\bINSERT\s+OR\s+IGNORE\b", s, flags=re.I):
         s = re.sub(r"\bINSERT\s+OR\s+IGNORE\b", "INSERT", s, flags=re.I)
         if not re.search(r"ON\s+CONFLICT", s, flags=re.I):
-            s = re.sub(r";?\s*$", " ON CONFLICT DO NOTHING", s)
+            # count=1: `;?\s*$` matches TWICE on SQL with trailing whitespace -- once consuming
+            # it, then again as an empty match at end-of-string -- appending the clause twice
+            # and producing `... ON CONFLICT DO NOTHING ON CONFLICT DO NOTHING`, which
+            # Postgres rejects with `syntax error at or near "ON"`. Every multi-line
+            # INSERT OR IGNORE (i.e. every one written as a triple-quoted string) hit this.
+            s = re.sub(r";?\s*$", " ON CONFLICT DO NOTHING", s, count=1)
+
+    # ── DDL: SQLite-only column types (2026-08-16) ────────────────────────────
+    #
+    # Added for SQLITE_DECOMMISSION_PLAN Phase 2. The pytest fixtures being moved onto Postgres
+    # declare their own throwaway tables, and several use SQLite-only spellings that Postgres
+    # rejects outright (`syntax error at or near "AUTOINCREMENT"`).
+    #
+    # Translating HERE rather than editing the test files is deliberate. The obvious alternative
+    # -- sweeping `INTEGER PRIMARY KEY AUTOINCREMENT` -> `BIGSERIAL PRIMARY KEY` in the files --
+    # was tried and reverted: BIGSERIAL is not valid SQLite, so it breaks those same files on the
+    # default path, and there is no single spelling that auto-increments on both engines. A
+    # translator entry has neither problem: it only ever runs on the Postgres path, the SQLite
+    # path is untouched, and no test file has to know which dialect it is on. That is what this
+    # module is for.
+    #
+    # Safe for production SQL: no Postgres call site can legitimately contain these tokens.
+    s = re.sub(r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b", "BIGSERIAL PRIMARY KEY", s, flags=re.I)
+    s = re.sub(r"\bAUTOINCREMENT\b", "", s, flags=re.I)
+    # SQLite's REAL is 8-byte IEEE; Postgres's REAL is 4-byte float4. Declaring a fixture column
+    # REAL therefore silently ROUNDS every value -- 19.41680852073002 reads back 19.41681, and
+    # `WHERE win_probability = 0.8` matches nothing because the stored float4 upcasts to
+    # 0.800000011920929. DOUBLE PRECISION is the type with SQLite's actual semantics, and is
+    # already what this module maps `CAST(x AS REAL)` to a few lines above.
+    # DDL only: `REAL` is too short a token to rewrite inside arbitrary query text.
+    if re.match(r"\s*(CREATE\s+TABLE|ALTER\s+TABLE)\b", s, flags=re.I):
+        s = re.sub(r"\bREAL\b", "DOUBLE PRECISION", s, flags=re.I)
+        # SQLite accepts any type name at all (it applies affinity rules and moves on), so its
+        # fixtures freely spell things Postgres has never heard of. These two are the only
+        # spellings that actually occur in this repo's suite -- 380 DATETIME, 14 BLOB, measured
+        # 2026-08-17 when src/server/__tests__'s 4 Python files moved onto Postgres for the
+        # first time and every one of their 50 failures was `type "datetime" does not exist`.
+        #
+        # TYPE POSITION ONLY -- the leading `(\w+\s+)` is load-bearing, not decoration.
+        # `intraday_ohlcv` has a COLUMN named `datetime`, so a bare \bDATETIME\b rewrote
+        # `symbol TEXT, datetime TEXT` into `symbol TEXT, TIMESTAMP TEXT` -- a column silently
+        # renamed, after which `SELECT symbol, datetime` raises KeyError on the row dict. Shipped
+        # and caught the same day by the live suite. Requiring a preceding identifier (the column
+        # name) means only `foo DATETIME` is a type; a `datetime` sitting after `(` or `,` is a
+        # name and is left alone. Same trap as the REAL -> DOUBLE PRECISION codemod that
+        # SQLITE_DECOMMISSION_PLAN.md records as reverted: a token rewrite that does not check
+        # what position the token is in.
+        s = re.sub(r"\b(\w+\s+)DATETIME\b", r"\1TIMESTAMP", s, flags=re.I)
+        s = re.sub(r"\b(\w+\s+)BLOB\b", r"\1BYTEA", s, flags=re.I)
+
+    # A BARE `INTEGER PRIMARY KEY` is SQLite's rowid alias: omit it on INSERT and SQLite fills
+    # it in. Postgres just raises NotNullViolation. GENERATED BY DEFAULT (not ALWAYS) reproduces
+    # exactly that -- auto-assign when omitted, accept an explicit value when supplied -- so it
+    # is also a no-op for any real Postgres call site that always supplies its own id.
+    s = re.sub(r"\bINTEGER\s+PRIMARY\s+KEY\b(?!\s+GENERATED)",
+               "INTEGER PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY", s, flags=re.I)
+
+    # ── Schema introspection: PRAGMA table_info / sqlite_master ───────────────
+    #
+    # Same reasoning as the DDL block above: these appear only in pytest fixtures asserting
+    # "did ensure_schema() add the column / create the table", and there is no spelling that
+    # works on both engines, so translating beats editing the call sites.
+    # Column order matches PRAGMA's (cid, name, type, notnull, dflt_value, pk) -- the call
+    # sites read r[1], the column name.
+    s = re.sub(
+        r"\bPRAGMA\s+table_info\s*\(\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?\s*\)",
+        r"SELECT ordinal_position - 1 AS cid, column_name AS name, data_type AS type, "
+        r"(is_nullable = 'NO')::int AS notnull, column_default AS dflt_value, 0 AS pk "
+        r"FROM information_schema.columns WHERE table_name = '\1' "
+        r"AND table_schema = current_schema() ORDER BY ordinal_position",
+        s, flags=re.I)
+    s = re.sub(
+        r"\bsqlite_master\b",
+        "(SELECT 'table'::text AS type, tablename::text AS name, tablename::text AS tbl_name, "
+        "''::text AS sql FROM pg_tables WHERE schemaname = current_schema() "
+        "UNION ALL SELECT 'index', indexname::text, tablename::text, ''::text "
+        "FROM pg_indexes WHERE schemaname = current_schema()) AS sqlite_master",
+        s, flags=re.I)
 
     return s
 
@@ -302,3 +412,9 @@ def build_params(params) -> dict:
         return {k: _clean_value(v) for k, v in params.items()}
     return {f"p{i}": _clean_value(v) for i, v in enumerate(params)}
 
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

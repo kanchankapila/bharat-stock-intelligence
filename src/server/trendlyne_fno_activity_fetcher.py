@@ -37,12 +37,28 @@ Run:
   python trendlyne_fno_activity_fetcher.py --expiry 2026-08-04
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class TrendlyneFnoActivityFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class TrendlyneFnoActivityFetcherBaseFetcher(BaseFetcher[TrendlyneFnoActivityFetcherSchema]):
+    fetcher_name = 'TrendlyneFnoActivityFetcher'
+    domain = 'trendlyne.com'
+    schema = TrendlyneFnoActivityFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 from datetime import date as _date, datetime
 
 import requests
 
 from db_compat import execute, executemany, connect, query_all
+import sys
 
 FNO_ACTIVITY_HEADERS = {
     "User-Agent": (
@@ -160,7 +176,7 @@ def _get_nse_official_monthly_expiry() -> str | None:
             return None
         return datetime.strptime(dates[0], "%d-%b-%Y").date().isoformat()
     except Exception as e:
-        print(f"  [fno_activity] NSE official expiry lookup failed ({e}), falling back to nt_fno_expiry")
+        print(f"  [fno_activity] NSE official expiry lookup failed ({e}), falling back to nt_fno_expiry", file=sys.stderr)
         return None
 
 
@@ -208,7 +224,7 @@ def fetch_activity(expiry: str, screen_type: str) -> dict | None:
             return None
         return d.get("body")
     except Exception as e:
-        print(f"    [fno_activity] fetch error {screen_type}/{expiry}: {e}")
+        print(f"    [fno_activity] fetch error {screen_type}/{expiry}: {e}", file=sys.stderr)
         return None
 
 
@@ -284,3 +300,9 @@ if __name__ == "__main__":
 
     screen_types = (args.screen_type,) if args.screen_type else SCREEN_TYPES
     run(expiry=args.expiry, screen_types=screen_types)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

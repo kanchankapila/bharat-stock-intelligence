@@ -1,5 +1,6 @@
 import sqlite3, sys, os, datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 from confluence_outcome_tracker import track_outcomes, recompute_screener_reliability  # noqa: E402
 
@@ -7,7 +8,7 @@ SIGNAL_DATE = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
 
 
 def make_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE confluence_signals (

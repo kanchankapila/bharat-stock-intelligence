@@ -98,3 +98,56 @@ export function logicalSession(now: Date): string {
   const iso = shifted.toISOString();
   return iso.slice(0, 10);
 }
+
+export interface ScheduleTarget {
+  /** IST hour, 0-23. */
+  hour: number;
+  /** IST minute, 0-59. */
+  minute: number;
+  /** IST-local day-of-week (0=Sun..6=Sat) this job is meant to fire on. Omit for "every day". */
+  daysOfWeek?: readonly number[];
+}
+
+/**
+ * True when `now` falls within `toleranceMinutes` of a one-shot cron job's intended IST
+ * fire time (and day-of-week, if given).
+ *
+ * PM2's `cron_restart` launches an app IMMEDIATELY on `pm2 start`/registration/restart,
+ * regardless of the cron field -- confirmed live 2026-09-03: an ecosystem-wide pm2 restart
+ * at 09:20 IST (5 min after market open) fired all 11 greenfield night/weekend-only jobs plus
+ * pg-backup-nightly at once. For gf-bhavcopy-daily this wasn't just wasted work: NSE's bhavcopy
+ * URL 404s before ~18:00 IST, and that response is checkpointed as `status='skipped',
+ * skip_reason='non-trading day (404)'` -- indistinguishable from a real holiday to
+ * isRunAlreadyCompleted(), which then silently no-ops the REAL 19:30 IST run for the rest of
+ * the day. See recurring-bugs.md's "Registered != running, for a pm2 cron_restart job" entry --
+ * this is the same root cause producing data corruption instead of dormancy.
+ *
+ * Callers should check this FIRST, before opening any ingestion_run / doing any real work, and
+ * exit without writing a checkpoint on a miss -- an off-schedule launch must leave no trace for
+ * the real fire to trip over, the same way a skip must never stamp over a real run's status.
+ *
+ * Default tolerance is 4 min, not generous: pm2's croner fires a `cron_restart` app at the exact
+ * scheduled minute (this guard runs before any DB/network work, so process-start jitter is at
+ * most a few seconds), and the evening chain's own jobs sit as close as 10 min apart
+ * (21:30/21:40/21:50/22:00 IST in ecosystem.config.cjs). A wider tolerance would make adjacent
+ * jobs' acceptance windows overlap, so a single off-schedule pm2 restart landing anywhere in
+ * that corridor could pass the guard for several jobs at once and fire them out of their
+ * intended order -- a smaller-scale repeat of the exact failure mode this guard exists to close.
+ * 4 min keeps every pairwise window non-overlapping WITH a real gap left over (2*4=8 < 10, the
+ * tightest real spacing) -- a restart landing in that dead zone is correctly rejected by every
+ * job, the safest possible outcome -- while still covering any plausible process-start jitter.
+ */
+export function isWithinScheduleWindow(
+  now: Date,
+  target: ScheduleTarget,
+  toleranceMinutes = 4,
+): boolean {
+  const shifted = new Date(now.getTime() + IST_OFFSET_MINUTES * 60_000);
+  if (target.daysOfWeek && !target.daysOfWeek.includes(shifted.getUTCDay())) {
+    return false;
+  }
+  const minutesOfDay = shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+  const targetMinutes = target.hour * 60 + target.minute;
+  const diff = Math.abs(minutesOfDay - targetMinutes);
+  return Math.min(diff, 1440 - diff) <= toleranceMinutes;
+}

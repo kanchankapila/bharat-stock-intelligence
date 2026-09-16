@@ -15,6 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import institutional_deals_fetcher as idf
 from live_datasource_helpers import assert_looks_like_ticker, assert_non_empty_response, assert_numeric_and_finite
@@ -56,7 +57,7 @@ class TestInstitutionalDealsLiveDataSource:
             rows.extend(r for r in (idf.parse_deal(action, d, universe) for d in raw) if r is not None)
         assert rows, "no usable (NSE-tickered) deal rows found across buy+sell sample"
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         idf.ensure_schema(con)
         assert idf.store(con, rows) == len(rows)
 

@@ -31,11 +31,11 @@ export const RolloverPositioningPanel: React.FC<{ onSelectStock?: (symbol: strin
   return (
     <div className="flex flex-col h-[580px] glass border border-slate-800/50 rounded-2xl p-5 text-slate-200">
       <div className="flex-shrink-0 mb-5">
-        <h2 className="text-xl font-bold font-['Rajdhani'] flex items-center gap-2">
+        <h2 className="text-xl font-bold font-display flex items-center gap-2">
           <Repeat className="w-5 h-5 text-sky-400" />
           F&amp;O Rollover Positioning
         </h2>
-        <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest mt-0.5">
+        <p className="text-[10px] font-data text-slate-500 font-display uppercase tracking-widest mt-0.5">
           Rollover% + cost-of-carry as of {latestDate || '—'} — the local proxy for short/long positioning rolling into the next series
         </p>
       </div>
@@ -71,7 +71,7 @@ export const RolloverPositioningPanel: React.FC<{ onSelectStock?: (symbol: strin
                 >
                   <div className="space-y-0.5 sm:w-1/4">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-black text-white uppercase tracking-wider">{r.symbol}</span>
+                      <span className="text-sm font-black text-white font-display uppercase tracking-wider">{r.symbol}</span>
                       <span className={cn("text-[8px] font-black px-1.5 py-0.5 rounded border uppercase flex items-center gap-1", meta.color)}>
                         <Icon className="w-2.5 h-2.5" /> {meta.label}
                       </span>
@@ -81,22 +81,22 @@ export const RolloverPositioningPanel: React.FC<{ onSelectStock?: (symbol: strin
 
                   <div className="grid grid-cols-4 gap-3 flex-grow text-center sm:text-left">
                     <div>
-                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Rollover %</span>
-                      <span className="text-xs font-bold text-slate-200 font-mono">{r.rollover_pct !== null ? `${r.rollover_pct.toFixed(1)}%` : '—'}</span>
+                      <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest block">Rollover %</span>
+                      <span className="text-xs font-bold text-slate-200 font-data">{r.rollover_pct !== null ? `${r.rollover_pct.toFixed(1)}%` : '—'}</span>
                     </div>
                     <div>
-                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Cost of Carry</span>
-                      <span className={cn("text-xs font-bold font-mono", (r.cost_of_carry_ann ?? 0) < 0 ? "text-rose-400" : "text-emerald-400")}>
+                      <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest block">Cost of Carry</span>
+                      <span className={cn("text-xs font-bold font-data", (r.cost_of_carry_ann ?? 0) < 0 ? "text-rose-400" : "text-emerald-400")}>
                         {r.cost_of_carry_ann !== null ? `${r.cost_of_carry_ann >= 0 ? '+' : ''}${r.cost_of_carry_ann.toFixed(1)}%` : '—'}
                       </span>
                     </div>
                     <div>
-                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Near OI</span>
-                      <span className="text-xs font-bold text-slate-300 font-mono">{formatOI(r.near_oi)}</span>
+                      <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest block">Near OI</span>
+                      <span className="text-xs font-bold text-slate-300 font-data">{formatOI(r.near_oi)}</span>
                     </div>
                     <div>
-                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Next OI</span>
-                      <span className="text-xs font-bold text-slate-300 font-mono">{formatOI(r.next_oi)}</span>
+                      <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest block">Next OI</span>
+                      <span className="text-xs font-bold text-slate-300 font-data">{formatOI(r.next_oi)}</span>
                     </div>
                   </div>
                 </div>

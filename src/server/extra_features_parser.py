@@ -10,6 +10,7 @@ Usage:
   python src/server/extra_features_parser.py --date 2026-07-15
 """
 
+import polars as pl
 import argparse
 import json
 import sys
@@ -285,3 +286,9 @@ if __name__ == "__main__":
     # skipped as stale. logical_trading_date() keeps both on the same session.
     target_dt = args.date or logical_trading_date()
     run(target_dt)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

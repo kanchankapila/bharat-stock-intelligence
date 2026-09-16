@@ -34,6 +34,49 @@ export function getStockTickers(query: string) {
 // In-memory cache to avoid redundant API calls
 const scIdCache = new Map<string, string>();
 
+/**
+ * MoneyControl's autosuggestion_solr.php always concatenates TWO JSON arrays back to back
+ * with no separator (a real match array, then a literal second "No Result Available" array),
+ * e.g. `[{...},{...}][{"pdt_dis_nm":"No Result Available",...}]`. `res.json()`/`JSON.parse`
+ * throws `Unexpected non-whitespace character after JSON` on the trailing array. Extract just
+ * the first balanced top-level JSON value instead of parsing the whole body.
+ */
+function extractFirstJsonValue(text: string): unknown | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (start === -1) {
+      if (ch === '[' || ch === '{') {
+        start = i;
+        depth = 1;
+      }
+      continue;
+    }
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '[' || ch === '{') depth++;
+    else if (ch === ']' || ch === '}') {
+      depth--;
+      if (depth === 0) {
+        try {
+          return JSON.parse(text.slice(start, i + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 export async function resolveMoneycontrolSymbol(query: string): Promise<string | null> {
   if (!query) return null;
   const upperQuery = query.toUpperCase();
@@ -59,7 +102,8 @@ export async function resolveMoneycontrolSymbol(query: string): Promise<string |
     });
     
     if (res.ok) {
-      const data = await res.json();
+      const text = await res.text();
+      const data = extractFirstJsonValue(text);
       if (Array.isArray(data) && data.length > 0) {
         // Try to find exact match by looking for the symbol in the display name
         const exactMatch = data.find(item => {

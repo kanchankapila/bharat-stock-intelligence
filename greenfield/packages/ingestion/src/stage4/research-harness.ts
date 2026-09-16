@@ -108,7 +108,12 @@ function pearson(xs: number[], ys: number[]): number | null {
   return cov / Math.sqrt(varX * varY);
 }
 
-function spearman(xs: number[], ys: number[]): number | null {
+// Exported (not file-local like pearson/rank) so Task 5.3's dual-run
+// divergence analysis (stage5/divergence.ts) can compute the SAME rank
+// correlation this harness's own computeIC uses, rather than reimplementing
+// it -- recurring-bugs.md's "a test that reimplements the logic under test"
+// class applies just as much to a second production computation as to a test.
+export function spearman(xs: number[], ys: number[]): number | null {
   return pearson(rank(xs), rank(ys));
 }
 

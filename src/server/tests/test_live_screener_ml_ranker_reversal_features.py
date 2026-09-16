@@ -127,7 +127,7 @@ class TestAsofReversalForDate:
     def test_empty_bars_or_empty_asof_returns_empty_with_expected_columns(self):
         cols = ["run_id", "symbol", "vwap_deviation_pct", "intraday_range_pos"]
         empty_bars = pd.DataFrame(columns=["symbol", "datetime", "high", "low", "close", "volume"])
-        as_of = pd.DataFrame({"run_id": [1], "symbol": ["TESTCO"], "ts": [pd.Timestamp.utcnow()]})
+        as_of = pd.DataFrame({"run_id": [1], "symbol": ["TESTCO"], "ts": [pd.Timestamp.now(tz="UTC")]})
         result = lsmr._asof_reversal_for_date(empty_bars, as_of)
         assert result.empty and list(result.columns) == cols
 

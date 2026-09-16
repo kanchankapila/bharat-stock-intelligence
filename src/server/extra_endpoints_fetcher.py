@@ -13,6 +13,21 @@ Usage:
   python src/server/extra_endpoints_fetcher.py --registry-only # Validate/sync endpoint registry only
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class ExtraEndpointsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class ExtraEndpointsFetcherBaseFetcher(BaseFetcher[ExtraEndpointsFetcherSchema]):
+    fetcher_name = 'ExtraEndpointsFetcher'
+    domain = 'niftytrader.in'
+    schema = ExtraEndpointsFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import json
 import os
@@ -91,7 +106,7 @@ def main():
         print(f"Error: stocklist.json not found at {STOCKLIST_PATH}")
         sys.exit(1)
 
-    with open(STOCKLIST_PATH, "r", encoding="utf-8") as f:
+    with open(STOCKLIST_PATH, "r", encoding="utf-8-sig") as f:
         stocks = json.load(f)
 
     if args.symbol:
@@ -152,7 +167,7 @@ def main():
             data = fetch_url(url)
             save_response(cur, "MARKET", name, data)
         except Exception as e:
-            print(f"Error fetching market-wide endpoint {endpoint.name}: {e}")
+            print(f"Error fetching market-wide endpoint {endpoint.name}: {e}", file=sys.stderr)
     con.commit()
 
     # Build the full request list up front, skipping rows missing the id a template needs.
@@ -181,7 +196,7 @@ def main():
                 data = fut.result()
                 save_response(cur, symbol, name, data)
             except Exception as e:
-                print(f"  Error fetching {name} for {symbol}: {e}")
+                print(f"  Error fetching {name} for {symbol}: {e}", file=sys.stderr)
             done += 1
             if done % 500 == 0:
                 con.commit()
@@ -202,3 +217,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

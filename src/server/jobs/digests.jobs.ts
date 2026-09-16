@@ -16,11 +16,17 @@ import { telegramService } from '../telegramService';
 import { registerRepeatableJob } from './registerJob';
 
 export const QUEUE_JOB_DIGEST = 'job-digest';
+export const QUEUE_JOB_DIGEST_MORNING = 'job-digest-morning';
 export const QUEUE_RECOMMENDATIONS_DIGEST = 'recommendations-digest';
 
 async function processJobDigest(): Promise<void> {
   const digest = await buildDailyDigest();
-  await telegramService.sendMarkdownMessage(digest);
+  const ok = await telegramService.sendMarkdownMessage(digest);
+  if (!ok) {
+    // Same reasoning as processRecommendationsDigest below: a swallowed Telegram failure here
+    // would let job_heartbeat mark this critical daily digest 'success' on a send nobody received.
+    throw new Error('job digest failed to send to Telegram');
+  }
 }
 
 async function processRecommendationsDigest(): Promise<void> {
@@ -38,7 +44,7 @@ export async function registerDigestJobs(connection: any) {
     connection,
     queueName: QUEUE_JOB_DIGEST,
     jobName: 'job-digest-daily',
-    repeat: { pattern: '45 18 * * *' }, // 12:15 AM IST next day (18:45 UTC), covers late-night jobs
+    repeat: { pattern: '20 17 * * *' }, // 10:50 PM IST (17:20 UTC), covers daily post-market jobs
     jobId: 'job-digest-daily-repeatable',
     removeOnComplete: 3,
     removeOnFail: 3,
@@ -51,14 +57,36 @@ export async function registerDigestJobs(connection: any) {
     onCompleted: () => console.log('[QUEUE] job-digest sent'),
   });
 
+  // Second daily send (added 2026-09-02, user request: digest morning AND night). 02:45 UTC =
+  // 08:15 IST, pre-open — reports what changed overnight (post-close jobs, catch-ups) before
+  // the trading day starts. Same processor as the night send; its OWN monitorName so
+  // job_heartbeat tracks each schedule separately (one heartbeat row cannot serve two crons
+  // without lateness detection reading the wrong boundary). Its OWN queue too: it shared the
+  // night send's queue until 2026-09-11, and registerRepeatableJob clears every repeatable on its
+  // queue before adding its own -- so this registration deleted the night schedule on every
+  // boot, and the 22:50 digest only ever ran as a boot-time catch-up.
+  const jobDigestMorning = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_JOB_DIGEST_MORNING,
+    jobName: 'job-digest-morning',
+    repeat: { pattern: '45 2 * * *' }, // 08:15 IST (02:45 UTC)
+    jobId: 'job-digest-morning-repeatable',
+    removeOnComplete: 3,
+    removeOnFail: 3,
+    processor: processJobDigest,
+    monitorName: 'job-digest-morning',
+    concurrency: 1,
+    lockDuration: 5 * 60_000,
+    onCompleted: () => console.log('[QUEUE] job-digest (morning) sent'),
+  });
+
   const recommendationsDigest = await registerRepeatableJob({
     connection,
     queueName: QUEUE_RECOMMENDATIONS_DIGEST,
     jobName: 'recommendations-digest-daily',
-    // 8:15 AM IST (02:45 UTC), Mon-Fri -- scheduled 45 min after unified-ranker
-    // ('0 2 * * 1-5' = 07:30 IST) so it reads that day's freshly-built ranking, and before
-    // the 09:15 IST open so the picks are actionable.
-    repeat: { pattern: '45 2 * * 1-5' },
+    // 10:40 PM IST (17:10 UTC), Mon-Fri -- scheduled after unified-ranker
+    // ('0 17 * * 1-5' = 22:30 IST) so it reads that day's freshly-built ranking
+    repeat: { pattern: '10 17 * * 1-5' },
     jobId: 'recommendations-digest-daily-repeatable',
     removeOnComplete: 3,
     removeOnFail: 3,
@@ -69,5 +97,5 @@ export async function registerDigestJobs(connection: any) {
     onCompleted: () => console.log('[QUEUE] recommendations-digest sent'),
   });
 
-  return { jobDigest, recommendationsDigest };
+  return { jobDigest, jobDigestMorning, recommendationsDigest };
 }

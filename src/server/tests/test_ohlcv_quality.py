@@ -2,12 +2,17 @@ import sys, os, sqlite3
 import pandas as pd
 import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 from ohlcv_quality import (  # noqa: E402
     parse_split_actions,
     parse_dividend_actions,
     is_bad_print,
     flag_bad_prints,
+    ingest_corporate_actions,
+    load_recently_checked,
+    mark_checked,
+    CORPORATE_ACTIONS_STALENESS_DAYS,
 )
 
 
@@ -61,11 +66,11 @@ def test_boundary_bar_without_a_neighbour_is_not_flagged():
 # ── integration: flag suspect bars in stock_ohlcv ───────────────────────────────
 
 def make_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.executescript("""
         CREATE TABLE stock_ohlcv (
             symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER,
-            is_suspect INTEGER DEFAULT 0, PRIMARY KEY (symbol, date)
+            is_suspect INTEGER DEFAULT 0, suspect_reason TEXT, PRIMARY KEY (symbol, date)
         );
         CREATE TABLE corporate_actions (
             symbol TEXT, ex_date TEXT, action_type TEXT, ratio REAL, amount REAL,
@@ -95,6 +100,80 @@ def test_flag_bad_prints_marks_spikes_only():
     assert suspect == [('SPIKE', 700.0)]
 
 
+# ── AF-20260912-19: the reset must not clear another flagger's flags ─────────────
+
+def test_reset_preserves_closed_session_flags_from_data_integrity_repair():
+    # data_integrity_repair.py --closed-sessions (AF-20260911-15) flags fabricated
+    # market-holiday sessions with suspect_reason = CLOSED_SESSION_REASON. flag_bad_prints
+    # resets is_suspect at the top of every run; live on 2026-09-12 the unscoped reset wiped
+    # 2,322 of those flags and data-quality-daily failed that night. None of this module's
+    # detectors can re-derive a closed session (a flat bar deviates from neither neighbour),
+    # so the reset must leave another flagger's rows alone.
+    from ohlcv_quality import CLOSED_SESSION_REASON
+
+    conn = make_db()
+    conn.execute(
+        "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume,is_suspect,suspect_reason) "
+        "VALUES ('HOLIDAY','2026-06-26',100,100,100,100,0,1,?)", (CLOSED_SESSION_REASON,))
+    # Our own flag (suspect_reason NULL): must be reset, then re-derived if it is a spike.
+    conn.execute(
+        "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume,is_suspect,suspect_reason) "
+        "VALUES ('STALE','2024-01-02',100,300,100,100,10,1,NULL)")
+    # A third-party flag that is NOT a closed session: still ours to reset (reason mismatch).
+    conn.execute(
+        "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume,is_suspect,suspect_reason) "
+        "VALUES ('OTHER','2024-01-02',100,300,100,100,10,1,'some other tool')")
+    conn.commit()
+
+    flag_bad_prints(conn)
+
+    rows = dict((r[0], (r[1], r[2])) for r in conn.execute(
+        "SELECT symbol, is_suspect, suspect_reason FROM stock_ohlcv "
+        "WHERE symbol IN ('HOLIDAY','STALE','OTHER')").fetchall())
+    assert rows['HOLIDAY'] == (1, CLOSED_SESSION_REASON)   # preserved, reason intact
+    assert rows['STALE'][0] == 0                            # ours: reset (1 bar, not re-flagged)
+    assert rows['OTHER'][0] == 0                            # not a closed session: reset
+
+
+def _mixed_universe(conn):
+    _bars(conn, 'SPIKE', [100, 100, 700, 100, 100])     # one-bar error
+    _bars(conn, 'JUMP', [100, 100, 100, 5000, 5000])    # extreme persistent shift
+    _bars(conn, 'CLEAN', [100, 101, 102, 103, 104])
+    conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) "
+                 "VALUES ('BROKEN','2024-02-01',10,9,11,10,1)")   # high < low
+    conn.commit()
+
+
+def _suspects(conn):
+    return sorted(tuple(r) for r in conn.execute(
+        "SELECT symbol, date FROM stock_ohlcv WHERE is_suspect=1").fetchall())
+
+
+def test_flag_all_reads_the_bars_once_and_flags_like_the_separate_passes(monkeypatch):
+    # Both neighbour-based passes used to fetch all of stock_ohlcv (2.7M rows) as Row objects:
+    # 45.7s and a 2,974MB peak per run, measured 2026-09-11.
+    import ohlcv_quality
+    from ohlcv_quality import flag_all, flag_extreme_level_shifts, flag_malformed_bars
+
+    separate = make_db()
+    _mixed_universe(separate)
+    flag_bad_prints(separate)
+    flag_extreme_level_shifts(separate)
+    flag_malformed_bars(separate)
+
+    combined = make_db()
+    _mixed_universe(combined)
+    reads = []
+    real_iter_rows = ohlcv_quality.iter_rows
+    monkeypatch.setattr(ohlcv_quality, 'iter_rows',
+                        lambda conn, sql, *a, **k: (reads.append(sql), real_iter_rows(conn, sql, *a, **k))[1])
+    flag_all(combined)
+
+    assert len([s for s in reads if 'FROM stock_ohlcv' in s]) == 1
+    assert _suspects(combined) == _suspects(separate)
+    assert {s for s, _ in _suspects(combined)} == {'SPIKE', 'JUMP', 'BROKEN'}
+
+
 def test_flag_bad_prints_respects_corporate_action_allowlist():
     conn = make_db()
     _bars(conn, 'CORP', [100, 100, 700, 700, 700])     # a real step up at a split ex-date
@@ -108,3 +187,96 @@ def test_flag_bad_prints_respects_corporate_action_allowlist():
     flagged = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM stock_ohlcv WHERE is_suspect=1").fetchall()}
     assert 'BAD' in flagged
     assert 'CORP' not in flagged
+
+
+# ── ingest_corporate_actions cadence skip (2026-09-04, scheduler-review suggestion #4) ──────
+#
+# corporate_actions is an EVENT table -- a symbol with no recent split/dividend has NO row in
+# it, so the skip can't be driven off that table (would treat the vast majority of the universe
+# as permanently stale). ohlcv_corporate_actions_checked is the dedicated per-symbol marker,
+# mirroring marketsmojo_financials_checked's AF-20260816-20 pattern exactly.
+
+def make_checked_db():
+    conn = pg_memory_conn()
+    conn.executescript("""
+        CREATE TABLE corporate_actions (
+            symbol TEXT, ex_date TEXT, action_type TEXT, ratio REAL, amount REAL,
+            PRIMARY KEY (symbol, ex_date, action_type)
+        );
+        CREATE TABLE ohlcv_corporate_actions_checked (
+            symbol TEXT PRIMARY KEY, checked_at TIMESTAMPTZ NOT NULL
+        );
+    """)
+    return conn
+
+
+def test_load_recently_checked_only_returns_symbols_within_the_staleness_window():
+    conn = make_checked_db()
+    fresh = (pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=1)).isoformat()
+    stale = (pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=CORPORATE_ACTIONS_STALENESS_DAYS + 5)).isoformat()
+    conn.execute("INSERT INTO ohlcv_corporate_actions_checked VALUES ('RELIANCE', ?)", (fresh,))
+    conn.execute("INSERT INTO ohlcv_corporate_actions_checked VALUES ('TCS', ?)", (stale,))
+    conn.commit()
+
+    checked = load_recently_checked(conn)
+    assert checked == {'RELIANCE'}
+
+
+def test_mark_checked_is_idempotent_upsert():
+    conn = make_checked_db()
+    mark_checked(conn, 'RELIANCE')
+    conn.commit()
+    first = conn.execute("SELECT checked_at FROM ohlcv_corporate_actions_checked WHERE symbol='RELIANCE'").fetchone()
+
+    mark_checked(conn, 'RELIANCE')
+    conn.commit()
+    rows = conn.execute("SELECT checked_at FROM ohlcv_corporate_actions_checked WHERE symbol='RELIANCE'").fetchall()
+    assert len(rows) == 1  # still exactly one row, not a duplicate
+    assert rows[0][0] >= first[0]  # timestamp advanced, not frozen at the first check
+
+
+class _FakeTicker:
+    def __init__(self, calls, ticker):
+        calls.append(ticker)
+        self.splits = pd.Series(dtype=float)
+        self.dividends = pd.Series(dtype=float)
+
+
+def _fake_yfinance_module(calls):
+    module = type(sys)('yfinance')
+    module.Ticker = lambda ticker: _FakeTicker(calls, ticker)
+    return module
+
+
+def test_ingest_corporate_actions_skips_a_recently_checked_symbol(monkeypatch):
+    conn = make_checked_db()
+    mark_checked(conn, 'RELIANCE')  # checked just now -- must be skipped
+    conn.commit()
+
+    calls = []
+    monkeypatch.setitem(sys.modules, 'yfinance', _fake_yfinance_module(calls))
+    ingest_corporate_actions(conn, ['RELIANCE', 'TCS'])
+
+    assert calls == ['TCS.NS']  # RELIANCE skipped, TCS actually queried
+
+
+def test_ingest_corporate_actions_force_bypasses_the_skip(monkeypatch):
+    conn = make_checked_db()
+    mark_checked(conn, 'RELIANCE')
+    conn.commit()
+
+    calls = []
+    monkeypatch.setitem(sys.modules, 'yfinance', _fake_yfinance_module(calls))
+    ingest_corporate_actions(conn, ['RELIANCE'], force=True)
+
+    assert calls == ['RELIANCE.NS']
+
+
+def test_ingest_corporate_actions_marks_a_no_action_symbol_checked_too(monkeypatch):
+    conn = make_checked_db()
+    calls = []
+    monkeypatch.setitem(sys.modules, 'yfinance', _fake_yfinance_module(calls))
+    ingest_corporate_actions(conn, ['RELIANCE'])
+
+    # An empty response is still an answer -- the symbol must not look permanently uncheckable.
+    assert load_recently_checked(conn) == {'RELIANCE'}

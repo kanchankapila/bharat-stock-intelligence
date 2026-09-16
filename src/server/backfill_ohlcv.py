@@ -1,3 +1,4 @@
+import polars as pl
 import asyncio
 
 from db_compat import connect
@@ -59,7 +60,6 @@ import os
 import time
 from tqdm import tqdm
 
-DB_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'database.sqlite'))
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
@@ -184,11 +184,11 @@ def init_db(conn):
     # mc_ohlcv_backfill.py's ensure_adjustment_basis_column() docstring. CREATE TABLE IF NOT
     # EXISTS above is a no-op on the live table, so an existing DB needs this ALTER too.
     try:
-        conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN adjustment_basis TEXT")
+        conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS adjustment_basis TEXT")
         conn.commit()
     except Exception:
         conn.rollback()
-    print(f"[OK] stock_ohlcv table ready  [DB: {DB_PATH}]")
+    print("[OK] stock_ohlcv table ready  [DB: Postgres via db_compat.connect()]")
 
 def get_all_nse_symbols(conn):
     try:
@@ -284,9 +284,17 @@ YAHOO_SYMBOL_MAP: dict[str, str] = {
     "SRTRANSFIN":   "SHRIRAMFIN",
     "CHOLAFINSV":   "CHOLAFIN",
     "LTFH":         "LTF",
-    "LTIM":         "LTI",
+    # Verified live 2026-09-12 against a working control (RELIANCE.NS returns rows in the
+    # same call): LTIM.NS, LTI.NS and LTIMINDTREE.NS are ALL absent from Yahoo, so this
+    # mapping pointed a live Nifty-50 ticker at an equally-dead one. Kept as a no-op comment
+    # rather than a wrong redirect -- LTIM needs a non-Yahoo price source (AF-20260912-08).
+    # "LTIM":       "LTI",   <- removed: target is dead too
     "BAJAJINSUR":   "BAJAJFINSV",
-    "TATAMOTORS":   "TATAMTRDVR",
+    # Tata Motors' PV business kept ISIN INE155A01022 and renamed to TMPV; the old DVR line
+    # TATAMTRDVR is delisted and TATAMOTORS.NS itself returns nothing. TMPV.NS resolves (5
+    # rows, last close 301.10, live 2026-09-12). The universe master now carries TMPV, so this
+    # entry is only a safety net for any caller still passing the retired symbol.
+    "TATAMOTORS":   "TMPV",
     "OBEROI":       "OBEROIRLTY",
     "LARSEN":       "LT",
     "NESTLE":       "NESTLEIND",
@@ -558,3 +566,9 @@ if __name__ == "__main__":
         elif args.mode == "gap-fill":
             gap_fill(conn, lookback_days=args.lookback)
             print("Done.")
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

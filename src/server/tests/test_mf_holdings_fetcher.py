@@ -1,14 +1,13 @@
 import os
-import sqlite3
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import mf_holdings_fetcher as mf
+from pg_test_support import pg_memory_conn  # noqa: E402
+import mf_holdings_fetcher as mf  # noqa: E402
 
 
 def _conn(tmp_path):
-    con = sqlite3.connect(tmp_path / "test-mf-holdings.sqlite")
-    con.row_factory = sqlite3.Row
+    con = pg_memory_conn()
     con.execute("CREATE TABLE technical_signals (symbol TEXT, date TEXT, mf_holding_pct REAL, mf_fund_count INTEGER, mf_chg_vs_prev REAL)")
     return con
 

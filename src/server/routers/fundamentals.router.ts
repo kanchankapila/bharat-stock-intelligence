@@ -149,17 +149,27 @@ export const fundamentalsRouter = router({
     }))
     .query(async ({ input }) => {
       try {
+        // Cutoffs computed in JS and bound as plain date-string params, not `CURRENT_DATE ±
+        // (? || ' days')::interval` -- trpc-surface-review (2026-08-14) found this pattern
+        // silently no-ops under the SQLite dev fallback: stripPgCasts strips the ::interval/
+        // ::date/::text casts but SQLite has no interval arithmetic to fall back to, so the
+        // residual `CURRENT_DATE - (? || ' days')` evaluates to nonsense and the WHERE clause
+        // matches every row regardless of window (valid on live Postgres, so no production
+        // impact, but silently wrong for local dev). Same fix already applied to
+        // getScreenerSurfacingSignals/getScreenerSectorRotation (screeners.router.ts).
+        const fromDate = new Date(Date.now() - input.daysBack * 24 * 3600_000).toISOString().slice(0, 10);
+        const toDate = new Date(Date.now() + input.daysForward * 24 * 3600_000).toISOString().slice(0, 10);
         const rows = await dbAll<any>(
           `SELECT ca.symbol, ns.name, ca.ex_date, ca.action_type, ca.ratio, ca.amount
            FROM corporate_actions ca
            LEFT JOIN nse_stocks ns ON ns.symbol = ca.symbol AND ns.status = 'ACTIVE'
-           WHERE ca.ex_date >= (CURRENT_DATE - (? || ' days')::interval)::text
-             AND ca.ex_date <= (CURRENT_DATE + (? || ' days')::interval)::text
+           WHERE ca.ex_date >= ?
+             AND ca.ex_date <= ?
              ${input.actionType ? "AND ca.action_type = ?" : ""}
            ORDER BY ca.ex_date ASC`,
           input.actionType
-            ? [input.daysBack, input.daysForward, input.actionType.toUpperCase()]
-            : [input.daysBack, input.daysForward]
+            ? [fromDate, toDate, input.actionType.toUpperCase()]
+            : [fromDate, toDate]
         );
         return rows || [];
       } catch (e: any) {
@@ -240,17 +250,21 @@ export const fundamentalsRouter = router({
       `fund:filed-corp-actions:${input.daysBack}:${input.daysForward}:${input.symbol ?? ''}`,
       async () => {
         try {
+          // JS-computed cutoffs -- see getCorporateActionsCalendar above for why (same
+          // SQLite-dev-fallback no-op the CURRENT_DATE ± interval form silently hits).
+          const fromDate = new Date(Date.now() - input.daysBack * 24 * 3600_000).toISOString().slice(0, 10);
+          const toDate = new Date(Date.now() + input.daysForward * 24 * 3600_000).toISOString().slice(0, 10);
           const rows = await dbAll<any>(
             `SELECT symbol, company_name, category, headline, dividend_per_share,
                     record_date, ex_date, filing_date, source_url, upcoming
              FROM nse_filed_corporate_actions
-             WHERE filing_date >= (CURRENT_DATE - (? || ' days')::interval)::text
-               AND filing_date <= (CURRENT_DATE + (? || ' days')::interval)::text
+             WHERE filing_date >= ?
+               AND filing_date <= ?
                ${input.symbol ? "AND symbol = ?" : ""}
              ORDER BY filing_date DESC`,
             input.symbol
-              ? [input.daysBack, input.daysForward, input.symbol.toUpperCase()]
-              : [input.daysBack, input.daysForward]
+              ? [fromDate, toDate, input.symbol.toUpperCase()]
+              : [fromDate, toDate]
           );
           return rows || [];
         } catch (e: any) {

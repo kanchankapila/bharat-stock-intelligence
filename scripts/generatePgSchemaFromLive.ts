@@ -3,7 +3,9 @@
  * Regenerates db/schema.postgres.sql DIRECTLY from live Postgres's own catalogs
  * (pg_attribute/pg_constraint/pg_indexes), not from database.sqlite.
  *
- * Why this exists (2026-08-05, following the checkSchemaDrift.ts audit): scripts/generate_pg_schema.py
+ * Why this exists (2026-08-05, following the checkSchemaDrift.ts audit; that script was finally
+ * DELETED 2026-08-15 per docs/SQLITE_DECOMMISSION_PLAN.md Phase 1, this one replaces it outright):
+ * scripts/generate_pg_schema.py
  * generates db/schema.postgres.sql from database.sqlite (itself derived from db.ts's CREATE TABLE
  * statements) -- but a large and growing set of tables/columns only ever exist in live Postgres,
  * created via node-pg-migrate migrations or ad-hoc pgEnsureColumns() calls that never touch db.ts.
@@ -11,10 +13,10 @@
  * The first `npm run schema:drift` run against real production found 45 tables and ~140 columns
  * live but missing from the file (plus 3 columns in the file that don't exist live) -- this script
  * closes that gap by making live Postgres itself the source of truth for this file, instead of the
- * SQLite dev-fallback mirror. db.ts/database.sqlite remain the source of truth for the SQLite dev
- * fallback path (`USE_POSTGRES=false`) -- this script does not touch either of them.
+ * SQLite dev-fallback mirror. (That fallback is gone as of 2026-08-16 -- `db.ts` is now
+ * `db.sqlite-legacy.ts` and imported by nothing, so live Postgres is the only source there is.)
  *
- * Emits output in the same house style generate_pg_schema.py already uses (CREATE TABLE IF NOT
+ * Emits output in the house style the checked-in snapshot already uses (CREATE TABLE IF NOT
  * EXISTS "name" (...) with inline PRIMARY KEY/UNIQUE, quoted identifiers, uppercase type keywords)
  * so scripts/checkSchemaDrift.ts's parser -- and any human used to reading this file -- keeps
  * working unchanged. Deliberately does NOT reuse pg_dump: pg_dump's default output uses unquoted
@@ -39,8 +41,11 @@ import { writeFileSync } from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
-// Mirrors scripts/generate_pg_schema.py's HYPERTABLES dict exactly (static config, not queried --
-// this project's hypertable set changes rarely and deliberately, see that file's own comment).
+// Static config, not queried: this project's hypertable set changes rarely and deliberately.
+// This block is now the SOLE definition -- it previously mirrored scripts/generate_pg_schema.py,
+// deleted 2026-08-15 (docs/SQLITE_DECOMMISSION_PLAN.md Phase 1) because it generated the
+// Postgres snapshot from database.sqlite and structurally could not see the ~65 Postgres-only
+// tables. Cross-check against timescaledb_information.hypertables when changing it.
 const HYPERTABLES: Record<string, { timeCol: string; chunk: string; compressAfter: string | null; retainAfter: string | null }> = {
   stock_ohlcv: { timeCol: "date", chunk: "90 days", compressAfter: "180 days", retainAfter: null },
   feature_store: { timeCol: "date", chunk: "90 days", compressAfter: "120 days", retainAfter: null },
@@ -102,9 +107,10 @@ interface IndexRow {
 // node-pg-migrate's own internal bookkeeping table -- self-created on the first `npm run
 // migrate:up` against any target DB, so it doesn't belong in a from-scratch schema snapshot
 // (and its legacy `nextval('pgmigrations_id_seq'::regclass)` DEFAULT references a SEQUENCE
-// object this generator doesn't emit, which would break the whole file mid-apply). Mirrors
-// generate_pg_schema.py's SKIP set for SQLite-internal tables. Must stay in sync with the
-// identical skip in scripts/checkSchemaDrift.ts's fetchLiveSchema().
+// object this generator doesn't emit, which would break the whole file mid-apply). Must stay
+// in sync with the identical skip in scripts/checkSchemaDrift.ts's fetchLiveSchema() -- those
+// two are now the only copies (generate_pg_schema.py, which also carried one for the
+// SQLite-internal tables, was deleted 2026-08-15).
 const SKIP_TABLES = new Set(["pgmigrations"]);
 
 async function fetchAll(pool: import("pg").Pool) {
@@ -188,6 +194,23 @@ async function fetchAll(pool: import("pg").Pool) {
   };
 }
 
+// A legacy `SERIAL`-style column: Postgres represents it as a plain DEFAULT
+// `nextval('<seq>'::regclass)`, with attidentity left '' (only the modern `GENERATED ... AS
+// IDENTITY` syntax sets that flag) -- but the backing sequence is a SEPARATE catalog object
+// this generator's queries never fetch, so emitting the DEFAULT verbatim produces a CREATE
+// TABLE that references a sequence nothing in this file ever creates. Harmless in production
+// (the sequence has existed since whatever migration originally declared the column SERIAL)
+// and invisible to `schema:drift` (which only diffs column existence, not default text) --
+// but fatal the moment this file is the ONLY thing building the schema, which is exactly what
+// CI's throwaway test database does. Found 2026-08-19 when a routine `schema:regen` run baked
+// this into the checked-in file for the first time and broke CI:
+// `psycopg2.errors.UndefinedTable: relation "mf_portfolio_holdings_id_seq" does not exist`.
+// Fix: treat it exactly like a `d`-flavour identity column in the OUTPUT -- semantically
+// equivalent (still overridable by an explicit INSERT, same as calling nextval() by hand) and
+// self-contained, matching the house style every other auto-incrementing id in this file
+// already uses.
+const LEGACY_SERIAL_DEFAULT_RE = /^nextval\('[^']+'::regclass\)$/;
+
 function buildTableDdl(
   table: string,
   columns: ColumnRow[],
@@ -200,14 +223,17 @@ function buildTableDdl(
     const pgType = pgTypeToHouseStyle(col.data_type);
     const parts = [`  "${col.column_name}" ${pgType}`];
 
+    const isLegacySerial = !col.identity_flag && !!col.default_expr &&
+      LEGACY_SERIAL_DEFAULT_RE.test(col.default_expr);
+    const isIdentity = col.identity_flag !== "" || isLegacySerial;
+
     if (col.identity_flag === "a") parts.push("GENERATED ALWAYS AS IDENTITY");
-    else if (col.identity_flag === "d") parts.push("GENERATED BY DEFAULT AS IDENTITY");
+    else if (col.identity_flag === "d" || isLegacySerial) parts.push("GENERATED BY DEFAULT AS IDENTITY");
 
-    // NOT NULL is implied for an identity column; skip the redundant explicit keyword to match
-    // generate_pg_schema.py's own convention (its is_ai branch does the same).
-    if (col.not_null && !col.identity_flag) parts.push("NOT NULL");
+    // NOT NULL is implied for an identity column; skip the redundant explicit keyword.
+    if (col.not_null && !isIdentity) parts.push("NOT NULL");
 
-    if (col.default_expr && !col.identity_flag) parts.push(`DEFAULT ${col.default_expr}`);
+    if (col.default_expr && !isIdentity) parts.push(`DEFAULT ${col.default_expr}`);
 
     if (isSingleColPk) parts.push("PRIMARY KEY");
 

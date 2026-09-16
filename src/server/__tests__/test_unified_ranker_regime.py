@@ -13,6 +13,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 from unified_ranker import (
     CAT_BASE_WT,
     REGIME_WEIGHTS,
@@ -221,7 +222,7 @@ class TestTiltShrinkage:
         report ready_to_fit False, so nothing starts fitting on 13 days of data."""
         import sqlite3
         from unified_ranker import regime_tilt_fit_readiness
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         con.execute("CREATE TABLE stock_factor_breakdown_history (regime TEXT, snapshot_date TEXT)")
         con.execute("CREATE TABLE market_regimes (date TEXT, regime TEXT)")
         con.executemany("INSERT INTO stock_factor_breakdown_history VALUES (?,?)",

@@ -26,7 +26,7 @@ const DEAL_TABS: { key: DealTab; label: string; icon: React.ElementType }[] = [
 ];
 
 
-const COLORS = ['#10b981', '#f43f5e', '#3b82f6', '#f97316', '#8b5cf6', '#ec4899'];
+const COLORS = ['#10b981', '#f43f5e', '#6366f1', '#f97316', '#8b5cf6', '#ec4899'];
 
 const InsiderFilingsTable: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onSelectStock }) => {
   const { data: filings = [], isLoading } = trpc.getInsiderTransactions.useQuery({ limit: 100 }, {
@@ -34,20 +34,20 @@ const InsiderFilingsTable: React.FC<{ onSelectStock?: (symbol: string) => void }
   });
 
   return (
-    <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+    <div className="v1-card overflow-hidden">
       <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-800/50 flex items-center justify-between">
         <span className="text-xs font-bold text-slate-300">NSE Insider Filings — Promoter / Designated Person</span>
-        <span className="text-[10px] text-slate-500 font-mono">before/after % holding, from SAST/PIT disclosures</span>
+        <span className="text-[10px] text-slate-500 font-data">before/after % holding, from SAST/PIT disclosures</span>
       </div>
       {isLoading ? (
-        <div className="p-4 text-xs text-slate-500 font-mono">Loading filings&hellip;</div>
+        <div className="p-4 text-xs text-slate-500 font-data">Loading filings&hellip;</div>
       ) : filings.length === 0 ? (
-        <div className="p-4 text-xs text-slate-500 font-mono">No recent insider filings.</div>
+        <div className="p-4 text-xs text-slate-500 font-data">No recent insider filings.</div>
       ) : (
         <div className="overflow-y-auto max-h-96">
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-slate-900/80">
-              <tr className="text-[10px] text-slate-500 uppercase tracking-wider">
+              <tr className="text-[10px] text-slate-500 font-display uppercase tracking-wider">
                 <th className="text-left px-3 py-2 font-medium">Symbol</th>
                 <th className="text-left px-3 py-2 font-medium">Person</th>
                 <th className="text-left px-3 py-2 font-medium">Category</th>
@@ -71,19 +71,19 @@ const InsiderFilingsTable: React.FC<{ onSelectStock?: (symbol: string) => void }
                     <td className="px-3 py-1.5 font-bold text-slate-200">{f.symbol}</td>
                     <td className="px-3 py-1.5 text-slate-300 truncate max-w-[160px]">{f.person_name}</td>
                     <td className="px-3 py-1.5 text-slate-400">{f.person_category || '—'}</td>
-                    <td className={cn("px-3 py-1.5 font-medium", isBuy ? "text-emerald-400" : isSell ? "text-red-400" : "text-slate-400")}>
+                    <td className={cn("px-3 py-1.5 font-medium", isBuy ? "text-emerald-400" : isSell ? "text-rose-400" : "text-slate-400")}>
                       {f.transaction_mode}
                     </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-300">
+                    <td className="px-3 py-1.5 text-right font-data text-slate-300">
                       {f.value_cr != null ? Number(f.value_cr).toFixed(2) : '—'}
                     </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-400">
+                    <td className="px-3 py-1.5 text-right font-data text-slate-400">
                       {f.before_pct != null ? `${Number(f.before_pct).toFixed(2)}%` : '—'}
                     </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-200">
+                    <td className="px-3 py-1.5 text-right font-data text-slate-200">
                       {f.after_pct != null ? `${Number(f.after_pct).toFixed(2)}%` : '—'}
                     </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-500">{f.transaction_date}</td>
+                    <td className="px-3 py-1.5 text-right font-data text-slate-500">{f.transaction_date}</td>
                   </tr>
                 );
               })}
@@ -104,20 +104,20 @@ const BlockDealsTable: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
   });
 
   return (
-    <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+    <div className="v1-card overflow-hidden">
       <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-800/50 flex items-center justify-between">
         <span className="text-xs font-bold text-slate-300">Bulk / Block Deals</span>
-        <span className="text-[10px] text-slate-500 font-mono">% of float transacted, from NSE + Tickertape</span>
+        <span className="text-[10px] text-slate-500 font-data">% of float transacted, from NSE + Tickertape</span>
       </div>
       {isLoading ? (
-        <div className="p-4 text-xs text-slate-500 font-mono">Loading deals&hellip;</div>
+        <div className="p-4 text-xs text-slate-500 font-data">Loading deals&hellip;</div>
       ) : deals.length === 0 ? (
-        <div className="p-4 text-xs text-slate-500 font-mono">No recent block deals.</div>
+        <div className="p-4 text-xs text-slate-500 font-data">No recent block deals.</div>
       ) : (
         <div className="overflow-y-auto max-h-96">
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-slate-900/80">
-              <tr className="text-[10px] text-slate-500 uppercase tracking-wider">
+              <tr className="text-[10px] text-slate-500 font-display uppercase tracking-wider">
                 <th className="text-left px-3 py-2 font-medium">Symbol</th>
                 <th className="text-left px-3 py-2 font-medium">Client</th>
                 <th className="text-left px-3 py-2 font-medium">Type</th>
@@ -138,16 +138,16 @@ const BlockDealsTable: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
                   >
                     <td className="px-3 py-1.5 font-bold text-slate-200">{d.symbol}</td>
                     <td className="px-3 py-1.5 text-slate-300 truncate max-w-[220px]">{d.client_name || '—'}</td>
-                    <td className={cn("px-3 py-1.5 font-medium", isBuy ? "text-emerald-400" : isSell ? "text-red-400" : "text-slate-400")}>
+                    <td className={cn("px-3 py-1.5 font-medium", isBuy ? "text-emerald-400" : isSell ? "text-rose-400" : "text-slate-400")}>
                       {d.trade_type || '—'}
                     </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-300">
+                    <td className="px-3 py-1.5 text-right font-data text-slate-300">
                       {d.value_cr != null ? Number(d.value_cr).toFixed(2) : '—'}
                     </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-200">
+                    <td className="px-3 py-1.5 text-right font-data text-slate-200">
                       {d.pct_transacted != null ? `${Number(d.pct_transacted).toFixed(2)}%` : '—'}
                     </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-500">{d.date}</td>
+                    <td className="px-3 py-1.5 text-right font-data text-slate-500">{d.date}</td>
                   </tr>
                 );
               })}
@@ -216,12 +216,12 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
           <div className="text-xs text-slate-400">{deal.dealType || deal.type}</div>
         </td>
         <td className="py-2.5 px-3 text-xs text-slate-300">{deal.buyerName || deal.sellerName || deal.party || '—'}</td>
-        <td className="py-2.5 px-3 text-xs font-mono text-white text-right">
+        <td className="py-2.5 px-3 text-xs font-data text-white text-right">
           ₹{parseFloat(deal.dealsValue || deal.value || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}Cr
         </td>
         <td className="py-2.5 px-3 text-xs text-slate-400 text-right">{deal.dealDate || deal.date || '—'}</td>
         <td className="py-2.5 px-3 text-right">
-          <span className={cn('text-xs font-bold', chg >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+          <span className={cn('text-xs font-bold', chg >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
             {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%
           </span>
         </td>
@@ -233,7 +233,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-black text-white">Smart Money</h1>
+          <h1 className="v1-title-page">Smart Money</h1>
           <p className="text-sm text-slate-400 mt-0.5">Institutional deals, insider activity, and block trades</p>
         </div>
         <button
@@ -246,15 +246,15 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Large Deals',   value: largeDealList.length,   icon: DollarSign, color: 'text-blue-400'    },
+          { label: 'Large Deals',   value: largeDealList.length,   icon: DollarSign, color: 'text-indigo-400'    },
           { label: 'Insider Buys',  value: insiderBuyList.length,  icon: TrendingUp, color: 'text-emerald-400' },
-          { label: 'Insider Sells', value: insiderSellList.length, icon: TrendingDown,color: 'text-red-400'    },
+          { label: 'Insider Sells', value: insiderSellList.length, icon: TrendingDown,color: 'text-rose-400'    },
           { label: 'Top Stocks',    value: topStockList.length,    icon: BarChart2,  color: 'text-amber-400'   },
         ].map((card, i) => (
-          <div key={i} className="bg-slate-800/50 rounded-xl p-4 border border-slate-800/30">
+          <div key={i} className="v1-card p-4">
             <card.icon className={cn('w-4 h-4 mb-2', card.color)} />
-            <div className="text-2xl font-black text-white">{card.value}</div>
-            <div className="text-xs text-slate-400 mt-0.5">{card.label}</div>
+            <div className="v1-data-value text-white">{card.value}</div>
+            <div className="v1-data-label mt-0.5">{card.label}</div>
           </div>
         ))}
       </div>
@@ -278,7 +278,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
       </div>
 
       {activeTab === 'large' && (
-        <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+        <div className="v1-card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-slate-900/60">
@@ -302,8 +302,8 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
 
       {activeTab === 'insider' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-800/30">
-            <div className="text-sm font-semibold text-slate-300 mb-3">Insider Buy vs Sell</div>
+          <div className="v1-card p-4">
+            <div className="v1-title-card mb-3">Insider Buy vs Sell</div>
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
                 <Pie data={insiderNetData} dataKey="value" cx="50%" cy="50%" outerRadius={70} label={({ name, value }: any) => `${name}: ${value}`}>
@@ -315,7 +315,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+          <div className="v1-card overflow-hidden">
             <div className="px-3 py-2 bg-emerald-500/10 border-b border-emerald-500/20">
               <span className="text-xs font-bold text-emerald-400">Insider BUYS ({insiderBuyList.length})</span>
             </div>
@@ -325,9 +325,9 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
               </table>
             </div>
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
-            <div className="px-3 py-2 bg-red-500/10 border-b border-red-500/20">
-              <span className="text-xs font-bold text-red-400">Insider SELLS ({insiderSellList.length})</span>
+          <div className="v1-card overflow-hidden">
+            <div className="px-3 py-2 bg-rose-500/10 border-b border-rose-500/20">
+              <span className="text-xs font-bold text-rose-400">Insider SELLS ({insiderSellList.length})</span>
             </div>
             <div className="overflow-y-auto max-h-64">
               <table className="w-full">
@@ -344,7 +344,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
 
       {activeTab === 'institutional' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+          <div className="v1-card overflow-hidden">
             <div className="px-3 py-2 bg-emerald-500/10 border-b border-emerald-500/20">
               <span className="text-xs font-bold text-emerald-400">Investor BUYS</span>
             </div>
@@ -354,9 +354,9 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
               </table>
             </div>
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
-            <div className="px-3 py-2 bg-red-500/10 border-b border-red-500/20">
-              <span className="text-xs font-bold text-red-400">Investor SELLS</span>
+          <div className="v1-card overflow-hidden">
+            <div className="px-3 py-2 bg-rose-500/10 border-b border-rose-500/20">
+              <span className="text-xs font-bold text-rose-400">Investor SELLS</span>
             </div>
             <div className="overflow-y-auto max-h-80">
               <table className="w-full">
@@ -369,8 +369,8 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
 
       {activeTab === 'sector' && sectorChartData.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-800/30">
-            <div className="text-sm font-semibold text-slate-300 mb-3">Deal Value by Sector</div>
+          <div className="v1-card p-4">
+            <div className="v1-title-card mb-3">Deal Value by Sector</div>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={sectorChartData} layout="vertical" margin={{ left: 80, right: 16 }}>
                 <XAxis type="number" tick={{ fontSize: 10, fill: '#94a3b8' }} />
@@ -387,7 +387,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+          <div className="v1-card overflow-hidden">
             <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-800/30">
               <span className="text-xs font-bold text-slate-300">Top Stocks by Deal Value</span>
             </div>

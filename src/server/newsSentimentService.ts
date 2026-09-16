@@ -1038,7 +1038,7 @@ export async function runNewsSentimentCycle(): Promise<{
   // (15-min cadence -> 960/day) the 12,137-item backlog left after resetting the
   // available=False fallback-poisoning bug (see finbert_news_sentiment.py) would take ~12.6
   // days to clear even with zero new HIGH-impact arrivals. 25/cycle -> ~2,400/day, ~5 days --
-  // still conservative against the 60s runPython timeout (model load dominates cost, not
+  // still conservative against the 180s runPython timeout (model load dominates cost, not
   // per-item inference; this is a batch-size tuning knob, not a guaranteed-safe ceiling).
   const highImpact = await dbAll(`
     SELECT id, title, summary, category FROM news_sentiment_items
@@ -1073,7 +1073,19 @@ export async function enrichWithFinBERT(items: { id: string; title: string; summ
   const b64 = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64');
 
   try {
-    const { stdout } = await runPython('finbert_news_sentiment.py', [b64], 60_000);
+    // 60s -> 180s (2026-08-25): the 60s timeout fired repeatedly in pm2-err.log ("Timed out
+    // after 60000ms (killed by timeout)") because model load dominates cost and competes for
+    // RAM/CPU on a box that also runs the server, training and four other Python services.
+    // The comment below already said "model load dominates cost, not per-item inference" --
+    // 60s assumed a warm OS file cache that a memory-pressured host does not guarantee. A
+    // failed enrichment is caught + logged (rows stay ai_scored=0 for the next cycle), so the
+    // cost of a too-short timeout is silent backlog growth, not data corruption.
+    // 180s -> 420s (2026-09-02): it timed out twice more on 2026-09-01 with a contended box.
+    // Measured quiet baseline 2026-09-02 23:35 IST: import 31.8s + model load 2.6s + first
+    // predict 2.7s = 37s for a 1-item batch -- i.e. ~50-60s for the real 25-item cycle on an
+    // idle host, so 180s was only ~3x, and RAM pressure multiplies torch load well past that.
+    // 420s keeps ~7x over the measured baseline and still fits the 15-min cycle.
+    const { stdout } = await runPython('finbert_news_sentiment.py', [b64], 420_000);
     const jsonLine = stdout.trim().split('\n').pop() ?? '[]'; // model-load progress noise precedes it on some runs
     const results = JSON.parse(jsonLine) as { id: string; sentiment: string; score: number }[];
     for (const r of results) {

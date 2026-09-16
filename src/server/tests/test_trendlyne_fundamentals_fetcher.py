@@ -22,10 +22,20 @@ def test_pe_and_pb_params_are_not_fetched_during_a_full_run(monkeypatch):
         return {"eodData": []}
 
     monkeypatch.setattr(tff, "_fetch", fake_fetch)
-    # _load_stocks(symbol_filter) takes one arg -- main() calls it as _load_stocks(args.symbol)
-    # with no `con` (it opens/manages its own connection internally). The old 2-arg mock
-    # signature here predates that and TypeErrors on the very first call in main().
-    monkeypatch.setattr(tff, "_load_stocks", lambda symbol_filter: [("BEL", "175")])
+    # Mirror _load_stocks' real signature, keyword included. main() calls it as
+    # _load_stocks(args.symbol, skip_done_for_date=...) and passes no `con` (it opens/manages
+    # its own connection internally).
+    #
+    # This lambda has now drifted from the real signature TWICE -- once when `con` was dropped,
+    # again when `skip_done_for_date` was added for the WAF run-budget work. A stub with a
+    # hand-copied signature is a second declaration of the same interface, and nothing keeps the
+    # two honest; the failure surfaces as a TypeError on the first call, far from the change
+    # that caused it. Same shape as _CaptureDB.query_all in
+    # test_live_datasource_intraday_fetcher.py, which broke for 7 days the same way.
+    monkeypatch.setattr(
+        tff, "_load_stocks",
+        lambda symbol_filter, skip_done_for_date=None: [("BEL", "175")],
+    )
     monkeypatch.setattr(tff, "connect", lambda: MagicMock())
     monkeypatch.setattr(tff, "ensure_schema", lambda con: None)
     monkeypatch.setattr(tff, "_upsert_series", lambda *a, **k: None)

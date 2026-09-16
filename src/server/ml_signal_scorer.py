@@ -20,6 +20,7 @@ Run:  python ml_signal_scorer.py              # train + score all pending signal
       python ml_signal_scorer.py --min-samples 50
 """
 
+import polars as pl
 import os
 import sys
 import json
@@ -66,7 +67,7 @@ def load_training_data() -> pd.DataFrame:
             ts.volume_ratio
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
-            ON ts.symbol = so.symbol AND ts.date = so.signal_date
+            ON ts.symbol = so.symbol AND so.signal_date = ts.date
         WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
           AND so.return_pct IS NOT NULL
           AND so.signal_source = 'technical'
@@ -373,3 +374,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run(train_only=args.train_only, score_only=args.score_only, min_samples=args.min_samples)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

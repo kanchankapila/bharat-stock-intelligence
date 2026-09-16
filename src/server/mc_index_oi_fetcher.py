@@ -1,3 +1,4 @@
+import polars as pl
 import argparse
 import datetime
 import json
@@ -6,10 +7,13 @@ import time
 import urllib.parse
 import urllib.request
 
+from as_of import logical_trading_date
 from db_compat import execute, executemany
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
+
+SOURCE = "moneycontrol"
 
 def _get_mc_index_map() -> dict:
     """Load {scId: index_name} from DB. Keyed by mc_oi provider_id."""
@@ -38,10 +42,34 @@ HEADERS = {
 }
 
 
-def _get(url: str) -> dict:
-    req = urllib.request.Request(url, headers=HEADERS)
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode())
+def _already_has_oi(index_name: str, date: str, expiry: str) -> bool:
+    from db_compat import query_scalar
+    cnt = query_scalar(
+        "SELECT COUNT(*) FROM index_option_oi WHERE index_name = ? AND date = ? AND expiry = ?",
+        (index_name, date, expiry)
+    )
+    return bool(cnt and cnt > 0)
+
+
+def _get(url: str, retries: int = 3) -> dict:
+    # Retry added 2026-08-31: a single transient MC failure here used to drop the WHOLE
+    # day's index_option_oi silently (_fetch_expiries returns [] on error and the run
+    # no-ops) — the exact mechanism behind the missing 08-22/08-25/08-28 rows. Small
+    # fixed backoff; the fetcher already runs inside its own BullMQ job budget.
+    last_exc: Exception | None = None
+    for attempt in range(1, retries + 1):
+        req = urllib.request.Request(url, headers=HEADERS)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read().decode())
+        except Exception as exc:
+            last_exc = exc
+            if attempt < retries:
+                delay = 2.0 * attempt
+                log.warning("GET %s failed (attempt %d/%d): %s — retrying in %.0fs",
+                            url.split("?")[0], attempt, retries, exc, delay)
+                time.sleep(delay)
+    raise last_exc  # type: ignore[misc]
 
 
 def _ensure_tables():
@@ -61,8 +89,14 @@ def _ensure_tables():
             PRIMARY KEY (index_name, date, expiry, strike)
         )
     """)
+    # PK includes `source`: nt_oi_snapshot_fetcher.py writes the same (index_name, date, expiry)
+    # key for NIFTY50/NIFTYBANK from NiftyTrader's own OI data -- without the provider in the
+    # key, whichever fetcher runs later silently overwrites the other's max_pain/pcr_oi
+    # (migration 1787010000000, data-sources.md's composite-key rule). This CREATE TABLE only
+    # matters for a fresh SQLite dev DB; the live Postgres table is repaired by the migration.
     execute("""
         CREATE TABLE IF NOT EXISTS index_max_pain (
+            source       TEXT NOT NULL,
             index_name   TEXT NOT NULL,
             date         TEXT NOT NULL,
             expiry       TEXT NOT NULL,
@@ -71,7 +105,7 @@ def _ensure_tables():
             total_ce_oi  BIGINT,
             total_pe_oi  BIGINT,
             fetched_at   TEXT NOT NULL,
-            PRIMARY KEY (index_name, date, expiry)
+            PRIMARY KEY (source, index_name, date, expiry)
         )
     """)
 
@@ -231,6 +265,21 @@ def _fetch_and_store(sc_id: str, expiry: str, date: str, fetched_at: str) -> int
         oi_date = max(mc_results.keys(), default=date)
         date_block = mc_results.get(oi_date) or {}
         raw_rows = date_block.get("list") or []
+        # 2026-08-25: when MC's freshest block is STALE relative to the requested trading
+        # date (their API serves T-1 data through much of day T), these rows used to be
+        # upserted onto oi_date anyway -- overwriting the row nt_oi_snapshot_fetcher had
+        # already written for that same key hours earlier, while the CURRENT session got
+        # nothing. Measured live: index_option_oi froze at 2026-08-21 for three runs
+        # (08-22 00:08 / 08-24 15:09 / 08-24 20:39 all "succeeded") purely as backdated
+        # overwrites, while sibling index_max_pain stayed fresh. A stale block must write
+        # nothing rather than clobber another provider's session.
+        if oi_date < date:
+            if _already_has_oi(index_name, oi_date, expiry):
+                log.warning(
+                    "%s expiry=%s: MC's freshest OI block is %s (< requested %s); skipping "
+                    "rather than backdating over an already-written session",
+                    index_name, expiry, oi_date, date)
+                return 0
     if not raw_rows:
         # Fallback: flat list under data
         flat = data.get("oiData") or data.get("oi_data") or []
@@ -280,16 +329,16 @@ def _fetch_and_store(sc_id: str, expiry: str, date: str, fetched_at: str) -> int
     execute(
         """
         INSERT INTO index_max_pain
-            (index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (index_name, date, expiry) DO UPDATE SET
+            (source, index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (source, index_name, date, expiry) DO UPDATE SET
             max_pain    = EXCLUDED.max_pain,
             pcr_oi      = EXCLUDED.pcr_oi,
             total_ce_oi = EXCLUDED.total_ce_oi,
             total_pe_oi = EXCLUDED.total_pe_oi,
             fetched_at  = EXCLUDED.fetched_at
         """,
-        (index_name, date, expiry, max_pain, pcr_oi, total_ce, total_pe, fetched_at),
+        (SOURCE, index_name, date, expiry, max_pain, pcr_oi, total_ce, total_pe, fetched_at),
     )
 
     log.info(
@@ -302,7 +351,7 @@ def _fetch_and_store(sc_id: str, expiry: str, date: str, fetched_at: str) -> int
 
 def run(sc_ids: list[str] | None = None, expiry_override: str | None = None):
     _ensure_tables()
-    date = datetime.date.today().isoformat()
+    date = logical_trading_date()
     fetched_at = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
     targets = sc_ids if sc_ids else list(_get_mc_index_map().keys())
@@ -330,3 +379,22 @@ if __name__ == "__main__":
 
     sc_ids = [args.index] if args.index else None
     run(sc_ids=sc_ids, expiry_override=args.expiry)
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McIndexOiFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McIndexOiFetcherBaseFetcher(BaseFetcher[McIndexOiFetcherSchema]):
+    fetcher_name = 'McIndexOiFetcher'
+    domain = 'moneycontrol.com'
+    schema = McIndexOiFetcherSchema
+    min_interval_sec = 0.5
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -25,6 +25,7 @@ Usage:
   python multi_factor_scorer.py --force     # recompute even if run today
 """
 
+import polars as pl
 import argparse
 import datetime
 from typing import Optional
@@ -33,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, query_one, query_all
+import sys
 
 
 # ── Weight scheme ──────────────────────────────────────────────────────────────
@@ -50,12 +52,22 @@ MIN_UNIVERSE   = 20   # skip run if fewer stocks have enough data
 # ── Percentile rank helper ─────────────────────────────────────────────────────
 
 def _pct_rank(series: pd.Series, higher_is_better: bool = True) -> pd.Series:
-    """Cross-sectional percentile rank 0-100. Ties → average rank."""
+    """Cross-sectional percentile rank 0-100. Ties → average rank.
+
+    Found live 2026-08-17: `series.map(ranked)` looks up each of `series`'s VALUES as a key
+    into `ranked`'s INDEX -- but `ranked` is indexed by symbol (same index as `series`, minus
+    the dropped-NaN rows), not by the raw factor value. A stock's ROE (e.g. 15.3) is never
+    equal to a stock symbol string, so the lookup missed on virtually every row and the
+    `.fillna(50.0)` silently masked it -- every factor for every one of 2,424 symbols came back
+    exactly the neutral default, composite pinned at 49.0 with zero variance across the whole
+    universe, indistinguishable from a healthy run (rows populated, `last_computed` fresh) at a
+    glance. `ranked` is already indexed by symbol, so a plain reindex is all this needs.
+    """
     valid = series.dropna()
     if valid.empty:
-        return series * np.nan
+        return pd.Series(np.nan, index=series.index)
     ranked = valid.rank(pct=True, ascending=higher_is_better) * 100
-    return series.map(ranked).fillna(50.0)   # missing → median (neutral)
+    return ranked.reindex(series.index).fillna(50.0)   # missing → median (neutral)
 
 
 # ── Factor builders ────────────────────────────────────────────────────────────
@@ -176,7 +188,7 @@ def _load_macro_state() -> dict:
         if rows:
             state["fii_5d_net"] = sum(float(r[0] or 0) for r in rows)
     except Exception as e:
-        print(f"[MULTI_FACTOR] fii_5d_net load failed, defaulting to 0.0 (neutral): {e}")
+        print(f"[MULTI_FACTOR] fii_5d_net load failed, defaulting to 0.0 (neutral): {e}", file=sys.stderr)
 
     try:
         # Latest manufacturing PMI
@@ -187,7 +199,7 @@ def _load_macro_state() -> dict:
         if row and row[0]:
             state["pmi"] = float(row[0])
     except Exception as e:
-        print(f"[MULTI_FACTOR] pmi load failed, defaulting to None: {e}")
+        print(f"[MULTI_FACTOR] pmi load failed, defaulting to None: {e}", file=sys.stderr)
 
     try:
         # Repo rate change: compare last 2 readings
@@ -198,7 +210,7 @@ def _load_macro_state() -> dict:
         if len(rows) >= 2:
             state["repo_chg"] = float(rows[0][0] or 0) - float(rows[1][0] or 0)
     except Exception as e:
-        print(f"[MULTI_FACTOR] repo_chg load failed, defaulting to 0.0 (neutral): {e}")
+        print(f"[MULTI_FACTOR] repo_chg load failed, defaulting to 0.0 (neutral): {e}", file=sys.stderr)
 
     return state
 
@@ -308,3 +320,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     result = run(symbol=args.symbol, force=args.force, test=args.test)
     print(f"[MultiFactor] Result: {result}")
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

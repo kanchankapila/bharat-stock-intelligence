@@ -72,6 +72,14 @@ async function sendDigest() {
   log(digest);
 }
 
+async function cleanup() {
+  try { await pool.end(); } catch {}
+  try {
+    const { closePool } = await import('../src/server/pgClient.ts');
+    await closePool();
+  } catch {}
+}
+
 async function main() {
   log(`Watcher started. Waiting for fresh success (after baseline) on: ${TARGETS.join(', ')}`);
   while (Date.now() < deadline) {
@@ -82,19 +90,19 @@ async function main() {
     if (statuses.every(s => s.done)) {
       log('All target jobs have succeeded since baseline. Sending final digest.');
       await sendDigest();
-      await pool.end();
+      await cleanup();
       process.exit(0);
     }
     await new Promise(r => setTimeout(r, POLL_MS));
   }
   log(`Deadline (${MAX_HOURS}h) reached without all targets succeeding. Sending digest anyway (reflects current true state).`);
   await sendDigest();
-  await pool.end();
+  await cleanup();
   process.exit(0);
 }
 
 main().catch(async (e) => {
   log(`FATAL: ${e.stack || e.message}`);
-  try { await pool.end(); } catch {}
+  await cleanup();
   process.exit(1);
 });

@@ -3,6 +3,7 @@ import { findMcScreenersByStock } from './moneycontrolScreener';
 import { findScreenersByStock } from './trendlyneScreener';
 import { findEtScreenersByStock } from './etnow';
 import { dbRun } from './dbAsync';
+import { backoffDelay, delay } from './lib/async';
 
 const mcSemaphore = new Semaphore(10); // Increased concurrency
 
@@ -327,10 +328,10 @@ export async function mcFetchJson<T = any>(url: string, retries: number = 3, sym
         if (!res.ok) {
           // Retry on 503 Service Unavailable
           if (res.status === 503 && attempt < retries) {
-            const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
+            const waitMs = backoffDelay(attempt);
             const logSymbol = symbol ? `${symbol} (${url.split('/').pop()?.split('?')[0]})` : url;
-            console.warn(`MoneyControl API ${logSymbol} returned 503. Retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
+            console.warn(`MoneyControl API ${logSymbol} returned 503. Retrying in ${Math.round(waitMs)}ms (attempt ${attempt}/${retries})...`);
+            await delay(waitMs);
             continue;
           }
           return null;
@@ -341,13 +342,22 @@ export async function mcFetchJson<T = any>(url: string, retries: number = 3, sym
           return await res.json();
         }
         const text = await res.text();
-        try { return JSON.parse(text); } catch { console.warn('[mcApiService] JSON parse failed:', text.slice(0, 200)); return null; }
+        const trimmed = text.trim();
+        if (trimmed.startsWith('<') || contentType.includes('text/html') || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) {
+          return null;
+        }
+        try { 
+          return JSON.parse(text); 
+        } catch { 
+          return null; 
+        }
+
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e));
         if (attempt < retries) {
-          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
-          console.warn(`MoneyControl API error for ${symbol || url}: ${lastError.message}. Retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          const waitMs = backoffDelay(attempt);
+          console.warn(`MoneyControl API error for ${symbol || url}: ${lastError.message}. Retrying in ${Math.round(waitMs)}ms (attempt ${attempt}/${retries})...`);
+          await delay(waitMs);
         }
       }
     }
@@ -1023,13 +1033,25 @@ export interface McStockNewsResponse {
  * Only rewrite sequences that carry a digit and decode above ASCII, so ordinary
  * words that happen to be hex-shaped are left alone.
  */
+// Smart-quote codepoints that legitimately sit mid-word via a mangled contraction/possessive
+// ("Coforgeu2019s" -> "Coforge's"). Found live 2026-08-11 (news_pipeline memory): the original
+// prefix-boundary guard below (a non-alnum char required before "u") blocked exactly this, the
+// single most common real case, because the letter before "u" in a possessive is the word
+// itself. Not opened up to every codepoint -- a dash or other punctuation mid-word (the
+// "Neu2013ral" case the test suite already pins) is still presumed a coincidental hex-shaped
+// substring inside a real word, not a mangled escape.
+const MID_WORD_SAFE_CODEPOINTS = new Set([0x2018, 0x2019, 0x201c, 0x201d]);
+
 export function decodeMangledEscapes(text: string): string {
   if (!text) return text;
-  return text.replace(/(^|[^A-Za-z0-9])u([0-9a-fA-F]{4})/g, (match, prefix: string, hex: string) => {
+  return text.replace(/u([0-9a-fA-F]{4})/g, (match: string, hex: string, offset: number, full: string) => {
     if (!/\d/.test(hex)) return match;
     const code = parseInt(hex, 16);
     if (code < 0x80) return match;
-    return prefix + String.fromCharCode(code);
+    const charBefore = offset > 0 ? full[offset - 1] : '';
+    const wordCharBefore = /[A-Za-z0-9]/.test(charBefore);
+    if (wordCharBefore && !MID_WORD_SAFE_CODEPOINTS.has(code)) return match;
+    return String.fromCharCode(code);
   });
 }
 

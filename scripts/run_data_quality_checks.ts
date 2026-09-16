@@ -5,8 +5,8 @@
  * after a fetcher fix, or as a CI gate against a seeded test DB) without waiting for the
  * next poll.
  *
- * Run: tsx scripts/run_data_quality_checks.ts   (requires USE_POSTGRES=true + POSTGRES_URL/
- * POSTGRES_HOST pointed at a live/migrated instance, same as scripts/ci_smoke_test.ts)
+ * Run: tsx scripts/run_data_quality_checks.ts   (requires POSTGRES_URL/POSTGRES_HOST pointed
+ * at a live/migrated instance, same as scripts/ci_smoke_test.ts)
  *
  * Exit code 1 if any CRITICAL check is 'fail' or 'error'; non-critical fails/warns are
  * printed but don't fail the run.
@@ -15,12 +15,10 @@ import "dotenv/config";
 import { runDataQualityChecks } from "../src/server/dataQualityChecks";
 
 async function main() {
-  const { usePostgres } = await import("../src/server/pgConfig");
-  if (!usePostgres()) {
-    console.error("[DQ] USE_POSTGRES must be true for this check — refusing to run against SQLite.");
-    process.exit(1);
-  }
-
+  // The dialect guard that used to sit here (`if (!usePostgres()) refuse`) was removed
+  // 2026-08-16: usePostgres() returns true unconditionally, so it could never fire, and
+  // its "refusing to run against SQLite" message described a fallback that no longer
+  // exists. The pgHealthy() retry below is the check that actually does something.
   const { pgHealthy } = await import("../src/server/pgClient");
   for (let attempt = 1; attempt <= 15; attempt++) {
     if (await pgHealthy()) break;

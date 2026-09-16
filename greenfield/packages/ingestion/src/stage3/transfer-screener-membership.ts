@@ -14,7 +14,7 @@ import {
   openRun, closeRun, queryLegacyTrendlyneScreenerIdSummary, seedStage3Registry, upsertScreenerDefinition,
 } from '@greenfield/db';
 import type { JobMetrics, JobResult } from '@greenfield/contracts';
-import { logicalSession } from '@greenfield/market-calendar';
+import { isWithinScheduleWindow, logicalSession } from '@greenfield/market-calendar';
 import { fetchWithPolicy } from '@greenfield/provider-sdk';
 import { KAYAL_HEADERS, KNOWN_PKS, kayalUrl, parseKayalResponse } from './kayal.js';
 
@@ -26,6 +26,8 @@ try {
 
 const CODE_COMMIT = process.env.CODE_COMMIT ?? 'stage3-screener-membership';
 const OLD_DATABASE_URL = process.env.OLD_DATABASE_URL ?? 'postgresql://bharat:bharat@127.0.0.1:5433/bharat_intel';
+// ecosystem.config.cjs: cron_restart '30 7 * * 6' (07:30 IST Saturday).
+const SCHEDULE = { hour: 7, minute: 30, daysOfWeek: [6] } as const;
 
 const limitArgIndex = process.argv.indexOf('--limit');
 const PK_LIMIT = limitArgIndex >= 0 ? Number(process.argv[limitArgIndex + 1]) : KNOWN_PKS.length;
@@ -170,6 +172,14 @@ function emptyMetrics(): JobMetrics {
 }
 
 async function main(): Promise<void> {
+  // pm2 fires cron_restart apps immediately on registration/restart regardless of the cron
+  // field -- see nse/run-daily-bhavcopy.ts's guard for the live 2026-09-03 incident this
+  // fixes. --force bypasses this for a deliberate manual run.
+  if (!process.argv.includes('--force') && !isWithinScheduleWindow(new Date(), SCHEDULE)) {
+    console.log('[screener-membership] off-schedule invocation (expected ~07:30 IST Saturday) — likely a pm2 registration/restart launch, not the real cron fire. Skipping (pass --force to run manually).');
+    return;
+  }
+
   const pool = createPool();
   await seedStage3Registry(pool);
   const knownSymbols = await loadKnownSymbols(pool);

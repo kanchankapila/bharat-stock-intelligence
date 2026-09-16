@@ -12,6 +12,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import investsights_sector_intel_fetcher as si
 from live_datasource_helpers import assert_non_empty_response, assert_numeric_and_finite
@@ -73,7 +74,7 @@ class TestInvestsightsSectorIntelLiveDataSource:
         summary_row = si.parse_summary_row(corr_payload)
         assert rrg_rows and pair_rows and stats_rows and summary_row
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         si.ensure_schema(con)
         assert si.store_rrg(con, rrg_rows) == len(rrg_rows)
         assert si.store_pairs(con, pair_rows) == len(pair_rows)

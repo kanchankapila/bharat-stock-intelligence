@@ -53,6 +53,8 @@ why that distinction matters).
 Run:
   python ndtv_fno_basis_fetcher.py
 """
+
+import polars as pl
 import sys
 import threading
 
@@ -232,3 +234,22 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class NdtvFnoBasisFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class NdtvFnoBasisFetcherBaseFetcher(BaseFetcher[NdtvFnoBasisFetcherSchema]):
+    fetcher_name = 'NdtvFnoBasisFetcher'
+    domain = 'general'
+    schema = NdtvFnoBasisFetcherSchema
+    min_interval_sec = 0.5
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

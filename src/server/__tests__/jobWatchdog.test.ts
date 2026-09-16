@@ -5,7 +5,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // still hit ordering edge cases with multiple mocks) — see https://vitest.dev/api/vi.html#vi-hoisted
 const {
   mockSend, mockGetLateJobs, mockWasAlreadyAlerted, mockMarkAlerted, mockGetSystemStatus,
-  mockDbGet, mockDbRun, mockRunDataQualityChecks, mockGetLatestDataQualityResults,
+  mockDbGet, mockDbRun, mockDbAll, mockRunDataQualityChecks, mockGetLatestDataQualityResults,
+  mockReadFileSync, mockIsDeliberatelyIdleOccurrence,
 } = vi.hoisted(() => ({
   mockSend: vi.fn(async (_text: string) => true),
   mockGetLateJobs: vi.fn(),
@@ -14,9 +15,18 @@ const {
   mockGetSystemStatus: vi.fn(async () => []),
   mockDbGet: vi.fn(async () => undefined),
   mockDbRun: vi.fn(async () => ({ changes: 0, lastInsertRowid: 0 })),
+  mockDbAll: vi.fn(async () => []),
   mockRunDataQualityChecks: vi.fn(async () => []),
   mockGetLatestDataQualityResults: vi.fn(async () => []),
+  // Default: no log file on disk -- getRecentCatchupCounts treats that as "nothing to report",
+  // not an error (see its try/catch). Individual tests override this to supply log content.
+  mockReadFileSync: vi.fn((..._args: unknown[]): string => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }),
+  // Default: not a trading holiday (mirrors isDeliberatelyIdleOccurrence's fail-open false).
+  // The holiday-banner test flips this to true.
+  mockIsDeliberatelyIdleOccurrence: vi.fn(() => false),
 }));
+
+vi.mock('fs', () => ({ default: { readFileSync: mockReadFileSync }, readFileSync: mockReadFileSync }));
 
 vi.mock('../telegramService', () => ({
   telegramService: { sendMarkdownMessage: mockSend },
@@ -24,17 +34,25 @@ vi.mock('../telegramService', () => ({
     (text || '').replace(/[_*`[\]]/g, ' ').replace(/\s+/g, ' ').trim(),
 }));
 
-vi.mock('../jobHeartbeat', () => ({
-  getLateJobs: mockGetLateJobs,
-  wasAlreadyAlerted: mockWasAlreadyAlerted,
-  markAlerted: mockMarkAlerted,
-}));
+vi.mock('../jobHeartbeat', async () => {
+  const actual = await vi.importActual<typeof import('../jobHeartbeat')>('../jobHeartbeat');
+  return {
+    ...actual,
+    getLateJobs: mockGetLateJobs,
+    wasAlreadyAlerted: mockWasAlreadyAlerted,
+    markAlerted: mockMarkAlerted,
+    getRecentTradingSessions: vi.fn(async () => null),
+    isDeliberatelyIdleOccurrence: mockIsDeliberatelyIdleOccurrence,
+  };
+});
 
 vi.mock('../jobRegistry', () => ({
   JOB_REGISTRY: [
     { jobName: 'critical-job', label: 'Critical Job', cronPattern: '0 10 * * 1-5', graceMinutes: 45, critical: true },
     { jobName: 'noncritical-job', label: 'Noncritical Job', cronPattern: '0 11 * * 1-5', graceMinutes: 45, critical: false },
+    { jobName: 'saturday-job', label: 'Saturday Job', cronPattern: '0 2 * * 6', graceMinutes: 120, critical: false },
   ],
+  HOLIDAY_ACTIVE_JOB_NAMES: new Set(['closed-day-early-batch']),
 }));
 
 vi.mock('../routers/monitor.router', () => ({
@@ -45,6 +63,7 @@ vi.mock('../routers/monitor.router', () => ({
 vi.mock('../dbAsync', () => ({
   dbGet: mockDbGet,
   dbRun: mockDbRun,
+  dbAll: mockDbAll,
 }));
 
 vi.mock('../dataQualityChecks', () => ({
@@ -226,8 +245,29 @@ describe('buildDailyDigest', () => {
   beforeEach(() => {
     mockDbGet.mockReset().mockResolvedValue(undefined);
     mockDbRun.mockReset().mockResolvedValue({ changes: 0, lastInsertRowid: 0 });
+    mockDbAll.mockReset().mockResolvedValue([]);
     mockGetLatestDataQualityResults.mockReset().mockResolvedValue([]);
     mockRunDataQualityChecks.mockClear();
+    mockReadFileSync.mockReset().mockImplementation(() => {
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    mockGetLateJobs.mockResolvedValue([]);
+    mockGetSystemStatus.mockResolvedValue([]);
+    mockIsDeliberatelyIdleOccurrence.mockReset().mockReturnValue(false);
+  });
+
+  it('shows the trading-holiday banner when the judged day is a closed session', async () => {
+    mockIsDeliberatelyIdleOccurrence.mockReturnValue(true);
+    const digest = await buildDailyDigest(new Date('2026-09-16T17:50:00Z')); // a Wednesday
+    expect(digest).toContain('Trading holiday');
+    // The banner states why nothing counts as late, so a green digest on a holiday reads
+    // as "planned idle", not as alarming silence.
+    expect(digest).toContain('planned');
+  });
+
+  it('shows no holiday banner on a normal session day', async () => {
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(digest).not.toContain('Trading holiday');
   });
 
   it('lists a late registry job and a stale script under "Needs attention"', async () => {
@@ -299,5 +339,86 @@ describe('buildDailyDigest', () => {
     expect(digest).toContain('OHLCV freshness');
     expect(digest).toContain('Latest bar is 6.0d old');
     expect(mockRunDataQualityChecks).not.toHaveBeenCalled();
+  });
+
+  // job-runtime-audit (2026-08-19): the deterministic, dailyable slice of that audit.
+  // 2026-09-02: source switched from job_heartbeat lifetime ratios to job_run_history's
+  // rolling-7-day window (a decommissioned job's lifetime ratio was being reported as
+  // current health); the mock rows follow the new query shape.
+  it('flags a job whose failure rate crosses the warn threshold with enough runs to mean something', async () => {
+    mockDbAll.mockResolvedValue([
+      { job_name: 'ml-daily-ops', total: 89, fails: 44 },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(digest).toContain('Job-runtime health');
+    expect(digest).toContain('ml-daily-ops');
+    expect(digest).toContain('49%');
+  });
+
+  it('does not flag a job below the fail-rate threshold or with too few runs to judge', async () => {
+    mockDbAll.mockResolvedValue([
+      { job_name: 'healthy-job', total: 40, fails: 2 }, // 5% -- fine
+    ]);
+    // fewer than MIN_RUNS_FOR_FAIL_RATE total runs is filtered at the query level (the HAVING
+    // clause), so only the healthy row reaches the flag logic.
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(digest).not.toContain('Job-runtime health');
+  });
+
+  it('flags a job with more than one real catch-up queued in the last 24h', async () => {
+    // getRecentCatchupCounts reads TWO files (today + yesterday); mockImplementationOnce so the
+    // "yesterday" call still hits the default ENOENT throw instead of double-reading this content.
+    mockReadFileSync.mockImplementationOnce(() =>
+      [
+        '{"message":"[QUEUE] Job trendlyne-midweek-batch in trendlyne-midweek missed its scheduled run. Catch-up queued with a 110min stagger."}',
+        '{"message":"[QUEUE] Job trendlyne-midweek-batch in trendlyne-midweek missed its scheduled run. Catch-up queued with a 75min stagger."}',
+      ].join('\n'),
+    );
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(digest).toContain('Job-runtime health');
+    expect(digest).toContain('trendlyne-midweek-batch');
+    expect(digest).toContain('2 catch-ups');
+  });
+
+  it('does not flag a job with exactly one real catch-up (one genuine outage, correctly caught once)', async () => {
+    mockReadFileSync.mockImplementationOnce(() =>
+      '{"message":"[QUEUE] Job ml-daily-ops in ml-daily-ops missed its scheduled run. Catch-up queued with a 55min stagger."}',
+    );
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(digest).not.toContain('Job-runtime health');
+  });
+
+  it('does not count a deduped "skipping duplicate catch-up" line as a real catch-up', async () => {
+    mockReadFileSync.mockImplementationOnce(() =>
+      [
+        '{"message":"[QUEUE] Job ml-daily-ops in ml-daily-ops missed its scheduled run. Catch-up queued with a 55min stagger."}',
+        '{"message":"[QUEUE] Job ml-daily-ops in ml-daily-ops missed its scheduled run, but an instance is already active/waiting/delayed -- skipping duplicate catch-up."}',
+      ].join('\n'),
+    );
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(digest).not.toContain('Job-runtime health');
+  });
+
+  it('does NOT report Saturday jobs as late in a weekday digest', async () => {
+    mockGetLateJobs.mockResolvedValue([
+      { job: 'saturday-job', label: 'Saturday Job', expectedAt: new Date('2026-06-27T02:00:00Z'), hoursLate: 133, lastError: 'failed on sat' },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z')); // Thursday
+    expect(digest).not.toContain('Saturday Job');
+    expect(digest).not.toContain('Needs attention');
+  });
+
+  it('excludes Saturday jobs and skipped weekday jobs from digest on a trading holiday', async () => {
+    mockIsDeliberatelyIdleOccurrence.mockReturnValue(true);
+    mockGetLateJobs.mockResolvedValue([
+      { job: 'saturday-job', label: 'Saturday Job', expectedAt: new Date('2026-09-12T02:00:00Z'), hoursLate: 100, lastError: null },
+      { job: 'critical-job', label: 'Critical Job', expectedAt: new Date('2026-09-16T10:00:00Z'), hoursLate: 2, lastError: null },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-09-16T17:50:00Z')); // Wednesday holiday
+    expect(digest).toContain('Trading holiday');
+    expect(digest).not.toContain('Saturday Job');
+    expect(digest).not.toContain('Critical Job');
+    expect(digest).not.toContain('Needs attention');
+    expect(digest).not.toContain('Changed since last report');
   });
 });

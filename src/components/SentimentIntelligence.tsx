@@ -122,7 +122,7 @@ function SentimentGauge({ score }: { score: number }) {
         <line x1={cx} y1={cy} x2={needleX} y2={needleY} stroke="white" strokeWidth="2.5" strokeLinecap="round" />
         <circle cx={cx} cy={cy} r="5" fill="white" />
       </svg>
-      <div className={cn('text-3xl font-black tabular-nums', color)}>{clampedScore > 0 ? '+' : ''}{clampedScore.toFixed(0)}</div>
+      <div className={cn('v1-data-value tabular-nums', color)}>{clampedScore > 0 ? '+' : ''}{clampedScore.toFixed(0)}</div>
       <div className={cn('text-sm font-bold mt-0.5', color)}>{label}</div>
     </div>
   );
@@ -150,7 +150,7 @@ function NewsCard({ item, onSelectStock }: { item: NewsItem; onSelectStock: (s: 
           )}
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
-          <span className={cn('text-[10px] font-black px-1.5 py-0.5 rounded border uppercase tracking-wider', impactColor(item.impact))}>
+          <span className={cn('text-[10px] font-black px-1.5 py-0.5 rounded border font-display uppercase tracking-wider', impactColor(item.impact))}>
             {item.impact}
           </span>
           <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded border', sentimentBadge(item.sentiment))}>
@@ -191,8 +191,8 @@ function SentimentTimeline({ history }: { history: Snapshot[] }) {
   }));
 
   return (
-    <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-4">
-      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Sentiment Timeline (24h)</p>
+    <div className="v1-card p-4">
+      <p className="v1-title-card mb-3">Sentiment Timeline (24h)</p>
       <ResponsiveContainer width="100%" height={120}>
         <LineChart data={data}>
           <XAxis dataKey="time" tick={{ fontSize: 9, fill: '#475569' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
@@ -229,8 +229,8 @@ function SectorSentimentGrid({ data }: {
   if (data.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-4">
-      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Sector Sentiment (8h)</p>
+    <div className="v1-card p-4">
+      <p className="v1-title-card mb-3">Sector Sentiment (8h)</p>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
         {data.slice(0, 12).map(s => {
           const total = s.bullish + s.bearish + s.neutral;
@@ -280,9 +280,9 @@ function GlobalCueCard({ snapshot }: { snapshot: Snapshot }) {
                  : 'text-amber-400 border-amber-500/30 bg-amber-500/10';
 
   return (
-    <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-4 space-y-3">
+    <div className="v1-card p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+        <p className="v1-title-card flex items-center gap-2">
           <Globe className="w-3.5 h-3.5" /> Global Cues
         </p>
         <span className={cn('text-xs font-black px-2 py-0.5 rounded-full border', cueColor)}>
@@ -328,8 +328,8 @@ function NiftyRangeCard({ snapshot }: { snapshot: Snapshot }) {
                   : snapshot.nifty_bias === 'Bearish' ? <TrendingDown className="w-4 h-4" /> : <Minus className="w-4 h-4" />;
 
   return (
-    <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-4">
-      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+    <div className="v1-card p-4">
+      <p className="v1-title-card mb-3 flex items-center gap-2">
         <Activity className="w-3.5 h-3.5" /> Nifty Outlook (News-Driven)
       </p>
       <div className="flex items-center gap-3 mb-4">
@@ -357,12 +357,12 @@ function NiftyRangeCard({ snapshot }: { snapshot: Snapshot }) {
           </div>
           <div className="flex justify-between text-xs">
             <div className="text-center">
-              <div className="text-[10px] text-slate-400 font-bold uppercase">Support</div>
-              <div className="font-black text-rose-400">{snapshot.nifty_support.toLocaleString('en-IN')}</div>
+              <div className="v1-data-label">Support</div>
+              <div className="v1-data-value text-rose-400">{snapshot.nifty_support.toLocaleString('en-IN')}</div>
             </div>
             <div className="text-center">
-              <div className="text-[10px] text-slate-400 font-bold uppercase">Resistance</div>
-              <div className="font-black text-emerald-400">{snapshot.nifty_resistance.toLocaleString('en-IN')}</div>
+              <div className="v1-data-label">Resistance</div>
+              <div className="v1-data-value text-emerald-400">{snapshot.nifty_resistance.toLocaleString('en-IN')}</div>
             </div>
           </div>
         </div>
@@ -390,8 +390,8 @@ function CorporateEventsPanel({ onSelectStock }: { onSelectStock: (s: string) =>
   if (!events || events.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-4 space-y-3">
-      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+    <div className="v1-card p-4 space-y-3">
+      <p className="v1-title-card flex items-center gap-2">
         <Building2 className="w-3.5 h-3.5" /> Corporate Events (24h)
       </p>
       <div className="space-y-2">
@@ -471,7 +471,7 @@ export function SentimentIntelligence({ onSelectStock }: { onSelectStock: (symbo
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
+          <h2 className="v1-title-page flex items-center gap-2">
             <Newspaper className="w-6 h-6 text-indigo-400" />
             Market Sentiment Intelligence
           </h2>
@@ -524,21 +524,21 @@ export function SentimentIntelligence({ onSelectStock }: { onSelectStock: (symbo
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
             {/* Sentiment Gauge */}
-            <div className="rounded-2xl border border-slate-800/50 bg-slate-900/40 p-4 flex flex-col items-center gap-2">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Market Mood</p>
+            <div className="v1-card p-4 flex flex-col items-center gap-2">
+              <p className="v1-title-card">Market Mood</p>
               <SentimentGauge score={snapshot.overall_score} />
               <div className="grid grid-cols-3 gap-3 w-full mt-1">
                 <div className="text-center">
-                  <div className="text-[10px] text-emerald-500 font-bold uppercase">Bullish</div>
-                  <div className="text-lg font-black text-emerald-400">{snapshot.bullish_count}</div>
+                  <div className="v1-data-label">Bullish</div>
+                  <div className="v1-data-value text-emerald-400">{snapshot.bullish_count}</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">Neutral</div>
-                  <div className="text-lg font-black text-slate-400">{snapshot.neutral_count}</div>
+                  <div className="v1-data-label">Neutral</div>
+                  <div className="v1-data-value text-slate-400">{snapshot.neutral_count}</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-[10px] text-rose-500 font-bold uppercase">Bearish</div>
-                  <div className="text-lg font-black text-rose-400">{snapshot.bearish_count}</div>
+                  <div className="v1-data-label">Bearish</div>
+                  <div className="v1-data-value text-rose-400">{snapshot.bearish_count}</div>
                 </div>
               </div>
               {snapshot.high_impact_count > 0 && (
@@ -559,7 +559,7 @@ export function SentimentIntelligence({ onSelectStock }: { onSelectStock: (symbo
           {/* Key Themes */}
           {themes.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Today's Themes:</span>
+              <span className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">Today's Themes:</span>
               {themes.map(t => (
                 <span key={t} className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full border', categoryColor(t as string))}>
                   {t.replace('_', ' ')}

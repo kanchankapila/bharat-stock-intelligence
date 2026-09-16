@@ -1,5 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { addJobWithCatchup } from '../jobs/registerJob';
+
+// Policy (AF-20260909-11): EVERY test file importing jobs/registerJob mocks telegramService,
+// because the reclaim path fires a REAL Telegram alert through a dynamic import. Belt to the
+// process.env.VITEST guard inside sendMarkdownMessage itself.
+vi.mock('../telegramService', () => ({
+  telegramService: { sendMarkdownMessage: vi.fn().mockResolvedValue(true) },
+  sanitizeMarkdown: (t: string) => t,
+}));
 
 /**
  * Regression coverage for the 2026-08-03 fix: addJobWithCatchup used to decide "missed" by
@@ -12,20 +20,34 @@ import { addJobWithCatchup } from '../jobs/registerJob';
 
 function makeQueue(opts: {
   staleRepeatable?: boolean;   // getRepeatableJobs() returns an entry whose `next` is in the past
-  inFlight?: Array<{ name: string; data?: any }>; // active/waiting/delayed jobs already in the queue
+  // active/waiting/delayed jobs already in the queue -- `state` defaults to 'delayed' (the
+  // perpetual next-occurrence placeholder's real BullMQ state) so callers only need to set it
+  // when a test specifically cares about the 'active' vs 'waiting'/'delayed' distinction.
+  inFlight?: Array<{ name: string; data?: any; state?: 'active' | 'waiting' | 'delayed' }>;
+  // 2026-08-29 regression: completed/failed job history, queried as two SEPARATE per-status
+  // lists (matching the real getJobs(['completed'],...) / getJobs(['failed'],...) call shape),
+  // each { finishedOn, timestamp }.
+  completedHistory?: Array<{ finishedOn?: number; timestamp: number }>;
+  failedHistory?: Array<{ finishedOn?: number; timestamp: number }>;
 } = {}) {
-  const { staleRepeatable = true, inFlight = [] } = opts;
+  const { staleRepeatable = true, inFlight = [], completedHistory = [], failedHistory = [] } = opts;
   const add = vi.fn().mockResolvedValue({});
   const removeRepeatableByKey = vi.fn().mockResolvedValue(undefined);
   const getRepeatableJobs = vi.fn().mockResolvedValue(
     staleRepeatable ? [{ id: 'test-job-id', key: 'key-1', next: Date.now() - 60_000 }] : [],
   );
+  // Filters by each job's real state, the way BullMQ's getJobs actually does -- a job sitting in
+  // 'delayed' must NOT show up in a getJobs(['active']) call, or the active-vs-catchup distinction
+  // the 2026-08-19 fix relies on can't be exercised. completed/failed are queried as their own
+  // single-status calls (the 2026-08-29 fix), each returning its own history array unmodified --
+  // real BullMQ already returns newest-first for a single status with asc=false.
   const getJobs = vi.fn(async (states: string[]) => {
-    if (states.includes('completed')) return []; // no finished history -> lastRunTime null
-    if (states.includes('active')) return inFlight;
-    return [];
+    if (states.length === 1 && states[0] === 'completed') return completedHistory;
+    if (states.length === 1 && states[0] === 'failed') return failedHistory;
+    return inFlight.filter(j => states.includes(j.state ?? 'delayed'));
   });
-  return { name: 'test-queue', add, removeRepeatableByKey, getRepeatableJobs, getJobs } as any;
+  const drain = vi.fn().mockResolvedValue(undefined);
+  return { name: 'test-queue', add, removeRepeatableByKey, getRepeatableJobs, getJobs, drain } as any;
 }
 
 describe('addJobWithCatchup', () => {
@@ -74,5 +96,163 @@ describe('addJobWithCatchup', () => {
       jobId: 'test-job-id',
     });
     expect(queue.add).toHaveBeenCalledTimes(1);
+  });
+
+  it('regression (2026-08-19): does NOT queue a duplicate when the LEGITIMATE scheduled run of ' +
+     'this job is still active (no isCatchup) -- a restart landing mid-run on a long job like ' +
+     'ml-daily-ops used to see no *catchup* pending, conclude "missed", and queue a second full ' +
+     'run behind it at concurrency:1', async () => {
+    const queue = makeQueue({
+      staleRepeatable: true,
+      inFlight: [{ name: 'test-job', state: 'active' /* no data.isCatchup -- the real run */ }],
+    });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    // Only the normal repeatable registration -- no duplicate catchup queued behind the live run.
+    expect(queue.add).toHaveBeenCalledTimes(1);
+    expect(queue.add.mock.calls[0][1]).not.toMatchObject({ isCatchup: true });
+  });
+
+  it('regression (2026-08-29): a recent completed run is not shadowed by an old failed one -- ' +
+     'live for ml-weekly-retrain, a combined getJobs([\'completed\',\'failed\'], 0, 1) call ' +
+     'returned a month-old failed job as "the last run" on a day the job had actually completed ' +
+     'successfully ~11 hours earlier, so every bharat-server restart concluded the weekly ' +
+     'schedule was missed and queued a fresh catch-up -- three restarts in one afternoon each ' +
+     'queued another one, reproducing the exact concurrent-retrain contention already documented ' +
+     'as the cause of exit_policy.py\'s historical timeouts', async () => {
+    const now = Date.now();
+    const queue = makeQueue({
+      staleRepeatable: false,
+      inFlight: [],
+      // Completed 30 minutes ago -- well within the 24h interval below.
+      completedHistory: [{ finishedOn: now - 30 * 60_000, timestamp: now - 60 * 60_000 }],
+      // Failed over a month ago -- must NOT win just because 'failed' was queried too.
+      failedHistory: [{ finishedOn: now - 40 * 24 * 60 * 60_000, timestamp: now - 40 * 24 * 60 * 60_000 }],
+    });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { every: 24 * 60 * 60_000 }, // interval-based, not cron -- deterministic vs. wall clock
+      jobId: 'test-job-id',
+    });
+    // Only the normal repeatable registration -- the recent completion correctly satisfies
+    // the schedule, so no catchup should be queued.
+    expect(queue.add).toHaveBeenCalledTimes(1);
+    expect(queue.add.mock.calls[0][1]).not.toMatchObject({ isCatchup: true });
+  });
+
+  it('regression (2026-08-29), inverse: a recent FAILURE (with no completed history at all) ' +
+     'still correctly counts as "ran recently" -- the missed-check cares about recency of any ' +
+     'run, not success/failure, so it must not ignore failedHistory just because completedHistory ' +
+     'is empty', async () => {
+    const now = Date.now();
+    const queue = makeQueue({
+      staleRepeatable: false,
+      inFlight: [],
+      completedHistory: [], // never completed
+      failedHistory: [{ finishedOn: now - 30 * 60_000, timestamp: now - 60 * 60_000 }], // failed 30min ago
+    });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { every: 24 * 60 * 60_000 },
+      jobId: 'test-job-id',
+    });
+    expect(queue.add).toHaveBeenCalledTimes(1);
+    expect(queue.add.mock.calls[0][1]).not.toMatchObject({ isCatchup: true });
+  });
+
+  it('regression (2026-08-29), both stale: when BOTH completed and failed history are older ' +
+     'than the schedule interval, a catchup is still correctly queued -- confirms the fix does ' +
+     'not accidentally suppress a genuinely-missed run', async () => {
+    const now = Date.now();
+    const queue = makeQueue({
+      staleRepeatable: false,
+      inFlight: [],
+      completedHistory: [{ finishedOn: now - 40 * 24 * 60 * 60_000, timestamp: now - 40 * 24 * 60 * 60_000 }],
+      failedHistory: [{ finishedOn: now - 35 * 24 * 60 * 60_000, timestamp: now - 35 * 24 * 60 * 60_000 }],
+    });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { every: 24 * 60 * 60_000 },
+      jobId: 'test-job-id',
+    });
+    expect(queue.add).toHaveBeenCalledTimes(2);
+    expect(queue.add.mock.calls[1][1]).toMatchObject({ isCatchup: true });
+  });
+});
+
+/**
+ * SCHEDULER_PAUSED is the switch used to take the whole platform off its schedule for a
+ * controlled one-job-at-a-time validation sweep, without stopping bharat-server (workers must
+ * stay alive so each job can still be enqueued by hand).
+ *
+ * The gate has to sit AFTER the stale-repeatable removal loop and BEFORE queue.add(): clearing
+ * the repeatable is what actually stops the cron firing, and skipping the add is what stops it
+ * being re-registered. Suppressing the catch-up is the point, not a side effect -- a paused
+ * window looks exactly like a long outage to the missed-schedule detector, so resuming without
+ * this gate would queue one catch-up per paused job at once, which is the duplicate-catch-up
+ * storm recorded on 2026-08-30.
+ */
+describe('addJobWithCatchup under SCHEDULER_PAUSED', () => {
+  beforeEach(() => { vi.clearAllMocks(); delete process.env.SCHEDULER_PAUSED; });
+  afterEach(() => { delete process.env.SCHEDULER_PAUSED; });
+
+  it('registers neither the repeatable nor a catchup when SCHEDULER_PAUSED=1', async () => {
+    process.env.SCHEDULER_PAUSED = '1';
+    const queue = makeQueue({ staleRepeatable: true, inFlight: [] });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it('still clears an existing repeatable when SCHEDULER_PAUSED=1, so the cron cannot fire', async () => {
+    process.env.SCHEDULER_PAUSED = '1';
+    const queue = makeQueue({ staleRepeatable: true, inFlight: [] });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    expect(queue.removeRepeatableByKey).toHaveBeenCalledWith('key-1');
+  });
+
+  it('schedules normally when SCHEDULER_PAUSED is unset', async () => {
+    const queue = makeQueue({ staleRepeatable: false, inFlight: [] });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    expect(queue.add).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Live gap found 2026-09-05: clearing the repeatable registration does NOT remove the delayed
+ * "next occurrence" placeholder BullMQ had already materialised for it. With the repeatables
+ * gone but 10 delayed jobs still sitting in Redis across 8 queues, two of them
+ * (trendlyne-checklist-cycle, gdelt-sentiment) were still due to fire inside the paused window
+ * -- i.e. the pause silently did not hold. Draining waiting+delayed is what makes
+ * SCHEDULER_PAUSED mean what it says.
+ */
+describe('SCHEDULER_PAUSED drains already-materialised delayed jobs', () => {
+  beforeEach(() => { vi.clearAllMocks(); delete process.env.SCHEDULER_PAUSED; });
+  afterEach(() => { delete process.env.SCHEDULER_PAUSED; });
+
+  it('drains waiting and delayed jobs when SCHEDULER_PAUSED=1', async () => {
+    process.env.SCHEDULER_PAUSED = '1';
+    const queue = makeQueue({ staleRepeatable: true, inFlight: [] });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    expect(queue.drain).toHaveBeenCalledWith(true);
+  });
+
+  it('does NOT drain when SCHEDULER_PAUSED is unset', async () => {
+    const queue = makeQueue({ staleRepeatable: false, inFlight: [] });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    expect(queue.drain).not.toHaveBeenCalled();
   });
 });

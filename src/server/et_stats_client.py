@@ -28,6 +28,7 @@ same 2,005-stock provider-ID export already used elsewhere in this project —
 NOT via Trendlyne's tlid.
 """
 
+import polars as pl
 import json
 import time
 from datetime import date, timedelta
@@ -97,7 +98,7 @@ def load_companyid_map() -> dict[str, str]:
     if _symbol_to_companyid is not None:
         return _symbol_to_companyid
 
-    with open(_STOCKLIST_PATH, encoding="utf-8") as f:
+    with open(_STOCKLIST_PATH, encoding="utf-8-sig") as f:
         rows = json.load(f)
 
     _symbol_to_companyid = {
@@ -134,3 +135,9 @@ def fetch_et_stats(
         return None
     finally:
         time.sleep(RATE_LIMIT_SEC)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -236,20 +236,17 @@ const QUANT_SCORE_COLUMNS = [
 export async function snapshotQuantScores(): Promise<number> {
   // symbol and snapshot_date are written explicitly; the rest mirror quant_scores in order.
   const selectCols = QUANT_SCORE_COLUMNS.slice(1).join(', ');
-  // MAX(date)::text, not MAX(date): stock_ohlcv.date is a NATIVE Postgres DATE (db.ts declares
-  // it TEXT, but db.ts is the SQLite schema-of-record -- see recurring-bugs.md's "a column type
-  // assumed from db.ts"). Without the cast the comparison below is `text = date` and Postgres
-  // throws "operator does not exist". `::text` is a single-token cast, which sqlTranslate's
-  // stripPgCasts handles on the SQLite path; a multi-word cast would not be.
+  // stock_ohlcv.date and quant_scores_history.snapshot_date are both native Postgres DATEs.
+  // Keep the subquery typed as DATE so the insert remains valid after the date migration.
   await dbRun(
     `INSERT INTO quant_scores_history (symbol, snapshot_date, ${selectCols})
-     SELECT symbol, (SELECT MAX(date)::text FROM stock_ohlcv), ${selectCols}
+      SELECT symbol, (SELECT MAX(date) FROM stock_ohlcv), ${selectCols}
      FROM quant_scores
      ON CONFLICT (symbol, snapshot_date) DO NOTHING`,
   );
   const row = await dbGet<{ n: number }>(
     `SELECT COUNT(*) AS n FROM quant_scores_history
-     WHERE snapshot_date = (SELECT MAX(date)::text FROM stock_ohlcv)`,
+      WHERE snapshot_date = (SELECT MAX(date) FROM stock_ohlcv)`,
   );
   const n = Number(row?.n) || 0;
   console.log(`[QUANT] quant_scores snapshot: ${n} rows x ${QUANT_SCORE_COLUMNS.length} columns for the latest session`);

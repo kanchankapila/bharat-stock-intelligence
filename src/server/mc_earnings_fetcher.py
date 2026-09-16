@@ -17,6 +17,21 @@ Run:
   python mc_earnings_fetcher.py --skip-rapid
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McEarningsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McEarningsFetcherBaseFetcher(BaseFetcher[McEarningsFetcherSchema]):
+    fetcher_name = 'McEarningsFetcher'
+    domain = 'moneycontrol.com'
+    schema = McEarningsFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import sys
 import time
@@ -24,7 +39,7 @@ from datetime import date, datetime, timedelta
 
 from curl_cffi import requests as cffi_req
 
-from db_compat import connect, use_postgres
+from db_compat import connect
 from as_of import logical_trading_date
 
 # ── Constants ────────────────────────────────────────────────────────────────────
@@ -45,7 +60,15 @@ RAPID_PAGES = 1   # limit=10000 fetches all in one request
 CATEGORY_SCORE = {"BP": 2, "PT": 1, "LR": 0, "WP": -1, "NT": -2}
 
 TODAY = date.today().isoformat()
-TODAY_PLUS_14 = (date.today() + timedelta(days=14)).isoformat()
+# 2026-09-15: forward window widened 14 -> 90 days. MC's get-earnings-data API accepts an
+# arbitrary start/end range, but 14 days only ever captured the current reporting week --
+# which between quarters is dominated by SME/new-listing scids (SL25/Shiprocket, KI25,
+# TII02...) that do not join to the main universe. Measured 2026-09-15: exactly 18 upcoming
+# events existed, every one an SME scid, so feature_store.days_to_next_earnings sat at ~0%
+# (1 row on 09-04, 0 thereafter) and ml_ensemble's pre_earnings_3d/10d flags were dead
+# constants. The next large-cap Q2 board dates sit 3-6 weeks out -- inside 90, outside 14.
+UPCOMING_WINDOW_DAYS = 90
+TODAY_PLUS_90 = (date.today() + timedelta(days=UPCOMING_WINDOW_DAYS)).isoformat()
 
 
 # ── HTTP helper ──────────────────────────────────────────────────────────────────
@@ -162,7 +185,7 @@ def ensure_schema(con) -> None:
 def fetch_earnings_dates(con) -> None:
     url = (
         f"https://api.moneycontrol.com/mcapi/v1/earnings/get-earnings-data"
-        f"?indexId=All&page=1&startDate={TODAY}&endDate={TODAY_PLUS_14}"
+        f"?indexId=All&page=1&startDate={TODAY}&endDate={TODAY_PLUS_90}"
         f"&sector=&limit=10000"
     )
     data = _get(url)
@@ -211,7 +234,7 @@ def fetch_earnings_dates(con) -> None:
 
     # Backfill days_to_next_results into technical_signals via mc_pricefeed_daily join
     _backfill_days_to_results(con)
-    print(f"[EarningsFetcher] Upcoming: {len(rows)} stocks with results in next 14 days -> days_to_next_results updated")
+    print(f"[EarningsFetcher] Upcoming: {len(rows)} stocks with results in next {UPCOMING_WINDOW_DAYS} days -> days_to_next_results updated")
 
 
 def _backfill_days_to_results(con, as_of: str | None = None) -> None:
@@ -240,33 +263,20 @@ def _backfill_days_to_results(con, as_of: str | None = None) -> None:
     """
     cur = con.cursor()
     today = as_of or logical_trading_date()
-    if use_postgres():
-        cur.execute("""
-            UPDATE technical_signals ts
-            SET days_to_next_results = subq.days
-            FROM (
-                SELECT ns.symbol,
-                       (MIN(sed.result_date::date) - CAST(? AS date)) AS days
-                FROM stock_earnings_dates sed
-                JOIN nse_stocks ns ON ns.mcsymbol = sed.scid
-                WHERE sed.result_date >= ?
-                GROUP BY ns.symbol
-            ) subq
-            WHERE ts.symbol = subq.symbol
-              AND ts.date = ?
-        """, (today, today, today))
-    else:
-        cur.execute("""
-            UPDATE technical_signals
-            SET days_to_next_results = (
-                SELECT CAST(MIN(julianday(sed.result_date) - julianday(?)) AS INTEGER)
-                FROM stock_earnings_dates sed
-                JOIN nse_stocks ns ON ns.mcsymbol = sed.scid
-                WHERE ns.symbol = technical_signals.symbol
-                  AND sed.result_date >= ?
-            )
-            WHERE date = ?
-        """, (today, today, today))
+    cur.execute("""
+        UPDATE technical_signals ts
+        SET days_to_next_results = subq.days
+        FROM (
+            SELECT ns.symbol,
+                   (MIN(sed.result_date::date) - CAST(? AS date)) AS days
+            FROM stock_earnings_dates sed
+            JOIN nse_stocks ns ON ns.mcsymbol = sed.scid
+            WHERE sed.result_date >= ?
+            GROUP BY ns.symbol
+        ) subq
+        WHERE ts.symbol = subq.symbol
+          AND ts.date = ?
+    """, (today, today, today))
     con.commit()
 
 
@@ -380,6 +390,16 @@ def fetch_rapid_results(con) -> None:
     print(f"[EarningsFetcher] Rapid: {total} total ({counts_str}) -> {mapped} mapped to NSE symbols")
 
 
+# Vendor result_date format guard: "Month DD, YYYY", zero-padded day (confirmed live: "August
+# 06, 2026", not "August 6, 2026"). Day digits pinned to exactly 2 to match the SQLite branch's
+# GLOB pattern ('[0-9][0-9]') inside _backfill_rapid_features below -- an unpadded single-digit
+# day would otherwise parse correctly on Postgres via TO_DATE but silently fail the SQLite guard
+# (degrading to NULL, sorts last), a dialect-inconsistent result for identical input (found by
+# code-review 2026-08-14). Module-level so test_mc_earnings_fetcher_stale_quarter.py can assert
+# the real pattern directly instead of a hand-copied regex that could drift from it.
+PG_RESULT_DATE_RE = r'^[A-Za-z]+ [0-9]{2}, [0-9]{4}$'
+
+
 def _backfill_rapid_features(con) -> int:
     """Update technical_signals with earnings category scores and NP growth from rapid results.
 
@@ -392,69 +412,62 @@ def _backfill_rapid_features(con) -> int:
     today = logical_trading_date()
 
     # For each symbol in technical_signals, find the most recent rapid result per sub_type.
-    # We pick the row with the highest |category_score| (strongest signal) when multiple exist.
-    if use_postgres():
-        # Primary join via nse_stocks.mcsymbol (2260+ entries); mc_pricefeed_daily as secondary.
-        cur.execute("""
-            UPDATE technical_signals ts
-            SET
-                earnings_category_yoy  = yoy.category_score,
-                earnings_np_growth_yoy = yoy.np_growth,
-                earnings_category_qoq  = qoq.category_score,
-                earnings_np_growth_qoq = qoq.np_growth,
-                positive_turnaround    = CASE WHEN yoy.category_score = 1 THEN 1 ELSE 0 END,
-                negative_turnaround    = CASE WHEN yoy.category_score = -2 THEN 1 ELSE 0 END
-            FROM (
-                SELECT DISTINCT ON (ns.symbol)
-                    ns.symbol,
-                    r.category_score,
-                    r.np_growth
-                FROM mc_earnings_rapid r
-                JOIN nse_stocks ns ON ns.mcsymbol = r.scid
-                WHERE r.sub_type = 'yoy'
-                ORDER BY ns.symbol, ABS(r.category_score) DESC
-            ) yoy
-            LEFT JOIN (
-                SELECT DISTINCT ON (ns.symbol)
-                    ns.symbol,
-                    r.category_score,
-                    r.np_growth
-                FROM mc_earnings_rapid r
-                JOIN nse_stocks ns ON ns.mcsymbol = r.scid
-                WHERE r.sub_type = 'qoq'
-                ORDER BY ns.symbol, ABS(r.category_score) DESC
-            ) qoq ON qoq.symbol = yoy.symbol
-            WHERE ts.symbol = yoy.symbol
-              AND ts.date = ?
-        """, (today,))
-    else:
-        for col_score, col_growth, sub_type in [
-            ("earnings_category_yoy", "earnings_np_growth_yoy", "yoy"),
-            ("earnings_category_qoq", "earnings_np_growth_qoq", "qoq"),
-        ]:
-            cur.execute(f"""
-                UPDATE technical_signals
-                SET
-                    {col_score}  = (
-                        SELECT r.category_score
-                        FROM mc_earnings_rapid r
-                        JOIN mc_pricefeed_daily mpd ON mpd.scid = r.scid
-                        WHERE mpd.symbol = technical_signals.symbol
-                          AND r.sub_type = ?
-                        ORDER BY ABS(r.category_score) DESC
-                        LIMIT 1
-                    ),
-                    {col_growth} = (
-                        SELECT r.np_growth
-                        FROM mc_earnings_rapid r
-                        JOIN mc_pricefeed_daily mpd ON mpd.scid = r.scid
-                        WHERE mpd.symbol = technical_signals.symbol
-                          AND r.sub_type = ?
-                        ORDER BY ABS(r.category_score) DESC
-                        LIMIT 1
-                    )
-                WHERE date = ?
-            """, [sub_type, sub_type, today])
+    # Was `ORDER BY ABS(r.category_score) DESC` -- picked the historically most EXTREME result,
+    # not the most recent one, despite this function's own docstring claiming "most recent".
+    # mc_earnings_rapid's PK is (scid, sub_type, category), not result_date, and nothing purges
+    # a superseded row when a stock's category changes quarter to quarter -- so a strong-but-old
+    # quarter could permanently outrank a weaker-but-current one forever. Live-confirmed
+    # 2026-08-14 (measurement-integrity-review): 442/2,017 multi-row symbols (21.9%) had the old
+    # query's pick disagree with what result_date would have picked; RAMKY showed a May 2026
+    # "Beat Positive" label while its real Aug 2026 quarter landed "WP".
+    #
+    # result_date is free text ("May 27, 2026" / "August 10, 2026"), not ISO -- a raw string sort
+    # is lexicographic, not chronological ('M' > 'A', so May would sort AFTER August; live-caught
+    # while verifying this exact fix, the first attempt at `ORDER BY result_date DESC` silently
+    # picked the same wrong row as before). Parse it into a real sortable date first, guarded by
+    # a format regex: Postgres's TO_DATE THROWS (not NULL) on unparseable input, and this query
+    # updates the WHOLE table in one statement, so one malformed result_date would abort every
+    # symbol's update, not just its own row -- confirmed live TO_DATE('garbage', ...) raises
+    # "invalid value ... for Month". The regex guard falls back to NULL (sorts last) instead.
+    # 0 of the live rows fail the PG_RESULT_DATE_RE guard as of 2026-08-14 -- see its module-level
+    # docstring comment above for why the day-digit width matters.
+    _pg_sort_date = (
+        f"CASE WHEN r.result_date ~ '{PG_RESULT_DATE_RE}' "
+        f"THEN TO_DATE(r.result_date, 'FMMonth DD, YYYY') ELSE NULL END"
+    )
+    # Primary join via nse_stocks.mcsymbol (2260+ entries); mc_pricefeed_daily as secondary.
+    cur.execute(f"""
+        UPDATE technical_signals ts
+        SET
+            earnings_category_yoy  = yoy.category_score,
+            earnings_np_growth_yoy = yoy.np_growth,
+            earnings_category_qoq  = qoq.category_score,
+            earnings_np_growth_qoq = qoq.np_growth,
+            positive_turnaround    = CASE WHEN yoy.category_score = 1 THEN 1 ELSE 0 END,
+            negative_turnaround    = CASE WHEN yoy.category_score = -2 THEN 1 ELSE 0 END
+        FROM (
+            SELECT DISTINCT ON (ns.symbol)
+                ns.symbol,
+                r.category_score,
+                r.np_growth
+            FROM mc_earnings_rapid r
+            JOIN nse_stocks ns ON ns.mcsymbol = r.scid
+            WHERE r.sub_type = 'yoy'
+            ORDER BY ns.symbol, {_pg_sort_date} DESC NULLS LAST, ABS(r.category_score) DESC
+        ) yoy
+        LEFT JOIN (
+            SELECT DISTINCT ON (ns.symbol)
+                ns.symbol,
+                r.category_score,
+                r.np_growth
+            FROM mc_earnings_rapid r
+            JOIN nse_stocks ns ON ns.mcsymbol = r.scid
+            WHERE r.sub_type = 'qoq'
+            ORDER BY ns.symbol, {_pg_sort_date} DESC NULLS LAST, ABS(r.category_score) DESC
+        ) qoq ON qoq.symbol = yoy.symbol
+        WHERE ts.symbol = yoy.symbol
+          AND ts.date = ?
+    """, (today,))
     con.commit()
 
     # Count how many technical_signals rows got a non-null yoy category
@@ -528,44 +541,25 @@ def _backfill_shockers(con) -> None:
     above for why (ml-daily-ops crosses midnight IST)."""
     cur = con.cursor()
     today = logical_trading_date()
-    if use_postgres():
-        cur.execute("""
-            UPDATE technical_signals ts
-            SET
-                earnings_shocker_flag = 1,
-                earnings_shocker_gain = s.gain_since_result
-            FROM mc_price_shockers s
+    cur.execute("""
+        UPDATE technical_signals ts
+        SET
+            earnings_shocker_flag = 1,
+            earnings_shocker_gain = s.gain_since_result
+        FROM mc_price_shockers s
+        JOIN nse_stocks ns ON ns.mcsymbol = s.scid
+        WHERE ts.symbol = ns.symbol
+          AND ts.date = ?
+    """, (today,))
+    cur.execute("""
+        UPDATE technical_signals ts
+        SET earnings_shocker_flag = 0
+        WHERE NOT EXISTS (
+            SELECT 1 FROM mc_price_shockers s
             JOIN nse_stocks ns ON ns.mcsymbol = s.scid
-            WHERE ts.symbol = ns.symbol
-              AND ts.date = ?
-        """, (today,))
-        cur.execute("""
-            UPDATE technical_signals ts
-            SET earnings_shocker_flag = 0
-            WHERE NOT EXISTS (
-                SELECT 1 FROM mc_price_shockers s
-                JOIN nse_stocks ns ON ns.mcsymbol = s.scid
-                WHERE ns.symbol = ts.symbol
-            ) AND ts.date = ?
-        """, (today,))
-    else:
-        cur.execute("""
-            UPDATE technical_signals
-            SET
-                earnings_shocker_flag = (
-                    SELECT 1 FROM mc_price_shockers s
-                    JOIN nse_stocks ns ON ns.mcsymbol = s.scid
-                    WHERE ns.symbol = technical_signals.symbol
-                    LIMIT 1
-                ),
-                earnings_shocker_gain = (
-                    SELECT s.gain_since_result FROM mc_price_shockers s
-                    JOIN nse_stocks ns ON ns.mcsymbol = s.scid
-                    WHERE ns.symbol = technical_signals.symbol
-                    LIMIT 1
-                )
-            WHERE date = ?
-        """, (today,))
+            WHERE ns.symbol = ts.symbol
+        ) AND ts.date = ?
+    """, (today,))
     con.commit()
 
 
@@ -773,27 +767,20 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
     # logical_trading_date(), not date.today() (2026-08-01) -- ml-daily-ops's step chain
     # regularly finishes after midnight IST, see as_of.logical_trading_date's docstring.
     today = logical_trading_date()
-    if use_postgres():
-        cur.execute("""
-            UPDATE technical_signals ts
-            SET eps_beat_last_q = v.beat_label,
-                mc_eps_vs_cons  = v.beat_pct
-            FROM (VALUES {}) AS v(symbol, beat_label, beat_pct)
-            WHERE ts.symbol = v.symbol
-              AND ts.date = ?
-        """.format(
-            ", ".join(
-                f"('{sym}', {lbl}, {pct if pct is not None else 'NULL'})"
-                for sym, (lbl, pct, _) in rows_by_symbol.items()
-            )
-        ), (today,))
-    else:
-        for sym, (lbl, pct, _) in rows_by_symbol.items():
-            cur.execute(
-                "UPDATE technical_signals SET eps_beat_last_q = ?, mc_eps_vs_cons = ? "
-                "WHERE symbol = ? AND date = ?",
-                (lbl, pct, sym, today),
-            )
+    # Only the (?,?,?) row-shape is interpolated -- never a value. `sym` comes from our own
+    # nse_stocks.mcsymbol map, but that column has held junk before (nse_stocks.tlid held raw
+    # tickers for 412 rows), so a quote in it would have broken or rewritten this statement.
+    ordered = list(rows_by_symbol.items())
+    placeholders = ", ".join(["(?, ?, ?)"] * len(ordered))
+    params = [x for sym, (lbl, pct, _) in ordered for x in (sym, lbl, pct)]
+    cur.execute(f"""
+        UPDATE technical_signals ts
+        SET eps_beat_last_q = v.beat_label,
+            mc_eps_vs_cons  = v.beat_pct
+        FROM (VALUES {placeholders}) AS v(symbol, beat_label, beat_pct)
+        WHERE ts.symbol = v.symbol
+          AND ts.date = ?
+    """, (*params, today))
     con.commit()
 
     beats  = sum(1 for lbl, _, _ in rows_by_symbol.values() if lbl == 1)
@@ -885,3 +872,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

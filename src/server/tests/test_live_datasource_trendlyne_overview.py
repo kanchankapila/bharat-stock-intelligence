@@ -6,7 +6,6 @@ test_live_datasource_trendlyne_adv_tech.py / test_live_datasource_trendlyne_pric
 """
 import os
 
-os.environ["USE_POSTGRES"] = "false"
 
 import sqlite3
 import sys
@@ -17,6 +16,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import trendlyne_overview_fetcher as tof
 from live_datasource_helpers import assert_looks_like_ticker, assert_numeric_and_finite
 
@@ -25,7 +25,7 @@ REAL_TLID = "1127"
 
 
 def _make_test_conn():
-    conn = sqlite3.connect(":memory:")
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date TEXT)")
     conn.execute("""CREATE TABLE technical_signals (
@@ -64,7 +64,7 @@ class TestTrendlyneOverviewLiveDataSource:
         conn = _make_test_conn()
 
         profile = {}
-        profile.update(tof.extract_analyst_data(overview_body, REAL_SYMBOL, today, conn))
+        profile.update(tof.extract_analyst_data(overview_body, REAL_SYMBOL, today))
         profile.update(tof.extract_event_data(overview_body))
         profile.update(tof.extract_profile_data(fp_body))
 
@@ -93,4 +93,18 @@ class TestTrendlyneOverviewLiveDataSource:
         assert ts_row is not None
         if profile.get("roe") is not None:
             assert_numeric_and_finite(ts_row["roe_annual"], context="technical_signals.roe_annual")
+
+        # 2026-08-20 regression coverage: write_analyst_targets() is the fix for a bug where
+        # this INSERT silently never ran from the real batch flow (con=None guard). RELIANCE
+        # is a large, actively-covered blue chip -- if it has zero recent broker reports on a
+        # live pull, that's itself worth knowing, so this doesn't skip on empty.
+        reports = profile.get("_analyst_reports", [])
+        tof.write_analyst_targets(REAL_SYMBOL, reports, today, conn)
+        target_rows = conn.execute(
+            "SELECT COUNT(*) AS n FROM trendlyne_analyst_targets WHERE symbol = ?", (REAL_SYMBOL,)
+        ).fetchone()
+        assert target_rows["n"] == len(reports), (
+            f"write_analyst_targets wrote {target_rows['n']} rows but extract_analyst_data "
+            f"returned {len(reports)} reports for RELIANCE"
+        )
         conn.close()

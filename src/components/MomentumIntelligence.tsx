@@ -97,17 +97,17 @@ const StockRow: React.FC<{
         <p className={cn(
           'text-[11px] font-black uppercase truncate leading-none',
           isBullish ? 'text-slate-200 group-hover:text-emerald-700' : 'text-slate-200 group-hover:text-rose-700'
-        )} style={{ fontFamily: "'Space Mono', monospace" }}>
+        )} style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
           {sym}
         </p>
-        <p className="text-[9.5px] text-slate-400 font-semibold truncate mt-0.5 leading-none" style={{ fontFamily: "'Rajdhani', sans-serif", letterSpacing: 2 }}>
+        <p className="text-[9.5px] text-slate-400 font-semibold truncate mt-0.5 leading-none" style={{ fontFamily: "'Archivo', sans-serif", letterSpacing: 2 }}>
           {stock.trend || ''}
         </p>
       </div>
 
       {/* Price & pct */}
       <div className="text-right shrink-0">
-        <p className="text-[11px] font-bold text-slate-300 tabular-nums" style={{ fontFamily: "'Space Mono', monospace" }}>
+        <p className="text-[11px] font-bold text-slate-300 tabular-nums" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
           ₹{Number(stock.lastPrice || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
         </p>
         <p className={cn('text-[10px] font-black tabular-nums mt-0.5', pct >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
@@ -142,7 +142,7 @@ const QuickScreenerTile: React.FC<{
       >
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-sm">{screener.icon}</span>
-          <span className="text-[11px] font-black uppercase truncate" style={{ fontFamily: "'Rajdhani', sans-serif", letterSpacing: 2, color: '#475569' }}>
+          <span className="text-[11px] font-black uppercase truncate" style={{ fontFamily: "'Archivo', sans-serif", letterSpacing: 2, color: '#475569' }}>
             {screener.label}
           </span>
         </div>
@@ -171,7 +171,7 @@ const QuickScreenerTile: React.FC<{
                 rel="noreferrer"
                 className="flex items-center justify-between py-1 hover:bg-white/[0.03] rounded-lg px-1 transition-all"
               >
-                <span className="text-[11px] font-black uppercase" style={{ fontFamily: "'Space Mono', monospace", color: '#1e293b' }}>
+                <span className="text-[11px] font-black uppercase" style={{ fontFamily: "'IBM Plex Mono', monospace", color: '#1e293b' }}>
                   {item.name}
                 </span>
                 <div className="flex items-center gap-2">
@@ -220,10 +220,10 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
             <Zap className="w-4 h-4" style={{ color: '#fbbf24' }} />
           </div>
           <div>
-            <h3 style={{ fontFamily: "'Rajdhani', sans-serif", fontWeight: 800, fontSize: 13, letterSpacing: 3, color: '#f8fafc', textTransform: 'uppercase' }}>
+            <h3 style={{ fontFamily: "'Archivo', sans-serif", fontWeight: 800, fontSize: 13, letterSpacing: 3, color: '#f8fafc', textTransform: 'uppercase' }}>
               Momentum Intelligence
             </h3>
-            <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 9.5, color: '#334155', letterSpacing: 2 }}>
+            <p style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: '#334155', letterSpacing: 2 }}>
               LIVE · 5 MIN REFRESH
             </p>
           </div>
@@ -243,7 +243,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
                   fontWeight: 800,
                   letterSpacing: 2,
                   textTransform: 'uppercase',
-                  fontFamily: "'Rajdhani', sans-serif",
+                  fontFamily: "'Archivo', sans-serif",
                   transition: 'all 0.2s',
                   background: view === v ? 'rgba(255,255,255,0.08)' : 'transparent',
                   color: view === v ? '#f8fafc' : '#475569',
@@ -286,7 +286,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
                   fontSize: 10.5,
                   fontWeight: 800,
                   letterSpacing: 1.5,
-                  fontFamily: "'Rajdhani', sans-serif",
+                  fontFamily: "'Archivo', sans-serif",
                   border: `1px solid ${trendType === opt.v ? opt.color + '60' : 'rgba(255,255,255,0.06)'}`,
                   background: trendType === opt.v ? opt.color + '15' : 'transparent',
                   color: trendType === opt.v ? opt.color : '#475569',
@@ -313,7 +313,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
                   fontSize: 9.5,
                   fontWeight: 800,
                   letterSpacing: 2,
-                  fontFamily: "'Rajdhani', sans-serif",
+                  fontFamily: "'Archivo', sans-serif",
                   border: `1px solid ${segment === seg.key ? seg.color + '50' : 'rgba(255,255,255,0.05)'}`,
                   background: segment === seg.key ? seg.color + '14' : 'transparent',
                   color: segment === seg.key ? seg.color : '#334155',
@@ -336,7 +336,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
             ) : stocks.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-32 text-center">
                 <Activity className="w-8 h-8 mb-2" style={{ color: '#1e293b' }} />
-                <p style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 10.5, color: '#334155', letterSpacing: 2 }}>NO DATA FOR THIS SEGMENT</p>
+                <p style={{ fontFamily: "'Archivo', sans-serif", fontSize: 10.5, color: '#334155', letterSpacing: 2 }}>NO DATA FOR THIS SEGMENT</p>
               </div>
             ) : (
               stocks.slice(0, 15).map((stock: any, i: number) => (
@@ -354,7 +354,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
 
           {/* Footer count */}
           <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-800/50">
-            <span style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 9.5, color: '#334155', letterSpacing: 2 }}>
+            <span style={{ fontFamily: "'Archivo', sans-serif", fontSize: 9.5, color: '#334155', letterSpacing: 2 }}>
               SOURCE: MONEYCONTROL TECHNICAL TRENDS
             </span>
             <div className="flex items-center gap-1.5">
@@ -362,7 +362,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
                 ? <ArrowUpRight className="w-3 h-3" style={{ color: accentColor }} />
                 : <ArrowDownRight className="w-3 h-3" style={{ color: accentColor }} />
               }
-              <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10.5, fontWeight: 700, color: accentColor }}>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, fontWeight: 700, color: accentColor }}>
                 {stocks.length} STOCKS
               </span>
             </div>
@@ -371,7 +371,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
       ) : (
         /* Quick Screeners Grid */
         <div>
-          <p style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 10.5, letterSpacing: 3, color: '#334155', textTransform: 'uppercase', marginBottom: 12 }}>
+          <p style={{ fontFamily: "'Archivo', sans-serif", fontSize: 10.5, letterSpacing: 3, color: '#334155', textTransform: 'uppercase', marginBottom: 12 }}>
             TRENDLYNE QUICK-ACCESS SCREENERS — CLICK TO EXPAND
           </p>
           <div className="grid grid-cols-2 gap-2 max-h-96 overflow-y-auto">

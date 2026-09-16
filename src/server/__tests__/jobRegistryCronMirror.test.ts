@@ -155,11 +155,13 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
   const mlDailyOpsSubsteps = [
     'fii-dii-fetcher', 'fii-dii-history', 'tickertape-deals', 'finbert-scorer',
     'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker',
-    'densify-feature-matrix', 'nse-bhavcopy-fetcher', 'ml-ensemble-incremental',
-    'ml-ensemble-score', 'drift-detector', 'reward-engine', 'rl-agent-update',
+    'densify-feature-matrix', 'nse-bhavcopy-fetcher', 'reconcile-stock-ohlcv', 'ml-ensemble-incremental',
+    'ml-ensemble-score', 'drift-detector', 'reward-engine',
     'signal-type-stats', 'news-symbol-link',
+    'event-triggers', 'breakout-classifier-train', 'movement-predictor-train',
   ];
-  const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer'];
+
+  const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer', 'exit-policy-train', 'backtest-optimizer'];
 
   const pinned: Array<{ jobName: string; marker: string; label: string }> = [
     // Legacy hand-rolled queues.ts registrations (not yet migrated to registerRepeatableJob).
@@ -171,7 +173,6 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'news-sentiment', marker: "'news-sentiment-refresh'", label: 'newsSentimentQueue (15-min cadence)' },
     { jobName: 'trendlyne-intraday', marker: "'trendlyne-intraday-scan'", label: 'trendlyneIntradayQueue' },
     { jobName: 'intraday-fetcher', marker: "'intraday-fetcher'", label: 'intradayFetcherQueue' },
-    { jobName: 'gdelt-sentiment', marker: "'gdelt-sentiment'", label: 'gdeltSentimentQueue' },
     { jobName: 'preopen-snapshot', marker: "'preopen-daily'", label: 'preopenQueue' },
     { jobName: 'market-regime-refresh', marker: "'regime-intraday'", label: 'regimeQueue' },
     { jobName: 'intraday-ranker', marker: "'regime-intraday'", label: 'regimeQueue (shared with market-regime-refresh)' },
@@ -181,6 +182,9 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'quant-eod-sync', marker: "'sync-quant-eod'", label: 'quantEodSyncQueue' },
     { jobName: 'trendlyne-daily-fetch', marker: "'trendlyne-daily-fetch'", label: 'trendlyneDailyFetchQueue' },
     { jobName: 'ml-daily-ops', marker: "'ml-daily-ops'", label: 'mlDailyOpsQueue' },
+    // Split out of ml-weekly-retrain 2026-09-12 (AF-20260912-13): the fetch + labelling half
+    // now runs Friday 18:00 UTC so it cannot share the Saturday window with the trainers.
+    { jobName: 'ml-weekly-data', marker: "'ml-weekly-data'", label: 'mlWeeklyDataQueue' },
     { jobName: 'ml-weekly-retrain', marker: "'ml-weekly-retrain'", label: 'mlWeeklyRetrainQueue' },
     { jobName: 'data-quality-daily', marker: "'data-quality-daily-run'", label: 'dataQualityDailyQueue' },
 
@@ -193,8 +197,12 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'fundamentals-sync', marker: "jobName: 'sync-fundamentals-weekly'", label: 'screeners.jobs.ts' },
     { jobName: 'quant-scoring', marker: "jobName: 'quant-score-daily'", label: 'screeners.jobs.ts' },
     { jobName: 'nse-sync', marker: "jobName: 'nse-sync-weekly'", label: 'sync.jobs.ts' },
+    { jobName: 'index-membership', marker: "jobName: 'index-membership-daily'", label: 'sync.jobs.ts' },
+    { jobName: 'analyst-estimates-sync', marker: "jobName: 'analyst-estimates-sync-daily'", label: 'sync.jobs.ts' },
+
     { jobName: 'confluence-compute', marker: "jobName: 'confluence-compute'", label: 'confluence.jobs.ts' },
     { jobName: 'confluence-outcomes', marker: "jobName: 'confluence-outcomes-daily'", label: 'confluence.jobs.ts' },
+    { jobName: 'trendlyne-catchup', marker: "jobName: 'trendlyne-catchup-slice'", label: 'trendlyneWeekly.jobs.ts' },
     { jobName: 'agent-data-scientist', marker: "jobName: 'agent-ds-daily'", label: 'agents.jobs.ts' },
     { jobName: 'agent-strategist', marker: "jobName: 'agent-strat-daily'", label: 'agents.jobs.ts' },
     { jobName: 'agent-auditor', marker: "jobName: 'agent-audit-daily'", label: 'agents.jobs.ts' },
@@ -204,8 +212,13 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'research-premarket', marker: "jobName: 'research-premarket-daily'", label: 'operations.jobs.ts' },
     { jobName: 'research-postclose', marker: "jobName: 'research-postclose-daily'", label: 'operations.jobs.ts' },
     { jobName: 'outcome-resolver', marker: "jobName: 'outcome-resolver-daily'", label: 'operations.jobs.ts' },
+    { jobName: 'chatbot-reingest', marker: "jobName: 'chatbot-reingest-daily'", label: 'operations.jobs.ts' },
     { jobName: 'trendlyne-ratios-monthly', marker: "jobName: 'trendlyne-ratios-monthly-check'", label: 'trendlyneWeekly.jobs.ts' },
+    { jobName: 'mover-study-weekly', marker: "'mover-study-weekly'", label: 'queues.ts' },
+    { jobName: 'nt-live-filter-capture', marker: "'nt-live-filter-slot'", label: 'queues.ts' },
     { jobName: 'job-digest', marker: "jobName: 'job-digest-daily'", label: 'digests.jobs.ts' },
+
+    { jobName: 'job-digest-morning', marker: "jobName: 'job-digest-morning'", label: 'digests.jobs.ts (morning send)' },
     { jobName: 'recommendations-digest', marker: "jobName: 'recommendations-digest-daily'", label: 'digests.jobs.ts' },
 
     // ml-daily-ops / ml-weekly-retrain StepTracker sub-steps -- share the parent's schedule.

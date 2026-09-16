@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 
-// Isolates this test from the host environment's USE_POSTGRES -- see createSignal.test.ts
-// for the full explanation of why a dynamic import is required here, not a plain top-level
-// statement before a static `import { dbRun } from '../dbAsync'`.
-process.env.USE_POSTGRES = 'false';
 const { dbRun } = await import('../dbAsync');
 const {
   fetchBroadcastablePicks,

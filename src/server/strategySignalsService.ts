@@ -145,7 +145,9 @@ export async function regimeSectorFilter(topNSectors = 3, minScore = 60, minWinP
       SELECT symbol, MAX(COALESCE(calibrated_win_probability, win_probability)) AS wp
       FROM technical_signals
       WHERE win_probability IS NOT NULL
-        AND date >= date('now', '-7 days')
+        -- date is a native DATE (2026-08-25 migration); date('now',...) renders as ::text,
+        -- so compare like-for-like (see sqlTranslate.ts's header).
+        AND date::text >= date('now', '-7 days')
       GROUP BY symbol
     `) as { symbol: string; wp: number }[];
     const wpMap = new Map(wpRows.map(r => [r.symbol, r.wp]));

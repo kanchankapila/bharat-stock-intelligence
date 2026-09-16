@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-// Isolates this test from the host environment's USE_POSTGRES -- see backtestRunner.test.ts
-// for the full explanation of why this must be set before any dbAsync.ts import.
-process.env.DATABASE_URL = ':memory:';
-process.env.USE_POSTGRES = 'false';
-const { default: db } = await import('../db');
-const { dbGet } = await import('../dbAsync');
+// Isolates this test from the host environment's USE_POSTGRES -- a deferred `await import`
+// (rather than a static top-level import) is required so this runs before any dbAsync.ts import.
+const { dbExec, dbRun, dbGet, dbAll } = await import('../dbAsync');
 const { syncNSEStocksToDatabase } = await import('../nseService');
 const { nseStocksData } = await import('../../data/nseStocks');
 
-async function waitForRow(symbol: string, predicate: (r: any) => boolean, timeoutMs = 5000) {
+async function waitForRow(symbol: string, predicate: (r: any) => boolean, timeoutMs = 20_000) {
+  // Default raised 5s -> 20s: under a full `npx vitest run` this suite co-runs with the `live`
+  // project against the same Postgres (pool budget 45-60 incl. pm2 services), and syncNSEStocksToDatabase
+  // re-inserts all ~2,366 stocks; polling sometimes starved past 5s and failed intermittently.
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const row = await dbGet<any>('SELECT * FROM nse_stocks WHERE symbol = ?', [symbol]);
@@ -26,12 +26,10 @@ describe('syncNSEStocksToDatabase — sector/industry upsert guard', () => {
   const symbol = nseStocksData[0].symbol;
 
   it('preserves a real backfilled sector/industry across a re-sync (no clobber to Unknown)', async () => {
-    db.exec('DELETE FROM nse_stocks');
+    await dbExec('DELETE FROM nse_stocks');
     // Seed a real classification, as if backfill_sector_mc.py already ran.
-    db.prepare(
-      `INSERT INTO nse_stocks (symbol, name, sector, industry, isin, status, last_updated)
-       VALUES (?, ?, 'Financials', 'Banks', 'X', 'ACTIVE', datetime('now'))`
-    ).run(symbol, symbol);
+    await dbRun(`INSERT INTO nse_stocks (symbol, name, sector, industry, isin, status, last_updated)
+       VALUES (?, ?, 'Financials', 'Banks', 'X', 'ACTIVE', CURRENT_TIMESTAMP)`, [symbol, symbol]);
 
     await syncNSEStocksToDatabase();
     const row = await waitForRow(symbol, (r) => r.last_updated !== null && r.sector != null);
@@ -41,7 +39,7 @@ describe('syncNSEStocksToDatabase — sector/industry upsert guard', () => {
   });
 
   it('still populates sector/industry on a brand-new row (first-ever sync)', async () => {
-    db.exec('DELETE FROM nse_stocks');
+    await dbExec('DELETE FROM nse_stocks');
 
     await syncNSEStocksToDatabase();
     const row = await waitForRow(symbol, (r) => r.symbol === symbol);
@@ -54,11 +52,9 @@ describe('syncNSEStocksToDatabase — sector/industry upsert guard', () => {
   });
 
   it('takes a genuinely new, non-placeholder incoming value over a stale real one', async () => {
-    db.exec('DELETE FROM nse_stocks');
-    db.prepare(
-      `INSERT INTO nse_stocks (symbol, name, sector, industry, isin, status, last_updated)
-       VALUES (?, ?, 'Financials', 'Banks', 'X', 'ACTIVE', datetime('now'))`
-    ).run(symbol, symbol);
+    await dbExec('DELETE FROM nse_stocks');
+    await dbRun(`INSERT INTO nse_stocks (symbol, name, sector, industry, isin, status, last_updated)
+       VALUES (?, ?, 'Financials', 'Banks', 'X', 'ACTIVE', CURRENT_TIMESTAMP)`, [symbol, symbol]);
 
     // Simulate the static file itself having been corrected to a real (non-Unknown) value --
     // the guard must still let a genuine correction through, not freeze the row forever.

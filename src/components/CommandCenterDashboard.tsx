@@ -8,24 +8,28 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
 import { CanonicalBadge } from './CanonicalSourceNote';
-import { V4QuickNav } from '../v4/components/V4QuickNav';
+import { V4QuickNav } from './v4/components/V4QuickNav';
 
 type ConvictionFilter = 'ALL' | 'S_ELITE' | 'A_HIGH' | 'B_MEDIUM' | 'C_LOW' | 'D_MARGINAL';
 type HorizonFilter    = 'ALL' | 'intraday' | 'swing' | 'long_term';
 
-const CONVICTION_STYLE: Record<string, { bg: string; border: string; text: string; dot: string; label: string }> = {
-  S_ELITE:    { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400', label: 'S — Elite'    },
-  A_HIGH:     { bg: 'bg-sky-500/15',     border: 'border-sky-500/40',     text: 'text-sky-400',     dot: 'bg-sky-400',     label: 'A — High'     },
-  B_MEDIUM:   { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400',   label: 'B — Medium'   },
-  C_LOW:      { bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   dot: 'bg-slate-400',   label: 'C — Low'      },
-  D_MARGINAL: { bg: 'bg-zinc-800/60',    border: 'border-zinc-700/40',    text: 'text-zinc-500',    dot: 'bg-zinc-500',    label: 'D — Marginal' },
+// ponytail: card = the matching v1-card-{up,down,neutral,accent} variant, so pick cards share
+// the rest of v1's glass+colored-top-edge shape. bg/border stay for the small tier badge chip,
+// which still wants its own solid tint (v1-card's background is fixed, can't be re-tinted).
+const CONVICTION_STYLE: Record<string, { bg: string; border: string; text: string; dot: string; label: string; card: string; badge: string }> = {
+  S_ELITE:    { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400', label: 'S — Elite',    card: 'v1-card-up',     badge: 'v1-badge v1-badge-s' },
+  A_HIGH:     { bg: 'bg-sky-500/15',     border: 'border-sky-500/40',     text: 'text-sky-400',     dot: 'bg-sky-400',     label: 'A — High',     card: 'v1-card',        badge: 'v1-badge v1-badge-a' },
+  B_MEDIUM:   { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400',   label: 'B — Medium',   card: 'v1-card-neutral', badge: 'v1-badge v1-badge-b' },
+  C_LOW:      { bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   dot: 'bg-slate-400',   label: 'C — Low',      card: 'v1-card-accent', badge: 'v1-badge v1-badge-c' },
+  D_MARGINAL: { bg: 'bg-zinc-800/60',    border: 'border-zinc-700/40',    text: 'text-zinc-500',    dot: 'bg-zinc-500',    label: 'D — Marginal', card: 'v1-card-accent', badge: 'v1-badge bg-zinc-800/60 border-zinc-700/40 text-zinc-500' },
 };
 
 const REGIME_STYLE: Record<string, { color: string; icon: string; bg: string }> = {
   BULL:     { color: 'text-emerald-400', icon: '▲', bg: 'bg-emerald-500/10 border-emerald-500/30' },
   BEAR:     { color: 'text-rose-400',    icon: '▼', bg: 'bg-rose-500/10 border-rose-500/30'       },
+  SIDEWAYS: { color: 'text-amber-400',   icon: '↔', bg: 'bg-amber-500/10 border-amber-500/30'    },
   HIGH_VOL: { color: 'text-amber-400',   icon: '⚡', bg: 'bg-amber-500/10 border-amber-500/30'    },
-  CRASH:    { color: 'text-red-400',     icon: '☠', bg: 'bg-red-500/10 border-red-500/30'         },
+  CRASH:    { color: 'text-rose-400',     icon: '☠', bg: 'bg-rose-500/10 border-rose-500/30'         },
 };
 
 const fmt2 = (n: number | null | undefined) =>
@@ -53,8 +57,19 @@ function pickExplanation(pick: any): { label: string; text: string } | null {
 }
 
 function ScoreBar({ label, value, color = 'bg-sky-500' }: {
-  label: string; value: number; color?: string;
+  label: string; value: number | null | undefined; color?: string;
 }) {
+  // null/undefined means the engine had no data for this stock -- not the same as a real 0,
+  // and must not render as an identical zero-width bar (see AF-20260818-31).
+  if (value == null) {
+    return (
+      <div className="flex items-center gap-2 text-[10px]">
+        <span className="w-16 text-slate-500 truncate">{label}</span>
+        <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden" />
+        <span className="w-7 text-right text-slate-600">n/a</span>
+      </div>
+    );
+  }
   const w = Math.max(0, Math.min(100, value));
   return (
     <div className="flex items-center gap-2 text-[10px]">
@@ -75,14 +90,14 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
   return (
     <motion.div
       layout
-      className={cn('rounded-xl border p-4 cursor-pointer hover:brightness-110 transition-all', style.bg, style.border)}
+      className={cn(style.card, 'p-4 cursor-pointer hover:brightness-110')}
       onClick={() => onSelect(pick.symbol)}
     >
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <div className="flex items-center gap-2">
             <span className="text-white font-bold text-sm">{pick.symbol}</span>
-            <span className={cn('text-[10px] font-black px-1.5 py-0.5 rounded border', style.bg, style.border, style.text)}>
+            <span className={cn('text-[10px] font-black', style.badge)}>
               {style.label}
             </span>
           </div>
@@ -111,10 +126,14 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
               </span>
             )}
           </span>
-          <span className={cn('text-sm font-bold', style.text)}>{pick.unified_score}</span>
+          <span className={cn('text-sm font-bold', pick.unified_score == null ? 'text-slate-600' : style.text)}>
+            {pick.unified_score == null ? 'n/a' : pick.unified_score}
+          </span>
         </div>
         <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-          <div className={cn('h-full rounded-full', style.dot)} style={{ width: `${pick.unified_score}%` }} />
+          {pick.unified_score != null && (
+            <div className={cn('h-full rounded-full', style.dot)} style={{ width: `${pick.unified_score}%` }} />
+          )}
         </div>
       </div>
 
@@ -153,11 +172,11 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
       )}
 
       <div className="space-y-1 mb-2">
-        <ScoreBar label="Screener"   value={pick.screener_stock_score ?? 0} color="bg-violet-500" />
-        <ScoreBar label="ML"         value={pick.ml_score ?? 0}             color="bg-sky-500"    />
-        <ScoreBar label="Confluence" value={pick.confluence_score ?? 0}     color="bg-emerald-500" />
-        <ScoreBar label="Technical"  value={pick.technical_score ?? 0}      color="bg-amber-500"  />
-        <ScoreBar label="DL"         value={pick.dl_score ?? 0}             color="bg-pink-500"   />
+        <ScoreBar label="Screener"   value={pick.screener_stock_score} color="bg-violet-500" />
+        <ScoreBar label="ML"         value={pick.ml_score}             color="bg-sky-500"    />
+        <ScoreBar label="Confluence" value={pick.confluence_score}     color="bg-emerald-500" />
+        <ScoreBar label="Technical"  value={pick.technical_score}      color="bg-amber-500"  />
+        <ScoreBar label="DL"         value={pick.dl_score}             color="bg-pink-500"   />
       </div>
 
       {explanation && (
@@ -188,7 +207,7 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
 function IntradayCard({ sig, onSelect }: { sig: any; onSelect: (sym: string) => void }) {
   return (
     <div
-      className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-3 cursor-pointer hover:border-slate-600 transition-colors"
+      className="v1-card p-3 cursor-pointer hover:border-slate-600 transition-colors"
       onClick={() => onSelect(sig.symbol)}
     >
       <div className="flex items-center justify-between mb-1">
@@ -318,7 +337,7 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
             <section>
               <div className="flex items-center gap-2 mb-3">
                 <Shield className="w-4 h-4 text-violet-400" />
-                <h2 className="text-sm font-bold text-white">EOD Swing Picks</h2>
+                <h2 className="v1-title-section">EOD Swing Picks</h2>
                 <span className="text-[10px] text-slate-500 ml-auto">{data?.eodPicks?.length ?? 0} stocks</span>
               </div>
               {(data?.eodPicks?.length ?? 0) === 0 ? (
@@ -337,13 +356,13 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
             <section>
               <div className="flex items-center gap-2 mb-3">
                 <Zap className="w-4 h-4 text-amber-400" />
-                <h2 className="text-sm font-bold text-white">Intraday Live</h2>
+                <h2 className="v1-title-section">Intraday Live</h2>
                 <span className="text-[10px] text-slate-500 ml-auto">
                   {data?.intradaySignals?.length ?? 0} HIGH-strength signals
                 </span>
               </div>
               {regime?.name === 'CRASH' ? (
-                <div className="flex items-center gap-2 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                <div className="flex items-center gap-2 p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm">
                   <AlertTriangle className="w-4 h-4 flex-none" />
                   Intraday signals disabled — CRASH regime active. Preserve capital.
                 </div>

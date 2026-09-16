@@ -14,12 +14,17 @@ Table: screener_sector_rotation
 Run daily after screener_features_fetcher.py.
 """
 
+import polars as pl
 import json
 import datetime
 from collections import defaultdict
 from db_compat import connect
+import as_of
 
 TODAY = datetime.date.today().isoformat()
+# trading-day-exempt: reads this script's OWN output table (load_previous_sector_scores) for a
+# momentum delta, not a trading-day source. No prior snapshot -> momentum_change 0, which is
+# correct behaviour rather than a silent degradation.
 YESTERDAY = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
 
 
@@ -49,7 +54,10 @@ def load_sector_screener_data(con) -> dict:
     Falls back to screener_appearances if features not available.
     """
     # Primary: use pre-computed screener_features on technical_signals
-    cutoff = (datetime.date.today() - datetime.timedelta(days=2)).isoformat()
+    # Trading days, not calendar days: technical_signals is trading-day-only, so a Monday
+    # date.today()-2 window has no session and this primary read silently returns nothing,
+    # falling through to the screener_appearances path below. recurring-bugs.md.
+    cutoff = as_of.trading_days_back(2, con)[-1].isoformat()
     rows = con.execute("""
         SELECT ts.symbol,
                ns.sector,
@@ -177,3 +185,9 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

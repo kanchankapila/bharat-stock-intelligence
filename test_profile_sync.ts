@@ -10,9 +10,9 @@ async function testSingle() {
     
     if (description) {
         console.log("Description found (first 100 chars):", description.substring(0, 100));
-        console.log("Running Ollama analysis...");
+        console.log("Running AI profile analysis...");
         const result = await analyzeCompanyProfile('RELIANCE', description);
-        console.log("Ollama Analysis Result:", result);
+        console.log("AI Analysis Result:", result);
     } else {
         console.log("No description found for RELIANCE.");
     }

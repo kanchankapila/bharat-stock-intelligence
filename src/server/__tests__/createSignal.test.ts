@@ -1,14 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
-// Isolates this test from the host environment's USE_POSTGRES -- dbAsync.ts's usePostgres()
-// reads it fresh on every call, not just at import time, so a real dev/CI environment with
-// USE_POSTGRES=true would route every dbRun/dbGet call below to a live Postgres pool instead
-// of the (default file-based) SQLite db this file actually exercises, failing on ECONNREFUSED
-// regardless of what's being tested. A plain top-level `process.env.USE_POSTGRES = 'false'`
-// before a STATIC `import { dbRun } from '../dbAsync'` would not reliably run first (static
-// imports are hoisted ahead of a module's own top-level statements) -- use a dynamic import
-// instead, matching the pattern already established in backtestRunner.test.ts and siblings.
-process.env.USE_POSTGRES = 'false';
 const { dbRun, dbGet } = await import('../dbAsync');
 const { createSignal } = await import('../signals');
 

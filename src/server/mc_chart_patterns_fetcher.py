@@ -24,6 +24,21 @@ Run:
   python mc_chart_patterns_fetcher.py --symbol BEL
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McChartPatternsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McChartPatternsFetcherBaseFetcher(BaseFetcher[McChartPatternsFetcherSchema]):
+    fetcher_name = 'McChartPatternsFetcher'
+    domain = 'moneycontrol.com'
+    schema = McChartPatternsFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import json
 import time
@@ -34,11 +49,17 @@ from curl_cffi import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
+import sys
 
 PATTERNS_URL = (
     "https://api.moneycontrol.com/mcapi/technicalpicks/chart-patterns"
     "?deviceType=W&version=174&start=0&limit=10000&pattern_type=all&sc_id={scid}"
 )
+BULK_PATTERNS_URL = (
+    "https://api.moneycontrol.com/mcapi/technicalpicks/chart-patterns"
+    "?deviceType=W&version=174&start=0&limit=5000&pattern_type=all"
+)
+
 
 MC_HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -106,10 +127,10 @@ def ensure_schema(con) -> None:
     con.commit()
 
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN mc_cp_bull_count     INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mc_cp_bear_count     INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mc_cp_net_score      INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mc_cp_avg_target_pct REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_cp_bull_count     INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_cp_bear_count     INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_cp_net_score      INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_cp_avg_target_pct REAL",
     ]:
         try:
             cur.execute(ddl)
@@ -131,8 +152,24 @@ def _fetch(mcsymbol: str, session) -> list[dict]:
             return []
         return payload.get("list", {}).get("data", [])
     except Exception as e:
-        print(f"  [{mcsymbol}] chart patterns error: {e}")
+        print(f"  [{mcsymbol}] chart patterns error: {e}", file=sys.stderr)
         return []
+
+
+def _fetch_all_bulk(session) -> list[dict]:
+    """Fetch all chart patterns across the entire market in a single bulk HTTP call."""
+    try:
+        r = session.get(BULK_PATTERNS_URL, headers=MC_HEADERS, timeout=15, impersonate="chrome110")
+        if r.status_code != 200:
+            return []
+        payload = r.json()
+        if payload.get("status") != "success":
+            return []
+        return payload.get("list", {}).get("data", [])
+    except Exception as e:
+        print(f"  [Bulk] chart patterns error: {e}", file=sys.stderr)
+        return []
+
 
 
 def _sf(v, default=None) -> float | None:
@@ -239,7 +276,7 @@ def compute_and_upsert_signals(symbol: str, today: str, patterns: list[dict], co
 
 
 def backfill_technical_signals(symbol: str, ts_floor: str, signals: dict, con) -> None:
-    """date >= ? ELSE NULL guard added 2026-07-19 -- see mc_pricefeed_fetcher.py's
+    """date >= ? guard added 2026-07-19 -- see mc_pricefeed_fetcher.py's
     backfill_technical_signals for the full writeup of the no-date-filter bug this fixes.
 
     BUG FOUND 2026-07-28 (Finding #64 of the full-stack audit): the guard threshold
@@ -248,19 +285,26 @@ def backfill_technical_signals(symbol: str, ts_floor: str, signals: dict, con) -
     existed. On a closed-market day this job still runs, date.today() matches zero
     technical_signals rows, and the ELSE branch nulls mc_cp_bull/bear_count etc across
     a symbol's entire history. Caller must pass the last completed trading session
-    (MAX(date) FROM stock_ohlcv), not raw date.today() -- see main()."""
+    (MAX(date) FROM stock_ohlcv), not raw date.today() -- see main().
+
+    BUG FOUND 2026-09-01 (data/model audit, same class as index_membership_fetcher.py):
+    the ELSE branch was `ELSE NULL`. ts_floor is MAX(date) FROM stock_ohlcv, which advances
+    by one trading day every run, so the day-after's run pushed the floor past YESTERDAY's
+    row and re-nulled the value yesterday's own run had just correctly set -- only the
+    single most-recent date ever stayed populated, regardless of how often this ran.
+    ELSE now preserves the row's own current value instead."""
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            mc_cp_bull_count     = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_bull_count)     ELSE NULL END,
-            mc_cp_bear_count     = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_bear_count)     ELSE NULL END,
-            mc_cp_net_score      = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_net_score)      ELSE NULL END,
-            mc_cp_avg_target_pct = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_avg_target_pct) ELSE NULL END
-        WHERE symbol = ?
+            mc_cp_bull_count     = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_bull_count)     ELSE mc_cp_bull_count     END,
+            mc_cp_bear_count     = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_bear_count)     ELSE mc_cp_bear_count     END,
+            mc_cp_net_score      = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_net_score)      ELSE mc_cp_net_score      END,
+            mc_cp_avg_target_pct = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_avg_target_pct) ELSE mc_cp_avg_target_pct END
+        WHERE symbol = ? AND date >= ?
     """, (
         ts_floor, signals.get("bull_count"), ts_floor, signals.get("bear_count"),
         ts_floor, signals.get("net_score"), ts_floor, signals.get("avg_target_pct"),
-        symbol,
+        symbol, ts_floor,   # bounded: older rows only took ELSE-keep yet were all rewritten
     ))
     con.commit()
 
@@ -281,48 +325,123 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", default=None)
+    parser.add_argument("--force-serial", action="store_true", default=False,
+                        help="Force serial per-stock crawl instead of bulk market fetch")
     args = parser.parse_args()
 
     con = connect()
     ensure_schema(con)
 
-    stocks = _load_stocks(args.symbol, con)
-    if not stocks:
-        print("[MCPatterns] No stocks with mcsymbol found.")
-        return
-
-    print(f"[MCPatterns] Fetching chart patterns for {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)…")
-    session = requests.Session()
     today = date.today().isoformat()
     ts_floor = logical_write_floor(fallback=today)
-    ok = 0
-    done = 0
+    session = requests.Session()
 
-    def _fetch_one(args):
-        symbol, mcsymbol = args
+    if args.symbol:
+        stocks = _load_stocks(args.symbol, con)
+        if not stocks:
+            print(f"[MCPatterns] No stocks with symbol={args.symbol} found.")
+            con.close()
+            return
+        symbol, mcsymbol = stocks[0]
         raw_list = _fetch(mcsymbol, session)
         patterns = [p for p in (_parse_pattern(r) for r in raw_list) if p is not None]
-        return symbol, mcsymbol, patterns
+        upsert_patterns(symbol, mcsymbol, patterns, con)
+        sigs = compute_and_upsert_signals(symbol, today, patterns, con)
+        backfill_technical_signals(symbol, ts_floor, sigs, con)
+        print(f"[MCPatterns] {symbol}: {len(patterns)} patterns | "
+              f"bull={sigs['bull_count']} bear={sigs['bear_count']} "
+              f"net={sigs['net_score']} tgt={sigs.get('avg_target_pct','?')}%")
+        con.close()
+        return
 
-    for batch_start in range(0, len(stocks), BATCH_SIZE):
-        batch = stocks[batch_start:batch_start + BATCH_SIZE]
-        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
-            futures = [pool.submit(_fetch_one, item) for item in batch]
-            for fut in as_completed(futures):
-                symbol, mcsymbol, patterns = fut.result()
-                done += 1
-                upsert_patterns(symbol, mcsymbol, patterns, con)
-                sigs = compute_and_upsert_signals(symbol, today, patterns, con)
-                backfill_technical_signals(symbol, ts_floor, sigs, con)
-                print(f"  [{done}/{len(stocks)}] {symbol}: {len(patterns)} patterns | "
-                      f"bull={sigs['bull_count']} bear={sigs['bear_count']} "
-                      f"net={sigs['net_score']} tgt={sigs.get('avg_target_pct','?')}%")
-                ok += 1
-        time.sleep(BATCH_GAP_SEC)
+    if args.force_serial:
+        stocks = _load_stocks(None, con)
+        print(f"[MCPatterns] Fetching chart patterns for {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)…")
+        ok = 0
+        done = 0
 
-    print(f"[MCPatterns] Done. {ok}/{len(stocks)} stocks processed.")
+        def _fetch_one(args):
+            symbol, mcsymbol = args
+            raw_list = _fetch(mcsymbol, session)
+            patterns = [p for p in (_parse_pattern(r) for r in raw_list) if p is not None]
+            return symbol, mcsymbol, patterns
+
+        for batch_start in range(0, len(stocks), BATCH_SIZE):
+            batch = stocks[batch_start:batch_start + BATCH_SIZE]
+            with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+                futures = [pool.submit(_fetch_one, item) for item in batch]
+                for fut in as_completed(futures):
+                    symbol, mcsymbol, patterns = fut.result()
+                    done += 1
+                    upsert_patterns(symbol, mcsymbol, patterns, con)
+                    sigs = compute_and_upsert_signals(symbol, today, patterns, con)
+                    backfill_technical_signals(symbol, ts_floor, sigs, con)
+                    ok += 1
+            time.sleep(BATCH_GAP_SEC)
+        print(f"[MCPatterns] Done. {ok}/{len(stocks)} stocks processed.")
+        con.close()
+        return
+
+    # BULK OPTIMIZATION: Fetch entire market in 1 single HTTP call (~0.6s) instead of 2,300 requests (25 min)
+    t0 = time.time()
+    print("[MCPatterns] Fetching entire market chart patterns in 1 bulk request…")
+    raw_list = _fetch_all_bulk(session)
+    elapsed = time.time() - t0
+    print(f"[MCPatterns] Bulk fetch received {len(raw_list)} patterns across market in {elapsed:.2f}s")
+
+    # Load mcsymbol -> symbol mapping from nse_stocks
+    cur = con.cursor()
+    cur.execute("SELECT mcsymbol, symbol FROM nse_stocks WHERE mcsymbol IS NOT NULL AND mcsymbol != ''")
+    mc_to_sym = {}
+    for r in cur.fetchall():
+        mc = r[0] if isinstance(r, (tuple, list)) else (r['mcsymbol'] if hasattr(r, '__getitem__') and 'mcsymbol' in r else list(dict(r).values())[0])
+        sym = r[1] if isinstance(r, (tuple, list)) else (r['symbol'] if hasattr(r, '__getitem__') and 'symbol' in r else list(dict(r).values())[1])
+        if mc and sym:
+            mc_to_sym[mc.strip().upper()] = sym.strip().upper()
+
+    # Group patterns by mcsymbol
+    patterns_by_mcsym: dict[str, list[dict]] = {}
+    for r in raw_list:
+        p = _parse_pattern(r)
+        if not p:
+            continue
+        mcsym = r.get("sc_id")
+        if not mcsym and r.get("meta_data"):
+            try:
+                md = json.loads(r["meta_data"]) if isinstance(r["meta_data"], str) else r["meta_data"]
+                pk = md.get("price_key", "")
+                if pk.startswith("stk_") or pk.startswith("futstk_"):
+                    parts = pk.split("_")
+                    if len(parts) >= 2:
+                        mcsym = parts[1]
+            except Exception:
+                pass
+        if mcsym:
+            mcsym = mcsym.strip().upper()
+            patterns_by_mcsym.setdefault(mcsym, []).append(p)
+
+    # Upsert patterns and compute signals for all stocks carrying active patterns
+    updated_stocks = 0
+    for mcsym, plist in patterns_by_mcsym.items():
+        sym = mc_to_sym.get(mcsym)
+        if not sym:
+            continue
+        upsert_patterns(sym, mcsym, plist, con)
+        sigs = compute_and_upsert_signals(sym, today, plist, con)
+        backfill_technical_signals(sym, ts_floor, sigs, con)
+        updated_stocks += 1
+
+    total_time = time.time() - t0
+    print(f"[MCPatterns] Done. Updated {updated_stocks} stocks with active chart patterns in {total_time:.2f}s (replaces 25-minute serial crawl).")
     con.close()
+
 
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

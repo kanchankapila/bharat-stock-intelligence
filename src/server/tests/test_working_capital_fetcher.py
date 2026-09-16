@@ -135,7 +135,7 @@ class TestUpdateTechnicalSignalsAsOfFallback:
         def fake_update_technical_signals(symbol, features, con, today=None):
             recorded["today"] = today
 
-        def fake_fetch_et_stats(company_id, event_type, session):
+        def fake_fetch_et_stats(company_id, event_type, session, **kwargs):
             if event_type == "Balance":
                 return [{"yearEnding": "2026-03-31", "inventories": 100.0,
                           "tradeReceivables": 200.0, "tradePayables": 50.0}]
@@ -153,3 +153,40 @@ class TestUpdateTechnicalSignalsAsOfFallback:
         wcf.process_stock("RELIANCE", "500325", "2026-07-24", MagicMock(), MagicMock())
 
         assert recorded["today"] == "2026-07-24"
+
+
+class TestQuarterlyFetchDepthMatchesBalanceDepth:
+    """Regression for the 2026-08-27 wiring finding: Balance defaults to last=5 (5 FISCAL
+    YEARS), but Quarterly's own default of last=5 means 5 QUARTERS (~1.25y) -- nowhere near
+    enough to complete a 4-quarter match for any fiscal year but the most recent, so every
+    older Balance year was silently dropped by compute_ccc()'s `len(year_quarters) < 4`
+    check. Every symbol in production had exactly 1 working_capital_history row as a direct
+    result -- ccc_trend/wc_deteriorating/wc_improving could never compute for anyone. Live-
+    verified against the real ET_Stats endpoint that last=20 actually returns 20 quarters
+    back to 2021, not a truncated/empty response -- this was a code bug, not a data gap."""
+
+    def test_process_stock_requests_enough_quarters_to_match_balance_depth(self, monkeypatch):
+        captured_last = {}
+
+        def fake_fetch_et_stats(company_id, event_type, session, last=5):
+            if event_type == "Quarterly":
+                captured_last["quarterly"] = last
+            if event_type == "Balance":
+                return [{"yearEnding": "2026-03-31", "inventories": 100.0,
+                          "tradeReceivables": 200.0, "tradePayables": 50.0}]
+            return []
+
+        monkeypatch.setattr(wcf, "fetch_et_stats", fake_fetch_et_stats)
+        monkeypatch.setattr(wcf, "upsert_wc_history", lambda *a, **k: None)
+        monkeypatch.setattr(wcf, "update_technical_signals", lambda *a, **k: None)
+
+        wcf.process_stock("RELIANCE", "500325", "2026-07-24", MagicMock(), MagicMock())
+
+        # Balance's own default is 5 fiscal years; Quarterly needs 4 quarters PER year to
+        # let compute_ccc() match each one, i.e. must ask for at least 5*4=20, not the bare
+        # default of 5 (which silently caps every fetch at ~1 usable fiscal year).
+        assert captured_last.get("quarterly", 5) >= 20, (
+            "working_capital_fetcher.process_stock() must request enough Quarterly history "
+            "to match Balance's 5-year depth (last>=20), or ccc_trend can never compute for "
+            "any symbol -- it silently degrades to exactly 1 fiscal year per symbol forever"
+        )

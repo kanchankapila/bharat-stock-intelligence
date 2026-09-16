@@ -1,20 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-process.env.DATABASE_URL = ':memory:';
-// Isolates this test from the host environment's USE_POSTGRES -- see backtestRunner.test.ts
-// for the full explanation of why this must be set before any dbAsync.ts import.
-process.env.USE_POSTGRES = 'false';
-const { default: db } = await import('../db');
-const { dbAll } = await import('../dbAsync');
-
+const { dbExec, dbRun, dbGet, dbAll } = await import('../dbAsync');
 const { persistMcConsolidatedMetrics } = await import('../mcApiService');
 
 // mc_general_metrics and mc_swot_history are both real db.ts tables (the former shared with
 // etMarketstatsSync.ts's writer) -- no ad-hoc CREATE TABLE needed here, unlike the
 // Python-fetcher-owned tables in corporateActionsRouter.test.ts.
-beforeEach(() => {
-  db.exec(`DELETE FROM mc_general_metrics WHERE source_api = 'mc_consolidated'`);
-  db.exec(`DELETE FROM mc_swot_history`);
+beforeEach(async () => {
+  await dbExec(`DELETE FROM mc_general_metrics WHERE source_api = 'mc_consolidated'`);
+  await dbExec(`DELETE FROM mc_swot_history`);
 });
 
 describe('persistMcConsolidatedMetrics', () => {

@@ -4,6 +4,7 @@ Tests for ml_ensemble.py
 import sqlite3
 import datetime
 import pytest
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 
 def test_load_training_data_includes_stop_loss(monkeypatch):
@@ -41,7 +42,10 @@ def test_load_training_data_includes_stop_loss(monkeypatch):
     ]
 
     monkeypatch.setattr('ml_ensemble.read_df', lambda q, p=None: pd.DataFrame(fake_rows))
-    df = load_training_data()
+    # Pinned to label='horizon' explicitly: this test's subject is that label's own
+    # STOP_LOSS -> 0 mapping. The default moved to 'triple_barrier' on 2026-08-21, which
+    # reads se.tb_label and has no STOP_LOSS state to map.
+    df = load_training_data(label='horizon')
 
     assert len(df) == 2, f"Expected 2 rows, got {len(df)}: STOP_LOSS row should not be dropped"
     stop_row = df[df.index == 1] if 1 in df.index else df.iloc[1:2]
@@ -69,7 +73,7 @@ def test_regime_threshold_varies_by_regime(monkeypatch):
 # ── recommendation_log propagation + expiry gate ────────────────────────────────
 
 def _make_gate_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE technical_signals (
@@ -91,7 +95,11 @@ def _insert_rec(conn, symbol, signal_date, win_probability=None, status='ACTIVE'
     conn.execute(
         "INSERT INTO recommendation_log (symbol, rec_type, signal_date, generated_at, "
         "win_probability, source, status) VALUES (?, 'BUY', ?, ?, ?, 'technical_scan', ?)",
-        (symbol, signal_date, datetime.datetime.utcnow().isoformat(), win_probability, status),
+        # .replace(tzinfo=None): utcnow() returned a naive datetime; now(timezone.utc) returns an
+        # aware one whose .isoformat() appends "+00:00" -- stripped to keep this fixture's output
+        # byte-identical to before, since nothing here depends on the aware/naive distinction.
+        (symbol, signal_date, datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
+         win_probability, status),
     )
 
 

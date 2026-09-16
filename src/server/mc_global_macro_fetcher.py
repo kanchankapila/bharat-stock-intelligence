@@ -36,6 +36,21 @@ Run:
   python mc_global_macro_fetcher.py --dry-run # fetch only, print summary
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McGlobalMacroFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McGlobalMacroFetcherBaseFetcher(BaseFetcher[McGlobalMacroFetcherSchema]):
+    fetcher_name = 'McGlobalMacroFetcher'
+    domain = 'moneycontrol.com'
+    schema = McGlobalMacroFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import datetime
 import sys
@@ -509,3 +524,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

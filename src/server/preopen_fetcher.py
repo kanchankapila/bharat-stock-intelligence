@@ -12,12 +12,28 @@ backfilling iep_gap_pct + preopen_imbalance into technical_signals.
 Run:  python preopen_fetcher.py
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class PreopenFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class PreopenFetcherBaseFetcher(BaseFetcher[PreopenFetcherSchema]):
+    fetcher_name = 'PreopenFetcher'
+    domain = 'general'
+    schema = PreopenFetcherSchema
+    min_interval_sec = 0.5
+
+
 import datetime
 
 import requests
 from curl_cffi import requests as cffi_req
 
 from db_compat import connect, translate, use_postgres
+import sys
 
 MC_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -35,6 +51,7 @@ NSE_HEADERS = {
     "Referer": "https://www.nseindia.com/",
 }
 
+NSE_PREOPEN_ALL   = "https://www.nseindia.com/api/market-data-pre-open?key=ALL"
 NSE_PREOPEN_FO    = "https://www.nseindia.com/api/market-data-pre-open?key=FO"
 NSE_PREOPEN_NIFTY = "https://www.nseindia.com/api/market-data-pre-open?key=NIFTY"
 
@@ -50,25 +67,35 @@ def ensure_preopen_stock_schema(con) -> None:
     cur = con.cursor()
     cur.execute(translate("""
         CREATE TABLE IF NOT EXISTS preopen_stock_snapshot (
-            symbol            TEXT NOT NULL,
-            snapshot_date     TEXT NOT NULL,
-            iep               REAL,
-            prev_close        REAL,
-            iep_gap_pct       REAL,
-            total_buy_qty     REAL,
-            total_sell_qty    REAL,
-            preopen_imbalance REAL,
-            last_price        REAL,
-            fetched_at        TEXT DEFAULT CURRENT_TIMESTAMP,
+            symbol              TEXT NOT NULL,
+            snapshot_date       TEXT NOT NULL,
+            iep                 REAL,
+            prev_close          REAL,
+            iep_gap_pct         REAL,
+            total_buy_qty       REAL,
+            total_sell_qty      REAL,
+            preopen_imbalance   REAL,
+            last_price          REAL,
+            total_traded_volume REAL,
+            fetched_at          TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (symbol, snapshot_date)
         )
     """))
     con.commit()
 
-    # Add IEP columns to technical_signals (skip if already present)
+    # Add IEP/volume columns to preopen_stock_snapshot + technical_signals (skip if already
+    # present -- this table has been live since before total_traded_volume existed, so
+    # existing installs need the ALTER even though a fresh CREATE TABLE above already has it).
+    # total_traded_volume added 2026-09-04: NSE's pre-open response already carries the actual
+    # MATCHED quantity at the call-auction clearing price (totalTradedVolume/finalQuantity) --
+    # distinct from total_buy_qty/total_sell_qty above, which are UNMATCHED order-book depth
+    # used for the imbalance signal. This is real pre-market traded volume that was sitting
+    # unused in a response this fetcher already makes; no new request needed.
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN iep_gap_pct       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN preopen_imbalance REAL",
+        "ALTER TABLE preopen_stock_snapshot ADD COLUMN IF NOT EXISTS total_traded_volume REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS iep_gap_pct       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS preopen_imbalance REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS preopen_volume    REAL",
     ]:
         try:
             cur.execute(ddl)
@@ -109,13 +136,17 @@ def _parse_float(val: str | None) -> float | None:
     """Parse a comma-formatted number string like '23,969.50' or '-0.60'."""
     if val is None:
         return None
+    val_str = str(val).strip().replace(",", "")
+    if not val_str or val_str.lower() in ("-", "null", "none", "nan", ""):
+        return None
     try:
-        return float(str(val).replace(",", "").strip())
+        return float(val_str)
     except (ValueError, TypeError):
         return None
 
 
 def fetch_section(url: str) -> list[dict]:
+    """Fetch an MC pre-market API endpoint (MI or II) and return the list of items."""
     r = cffi_req.get(url, headers=HEADERS, impersonate="chrome110", timeout=10)
     r.raise_for_status()
     data = r.json()
@@ -142,7 +173,15 @@ def _find(items: list[dict], *name_fragments: str) -> dict | None:
 # NSE pre-open IEP fetch
 # ---------------------------------------------------------------------------
 
-def _nse_session() -> requests.Session:
+def _nse_session():
+    if cffi_req is not None:
+        try:
+            s = cffi_req.Session(impersonate="chrome110")
+            s.headers.update(NSE_HEADERS)
+            s.get("https://www.nseindia.com/", timeout=10)
+            return s
+        except Exception:
+            pass
     s = requests.Session()
     s.headers.update(NSE_HEADERS)
     try:
@@ -152,7 +191,7 @@ def _nse_session() -> requests.Session:
     return s
 
 
-def _fetch_nse_preopen_url(sess: requests.Session, url: str) -> list[dict]:
+def _fetch_nse_preopen_url(sess, url: str) -> list[dict]:
     try:
         r = sess.get(url, timeout=12)
         if r.status_code == 403:
@@ -162,12 +201,12 @@ def _fetch_nse_preopen_url(sess: requests.Session, url: str) -> list[dict]:
         data = r.json()
         return data.get("data") or []
     except Exception as e:
-        print(f"[NSE PreOpen] Warning: fetch failed for {url}: {e}")
+        print(f"[NSE PreOpen] Warning: fetch failed for {url}: {e}", file=sys.stderr)
         return []
 
 
 def fetch_nse_preopen(con) -> int:
-    """Fetch NSE pre-open IEP data for F&O + Nifty 50 stocks.
+    """Fetch NSE pre-open IEP data for the entire market (2,150+ equities in 1 call).
 
     Writes to preopen_stock_snapshot and backfills the most recent
     technical_signals row per symbol with iep_gap_pct + preopen_imbalance.
@@ -177,12 +216,21 @@ def fetch_nse_preopen(con) -> int:
     ensure_preopen_stock_schema(con)
 
     sess = _nse_session()
-    raw_fo    = _fetch_nse_preopen_url(sess, NSE_PREOPEN_FO)
-    raw_nifty = _fetch_nse_preopen_url(sess, NSE_PREOPEN_NIFTY)
+    raw_all = _fetch_nse_preopen_url(sess, NSE_PREOPEN_ALL)
 
-    # Merge, dedup by symbol (FO takes priority if duplicate)
+    if raw_all:
+        raw_items = raw_all
+        print(f"[NSE PreOpen] Fetched entire equity market in 1 call ({len(raw_items)} items from key=ALL)")
+    else:
+        # Graceful fallback to FO + NIFTY if ALL fails or is blocked
+        print("[NSE PreOpen] key=ALL returned empty; falling back to key=FO + key=NIFTY...")
+        raw_fo    = _fetch_nse_preopen_url(sess, NSE_PREOPEN_FO)
+        raw_nifty = _fetch_nse_preopen_url(sess, NSE_PREOPEN_NIFTY)
+        raw_items = raw_nifty + raw_fo
+
+    # Merge, dedup by symbol
     merged: dict[str, dict] = {}
-    for item in (raw_nifty + raw_fo):
+    for item in raw_items:
         meta = item.get("metadata") or {}
         sym = (meta.get("symbol") or "").strip().upper()
         if sym:
@@ -206,6 +254,11 @@ def fetch_nse_preopen(con) -> int:
         last_price = _parse_float(meta.get("lastPrice") or meta.get("ltp"))
         buy_qty    = _parse_float(preopen_mkt.get("totalBuyQuantity") or meta.get("totalBuyQuantity") or meta.get("buyQuantity"))
         sell_qty   = _parse_float(preopen_mkt.get("totalSellQuantity") or meta.get("totalSellQuantity") or meta.get("sellQuantity"))
+        # Actual MATCHED quantity at the call-auction clearing price -- not the same thing as
+        # buy_qty/sell_qty above, which are unmatched order-book depth. finalQuantity is the
+        # fallback name the same field carries when totalTradedVolume is absent from a given
+        # response shape; both were confirmed live 2026-09-04 to hold the identical value.
+        traded_vol = _parse_float(preopen_mkt.get("totalTradedVolume") or preopen_mkt.get("finalQuantity"))
 
         iep_gap_pct = None
         if iep is not None and prev_close and prev_close != 0:
@@ -221,59 +274,59 @@ def fetch_nse_preopen(con) -> int:
             sym, snapshot_date,
             iep, prev_close, iep_gap_pct,
             buy_qty, sell_qty, preopen_imbalance,
-            last_price, fetched_at,
+            last_price, traded_vol, fetched_at,
         ))
 
     cur = con.cursor()
 
-    # Upsert into preopen_stock_snapshot
-    for row in rows:
-        cur.execute(translate("""
-            INSERT INTO preopen_stock_snapshot
-                (symbol, snapshot_date, iep, prev_close, iep_gap_pct,
-                 total_buy_qty, total_sell_qty, preopen_imbalance, last_price, fetched_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(symbol, snapshot_date) DO UPDATE SET
-                iep               = excluded.iep,
-                prev_close        = excluded.prev_close,
-                iep_gap_pct       = excluded.iep_gap_pct,
-                total_buy_qty     = excluded.total_buy_qty,
-                total_sell_qty    = excluded.total_sell_qty,
-                preopen_imbalance = excluded.preopen_imbalance,
-                last_price        = excluded.last_price,
-                fetched_at        = excluded.fetched_at
-        """), row)
+    # Batch upsert into preopen_stock_snapshot
+    upsert_sql = translate("""
+        INSERT INTO preopen_stock_snapshot
+            (symbol, snapshot_date, iep, prev_close, iep_gap_pct,
+             total_buy_qty, total_sell_qty, preopen_imbalance, last_price,
+             total_traded_volume, fetched_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(symbol, snapshot_date) DO UPDATE SET
+            iep                  = excluded.iep,
+            prev_close           = excluded.prev_close,
+            iep_gap_pct          = excluded.iep_gap_pct,
+            total_buy_qty        = excluded.total_buy_qty,
+            total_sell_qty       = excluded.total_sell_qty,
+            preopen_imbalance    = excluded.preopen_imbalance,
+            last_price           = excluded.last_price,
+            total_traded_volume  = excluded.total_traded_volume,
+            fetched_at           = excluded.fetched_at
+    """)
+    cur.executemany(upsert_sql, rows)
     con.commit()
 
-    # Backfill today's technical_signals row per symbol.
-    # date = ? guard (2026-07-19): previously matched created_at = MAX(created_at), but
-    # technical_signals.created_at is NULL for 100% of rows in production (nothing else in
-    # this codebase sets it) -- MAX(created_at) is therefore always NULL, and `created_at =
-    # NULL` never matches in SQL, so this UPDATE has never actually written a row, ever.
-    # Uses snapshot_date (this batch's own date), not a fresh now() call, to stay consistent
-    # with what was just written to preopen_stock_snapshot above.
-    for (sym, sd, _iep, _pc, iep_gap_pct, _bq, _sq, preopen_imbalance, _lp, _fa) in rows:
-        if iep_gap_pct is None and preopen_imbalance is None:
-            continue
-        cur.execute(
-            """
+    # Backfill today's technical_signals row per symbol
+    sig_updates = [
+        (iep_gap_pct, preopen_imbalance, traded_vol, sym, sd)
+        for (sym, sd, _iep, _pc, iep_gap_pct, _bq, _sq, preopen_imbalance, _lp, traded_vol, _fa)
+        in rows
+        if iep_gap_pct is not None or preopen_imbalance is not None or traded_vol is not None
+    ]
+    if sig_updates:
+        update_sql = """
             UPDATE technical_signals
-            SET iep_gap_pct = ?, preopen_imbalance = ?
+            SET iep_gap_pct = ?, preopen_imbalance = ?, preopen_volume = ?
             WHERE symbol = ? AND date = ?
-            """,
-            (iep_gap_pct, preopen_imbalance, sym, sd),
-        )
-    con.commit()
+        """
+        cur.executemany(update_sql, sig_updates)
+        con.commit()
 
     # Summary
-    gap_ups   = sum(1 for r in rows if r[4] is not None and r[4] > 1.0)
-    gap_downs = sum(1 for r in rows if r[4] is not None and r[4] < -1.0)
-    buy_heavy = sum(1 for r in rows if r[7] is not None and r[7] > 0.3)
-    sell_heavy= sum(1 for r in rows if r[7] is not None and r[7] < -0.3)
+    gap_ups    = sum(1 for r in rows if r[4] is not None and r[4] > 1.0)
+    gap_downs  = sum(1 for r in rows if r[4] is not None and r[4] < -1.0)
+    buy_heavy  = sum(1 for r in rows if r[7] is not None and r[7] > 0.3)
+    sell_heavy = sum(1 for r in rows if r[7] is not None and r[7] < -0.3)
+    with_vol   = sum(1 for r in rows if r[9] is not None)
     print(
         f"[NSE PreOpen] {len(rows)} stocks | "
         f"Gap-up >1%: {gap_ups} | Gap-down <-1%: {gap_downs} | "
-        f"Buy-heavy (>0.3): {buy_heavy} | Sell-heavy (<-0.3): {sell_heavy}"
+        f"Buy-heavy (>0.3): {buy_heavy} | Sell-heavy (<-0.3): {sell_heavy} | "
+        f"With traded volume: {with_vol}"
     )
     return len(rows)
 
@@ -395,3 +448,9 @@ def run() -> None:
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

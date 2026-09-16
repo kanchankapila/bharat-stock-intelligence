@@ -20,6 +20,21 @@ already exist for the latest date (the grid-ensurer guarantees full-universe cov
 Run:  python mc_techscanner_fetcher.py
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McTechscannerFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McTechscannerFetcherBaseFetcher(BaseFetcher[McTechscannerFetcherSchema]):
+    fetcher_name = 'McTechscannerFetcher'
+    domain = 'moneycontrol.com'
+    schema = McTechscannerFetcherSchema
+    min_interval_sec = 0.5
+
+
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -27,6 +42,7 @@ import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
+import sys
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Gecko/20100101 Firefox/124.0"}
 SCAN_URL = "https://api.moneycontrol.com/mcapi/v1/techscanner/scanner-detail"
@@ -66,7 +82,7 @@ def _fetch_scan(session, cat_id: int, scan_id: str) -> set[str]:
         rows = (r.json().get("data") or {}).get("list", {}).get("scannerDetails") or []
         return {row["stkId"] for row in rows if row.get("stkId")}
     except Exception as e:
-        print(f"[MC_TECHSCANNER] scan catId={cat_id} scanId={scan_id} failed: {e} — treating as 0 matches")
+        print(f"[MC_TECHSCANNER] scan catId={cat_id} scanId={scan_id} failed: {e} — treating as 0 matches", file=sys.stderr)
         return set()
 
 
@@ -83,7 +99,7 @@ def _fetch_trend(session, path: str) -> set[str]:
                 break
             out.update(row["scId"] for row in rows if row.get("scId"))
         except Exception as e:
-            print(f"[MC_TECHSCANNER] trend path={path} page={page} failed: {e} — stopping pagination, {len(out)} collected so far")
+            print(f"[MC_TECHSCANNER] trend path={path} page={page} failed: {e} — stopping pagination, {len(out)} collected so far", file=sys.stderr)
             break
     return out
 
@@ -160,3 +176,9 @@ def run() -> int:
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

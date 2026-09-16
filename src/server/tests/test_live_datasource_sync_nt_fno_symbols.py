@@ -49,7 +49,7 @@ class TestSyncNtFnoSymbolsLiveDataSource:
         assert sample.get("symbol_name"), "F&O symbol entry missing symbol_name"
 
         exp_data = snf._fetch(
-            "https://webapi.niftytrader.in/webapi/Symbol/symbol-expiry-all?symbol=nifty&exchange=nse"
+            "https://www.niftytrader.in/api/niftytrader/Symbol/symbol-expiry-all?symbol=nifty&exchange=nse"
         )
         assert exp_data, "symbol-expiry-all endpoint returned nothing -- may be down/changed"
         exp_sample = exp_data[0]

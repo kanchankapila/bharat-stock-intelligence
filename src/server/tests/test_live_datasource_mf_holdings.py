@@ -20,6 +20,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import mf_holdings_fetcher as mhf
 from et_stats_client import load_companyid_map
 from live_datasource_helpers import assert_looks_like_ticker, assert_numeric_and_finite
@@ -28,7 +29,7 @@ REAL_SYMBOL = "RELIANCE"
 
 
 def _make_test_conn():
-    conn = sqlite3.connect(":memory:")
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.execute("""CREATE TABLE technical_signals (
         symbol TEXT, date TEXT,
@@ -50,7 +51,10 @@ class TestMfHoldingsFetcherLiveDataSource:
 
         session = requests.Session()
         session.headers.update(mhf.HEADERS)
-        result = mhf.fetch_mf_holding(REAL_SYMBOL, company_id, session)
+        # Returns (verdict, payload) since 2026-09-10 (d2e0be0b): a bare Optional collapsed a
+        # throttle into "no data". This gated test was never updated, so it rotted until run.
+        verdict, result = mhf.fetch_mf_holding(REAL_SYMBOL, company_id, session)
+        assert verdict == mhf.VERDICT_OK, f"fetch_mf_holding verdict={verdict!r} for {REAL_SYMBOL}"
         assert result is not None, (
             f"fetch_mf_holding returned None for {REAL_SYMBOL} — either the endpoint changed "
             f"shape again or companyId={company_id} is stale"
@@ -65,8 +69,9 @@ class TestMfHoldingsFetcherLiveDataSource:
         company_id = company_map.get(REAL_SYMBOL)
         session = requests.Session()
         session.headers.update(mhf.HEADERS)
-        result = mhf.fetch_mf_holding(REAL_SYMBOL, company_id, session)
-        assert result is not None, f"fetch_mf_holding returned None for {REAL_SYMBOL}"
+        verdict, result = mhf.fetch_mf_holding(REAL_SYMBOL, company_id, session)
+        assert verdict == mhf.VERDICT_OK and result is not None, \
+            f"fetch_mf_holding verdict={verdict!r} for {REAL_SYMBOL}"
 
         conn = _make_test_conn()
         today = date.today().isoformat()

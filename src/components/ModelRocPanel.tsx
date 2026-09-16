@@ -59,14 +59,14 @@ export function ModelRocPanel() {
     return (
       <div className="glass border border-slate-800/60 rounded-2xl p-5 h-80 flex flex-col items-center justify-center">
         <Loader2 className="w-6 h-6 text-indigo-400 animate-spin mb-2" />
-        <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">Computing deployment ROC…</span>
+        <span className="text-[10px] text-slate-500 font-data font-display uppercase tracking-widest">Computing deployment ROC…</span>
       </div>
     );
   }
   if (!data || !data.regimes.length) {
     return (
       <div className="glass border border-slate-800/60 rounded-2xl p-5 h-80 flex items-center justify-center">
-        <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">No resolved WIN/LOSS signals to score yet</span>
+        <span className="text-[10px] text-slate-500 font-data font-display uppercase tracking-widest">No resolved WIN/LOSS signals to score yet</span>
       </div>
     );
   }
@@ -80,42 +80,42 @@ export function ModelRocPanel() {
     <div className="glass border border-slate-800/60 rounded-2xl p-5">
       <div className="flex justify-between items-start mb-4">
         <div>
-          <h3 className="text-xs font-black text-slate-200 uppercase tracking-wider font-mono flex items-center gap-2">
+          <h3 className="text-xs font-black text-slate-200 font-display uppercase tracking-wider font-data flex items-center gap-2">
             <Activity className="w-4 h-4 text-indigo-400" /> Deployment ROC — win-probability vs realized outcome
           </h3>
-          <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5 font-mono">
+          <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5 font-data">
             How well the live win_probability ranks WIN over LOSS, per market regime · {(data.scoredTotal ?? 0).toLocaleString()} scored / {data.totalResolved.toLocaleString()} resolved
           </p>
         </div>
-        <span className="text-[8px] font-black text-slate-400 bg-slate-800/40 px-2 py-0.5 rounded border border-slate-700/40 font-mono uppercase tracking-widest">
+        <span className="text-[8px] font-black text-slate-400 bg-slate-800/40 px-2 py-0.5 rounded border border-slate-700/40 font-data font-display uppercase tracking-widest">
           Out-of-sample
         </span>
       </div>
 
       {/* Train -> live gap callout: the whole point of the panel */}
       <div className="grid grid-cols-3 gap-3 mb-5">
-        <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-3">
-          <span className="text-[8px] text-slate-500 block uppercase font-black font-mono tracking-widest">Training-CV AUC</span>
-          <span className="text-xl font-black font-mono italic text-slate-300">{trainAuc != null ? trainAuc.toFixed(3) : '—'}</span>
-          <span className="text-[8px] text-slate-500 block font-bold font-mono uppercase">
+        <div className="v1-card p-3">
+          <span className="text-[8px] text-slate-500 block uppercase font-black font-data tracking-widest">Training-CV AUC</span>
+          <span className="text-xl font-black font-data italic text-slate-300">{trainAuc != null ? trainAuc.toFixed(3) : '—'}</span>
+          <span className="text-[8px] text-slate-500 block font-bold font-data uppercase">
             ensemble {data.trainingModelVersion ? `v${data.trainingModelVersion}` : ''}
           </span>
         </div>
-        <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-3">
-          <span className="text-[8px] text-slate-500 block uppercase font-black font-mono tracking-widest">Live overall AUC</span>
-          <span className={`text-xl font-black font-mono italic ${liveAuc != null ? verdict(liveAuc).cls : 'text-slate-300'}`}>
+        <div className="v1-card p-3">
+          <span className="text-[8px] text-slate-500 block uppercase font-black font-data tracking-widest">Live overall AUC</span>
+          <span className={`text-xl font-black font-data italic ${liveAuc != null ? verdict(liveAuc).cls : 'text-slate-300'}`}>
             {liveAuc != null ? liveAuc.toFixed(3) : '—'}
           </span>
-          <span className="text-[8px] text-slate-500 block font-bold font-mono uppercase">realized WIN/LOSS</span>
+          <span className="text-[8px] text-slate-500 block font-bold font-data uppercase">realized WIN/LOSS</span>
         </div>
         <div className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-3">
-          <span className="text-[8px] text-rose-400/80 block uppercase font-black font-mono tracking-widest flex items-center gap-1">
+          <span className="text-[8px] text-rose-400/80 block uppercase font-black font-data tracking-widest flex items-center gap-1">
             <AlertTriangle className="w-3 h-3" /> Train → live gap
           </span>
-          <span className="text-xl font-black font-mono italic text-rose-400">
+          <span className="text-xl font-black font-data italic text-rose-400">
             {gap != null ? `${gap >= 0 ? '−' : '+'}${Math.abs(gap).toFixed(3)}` : '—'}
           </span>
-          <span className="text-[8px] text-slate-500 block font-bold font-mono uppercase">edge lost in deployment</span>
+          <span className="text-[8px] text-slate-500 block font-bold font-data uppercase">edge lost in deployment</span>
         </div>
       </div>
 
@@ -161,16 +161,16 @@ export function ModelRocPanel() {
             return (
               <div key={r.regime} className="p-3 bg-slate-900/30 border border-slate-800 rounded-xl">
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-black font-mono uppercase tracking-wider" style={{ color: REGIME_COLOR[r.regime] ?? '#94a3b8' }}>
+                  <span className="text-[10px] font-black font-data font-display uppercase tracking-wider" style={{ color: REGIME_COLOR[r.regime] ?? '#94a3b8' }}>
                     {r.regime}
                   </span>
-                  <span className={`text-sm font-black font-mono italic ${v.cls}`}>{r.auc.toFixed(3)}</span>
+                  <span className={`text-sm font-black font-data italic ${v.cls}`}>{r.auc.toFixed(3)}</span>
                 </div>
                 <div className="flex justify-between items-center mt-1">
-                  <span className="text-[8px] text-slate-500 font-bold font-mono uppercase">
+                  <span className="text-[8px] text-slate-500 font-bold font-data uppercase">
                     n={r.n.toLocaleString()} · base {(r.baseRate * 100).toFixed(0)}%
                   </span>
-                  <span className={`text-[8px] font-black font-mono uppercase tracking-wider ${v.cls}`}>{v.label}</span>
+                  <span className={`text-[8px] font-black font-data font-display uppercase tracking-wider ${v.cls}`}>{v.label}</span>
                 </div>
               </div>
             );
@@ -180,18 +180,18 @@ export function ModelRocPanel() {
 
       {!!data.unscoredRegimes?.length && (
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="text-[8px] font-black text-amber-400/80 uppercase font-mono tracking-widest">
+          <span className="text-[8px] font-black text-amber-400/80 uppercase font-data tracking-widest">
             Unmeasured (regime occurred but model wasn't scoring):
           </span>
           {data.unscoredRegimes.map((u) => (
-            <span key={u.regime} className="text-[8px] font-mono font-bold text-slate-400 bg-slate-800/40 border border-slate-700/40 px-2 py-0.5 rounded">
+            <span key={u.regime} className="text-[8px] font-data font-bold text-slate-400 bg-slate-800/40 border border-slate-700/40 px-2 py-0.5 rounded">
               {u.regime} · {u.count.toLocaleString()}
             </span>
           ))}
         </div>
       )}
 
-      <p className="text-[8px] text-slate-600 font-bold uppercase mt-3 font-mono leading-relaxed">
+      <p className="text-[8px] text-slate-600 font-bold uppercase mt-3 font-data leading-relaxed">
         AUC 0.50 = coin flip. Only actually-scored signals are counted (unscored 0.5-default rows are
         excluded). The deployed probability ranks above chance in BEAR; SIDEWAYS is weak; regimes with
         no scored signals show as unmeasured, not tested. Read alongside the breakout classifier,

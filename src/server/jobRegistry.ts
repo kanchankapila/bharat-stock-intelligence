@@ -43,6 +43,18 @@ export interface JobScheduleEntry {
   lateDeadlineCronPatterns?: string[];
 }
 
+/**
+ * Jobs whose weekday cron DELIBERATELY RUNS on NSE trading holidays — the opposite polarity
+ * of the skip family — so the holiday lateness forgiveness in jobHeartbeat.ts
+ * (isDeliberatelyIdleOccurrence) must never apply to them: on a closed day they are NOT idle,
+ * and a genuine failure that day would otherwise be pardoned as planned idle. The one such
+ * job on a weekday-only cron is closed-day-early-batch, which IS the holiday dispatcher (on
+ * normal days it stamps a success and no-ops, so it is never late anyway); 24/7 cadences
+ * (confluence-compute, trendlyne-catchup, the two digests, data-quality-daily) are already
+ * excluded from forgiveness by the weekday-only pattern gate.
+ */
+export const HOLIDAY_ACTIVE_JOB_NAMES: ReadonlySet<string> = new Set(['closed-day-early-batch']);
+
 // ── Market-hours policy (IST 09:15–15:30 = UTC 03:45–10:00, Mon–Fri, minus holidays) ──
 // INTRADAY jobs run ONLY during market hours and no-op on holidays via an isMarketOpen() guard
 // (holiday-aware, see marketStatusService): stock-refresh (live prices), intraday-fetcher,
@@ -55,7 +67,7 @@ export interface JobScheduleEntry {
 export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'stock-refresh', label: 'Stock Price Refresh', cronPattern: '30 10 * * 1-5', graceMinutes: 30, critical: true },
   { jobName: 'ai-signals', label: 'AI Signal Analyzer', graceMinutes: 0, critical: false },
-  { jobName: 'stock-scoring', label: 'Stock Scoring Sync', cronPattern: '0 17 * * 1-5', graceMinutes: 60, critical: true },
+  { jobName: 'stock-scoring', label: 'Stock Scoring Sync', cronPattern: '0 15 * * 1-5', graceMinutes: 60, critical: true },
   // Screener syncs moved 2026-07-31 from the 11:00-11:35 PM IST block to 6:00-6:40 PM IST so
   // they run AHEAD of every consumer (ml-daily-ops 7:30 PM, stock-scoring 10:30 PM) instead of
   // hours behind them. Keep these three in lockstep with queues.ts — a stale cronPattern here
@@ -75,19 +87,27 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // value (90min lockDuration + headroom), critical:true since it feeds
   // screener_features_fetcher.py's screener_momentum_score same as MC/ETnow.
   { jobName: 'trendlyne-screener-sync', label: 'Trendlyne Screener Sync', cronPattern: '40 12 * * 1-5', graceMinutes: 105, critical: true },
-  { jobName: 'nse-sync', label: 'NSE Master List Sync', cronPattern: '0 2 * * 0', graceMinutes: 120, critical: false },
-  { jobName: 'fundamentals-sync', label: 'Fundamentals Sync', cronPattern: '0 3 * * 0', graceMinutes: 120, critical: false },
-  { jobName: 'quant-scoring', label: 'Quant Score Engine', cronPattern: '30 17 * * 1-5', graceMinutes: 45, critical: true },
+  { jobName: 'nse-sync', label: 'NSE Master List Sync', cronPattern: '0 2 * * 6', graceMinutes: 120, critical: false },
+  // AF-20260828-21: closes the Mon-Thu is_nifty50/.../nifty_tier coverage gap left by
+  // nse-sync's own weekly (Saturday-only) run of the same fetcher -- see sync.jobs.ts's
+  // processIndexMembership() comment for the full root-cause. critical:false, same as
+  // nse-sync: a supplementary ML feature, not a live-blended score input.
+  { jobName: 'index-membership', label: 'Index Membership Daily', cronPattern: '35 15 * * 1-5', graceMinutes: 45, critical: false },
+  { jobName: 'analyst-estimates-sync', label: 'Analyst Estimates Sync', cronPattern: '15 14 * * 1-5', graceMinutes: 45, critical: false },
+
+  { jobName: 'fundamentals-sync', label: 'Fundamentals Sync', cronPattern: '0 3 * * 6', graceMinutes: 120, critical: false },
+  { jobName: 'quant-scoring', label: 'Quant Score Engine', cronPattern: '20 15 * * 1-5', graceMinutes: 45, critical: true },
   { jobName: 'signal-outcomes', label: 'Signal Outcome Tracker', cronPattern: '30 3 * * 1-5', graceMinutes: 45, critical: true },
   { jobName: 'news-sentiment', label: 'News Sentiment Refresh', everyMs: 15 * 60 * 1000, graceMinutes: 45, critical: true },
-  { jobName: 'trendlyne-intraday', label: 'Trendlyne Intraday Scan', everyMs: 15 * 60 * 1000, graceMinutes: 45, critical: false },
+  // Registered with `every: 15min` (24/7) but gated to market hours at runtime, where it returns
+  // { skipped: true } — same shape as its intraday-fetcher / market-regime-refresh /
+  // live-screener-collect siblings below, so it takes the identical deadline patterns. Needed as
+  // of the everyMs fix in jobHeartbeat.ts: until then this entry could never report late at all,
+  // so the absence of deadlines here was invisible rather than correct.
+  { jobName: 'trendlyne-intraday', label: 'Trendlyne Intraday Scan', everyMs: 15 * 60 * 1000, graceMinutes: 45, critical: false,
+    lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
   { jobName: 'intraday-fetcher', label: 'Intraday Bar Fetcher', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false,
     lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
-  // 2026-08-13: gdeltService.ts existed with a working fetcher/parser but was never scheduled
-  // anywhere -- wired into queues.ts (QUEUE_GDELT_SENTIMENT) the same day. Daily, no weekday
-  // restriction (GDELT indexes news on weekends/holidays too), 90min grace for the ~13min
-  // rate-limited run plus headroom.
-  { jobName: 'gdelt-sentiment', label: 'GDELT News Sentiment Backfill', cronPattern: '0 19 * * *', graceMinutes: 90, critical: false },
   { jobName: 'research-premarket', label: 'Premarket Research', cronPattern: '0 3 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'research-postclose', label: 'Postclose Research', cronPattern: '45 10 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'dl-macro-fetch', label: 'DL Macro Fetcher', cronPattern: '30 2 * * 1-5', graceMinutes: 60, critical: false },
@@ -98,13 +118,25 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
     lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
   { jobName: 'closed-day-early-batch', label: 'Closed-Day Early Batch (holiday pipeline)', cronPattern: '40 1 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'dl-retrain-emergency', label: 'DL Emergency Retrain (drift-triggered)', graceMinutes: 0, critical: false },
-  { jobName: 'confluence-compute', label: 'Confluence Engine', everyMs: 30 * 60 * 1000, graceMinutes: 45, critical: true },
-  { jobName: 'confluence-outcomes', label: 'Confluence Outcomes', cronPattern: '0 18 * * 1-5', graceMinutes: 60, critical: false },
+  // everyMs is its real cadence (30 min, 24/7) and stays the mirror of the registration, but the
+  // job only does WORK inside isConfluenceComputeWindow() -- IST hours 6-7 and 17-23 -- and now
+  // returns { skipped: true } outside it rather than faking a success. Without these deadlines the
+  // raw 30-min cadence would flag this critical job 'late' through every skip window (~9h a day),
+  // which is the phantom-alert failure mode the mc-screener-sync/quant-eod-sync grace bumps above
+  // were written for. Patterns are the window's real 30-min slots in UTC (IST minus 5:30):
+  // IST 06:00-07:30 -> UTC 00:30-02:00, IST 17:00-23:30 -> UTC 11:30-18:00.
+  { jobName: 'confluence-compute', label: 'Confluence Engine', everyMs: 30 * 60 * 1000, graceMinutes: 45, critical: true,
+    lateDeadlineCronPatterns: ['30 0 * * *', '0,30 1 * * *', '0 2 * * *', '30 11 * * *', '*/30 12-17 * * *', '0 18 * * *'] },
+  { jobName: 'confluence-outcomes', label: 'Confluence Outcomes', cronPattern: '40 15 * * 1-5', graceMinutes: 60, critical: false },
+  // Takes one bounded slice of one trendlyne.com fetcher per run (see trendlyneWeekly.jobs.ts).
+  // critical:false — a single missed slice is made up by the next one; only a sustained outage
+  // matters, which the 60min grace against a 20min cadence is what catches.
+  { jobName: 'trendlyne-catchup', label: 'Trendlyne Catch-up Slice', cronPattern: '*/20 * * * *', graceMinutes: 60, critical: false },
   { jobName: 'agent-data-scientist', label: 'Agent: Data Scientist', cronPattern: '30 1 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-strategist', label: 'Agent: Strategist', cronPattern: '20 3 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-auditor', label: 'Agent: Auditor', cronPattern: '0 11 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-optimizer', label: 'Agent: Optimizer', cronPattern: '0 12 * * 1-5', graceMinutes: 60, critical: false },
-  { jobName: 'unified-ranker', label: 'Unified Daily Ranker', cronPattern: '0 2 * * 1-5', graceMinutes: 45, critical: true },
+  { jobName: 'unified-ranker', label: 'Unified Daily Ranker', cronPattern: '0 17 * * 1-5', graceMinutes: 45, critical: true },
   { jobName: 'live-screener-collect', label: 'Live Screener Poller', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 30, critical: false,
     lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
   // graceMinutes 45 -> 360: the processor's own comment says "5.5h backstop... the last
@@ -114,6 +146,12 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // Found 2026-08-03 while building the graceMinutes mirror-consistency test.
   { jobName: 'quant-eod-sync', label: 'Quant EOD Sync', cronPattern: '30 16 * * 1-5', graceMinutes: 360, critical: false },
   { jobName: 'outcome-resolver', label: 'Outcome Resolver', cronPattern: '0 4 * * 1-5', graceMinutes: 45, critical: true },
+  // Listed here from the day the job was created (2026-08-16), deliberately: the ChromaDB index
+  // this refreshes sat frozen at its 2026-06-20 initial ingest for ~8 weeks precisely because
+  // nothing watched it. graceMinutes 90 covers a slow CPU embedding pass (lockDuration is 30min
+  // per run, x2 attempts, plus catch-up stagger). Keep cronPattern identical to
+  // operations.jobs.ts's `repeat: { pattern }` — a drifted mirror is its own recurring bug.
+  { jobName: 'chatbot-reingest', label: 'Chatbot RAG Re-ingest', cronPattern: '0 20 * * *', graceMinutes: 90, critical: false },
   // graceMinutes 60 -> 270: the Worker's own lockDuration is 4h (240min, "covers the full
   // daily ops run" per queues.ts's own comment) and processMlDailyOps is wrapped in
   // withJobTimeout(..., 3.5h) -- 60min grace flagged 'late' (critical: true, real Telegram
@@ -131,27 +169,32 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // flagged 'late' on any run past 3 hours, well inside what the job's own declared budget
   // (which includes a 90min ml_ensemble.py --train --tune --score step alone) allows.
   // Found 2026-08-03 while building the graceMinutes mirror-consistency test.
-  { jobName: 'ml-weekly-retrain', label: 'ML Weekly Retrain', cronPattern: '0 5 * * 0', graceMinutes: 390, critical: false },
+  // ml-weekly-data carries the fetch + labelling prologue split out of ml-weekly-retrain on
+  // 2026-09-12 (AF-20260912-13). Friday 18:00 UTC. graceMinutes 600 covers the ~513 min of
+  // runPython budget it inherited plus margin -- deliberately generous: this job is allowed
+  // to be slow on a Friday night, it just must not still be running on Saturday.
+  { jobName: 'ml-weekly-data', label: 'ML Weekly Data Prep', cronPattern: '0 18 * * 5', graceMinutes: 600, critical: false },
+  // graceMinutes still 390 after the 2026-09-12 split. It is now TRAIN-ONLY and should finish
+  // well inside that, but the value was not tightened: the train-only runtime has not been
+  // measured yet, and guessing a tighter bound risks a phantom 'late' alert. Re-measure from
+  // job_run_history after a few Saturdays, then tighten.
+  { jobName: 'ml-weekly-retrain', label: 'ML Weekly Retrain', cronPattern: '0 5 * * 6', graceMinutes: 390, critical: false },
   // Queue id kept as '-monthly' deliberately: renaming a BullMQ queue would orphan its
   // repeatable-job key and monitor state. As of 2026-07-31 the ratios step is WEEKLY (every
-  // Sunday); only working_capital + mf_stock_holdings remain first-Sunday-only.
+  // Saturday); only working_capital + mf_stock_holdings remain first-Saturday-only.
   // graceMinutes 60 -> 150: the weekly ratios leg alone is budgeted 60 min, and on a first
-  // Sunday it is followed by working_capital (60) + mf_stock_holdings (30).
-  // graceMinutes 150 -> 210: a first-Sunday run now chains 4 steps (financial_ratios 60min +
+  // Saturday it is followed by working_capital (60) + mf_stock_holdings (30).
+  // graceMinutes 150 -> 210: a first-Saturday run now chains 4 steps (financial_ratios 60min +
   // working_capital 60min + mf_stock_holdings 30min + mc_stockvitals_history 60min = up to
   // 210min worst case), not 3 -- same reasoning as the prior 150min bump when mf_stock_holdings
   // was added (see CLAUDE.md's session notes on this job's timeout history).
-  // graceMinutes 210 -> 270: 2026-08-07 added 3 more WEEKLY (every-Sunday, not just first-
-  // Sunday) steps -- mc_corporate_actions_fetcher.py (30min budget) + ohlcv_adjust.py --persist
+  // graceMinutes 210 -> 270: 2026-08-07 added 3 more WEEKLY (every-Saturday, not just first-
+  // Saturday) steps -- mc_corporate_actions_fetcher.py (30min budget) + ohlcv_adjust.py --persist
   // (20min budget, measured ~3.3min real) + ohlcv_adjust.py --cross-validate --persist (10min
   // budget, measured ~9s real) = 60min more worst-case, same additive convention as every prior
   // bump on this entry.
-  // cronPattern 30 12 * * 0 -> 30 0 * * 0 (2026-08-09): moved from 18:00 IST (evening) to
-  // 06:00 IST (early morning, ahead of the 07:30-11:30+ IST Sunday cluster) -- see
-  // trendlyneWeekly.jobs.ts's registration comment for the full reasoning. graceMinutes is
-  // unchanged: it bounds how long the job itself may run past its cron fire time, which
-  // doesn't depend on which hour it fires at.
-  { jobName: 'trendlyne-ratios-monthly', label: 'ET Ratios (weekly) + Corporate Actions/OHLCV Adjust (weekly) + Working Capital/MF Holdings/MC StockVitals History (monthly)', cronPattern: '30 0 * * 0', graceMinutes: 270, critical: false },
+  // cronPattern 30 12 * * 0 -> 30 0 * * 6 (2026-08-09): moved to 06:00 IST Saturday (early morning, ahead of the 07:30-11:30+ IST Saturday cluster)
+  { jobName: 'trendlyne-ratios-monthly', label: 'ET Ratios (weekly) + Corporate Actions/OHLCV Adjust (weekly) + Working Capital/MF Holdings/MC StockVitals History (monthly)', cronPattern: '30 0 * * 6', graceMinutes: 270, critical: false },
   { jobName: 'dl-feature-refresh', label: 'DL Feature Refresh', cronPattern: '30 11 * * 1-5', graceMinutes: 90, critical: false },
 
   // ml-daily-ops (cron '20 13 * * 1-5', see queues.ts processMlDailyOps) writes each of its
@@ -174,39 +217,56 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // critical: this is the only survivorship-free record of the traded universe. Every day it
   // misses is a day whose delisted names are gone for good from nse_universe_history.
   { jobName: 'nse-bhavcopy-fetcher', label: 'ML Daily Ops: NSE Bhavcopy (PIT universe)', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: true },
+  // critical: false -- dual-write validation phase (AF-20260903-01): Yahoo's own stock-refresh
+  // write is still the authoritative EOD source, this only reconciles gaps/drift against it.
+  // Not yet load-bearing enough to redden ml-daily-ops on its own if it fails.
+  { jobName: 'reconcile-stock-ohlcv', label: 'ML Daily Ops: Reconcile stock_ohlcv vs bhavcopy', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'ml-ensemble-incremental', label: 'ML Daily Ops: Ensemble Incremental', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'ml-ensemble-score', label: 'ML Daily Ops: Ensemble Score', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'drift-detector', label: 'ML Daily Ops: Drift Detector', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'reward-engine', label: 'ML Daily Ops: Reward Engine', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
-  { jobName: 'rl-agent-update', label: 'ML Daily Ops: RL Agent Update', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
+  // rl-agent-update removed 2026-08-31 with rl_agent.py (no demonstrated edge; tables dropped).
   { jobName: 'signal-type-stats', label: 'ML Daily Ops: Signal Type Stats', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'news-symbol-link', label: 'ML Daily Ops: News Symbol Link', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'event-triggers', label: 'ML Daily Ops: Event Triggers', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'breakout-classifier-train', label: 'ML Daily Ops: Breakout Classifier Train', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'movement-predictor-train', label: 'ML Daily Ops: Movement Predictor Train', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
 
-  // Same story for ml-weekly-retrain's (cron '0 5 * * 0') StepTracker sub-steps.
-  { jobName: 'ml-ensemble-train', label: 'ML Weekly Retrain: Ensemble Train', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
-  { jobName: 'strategy-optimizer', label: 'ML Weekly Retrain: Strategy Optimizer', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
+  // Same story for ml-weekly-retrain's (cron '0 5 * * 6') StepTracker sub-steps.
+  { jobName: 'ml-ensemble-train', label: 'ML Weekly Retrain: Ensemble Train', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
+  { jobName: 'strategy-optimizer', label: 'ML Weekly Retrain: Strategy Optimizer', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
+  // These three T.run() siblings (queues.ts) were missing from this list entirely, so they fell
+  // through to getStaleJobs()'s flat 26h legacy threshold instead of this file's cron-aware
+  // getLateJobs() -- false-positiving "STALE" every week between Saturday runs (found live
+  // 2026-08-21: backtest-optimizer logged STALE at ~77-83h while job_heartbeat showed
+  // last_status='success' from the prior Saturday, no real failure).
+  { jobName: 'exit-policy-train', label: 'ML Weekly Retrain: Exit Policy Train', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
+  // cs-ranker-train removed 2026-08-31: model deactivated (live CV AUC 0.176, worse than
+  // random) and its blend weight zeroed — see unified_ranker.py's REGIME_WEIGHTS note.
+  { jobName: 'backtest-optimizer', label: 'ML Weekly Retrain: Backtest Optimizer', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
+  { jobName: 'mover-study-weekly', label: 'Mover Reverse Engineering Study', cronPattern: '30 8 * * 6', graceMinutes: 180, critical: false },
+  // Registered 2026-09-04 alongside the job itself. Without an entry here the name still gets a
+  // job_heartbeat row (its worker calls recordHeartbeat directly), and getStaleJobs() applies a
+  // generic 26h staleness warning to any heartbeat whose name is in NEITHER JOB_REGISTRY,
+  // MONITOR_SCRIPTS nor DATA_QUALITY_CHECKS -- so an unregistered live job emits a permanent
+  // false STALE alert every day. graceMinutes 180 because the capture legitimately stops at the
+  // 15:30 IST close while the coarse '*/15 3-10' cron keeps firing until 16:15 IST.
+  { jobName: 'nt-live-filter-capture', label: 'NiftyTrader Live Filter Capture', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 180, critical: false },
 
-  // job-digest (queues.ts '45 18 * * *', runs all 7 days) had NO entry here and never called
-  // recordHeartbeat() at all -- the one job whose entire purpose is monitoring every other job
-  // was itself completely unmonitored (found in the 2026-07-30 fifth full-stack-audit pass).
-  // Not critical -- it's a Telegram notification job, not a data pipeline -- but a missed
-  // digest send should still show up as stale rather than silently vanish.
-  { jobName: 'job-digest', label: 'Daily Job Digest (Telegram)', cronPattern: '45 18 * * *', graceMinutes: 60, critical: false },
+  // job-digest (queues.ts '20 17 * * *', runs all 7 days)
+  { jobName: 'job-digest', label: 'Daily Job Digest (Telegram)', cronPattern: '20 17 * * *', graceMinutes: 60, critical: false },
 
-  // Stock-recommendation digest. Runs after unified-ranker ('0 2 * * 1-5' = 07:30 IST) so it
+
+  // Second daily job-digest send (digests.jobs.ts '45 2 * * *' = 08:15 IST, added 2026-09-02):
+  // pre-open morning digest under its own heartbeat so lateness is judged per schedule.
+  { jobName: 'job-digest-morning', label: 'Morning Job Digest (Telegram)', cronPattern: '45 2 * * *', graceMinutes: 60, critical: false },
+
+  // Stock-recommendation digest. Runs after unified-ranker ('0 17 * * 1-5' = 22:30 IST) so it
   // reads the freshly-built ranking. Critical: this is the user-facing output of the whole
   // pipeline, and its predecessor (the websocketService confidence>=85 alert) went silent for
   // ~2 weeks without anything noticing, which is exactly what a heartbeat entry prevents.
-  { jobName: 'recommendations-digest', label: 'Daily Stock Recommendations (Telegram)', cronPattern: '45 2 * * 1-5', graceMinutes: 90, critical: true },
+  { jobName: 'recommendations-digest', label: 'Daily Stock Recommendations (Telegram)', cronPattern: '10 17 * * 1-5', graceMinutes: 90, critical: true },
 
-  // Formal daily wrapper around dataQualityChecks.ts's 25-check suite (2026-08-01). The
-  // 15-min setInterval poll in jobWatchdog.ts already runs these checks continuously and
-  // alerts on critical failures, but it was never a JOB_REGISTRY/cron job itself -- an
-  // unregistered setInterval has no lateness detection, so a silently-dead Node process
-  // would take the checks down with it and nothing would notice (the exact class of gap
-  // that already bit job-digest once). This job re-runs the full suite once a day and
-  // sends a summary regardless of pass/fail, so the report itself is monitored, not just
-  // the alerts it produces. Runs all 7 days (data staleness matters on weekends too, and
-  // job-digest already sets this precedent) after unified-ranker + recommendations-digest.
-  { jobName: 'data-quality-daily', label: 'Daily Data-Integrity Report (Telegram)', cronPattern: '10 3 * * *', graceMinutes: 90, critical: true },
+  // Formal daily wrapper around dataQualityChecks.ts's 25-check suite (2026-08-01).
+  { jobName: 'data-quality-daily', label: 'Daily Data-Integrity Report (Telegram)', cronPattern: '30 17 * * *', graceMinutes: 90, critical: true },
 ];

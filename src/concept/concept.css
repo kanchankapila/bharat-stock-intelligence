@@ -1,0 +1,246 @@
+/* ════════════════════════════════════════════════════════════════════
+   CONCEPT LEDGER — standalone design-direction preview (/concept).
+   Scoped entirely under .concept-root; nothing here touches the six
+   shipping shells. Direction: "editorial broadsheet × trading desk" —
+   warm paper, ink hairlines, Fraunces display serif, Archivo grotesque,
+   IBM Plex Mono tabular numerals. All figures are simulated client-side.
+   ════════════════════════════════════════════════════════════════════ */
+
+.concept-root {
+  --cl-paper:      #f4efe4;
+  --cl-paper-2:    #ece5d3;
+  --cl-paper-3:    #e2dac4;
+  --cl-ink:        #191410;
+  --cl-ink-2:      rgba(25, 20, 16, 0.67);
+  --cl-ink-3:      rgba(25, 20, 16, 0.43);
+  --cl-rule:       rgba(25, 20, 16, 0.16);
+  --cl-rule-hard:  rgba(25, 20, 16, 0.6);
+  --cl-saffron:    #e4570a;
+  --cl-saffron-dk: #a83d02;
+  --cl-green:      #0d7a4d;
+  --cl-red:        #bf2121;
+  --cl-gold:       #946200;
+
+  --cl-f-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --cl-f-ui:      'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  --cl-f-data:    'IBM Plex Mono', ui-monospace, 'Courier New', monospace;
+
+  min-height: 100vh;
+  background: var(--cl-paper);
+  color: var(--cl-ink);
+  font-family: var(--cl-f-ui);
+  font-size: 14px;
+  line-height: 1.45;
+  position: relative;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.concept-root ::selection { background: var(--cl-saffron); color: var(--cl-paper); }
+.concept-root :focus-visible { outline: 2px solid var(--cl-saffron); outline-offset: 2px; }
+
+/* paper grain — sits over everything, never intercepts the pointer */
+.concept-root::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.cl-wrap { max-width: 1440px; margin: 0 auto; padding: 0 clamp(16px, 3vw, 44px); }
+
+/* ── topbar ─────────────────────────────────────────────────────────── */
+.cl-topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--cl-rule-hard);
+  font-family: var(--cl-f-data);
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--cl-ink-2);
+}
+.cl-live { display: inline-flex; align-items: center; gap: 7px; color: var(--cl-red); font-weight: 600; }
+.cl-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cl-red); animation: cl-blink 1.4s steps(2, start) infinite; }
+.cl-stamp {
+  font-family: var(--cl-f-data); font-size: 9px; font-weight: 600; letter-spacing: 0.22em;
+  color: var(--cl-red); border: 1.5px solid var(--cl-red); border-radius: 2px;
+  padding: 3px 9px 2px; transform: rotate(-1.6deg); opacity: 0.85; white-space: nowrap;
+}
+
+/* ── ticker tape ────────────────────────────────────────────────────── */
+.cl-tape {
+  overflow: hidden; white-space: nowrap; border-bottom: 1px solid var(--cl-rule);
+  background: var(--cl-paper-2); padding: 7px 0; user-select: none;
+}
+.cl-tape-track { display: inline-flex; animation: cl-scroll 36s linear infinite; will-change: transform; }
+.cl-tape:hover .cl-tape-track { animation-play-state: paused; }
+.cl-tape-group { display: inline-flex; gap: 34px; padding-right: 34px; font-family: var(--cl-f-data); font-size: 11px; }
+.cl-tape-item b { font-weight: 600; letter-spacing: 0.06em; color: var(--cl-ink); }
+.cl-tape-item span { margin-left: 6px; }
+
+/* ── masthead ───────────────────────────────────────────────────────── */
+.cl-masthead { padding: clamp(30px, 5vw, 58px) 0 26px; border-bottom: 3px double var(--cl-rule-hard); text-align: center; }
+.cl-mast-kicker {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  font-family: var(--cl-f-data); font-size: 10px; letter-spacing: .34em;
+  text-transform: uppercase; color: var(--cl-ink-2);
+}
+.cl-mast-kicker::before, .cl-mast-kicker::after { content: ''; height: 1px; width: min(180px, 18vw); background: var(--cl-rule); }
+.cl-mast-title {
+  font-family: var(--cl-f-display); font-style: italic; font-weight: 900;
+  font-size: clamp(64px, 11vw, 158px); line-height: .94; letter-spacing: -0.015em;
+  margin-top: 10px; color: var(--cl-ink);
+}
+.cl-mast-title em { font-style: inherit; color: var(--cl-saffron); }
+.cl-mast-sub {
+  margin-top: 12px; font-family: var(--cl-f-ui); font-weight: 600;
+  font-size: clamp(11px, 1.4vw, 14px); letter-spacing: 0.52em; text-indent: 0.52em;
+  text-transform: uppercase;
+}
+.cl-mast-meta {
+  margin-top: 16px; font-family: var(--cl-f-data); font-size: 10.5px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--cl-ink-2);
+  display: flex; justify-content: center; gap: 8px 22px; flex-wrap: wrap;
+}
+.cl-mast-cta { margin-top: 24px; display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.cl-btn {
+  appearance: none; cursor: pointer; border-radius: 999px;
+  font-family: var(--cl-f-ui); font-weight: 600; font-size: 12px; letter-spacing: .08em;
+  text-transform: uppercase; text-decoration: none; padding: 11px 22px; display: inline-block;
+  transition: transform .16s ease, box-shadow .16s ease, background .16s ease, color .16s ease;
+}
+.cl-btn-solid { background: var(--cl-ink); color: var(--cl-paper); border: 1px solid var(--cl-ink); }
+.cl-btn-solid:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(25, 20, 16, .28); }
+.cl-btn-ghost { background: transparent; color: var(--cl-ink); border: 1px solid var(--cl-rule-hard); }
+.cl-btn-ghost:hover { background: var(--cl-ink); color: var(--cl-paper); transform: translateY(-2px); }
+
+/* ── section scaffolding ─────────────────────────────────────────────── */
+.cl-section { padding: clamp(30px, 4vw, 48px) 0; border-bottom: 1px solid var(--cl-rule); }
+.cl-sec-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 22px; }
+.cl-sec-no { font-family: var(--cl-f-data); font-size: 11px; color: var(--cl-saffron); font-weight: 600; letter-spacing: .18em; }
+.cl-sec-title { font-family: var(--cl-f-display); font-weight: 800; font-size: clamp(24px, 3vw, 34px); line-height: 1.05; }
+.cl-sec-note { margin-left: auto; font-family: var(--cl-f-data); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--cl-ink-3); }
+
+/* ── hero grid ───────────────────────────────────────────────────────── */
+.cl-hero-grid { display: grid; grid-template-columns: minmax(280px, 5fr) minmax(260px, 4fr); gap: clamp(20px, 3vw, 40px); align-items: start; }
+@media (max-width: 900px) { .cl-hero-grid { grid-template-columns: 1fr; } }
+.cl-hero-rule { height: 1px; background: var(--cl-rule-hard); margin: 14px 0; }
+
+.cl-bigchart-box { position: relative; }
+.cl-bigchart-svg { width: 100%; height: auto; display: block; }
+.cl-chart-tag {
+  position: absolute; top: 10px; right: 0; font-family: var(--cl-f-data);
+  font-size: 9px; letter-spacing: .2em; text-transform: uppercase; color: var(--cl-ink-3);
+}
+.cl-hero-quote { font-family: var(--cl-f-display); font-size: clamp(17px, 1.9vw, 21px); line-height: 1.42; font-weight: 600; }
+.cl-hero-quote em { color: var(--cl-saffron-dk); }
+.cl-byline { display: flex; gap: 10px; align-items: center; margin-top: 14px; font-family: var(--cl-f-data); font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--cl-ink-2); }
+.cl-byline::before { content: ''; width: 26px; height: 1px; background: var(--cl-rule-hard); }
+
+/* ── index cards row ─────────────────────────────────────────────────── */
+.cl-cards4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+@media (max-width: 1000px) { .cl-cards4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .cl-cards4 { grid-template-columns: 1fr; } }
+.cl-card {
+  background: var(--cl-paper-2); border: 1px solid var(--cl-rule); padding: 16px 16px 14px;
+  animation: cl-rise .55s cubic-bezier(.2,.75,.25,1) both; animation-delay: calc(var(--i, 0) * 90ms);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.cl-card:hover { transform: translateY(-3px); box-shadow: 0 12px 26px rgba(25, 20, 16, .13); border-color: var(--cl-rule-hard); }
+.cl-card-name { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--cl-f-ui); font-weight: 700; font-size: 11px; letter-spacing: .14em; }
+.cl-card-spark { margin-top: 8px; }
+.cl-card-spark svg { width: 100%; height: 44px; display: block; overflow: visible; }
+.cl-card-val { margin-top: 8px; font-family: var(--cl-f-data); font-weight: 600; font-size: 19px; letter-spacing: -.01em; }
+.cl-card-chg { font-size: 11.5px; font-weight: 600; margin-left: 7px; letter-spacing: 0; }
+.cl-up { color: var(--cl-green); }
+.cl-dn { color: var(--cl-red); }
+.cl-nt { color: var(--cl-gold); }
+
+/* ── ledger table ────────────────────────────────────────────────────── */
+.cl-table-wrap { border-top: 2px solid var(--cl-rule-hard); }
+.cl-table { width: 100%; border-collapse: collapse; }
+.cl-thead th {
+  font-family: var(--cl-f-ui); font-weight: 700; font-size: 9.5px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--cl-ink-2); text-align: left;
+  padding: 10px 10px; border-bottom: 1px solid var(--cl-rule-hard); white-space: nowrap;
+}
+.cl-tbody td { padding: 9px 10px; border-bottom: 1px solid var(--cl-rule); vertical-align: middle; white-space: nowrap; }
+.cl-tbody tr { transition: background .12s ease, color .12s ease; animation: cl-rise .5s ease both; animation-delay: calc(var(--i, 0) * 32ms); cursor: default; }
+.cl-tbody tbody tr:hover { background: var(--cl-ink); color: var(--cl-paper); }
+.cl-tbody tbody tr:hover .cl-up, .cl-tbody tbody tr:hover .cl-dn, .cl-tbody tr:hover .cl-sym-sub { color: inherit; opacity: .85; }
+.cl-sym { font-family: var(--cl-f-ui); font-weight: 700; font-size: 12.5px; letter-spacing: .05em; }
+.cl-sym-sub { display: block; font-weight: 400; font-size: 10px; color: var(--cl-ink-3); letter-spacing: .02em; margin-top: 1px; }
+.cl-num { font-family: var(--cl-f-data); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.cl-verdict {
+  display: inline-block; font-family: var(--cl-f-data); font-weight: 700; font-size: 9px;
+  letter-spacing: .16em; border: 1.5px solid currentColor; border-radius: 999px;
+  padding: 3px 9px 2px; transform: rotate(-2deg);
+}
+.cl-mini { stroke-width: 1.6; fill: none; }
+
+/* ── the wire ────────────────────────────────────────────────────────── */
+.cl-wire-list { display: flex; flex-direction: column; }
+.cl-wire-item {
+  display: flex; gap: 14px; align-items: baseline; padding: 11px 2px;
+  border-bottom: 1px solid var(--cl-rule); font-size: 13px;
+}
+.cl-wire-item:last-child { border-bottom: none; }
+.cl-wire-tag {
+  font-family: var(--cl-f-data); font-size: 9px; font-weight: 700; letter-spacing: .14em;
+  background: var(--cl-ink); color: var(--cl-paper); padding: 3px 7px 2px; white-space: nowrap;
+}
+.cl-wire-val { margin-left: auto; font-family: var(--cl-f-data); font-size: 12px; white-space: nowrap; }
+
+/* ── sectors heat strip ─────────────────────────────────────────────── */
+.cl-sector-grid { display: grid; grid-template-columns: repeat(10, 1fr); border: 1px solid var(--cl-rule-hard); }
+@media (max-width: 900px) { .cl-sector-grid { grid-template-columns: repeat(5, 1fr); } }
+@media (max-width: 520px) { .cl-sector-grid { grid-template-columns: repeat(2, 1fr); } }
+.cl-cell {
+  padding: 14px 10px 12px; border-right: 1px solid var(--cl-rule); border-bottom: 1px solid var(--cl-rule);
+  display: flex; flex-direction: column; gap: 5px; min-height: 84px;
+  animation: cl-rise .5s ease both; animation-delay: calc(var(--i, 0) * 45ms);
+  transition: filter .15s ease;
+}
+.cl-cell:hover { filter: brightness(1.06); }
+.cl-cell:nth-child(10n) { border-right: none; }
+.cl-cell-name { font-weight: 700; font-size: 9.5px; letter-spacing: .13em; color: var(--cl-ink); }
+.cl-cell-val { font-family: var(--cl-f-data); font-weight: 600; font-size: 12px; color: var(--cl-ink); }
+
+/* ── footer colophon ────────────────────────────────────────────────── */
+.cl-colophon {
+  padding: 34px 0 46px; display: flex; justify-content: space-between; gap: 18px;
+  align-items: flex-start; flex-wrap: wrap;
+}
+.cl-colophon-brand { font-family: var(--cl-f-display); font-style: italic; font-weight: 900; font-size: 26px; }
+.cl-colophon-note { max-width: 520px; font-size: 11px; line-height: 1.65; color: var(--cl-ink-2); }
+.cl-colophon-note b { color: var(--cl-saffron-dk); }
+
+.cl-wire-grid { display: grid; grid-template-columns: minmax(300px, 6fr) minmax(320px, 5fr); gap: clamp(24px, 4vw, 56px); align-items: start; }
+@media (max-width: 980px) { .cl-wire-grid { grid-template-columns: 1fr; } }
+
+/* ── scroll reveal (class added by IntersectionObserver in ConceptLedger.tsx) ── */
+.cl-reveal { opacity: 0; transform: translateY(14px); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.75,.25,1); }
+.cl-reveal.is-in { opacity: 1; transform: translateY(0); }
+
+/* ── helpers ─────────────────────────────────────────────────────────── */
+.cl-card-tag { font-family: var(--cl-f-data); font-size: 8.5px; letter-spacing: .18em; color: var(--cl-saffron-dk); font-weight: 700; }
+.cl-sector-cell { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--cl-ink-2); font-weight: 600; }
+.cl-sector-foot { margin-top: 12px; font-family: var(--cl-f-data); font-size: 10px; letter-spacing: .08em; color: var(--cl-ink-3); text-transform: uppercase; }
+
+/* ── keyframes ──────────────────────────────────────────────────────── */
+@keyframes cl-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes cl-rise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes cl-blink { 50% { opacity: 0.15; } }
+@keyframes cl-draw { from { stroke-dashoffset: var(--len, 1200); } to { stroke-dashoffset: 0; } }
+@keyframes cl-fadein { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .concept-root *, .concept-root *::before, .concept-root *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

@@ -14,6 +14,7 @@ Run:  python avwap_features.py
       python avwap_features.py --date 2026-06-25
       python avwap_features.py --window 10   # shorter anchor window
 """
+import polars as pl
 
 import datetime
 import argparse
@@ -98,3 +99,9 @@ if __name__ == '__main__':
     parser.add_argument('--window', type=int, default=AVWAP_WINDOW, help='Anchor window in trading days')
     args = parser.parse_args()
     run(date_str=args.date, window=args.window)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

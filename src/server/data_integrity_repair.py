@@ -8,9 +8,11 @@ Each repair is idempotent and can be run independently:
   --bad-bars        flag physically-impossible stock_ohlcv bars (is_suspect)
   --adjustment      backfill the untagged adjustment_basis column
   --insider-dates   convert insider_trades.date from "22 May, 2026" to ISO
+  --closed-sessions flag stock_ohlcv bars from days the exchange never opened
   --holidays        populate market_holidays from observed trading gaps
   --news-link       build an indexed news_symbol_link table from symbols_json
   --labels          add label_definition/producer to signal_outcomes + flag implausible returns
+  --feature-store-columns  add feature_store flow/fundamental columns feature_engineering writes
   --nan-recommendations  delete unified_recommendations rows with a non-finite unified_score
   --ghost-recommendations delete unified_recommendations rows for symbols with no price history
   --weekend-recommendations delete unified_recommendations snapshots dated to a closed day
@@ -19,6 +21,7 @@ Each repair is idempotent and can be run independently:
 
 Run:  python data_integrity_repair.py --all [--dry-run]
 """
+import polars as pl
 import argparse
 import datetime
 import json
@@ -205,8 +208,15 @@ def repair_holidays(conn: ConnWrapper, dry: bool) -> None:
         )
     """)
     conn.commit()
+    # A date counts as traded only if it has at least one bar NOT flagged as a fabricated
+    # closed session. Without this exclusion the derivation is circular: a holiday on which
+    # a live-quote refresh wrote flat zero-volume bars looks "traded" and can never be
+    # recognised as a holiday again (AF-20260911-15).
     traded = {str(r[0])[:10] for r in
-              conn.execute("SELECT DISTINCT date FROM stock_ohlcv").fetchall()}
+              conn.execute(
+                  "SELECT DISTINCT date FROM stock_ohlcv "
+                  "WHERE suspect_reason IS DISTINCT FROM ?",
+                  (CLOSED_SESSION_REASON,)).fetchall()}
     if not traded:
         _log("  no OHLCV dates; skipping")
         return
@@ -240,6 +250,7 @@ def repair_news_link(conn: ConnWrapper, dry: bool) -> None:
     wrong = conn.execute("""
         SELECT data_type FROM information_schema.columns
         WHERE table_name='news_symbol_link' AND column_name='news_id'
+          AND table_schema = current_schema()
     """).fetchone()
     if wrong and wrong[0] != 'text':
         _log(f"  news_id has type {wrong[0]}, expected text -- recreating table")
@@ -355,6 +366,96 @@ def repair_labels(conn: ConnWrapper, dry: bool) -> None:
     _log(f"  implausible-return rows flagged: {n_sus}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_so_label ON signal_outcomes (label_definition)")
     conn.commit()
+
+
+def repair_feature_store_columns(conn: ConnWrapper, dry: bool) -> None:
+    """Schema catch-up: feature_store columns feature_engineering writes but live PG lacks.
+
+    Found 2026-08-24 via the Gap #4 verification probe (_tmp_verify.py): the writer's
+    upsert lists 94 columns, live table had 86 -- every process_symbol() run has been
+    failing with UndefinedColumn since the Gap #4/#5 writer expansion landed, so
+    feature_store stopped receiving ANY fresh rows (not just the new ones).
+
+    Nine missing columns:
+      iv_skew, insider_buy_pct_90d, block_deal_net_qty, call_wall_dist_pct,
+      put_wall_dist_pct, near_expiry_gamma, sector_ret_5d, sector_ret_21d,
+      price_to_book  (legacy `pb` predates the writer and has never received a row --
+      0 non-null values table-wide -- so feature_engineering writes only
+      price_to_book; dl_engine.FEATURE_COLS was repointed from `pb` to
+      `price_to_book` on 2026-08-24 at the same list position, keeping checkpoint
+      shape).
+    Mirrored into db/schema.postgres.sql so bootstrap/DR restores match; bare
+    ADD COLUMN is metadata-only here and safe under Timescale compression
+    (.claude/commands/migration-safety-review.md). No data backfill: these are
+    point-in-time measurements, NEVER_FILL doctrine applies.
+    """
+    _log("feature_store: adding missing flow/fundamental columns ...")
+    stmts = [
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS iv_skew DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS insider_buy_pct_90d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS block_deal_net_qty DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS call_wall_dist_pct DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS put_wall_dist_pct DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS near_expiry_gamma DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS sector_ret_5d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS sector_ret_21d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS price_to_book DOUBLE PRECISION",
+        # 2026-09-13: block-deal smart-money family (_merge_block_deals reads the
+        # block_deals table of record; value_cr is already consumed by ml_ensemble).
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS block_deal_value_cr DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS block_deal_net_qty_5d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS block_deal_value_cr_5d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS analyst_buy_pct DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS analyst_target_mean DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS analyst_target_upside_pct DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS analyst_n DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS broker_recos_90d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS days_to_next_earnings DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS days_since_last_earnings DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS last_eps_surprise_pct DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS last_beat_score DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS earnings_in_5d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS delivery_z_20d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS delivery_pct_chg_5d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS delivery_qty_5d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS nifty_pcr DOUBLE PRECISION",
+    ]
+    if not dry:
+        for s in stmts:
+            conn.execute(s)
+        conn.commit()
+    have = {
+        r[0]
+        for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'feature_store'"
+        ).fetchall()
+    }
+    want = [
+        "iv_skew", "insider_buy_pct_90d", "block_deal_net_qty", "call_wall_dist_pct",
+        "put_wall_dist_pct", "near_expiry_gamma", "sector_ret_5d", "sector_ret_21d",
+        "price_to_book",
+        "block_deal_value_cr", "block_deal_net_qty_5d", "block_deal_value_cr_5d",
+        "analyst_buy_pct",
+        "analyst_target_mean",
+        "analyst_target_upside_pct",
+        "analyst_n",
+        "broker_recos_90d",
+        "days_to_next_earnings",
+        "days_since_last_earnings",
+        "last_eps_surprise_pct",
+        "last_beat_score",
+        "earnings_in_5d",
+        "delivery_z_20d",
+        "delivery_pct_chg_5d",
+        "delivery_qty_5d",
+        "nifty_pcr",
+    ]
+    missing = [c for c in want if c not in have]
+    _log(f"  post-check: {len(want) - len(missing)}/{len(want)} present"
+         + (f", STILL MISSING: {missing}" if missing else ""))
+    if missing and not dry:
+        raise RuntimeError(f"feature_store schema catch-up failed for {missing}")
 
 
 # ── entry point ──────────────────────────────────────────────────────────────
@@ -551,13 +652,88 @@ def repair_delivery_trades(conn: ConnWrapper, dry: bool) -> None:
     _log(f"delivery-trades: nulled {total} rows.")
 
 
+# ── 12. fabricated closed-session bars ───────────────────────────────────────
+
+# Above this share of a day's universe being flat AND zero-volume, the exchange never opened.
+# Matches liveStockData.ts's CLOSED_MARKET_SHARE_FLOOR -- keep the two in step.
+CLOSED_MARKET_SHARE_FLOOR = 0.95
+CLOSED_SESSION_REASON = 'closed session: universe-wide flat zero-volume bar'
+
+
+def _find_closed_sessions(conn) -> list:
+    """Dates whose whole universe is a flat (o==h==l==c) zero-volume bar -- a market holiday on
+    which a live-quote refresh persisted every stock's last close as if it were a session."""
+    rows = conn.execute("""
+        SELECT date::text AS d, count(*) AS n,
+               count(*) FILTER (WHERE COALESCE(volume,0)=0
+                                 AND open=high AND high=low AND low=close) AS flat
+        FROM stock_ohlcv
+        GROUP BY date
+        HAVING count(*) > 50
+        ORDER BY date
+    """).fetchall()
+    return [(str(r[0])[:10], int(r[1])) for r in rows
+            if int(r[1]) and int(r[2]) / int(r[1]) >= CLOSED_MARKET_SHARE_FLOOR]
+
+
+def repair_closed_sessions(conn: ConnWrapper, dry: bool) -> None:
+    """Flag bars belonging to a session the exchange never opened (AF-20260911-15).
+
+    Found 2026-09-11: 4 such dates (2026-01-15, 2026-05-01, 2026-05-28, 2026-06-26) held 7,515
+    bars, essentially none flagged. Two distinct harms, which is why flagging matters rather
+    than being cosmetic:
+      * measurement.md's panel spec excludes `is_suspect = 1`, so unflagged fake bars entered
+        every forward-return panel as a real session returning exactly 0%;
+      * repair_holidays() derives market_holidays from weekdays ABSENT from stock_ohlcv, so a
+        fabricated bar permanently hides the holiday that produced it.
+
+    Flags rather than deletes: is_suspect is the column that exists for exactly this, every
+    measurement path already filters on it, and the flag is reversible where a DELETE is not.
+    """
+    _log("closed sessions: scanning for universe-wide flat zero-volume days ...")
+    conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS is_suspect SMALLINT DEFAULT 0")
+    conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS suspect_reason TEXT")
+    conn.commit()
+
+    sessions = _find_closed_sessions(conn)
+    if not sessions:
+        _log("  none found")
+        return
+    for d, n in sessions:
+        _log(f"  {d}: {n} bars")
+
+    dates = [d for d, _ in sessions]
+    placeholders = ','.join('?' for _ in dates)
+    # Idempotent: only rows not already carrying this reason are rewritten, so a second run
+    # decompresses nothing.
+    pairs = conn.execute(
+        f"SELECT symbol, date::text FROM stock_ohlcv "
+        f"WHERE date::text IN ({placeholders}) "
+        f"AND (COALESCE(is_suspect,0)=0 OR suspect_reason IS DISTINCT FROM ?)",
+        (*dates, CLOSED_SESSION_REASON)).fetchall()
+    _log(f"  bars needing the flag: {len(pairs)}")
+    if not pairs or dry:
+        return
+
+    done = safe_keyed_update(
+        conn,
+        "UPDATE stock_ohlcv SET is_suspect=1, suspect_reason=? WHERE symbol=? AND date::text=?",
+        [(CLOSED_SESSION_REASON, str(s), str(d)[:10]) for s, d in pairs],
+        batch_size=200)
+    _log(f"  flagged {done} bars across {len(dates)} session(s)")
+
+
 TASKS = {
     'bad_bars': repair_bad_bars,
     'adjustment': repair_adjustment_basis,
     'insider_dates': repair_insider_dates,
+    # Must precede 'holidays': that repair derives the calendar from dates ABSENT from
+    # stock_ohlcv, so the fabricated sessions have to be flagged first to be excluded.
+    'closed_sessions': repair_closed_sessions,
     'holidays': repair_holidays,
     'news_link': repair_news_link,
     'labels': repair_labels,
+    'feature_store_columns': repair_feature_store_columns,
     'nan_recommendations': repair_nan_recommendations,
     'ghost_recommendations': repair_ghost_recommendations,
     'weekend_recommendations': repair_weekend_recommendations,
@@ -586,3 +762,9 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

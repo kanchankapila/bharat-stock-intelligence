@@ -20,11 +20,27 @@ both shapes rather than assuming one.
 symbol resolution and headers are shared with marketsmojo_technical_fetcher.py.
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MarketsmojoShareholdingFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MarketsmojoShareholdingFetcherBaseFetcher(BaseFetcher[MarketsmojoShareholdingFetcherSchema]):
+    fetcher_name = 'MarketsmojoShareholdingFetcher'
+    domain = 'marketsmojo.com'
+    schema = MarketsmojoShareholdingFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import re
 import sys
 import time
 from calendar import monthrange
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 
 import requests
@@ -35,6 +51,9 @@ from marketsmojo_technical_fetcher import HEADERS, load_sid_map  # noqa: E402
 
 BASE_URL = "https://frapi.marketsmojo.com/Stocks_Shareholding/get_results"
 RATE_LIMIT_SEC = 0.5
+# Same host/rate profile as marketsmojo_technical_fetcher.py, which measured 8 concurrent
+# workers with zero throttling (2.02s/symbol serial -> ~0.28s/symbol parallel).
+MAX_WORKERS = 8
 
 _TITLE_RE = re.compile(r"[^a-z0-9]+")
 
@@ -99,7 +118,7 @@ def fetch_shareholding_history(sid: str, session: requests.Session, exchange: st
             return None
         blocks = payload.get("data", {}).get("shareholding_graphs", {}).get("data", [])
     except Exception as e:
-        print(f"  [marketsmojo shareholding] sid={sid} error: {e}")
+        print(f"  [marketsmojo shareholding] sid={sid} error: {e}", file=sys.stderr)
         return None
     finally:
         time.sleep(RATE_LIMIT_SEC)
@@ -108,9 +127,41 @@ def fetch_shareholding_history(sid: str, session: requests.Session, exchange: st
     return rows or None
 
 
-def write_shareholding_history(conn, symbol: str, rows: list, fetched_at: str) -> int:
+def load_known_max_dates(conn) -> dict[tuple[str, str], str]:
+    """(symbol, category) -> max stored period_date, as ISO text. Same rationale as
+    marketsmojo_technical_fetcher.py's fetcher of the same name (recurring-bugs.md's
+    write-amplification class): no since-param on this API, so this is what lets a rerun skip
+    periods already held instead of re-upserting the whole history every call.
+    """
+    rows = conn.execute(
+        "SELECT symbol, category, MAX(period_date) FROM marketsmojo_shareholding_history "
+        "GROUP BY symbol, category"
+    ).fetchall()
+    return {
+        (r[0], r[1]): (r[2].isoformat() if hasattr(r[2], "isoformat") else str(r[2]))
+        for r in rows if r[2] is not None
+    }
+
+
+def write_shareholding_history(conn, symbol: str, rows: list, fetched_at: str,
+                                known: dict[tuple[str, str], str] | None = None) -> int:
     written = 0
     for category, period_date, value in rows:
+        since = (known or {}).get((symbol, category))
+        # Both sides coerced to ISO text before comparing. They are NOT the same type:
+        # _flatten_blocks yields datetime.date (via _yyyymm_to_date), while
+        # load_known_max_dates deliberately returns ISO strings (MAX(period_date) comes back
+        # as a date from Postgres and is stringified there). The original
+        # `period_date <= since` therefore raised
+        #   TypeError: '<=' not supported between instances of 'datetime.date' and 'str'
+        # on every symbol that already had stored history -- i.e. the whole incremental path,
+        # which is the only path this guard exists for. Caught live in the pm2 logs 2026-08-16.
+        # Its own comment ("ISO dates, lexicographic == chronological") was right about the
+        # ordering and wrong about the types.
+        if since and period_date:
+            pd_iso = period_date.isoformat() if hasattr(period_date, "isoformat") else str(period_date)
+            if pd_iso <= since:
+                continue
         conn.execute(
             """
             INSERT INTO marketsmojo_shareholding_history
@@ -127,29 +178,41 @@ def write_shareholding_history(conn, symbol: str, rows: list, fetched_at: str) -
     return written
 
 
-def run(symbols: list[str] | None = None) -> None:
+def run(symbols: list[str] | None = None, full: bool = False) -> None:
     sid_map = load_sid_map()
     symbols = [s.upper() for s in symbols] if symbols else sorted(sid_map.keys())
     session = requests.Session()
     session.headers.update(HEADERS)
     conn = connect()
     fetched_at = date.today().isoformat()
+    known = None if full else load_known_max_dates(conn)
+    if known is not None:
+        print(f"[marketsmojo shareholding] {len(known)} (symbol,category) pairs known -- fetching new periods only")
+
+    def _fetch_one(symbol):
+        sid = sid_map.get(symbol)
+        if not sid:
+            return symbol, None, "no stockid mapping"
+        return symbol, fetch_shareholding_history(sid, session), None
 
     total_rows = 0
     ok = 0
-    for symbol in symbols:
-        sid = sid_map.get(symbol)
-        if not sid:
-            print(f"  [marketsmojo shareholding] {symbol}: no stockid mapping, skipped")
-            continue
-        rows = fetch_shareholding_history(sid, session)
-        if not rows:
-            print(f"  [marketsmojo shareholding] {symbol}: empty response")
-            continue
-        n = write_shareholding_history(conn, symbol, rows, fetched_at)
-        total_rows += n
-        ok += 1
-        print(f"  [marketsmojo shareholding] {symbol}: {n} rows")
+    # Fetch in parallel (network only); DB writes stay single-threaded on the main thread --
+    # same pattern as mc_pricefeed_fetcher.py / marketsmojo_fintrend_fetcher.py.
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = [pool.submit(_fetch_one, symbol) for symbol in symbols]
+        for fut in as_completed(futures):
+            symbol, rows, skip_reason = fut.result()
+            if skip_reason:
+                print(f"  [marketsmojo shareholding] {symbol}: {skip_reason}, skipped")
+                continue
+            if not rows:
+                print(f"  [marketsmojo shareholding] {symbol}: empty response")
+                continue
+            n = write_shareholding_history(conn, symbol, rows, fetched_at, known)
+            total_rows += n
+            ok += 1
+            print(f"  [marketsmojo shareholding] {symbol}: {n} rows")
 
     conn.close()
     print(f"[marketsmojo shareholding] done -- {total_rows} rows, {ok}/{len(symbols)} symbols succeeded")
@@ -158,5 +221,12 @@ def run(symbols: list[str] | None = None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbols", nargs="*", help="restrict to these NSE symbols (default: full universe)")
+    parser.add_argument("--full", action="store_true", help="force a complete re-upsert (backfill/vendor restatement)")
     args = parser.parse_args()
-    run(args.symbols)
+    run(args.symbols, full=args.full)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

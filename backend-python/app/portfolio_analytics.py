@@ -1,4 +1,3 @@
-import os
 import datetime
 import numpy as np
 import pandas as pd
@@ -8,8 +7,12 @@ from db_compat import get_engine
 from pydantic import BaseModel
 from typing import List, Dict
 
-DB_PATH = os.environ.get('DATABASE_URL', os.path.join(os.getcwd(), 'database.sqlite'))
-DATABASE_URL = DB_PATH if DB_PATH.startswith("sqlite:///") else f"sqlite:///{DB_PATH}"
+# NOTE: this module deliberately has no DB path of its own. It uses db_compat.get_engine(),
+# which resolves the dialect from USE_POSTGRES -- production is Postgres. Two dead lines
+# were removed here 2026-08-15: a DB_PATH/DATABASE_URL pair that force-wrapped the value in
+# "sqlite:///" and was then never referenced again. They were harmless but actively
+# misleading -- they are why a past session recorded AlphaQuant as a live SQLite writer
+# (infra_gotchas memory) when it has never been one. See docs/SQLITE_DECOMMISSION_PLAN.md.
 
 class PortfolioRequest(BaseModel):
     symbols: List[str]

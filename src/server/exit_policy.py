@@ -19,6 +19,7 @@ Run:  python exit_policy.py --train
       python exit_policy.py --train --min-samples 200
 """
 
+import polars as pl
 import argparse
 import datetime
 import os
@@ -28,9 +29,11 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df
-from ml_ensemble import build_features
+from ml_ensemble import build_features, full_feature_train_sql
 from as_of import as_of_join_sql
-from model_promotion import decide_promotion_with_nan_guard
+from model_promotion import (decide_promotion_with_nan_guard, rejections_since,
+                              staleness_override_applies,
+                              DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
 
 # Script-relative, not os.getcwd()-relative -- see ml_ensemble.py's MODELS_DIR comment.
 MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_models')
@@ -41,8 +44,35 @@ EXIT_CANDIDATE_PATH = EXIT_MODEL_PATH + '.candidate'
 EXIT_PROMOTION_MARGIN = 0.1
 
 # Defaults for translating predicted excursions into levels.
-MFE_CAPTURE = 0.6   # bank 60% of the expected favourable run (you don't sell the exact high)
-MAE_BUFFER  = 1.15  # set the stop 15% wider than the expected adverse excursion (noise room)
+# MEASURED 2026-09-10 (AF-20260910-17) -- this constant is a MEDIAN-TARGETING rule, and it is
+# almost exactly calibrated as one. On a time-ordered holdout (40k most recent excursions,
+# embargoed, n_test=4,004) `target = 0.6 * predicted_MFE` is reached by the realized MFE
+# **50.1%** of the time -- 0.1pp off a true median. The capture/hit curve on that holdout:
+#     c=0.4 -> 63.0%   c=0.5 -> 56.3%   c=0.6 -> 50.1%   c=0.7 -> 43.6%   c=1.0 -> 29.7%
+# So do NOT read 0.6 as "we keep 60% of the move": it is "we aim at the level the trade clears
+# about half the time". Changing it moves that hit rate along the curve above, which is a
+# scoring change -- re-measure, don't retune by argument (measurement.md).
+#
+# REPLACING THIS WITH A QUANTILE REGRESSOR WAS TESTED AND LOST (same holdout, same features,
+# GradientBoostingRegressor(loss='quantile')). Every quantile head came out systematically
+# OVER-optimistic -- claimed vs actual hit rate: a=0.20 80%/74.5%, a=0.30 70%/62.9%,
+# a=0.40 60%/52.2%, a=0.50 50%/41.5% (calibration error 5.5-8.5pp). The a=0.50 head, doing this
+# constant's exact job, is 8.5pp worse calibrated than the constant. And at a MATCHED hit rate
+# there is no gain in captured return: c=0.6 gives a 1.37% median target at 50.1%, a=0.40 gives
+# 1.35% at 52.2%. The appeal of "a stated quantile beats an emergent one" is real in principle
+# and false on this data -- the quantile head resolves the lower tail of MFE worse than the
+# point estimate plus a scalar does. Do not re-propose it without a genuinely new angle
+# (different features, a conformal wrapper, or a recalibration layer on top).
+MFE_CAPTURE = 0.6   # aim at the level cleared ~50% of the time (measured; see above)
+# MEASURED 2026-09-10 (AF-20260910-17), same holdout as MFE_CAPTURE above. The number this
+# constant actually picks is the STOP-OUT RATE: `stop = 1.15 * predicted_MAE` is breached by the
+# realized adverse excursion **30.5%** of the time. The buffer/stop-out curve:
+#     b=1.00 -> 37.9%   b=1.15 -> 30.5%   b=1.30 -> 24.6%   b=1.50 -> 17.7%   b=2.00 -> 7.7%
+# Read the pair together: the shipped policy aims at a level cleared ~50% of the time and stops
+# out on ~30% of trades. Neither constant is miscalibrated -- they were UNDOCUMENTED, which is a
+# different defect and the one that was fixed. Widening b trades stop-outs for larger losses when
+# the stop does hit; that is a scoring change, so re-measure rather than retune by argument.
+MAE_BUFFER  = 1.15  # stop breached on ~30% of trades (measured; see above)
 
 
 def suggest_levels(entry: float, pred_mfe_pct: float, pred_mae_pct: float,
@@ -57,26 +87,48 @@ def suggest_levels(entry: float, pred_mfe_pct: float, pred_mae_pct: float,
     return round(target, 2), round(stop, 2)
 
 
+# 2026-08-29: signal_excursions has no retention/window at all -- it grew to 393K qualifying
+# rows in its first ~103 days of existence (2026-05-16..08-27) and GradientBoostingRegressor's
+# per-tree cost scales with row count, fit 4x (2 targets x split-fit + refit-all, see
+# train_from_df). This is the direct cause of exit-policy-train's weekly timeout, which had
+# already been bumped once (20min->45min, 2026-08-24) "for dataset growth" and hit the new
+# ceiling again just 5 days later -- bumping it a second time would only defer the same failure
+# again as the table keeps growing, unbounded, forever. A recency cap keeps runtime roughly flat
+# going forward instead of growing every week; MAX_TRAINING_ROWS is deliberately a ROW count, not
+# a calendar window, because the table is currently younger than any reasonable calendar window
+# would be (a "last 2 years" cap would not drop a single row today). The champion/challenger gate
+# in _register_exit_model already refuses to promote a worse model, so a training-set change here
+# cannot silently degrade the live model -- it can only fail to improve it, which is caught.
+MAX_TRAINING_ROWS = 150_000
+
+
 def load_exit_training_data() -> pd.DataFrame:
     """Excursion labels joined to the entry-time technical features + point-in-time
-    fundamentals (same as-of discipline as ml_ensemble.load_training_data)."""
+    fundamentals (same as-of discipline as ml_ensemble.load_training_data).
+
+    Capped to the most recent MAX_TRAINING_ROWS by signal_date (see the comment above) --
+    re-sorted ascending afterward since train_from_df's time-ordered split assumes that order."""
+    # Full feature set (2026-08-30): this used to hand-select ~23 of build_features()'s 304
+    # raw inputs -- everything else silently defaulted to a constant for every training row.
+    # See measurement.md's cs_ranker/exit_policy feature-completeness finding and
+    # full_feature_train_sql()'s docstring in ml_ensemble.py. Anchored on `se` (signal_excursions
+    # has the same symbol/signal_date shape as signal_outcomes), so the LATERAL join inside
+    # full_feature_train_sql already finds its own `ts` row -- the old hand-written
+    # `JOIN technical_signals ts` above is now redundant and removed.
+    select_cols, joins = full_feature_train_sql('se', 'signal_date')
     q = f"""
-        SELECT se.symbol, se.signal_date, se.horizon_days,
-               se.mfe_pct, se.mae_pct,
-               ts.signal_score, ts.signals_json,
-               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
-               ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
-               ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
-               ts.sector_ret_5d, ts.sector_ret_21d,
-               ts.iv_rank, ts.iv_skew, ts.rs_rank_21d, ts.rs_rank_63d,
-               fh.fifty_two_week_high, fh.piotroski_f_score, fh.debt_to_equity,
-               fh.operating_margins, fh.return_on_equity, fh.revenue_growth,
-               fh.earnings_growth, fh.earnings_yield, fh.price_to_book, fh.market_cap
-        FROM signal_excursions se
-        JOIN technical_signals ts ON ts.symbol = se.symbol AND ts.date = se.signal_date
-        {as_of_join_sql('fundamentals_history', 'fh', 'se', 'symbol', 'signal_date')}
-        WHERE se.mfe_pct IS NOT NULL AND se.mae_pct IS NOT NULL
-        ORDER BY se.signal_date
+        WITH recent AS (
+            SELECT se.symbol, se.signal_date, se.horizon_days,
+                   se.mfe_pct, se.mae_pct,
+                   ts.signal_score, ts.signals_json,
+                   {select_cols}
+            FROM signal_excursions se
+            {joins}
+            WHERE se.mfe_pct IS NOT NULL AND se.mae_pct IS NOT NULL
+            ORDER BY se.signal_date DESC
+            LIMIT {MAX_TRAINING_ROWS}
+        )
+        SELECT * FROM recent ORDER BY signal_date
     """
     return read_df(q)
 
@@ -154,11 +206,12 @@ def _active_exit_baseline(conn) -> dict | None:
     """
     try:
         row = conn.execute(
-            "SELECT cv_roc_auc, cv_accuracy FROM model_registry "
+            "SELECT id, cv_roc_auc, cv_accuracy, trained_at FROM model_registry "
             "WHERE model_name = 'exit_policy' AND is_active = 1 ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        if row and row[0] is not None and row[1] is not None:
-            return {'mfe_holdout_mae': float(row[0]), 'mae_holdout_mae': float(row[1])}
+        if row and row[1] is not None and row[2] is not None:
+            return {'id': row[0], 'mfe_holdout_mae': float(row[1]), 'mae_holdout_mae': float(row[2]),
+                    'trained_at': row[3]}
     except Exception:
         pass
     return None
@@ -175,6 +228,12 @@ def _register_exit_model(conn, payload: dict) -> int:
     Promotes only if BOTH mfe and mae holdout MAE improve (or there's no active baseline
     yet) -- they're one combined pickle file, so a partial improvement can't partially
     overwrite it.
+
+    STALENESS OVERRIDE (ml-promotion-gate-review, 2026-08-14): this file had no equivalent to
+    ml_ensemble.py/cs_ranker.py/confluence_ml_engine.py's safety valve against a baseline whose
+    holdout MAE became permanently unbeatable (e.g. from a leak that's since been fixed) --
+    without it, every future honest retrain would reject forever. Same mechanism, reused
+    directly since this baseline lives in model_registry like those three.
     """
     metrics = payload['metrics']
     baseline = _active_exit_baseline(conn)
@@ -189,16 +248,26 @@ def _register_exit_model(conn, payload: dict) -> int:
         EXIT_PROMOTION_MARGIN, metric_name="MAE MAE")
     promote = promote_mfe and promote_mae
 
+    staleness_override = False
+    age_days = 0.0
+    rejections = 0
+    if baseline is not None and not promote:
+        rejections = rejections_since(conn, 'exit_policy', baseline['id'])
+        staleness_override, age_days = staleness_override_applies(
+            baseline['trained_at'], rejections,
+            DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
+
     os.makedirs(MODELS_DIR, exist_ok=True)
     version = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
     cur = conn.cursor()
 
-    if not promote:
+    if not promote and not staleness_override:
         with open(EXIT_CANDIDATE_PATH, 'wb') as f:
             pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
         reason = reason_mfe or reason_mae or "did not clear the promotion bar"
         print(f"[EXIT-POLICY] Candidate REJECTED: {reason} Saved to {EXIT_CANDIDATE_PATH} "
-              f"for inspection; active model unchanged.")
+              f"for inspection; active model unchanged. (baseline stale {age_days:.1f}d, "
+              f"{rejections} rejections so far)")
         cur.execute("""
             INSERT INTO model_registry
                 (model_name, model_version, model_type, trained_at, training_samples,
@@ -217,6 +286,8 @@ def _register_exit_model(conn, payload: dict) -> int:
     cur.execute("UPDATE model_registry SET is_active = 0 WHERE model_name = 'exit_policy' AND is_active = 1")
     note = (f"mfe_mae={metrics['mfe_holdout_mae']:.4f} mae_mae={metrics['mae_holdout_mae']:.4f}"
             + (" (bootstrap, no prior baseline)" if baseline is None else
+               f" (STALENESS OVERRIDE: baseline unbeaten {age_days:.1f}d, {rejections} rejections)"
+               if staleness_override and not promote else
                f" (beat baseline mfe={base_mfe:.4f} mae={base_mae:.4f})"))
     cur.execute("""
         INSERT INTO model_registry
@@ -364,11 +435,11 @@ def load_latest_features_for_symbol(symbol: str) -> pd.DataFrame:
         FROM technical_signals ts
         LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
         LEFT JOIN feature_store fs
-               ON fs.symbol = ts.symbol AND fs.date::text = ts.date AND fs.timeframe = 'D'
+               ON fs.symbol = ts.symbol AND fs.date = ts.date AND fs.timeframe = 'D'
         LEFT JOIN market_breadth mb ON mb.date = ts.date
         LEFT JOIN historical_fno_sentiment hfs
                ON hfs.symbol = ts.symbol AND hfs.date = ts.date
-        {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date')}
+        {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date', False)}
         LEFT JOIN proprietary_scores_history psh_az
                ON psh_az.symbol = ts.symbol
               AND psh_az.source = 'moneycontrol'
@@ -441,3 +512,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.train:
         train(min_samples=args.min_samples)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

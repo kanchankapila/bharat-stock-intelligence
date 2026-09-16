@@ -29,6 +29,21 @@ Run:
   python eps_surprise_fetcher.py --limit 50     # first 50 resolved stocks
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class EpsSurpriseFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class EpsSurpriseFetcherBaseFetcher(BaseFetcher[EpsSurpriseFetcherSchema]):
+    fetcher_name = 'EpsSurpriseFetcher'
+    domain = 'general'
+    schema = EpsSurpriseFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import sys
 
@@ -85,11 +100,11 @@ def ensure_schema(con) -> None:
     con.commit()
 
     new_cols = [
-        "ALTER TABLE technical_signals ADD COLUMN eps_surprise_q1       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_surprise_q2       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_beat_streak       INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN eps_miss_after_streak INTEGER DEFAULT 0",
-        "ALTER TABLE technical_signals ADD COLUMN rev_surprise_q1       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_surprise_q1       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_surprise_q2       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_beat_streak       INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_miss_after_streak INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rev_surprise_q1       REAL",
     ]
     for ddl in new_cols:
         try:
@@ -163,12 +178,12 @@ def fetch_bulk(mc_to_symbol: dict[str, str]) -> tuple[dict[str, dict], list[tupl
     try:
         r = retry_get(cffi_req, BULK_URL, headers=MC_HEADERS, impersonate="chrome110", timeout=30)
     except Exception as e:
-        print(f"[EPSSurprise] Bulk endpoint fetch failed after retries: {e}")
+        print(f"[EPSSurprise] Bulk endpoint fetch failed after retries: {e}", file=sys.stderr)
         return {}, []
     try:
         rows = r.json()["data"]["list"]
     except (ValueError, KeyError, TypeError) as e:
-        print(f"[EPSSurprise] Bulk endpoint returned no usable data (status={r.status_code}): {e}")
+        print(f"[EPSSurprise] Bulk endpoint returned no usable data (status={r.status_code}): {e}", file=sys.stderr)
         return {}, []
 
     features_by_symbol: dict[str, dict] = {}
@@ -433,3 +448,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

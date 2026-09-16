@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { convertPlaceholders, translateSql, stripPgCasts } from '../sqlTranslate';
+import {
+  convertPlaceholders, translateSql, stripPgCasts, translateCacheSize, TRANSLATE_CACHE_MAX_ENTRIES,
+} from '../sqlTranslate';
 
 describe('convertPlaceholders', () => {
   it('numbers positional placeholders', () => {
@@ -105,6 +107,24 @@ describe('translateSql: memoization', () => {
     expect(translateSql('SELECT a FROM t WHERE x = ?')).toBe('SELECT a FROM t WHERE x = $1');
     expect(translateSql('SELECT b FROM t WHERE y = ?')).toBe('SELECT b FROM t WHERE y = $1');
     expect(translateSql('SELECT a FROM t WHERE x = ?')).toBe('SELECT a FROM t WHERE x = $1');
+  });
+
+  // bulkUpsert builds a different SQL string for every chunk row count, so each run's tail chunk
+  // was a new entry that was never evicted: measured 2026-09-11 at ~2.7MB retained heap per
+  // 30-column entry (100 distinct tails pinned 264MB), against 9.5ms to translate one uncached.
+  it('does not retain large generated statements', () => {
+    const before = translateCacheSize();
+    for (let n = 1; n <= 50; n++) {
+      const rows = 3000 + n; // >16KB of SQL, like any real multi-hundred-row bulk upsert
+      const sql = `INSERT INTO t (a, b) VALUES ${Array(rows).fill('(?,?)').join(',')}`;
+      expect(translateSql(sql).endsWith(`($${rows * 2 - 1},$${rows * 2})`)).toBe(true);
+    }
+    expect(translateCacheSize() - before).toBe(0);
+  });
+
+  it('stays bounded however many distinct small statements it sees', () => {
+    for (let n = 1; n <= 6000; n++) translateSql(`SELECT a FROM t WHERE x IN (${Array(n % 900 + 1).fill('?').join(',')}) AND k = ${n}`);
+    expect(translateCacheSize()).toBeLessThanOrEqual(TRANSLATE_CACHE_MAX_ENTRIES);
   });
 });
 

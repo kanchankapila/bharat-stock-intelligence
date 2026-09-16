@@ -17,6 +17,7 @@ Run:  python performance_tracker.py
       python performance_tracker.py --resolve-recs   # resolve pending recommendation_log rows
 """
 
+import polars as pl
 import os
 import math
 import json
@@ -27,7 +28,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-from db_compat import connect, read_df
+from db_compat import connect, read_df, now_utc_iso
 
 # WIN threshold: > +1% within horizon = WIN, < -1% = LOSS, else NEUTRAL
 WIN_THRESHOLD  =  1.0
@@ -73,7 +74,7 @@ class PerformanceTracker:
                 ns.sector
             FROM signal_outcomes so
             LEFT JOIN technical_signals ts
-                   ON ts.symbol = so.symbol AND ts.date = so.signal_date
+                   ON ts.symbol = so.symbol AND so.signal_date = ts.date
             LEFT JOIN nse_stocks ns ON ns.symbol = so.symbol
             WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
               AND so.return_pct IS NOT NULL
@@ -107,8 +108,20 @@ class PerformanceTracker:
     # ──────────────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def compute_metrics(returns: pd.Series, outcomes: pd.Series, horizon_days: int) -> dict:
-        """Compute comprehensive performance metrics for a group of signals."""
+    def compute_metrics(returns: pd.Series, outcomes: pd.Series, horizon_days: int,
+                         dates: pd.Series | None = None) -> dict:
+        """Compute comprehensive performance metrics for a group of signals.
+
+        `dates`, when given, orders the max-drawdown trajectory chronologically -- callers pass
+        `signal_date` so the cumulative-return path means "if these signals had fired in the
+        order they actually occurred," not an arbitrary DataFrame row order. Still a known,
+        disclosed simplification for a genuinely cross-sectional segment (concurrent signals
+        across many symbols on the same date get compounded sequentially, as if one strategy
+        took them one after another with no sizing) -- real 2026-08-29 finding, not new scope:
+        without either the sort or the clip below, one pathological return_pct anywhere in the
+        (previously arbitrary) row order made numpy's cumprod silently overflow to inf, live in
+        production (`ml-weekly-retrain`'s performance_tracker(15) step, RuntimeWarning caught by
+        chance while investigating an unrelated timeout that same run)."""
         n = len(returns)
         if n == 0:
             return {}
@@ -129,16 +142,41 @@ class PerformanceTracker:
         ann_factor = math.sqrt(252 / max(horizon_days, 1))
         sharpe = (avg_ret / std_ret * ann_factor) if std_ret > 0 else 0.0
 
-        # Profit factor = sum(wins) / abs(sum(losses))
+        # Profit factor = sum(wins) / abs(sum(losses)). 2026-08-29: dividing by an epsilon
+        # (1e-9) when a small segment has zero losses (common at n<20, e.g. a 7-signal 100%
+        # win-rate bucket) produced values like 58,981,090,726.84 -- a fabricated number, not a
+        # real profit factor (there IS no upper bound when nothing lost money). Report None
+        # (NULL) instead of pretending a near-infinite ratio is a measured quantity.
         sum_wins   = float(win_returns.sum())         if len(win_returns)  > 0 else 0.0
-        sum_losses = abs(float(loss_returns.sum()))   if len(loss_returns) > 0 else 1e-9
-        profit_factor = sum_wins / sum_losses if sum_losses > 0 else sum_wins
+        sum_losses = abs(float(loss_returns.sum()))   if len(loss_returns) > 0 else 0.0
+        profit_factor = (sum_wins / sum_losses) if sum_losses > 0 else None
 
-        # Max drawdown (cumulative return trajectory)
-        cum_ret = (1 + returns / 100).cumprod()
-        peak    = cum_ret.cummax()
-        dd      = ((cum_ret - peak) / peak * 100)
+        # Max drawdown (cumulative return trajectory). Order chronologically when dates are
+        # available (see docstring) instead of arbitrary row order; clip each return to a sane
+        # bound before compounding, matching this codebase's winsorization convention elsewhere
+        # (measurement.md), so one corrupt/extreme outcome can't blow the whole chain up to inf.
+        if dates is None:
+            ordered_returns = returns.sort_index()
+        else:
+            sort_order = pd.to_datetime(dates, errors='coerce').sort_values().index
+            ordered_returns = returns.loc[sort_order]
+        clipped = ordered_returns.clip(-95, 95)
+        # Computed in LOG space, which is algebraically identical for a drawdown RATIO and
+        # cannot overflow. The direct `(1 + r/100).cumprod()` did overflow, every run and for
+        # the whole population, not occasionally: measured live 2026-09-12 the h=15 group is
+        # 93,278 rows with a mean clipped return of +2.216%, and 1.02216^93278 is inf. Because
+        # the non-finite guard below then wrote NULL, max_drawdown was never produced at all
+        # for any large group -- a silently dead metric, not a degraded one (AF-20260912-04).
+        # log(cum) = cumsum(log1p(r)); log(peak) = cummax(log(cum)) since log is monotonic; so
+        # dd = exp(logcum - logpeak) - 1, whose exponent is <= 0 by construction. The clip to
+        # [-95, 95] keeps 1 + r/100 in [0.05, 1.95], so log1p never sees a non-positive input.
+        log_cum  = np.log1p(clipped / 100).cumsum()
+        log_peak = log_cum.cummax()
+        dd       = (np.exp(log_cum - log_peak) - 1) * 100
         max_dd  = float(dd.min()) if len(dd) > 0 else 0.0
+        if not math.isfinite(max_dd):
+            print(f"[PerfTracker] max_drawdown non-finite for a {n}-row group -- writing NULL, not a fabricated number.")
+            max_dd = None
 
         # False positive rate: signalled WIN but got LOSS (among those that resolved)
         resolved = wins | losses
@@ -154,9 +192,9 @@ class PerformanceTracker:
             'median_return_pct': round(median_ret, 4),
             'avg_win_pct':      round(avg_win, 4),
             'avg_loss_pct':     round(avg_loss, 4),
-            'profit_factor':    round(profit_factor, 4),
+            'profit_factor':    round(profit_factor, 4) if profit_factor is not None else None,
             'sharpe_ratio':     round(sharpe, 4),
-            'max_drawdown_pct': round(max_dd, 4),
+            'max_drawdown_pct': round(max_dd, 4) if max_dd is not None else None,
             'false_positive_rate': round(fp_rate, 4),
         }
 
@@ -272,7 +310,8 @@ class PerformanceTracker:
         for val, grp in df.groupby('_seg'):
             if len(grp) < 5:
                 continue
-            metrics = self.compute_metrics(grp['return_pct'], grp['outcome'], horizon_days)
+            metrics = self.compute_metrics(grp['return_pct'], grp['outcome'], horizon_days,
+                                            dates=grp.get('signal_date'))
             if not metrics:
                 continue
             alpha  = self.alpha_vs_nifty(grp, nifty_rets)
@@ -298,7 +337,7 @@ class PerformanceTracker:
     # ──────────────────────────────────────────────────────────────────────────
 
     def save_strategy_performance(self, rows: list[dict]):
-        now = datetime.datetime.now().isoformat()
+        now = now_utc_iso()
         cur = self.conn.cursor()
         for r in rows:
             r['last_computed'] = now
@@ -435,7 +474,8 @@ class PerformanceTracker:
             all_rows.extend(rows)
 
         # Overall aggregate
-        overall = self.compute_metrics(df['return_pct'], df['outcome'], horizon_days)
+        overall = self.compute_metrics(df['return_pct'], df['outcome'], horizon_days,
+                                        dates=df.get('signal_date'))
         if overall:
             alpha = self.alpha_vs_nifty(df, nifty_rets)
             decay = self.signal_decay_halflife(df)
@@ -478,3 +518,9 @@ if __name__ == "__main__":
         )
     finally:
         tracker.close()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

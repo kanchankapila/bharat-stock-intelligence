@@ -4,7 +4,7 @@ nt_pcr_ts_fetcher.py
 Fetches intraday Put/Call Ratio time series from NiftyTrader for major indices
 and stores minute-level data in nt_index_pcr_ts.
 
-API: https://webapi.niftytrader.in/webapi/option/oi-pcr-data
+API: https://www.niftytrader.in/api/niftytrader/option/oi-pcr-data
      ?symbolName={nt_symbol}&reqType=nse_pcr_data&reqDate=
 
 Index symbols are read from index_provider_map (provider='nt_index').
@@ -19,6 +19,21 @@ Run:
   python nt_pcr_ts_fetcher.py --date 2026-06-27  # historical date (if API supports)
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class NtPcrTsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class NtPcrTsFetcherBaseFetcher(BaseFetcher[NtPcrTsFetcherSchema]):
+    fetcher_name = 'NtPcrTsFetcher'
+    domain = 'niftytrader.in'
+    schema = NtPcrTsFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 from datetime import date as _date
 from urllib.parse import urlencode
@@ -27,6 +42,7 @@ import requests
 
 from db_compat import connect, executemany, load_index_map_inv, query_all, translate
 from fetch_utils import retry_get
+import sys
 
 NT_HEADERS = {
     "User-Agent": (
@@ -38,7 +54,7 @@ NT_HEADERS = {
     "Referer": "https://www.niftytrader.in/",
 }
 
-PCR_BASE_URL = "https://webapi.niftytrader.in/webapi/option/oi-pcr-data"
+PCR_BASE_URL = "https://www.niftytrader.in/api/niftytrader/option/oi-pcr-data"
 
 # provider → reqType used in PCR API
 _REQ_TYPE = {
@@ -68,7 +84,7 @@ def _get_nt_index_map() -> dict[str, tuple[str, str]]:
             for r in rows:
                 result[r["index_name"]] = (r["provider_id"], req_type)
     except Exception as e:
-        print(f"[nt_pcr_ts] WARN: index map lookup failed ({e}), using fallback")
+        print(f"[nt_pcr_ts] WARN: index map lookup failed ({e}), using fallback", file=sys.stderr)
     return result or _FALLBACK
 
 
@@ -224,3 +240,9 @@ if __name__ == "__main__":
     parser.add_argument("--date",  default="",   help="reqDate param (leave empty for today)")
     args = parser.parse_args()
     run(target_index=args.index, req_date=args.date)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

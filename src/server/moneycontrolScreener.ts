@@ -2,6 +2,8 @@ import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { getStockMapping, getSymbolFromMcsymbol } from './stockMapping';
 import { mcFetchJson } from './mcApiService';
 import { parseMcScannerDetailResponse } from './contracts/marketFeeds';
+import { rowGroups, rowGroupsWith, bulkUpsert } from './dbBulk';
+import { delay } from './lib/async';
 import fs from 'fs';
 import path from 'path';
 import { isIntradayScreener } from './trendlyneScreener';
@@ -279,9 +281,10 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
           .map(r => r.symbol).filter(Boolean)
       );
 
-      const upsertStockSql = `
+      const STOCK_COLS = 6;
+      const buildStockUpsertSql = (n: number) => `
         INSERT INTO moneycontrol_screener_stocks (scan_id, mcsymbol, stock_name, symbol, first_seen, last_seen)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES ${rowGroups(n, STOCK_COLS)}
         ON CONFLICT(scan_id, mcsymbol) DO UPDATE SET
           stock_name = excluded.stock_name,
           symbol     = excluded.symbol,
@@ -290,26 +293,33 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
       const currentSymbols = new Set<string>();
       const today = new Date().toISOString().slice(0, 10);
       const incomingMcSymbols = new Set<string>();
+      // Deduped by mcsymbol (a later duplicate row overwrites an earlier one, matching the
+      // sequential per-row upserts) because Postgres rejects an ON CONFLICT DO UPDATE that
+      // touches the same row twice.
+      const stockRowsByMc = new Map<string, unknown[]>();
 
       for (const stock of stocks) {
         const mcsymbol = stock.stkId;
         const stkname = stock.stkname;
         if (mcsymbol) {
           const nseSymbol = getSymbolFromMcsymbol(mcsymbol);
-          await dbRun(upsertStockSql, [config.scanId, mcsymbol, stkname, nseSymbol, today, today]);
+          stockRowsByMc.set(mcsymbol, [config.scanId, mcsymbol, stkname, nseSymbol, today, today]);
           incomingMcSymbols.add(mcsymbol);
           if (nseSymbol) currentSymbols.add(nseSymbol);
           if (stkname) mappingsToUpdate.set(stkname.toUpperCase().trim(), mcsymbol);
         }
       }
+      await dbTransaction((tx) => bulkUpsert(tx, [...stockRowsByMc.values()], STOCK_COLS, buildStockUpsertSql));
 
-      // Remove stocks no longer in screener
+      // Remove stocks no longer in screener — one statement; the diff is bounded by one screener's membership
       const existingRows = await dbAll<{ mcsymbol: string }>(`SELECT mcsymbol FROM moneycontrol_screener_stocks WHERE scan_id = ?`,
         [config.scanId]);
       const toDelete = existingRows.filter(r => !incomingMcSymbols.has(r.mcsymbol));
       if (toDelete.length) {
-        const delSql = `DELETE FROM moneycontrol_screener_stocks WHERE scan_id = ? AND mcsymbol = ?`;
-        await dbTransaction(async (tx) => { for (const r of toDelete) await tx.run(delSql, [config.scanId, r.mcsymbol]); });
+        await dbRun(
+          `DELETE FROM moneycontrol_screener_stocks WHERE scan_id = ? AND mcsymbol IN (${toDelete.map(() => '?').join(',')})`,
+          [config.scanId, ...toDelete.map(r => r.mcsymbol)]
+        );
       }
 
       // Update screener_master sync time
@@ -324,29 +334,28 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
         // appeared_at records WHEN the sync saw it -- appeared_date is date-only and is the
         // dedup key, so it cannot carry a time. See the migration for why this is separate.
         const appearedAt = new Date().toISOString();
-        const insertAppSql = `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date, appeared_at) VALUES (?, 'moneycontrol', ?, ?, ?)`;
-        const insertLogSql = `INSERT OR IGNORE INTO screener_history_log (symbol, screener_id, entry_date, source) VALUES (?, ?, ?, 'moneycontrol')`;
+        // Literals stay in the SQL: screenerAppearedAt.test.ts pins the source literal on
+        // the screener_appearances INSERT line. Counts below are bind params per row.
+        const buildAppSql = (n: number) =>
+          `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date, appeared_at) VALUES ${rowGroupsWith(n, "(?, 'moneycontrol', ?, ?, ?)")}`;
+        const buildLogSql = (n: number) =>
+          `INSERT OR IGNORE INTO screener_history_log (symbol, screener_id, entry_date, source) VALUES ${rowGroupsWith(n, "(?, ?, ?, 'moneycontrol')")}`;
         await dbTransaction(async (tx) => {
-          for (const s of entered) {
-            await tx.run(insertAppSql, [config.scanId, s, today, appearedAt]);
-            await tx.run(insertLogSql, [s, config.scanId, today]);
-          }
+          await bulkUpsert(tx, entered.map(s => [config.scanId, s, today, appearedAt]), 4, buildAppSql);
+          await bulkUpsert(tx, entered.map(s => [s, config.scanId, today]), 3, buildLogSql);
         });
       }
       if (exited.length > 0) {
         await dbRun(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,
           [today, config.scanId, ...exited]);
-        
-        await dbTransaction(async (tx) => {
-          for (const s of exited) {
-            await tx.run(`UPDATE screener_history_log SET exit_date = ? WHERE symbol = ? AND screener_id = ? AND exit_date IS NULL`, [today, s, config.scanId]);
-          }
-        });
+
+        await dbRun(`UPDATE screener_history_log SET exit_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exit_date IS NULL`,
+          [today, config.scanId, ...exited]);
       }
     }
 
     // Small delay to avoid rate limits
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await delay(500);
   }
 
   // Final step: update the stocklist.ts file with discovered mappings

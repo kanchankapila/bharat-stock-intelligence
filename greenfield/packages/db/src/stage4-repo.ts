@@ -53,12 +53,13 @@ export interface ActiveModelArtifact {
   model: string;
   version: string;
   artifactHash: string;
+  metrics: Record<string, unknown>;
 }
 
 export async function queryActiveModelArtifact(pool: pg.Pool): Promise<ActiveModelArtifact | null> {
-  const { rows } = await pool.query<{ model: string; version: string; artifact_hash: string }>(
-    `SELECT model, version, artifact_hash FROM model_version WHERE state = 'active' LIMIT 1`,
+  const { rows } = await pool.query<{ model: string; version: string; artifact_hash: string; metrics: Record<string, unknown> }>(
+    `SELECT model, version, artifact_hash, metrics FROM model_version WHERE state = 'active' LIMIT 1`,
   );
   const r = rows[0];
-  return r ? { model: r.model, version: r.version, artifactHash: r.artifact_hash } : null;
+  return r ? { model: r.model, version: r.version, artifactHash: r.artifact_hash, metrics: r.metrics } : null;
 }

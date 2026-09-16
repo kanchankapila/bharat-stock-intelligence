@@ -1,11 +1,14 @@
 # Bharat Stock Intelligence — Claude Instructions
 
-Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, ~30 Python ML engines.
+Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, ~210 Python modules in `src/server/` (81 fetchers + ML engines/jobs/helpers).
 
 ## Read first
 
 1. **`fable-brain.md`** (project root) — standing reasoning discipline. Applies to every task.
-2. **Memory index** — `C:\Users\amitk\.claude\projects\d--Github-bharat-stock-intelligence\memory\MEMORY.md`. Load the entries relevant to your task before exploring files.
+2. **Memory** — two indexes, both live, and the SessionStart hook reports which it found:
+   - Claude Code's project memory: `C:\Users\amitk\.claude\projects\d--Github-bharat-stock-intelligence\memory\MEMORY.md` (index; detail in 130+ topic files in that directory).
+   - This repo's own: **`.agents/memory/MEMORY.md`** (index) + **`.agents/memory/session_journal.md`** (append a dated section per session).
+   Load the entries relevant to your task before exploring files; a finding recorded in either is not re-investigated from scratch.
 3. **The rule file for what you're touching** (below). Don't read all of them.
 
 ## Rules (load on demand)
@@ -15,9 +18,58 @@ Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC ba
 | scoring, ranking, any `*_signals` / `*_outcomes` table | `.claude/rules/scoring-authority.md` |
 | a fetcher, a new provider, a provider-issued id | `.claude/rules/data-sources.md` |
 | any accuracy / win-rate / IC / backtest number | `.claude/rules/measurement.md` |
+| a model, a promotion gate, a measurement harness | `.claude/rules/ml-model-bugs.md` |
 | **anything** — skim before writing Python or SQL | `.claude/rules/recurring-bugs.md` |
 
-`docs/session-log.md` is the historical changelog (743 lines). Not loaded automatically; read a specific entry when you need the history behind a decision.
+`docs/session-log.md` is the historical changelog (~7,600 lines — never load it whole). Not loaded automatically; grep or read a specific dated entry when you need the history behind a decision.
+
+**Resolve findings, don't just log them.** Writing a row to `docs/audit-findings.md` is not the
+deliverable — a closed row is. When you find a bug, gap, or follow-up, the default action in the
+same session is: fix it, verify the fix against live production (not just `tsc`/a green suite —
+see `measurement.md`'s reverse-engineering discipline), and close the row with a date and
+evidence, all in one pass. Filing a finding and leaving it **open** is the exception, not a
+routine outcome, and is only legitimate for one of these reasons — state which, explicitly, in
+the row itself:
+
+- **EVIDENCE lane** — the finding touches a score, weight, threshold, or classification, and
+  `measurement.md`/`ml-model-bugs.md` require measuring *before* changing it. Here "resolve
+  immediately" means run the measurement now, not defer the fix — see the EVIDENCE-lane rows in
+  `docs/audit-findings.md` for the pattern (measure, record the verdict, only then decide FIX or
+  ACCEPT).
+- **Calendar-blocked** — genuinely needs elapsed time (e.g. ~20-30 trading dates for a panel to
+  reach a reliable size) that cannot be compressed by working harder right now. The row must name
+  the unblock condition and an approximate date, not just "not enough data."
+- **Needs a user decision** — a tradeoff only the user can make (e.g. which of two designs, or
+  whether to accept a known bounded risk). Ask, don't leave it silently open. **"Needs a user
+  decision" is not a lane you may enter until you have exhausted what you can determine
+  yourself.** For a vendor/endpoint that stopped returning data that means: probe it route by
+  route, isolate the MINIMUM headers/credentials it needs (adding a token can LOWER access —
+  see `recurring-bugs.md`), **and grep the repo for an alternate source and probe that too**
+  before asking. Reinforced by the user 2026-09-12 after a sweep reported three "dead vendors":
+  two were already covered by endpoints sitting in this repo (MoneyControl `deals/list` for NSE
+  bulk deals, MarketsMojo movers for ET gainers), and NSE's own `/api/block-deal` was still
+  returning 200 — only one route had actually retired. Ask with the per-route breakdown and the
+  alternates already ruled in or out, never with "this vendor is dead."
+- **Depends on an earlier fix landing first** — genuinely sequential, and the blocking row is
+  named.
+
+Every other finding gets fixed and closed before moving on. **This applies to findings surfaced
+by a log/warning sweep exactly as it does to an audit**: a pm2 `warn`/`error` that means data was
+not written is a defect to fix in the same pass, not an inventory item — and per the user
+(2026-09-12), "data not successfully written" counts as an error regardless of the log level it
+was emitted at, including a step that exited 0. Re-surface any open row you touch in
+a session: re-verify it live, and either close it or update its "surviving N runs" count with a
+reason it's still legitimately blocked — an open row that just sits, unre-checked, across
+sessions is itself a finding (the ledger's own header already says this; it applies to every
+session, not just `/weekend-audit` runs).
+
+**`docs/audit-findings.md` is the one and only open/pending-items tracker.** Any finding that
+isn't closed in the same pass (for one of the reasons above) gets a row there (stable
+`AF-YYYYMMDD-NN` ID, never delete a row — close it in place with a date and evidence). Don't
+create a new markdown file for "things to do later" — this repo already did that three times
+(`ACTION_ITEMS.md`, `docs/FETCHER_HEALTH_TRACKER.md`, `docs/DATA_GAP_MANIFEST.md`) and the
+trackers drifted out of sync with each other and with the code, which is exactly what caused a
+2026-09-02 consolidation pass to be needed. All three are now retired stubs pointing here.
 
 ## Definition of done
 
@@ -26,15 +78,38 @@ A task is **not** done until the relevant check has actually run and passed. Cla
 ```bash
 npx tsc --noEmit                                    # any .ts change
 npx vitest run                                      # any .ts logic change
-python -m pytest src/server/__tests__/ src/server/tests/  # any .py change (identical to CI)
+python -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/  # any .py change (identical to CI)
 npm run schema:drift                                # any migration
 ```
+
+`/verify-gate-runner` runs the first three in sequence.
 
 Plus, for anything touching signal/scoring/model logic:
 
 - **Negative-control your tests.** Revert the fix, confirm the new test fails, restore. A green suite that never failed against the bug protects nothing.
 - **Run it against live production data and query the result back.** `tsc --noEmit` and a green suite do not tell you a fetcher wrote the right rows. See `.claude/rules/measurement.md`.
-- **Committed ≠ deployed.** `.ts` needs `pm2 restart bharat-server`; a migration needs `npm run migrate:up` against the real `POSTGRES_URL`; a package needs `npm install` / the right venv.
+- **Committed ≠ deployed.** `.ts` needs `pm2 restart bharat-server`; a migration needs `npm run migrate:up` against the real `POSTGRES_URL`; a package needs `npm install` / the right venv. (`/deploy-and-verify` does this end to end.)
+
+**These are enforced, not advisory.** Four hooks run as `node .claude/hooks/<file>.mjs` (that
+invocation shape matters — see the shell note below):
+`.claude/hooks/verify-gate.mjs` is a `Stop` hook: it blocks the session from finishing if the
+diff touches `.ts`/`.py` and the matching command never ran, and demands backtest evidence for
+signal-surface files. It reads your actual Bash invocations — writing "I ran pytest" does not
+satisfy it. `.claude/hooks/{rules-pointer,env-guard}.mjs` run on every Edit/Write.
+`.claude/hooks/graphify-pointer.mjs` runs on Read/Glob and on Bash search commands, and is what
+actually enforces the query-the-graph-first rule in the graphify section below.
+`.claude/hooks/run-session-start.mjs` is the SessionStart entry point (it locates a usable bash
+and runs `session-start.sh`).
+
+⚠ **An enforcement hook that cannot run is indistinguishable from a passing one** — it exits 0
+and prints nothing, so the session proceeds believing it was checked. Both failure modes have
+happened here: the graphify hooks were written as inline `bash`+`python3` one-liners that no
+shell on Windows could parse (measured: exit 127, zero output, from both cmd.exe and WSL bash),
+and `session-start.sh` shipped CRLF so bash rejected it outright (`.gitattributes` now pins
+`*.sh` to `eol=lf`; `git config core.autocrlf` is `true` on this box, which is what rewrote it).
+If you change a hook, run `npx vitest run .claude/hooks` — `settings-hooks.replay.test.mjs` replays every command declared in `.claude/settings.json` through the platform shell with the hook JSON on stdin and asserts both emit **and** silence. The other hook logic is unit-tested in colocated `.claude/hooks/*.test.mjs`. A `*.sh` a hook calls must stay LF-only: `.gitattributes` pins it, and a CRLF script fails with `$'\r': command not found` before a single line of it runs.
+
+Run pytest with `backend-python/venv` (the production interpreter, Python 3.11) unless reproducing a CI-only failure — CI runs 3.12, and that gap has caused a green-locally/red-on-CI tokenizer bug before.
 
 ## Knowledge graph
 
@@ -46,11 +121,15 @@ $PY = Get-Content "graphify-out/.graphify_python"
 & $PY -m graphify update .               # after significant changes
 ```
 
-~13.2k nodes / 21.3k edges over ~1029 files. Check `graphify-out/GRAPH_REPORT.md`'s freshness hash against `git rev-parse HEAD` before trusting it.
+Check `graphify-out/GRAPH_REPORT.md`'s "Built from commit" hash against `git rev-parse HEAD` before trusting it — it drifted 330 files behind in five days once already, and it is usually behind (it was again at the time of writing). Node/edge/file counts live in that report, deliberately not here.
+
+Updating is **free** (local AST extraction, 0 tokens) — run it, don't ration it. `graph.html` is no longer emitted: 16k+ nodes is over the 5,000-node viz cap, which is expected and exits 0. `query`/`path`/`explain` are the interface.
+
+This is enforced, not advisory: `.claude/hooks/graphify-pointer.mjs` (PreToolUse on `Read|Glob` and on `Bash` search commands) injects the reminder whenever `graphify-out/graph.json` exists, and covers subagents only if you put the instruction in their prompt. It was **dead on Windows** until 2026-09-15 — the rule appeared in `CLAUDE.md` and in every skill while the hook that enforced it emitted nothing; `npx vitest run .claude/hooks/` replays the declared hook commands and asserts they fire, so a change to this wiring cannot regress silently.
 
 ## Services
 
-Four processes run concurrently (`npm start`, or pm2 in production). A change to one is not live
+Five processes run concurrently (`npm start`, or pm2 in production). A change to one is not live
 in the others — and `.ts` is not hot-reloaded, so the Node server needs `pm2 restart bharat-server`.
 
 | pm2 name | Entry point | Port (env var) | Purpose |
@@ -59,53 +138,69 @@ in the others — and `.ts` is not hot-reloaded, so the Node server needs `pm2 r
 | `ml-api` | `src/server/python_api.py` | 8000 (`PYTHON_API_PORT`) | DL training/inference, outcome resolution |
 | `chatbot` | `src/server/chatbot/app.py` | 8001 (`CHATBOT_PORT`) | LangGraph RAG agent, ChromaDB |
 | `alphaquant-api` | `backend-python/main.py` | 8002 (`PYTHON_PORT`) | Backtesting, scoring, TV bridge, optimisation |
+| `engine-worker` | `src/server/worker_service.py` | 8005 | MCP tool dispatch (`mcp/market_intelligence_mcp.py`) + ingestion health/risk-analysis endpoints — added 2026-08-29 |
+
+`ecosystem.config.cjs` registers **6** pm2 apps, not 5: these five long-running services plus one `cron_restart` job, `pg-backup-nightly`. It was 17 until 2026-09-10, when the **11 `gf-*` greenfield jobs were deregistered** — nothing in the live app imports `greenfield/`, its :5434 database refuses connections, and all 11 were sitting at `stopped`, so they only made `pm2 list` harder to read. The `greenfield/` code itself was NOT deleted (still in git); restore the block from history to revive it. `deploy-drift-check`/`port-drift-check` were deliberately removed 2026-08-28 (`b27e588`) — don't re-add them from an old memory of this file. A `cron_restart` app sitting at `stopped`/`pid 0` looks identical whether it is healthily idle or dormant after a failed first launch — see `recurring-bugs.md`.
+
+**`greenfield/` (~105 `.ts` files) is a parallel rebuild that nothing in the live app imports.** Changing it changes nothing a user sees, and vice versa. Check which tree you are in before editing.
 
 ## Layout
 
 ```
 src/
-  App.tsx            main app, layout + tab routing
-  v2/ … v6/          six dashboard experiences, all lazy-loaded, all reading the same tRPC surface
-  components/        36+ shared React components
-  services/          marketService (live prices), aiService (Ollama), geminiService (fallback)
+  App.tsx            main app, layout + tab routing — v1 only (2026-09-01 consolidation)
+  v1/V1Routes.tsx    the only route tree; renders every page, including former v2/v4/v5/v6 ones
+  components/        shared React components, incl. components/v{2,4,5,6}/ — former shell-specific
+                     pages/widgets folded in here, rendered through v1's AppShell, not standalone
+  services/          marketService (live prices), aiService (routes to gemini/bedrockService — no local LLM since 2026-08-20)
   lib/trpc.ts        tRPC client
-  data/              stocklist.ts (180 stocks, all provider mappings) · nseStocks.ts (2000+ NSE master)
+  data/              stocklist.ts (2,000 stocks, provider mappings 89-100% populated) · nseStocks.ts (2000+ NSE master)
 
 src/server/
-  router.ts          ALL tRPC procedures — check here before searching elsewhere
+  router.ts          pure mergeRouters of routers/*.ts — procedures live in routers/
   routers/*.ts       domain-split procedure modules
-  db.ts              SQLite schema-of-record + dev fallback (NOT the live Postgres shape)
+                     (there is NO db.ts / db.sqlite-legacy.ts — deleted 2026-08-16, a2a20d2.
+                      Schema-of-record is db/schema.postgres.sql, generated from live.)
   dbAsync.ts         → pgClient.ts   the live Postgres facade
   queues.ts          BullMQ definitions + all cron schedules
   jobs/*.jobs.ts     decomposed job registrations
   cacheService.ts    Redis → in-memory fallback
-  dataQualityChecks.ts   62 freshness/coverage checks, daily cron + Telegram
-  *.py               ML engines — canonical ranker is unified_ranker.py
+  dataQualityChecks.ts   freshness/coverage checks (factory-generated + hand-rolled), daily cron + Telegram
+  *.py               81 `*_fetcher.py` + ML engines/backfills — canonical ranker is unified_ranker.py
 ```
 
 Component/procedure/table inventories are deliberately **not** listed here — they rot. Grep the source.
 
-## Frontend versions
+## Frontend versions — CONSOLIDATED 2026-09-01 (`fd0cbd4`)
 
-Six dashboards coexist in one app, no separate build. `App.tsx`'s `dashboardVersion` (localStorage) selects; **fallback is `v6`** — that's what a fresh visitor lands on.
+**v1 is now the only frontend.** The six-shell / `dashboardVersion`-switcher architecture this
+section used to describe is gone: `src/v2/`, `src/v3/`, `src/v5/`, `src/v6/` (their `V2AppShell`,
+`V6Shell`, `V5App`, `V3Dashboard` and ~7,300 more lines) were deleted outright. Every page now
+renders through `V1Routes` inside the classic `AppShell`; `App.tsx` force-migrates any stored
+`dashboardVersion` to `'v1'` on mount, so there is no shell to pick anymore.
 
-| | Shell | Notes |
-|---|---|---|
-| v1 | `AppShell` | classic tab list |
-| v2 / v3 | `V2AppShell` | v3 = Bloomberg-terminal restyle |
-| v4 | inside `V2AppShell` | `MarketCommandCenter`, `StockIntelligencePage` |
-| v5 | own route tree at `/v5` | institutional workbench + desk pages |
-| v6 | `V6Shell` | **default** — composed home + portfolio tracker + screener browser |
+The former v2/v4/v5/v6 pages and widgets weren't deleted — they were folded in as ordinary
+components under `src/components/v{2,4,5,6}/` (e.g. `v5`'s desk pages, `v6`'s Screener Browser /
+Portfolio Tracker, `v4`'s `MarketCommandCenter`), given v1's page chrome via `V1PageFrame`, and
+routed like any other v1 page. If you're looking for a page that used to live in one of the old
+shells, it's almost certainly still there, just relocated under `components/`, not gone.
 
-Nothing is deprecated. Before trusting any "fix applied to the nav/shell" claim, check *which shell* it landed in — a comment saying it was mirrored has been wrong before.
+**If you find an old reference to "six dashboards," `dashboardVersion` branching, or a specific
+shell name (`V2AppShell`, `V6Shell`, etc.) in a skill, command, or your own memory of this repo —
+it predates this consolidation and no longer reflects the live app.** There is nothing left to
+check for shell-parity against; a fix now either lands in v1 or it doesn't ship.
 
 ## Architecture facts that constrain changes
 
 - **Canonical ranking is `unified_recommendations`** (`unified_ranker.py`). `stock_scores` and `quant_scores` are its *inputs*, not duplicates. Never write a parallel "final" score. Details: `.claude/rules/scoring-authority.md`.
 - **Four signal tables, and that's the ceiling**: `unified_signals`, `technical_signals`, `signal_outcomes`, `unified_signal_outcomes`. Do not add a fifth. The merges you might consider have been investigated and rejected on their merits — see the rule file before re-proposing one.
 - **NSE symbol is the only canonical identifier.** Every provider id derives from it, never the reverse, and is never constructed by convention.
-- **Live DB is Postgres/TimescaleDB** (`USE_POSTGRES=true`, :5433). Several tables are compressed hypertables where a predicate-wide `UPDATE`/`ADD CONSTRAINT` will fail or destroy compression.
+- **Postgres/TimescaleDB (:5433) is the ONLY database. There is no second dialect to reason about.** `usePostgres()` / `use_postgres()` take no environment variable for any real process — a missing `.env` can no longer reroute anything, it can only fail to connect, loudly. Several tables are compressed hypertables where a predicate-wide `UPDATE`/`ADD CONSTRAINT` will fail or destroy compression.
+  - **TypeScript is fully migrated.** `npx vitest run`'s `unit` project runs against a private throwaway Postgres schema built from `db/schema.postgres.sql` (`vitest.globalSetup.ts`); its `live` project talks to real production on purpose. There is no SQLite path left in any `.ts`.
+  - **Python runs on Postgres too, and the shim is GONE (2026-08-17).** There is no `SQLITE_SHIM_POSTGRES` flag and no monkeypatch of `sqlite3.connect` any more: 93 fixture files were converted to an explicit **`pg_memory_conn()`** (`src/server/pg_test_support.py`), which is the 1:1 replacement for a raw `sqlite3.connect(':memory:')`. `conftest.py` now lives at **`src/server/conftest.py`**, not `src/server/tests/` — it was moved up because `src/server/__tests__/` had no conftest at all, so its Python files were invisible to the old shim's own counter. Use `pg_memory_conn()`, `pg_conn` (empty schema, bring your own DDL) or `pg_db_conn` (full production schema); never add a `sqlite3.connect`. **Phase 3 Python is DONE too (2026-08-19)** — the 6 files that blocked it were converted/deleted and `sql_translate.py`'s pytest carve-out (`_in_pytest()`) was removed as dead code, so `use_postgres()` now returns True unconditionally *including inside pytest* (`docs/SQLITE_DECOMMISSION_PLAN.md`). ⚠ Do not verify this with a bare `grep -r "sqlite3.connect(':memory:')"`: it matches 8 *comments/docstrings* naming the retired pattern, and from the repo root it also descends into `.claude/worktrees/` (gitignored, 12 stale copies) and returns dozens. The verified check is the assignment form — `grep -rnE "=\s*sqlite3\.connect\(':memory:'\)" --include=*.py src/ tests/` → 0, and 21 against a stale worktree, so it is not vacuous.
+  - **Test against an EMPTY database before believing a test passes.** A developer's Postgres IS production, and `pg_conn` puts `public` on the search_path, so a table the fixture forgot silently resolves to the real one. Three separate suites were green that way and red in CI. `PGTEST_DB=<empty db> pytest ...` is the check.
 - **Measured state of the edge**: the ranker has no demonstrated forward-return edge, and most factors tested are null-to-negative. Read `.claude/rules/measurement.md` before proposing a reweighting — it is very likely the wrong fix.
+- **Restart-orphaned jobs are auto-requeued (AF-20260909-06).** `reclaimStaleActiveJobs` now calls `requeueOrphanedJob`: a job left `active` by a worker that died mid-restart is failed **and** a guarded make-up is re-queued under the same name (skipped if the job's regular slot fires within 90min, or a same-name make-up is already pending; >48h-old orphans are alert-only). On boot, look for `orphanRequeue: true` / `isCatchup: true` in job data (or `REQUEUED make-up` / `reclaimed orphaned job` in the log) rather than assuming a long `active` job is a loss. A reclaimed orphan's fresh `finishedOn` previously masked it from the missed-slot detector — that self-masking is exactly what this fix targets.
 
 ## Conventions
 
@@ -114,13 +209,46 @@ Nothing is deprecated. Before trusting any "fix applied to the nav/shell" claim,
 - Do not refactor beyond what the task requires.
 - Prefer reusing an existing helper over writing a new one — check first.
 - Multiple sessions edit this repo concurrently. Commit **by explicit path**, never `git add -A`, and re-check `git status` immediately before committing.
+- **Origin branch hygiene (as of 2026-09-09): only 3 remote branches remain** — `main`, `claude/project-skills-backend-frontend-audits-uf5edt` (flagged do-**not**-merge: 361 behind main and it resurrects deleted pre-desk-restructure UI), and `dependabot/pip/backend-python/pip-493d92642e` (transformers 5.9→5.10, held pending a venv upgrade so the manifest doesn't outrun the installed package). Open work is tracked in `docs/audit-findings.md`, **not** in feature branches — don't create `_effort` branches expecting them to pile up on origin; land work on main and close it there.
+- **Follow the `superpowers` plugin's workflow skills for code development work in this repo** (enabled in `.claude/settings.json`): `superpowers:brainstorming` before designing a new feature or nontrivial change, `superpowers:systematic-debugging` before proposing a fix for a bug/test failure, `superpowers:test-driven-development` before writing implementation code, `superpowers:requesting-code-review` after completing a task or before merging. This is in addition to — not instead of — this file's own `.claude/rules/` and the `/verify-gate-runner` checks; the superpowers skills are process discipline (design-first, test-first, reviewed), this file's rules are the domain-specific ones (scoring authority, measurement discipline, recurring bug classes).
 
 ## Closing a session
 
-Before finishing, make all three consistent with what actually happened:
+Before finishing, make all four consistent with what actually happened (`/session-close` walks this against what the session actually changed):
 
 1. **`docs/session-log.md`** — append what changed and what was learned.
 2. **Memory** — add/extend a file for anything durable and non-obvious; update `MEMORY.md`'s index.
 3. **`.claude/rules/`** — if you hit a bug class that will recur, add its signature to `recurring-bugs.md`. That file is what stops the next session repeating it.
+4. **`docs/audit-findings.md`** — fix and close findings in-session by default (see "Resolve findings, don't just log them" above); anything left open needs a stated reason (EVIDENCE/calendar-blocked/needs-a-decision/depends-on-another-row). New rows get a stable `AF-YYYYMMDD-NN` ID, not a new file and not just a mention in the session log. If you closed a row, update it in place with today's date and evidence; never delete a row.
 
 Run `graphify update .` if files changed significantly. Silence in any of these means a future session rediscovers the same thing from scratch.
+
+## Issue tracker, triage labels and domain docs (matt-pocock config)
+
+Configured 2026-09-15 by `/setup-matt-pocock-skills`. Downstream matt-pocock skills read these
+three settings; edit them here rather than re-running the skill.
+
+- **Issue tracker: GitHub**, via the `gh` CLI — `github.com/kanchankapila/bharat-stock-intelligence`,
+  inferred from `git remote -v` (so `gh issue …` needs no `--repo`). External PRs are **not**
+  treated as feature requests here.
+- **Findings are NOT GitHub issues.** The single tracker for bugs, gaps and follow-ups stays
+  `docs/audit-findings.md` with stable `AF-YYYYMMDD-NN` ids (see above). Don't mirror a finding
+  into GitHub Issues, and don't create a second markdown tracker — the `docs/audit-findings.md`
+  section above is explicit that this repo already retired three of those.
+- **Triage label vocabulary** — the `triage` skill is not installed in this repo, so no label
+  section is bound. These are the roles if it is ever added: `needs-triage`, `needs-info`,
+  `ready-for-agent`, `ready-for-human`, `wontfix`.
+- **Domain docs: single context.** `CONTEXT.md` (project overview + data sources + ops rhythms)
+  and `AGENTS.md` (agent registry + contracts) created 2026-09-15 at repo root. Downstream
+  matt-pocock skills (`trade-desk`, `verify-gate-runner`, `weekend-audit`, `claude-mem`,
+  `headroom`, `codebase`) read these for context injection. ADRs under `docs/adr/` when needed.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

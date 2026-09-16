@@ -1,0 +1,13 @@
+# Line-ending policy — keep shell scripts LF on every platform.
+#
+# Why this file exists: `.claude/settings.json` wires `.claude/hooks/session-start.sh`
+# as the SessionStart hook and invokes it through bash. Git for Windows defaults to
+# core.autocrlf=true, which rewrites checked-out text files to CRLF, and bash then
+# refuses the script ("$'\r': command not found" / "syntax error near unexpected token").
+# The failure is silent-ish (the hook's env/DoD checks and the memory/graphify freshness
+# hint simply never appear), and re-checking-out the file re-breaks it. Pinning eol=lf
+# in the repository is the only fix that survives checkouts on Windows.
+#
+# Only shell scripts need this: `.mjs` hooks run under node, and JSON/Markdown are
+# whitespace-insensitive, so they are deliberately left to core.autocrlf.
+*.sh text eol=lf

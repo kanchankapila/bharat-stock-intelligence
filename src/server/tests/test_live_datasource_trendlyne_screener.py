@@ -17,6 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 from trendlyne_screener_discovery import fetch_screener, extract_screener_info, upsert_screener
 from live_datasource_helpers import (
     assert_looks_like_ticker,
@@ -28,7 +29,7 @@ REAL_SCREENER_PK = 42221
 
 
 def _make_test_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE trendlyne_screeners (
@@ -39,19 +40,41 @@ def _make_test_db():
         CREATE TABLE screener_master (
             scan_id TEXT, name TEXT, source TEXT,
             inferred_sentiment TEXT, inferred_category TEXT,
-            inferred_timeframe TEXT, confidence REAL,
+            inferred_timeframe TEXT, confidence DOUBLE PRECISION,
+            -- last_updated is written by upsert_screener_master() and EXISTS in production and
+            -- in db/schema.postgres.sql; it was simply missing here. Before the search_path
+            -- isolation fix an unqualified write fell through to public.screener_master, i.e.
+            -- PRODUCTION, so the omission was invisible.
+            last_updated TIMESTAMPTZ,
             UNIQUE (source, scan_id)
         );
+        -- Mirrors production's column list (checked against information_schema, not guessed).
+        -- score_0_100/tier/sub_mod/horiz_mult/fetched_at were all missing; the writer sets
+        -- fetched_at, so the UPDATE failed. Same cause as screener_master above -- before the
+        -- search_path isolation fix these writes fell through to the PRODUCTION table.
         CREATE TABLE screener_catalog (
             screener_id TEXT PRIMARY KEY, source TEXT, screener_name TEXT,
             category TEXT, subcategory TEXT, signal_bias TEXT,
-            investment_horizon TEXT, confidence REAL, signal_keywords TEXT,
-            screener_url TEXT
+            investment_horizon TEXT, confidence DOUBLE PRECISION,
+            score_0_100 DOUBLE PRECISION, tier TEXT,
+            sub_mod DOUBLE PRECISION, horiz_mult DOUBLE PRECISION,
+            signal_keywords TEXT, screener_url TEXT, fetched_at TEXT
         );
         CREATE TABLE trendlyne_screener_stocks (
             screener_id TEXT, stock_id TEXT, symbol TEXT,
             first_seen TEXT, last_seen TEXT,
             PRIMARY KEY (screener_id, stock_id)
+        );
+        -- Added by migration 1787100000000 after upsert_screener() started writing to it
+        -- (screener-pk-collision fix, trendlyne_screener_discovery.py) -- missing here left
+        -- this test failing with "relation does not exist" against a genuinely-empty throwaway
+        -- schema, easily misread as a production gap since production has carried this table
+        -- since 2026-08-18. Mirrors db/schema.postgres.sql's real column list.
+        CREATE TABLE trendlyne_screener_pk_history (
+            screener_id TEXT NOT NULL, screenpk TEXT NOT NULL,
+            first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+            last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (screener_id, screenpk)
         );
     """)
     return conn

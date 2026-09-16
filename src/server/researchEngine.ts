@@ -5,7 +5,6 @@ export interface StockPick {
   conviction_score: number;
   quant_rank: number;
   signal_score: number;
-  xgboost_score: number;
   screener_net: number;
   news_boost: number;
   unified_score?: number;
@@ -113,14 +112,6 @@ async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: str
     WHERE ts.signal_score >= 5
   `) as any[]).forEach(r => techMap.set(r.symbol, r));
 
-  const xgbMap = new Map<string, any>();
-  try {
-    (await dbAll(`
-      SELECT symbol, xgboost_score, signal, is_growth, is_breakout
-      FROM xgboost_predictions WHERE signal = 'BUY'
-    `) as any[]).forEach(r => xgbMap.set(r.symbol, r));
-  } catch { /* table may not exist */ }
-
   const unifiedMap = new Map<string, any>();
   try {
     const unifiedRows = await dbAll(`
@@ -144,12 +135,16 @@ async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: str
 
   const dlMap = new Map<string, number>();
   try {
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    // 4 calendar days, not 1: prediction_date is written on the weekday EOD cycle, so a
+    // 1-day cutoff on Monday finds Sunday (nothing) instead of Friday's rows — the same
+    // "calendar days cannot span a trading-day gap" class documented throughout
+    // unified_ranker.py. 4 days covers Fri->Mon and long weekends.
+    const dlCutoff = new Date(Date.now() - 4 * 86400000).toISOString().slice(0, 10);
     (await dbAll(`
       SELECT symbol, prob_up_5d as probability
       FROM deep_learning_predictions
       WHERE prediction_date >= ?
-    `, [yesterday]) as any[]).forEach(r => dlMap.set(r.symbol, (r.probability ?? 0) * 100));
+    `, [dlCutoff]) as any[]).forEach(r => dlMap.set(r.symbol, (r.probability ?? 0) * 100));
   } catch { /* DL predictions may not be available */ }
 
   const newsMap = new Map<string, number>();
@@ -172,7 +167,6 @@ async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: str
   const allSymbols = new Set<string>();
   quantRows.forEach(q => allSymbols.add(q.symbol));
   techMap.forEach((_, symbol) => allSymbols.add(symbol));
-  xgbMap.forEach((_, symbol) => allSymbols.add(symbol));
   unifiedMap.forEach((_, symbol) => allSymbols.add(symbol));
   confluenceMap.forEach((_, symbol) => allSymbols.add(symbol));
   dlMap.forEach((_, symbol) => allSymbols.add(symbol));
@@ -181,7 +175,6 @@ async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: str
   for (const symbol of allSymbols) {
     const q = quantMap.get(symbol);
     const tech = techMap.get(symbol);
-    const xgb  = xgbMap.get(symbol);
     const u = unifiedMap.get(symbol);
     const newsScore = newsMap.get(symbol) || 0;
 
@@ -202,7 +195,6 @@ async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: str
     let layers_confirmed = 0;
     if (q) layers_confirmed++;
     if (tech) layers_confirmed++;
-    if (xgb) layers_confirmed++;
     if (newsScore > 0) layers_confirmed++;
     if (u) layers_confirmed++;
     if (!u && confluenceScore > 0) layers_confirmed++;
@@ -213,7 +205,6 @@ async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: str
     const unified_component    = u ? Math.min(u.unified_score / 100, 1) * 50 : 0;
     const quant_component      = q ? (q.rank_composite / 100) * 20 : 0;
     const tech_component       = tech ? (tech.signal_score / 10) * 15 : (u?.technical_score ? Math.min(u.technical_score / 10, 1) * 10 : 0);
-    const xgb_component        = xgb ? xgb.xgboost_score * 10 : 0;
     const confluence_component = confluenceScore ? Math.min(confluenceScore / 100, 1) * 10 : 0;
     // Falls back to COALESCE(calibrated_win_probability, win_probability) when there's no
     // unified_recommendations row for this symbol — was raw win_probability unconditionally
@@ -223,8 +214,10 @@ async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: str
     const screener_component   = u?.screener_stock_score ? Math.min(u.screener_stock_score / 100, 1) * 10 : Math.min((q?.screener_net_score || 0) / 50, 1) * 10;
     const news_component       = Math.min(newsScore / 3, 1) * 10;
 
+    // xgboost_component removed 2026-08-31 with the dead xgboost_predictions table (no
+    // writer since 2026-05-20; the standalone job was superseded by ml_ensemble).
     let conviction_score =
-      unified_component + quant_component + tech_component + xgb_component + confluence_component + ml_component + screener_component + news_component;
+      unified_component + quant_component + tech_component + confluence_component + ml_component + screener_component + news_component;
     conviction_score = Math.min(Math.max(conviction_score, 0), 100);
 
     if (flags.includes('RSI_OVERBOUGHT'))    conviction_score *= 0.75;
@@ -245,7 +238,6 @@ async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: str
       conviction_score:     parseFloat(conviction_score.toFixed(1)),
       quant_rank:           q?.rank_composite ?? 0,
       signal_score:         tech?.signal_score ?? u?.technical_score ?? 0,
-      xgboost_score:        xgb?.xgboost_score ?? 0,
       screener_net:         q?.screener_net_score ?? 0,
       news_boost:           newsScore,
       unified_score:        u?.unified_score,

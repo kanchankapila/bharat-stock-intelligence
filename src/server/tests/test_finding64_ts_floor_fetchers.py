@@ -11,6 +11,12 @@ each main() pass MAX(date) FROM stock_ohlcv (the last completed trading session)
 instead of raw date.today() -- the per-day snapshot tables these fetchers also write
 (mc_pricefeed_daily, mc_pattern_signals, nt_dashboard_snapshot) are untouched and
 still correctly keyed on the real calendar date.
+
+FOLLOW-UP (2026-09-01, data/model audit): the ELSE NULL branch itself was a second,
+independent bug -- ts_floor advances by one trading day every run, so ELSE NULL re-nulled
+every prior day's already-correct value on every subsequent run (see recurring-bugs.md).
+ELSE now preserves the row's own current value instead, so the assertions below check for
+the guard's presence via `CASE WHEN date >=`, not the no-longer-accurate `ELSE NULL` text.
 """
 import os
 import sys
@@ -46,7 +52,7 @@ class TestMcPricefeedFetcherFloorParam:
         con = _FakeConn()
         mcp.backfill_technical_signals("SYM", "2026-07-29", {"cagr_3y": 12.0}, con)
         sql, params = con.cur.executed[0]
-        assert "ELSE NULL" in sql
+        assert "CASE WHEN date >=" in sql
         # every guard-threshold slot in the params tuple must be the floor we passed in
         assert params[0] == "2026-07-29"
         assert params.count("2026-07-29") >= 15  # one per CASE WHEN clause
@@ -57,7 +63,7 @@ class TestMcChartPatternsFetcherFloorParam:
         con = _FakeConn()
         mcc.backfill_technical_signals("SYM", "2026-07-29", {"bull_count": 1}, con)
         sql, params = con.cur.executed[0]
-        assert "ELSE NULL" in sql
+        assert "CASE WHEN date >=" in sql
         assert params[0] == "2026-07-29"
 
 
@@ -66,7 +72,7 @@ class TestNtDashboardFetcherFloorParam:
         con = _FakeConn()
         ntd.backfill_technical_signals("2026-07-29", {"symbol": "SYM", "pcr": 0.9}, con)
         sql, params = con.cur.executed[0]
-        assert "ELSE NULL" in sql
+        assert "CASE WHEN date >=" in sql
         assert params[0] == "2026-07-29"
 
 

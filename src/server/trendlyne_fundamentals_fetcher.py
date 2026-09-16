@@ -30,18 +30,36 @@ Run:
   python trendlyne_fundamentals_fetcher.py --symbol BEL
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class TrendlyneFundamentalsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class TrendlyneFundamentalsFetcherBaseFetcher(BaseFetcher[TrendlyneFundamentalsFetcherSchema]):
+    fetcher_name = 'TrendlyneFundamentalsFetcher'
+    domain = 'trendlyne.com'
+    schema = TrendlyneFundamentalsFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import requests
+import tl_fetch
 from requests.adapters import HTTPAdapter
 
 from db_compat import connect
 from as_of import logical_write_floor
+from fetch_utils import TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget
+import sys
 
 BASE_URL = "https://trendlyne.com/mapp/v1/stock/chart-data/{tlid}/{param}/"
 
@@ -55,7 +73,9 @@ HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
-BATCH_SIZE = 15
+# Was 15 -- AWS WAF returns 405/captcha for the rest of the run when more than 3
+# requests are in flight at once. Measured, see TRENDLYNE_MAX_CONCURRENT in fetch_utils.py.
+BATCH_SIZE = TRENDLYNE_MAX_CONCURRENT
 BATCH_GAP_SEC = 0.5
 STOCKLIST_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "stocklist.json")
 
@@ -112,25 +132,70 @@ def ensure_schema(con) -> None:
     """)
     con.commit()
 
-    for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN eps_ttm REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_growth_yoy REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_growth_qoq REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_acceleration REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pe_ttm REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pe_pct_rank_252d REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pe_vs_median_1yr REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pb_pct_rank_252d REAL",
-        "ALTER TABLE technical_signals ADD COLUMN div_yield_ttm REAL",
-        "ALTER TABLE technical_signals ADD COLUMN dvm_durability INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN dvm_valuation INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN dvm_momentum INTEGER",
-    ]:
-        try:
-            cur.execute(ddl)
-            con.commit()
-        except Exception:
-            con.rollback()
+    # AF-20260827-14 / AF-20260829-18: these 12 columns have existed on technical_signals for
+    # months (db/schema.postgres.sql is schema-of-record and already carries them). A bare
+    # "ADD COLUMN" without IF NOT EXISTS still requests an ACCESS EXCLUSIVE lock before it can
+    # even discover the column exists and throw DuplicateColumn -- and once that lock request is
+    # queued, every concurrent reader of technical_signals (a hot table read by dozens of jobs)
+    # queues behind it too, by Postgres's FIFO lock-queue-per-relation rule. That queued-for-
+    # minutes ALTER TABLE, re-run on every single fetcher invocation, is what repeatedly stalled
+    # this session's `integrity_sweep.py`/pytest runs on 2026-08-29 while ml-weekly-retrain was
+    # active. Fix: IF NOT EXISTS (no-op when already present, no exception) + a short
+    # `lock_timeout` scoped to just this block so a genuinely busy table makes this skip fast
+    # instead of holding a place in the lock queue for however long the blocker takes.
+    # NOTE: SET LOCAL would reset after the first per-statement commit() below, leaving
+    # statements 2-12 unprotected -- use a session-scoped SET, restored in the finally.
+    cur.execute("SET lock_timeout = '2s'")
+    try:
+        for ddl in [
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_ttm REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_growth_yoy REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_growth_qoq REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_acceleration REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pe_ttm REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pe_pct_rank_252d REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pe_vs_median_1yr REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pb_pct_rank_252d REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS div_yield_ttm REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS dvm_durability INTEGER",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS dvm_valuation INTEGER",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS dvm_momentum INTEGER",
+        ]:
+            try:
+                # AF-20260901: IF NOT EXISTS alone still queued a 2s-lock-timeout cancel per
+                # column on 09-01 (9 cancels in the postgres log) because the no-op ALTER
+                # still requests the ACCESS EXCLUSIVE lock before discovering the column
+                # exists. The lock-free pre-check skips the ALTER entirely on the common
+                # path; the DDL only runs when the column is genuinely missing.
+                if not _ddl_column_exists(cur, ddl):
+                    cur.execute(ddl)
+                con.commit()
+            except Exception:
+                con.rollback()
+    finally:
+        cur.execute("SET lock_timeout = DEFAULT")
+        con.commit()
+
+
+def _ddl_column_exists(cur, ddl: str) -> bool:
+    """True when the column targeted by an ``ALTER TABLE t ADD COLUMN [IF NOT EXISTS] c``
+    statement already exists in the current schema. Lock-free (information_schema lookup),
+    so gating the ALTER on it avoids queueing an ACCESS EXCLUSIVE lock request just to
+    discover the column was already there (AF-20260901 / AF-20260827-14)."""
+    toks = ddl.split()
+    if (len(toks) < 6 or toks[0].upper() != "ALTER" or toks[1].upper() != "TABLE"
+            or toks[3].upper() != "ADD" or toks[4].upper() != "COLUMN"):
+        return False
+    rest = toks[5:]
+    if rest and rest[0].upper() == "IF":  # skip IF NOT EXISTS
+        rest = rest[3:]
+    if not rest:
+        return False
+    cur.execute(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+        f"AND table_name = '{toks[2]}' AND column_name = '{rest[0]}'"
+    )
+    return cur.fetchone() is not None
 
 
 # â”€â”€ Fetch helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -146,7 +211,7 @@ def _fetch(tlid: str, param: str, session: requests.Session) -> dict | None:
             return None
         return data.get("body", {})
     except Exception as e:
-        print(f"  [{param}] error: {e}")
+        print(f"  [{param}] error: {e}", file=sys.stderr)
         return None
 
 
@@ -293,19 +358,19 @@ def _backfill_technical_signals(symbol: str, today: str, features: dict, con) ->
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            eps_ttm          = CASE WHEN date >= ? THEN COALESCE(?, eps_ttm)          ELSE NULL END,
-            eps_growth_yoy   = CASE WHEN date >= ? THEN COALESCE(?, eps_growth_yoy)   ELSE NULL END,
-            eps_growth_qoq   = CASE WHEN date >= ? THEN COALESCE(?, eps_growth_qoq)   ELSE NULL END,
-            eps_acceleration = CASE WHEN date >= ? THEN COALESCE(?, eps_acceleration) ELSE NULL END,
-            pe_ttm           = CASE WHEN date >= ? THEN COALESCE(?, pe_ttm)           ELSE NULL END,
-            pe_pct_rank_252d = CASE WHEN date >= ? THEN COALESCE(?, pe_pct_rank_252d) ELSE NULL END,
-            pe_vs_median_1yr = CASE WHEN date >= ? THEN COALESCE(?, pe_vs_median_1yr) ELSE NULL END,
-            pb_pct_rank_252d = CASE WHEN date >= ? THEN COALESCE(?, pb_pct_rank_252d) ELSE NULL END,
-            div_yield_ttm    = CASE WHEN date >= ? THEN COALESCE(?, div_yield_ttm)    ELSE NULL END,
-            dvm_durability   = CASE WHEN date >= ? THEN COALESCE(?, dvm_durability)   ELSE NULL END,
-            dvm_valuation    = CASE WHEN date >= ? THEN COALESCE(?, dvm_valuation)    ELSE NULL END,
-            dvm_momentum     = CASE WHEN date >= ? THEN COALESCE(?, dvm_momentum)     ELSE NULL END
-        WHERE symbol = ?
+            eps_ttm          = CASE WHEN date >= ? THEN COALESCE(?, eps_ttm)          ELSE eps_ttm END,
+            eps_growth_yoy   = CASE WHEN date >= ? THEN COALESCE(?, eps_growth_yoy)   ELSE eps_growth_yoy END,
+            eps_growth_qoq   = CASE WHEN date >= ? THEN COALESCE(?, eps_growth_qoq)   ELSE eps_growth_qoq END,
+            eps_acceleration = CASE WHEN date >= ? THEN COALESCE(?, eps_acceleration) ELSE eps_acceleration END,
+            pe_ttm           = CASE WHEN date >= ? THEN COALESCE(?, pe_ttm)           ELSE pe_ttm END,
+            pe_pct_rank_252d = CASE WHEN date >= ? THEN COALESCE(?, pe_pct_rank_252d) ELSE pe_pct_rank_252d END,
+            pe_vs_median_1yr = CASE WHEN date >= ? THEN COALESCE(?, pe_vs_median_1yr) ELSE pe_vs_median_1yr END,
+            pb_pct_rank_252d = CASE WHEN date >= ? THEN COALESCE(?, pb_pct_rank_252d) ELSE pb_pct_rank_252d END,
+            div_yield_ttm    = CASE WHEN date >= ? THEN COALESCE(?, div_yield_ttm)    ELSE div_yield_ttm END,
+            dvm_durability   = CASE WHEN date >= ? THEN COALESCE(?, dvm_durability)   ELSE dvm_durability END,
+            dvm_valuation    = CASE WHEN date >= ? THEN COALESCE(?, dvm_valuation)    ELSE dvm_valuation END,
+            dvm_momentum     = CASE WHEN date >= ? THEN COALESCE(?, dvm_momentum)     ELSE dvm_momentum END
+        WHERE symbol = ? AND date >= ?
     """, (
         today, features.get("eps_ttm"),          today, features.get("eps_growth_yoy"),
         today, features.get("eps_growth_qoq"),   today, features.get("eps_acceleration"),
@@ -314,23 +379,39 @@ def _backfill_technical_signals(symbol: str, today: str, features: dict, con) ->
         today, features.get("div_yield_ttm"),
         today, features.get("dvm_d"),            today, features.get("dvm_v"),
         today, features.get("dvm_m"),
-        symbol,
+        symbol, today,   # bounded: older rows only took ELSE-keep yet were all rewritten
     ))
     con.commit()
 
 
 # â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _load_stocks(symbol_filter: str | None) -> list[tuple[str, str]]:
+def _load_stocks(symbol_filter: str | None, skip_done_for_date: str | None = None) -> list[tuple[str, str]]:
     """Return [(symbol, tlid), ...] from scripts/stocklist.json — the canonical
     provider-mapping table (2005 stocks) — instead of the much larger (7000+)
     trendlyne_screener_stocks fallback universe, which is why this fetcher used to
     blow past its timeout ceiling."""
-    with open(STOCKLIST_PATH, encoding="utf-8") as f:
+    with open(STOCKLIST_PATH, encoding="utf-8-sig") as f:
         entries = json.load(f)
     rows = [(e["symbol"], str(e["tlid"])) for e in entries if e.get("symbol") and e.get("tlid")]
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
+    # Resume, same shape as trendlyne_adv_tech_fetcher.py's loader. Without it every run
+    # restarts at the same alphabetical position, so the leading slice is re-fetched forever and
+    # coverage never advances past one WAF allowance -- see cap_to_run_budget in fetch_utils.py.
+    if skip_done_for_date:
+        con = connect()
+        try:
+            cur = con.cursor()
+            cur.execute("SELECT symbol FROM trendlyne_dvm_scores WHERE date = ?", (skip_done_for_date,))
+            done = {r[0] for r in cur.fetchall()}
+        finally:
+            con.close()
+        if done:
+            before = len(rows)
+            rows = [(s, t) for s, t in rows if s not in done]
+            print(f"[TLFund] Resuming: {before - len(rows)} of {before} stocks already "
+                  f"fetched for {skip_done_for_date}, {len(rows)} remaining.")
     return rows
 
 
@@ -383,6 +464,8 @@ def _process_one(symbol: str, tlid: str, today: str, session: requests.Session) 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", default=None)
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch all symbols even if fresh within last 7 days")
     args = parser.parse_args()
 
     con = connect()
@@ -397,16 +480,50 @@ def main() -> None:
     today = logical_write_floor(con, fallback=date.today().isoformat())
     con.close()
 
-    stocks = _load_stocks(args.symbol)
+    stocks = _load_stocks(args.symbol, skip_done_for_date=None if args.symbol else today)
+
+    # Smart 7-day cadence check, on top of the same-day resume above: EPS_TTM/dividend-yield
+    # are quarterly-cadence data (see class docstring), so re-fetching a symbol whose EPS/
+    # dividend series was already pulled this week wastes this fetcher's share of the shared
+    # trendlyne.com WAF request allowance (fetch_utils.TRENDLYNE_RUN_REQUEST_BUDGET) on data
+    # that cannot have changed. Window kept short (7d, not the 20-25d used by the
+    # monthly-cadence financial_ratios_fetcher.py/working_capital_fetcher.py) because this
+    # fetcher's _backfill_technical_signals also refreshes PE/PB percentile ranks derived from
+    # today's PRICE (via _pe_features_from_db/_pb_features_from_db, which read local history,
+    # not the network) -- skipping a symbol here also defers that refresh, so the window is
+    # bounded to at most a week of staleness on the price-driven half, not the quarter the
+    # EPS/dividend half alone would tolerate.
+    if not args.force and not args.symbol:
+        from fetch_utils import filter_stale_symbols
+        fresh_cutoff = (date.today() - timedelta(days=7)).isoformat()
+        # con was already closed above (today's logical_write_floor lookup is the only thing
+        # it was needed for) -- open a fresh one for this check, same as _load_stocks does
+        # internally for its own skip_done_for_date query.
+        stale_con = connect()
+        try:
+            stale_stocks = filter_stale_symbols(stale_con, stocks, "trendlyne_dvm_scores",
+                                                date_col="date", as_of_date=fresh_cutoff)
+        finally:
+            stale_con.close()
+        skipped = len(stocks) - len(stale_stocks)
+        if skipped > 0:
+            print(f"[TLFund] Smart cadence skip: {skipped}/{len(stocks)} symbols already fresh within last 7 days. Processing {len(stale_stocks)} remaining.")
+            stocks = stale_stocks
+
+    stocks = cap_to_run_budget(stocks, "TLFund", requests_per_row=2)
     if not stocks:
         print("[TLFund] No stocks with tlid found.")
         return
 
     print(f"[TLFund] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} "
           f"({BATCH_GAP_SEC}s gap) - EPS/DivYield + DVM...")
-    session = requests.Session()
-    session.headers.update(HEADERS)
-    session.mount("https://", HTTPAdapter(pool_connections=BATCH_SIZE, pool_maxsize=BATCH_SIZE))
+    # curl_cffi Chrome-TLS-impersonated session (tl_fetch) -- see the sibling comment in
+    # trendlyne_overview_fetcher.py. HTTPAdapter.mount is requests-only, so it is applied
+    # only on the fallback path; TLSession does its own connection handling.
+    session = tl_fetch.create_session()
+    if not isinstance(session, tl_fetch.TLSession):
+        session.headers.update(HEADERS)
+        session.mount("https://", HTTPAdapter(pool_connections=BATCH_SIZE, pool_maxsize=BATCH_SIZE))
     ok = 0
     done = 0
 
@@ -426,3 +543,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

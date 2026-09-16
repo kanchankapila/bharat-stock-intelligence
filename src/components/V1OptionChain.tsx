@@ -44,7 +44,7 @@ export const V1OptionChain: React.FC<{ symbol: string; stockPrice: number }> = (
     return (
       <div className="py-20 text-center glass-strong rounded-2xl border border-slate-800/50 border-dashed">
         <Activity className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-4" />
-        <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Fetching real-time option chain...</p>
+        <p className="text-slate-400 font-bold font-display uppercase tracking-widest text-[10px]">Fetching real-time option chain...</p>
       </div>
     );
   }
@@ -66,7 +66,7 @@ export const V1OptionChain: React.FC<{ symbol: string; stockPrice: number }> = (
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="p-4 glass border border-slate-800/50 rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Max Pain Strike</p>
+            <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">Max Pain Strike</p>
             <p className="text-2xl font-black text-slate-100 italic">₹{maxPain || '—'}</p>
             <p className="text-[8px] text-slate-400 font-bold uppercase mt-1">Expiry Magnet</p>
           </div>
@@ -77,7 +77,7 @@ export const V1OptionChain: React.FC<{ symbol: string; stockPrice: number }> = (
 
         <div className="p-4 glass border border-slate-800/50 rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">IV Rank</p>
+            <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">IV Rank</p>
             <p className="text-2xl font-black text-slate-100 italic">{ivRank || 'N/A'}</p>
             <p className="text-[8px] text-slate-400 font-bold uppercase mt-1">Volatility vs History</p>
           </div>
@@ -103,7 +103,7 @@ export const V1OptionChain: React.FC<{ symbol: string; stockPrice: number }> = (
 
         <div className="p-4 glass border border-slate-800/50 rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">IV Percentile</p>
+            <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">IV Percentile</p>
             <p className="text-2xl font-black text-emerald-400 italic">{ivPercentile ? `${ivPercentile}%` : 'N/A'}</p>
             <p className="text-[8px] text-slate-400 font-bold uppercase mt-1">Relative Volatility</p>
           </div>
@@ -210,7 +210,7 @@ export const V1OptionChain: React.FC<{ symbol: string; stockPrice: number }> = (
         <div className="grid grid-cols-4 gap-4 mt-6">
            {['Delta', 'Gamma', 'Theta', 'Vega'].map(g => (
              <div key={g} className="text-center p-3 glass-strong rounded-xl border border-slate-800/50">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{g}</p>
+                <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">{g}</p>
                 <div className={cn(
                   "h-1 rounded-full mb-1",
                   g === 'Delta' ? 'bg-emerald-500' : g === 'Theta' ? 'bg-rose-500' : 'bg-blue-500'

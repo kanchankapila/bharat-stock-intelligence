@@ -33,6 +33,21 @@ Run:
   python trendlyne_overview_fetcher.py --symbol BEL
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class TrendlyneOverviewFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class TrendlyneOverviewFetcherBaseFetcher(BaseFetcher[TrendlyneOverviewFetcherSchema]):
+    fetcher_name = 'TrendlyneOverviewFetcher'
+    domain = 'trendlyne.com'
+    schema = TrendlyneOverviewFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import hashlib
 import time
@@ -40,10 +55,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 
 import requests
+import tl_fetch
 
 from db_compat import connect
-from fetch_utils import filter_numeric_tlids
+from fetch_utils import filter_numeric_tlids, TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget
 from as_of import logical_write_floor
+import sys
 
 OVERVIEW_URL = "https://trendlyne.com/equity/overview-second-part/{tlid}/"
 PROFILE_URL  = "https://trendlyne.com/equity/chart/fundamental-profile/{tlid}/"
@@ -58,13 +75,20 @@ HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
-BATCH_SIZE     = 15
+# Was 15 -- AWS WAF returns 405/captcha for the rest of the run when more than 3
+# requests are in flight at once. Measured, see TRENDLYNE_MAX_CONCURRENT in fetch_utils.py.
+BATCH_SIZE = TRENDLYNE_MAX_CONCURRENT
 BATCH_GAP_SEC  = 0.5
 
 # SEBI LODR Reg 31: the shareholding pattern is filed within 21 days of each period end.
 # Use 30 to stay safely on the late side so a disclosure never back-fills onto rows that
 # predate it (same anti-look-ahead discipline as the MF + ET_Stats fetchers).
 SHAREHOLDING_DISCLOSURE_LAG_DAYS = 30
+
+# How stale a trendlyne_stock_profile row must be before its symbol is due for re-sync.
+# 7 days, not longer: matches the docstring's stated "weekly" cadence and the 7-way shard
+# below, so a symbol becomes due again right as its shard day rolls back around.
+REFRESH_AFTER_DAYS = 7
 
 
 # â”€â”€ Schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -136,38 +160,71 @@ def ensure_schema(con) -> None:
     """)
     con.commit()
 
-    for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN analyst_upside_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN analyst_count INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN analyst_buy_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN roe_annual REAL",
-        "ALTER TABLE technical_signals ADD COLUMN roce_annual REAL",
-        "ALTER TABLE technical_signals ADD COLUMN ebitda_margin REAL",
-        "ALTER TABLE technical_signals ADD COLUMN np_margin REAL",
-        "ALTER TABLE technical_signals ADD COLUMN promoter_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN fii_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mf_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pledge_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN promoter_chg_qoq REAL",
-        "ALTER TABLE technical_signals ADD COLUMN fii_chg_qoq REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mf_chg_qoq REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pledge_chg_qoq REAL",
-        "ALTER TABLE technical_signals ADD COLUMN rev_growth_yoy_q REAL",
-        "ALTER TABLE technical_signals ADD COLUMN np_growth_yoy_q REAL",
-        "ALTER TABLE technical_signals ADD COLUMN days_since_dividend INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN last_dividend_amt REAL",
-        "ALTER TABLE trendlyne_stock_profile ADD COLUMN company_description TEXT",
-        "ALTER TABLE trendlyne_stock_profile ADD COLUMN promoter_chg_qoq REAL",
-        "ALTER TABLE trendlyne_stock_profile ADD COLUMN fii_chg_qoq REAL",
-        "ALTER TABLE trendlyne_stock_profile ADD COLUMN mf_chg_qoq REAL",
-        "ALTER TABLE trendlyne_stock_profile ADD COLUMN pledge_chg_qoq REAL",
-    ]:
-        try:
-            cur.execute(ddl)
-            con.commit()
-        except Exception:
-            con.rollback()
+    # AF-20260901: every column below already exists (db/schema.postgres.sql is
+    # schema-of-record), but these ALTERs re-ran on every fetch. Even with IF NOT EXISTS,
+    # each attempt still queues an ACCESS EXCLUSIVE lock on technical_signals -- a hot table
+    # read by dozens of jobs -- before no-op'ing (the lock-queue stall mechanism is
+    # AF-20260827-14), and every run logged ~24 duplicate-column postgres ERRORs. Guard:
+    # lock-free information_schema pre-check skips the ALTER entirely when the column
+    # exists; the 2s session lock_timeout bounds the wait for a genuinely-new column on a
+    # busy table. Restored in finally (SET LOCAL would not survive the per-DDL commits).
+    cur.execute("SET lock_timeout = '2s'")
+    try:
+        for ddl in [
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS analyst_upside_pct REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS analyst_count INTEGER",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS analyst_buy_pct REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS roe_annual REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS roce_annual REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ebitda_margin REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS np_margin REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS promoter_pct REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fii_pct REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_pct REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pledge_pct REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS promoter_chg_qoq REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fii_chg_qoq REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_chg_qoq REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pledge_chg_qoq REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rev_growth_yoy_q REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS np_growth_yoy_q REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS days_since_dividend INTEGER",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS last_dividend_amt REAL",
+            "ALTER TABLE trendlyne_stock_profile ADD COLUMN IF NOT EXISTS company_description TEXT",
+            "ALTER TABLE trendlyne_stock_profile ADD COLUMN IF NOT EXISTS promoter_chg_qoq REAL",
+            "ALTER TABLE trendlyne_stock_profile ADD COLUMN IF NOT EXISTS fii_chg_qoq REAL",
+            "ALTER TABLE trendlyne_stock_profile ADD COLUMN IF NOT EXISTS mf_chg_qoq REAL",
+            "ALTER TABLE trendlyne_stock_profile ADD COLUMN IF NOT EXISTS pledge_chg_qoq REAL",
+        ]:
+            try:
+                if not _ddl_column_exists(cur, ddl):
+                    cur.execute(ddl)
+                con.commit()
+            except Exception:
+                con.rollback()
+    finally:
+        cur.execute("SET lock_timeout = DEFAULT")
+        con.commit()
 
+def _ddl_column_exists(cur, ddl: str) -> bool:
+    """True when the column targeted by an ``ALTER TABLE t ADD COLUMN [IF NOT EXISTS] c``
+    statement already exists in the current schema. Lock-free (information_schema lookup),
+    so gating the ALTER on it avoids queueing an ACCESS EXCLUSIVE lock request just to
+    discover the column was already there (AF-20260901 / AF-20260827-14)."""
+    toks = ddl.split()
+    if (len(toks) < 6 or toks[0].upper() != "ALTER" or toks[1].upper() != "TABLE"
+            or toks[3].upper() != "ADD" or toks[4].upper() != "COLUMN"):
+        return False
+    rest = toks[5:]
+    if rest and rest[0].upper() == "IF":  # skip IF NOT EXISTS
+        rest = rest[3:]
+    if not rest:
+        return False
+    cur.execute(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+        f"AND table_name = '{toks[2]}' AND column_name = '{rest[0]}'"
+    )
+    return cur.fetchone() is not None
 
 # â”€â”€ Fetch helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -180,7 +237,7 @@ def _fetch(url: str, session: requests.Session) -> dict | None:
         body = data.get("body") if isinstance(data, dict) else None
         return body
     except Exception as e:
-        print(f"  fetch error {url}: {e}")
+        print(f"  fetch error {url}: {e}", file=sys.stderr)
         return None
 
 
@@ -271,43 +328,52 @@ def _safe(v) -> float | None:
 
 # â”€â”€ Extract analyst data from overview-second-part â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def extract_analyst_data(body: dict, symbol: str, today: str, con) -> dict:
+def write_analyst_targets(symbol: str, recent: list, today: str, con) -> None:
+    """Persist per-broker report rows to trendlyne_analyst_targets. Must be called on the
+    main thread with a real connection -- see extract_analyst_data's docstring for why this
+    was split out of that function rather than writing inline."""
+    if not recent or con is None:
+        return
+    cur = con.cursor()
+    for r in recent:
+        try:
+            cur.execute("""
+                INSERT INTO trendlyne_analyst_targets
+                    (symbol, reco_date, broker, target_price, reco_price, rating)
+                VALUES (?,?,?,?,?,?)
+                ON CONFLICT(symbol, reco_date, broker) DO UPDATE SET
+                    target_price = excluded.target_price,
+                    reco_price   = excluded.reco_price,
+                    rating       = excluded.rating,
+                    fetched_at   = CURRENT_TIMESTAMP
+            """, (
+                symbol,
+                r.get("recoDate", today),
+                r.get("postAuthor", ""),
+                _safe(r.get("targetPrice")),
+                _safe(r.get("recoPrice")),
+                r.get("rec", ""),
+            ))
+        except Exception:
+            pass
+    con.commit()
+
+
+def extract_analyst_data(body: dict, symbol: str, today: str) -> dict:
     reports = body.get("researchReports", {}).get("tableData", [])
     cutoff  = date.today().replace(year=date.today().year - 1).isoformat()
     recent  = [r for r in reports if isinstance(r, dict) and r.get("recoDate", "") >= cutoff]
 
-    # Persist all reports. `con` is None when called from a worker thread (see main()'s
-    # comment: DB writes must happen on the main thread with a real connection) -- this used
-    # to call con.cursor() unconditionally, crashing _fetch_one (and the whole batch, since
-    # nothing catches the exception from fut.result()) for every stock with >=1 recent analyst
-    # report -- i.e. almost every actively-covered stock. That silently prevented this function
-    # from ever returning its extracted dict, which is what feeds analyst_upside_pct/
-    # analyst_count/analyst_buy_pct into backfill_technical_signals downstream.
-    if recent and con is not None:
-        cur = con.cursor()
-        for r in recent:
-            try:
-                cur.execute("""
-                    INSERT INTO trendlyne_analyst_targets
-                        (symbol, reco_date, broker, target_price, reco_price, rating)
-                    VALUES (?,?,?,?,?,?)
-                    ON CONFLICT(symbol, reco_date, broker) DO UPDATE SET
-                        target_price = excluded.target_price,
-                        reco_price   = excluded.reco_price,
-                        rating       = excluded.rating,
-                        fetched_at   = CURRENT_TIMESTAMP
-                """, (
-                    symbol,
-                    r.get("recoDate", today),
-                    r.get("postAuthor", ""),
-                    _safe(r.get("targetPrice")),
-                    _safe(r.get("recoPrice")),
-                    r.get("rec", ""),
-                ))
-            except Exception:
-                pass
-        con.commit()
-
+    # 2026-08-20 fix: this function is called from a worker thread with con=None (DB writes
+    # must happen on the main thread with a real connection -- see main()'s ThreadPoolExecutor
+    # loop). A prior fix (guard `con is not None`) stopped a crash here but, as an unintended
+    # side effect, meant the INSERT below NEVER ran from the real batch flow -- trendlyne_
+    # analyst_targets went 39 days stale despite trendlyne_stock_profile's own aggregate
+    # analyst_count/analyst_buy_pct/analyst_upside_pct columns (computed below, unaffected)
+    # continuing to populate correctly. Fixed properly this time: the raw per-broker report
+    # list is returned to the caller as "_analyst_reports" instead of written here, and the
+    # caller invokes write_analyst_targets() on the main thread, mirroring exactly how
+    # upsert_profile()/backfill_technical_signals() already handle their own DB writes.
     if not recent:
         return {}
 
@@ -330,6 +396,7 @@ def extract_analyst_data(body: dict, symbol: str, today: str, con) -> dict:
         "analyst_count":       len(recent),
         "analyst_buy_pct":     buy_pct,
         "analyst_upside_pct":  upside,
+        "_analyst_reports":    recent,
     }
 
 
@@ -516,26 +583,26 @@ def backfill_technical_signals(symbol: str, today: str, profile: dict, con) -> N
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            analyst_upside_pct  = CASE WHEN date >= ? THEN COALESCE(?, analyst_upside_pct)  ELSE NULL END,
-            analyst_count       = CASE WHEN date >= ? THEN COALESCE(?, analyst_count)       ELSE NULL END,
-            analyst_buy_pct     = CASE WHEN date >= ? THEN COALESCE(?, analyst_buy_pct)     ELSE NULL END,
-            roe_annual          = CASE WHEN date >= ? THEN COALESCE(?, roe_annual)          ELSE NULL END,
-            roce_annual         = CASE WHEN date >= ? THEN COALESCE(?, roce_annual)         ELSE NULL END,
-            ebitda_margin       = CASE WHEN date >= ? THEN COALESCE(?, ebitda_margin)       ELSE NULL END,
-            np_margin           = CASE WHEN date >= ? THEN COALESCE(?, np_margin)           ELSE NULL END,
-            promoter_pct        = CASE WHEN date >= ? THEN COALESCE(?, promoter_pct)     ELSE NULL END,
-            fii_pct             = CASE WHEN date >= ? THEN COALESCE(?, fii_pct)          ELSE NULL END,
-            mf_pct              = CASE WHEN date >= ? THEN COALESCE(?, mf_pct)           ELSE NULL END,
-            pledge_pct          = CASE WHEN date >= ? THEN COALESCE(?, pledge_pct)       ELSE NULL END,
-            promoter_chg_qoq    = CASE WHEN date >= ? THEN COALESCE(?, promoter_chg_qoq) ELSE NULL END,
-            fii_chg_qoq         = CASE WHEN date >= ? THEN COALESCE(?, fii_chg_qoq)      ELSE NULL END,
-            mf_chg_qoq          = CASE WHEN date >= ? THEN COALESCE(?, mf_chg_qoq)       ELSE NULL END,
-            pledge_chg_qoq      = CASE WHEN date >= ? THEN COALESCE(?, pledge_chg_qoq)   ELSE NULL END,
-            rev_growth_yoy_q    = CASE WHEN date >= ? THEN COALESCE(?, rev_growth_yoy_q)    ELSE NULL END,
-            np_growth_yoy_q     = CASE WHEN date >= ? THEN COALESCE(?, np_growth_yoy_q)     ELSE NULL END,
-            days_since_dividend = CASE WHEN date >= ? THEN COALESCE(?, days_since_dividend) ELSE NULL END,
-            last_dividend_amt   = CASE WHEN date >= ? THEN COALESCE(?, last_dividend_amt)   ELSE NULL END
-        WHERE symbol = ?
+            analyst_upside_pct  = CASE WHEN date >= ? THEN COALESCE(?, analyst_upside_pct)  ELSE analyst_upside_pct END,
+            analyst_count       = CASE WHEN date >= ? THEN COALESCE(?, analyst_count)       ELSE analyst_count END,
+            analyst_buy_pct     = CASE WHEN date >= ? THEN COALESCE(?, analyst_buy_pct)     ELSE analyst_buy_pct END,
+            roe_annual          = CASE WHEN date >= ? THEN COALESCE(?, roe_annual)          ELSE roe_annual END,
+            roce_annual         = CASE WHEN date >= ? THEN COALESCE(?, roce_annual)         ELSE roce_annual END,
+            ebitda_margin       = CASE WHEN date >= ? THEN COALESCE(?, ebitda_margin)       ELSE ebitda_margin END,
+            np_margin           = CASE WHEN date >= ? THEN COALESCE(?, np_margin)           ELSE np_margin END,
+            promoter_pct        = CASE WHEN date >= ? THEN COALESCE(?, promoter_pct)     ELSE promoter_pct END,
+            fii_pct             = CASE WHEN date >= ? THEN COALESCE(?, fii_pct)          ELSE fii_pct END,
+            mf_pct              = CASE WHEN date >= ? THEN COALESCE(?, mf_pct)           ELSE mf_pct END,
+            pledge_pct          = CASE WHEN date >= ? THEN COALESCE(?, pledge_pct)       ELSE pledge_pct END,
+            promoter_chg_qoq    = CASE WHEN date >= ? THEN COALESCE(?, promoter_chg_qoq) ELSE promoter_chg_qoq END,
+            fii_chg_qoq         = CASE WHEN date >= ? THEN COALESCE(?, fii_chg_qoq)      ELSE fii_chg_qoq END,
+            mf_chg_qoq          = CASE WHEN date >= ? THEN COALESCE(?, mf_chg_qoq)       ELSE mf_chg_qoq END,
+            pledge_chg_qoq      = CASE WHEN date >= ? THEN COALESCE(?, pledge_chg_qoq)   ELSE pledge_chg_qoq END,
+            rev_growth_yoy_q    = CASE WHEN date >= ? THEN COALESCE(?, rev_growth_yoy_q)    ELSE rev_growth_yoy_q END,
+            np_growth_yoy_q     = CASE WHEN date >= ? THEN COALESCE(?, np_growth_yoy_q)     ELSE np_growth_yoy_q END,
+            days_since_dividend = CASE WHEN date >= ? THEN COALESCE(?, days_since_dividend) ELSE days_since_dividend END,
+            last_dividend_amt   = CASE WHEN date >= ? THEN COALESCE(?, last_dividend_amt)   ELSE last_dividend_amt END
+        WHERE symbol = ? AND date >= ?
     """, (
         today, _safe(profile.get("analyst_upside_pct")),
         today, int(profile.get("analyst_count") or 0) if profile.get("analyst_count") is not None else None,
@@ -553,30 +620,48 @@ def backfill_technical_signals(symbol: str, today: str, profile: dict, con) -> N
         today, _safe(profile.get("rev_growth_yoy_q")), today, _safe(profile.get("np_growth_yoy_q")),
         today, int(profile.get("days_since_dividend") or 0) if profile.get("days_since_dividend") is not None else None,
         today, _safe(profile.get("last_dividend_amt")),
-        symbol,
+        # Bounded at the LOWER of the two floors (both ISO strings, so min() is chronological):
+        # older rows only took ELSE-keep in every column yet were all rewritten.
+        symbol, min(str(today)[:10], str(sh_floor)[:10]),
     ))
     con.commit()
 
 
 # â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _load_stocks(symbol_filter: str | None, con, only_unsynced: bool = True) -> list[tuple[str, str]]:
+def _load_stocks(symbol_filter: str | None, con, only_unsynced: bool = True,
+                  refresh_cutoff: str | None = None) -> list[tuple[str, str]]:
     """Return [(symbol, tlid), ...] scoped to the NSE master list only (nse_stocks.tlid).
     No trendlyne_screener_stocks fallback — that table carries non-NSE-master symbols
     (junk/delisted/BSE-only tickers) which pulled the universe well past NSE coverage.
 
-    Company profile/description/fundamentals data is near-static — there's no reason to
-    re-scrape the same NSE stock over and over. With only_unsynced=True (the default), a
-    symbol that already has ANY row in trendlyne_stock_profile (any date) is excluded, so
-    each NSE stock gets scraped once, ever; subsequent runs only pick up stocks that have
-    never been synced (new listings). --resync-all bypasses this to force a full refresh
-    of the whole universe when one is genuinely needed.
+    company_description is near-static; analyst_upside_pct/roe_annual/promoter_pct/etc are
+    NOT (this file's own docstring says "weekly") -- so "already has a row" can't be the gate
+    forever, only until the initial backlog is cleared. With only_unsynced=True (the default)
+    a symbol is due when it has no trendlyne_stock_profile row at all, OR its most recent row
+    predates `refresh_cutoff`. Once due, it stays due until the DAILY shard rotation (7-way,
+    see _shard()) reaches its shard again -- so in steady state this converges to the ~weekly
+    cadence the docstring always claimed, instead of syncing every stock once, ever.
+    Was unconditional "ANY row excludes forever" until 2026-08-18: measured live, the initial
+    backlog finished weeks ago (trendlyne_stock_profile stopped gaining rows entirely), which
+    left analyst_upside_pct/roe_annual/promoter_pct/... frozen at 0-3% of technical_signals
+    populated site-wide -- this fetcher's own 19 columns accounted for the bulk of the
+    under-50%-populated column list. --resync-all bypasses refresh_cutoff entirely (ignores
+    staleness, re-fetches everyone every run) for when a full forced refresh is genuinely needed.
     """
     cur = con.cursor()
-    unsynced_clause = (
-        "AND NOT EXISTS (SELECT 1 FROM trendlyne_stock_profile tsp WHERE tsp.symbol = symbol)"
-        if only_unsynced else ""
-    )
+    if only_unsynced and refresh_cutoff:
+        unsynced_clause = (
+            "AND NOT EXISTS (SELECT 1 FROM trendlyne_stock_profile tsp "
+            "WHERE tsp.symbol = symbol AND tsp.date >= ?)"
+        )
+        params: tuple = (refresh_cutoff,)
+    elif only_unsynced:
+        unsynced_clause = "AND NOT EXISTS (SELECT 1 FROM trendlyne_stock_profile tsp WHERE tsp.symbol = symbol)"
+        params = ()
+    else:
+        unsynced_clause = ""
+        params = ()
     cur.execute(f"""
         SELECT symbol, tlid FROM (
             SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
@@ -584,7 +669,7 @@ def _load_stocks(symbol_filter: str | None, con, only_unsynced: bool = True) -> 
         ) universe(symbol, tlid)
         WHERE 1=1 {unsynced_clause}
         ORDER BY symbol
-    """)
+    """, params)
     rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0]]
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
@@ -624,9 +709,14 @@ def main() -> None:
     con = connect()
     ensure_schema(con)
 
-    stocks = _load_stocks(args.symbol, con, only_unsynced=not args.resync_all)
+    # 7 days: matches this file's own docstring ("Two calls per stock (weekly)") and the
+    # 7-way shard cycle below -- a symbol becomes due again right around when its shard day
+    # comes back around, so this reads as a steady weekly refresh rather than a burst.
+    refresh_cutoff = (date.today() - timedelta(days=REFRESH_AFTER_DAYS)).isoformat()
+    stocks = _load_stocks(args.symbol, con, only_unsynced=not args.resync_all,
+                           refresh_cutoff=refresh_cutoff)
     if not stocks:
-        print("[TLOverview] No stocks with tlid found (or the whole universe is already synced — "
+        print(f"[TLOverview] No stocks due (none unsynced or stale past {refresh_cutoff} — "
               "pass --resync-all to force a full refresh).")
         return
 
@@ -636,9 +726,16 @@ def main() -> None:
         print(f"[TLOverview] Shard {args.shard_index}/{args.shard_count}: "
               f"{len(stocks)}/{full_count} stocks this run.")
 
+    stocks = cap_to_run_budget(stocks, "TLOverview", requests_per_row=2)
     print(f"[TLOverview] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap) - analyst + fundamentals...")
-    session = requests.Session()
-    session.headers.update(HEADERS)
+    # curl_cffi Chrome-TLS-impersonated session (tl_fetch), same switch the two catch-up
+    # fetchers already use. Trendlyne's WAF fingerprints the TLS ClientHello, so a plain
+    # urllib/requests handshake is the cheapest signal it has -- headers alone do not help.
+    # create_session() falls back to requests+legacy headers when Scrapling is missing or
+    # TRENDLYNE_USE_SCRAPLING=0, so this is strictly additive.
+    session = tl_fetch.create_session()
+    if not isinstance(session, tl_fetch.TLSession):
+        session.headers.update(HEADERS)
     today = date.today().isoformat()
     # Separate anchor for the technical_signals UPDATE below: this job runs DAILY including
     # weekends (company-profiles-sync, '0 4 * * *') -- on a Sat/Sun `today` has no grid-ensurer
@@ -654,7 +751,7 @@ def main() -> None:
         profile = {}
         overview_body = _fetch(OVERVIEW_URL.format(tlid=tlid), session)
         if overview_body is not None:
-            profile.update(extract_analyst_data(overview_body, symbol, today, None))
+            profile.update(extract_analyst_data(overview_body, symbol, today))
             profile.update(extract_event_data(overview_body))
             desc = extract_company_description(overview_body)
             if desc:
@@ -676,6 +773,7 @@ def main() -> None:
                     overview_body2 = None  # analyst_data already extracted in worker
                     upsert_profile(symbol, today, profile, con)
                     backfill_technical_signals(symbol, ts_anchor, profile, con)
+                    write_analyst_targets(symbol, profile.get("_analyst_reports", []), today, con)
                     ok += 1
                 upside_str = f"Upside={profile.get('analyst_upside_pct','?')}% n={profile.get('analyst_count','?')}"
                 margin_str = f"EBITDA={profile.get('ebitda_margin','?')}% ROE={profile.get('roe','?')}%"
@@ -689,3 +787,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
