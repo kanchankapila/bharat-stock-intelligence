@@ -7,6 +7,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * volume>0) so the closed-market guard cannot see them -- the fix drops the names at persist
  * time, using nse_universe_history (the exchange's own record) as the authority on whether a
  * symbol still trades. These tests pin the filter semantics at the persist boundary.
+ *
+ * AF-20260915-10. Extended with a canonical universe allowlist: symbols not in nse_stocks
+ * are dropped before the post-exit check even runs, closing the gap where ~58 symbols
+ * (ETFs, aliases, index tickers) bypassed the denylist entirely.
  */
 
 const mockDbAll = vi.hoisted(() => vi.fn(async () => [] as Array<{ symbol: string }>));
@@ -35,7 +39,13 @@ vi.mock('./marketStatusService', () => ({ isMarketOpen: vi.fn(async () => false)
 vi.mock('./intradayBreadth', () => ({ persistIntradayBreadth: vi.fn(async () => {}) }));
 vi.mock('./yahooQuoteUrl', () => ({ yahooQuoteUrl: '' }));
 
-import { persistTodayOHLCVData, getPostExitSymbols, _resetPostExitCacheForTests } from '../liveStockData';
+import {
+  persistTodayOHLCVData,
+  getPostExitSymbols,
+  getCanonicalSymbols,
+  _resetPostExitCacheForTests,
+  _resetCanonicalCacheForTests,
+} from '../liveStockData';
 
 const md = (symbol: string) =>
   ({
@@ -49,9 +59,12 @@ describe('persistTodayOHLCVData drops post-exit symbols (AF-20260914-05)', () =>
     mockDbAll.mockReset();
     mockDbAll.mockImplementation(async () => [] as Array<{ symbol: string }>);
     _resetPostExitCacheForTests();
+    _resetCanonicalCacheForTests();
   });
 
   it('writes every row when no symbol is post-exit', async () => {
+    // Call 1: getCanonicalSymbols() -> all symbols in universe (fail-open: empty set allows all)
+    // Call 2: getPostExitSymbols() -> no dead symbols
     mockDbAll.mockResolvedValue([]);
     const res = await persistTodayOHLCVData([md('RELIANCE'), md('TCS')]);
     expect(res.inserted).toBe(2);
@@ -59,14 +72,22 @@ describe('persistTodayOHLCVData drops post-exit symbols (AF-20260914-05)', () =>
   });
 
   it('drops a symbol whose exchange record shows no trades for >7 days', async () => {
-    mockDbAll.mockResolvedValue([{ symbol: 'JETAIRWAYS' }]);
+    // Call 1: getCanonicalSymbols() -> both symbols in the master (so neither is dropped by allowlist)
+    // Call 2: getPostExitSymbols() -> JETAIRWAYS is post-exit
+    mockDbAll
+      .mockResolvedValueOnce([{ symbol: 'RELIANCE' }, { symbol: 'JETAIRWAYS' }])  // canonical
+      .mockResolvedValueOnce([{ symbol: 'JETAIRWAYS' }]);                          // post-exit
     const res = await persistTodayOHLCVData([md('RELIANCE'), md('JETAIRWAYS')]);
     expect(res.inserted).toBe(1);
     expect(bulkCalls.current.map(r => r[0])).toEqual(['RELIANCE']);
   });
 
   it('caches the dead set: a second persist does not re-query', async () => {
-    mockDbAll.mockResolvedValue([{ symbol: 'SRTRANSFIN' }]);
+    // Call 1: getCanonicalSymbols() -> both symbols in master
+    // Call 2: getPostExitSymbols() -> SRTRANSFIN is post-exit
+    mockDbAll
+      .mockResolvedValueOnce([{ symbol: 'RELIANCE' }, { symbol: 'SRTRANSFIN' }])  // canonical
+      .mockResolvedValueOnce([{ symbol: 'SRTRANSFIN' }]);                          // post-exit
     await persistTodayOHLCVData([md('RELIANCE'), md('SRTRANSFIN')]);
     const callsAfterFirst = mockDbAll.mock.calls.length;
     await persistTodayOHLCVData([md('RELIANCE'), md('SRTRANSFIN')]);
@@ -81,3 +102,47 @@ describe('persistTodayOHLCVData drops post-exit symbols (AF-20260914-05)', () =>
     expect(set.has('GUJGASLTD')).toBe(true);
   });
 });
+
+describe('persistTodayOHLCVData canonical universe allowlist (AF-20260915-10)', () => {
+  beforeEach(() => {
+    bulkCalls.current = [];
+    mockDbAll.mockReset();
+    mockDbAll.mockImplementation(async () => [] as Array<{ symbol: string }>);
+    _resetPostExitCacheForTests();
+    _resetCanonicalCacheForTests();
+  });
+
+  it('drops symbols not in nse_stocks when canonical set is populated', async () => {
+    // First call: getCanonicalSymbols() -> SELECT symbol FROM nse_stocks
+    // Second call: getPostExitSymbols() -> SELECT symbol FROM (... nse_universe_history ...)
+    let callCount = 0;
+    mockDbAll.mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) return [{ symbol: 'RELIANCE' }, { symbol: 'TCS' }]; // nse_stocks
+      return []; // no post-exit symbols
+    });
+    const res = await persistTodayOHLCVData([md('RELIANCE'), md('NIFTY50'), md('TCS')]);
+    expect(res.inserted).toBe(2);
+    expect(bulkCalls.current.map(r => r[0]).sort()).toEqual(['RELIANCE', 'TCS']);
+  });
+
+  it('allows all symbols through when getCanonicalSymbols fails (fail-open)', async () => {
+    let callCount = 0;
+    mockDbAll.mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) throw new Error('nse_stocks unreachable');
+      return []; // no post-exit symbols
+    });
+    const res = await persistTodayOHLCVData([md('RELIANCE'), md('NIFTY50')]);
+    // Fail-open: both symbols pass through
+    expect(res.inserted).toBe(2);
+  });
+
+  it('getCanonicalSymbols returns the queried set', async () => {
+    mockDbAll.mockResolvedValue([{ symbol: 'RELIANCE' }, { symbol: 'TCS' }]);
+    const set = await getCanonicalSymbols();
+    expect(set.has('RELIANCE')).toBe(true);
+    expect(set.has('TCS')).toBe(true);
+    expect(set.has('NIFTY50')).toBe(false);
+  });
+});

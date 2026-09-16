@@ -9,16 +9,16 @@ import { isMarketOpen } from "./marketStatusService";
 import { persistIntradayBreadth } from "./intradayBreadth";
 import { yahooQuoteUrl } from "./yahooQuoteUrl";
 
-// ─── Symbol & name resolution ─────────────────────────────────────────────────
+// â”€â”€â”€ Symbol & name resolution â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/** Combined NSE symbols: computed once at module load — avoids re-allocation on every refresh. */
+/** Combined NSE symbols: computed once at module load â€” avoids re-allocation on every refresh. */
 const ALL_NSE_SYMBOLS: string[] = (() => {
   const stocklistSymbols = getAllStocks().map((s) => s.symbol);
   const nseSymbols = nseStocksData.map((s) => s.symbol);
   return [...new Set([...stocklistSymbols, ...nseSymbols])];
 })();
 
-/** O(1) lookup map for the 180-stock list — used by MC/Finnhub quote fetchers. */
+/** O(1) lookup map for the 180-stock list â€” used by MC/Finnhub quote fetchers. */
 const _stocklistMap = new Map(getAllStocks().map((s) => [s.symbol, s]));
 
 const _nameMap: Map<string, string> = (() => {
@@ -35,7 +35,7 @@ const _sectorMap: Map<string, string> = (() => {
   return m;
 })();
 
-// ─── Yahoo Finance session variables ─────────────────────────────────────────
+// â”€â”€â”€ Yahoo Finance session variables â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let yfCookie: string | null = null;
 let yfCrumb: string | null = null;
 let lastHandshakeTime = 0;
@@ -47,7 +47,7 @@ async function ensureYahooFinanceSession(): Promise<{ cookie: string; crumb: str
   if (yfCookie && yfCrumb && now - lastHandshakeTime < 3600000) {
     return { cookie: yfCookie, crumb: yfCrumb };
   }
-  // Deduplicate concurrent callers — only one handshake at a time
+  // Deduplicate concurrent callers â€” only one handshake at a time
   if (yfHandshakeInFlight) return yfHandshakeInFlight;
 
   yfHandshakeInFlight = (async () => {
@@ -91,7 +91,7 @@ async function ensureYahooFinanceSession(): Promise<{ cookie: string; crumb: str
     }
     // Return stale session if we have one rather than null
     if (yfCookie && yfCrumb) {
-      console.warn("[LIVE DATA] YF handshake failed — reusing stale session");
+      console.warn("[LIVE DATA] YF handshake failed â€” reusing stale session");
       return { cookie: yfCookie, crumb: yfCrumb };
     }
     return null;
@@ -100,20 +100,20 @@ async function ensureYahooFinanceSession(): Promise<{ cookie: string; crumb: str
   return yfHandshakeInFlight;
 }
 
-// ─── Yahoo Finance batch fetch (v7) ──────────────────────────────────────────
+// â”€â”€â”€ Yahoo Finance batch fetch (v7) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const BATCH_SIZE = 50;
 const BATCH_CONCURRENCY = 8;
 const QUOTE_FETCH_TIMEOUT_MS = Number(process.env.QUOTE_FETCH_TIMEOUT_MS ?? 8000);
 const MAX_INDIVIDUAL_FALLBACKS = Number(process.env.MAX_INDIVIDUAL_FALLBACKS ?? 250);
 
-// ─── Pacing + circuit breaker (avoid Yahoo throttling / ban) ──────────────────
+// â”€â”€â”€ Pacing + circuit breaker (avoid Yahoo throttling / ban) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const BATCH_GROUP_DELAY_MS = Number(process.env.YF_BATCH_GROUP_DELAY_MS ?? 250);
 const YF_CIRCUIT_COOLDOWN_MS = Number(process.env.YF_CIRCUIT_COOLDOWN_MS ?? 5 * 60_000);
 const YF_TRIP_FAIL_RATE = 0.5;   // trip if >50% of batches in a refresh fail
 let yfCircuitOpenUntil = 0;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-/** base..2*base ms — spreads bursts so we don't hammer Yahoo on a fixed cadence. */
+/** base..2*base ms â€” spreads bursts so we don't hammer Yahoo on a fixed cadence. */
 const jitter = (base: number) => base + Math.floor(Math.random() * base);
 
 async function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response> {
@@ -189,7 +189,7 @@ async function fetchBatchYahooFinance(
   return result;
 }
 
-// ─── Yahoo Finance per-symbol fallback (v8 chart) ────────────────────────────
+// â”€â”€â”€ Yahoo Finance per-symbol fallback (v8 chart) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function fetchStockQuoteYahooFinance(
   symbol: string,
@@ -239,7 +239,7 @@ async function fetchStockQuoteYahooFinance(
   }
 }
 
-// ─── MoneyControl (secondary, kept for stocklist stocks only) ─────────────────
+// â”€â”€â”€ MoneyControl (secondary, kept for stocklist stocks only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function fetchStockQuoteMoneyControl(
   symbol: string,
@@ -273,7 +273,7 @@ export async function fetchStockQuoteMoneyControl(
   };
 }
 
-// ─── Finnhub (tertiary, requires env var) ────────────────────────────────────
+// â”€â”€â”€ Finnhub (tertiary, requires env var) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function fetchStockQuoteFinnhub(
   symbol: string,
@@ -312,7 +312,7 @@ export async function fetchStockQuoteFinnhub(
   }
 }
 
-// ─── Parallel bulk fetch ──────────────────────────────────────────────────────
+// â”€â”€â”€ Parallel bulk fetch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function fetchAllLiveStocks(): Promise<MarketData[]> {
   const allSymbols = ALL_NSE_SYMBOLS;
@@ -321,7 +321,7 @@ export async function fetchAllLiveStocks(): Promise<MarketData[]> {
   // the caller keeps serving the existing cache/mirror instead of hammering a throttled host.
   if (Date.now() < yfCircuitOpenUntil) {
     const secs = Math.ceil((yfCircuitOpenUntil - Date.now()) / 1000);
-    console.warn(`[LIVE DATA] Yahoo circuit OPEN (${secs}s left) — skipping refresh, serving cache.`);
+    console.warn(`[LIVE DATA] Yahoo circuit OPEN (${secs}s left) â€” skipping refresh, serving cache.`);
     return [];
   }
 
@@ -362,7 +362,7 @@ export async function fetchAllLiveStocks(): Promise<MarketData[]> {
   if (chunks.length > 0 && batchFailures / chunks.length > YF_TRIP_FAIL_RATE) {
     yfCircuitOpenUntil = Date.now() + YF_CIRCUIT_COOLDOWN_MS;
     console.warn(
-      `[LIVE DATA] ${batchFailures}/${chunks.length} batches failed — tripping Yahoo circuit for ${YF_CIRCUIT_COOLDOWN_MS / 1000}s.`,
+      `[LIVE DATA] ${batchFailures}/${chunks.length} batches failed â€” tripping Yahoo circuit for ${YF_CIRCUIT_COOLDOWN_MS / 1000}s.`,
     );
   }
 
@@ -397,7 +397,7 @@ export async function fetchAllLiveStocks(): Promise<MarketData[]> {
   return results;
 }
 
-// ─── Cache keys ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ Cache keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const BULK_CACHE_KEY = "live-stocks-bulk";
 const PER_SYMBOL_TTL = 30; // seconds
@@ -405,7 +405,7 @@ const BULK_TTL = 5 * 60; // 5 minutes
 const BULK_REFRESH_INTERVAL = BULK_TTL * 1000;
 
 // intraday_regime.py consumes breadth every 15 min and its staleness guard is 20 min.
-// Throttling the DB write to match avoids storing 3× more snapshots than the consumer
+// Throttling the DB write to match avoids storing 3Ã— more snapshots than the consumer
 // can ever use, without affecting the live regime nowcast.
 const BREADTH_CAPTURE_INTERVAL_MS = 15 * 60 * 1000; // 15 min
 let lastBreadthCaptureTime = 0;
@@ -415,7 +415,7 @@ let lastBreadthCaptureTime = 0;
 let bulkMirror: Map<string, MarketData> = new Map();
 let lastBulkFetchTime = 0;
 
-// ─── Background refresh task ─────────────────────────────────────────────────
+// â”€â”€â”€ Background refresh task â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 let refreshRunning = false;
 let hasFetchedOnce = false;
@@ -443,7 +443,7 @@ async function runBulkRefresh(): Promise<void> {
     lastBulkFetchTime = Date.now();
     hasFetchedOnce = true;
 
-    // Intraday breadth nowcast — throttled to every 15 min even though the quote refresh
+    // Intraday breadth nowcast â€” throttled to every 15 min even though the quote refresh
     // runs every 5 min. intraday_regime.py only consumes breadth every 15 min (20-min
     // staleness tolerance), so writing every 5 min just triples the snapshot table growth
     // with no benefit to the downstream regime label.
@@ -480,7 +480,7 @@ export function startBackgroundRefresh(): void {
   );
 }
 
-// ─── Per-symbol cache (Redis / in-memory, 30-sec TTL) ────────────────────────
+// â”€â”€â”€ Per-symbol cache (Redis / in-memory, 30-sec TTL) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function fetchStockDataWithCache(
   symbol: string,
@@ -518,7 +518,7 @@ export async function fetchStockDataWithCache(
   return quoteData;
 }
 
-// ─── Bulk accessor (used by getLiveStocks route) ──────────────────────────────
+// â”€â”€â”€ Bulk accessor (used by getLiveStocks route) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function getOrRefreshAllStocks(): Promise<MarketData[]> {
   const now = Date.now();
@@ -541,7 +541,7 @@ export async function getOrRefreshAllStocks(): Promise<MarketData[]> {
   return Array.from(bulkMirror.values());
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function formatVolume(volume: number): string {
   if (volume >= 1_000_000) return (volume / 1_000_000).toFixed(1) + "M";
@@ -549,7 +549,7 @@ function formatVolume(volume: number): string {
   return volume.toString();
 }
 
-// ─── DB Mappings Cache ───────────────────────────────────────────────────────
+// â”€â”€â”€ DB Mappings Cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let dbMappingsCache: Map<string, { mcsymbol: string | null; tlid: string | null; tlname: string | null }> | null = null;
 let dbMappingsLoading: Promise<void> | null = null;  // singleton guard against concurrent init
 
@@ -600,12 +600,12 @@ function enrichMarketData(data: MarketData): MarketData {
     };
   }
 
-  // Stock is in NSE master list but not in 180-stock mapping — provider IDs unavailable
+  // Stock is in NSE master list but not in 180-stock mapping â€” provider IDs unavailable
   // console.debug(`[enrichMarketData] No provider mapping for ${data.symbol}; MC/TL calls will be skipped`);
   return data;
 }
 
-// ─── PHASE 1 FIX: Persist OHLCV data to database ───────────────────────────────
+// â”€â”€â”€ PHASE 1 FIX: Persist OHLCV data to database â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Persists today's OHLCV data to stock_ohlcv table for backtesting
@@ -646,12 +646,49 @@ export function closedMarketShare(rows: (string | number)[][]): number {
 export const CLOSED_MARKET_SHARE_FLOOR = 0.95;
 
 /**
- * AF-20260914-05. Symbols the EXCHANGE itself no longer trades — their last
- * nse_universe_history (bhavcopy) row is more than POST_EXIT_GRACE_DAYS old — are dead:
+ * AF-20260915-10. Canonical universe allowlist â€” only symbols present in nse_stocks
+ * (the platform's ~2,366-name master) are eligible for OHLCV persistence. The vendor
+ * quote batch includes ~58 symbols outside this master (ETFs, micro-caps, aliases like
+ * KOTAK/VODAFONE, index tickers like NIFTY50) that silently passed through the post-exit
+ * denylist below because they had no nse_universe_history row at all (the denylist's
+ * INNER JOIN found nothing, so they weren't in the dead set). Filtering against
+ * nse_stocks closes this gap entirely: anything not in the master is dropped, regardless
+ * of bhavcopy presence.
+ *
+ * Cached 12h: the master changes on listing/delisting cadence, not intraday.
+ */
+let _canonicalCache: { set: Set<string>; loadedAt: number } | null = null;
+const CANONICAL_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+
+export async function getCanonicalSymbols(): Promise<Set<string>> {
+  if (_canonicalCache && Date.now() - _canonicalCache.loadedAt < CANONICAL_CACHE_TTL_MS) {
+    return _canonicalCache.set;
+  }
+  try {
+    const rows = await dbAll<{ symbol: string }>(`SELECT symbol FROM nse_stocks`);
+    const set = new Set(rows.map((r) => r.symbol));
+    _canonicalCache = { set, loadedAt: Date.now() };
+    return set;
+  } catch {
+    // Fail OPEN: if nse_stocks is unreachable, allow everything through rather than
+    // blocking the entire persist. The post-exit guard below and the DQ check still catch
+    // the worst cases (delisted names).
+    return new Set<string>();
+  }
+}
+
+/** Test seam: clears the 12h canonical cache. */
+export function _resetCanonicalCacheForTests(): void {
+  _canonicalCache = null;
+}
+
+/**
+ * AF-20260914-05. Symbols the EXCHANGE itself no longer trades â€” their last
+ * nse_universe_history (bhavcopy) row is more than POST_EXIT_GRACE_DAYS old â€” are dead:
  * suspended, delisted, or merged away. The quote vendors keep serving a frozen snapshot
  * for them, so without this guard every refresh mints one fabricated bar per dead name
- * per trading day (48 symbols / 3,199 fabricated bars found live, incl. SRTRANSFIN —
- * delisted 2022-12 — still receiving bars in 2026-09). The bars look plausible (high>low,
+ * per trading day (48 symbols / 3,199 fabricated bars found live, incl. SRTRANSFIN â€”
+ * delisted 2022-12 â€” still receiving bars in 2026-09). The bars look plausible (high>low,
  * volume>0) so the closed-market guard below cannot see them.
  *
  * Cached 12h: the dead set changes on delisting-announcement cadence, not intraday.
@@ -681,7 +718,7 @@ export async function getPostExitSymbols(): Promise<Set<string>> {
   }
 }
 
-/** Test seam: clears the 12h cache so each test observes its own mocked exchange record. */
+/** Test seam: clears the 12h post-exit cache so each test observes its own mocked exchange record. */
 export function _resetPostExitCacheForTests(): void {
   _postExitCache = null;
 }
@@ -703,22 +740,37 @@ export async function persistTodayOHLCVData(stocks: MarketData[]): Promise<{ ins
   let inserted = 0;
   let failed = 0;
 
-  // Dedupe by symbol — bulkUpsert errors if the same ON CONFLICT key appears twice in one batch.
+  // Dedupe by symbol â€” bulkUpsert errors if the same ON CONFLICT key appears twice in one batch.
   const seen = new Set<string>();
   const deduped = stocks
     .filter(s => { if (seen.has(s.symbol)) return false; seen.add(s.symbol); return true; });
+
+  // AF-20260915-10. Allowlist: only persist symbols in the canonical nse_stocks master.
+  // The vendor batch includes ~58 names outside this master (ETFs, index tickers, aliases)
+  // that bypass the post-exit denylist below. Fail-open inside getCanonicalSymbols.
+  const canonical = await getCanonicalSymbols();
+  const inUniverse = canonical.size
+    ? deduped.filter(s => canonical.has(s.symbol))
+    : deduped;
+  if (inUniverse.length < deduped.length) {
+    console.warn(
+      `[OHLCV] Skipped ${deduped.length - inUniverse.length} symbol(s) not in the canonical ` +
+      `nse_stocks master â€” vendor serves quotes for them but they are not in the platform's ` +
+      `universe (AF-20260915-10).`,
+    );
+  }
 
   // AF-20260914-05. Drop post-exit (delisted/suspended) names BEFORE persisting: their vendor
   // quotes are frozen snapshots, and writing them mints one fabricated bar per dead name per
   // trading day with plausible-looking OHLC and volume. Fail-open inside getPostExitSymbols.
   const postExit = await getPostExitSymbols();
   const live = postExit.size
-    ? deduped.filter(s => !postExit.has(s.symbol))
-    : deduped;
-  if (live.length < deduped.length) {
+    ? inUniverse.filter(s => !postExit.has(s.symbol))
+    : inUniverse;
+  if (live.length < inUniverse.length) {
     console.warn(
-      `[OHLCV] Skipped ${deduped.length - live.length} post-exit symbol(s) whose exchange ` +
-      `record shows no trades for >${POST_EXIT_GRACE_DAYS} days — vendor quotes for them are ` +
+      `[OHLCV] Skipped ${inUniverse.length - live.length} post-exit symbol(s) whose exchange ` +
+      `record shows no trades for >${POST_EXIT_GRACE_DAYS} days â€” vendor quotes for them are ` +
       `frozen snapshots, not trading data (AF-20260914-05).`,
     );
   }
@@ -757,7 +809,7 @@ export async function persistTodayOHLCVData(stocks: MarketData[]): Promise<{ ins
       close=excluded.close, volume=excluded.volume
   `;
 
-  // Fake DbTx — no transaction needed, and dbBulk chunks rows to stay under PG's 65535-param limit.
+  // Fake DbTx â€” no transaction needed, and dbBulk chunks rows to stay under PG's 65535-param limit.
   const fakeTx = { run: dbRun, get: async () => undefined as any, all: async () => [] as any[] };
   try {
     await bulkUpsert(fakeTx, rows, 7, buildSql);
@@ -791,7 +843,7 @@ export async function fetchAndPersistOHLCVData(): Promise<{ count: number; persi
     // PHASE 2.4 FIX: Detect significant price movements and trigger signal updates
     await detectAndQueueSignalUpdates(stocks);
 
-    // Enqueue a technical signal re-scan for stocks that moved ≥5% intraday
+    // Enqueue a technical signal re-scan for stocks that moved â‰¥5% intraday
     try {
       const { technicalSignalsQueue } = await import('./queues');
       if (technicalSignalsQueue) {
@@ -820,7 +872,7 @@ export async function fetchAndPersistOHLCVData(): Promise<{ count: number; persi
   }
 }
 
-// ─── PHASE 2.4 FIX: Detect price changes and trigger signal updates ─────────
+// â”€â”€â”€ PHASE 2.4 FIX: Detect price changes and trigger signal updates â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const PRICE_CHANGE_THRESHOLD = 2.0;  // Re-evaluate signals if price moves > 2%
 const lastPriceCache = new Map<string, number>();  // Track previous prices
@@ -832,7 +884,7 @@ const lastPriceCache = new Map<string, number>();  // Track previous prices
 async function detectAndQueueSignalUpdates(stocks: MarketData[]): Promise<void> {
   const symbelsToUpdate: string[] = [];
 
-  // Import once outside the loop — best-effort; silently skip if WS not ready
+  // Import once outside the loop â€” best-effort; silently skip if WS not ready
   let wsSvc: { checkAndBroadcastPriceMove: (symbol: string, price: number) => void } | null = null;
   try {
     const { wsSignalService } = await import('./websocketService');

@@ -634,9 +634,12 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // to gain 2,787 genuinely new ones. getCardInfo still has no since-parameter — the whole
   // ~9,900-row series arrives regardless — so the fix is on the write side (skip dates already
   // stored, live-measured 13 rows/symbol instead of 9,876) plus an 8-worker fetch (2.02s/symbol
-  // serial = 61.7 min, which no budget could have absorbed). Now ~9 min; 20 gives real headroom.
+  // serial = 61.7 min, which no budget could have absorbed). Now ~9 min; 30 gives real headroom.
+  // 2026-09-15: timed out at 20min under contention (ml-daily-ops reported
+  // "1 steps failed: marketsmojo_technical_fetcher"), cascading to DL Engine Inference going
+  // stale and the Telegram DI report being ~24h late. 30min absorbs the worst observed spikes.
   // --full forces a complete re-upsert if the vendor ever restates history.
-  await runPython('marketsmojo_technical_fetcher.py', [], 20 * 60_000)
+  await runPython('marketsmojo_technical_fetcher.py', [], 30 * 60_000)
     .catch(e => T.fail('marketsmojo_technical_fetcher', e));
   // 81 indices, one call each — the BSE-family/sectoral coverage macro_asset_prices lacks.
   await runPython('marketsmojo_index_fetcher.py', [], 10 * 60_000)
@@ -1514,7 +1517,9 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; sk
   // covers the >1.33x contention factor the chain actually exhibits instead of the 33% margin
   // that kept failing. Still safe per the note above: nothing wraps this processor in a
   // chain-level budget and the worker's 6h lockDuration dwarfs it.
-  await T.run('exit-policy-train', () => runPython('exit_policy.py', ['--train'], 90 * 60_000));
+  // 2026-09-15: timed out at 90min (5400s) on 2026-09-12 under concurrent ml-weekly-retrain
+  // load. 120min = ~2.66x measured standalone (45min), absorbing the worst observed contention.
+  await T.run('exit-policy-train', () => runPython('exit_policy.py', ['--train'], 120 * 60_000));
   // --tune runs Optuna hyperparameter search (this is what took the model from AUC 0.70 to
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
   // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.
@@ -1532,7 +1537,10 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; sk
   // via the OS process table (not idle/hung), past 30min with no sign of a stuck connection.
   // Bumped to match backtest_optimizer.py's sibling budget one line below, a similarly-shaped
   // grid-search step in the same weekly pipeline.
-  await T.run('strategy-optimizer', () => runPython('strategy_optimizer.py', [], 60 * 60_000));
+  // 2026-09-15: hit 20GB memory ceiling at 60min on 2026-09-14. PIT alignment fix reduced
+  // the Cartesian product from 13.5M rows, but under contention the process still peaks near
+  // the ceiling. 90min gives headroom for the slower post-PIT-fix runtime + contention.
+  await T.run('strategy-optimizer', () => runPython('strategy_optimizer.py', [], 90 * 60_000));
   await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000)
     .catch(e => T.fail('backtester', e));
   // Backtest-driven strategy parameter tuning (holdout-gated inside the script itself).

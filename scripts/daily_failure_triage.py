@@ -37,6 +37,11 @@ MUTED = {
     # AMFI's portfolio endpoint returns the scheme master, not holdings -- upstream, documented in
     # mf_sector_flow_fetcher.py, exits 1 deliberately so it stays visible rather than silent.
     "mf_sector_flow_fetcher.py",
+    # mem_hog.py is a test fixture in __tests__/fixtures/ that intentionally allocates beyond the
+    # PY_CHILD_MEM_LIMIT_MB ceiling to verify the memory guard works. It crashes ~20x/day in CI
+    # and its failures are by design, not defects. Any script path under __tests__/fixtures/ is
+    # similarly a test fixture whose failures are intentional.
+    "mem_hog.py",
 }
 
 
