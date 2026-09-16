@@ -60,6 +60,12 @@ def _run(symbol, con):
     fe._merge_flow_features = lambda feat, sym: feat
     fe._merge_block_deals = lambda feat, sym: feat
     fe._merge_market_context = lambda feat: feat
+    # _merge_analyst_consensus was added after this test was written and does NOT take the
+    # injected con -- it reads via db_compat's own engine (POSTGRES_PORT, dev default 5433).
+    # Unstubbed, the test passed on dev boxes (real DB on 5433) and hard-failed CI's service
+    # container (5432) with ECONNREFUSED -- main's 2026-09-16 run. Stub it like its siblings:
+    # this file tests TARGET SCALING, not consensus merges.
+    fe._merge_analyst_consensus = lambda feat, sym: feat
     return fe.process_symbol(symbol, con=con)
 
 
