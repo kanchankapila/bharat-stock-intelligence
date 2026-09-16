@@ -347,6 +347,7 @@ export default function App() {
         watchlist={watchlist}
         onToggleWatchlist={toggleWatchlist}
         onSelectStock={setDrawerSymbol}
+        userId={user?.uid}
       />
 
       <AlertsToast userId={user?.uid} />

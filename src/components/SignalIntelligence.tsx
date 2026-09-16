@@ -496,6 +496,13 @@ export function SignalIntelligence() {
             <Star className="w-4 h-4 text-amber-400" />
             <span className="v1-title-card">Scanner Reliability Leaderboard</span>
           </div>
+          {/* screener_reliability, same family as screener_performance_v2 (both named
+              together in measurement.md's "did not survive contact with a from-scratch
+              measurement" finding) -- already disclaimed on the v6/v5/screener-intelligence
+              consumers of the sibling table; this one had no caveat until now. */}
+          <div className="px-4 pt-2.5">
+            <LegacyScoreBanner note="Win rate and reliability score are precomputed per-screener in screener_reliability. A from-scratch remeasurement of this table family found its win-rate figures didn't reproduce (one screener read 100%, remeasured at 65%), and 0 of 1,563 individual screeners tested clear a false-discovery correction -- treat this as a browse, not a graded prediction. Check Alpha / Buy Recs for the canonical, regime-aware view." />
+          </div>
           {reliability && reliability.length > 0 ? (
             <div className="divide-y divide-slate-800/50">
               {reliability.map((r: any, i: number) => (

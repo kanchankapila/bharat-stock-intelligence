@@ -60,6 +60,17 @@ def _run(symbol, con):
     fe._merge_flow_features = lambda feat, sym: feat
     fe._merge_block_deals = lambda feat, sym: feat
     fe._merge_market_context = lambda feat: feat
+    # Four more merges joined process_symbol after this test was written. They do NOT take
+    # the injected con -- each reads via db_compat's global engine (POSTGRES_URL, or
+    # POSTGRES_PORT defaulting to the dev 5433). Unstubbed, they passed on dev boxes (real
+    # DB on 5433 -- including via a .env found by walking up from a worktree) and hard-
+    # failed CI's service container (5432) with ECONNREFUSED -- main's 2026-09-16 python
+    # lane. Stub them like their siblings: this file tests TARGET SCALING, not merges.
+    fe._merge_analyst_consensus = lambda feat, sym: feat
+    fe._merge_earnings_clock = lambda feat, sym: feat
+    fe._merge_delivery = lambda feat, sym: feat
+    fe._merge_options_backfill = lambda feat, sym: feat
+    fe._merge_deep_history = lambda feat, sym: feat
     return fe.process_symbol(symbol, con=con)
 
 

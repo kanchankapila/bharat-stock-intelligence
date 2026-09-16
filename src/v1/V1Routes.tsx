@@ -233,7 +233,7 @@ const V1Routes = ({
                                 </V1PageFrame>
                             } />
                             <Route path="/early-spotter" element={<EarlyHoursSpotter onSelectStock={onSelectStock} />} />
-                            <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
+                            <Route path="/screener-intelligence" element={<ScreenerIntelligencePage onSelectStock={onSelectStock} />} />
                             <Route path="/agent-data-scientist" element={<AgentDataScientistPage />} />
                             <Route path="/agent-strategist" element={<AgentStrategistPage />} />
                             <Route path="/agent-auditor" element={<AgentAuditorPage />} />

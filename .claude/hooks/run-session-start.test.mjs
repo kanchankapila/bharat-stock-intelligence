@@ -3,6 +3,9 @@
 // on Windows (WSL bash cannot open a Windows path; exit 127), and a Windows-shaped
 // CLAUDE_PROJECT_DIR made the script's own `cd ... || exit 0` a silent no-op even when bash did
 // start. These tests lock in the resolution rules that fix it.
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { bashCandidates, envForBash, isWindowsStylePath, pickBash, run } from './run-session-start.mjs';
 
@@ -63,7 +66,15 @@ describe('run-session-start / execution', () => {
     const [bash, args, opts] = spawn.mock.calls[0];
     expect(bash).toBe('bash');
     expect(args).toEqual(['.claude/hooks/session-start.sh']);
-    expect(opts.cwd.endsWith('bharat-stock-intelligence')).toBe(true);
+    // Repo-root-anchored, NOT checkout-name-anchored: this module computes the root from its
+    // own location, so the assertion must too — a git worktree (…/.claude/worktrees/<name>)
+    // is a valid checkout whose basename is not the repo's name.
+    const expectedRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    expect(opts.cwd).toBe(expectedRoot);
+    // …and that root really is one: it contains both the package manifest and the script
+    // the hook launches.
+    expect(existsSync(join(expectedRoot, 'package.json'))).toBe(true);
+    expect(existsSync(join(expectedRoot, '.claude', 'hooks', 'session-start.sh'))).toBe(true);
     expect(opts.env.CLAUDE_PROJECT_DIR).toBeUndefined();
   });
 

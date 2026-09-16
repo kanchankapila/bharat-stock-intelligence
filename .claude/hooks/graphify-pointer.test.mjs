@@ -2,7 +2,7 @@
 // This logic used to be two untested inline bash+python3 one-liners in .claude/settings.json
 // that silently never fired on Windows (WSL bash could not parse the command string). These
 // tests are the guard that was missing: they pin the emit/silence boundary for both matchers.
-import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -67,16 +67,21 @@ describe('graphify-pointer / decision', () => {
 
   it('reads graph existence from a real cwd, not a hardcoded absolute path', () => {
     // Guards the regression that matters most: the hook runs with cwd = repo root, so a
-    // relative GRAPH_PATH must resolve. Verified by point: temporarily relocating the graph.
+    // relative GRAPH_PATH must resolve. Verified without depending on the repo's own
+    // (gitignored) graph artifact, which only exists in checkouts that have run
+    // `graphify update` — a fresh clone or CI must pass this too.
     const dir = mkdtempSync(join(tmpdir(), 'graphify-pointer-'));
+    const cwd = process.cwd();
     try {
-      const cwd = process.cwd();
       process.chdir(dir);
-      expect(decide('Bash', { command: 'grep -rn x src/' })).toBeNull(); // no graph here
-      process.chdir(cwd);
-      copyFileSync('graphify-out/graph.json', join(dir, 'graph.json')); // sanity: the file exists
-      expect(decide('Bash', { command: 'grep -rn x src/' }, GRAPH)).not.toBeNull();
+      // No graph in this cwd -> stay silent.
+      expect(decide('Bash', { command: 'grep -rn x src/' })).toBeNull();
+      // Create one IN this cwd -> the relative path must now resolve.
+      mkdirSync(join(dir, 'graphify-out'), { recursive: true });
+      writeFileSync(join(dir, 'graphify-out', 'graph.json'), '{}');
+      expect(decide('Bash', { command: 'grep -rn x src/' })).not.toBeNull();
     } finally {
+      process.chdir(cwd);
       rmSync(dir, { recursive: true, force: true });
     }
   });
