@@ -59,6 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Search,          label: 'Stock Intelligence', id: 'stock-intelligence-hub' },
       { icon: LayoutDashboard, label: 'Dashboard',  id: 'dashboard'   },
       { icon: BarChart2,       label: 'Indices',    id: 'indices'     },
+      { icon: PieChart,        label: 'Sectors',    id: 'sectors'     },
       { icon: Activity,        label: 'Market Map', id: 'market-map'  },
       { icon: Sunrise,         label: 'Pre-Market', id: 'premarket'   },
       { icon: Radio,           label: 'Intraday',   id: 'intraday'    },

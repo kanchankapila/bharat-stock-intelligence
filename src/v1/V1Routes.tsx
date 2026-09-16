@@ -72,6 +72,7 @@ const CorporateEventsPanel = React.lazy(() => import('../components/CorporateEve
 const Card = React.lazy(() => import('../components/Card').then(m => ({ default: m.Card })));
 const EconomicCalendarWidget = React.lazy(() => import('../components/TradingViewWidgets').then(m => ({ default: m.EconomicCalendarWidget })));
 const MarketOverviewWidget = React.lazy(() => import('../components/TradingViewWidgets').then(m => ({ default: m.MarketOverviewWidget })));
+const SectorIntelligencePage = React.lazy(() => import('../components/sectors/SectorIntelligencePage'));
 
 // v6-native (2 pages that were exclusive to V6Shell) and v5-desk retrofits (previously reachable
 // only under dashboardVersion==='v6'/'v7'/'v8' -- see App.tsx) -- v1's own nav now links all 8.
@@ -171,6 +172,14 @@ const V1Routes = ({
                                 </V1PageFrame>
                             } />
                             <Route path="/indices" element={<IndicesPage onSelectStock={onSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
+                            <Route path="/sectors" element={
+                                <V1PageFrame title="Sector Intelligence Studio" kicker="ROTATION · BREADTH · DERIVATIVES · ANALYST CALLS">
+                                    <SectorIntelligencePage
+                                        onSelectStock={onSelectStock}
+                                        onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                                    />
+                                </V1PageFrame>
+                            } />
                             <Route path="/market-map" element={
                                 <V1PageFrame title="Market Map" kicker="SECTOR INTELLIGENCE">
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
