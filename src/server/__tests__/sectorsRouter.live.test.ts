@@ -5,10 +5,14 @@
 // live-derived fields fail -- which is exactly how main's 2026-09-16 run went red
 // (AF-20260916-01). They proved their worth against the real stack on the dev box
 // (145-file run green with network) before being gated.
+// LIVE_DATE_SAFE: overview/deep-dive are read-only aggregations -- they fetch live indices and read rows from already-completed sessions; nothing is written, so no clock-anchored write can leak a holiday date.
+// (Declared for liveTestTradingDayGuard.test.ts -- see it for why this must be stated.)
 import { describe, it, expect } from 'vitest';
 import { appRouter } from '../router';
 
-describe('sectorsRouter', () => {
+const RUN_LIVE = process.env.RUN_LIVE_DATASOURCE_TESTS === '1';
+
+describe.runIf(RUN_LIVE)('sectorsRouter', () => {
   it('should export getSectorsOverview and return structured sector data', async () => {
     const caller = appRouter.createCaller({} as any);
     const result = await caller.getSectorsOverview();
