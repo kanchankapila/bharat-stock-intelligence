@@ -1,3 +1,10 @@
+// LIVE-DATASOURCE-GATED (`.live.test.ts` -> vitest `live` project, skipped unless
+// RUN_LIVE_DATASOURCE_TESTS is set): these caller tests exercise getSectorsOverview /
+// getSectorDeepDive end-to-end, which fetch LIVE NSE index data (fetchAllIndianIndices,
+// fetchIndexFullDetails, ...). On CI that network is unreachable and the assertions on
+// live-derived fields fail -- which is exactly how main's 2026-09-16 run went red
+// (AF-20260916-01). They proved their worth against the real stack on the dev box
+// (145-file run green with network) before being gated.
 import { describe, it, expect } from 'vitest';
 import { appRouter } from '../router';
 
