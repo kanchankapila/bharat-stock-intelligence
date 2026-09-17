@@ -235,6 +235,37 @@ inline with `WAS ->` so the drift stays visible instead of being silently overwr
   platform's mean-reversion finding itself is corroborated by non-`feature_store` routes and is
   **not** retracted; only these specific numbers are.
 
+## Position sizing: FULL_ENGINE_COVERAGE is derived, not chosen (measured 2026-09-17)
+
+`size_confidence_multiplier(strength, coverage)` shrinks a position by
+`c = min(1, coverage / FULL_ENGINE_COVERAGE)`, where `coverage` is `len(present)`. AF-20260916-08
+narrowed `present` from "engines with a row" to "engines with a NONZERO weight in the active
+regime" — correct on its own, but the denominator was left hardcoded at **5** while only **4**
+engines carry nonzero weight in ANY regime (screener/cs/dl/smart_money are all pinned 0.0).
+
+**Measured on the live 2026-09-17 grid (1,893 rows):**
+
+    active engines   rows    c=n/5   mult@q=1    c=n/4   mult@q=1
+         4          1,698    0.80      0.900      1.00      1.000
+         3             32    0.60      0.800      0.75      0.875
+         1            163    0.20      0.600      0.25      0.625
+    mean size multiplier @q=1:  0.8725 (FULL=5)   vs   0.9656 (FULL=4)
+
+i.e. **89.7% of the book capped at 0.900 instead of 1.000, and mean size sat 9.6% below where it
+belonged** — a platform-wide position-size cut nobody asked for, arriving as a side effect of a
+coverage-COUNTING fix. This is `recurring-bugs.md`'s "restricting a universe upstream re-tunes
+every absolute threshold downstream", in sizing form.
+
+`FULL_ENGINE_COVERAGE` is now **derived** from `REGIME_WEIGHTS`
+(`max(count of nonzero weights per regime)`), so re-enabling the PAUSED `dl` engine
+(AF-20260913-05) cannot silently reintroduce the skew. Guarded by
+`src/server/tests/test_engine_coverage_denominator.py`, negative-controlled (pre-fix
+`size_confidence_multiplier(100, 4)` returns 0.9 against an asserted 1.0).
+
+**This changes SIZING only, never the ranking.** The multiplier is applied after the blend and is
+monotone in `coverage`, so it cannot reorder `unified_score` — no factor-backtest re-run is owed
+for it, and none was run. Do not cite this entry as evidence about the ranker's edge.
+
 ## Accuracy comes from realized returns, never a proxy
 
 - **Accuracy and win-rate must always be computed from actual realized returns vs. the actual system-generated signal — never from a proxy metric** (a job's "success" status, a promotion gate's CV/AUC number, a model's self-reported test score). Join the signal table (`unified_recommendations`/`unified_signals`/`intraday_recommendations`) against what the instrument actually did afterward (`stock_ohlcv`/`intraday_ohlcv`, or the already-graded `signal_outcomes`/`intraday_recommendation_outcomes` tables) and compute win rate as `WIN / (WIN + LOSS)` — decisive outcomes only, NEUTRAL/PENDING excluded — plus average realized return, never a single blended percentage. **Before trusting or comparing any win-rate number, check its `label_definition`** — `signal_outcomes.label_definition` has two structurally different conventions (`terminal_pct2`: strict fixed ±2% terminal barrier; `path_barrier`: path-based max-favorable-excursion) that are NOT comparable — the same calendar window read 88–91% win rate under one and 41–44% under the other, almost entirely the label, not skill. See [[topgainers_reverse_engineering_practice]].

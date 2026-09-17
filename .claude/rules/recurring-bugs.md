@@ -242,18 +242,26 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   applied to a route already believed understood — **re-derive it rather than trusting the
   comment, including a comment written by a previous careful session.**
 
-- **Before asking the user for a vendor capture, grep the repo for an alternate source and probe
-  it — the answer is often already integrated.** Prompted by the user on 2026-09-12, a sweep of
-  in-codebase URLs resolved two of three "dead vendor" gaps with no ask at all: NSE bulk-deals
-  was covered by MoneyControl `deals/list` (200, carries `deal_type: bulk`) **and NSE's own
-  `/api/block-deal` still returned 200 — only the bulk route retired**; movers were covered by
+- **Before asking the user for a vendor capture, query the 3,000+ endpoint discovery registry
+  and check repo alternates — the answer is often already cataloged or integrated.** Prompted by
+  the user on 2026-09-12 and codified 2026-09-13: a sweep resolved two of three "dead vendor" gaps
+  with no ask at all: NSE bulk-deals was covered by MoneyControl `deals/list` (200, carries `deal_type: bulk`)
+  **and NSE's own `/api/block-deal` still returned 200 — only the bulk route retired**; movers were covered by
   `frapi.marketsmojo.com/market_Gainersloser/getData` (200, already wired as `MOJO_MOVERS_URL`)
   plus MC `price-shockers` and NT's EOD screener. Only ET was genuinely unreachable
   (host-wide 503 `DNS failure`, unchanged under chrome/chrome124/safari17_0 impersonation, so not
   a fingerprint block; **re-probed 2026-09-13: `screener.indiatimes.com` screener POST is back —
-  200, 167 records** — so recheck before treating ET as down). **Sequence: grep for sibling endpoints -> probe each -> THEN ask, with
-  the per-route breakdown.** Asking first is cheap but reporting "3 vendors are dead" when 2 are
-  already covered in-tree is misleading.
+  200, 167 records** — so recheck before treating ET as down).
+  **Mandatory Sequence whenever an endpoint fails or a new source is needed:**
+  1. Query `market_endpoint_registry` in PostgreSQL (`bharat_intel` on `:5433`, 3,408 live working endpoints; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`).
+  2. Check `url_endpoints` (830 templates) via `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>`.
+  3. Inspect `unique_urls.txt` (3,103 raw URLs) and `DATA_FETCHING_GUIDE.md` for proven headers/payloads.
+  4. Grep the repo for sibling endpoints and probe each route by route.
+  5. **THEN ask**, with the per-route breakdown. Asking first is cheap, but reporting "vendors are dead" when active endpoints exist in the 3,000+ registry or in-tree is a documented failure mode.
+
+- **Declaring a source dead or building web scrapers from scratch without checking the 3,000+ discovery registry.**
+  **Tell:** Concluding an API is permanently dead or attempting external browser scraping when an active alternative or updated route already exists in `market_endpoint_registry` (3,408 live endpoints) or `unique_urls.txt` (3,103 URLs).
+  **Fix:** Always run a discovery registry query (`SELECT provider, target_url, use_case FROM market_endpoint_registry WHERE ...`) or `--find-alternates` before proposing new scrapers or declaring data unobtainable.
 
 - **A vendor payload can be byte-identical for two different query params — check before relying
   on the split.** MarketsMojo's movers endpoint returned the same 181,942 bytes for
@@ -824,6 +832,8 @@ successful registration is not evidence of a working delivery path.
 - **A warning printed by a test runner is not a verdict — CI and hooks read the EXIT CODE.** A suite that skips everything it can't reach (e.g. no DB) and still exits 0 is advisory-only to any automation consuming it; flip the exit code non-zero when a test was skipped for a reason that shouldn't be silently tolerated (e.g. an unreachable required dependency).
 - **A `live_datasource`-gated test is code that DOES NOT RUN by default, so it rots silently** — the gate must stay (a third-party outage must never redden CI), but treat these files as needing a periodic manual full run, and after any bulk change touching test fixtures, explicitly check which of the gated files it did not execute. A stub that dispatches on its input (not a blanket return) fails loudly on an unexpected call instead of confidently answering with someone else's data.
 - **An unqualified `information_schema.columns`/`information_schema.tables` query can silently read a leaked throwaway test schema as a second copy of a real table**, producing duplicate column names that break downstream code with an error naming no table or schema. 🤖 Automated — `check_information_schema_missing_table_schema`. Fix: `AND table_schema = current_schema()`, not a hardcoded `'public'` (which breaks inside test fixtures that deliberately scope into their own schema).
+- **A throwaway-schema fixture that keeps `public` on the `search_path` reaches PRODUCTION for every name the fixture forgot to create — and on a busy table the ACCESS EXCLUSIVE LOCK, not the DDL, is the damage.** Caught live 2026-09-17 (AF-20260917-11): `conftest.py`'s `pg_schema` used `SET search_path TO "<throwaway>", public` under a comment asserting "the throwaway schema is FIRST, so an unqualified name can only ever shadow a production table, never write to one." **"First" only protects a name the schema HAS.** A test whose schema held 2 tables ran `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS …` against `public.technical_signals`; the column already existed so the DDL was a no-op, but the queued ACCESS EXCLUSIVE lock — stuck behind the nightly `pg_dump` — blocked **every subsequent reader** of the platform's main feature table for minutes. An `IF NOT EXISTS` that changes nothing still takes the lock. **Two tells, both cheap:** (1) `SHOW search_path` in the fixture — if `public` is on it, the isolation is partial by construction; (2) in `pg_stat_activity`, a DDL statement whose backend has a `t_`/`pytest_` search_path but whose target table is not in that schema. **The meta-lesson is the one this file already states in the comments-vs-guards entry**: the sibling fixture `pg_test_support.pg_memory_conn()` omitted `public` and documented exactly this hazard, and `CLAUDE.md` said `pg_conn` "puts `public` on the search_path, so a table the fixture forgot silently resolves to the real one" — three sources, two of them right, and the wrong one was the one sitting next to the code. When two places describe the same guard incompatibly, believe neither until you run the probe. Immunized by `src/server/tests/test_pg_schema_isolation.py`, whose negative control is that `SELECT 1 FROM technical_signals` **does not raise** against the unfixed fixture.
+
 - **Negative-control every new test**: revert the fix, confirm the test fails, restore. Suites here have been 100% green while protecting nothing.
 - **A test that reimplements the logic under test** (hand-copies the resolution logic into the test file instead of importing it) passes against the unfixed source, because the mirror never sees the fix or the bug. Call the real function.
 - **A test that derives its expectation from the constant it is testing** passes vacuously (`all([])` is `True`).

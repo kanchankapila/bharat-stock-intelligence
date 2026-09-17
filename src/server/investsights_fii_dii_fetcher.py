@@ -20,6 +20,23 @@ logger = logging.getLogger(__name__)
 
 INVESTSIGHTS_FIIDII_URL = "https://investsights.in/api/v2/market/fiidii"
 
+# ---------------------------------------------------------------------------------------
+# STATUS: UNWIRED. This module has no `__main__` and no caller anywhere in .py/.ts outside
+# `audit_new_modules.py`, which only introspects fetch_fii_dii_flows' signature and makes no
+# API call -- so nothing schedules it and `runPython` cannot invoke it. That is why it has no
+# `live_datasource` test: a gated test over a fetcher nothing runs is the "test that rots"
+# case CLAUDE.md warns about, not coverage. Tracked as AF-20260917-15.
+#
+# `store_fii_dii_flows`' default table was `fii_dii_flows` (plural) -- a table that has never
+# existed; only `fii_dii_flow` (singular) does. Corrected 2026-09-17 so the latent landmine is
+# gone, but note what wiring this up would mean: `fii_dii_flow` is ALREADY fresh (2,624 rows,
+# current to 2026-09-16) and written by `fii_dii_fetcher.py` and `fii_dii_history_fetcher.py`,
+# both of which run clean. Scheduling this one makes it a THIRD writer upserting on the same
+# `(date)` key -- the cross-writer collision class in data-sources.md, where whichever job runs
+# last silently wins. Decide that before wiring it, and per the vendor-onboarding freeze, state
+# the hypothesis this vendor tests that the two existing NSE-sourced writers do not.
+# ---------------------------------------------------------------------------------------
+
 
 def fetch_fii_dii_flows(
     days: int = 30,
@@ -113,7 +130,7 @@ def fetch_fii_dii_flows(
 def store_fii_dii_flows(
     df: pd.DataFrame,
     db_conn=None,
-    table: str = "fii_dii_flows",
+    table: str = "fii_dii_flow",
 ) -> int:
     """Store FII/DII flows to database.
 
@@ -163,7 +180,11 @@ def store_fii_dii_flows(
 
     try:
         db.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        # A swallowed commit discards EVERY row this loop just appeared to insert: the
+        # function still returns `rows` (the count it built) and the job exits 0, so the
+        # FII/DII table silently keeps yesterday's values. `rows` is a count of attempts,
+        # not of committed rows -- log so those two can be told apart.
+        logger.error(f"FII/DII commit failed, {rows} parsed rows were NOT persisted: {e}")
 
     return rows

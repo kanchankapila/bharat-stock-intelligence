@@ -9,7 +9,6 @@ feature_engineering.py. This is the ONE place that pattern lives now. A test
 (tests/test_as_of_no_hand_rolled_joins.py) fails CI if a new hand-rolled "as of date" join is
 added anywhere else under src/server, so this doesn't quietly re-drift.
 """
-import polars as pl
 from typing import Sequence
 
 import pandas as pd
@@ -281,8 +280,40 @@ def trading_days_back(n: int, conn=None) -> list:
             except Exception:
                 pass
 
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
+
+
+# -- post-exit (delisted / suspended) symbols ---------------------------------------------
+# Keep in step with liveStockData.ts's POST_EXIT_GRACE_DAYS and with the
+# `ohlcv-exit-carryforward` data-quality check's `u.last_trade + 7`. A test asserts all three.
+POST_EXIT_GRACE_DAYS = 7
+
+
+def post_exit_symbols(conn, grace_days: int = POST_EXIT_GRACE_DAYS) -> set:
+    """Symbols the exchange has stopped printing -- do NOT mint new bars for these.
+
+    The Python half of liveStockData.ts's guard of the same name. It had no Python
+    counterpart, and the leaking writer is Python: `backfill_ohlcv.gap_fill()` draws its
+    universe from `SELECT DISTINCT symbol FROM stock_ohlcv` (every symbol that has EVER had a
+    bar, delisted ones included) and asks yfinance to fill the days it believes are missing.
+    Yahoo serves a frozen last snapshot for a dead name, so each run mints another bar and the
+    next run sees a longer history to extend -- self-perpetuating. 3,199 such bars were purged
+    2026-09-14; 42 more across 17 symbols had accrued by 2026-09-17, all dated AFTER that purge.
+
+    Fails OPEN (returns an empty set) exactly like the TS guard: if the exchange record is
+    unreachable, behaving as before is better than blocking a legitimate backfill, and the
+    `ohlcv-exit-carryforward` check is the backstop that does not depend on this staying wired.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT symbol FROM ("
+            "  SELECT symbol, MAX(date) AS last_trade FROM nse_universe_history GROUP BY symbol"
+            ") u WHERE u.last_trade < CURRENT_DATE - ?",
+            (int(grace_days),),
+        ).fetchall()
+        return {r[0] for r in rows}
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return set()

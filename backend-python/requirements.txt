@@ -8,7 +8,12 @@ httpx==0.28.1
 tenacity==9.1.4
 beautifulsoup4==4.14.3
 pandas==2.3.3
-# polars: imported at module top by ~200 src/server/*.py files (to_polars_df helper).
+# polars: ONE real consumer -- densify_feature_matrix.py, which relies on polars' null
+# semantics (NaN is not null; forward_fill propagates over nulls) for the feature-matrix
+# densification. Do NOT read the low import count as "unused and removable": the 2026-09-03
+# bulk pass that put `import polars as pl` at the top of ~200 src/server/*.py files was
+# REVERTED (the injected to_polars_df helper had zero call sites), so one importer is the
+# correct post-revert state, not a leftover.
 # CI installs THIS file, not the repo-root requirements.txt -- an import-time dep that
 # only reaches the root file is an import error on every clean checkout.
 polars==1.44.1
@@ -16,10 +21,11 @@ polars==1.44.1
 # path work (AF-20260829-21) and reverted the same day: on this Windows box `import pyarrow`
 # BEFORE `import torch` breaks torch outright -- `OSError: [WinError 1114] ... c10.dll`.
 # Reproduced deterministically: torch-then-pyarrow OK, pyarrow-then-torch fails, and the full
-# pytest suite went red at collection (dl_engine/nlp_engine/scoring_engine). to_polars_df has
-# ZERO call sites, so pyarrow bought nothing and cost the whole torch-dependent ML stack.
-# If to_polars_df is ever genuinely needed, build the frame dtype-aware from numpy/.tolist()
-# instead of pl.from_pandas() -- see AF-20260829-21's own recorded alternative.
+# pytest suite went red at collection (dl_engine/nlp_engine/scoring_engine). The helper it was
+# added for (to_polars_df) had ZERO call sites and has since been deleted, so pyarrow bought
+# nothing and cost the whole torch-dependent ML stack. The rule still stands for any FUTURE
+# need: build the frame dtype-aware from numpy/.tolist() instead of pl.from_pandas()
+# -- see AF-20260829-21's own recorded alternative.
 numpy==2.4.6
 scipy==1.17.1
 scikit-learn==1.8.0

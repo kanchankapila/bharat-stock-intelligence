@@ -60,14 +60,24 @@ export class StepTracker {
   }
 
   private async _exec<T>(name: string, fn: () => Promise<T>, quiet: boolean): Promise<T | undefined> {
-    const t0 = Date.now();
+    // performance.now(), NOT Date.now(). Two reasons, both measured on this box:
+    //  1. Windows' wall clock ticks at ~15.6ms, so Date.now() quantizes to that. EVERY step
+    //     faster than one tick recorded ms = 0, and a genuinely 20ms step recorded 0, 15 or 31
+    //     depending on where it fell against a tick boundary -- which is what made
+    //     jobSteps.test.ts's `>= 15` assertion fail intermittently against a 20ms sleep
+    //     (the assertion's margin was negative by construction: a 15ms floor on a 15.6ms clock).
+    //     These ms values are what reach job_run_history.duration_ms and every runtime/budget
+    //     comparison built on it, so the quantization was silently corrupting the telemetry.
+    //  2. Date.now() is wall-clock and can jump BACKWARDS on an NTP correction, yielding a
+    //     negative duration. performance.now() is monotonic and cannot.
+    const t0 = performance.now();
     try {
       const r = await fn();
-      this.recs.push({ name, ok: true, ms: Date.now() - t0, quiet });
+      this.recs.push({ name, ok: true, ms: Math.round(performance.now() - t0), quiet });
       return r;
     } catch (e) {
       const error = (e as Error)?.message ?? String(e);
-      this.recs.push({ name, ok: false, error, ms: Date.now() - t0, quiet });
+      this.recs.push({ name, ok: false, error, ms: Math.round(performance.now() - t0), quiet });
       if (process.env.VITEST !== 'true' && process.env.NODE_ENV !== 'test') {
         console.warn(`[QUEUE] ${this.jobName}:${name} failed:`, error);
       }

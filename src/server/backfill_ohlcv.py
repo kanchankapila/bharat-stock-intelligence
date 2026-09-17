@@ -1,5 +1,5 @@
-import polars as pl
 import asyncio
+import sys
 
 from db_compat import connect
 from datetime import date as _date_type
@@ -315,15 +315,23 @@ _YAHOO_FALLBACK_PATTERNS = [
 def _try_download(yahoo_symbol: str) -> pd.DataFrame | None:
     """Download a single Yahoo Finance ticker (no .NS suffix needed here)."""
     ticker = f"{yahoo_symbol}.NS"
+    last_err = None
     for attempt in range(2):
         try:
             df = yf.download(ticker, period="1y", progress=False, auto_adjust=True)
             if df is not None and not df.empty:
                 return df
-        except Exception:
-            pass
+        except Exception as exc:
+            last_err = exc
         if attempt < 1:
             time.sleep(1)
+    # Report ONLY after both attempts fail. This is a per-symbol loop, so logging inside the
+    # loop would multiply the noise; logging after it names the ticker that produced no bars.
+    # Silence here is what makes a partial backfill indistinguishable from a complete one:
+    # the caller sees None and simply moves on, so the affected symbol is short of history
+    # with nothing in the log to say which one or why (recurring-bugs.md).
+    print(f"[BackfillOHLCV] download failed after 2 attempts for {ticker}: {last_err}",
+          file=sys.stderr)
     return None
 
 def _download_one(symbol: str) -> pd.DataFrame | None:
@@ -467,9 +475,24 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
     cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
     # stock_ohlcv.date is DATE on PG -> bind a date object for `date>=?` comparisons (rule #6).
     cutoff_d = (datetime.today() - timedelta(days=lookback_days)).date()
+    # `SELECT DISTINCT symbol FROM stock_ohlcv` is every symbol that has EVER had a bar --
+    # delisted and suspended names included. yfinance keeps serving a frozen last snapshot for
+    # those, so gap_fill mints one fabricated bar per "missing" day, and the next run sees a
+    # longer history to extend: self-perpetuating. 3,199 such bars were purged 2026-09-14 and a
+    # write-side guard was added -- but only to liveStockData.ts, while the leaking writer is
+    # THIS one, in Python. By 2026-09-17, 42 more bars across 17 symbols had accrued, every one
+    # dated AFTER that purge. `ohlcv-exit-carryforward` is the backstop (AF-20260914-05).
+    from as_of import post_exit_symbols, POST_EXIT_GRACE_DAYS
+    _dead = post_exit_symbols(conn)
     symbols = [r[0] for r in conn.execute(
         "SELECT DISTINCT symbol FROM stock_ohlcv"
     ).fetchall()]
+    if _dead:
+        _before = len(symbols)
+        symbols = [s for s in symbols if s not in _dead]
+        if _before != len(symbols):
+            print(f"[GAP-FILL] skipping {_before - len(symbols)} post-exit symbol(s) "
+                  f"(no bhavcopy row in >{POST_EXIT_GRACE_DAYS}d)")
 
     if not symbols:
         print("[GAP-FILL] No symbols in stock_ohlcv yet — run full backfill first")
@@ -567,8 +590,3 @@ if __name__ == "__main__":
             gap_fill(conn, lookback_days=args.lookback)
             print("Done.")
 
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

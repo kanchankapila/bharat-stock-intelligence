@@ -3,8 +3,6 @@ unified_ranker.py — Regime-gated unified stock recommendation engine.
 
 Run after market close: python unified_ranker.py
 """
-import polars as pl
-from workflow_orchestrator import WorkflowDAG, TaskNode
 import json
 import csv
 import math
@@ -463,7 +461,20 @@ DIRECTIONAL_AGREEMENT_FLOOR = 45.0
 # only SHRINK a position -- the part of it that has not been backtested can reduce risk, never
 # inflate it beyond what the validated probability/volatility core already allows.
 SIZE_CONFIDENCE_FLOOR = 0.5
-FULL_ENGINE_COVERAGE = 5
+# DERIVED, not hardcoded. `coverage` is len(present), and AF-20260916-08 narrowed `present`
+# to engines with a NONZERO weight in the active regime -- so the denominator has to be the
+# count of engines that can actually contribute, or a fully-covered symbol never reaches 1.0.
+# It was left at a hardcoded 5 while only 4 engines carry weight (screener/cs/dl/smart_money
+# are all pinned to 0.0), which capped every fully-covered row at c=0.8 -> multiplier 0.900.
+# Measured on the 2026-09-17 grid: 1,698 of 1,893 rows (89.7%) carry all four active engines,
+# and mean size multiplier across the book was 9.6% below where it belonged -- an unintended
+# sizing change riding along with a coverage-counting fix ("restricting a universe upstream
+# re-tunes every absolute threshold downstream", recurring-bugs.md).
+# Deriving it means re-enabling a PAUSED engine (dl is paused, not retired -- AF-20260913-05)
+# cannot silently reintroduce the same skew. Guarded by test_engine_coverage_denominator.py.
+FULL_ENGINE_COVERAGE = max(
+    sum(1 for _w in _r.values() if _w > 0.0) for _r in REGIME_WEIGHTS.values()
+)
 
 
 def _fund_mult(score):
@@ -1892,22 +1903,27 @@ class UnifiedRanker:
         return cost_map
 
     def _get_cs_scores(self):
-        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
-        # long weekend is 4, so a short date.today() window can contain NO session, this
-        # read returns {}, and _blend silently renormalizes over the engines that remain.
-        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
-        cutoff = as_of.trading_days_back(3, self.conn)[-1].isoformat()
-        try:
-            rows = self.conn.execute(
-                "SELECT symbol, AVG(cs_score) AS s FROM technical_signals "
-                "WHERE date >= ? AND cs_score IS NOT NULL GROUP BY symbol",
-                (cutoff,),
-            ).fetchall()
-            return _normalize_to_100({r['symbol']: float(r['s'] or 0) for r in rows})
-        except Exception as e:
-            self._degraded(f"[UnifiedRanker] _get_cs_scores failed: {e}")
-            self.conn.rollback()
-            return {}
+        """Return NO cs input: the cs engine has no producer left.
+
+        cs_ranker was decommissioned 2026-08-31 -- its training/scoring jobs were removed
+        from queues.ts, and `cs` is a deliberate 0.0 in REGIME_WEIGHTS after a measured live
+        model_registry CV AUC of 0.176 (worse than random; see the REGIME_WEIGHTS note above
+        dataQualityChecks.ts's model-registry comment). Nothing has written
+        technical_signals.cs_score since, so the query this method used to run scanned
+        2,400+ symbols over a multi-day window on EVERY nightly pass in order to average a
+        column that is 100% NULL.
+
+        The method is kept rather than deleted because three callers depend on it as a
+        contract, not as a data source:
+          * test_cs_ranker.py asserts hasattr(UnifiedRanker, '_get_cs_scores')
+          * test_unified_ranker_high_vol_veto.py slices this class's source between
+            `def _get_realized_vol` and `def _get_cs_scores`
+          * e2e_lifecycle_check.py invokes it as an engine stage
+        Returning {} satisfies all three: engine_maps['cs'] stays empty, so 'cs' is absent
+        from has_data and the persisted cs_score reporting column is written as NULL
+        (honest) rather than as a fabricated score.
+        """
+        return {}
 
     def _restrict_to_tradeable_universe(self, symbols):
         """Drop anything that is not a real NSE instrument we can price.
@@ -1982,7 +1998,10 @@ class UnifiedRanker:
                 "   + COALESCE(sector_strength_score,0) + COALESCE(fundamental_score,0)"
                 "  ) AS non_screener_score "
                 "FROM confluence_signals "
-                "WHERE computed_at >= ? AND symbol NOT LIKE '%://%' AND LENGTH(symbol) <= 20",
+                "WHERE computed_at >= ? AND symbol NOT LIKE '%://%' AND LENGTH(symbol) <= 20 "
+                # The dict below keeps the LAST row per symbol: chronological order makes
+                # that the latest snapshot, independent of physical/query-plan row order.
+                "ORDER BY symbol, computed_at ASC",
                 (cutoff,),
             ).fetchall()
             raw = {r['symbol']: float(r['non_screener_score'] or 0) for r in rows}
@@ -2637,8 +2656,10 @@ class UnifiedRanker:
 
             # Reporting view: every engine, so the persisted *_score columns stay complete.
             engine_scores = {e: m.get(sym, 0.0) for e, m in engine_maps_all.items()}
-            # Blend view: only engines that carry cross-sectional information for this symbol.
-            present = {e for e, m in engine_maps.items() if sym in m}
+            # Only contributing engines support coverage and sizing. Paused (zero-weight)
+            # engines remain in has_data for diagnostics, but cannot inflate confidence.
+            present = {e for e, m in engine_maps.items()
+                       if sym in m and base_weights.get(e, 0.0) > 0.0}
             has_data = {e for e, m in engine_maps_all.items() if sym in m}
             # renormalize weights over engines that actually have data for this symbol, so
             # empty confluence/dl tables don't drag every score down to ~15. Blends the
@@ -3063,9 +3084,3 @@ class UnifiedRanker:
 if __name__ == '__main__':
     ranker = UnifiedRanker()
     ranker.run()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

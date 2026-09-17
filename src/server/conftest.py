@@ -1,4 +1,3 @@
-import polars as pl
 import os
 import pathlib
 import re
@@ -97,9 +96,14 @@ def pg_schema():
     # check misreads as abandoned, and this fixture's schema sits in that gap the whole time
     # a test body hasn't run its own DDL yet.
     cur.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", (PG_TEST_SCHEMA_LOCK_NS, schema))
-    # public stays on the path so extensions/types resolve, but the throwaway schema is FIRST,
-    # so an unqualified name can only ever shadow a production table, never write to one.
-    cur.execute(f'SET search_path TO "{schema}", public')
+    # NO `public` on the path -- the same rule pg_test_support.pg_memory_conn() already
+    # applies, and for the same reason. "Schema FIRST" (what this comment used to claim)
+    # only protects a name the throwaway schema actually HAS; a name it does not have falls
+    # through to production. Measured live 2026-09-17: a pg_conn test ran
+    # `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ...` against PRODUCTION
+    # public.technical_signals and its queued ACCESS EXCLUSIVE lock stalled every reader of
+    # that table behind the nightly pg_dump. Guarded by tests/test_pg_schema_isolation.py.
+    cur.execute(f'SET search_path TO "{schema}"')
     try:
         yield conn, schema
     finally:
@@ -145,7 +149,16 @@ def pg_conn(pg_schema):
     url = f"postgresql+psycopg2://{dsn['user']}:{dsn['password']}@{dsn['host']}:{dsn['port']}/{dsn['dbname']}"
     engine = create_engine(url, future=True)
     sa_conn = engine.connect()
-    sa_conn.execute(text(f'SET search_path TO "{schema}", public'))
+    # NO `public` -- same rule and same reason as pg_schema above. This fixture is the MORE
+    # dangerous of the two: it is what fetcher tests use, and fetchers WRITE. `pg_schema`'s
+    # path was corrected first and this one was missed, because it opens its own SQLAlchemy
+    # connection and therefore carries a SECOND, independent search_path that a fix to
+    # pg_schema does not touch -- and the isolation test asserted only on pg_schema, so it
+    # passed while this path still reached production. Caught 2026-09-17 when
+    # `post_exit_symbols(pg_conn)` returned live production symbols from a schema that had no
+    # nse_universe_history at all. Both fixtures are now asserted by
+    # tests/test_pg_schema_isolation.py.
+    sa_conn.execute(text(f'SET search_path TO "{schema}"'))
 
     previous = os.environ.get("USE_POSTGRES")
     os.environ["USE_POSTGRES"] = "true"
@@ -200,6 +213,13 @@ def _apply_schema(cur, schema: str) -> None:
         r"|^ALTER TABLE \w+ SET \(timescaledb\..*?\);\s*$",
         "", ddl, flags=re.MULTILINE,
     )
+    # search-path-public-exempt: DDL APPLICATION ONLY -- the schema creates GIN trigram
+    # indexes and `gin_trgm_ops` is the pg_trgm extension's operator class, which lives in
+    # `public`; without it every apply dies with `operator class "gin_trgm_ops" does not exist`
+    # (measured 2026-09-17: removing it errored 23 tests at fixture setup). This is NOT the
+    # hazard the other two fixtures had: nothing but the CREATE/ALTER/INDEX statements runs on
+    # this connection, the throwaway schema is first so every CREATE lands there, and the test
+    # BODY path already excludes public (asserted by test_current_schema_is_never_public).
     cur.execute(f'SET search_path TO "{schema}", public')
     cur.execute(ddl)
 
@@ -336,9 +356,3 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "live_datasource" in item.keywords:
             item.add_marker(skip_live)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

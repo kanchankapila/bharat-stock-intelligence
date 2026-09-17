@@ -20,6 +20,7 @@ import { runPython } from '../pythonRunner';
 import { pythonApi } from '../pythonApi';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
+import { retryOnConnectionError } from '../localServiceRetry';
 import { shouldSkipOnTradingHoliday } from '../marketStatusService';
 import { StepTracker } from '../jobSteps';
 
@@ -123,7 +124,8 @@ const CHATBOT_BASE =
   process.env.CHATBOT_URL ?? `http://127.0.0.1:${process.env.CHATBOT_PORT ?? 8001}`;
 
 async function processChatbotReingest(_job: Job) {
-  const res = await fetch(`${CHATBOT_BASE}/ingest`, { method: 'POST' });
+  const res = await retryOnConnectionError(
+    () => fetch(`${CHATBOT_BASE}/ingest`, { method: 'POST' }), { label: 'chatbot /ingest' });
   if (!res.ok) {
     // Thrown, not logged-and-swallowed: a chatbot that is down must surface as a failed job
     // rather than a silent success, which is how this went unnoticed for eight weeks.

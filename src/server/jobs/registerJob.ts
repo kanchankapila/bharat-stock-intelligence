@@ -26,6 +26,48 @@ function isBenignLockError(err: any): boolean {
 // the ones going through registerRepeatableJob) so a restart doesn't fire every missed job's
 // catch-up in the same instant.
 const CATCHUP_STAGGER_MS = 5 * 60_000;
+
+/** Jobs whose make-up run must NOT start while NSE is open.
+ *
+ *  Measured 2026-09-17 across 30 days of job_run_history: these are the only jobs on the
+ *  platform whose p95 runtime exceeds an hour (ml-weekly-retrain 92min/199max, dl-trainer
+ *  195min, exit-policy-train 74min) and they are the memory-heaviest (strategy-optimizer hit
+ *  its 20GB per-tree ceiling on 2026-09-14). All of them are scheduled onto a closed day or
+ *  the post-close window ON PURPOSE -- so a make-up that ignores that placement is not
+ *  restoring the schedule, it is violating it.
+ *
+ *  What it cost: ml-weekly-retrain make-ups ran mid-session on 2026-09-10 and 09-11, and every
+ *  overlap with an intraday capture job in those windows involved a failure (intraday-fetcher
+ *  15/15, live-screener-collect 14/14, trendlyne-intraday 13/13, news-sentiment 14/14).
+ *
+ *  Deliberately a NAMED SET, not a runtime heuristic: at requeue time the only runtime signal
+ *  available is how long the orphan had been active before its worker died, which is near-zero
+ *  for the common case (a pm2 restart moments after it started) -- exactly the case that must
+ *  be deferred. */
+export const HEAVY_MAKEUP_JOBS = new Set<string>([
+  'ml-weekly-retrain', 'ml-weekly-data', 'dl-retrain-weekly', 'dl-trainer',
+  'exit-policy-train', 'strategy-optimizer', 'backtest-optimizer', 'mover-study-weekly',
+]);
+
+const MARKET_OPEN_MIN_IST = 9 * 60 + 15;    // 09:15 IST
+const MARKET_CLOSE_MIN_IST = 15 * 60 + 30;  // 15:30 IST
+const POST_CLOSE_BUFFER_MS = 15 * 60_000;
+
+/** ms from `now` until NSE's close (plus a buffer), or 0 if the market is not open.
+ *
+ *  Deliberately clock-only -- no holiday lookup. isMarketOpen() is async and reads the holiday
+ *  calendar, and importing it here would make every orphan reclaim depend on that call
+ *  succeeding during boot, which is the one moment it is least likely to. The cost of being
+ *  wrong is that a make-up on a holiday waits a few hours longer; the cost of the reverse is a
+ *  17GB trainer landing mid-session. */
+export function msUntilMarketCloseIST(now: number = Date.now()): number {
+  const ist = new Date(now + 5.5 * 3600_000);   // shift into IST, then read UTC fields
+  const dow = ist.getUTCDay();
+  if (dow === 0 || dow === 6) return 0;
+  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  if (minutes < MARKET_OPEN_MIN_IST || minutes >= MARKET_CLOSE_MIN_IST) return 0;
+  return (MARKET_CLOSE_MIN_IST - minutes) * 60_000 + POST_CLOSE_BUFFER_MS;
+}
 let _catchupSlot = 0;
 
 /** An orphan requeue older than this is history, not a miss: re-running a 2-day-old EOD batch
@@ -127,7 +169,17 @@ export async function requeueOrphanedJob(
       return false;
     }
 
-    const delay = (_catchupSlot++) * CATCHUP_STAGGER_MS;
+    // Guard 4: a heavy trainer's make-up must not land inside the session (see
+    // HEAVY_MAKEUP_JOBS). Push it past the close rather than dropping it -- the run is still
+    // wanted, just not while the intraday jobs need the slots and the RAM.
+    const stagger = (_catchupSlot++) * CATCHUP_STAGGER_MS;
+    const marketDeferMs = HEAVY_MAKEUP_JOBS.has(name) ? msUntilMarketCloseIST(now) : 0;
+    const delay = stagger + marketDeferMs;
+    if (marketDeferMs > 0) {
+      console.warn(
+        `[QUEUE] ${queue.name}: ${name} is a heavy job and NSE is open -- deferring its make-up ` +
+        `${Math.round(marketDeferMs / 60_000)}min, to after the close.`);
+    }
     await queue.add(name, {
       ...(orphan.data ?? {}),
       isCatchup: true,

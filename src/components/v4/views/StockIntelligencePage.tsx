@@ -171,8 +171,10 @@ const OverviewTab: React.FC<{ symbol: string; sector?: string | null }> = ({ sym
           </span>
           {score?.confidence != null && (
             // confidence is already a 5-95 integer (scoring_engine.py caps it there directly),
-            // not a 0-1 fraction — see TopRatedStocks.tsx's `stock.confidence.toFixed(0)` for
-            // the same field used correctly elsewhere.
+            // not a 0-1 fraction. This is stock_scores' OWN calibrated confidence, which is a
+            // different field from unified_recommendations.unified_score -- TopRatedStocks.tsx
+            // used to render that score as a confidence % and stopped (AF-20260917-10), so do
+            // not restore a cross-reference to it as if the two were the same quantity.
             <span className="text-[10px] text-slate-600 mt-0.5">{Math.round(score.confidence)}% confidence</span>
           )}
         </div>

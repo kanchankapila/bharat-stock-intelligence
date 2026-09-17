@@ -1,12 +1,14 @@
+import { retryOnConnectionError } from './localServiceRetry';
+
 const ALPHAQUANT_BASE = process.env.ALPHAQUANT_URL ?? 'http://127.0.0.1:8002';
 
 async function aqPost<T>(path: string, body: unknown, timeoutMs = 15_000): Promise<T> {
-  const res = await fetch(`${ALPHAQUANT_BASE}${path}`, {
+  const res = await retryOnConnectionError(() => fetch(`${ALPHAQUANT_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
-  });
+  }), { label: `alphaquant ${path}` });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`AlphaQuant ${path} failed (${res.status}): ${text.slice(0, 500)}`);
@@ -15,9 +17,9 @@ async function aqPost<T>(path: string, body: unknown, timeoutMs = 15_000): Promi
 }
 
 async function aqGet<T>(path: string, timeoutMs = 10_000): Promise<T> {
-  const res = await fetch(`${ALPHAQUANT_BASE}${path}`, {
+  const res = await retryOnConnectionError(() => fetch(`${ALPHAQUANT_BASE}${path}`, {
     signal: AbortSignal.timeout(timeoutMs),
-  });
+  }), { label: `alphaquant ${path}` });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`AlphaQuant ${path} failed (${res.status}): ${text.slice(0, 500)}`);
