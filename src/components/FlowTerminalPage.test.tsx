@@ -1,24 +1,26 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import FlowTerminalPage, { InsiderTab } from './FlowTerminalPage';
+import FlowTerminalPage, { InsiderTab, ConcallTab } from './FlowTerminalPage';
 
-const mockState: { blockDeals?: unknown[]; insider?: unknown[]; superstar?: unknown[] } = {};
+const mockState: { blockDeals?: unknown[]; insider?: unknown[]; superstar?: unknown[]; concall?: unknown[] } = {};
 vi.mock('../lib/trpc', () => ({
   trpc: {
     getBlockDeals: { useQuery: () => ({ data: mockState.blockDeals, isLoading: false, isError: false, refetch: vi.fn() }) },
     getInsiderTransactions: { useQuery: () => ({ data: mockState.insider, isLoading: false, isError: false, refetch: vi.fn() }) },
     getSuperstarActivityFeed: { useQuery: () => ({ data: mockState.superstar, isLoading: false, isError: false, refetch: vi.fn() }) },
+    getConcallTakeaways: { useQuery: () => ({ data: mockState.concall, isLoading: false, isError: false, refetch: vi.fn() }) },
   },
 }));
 
 describe('FlowTerminalPage', () => {
-  it('renders the hero, all three tabs and the standing disclosures', () => {
+  it('renders the hero, all four tabs and the standing disclosures', () => {
     const html = renderToStaticMarkup(<FlowTerminalPage />);
     expect(html).toContain('Who is actually trading.');
     expect(html).toContain('Block Deals');
     expect(html).toContain('Insider Transactions');
     expect(html).toContain('Superstar Activity');
+    expect(html).toContain('Concall Takeaways');
     expect(html).toContain('pct_transacted');
     expect(html).toContain('NOT FINANCIAL ADVICE');
   });
@@ -43,4 +45,16 @@ describe('FlowTerminalPage', () => {
     expect(html).toContain('null by design');
     mockState.insider = undefined;
   });
+  it('concall: takeaway truncates and AI tone stays unscored prose', () => {
+    mockState.concall = [
+      { symbol: 'INFY', company_name: 'Infosys', quarter: 'Q2', fiscal_year: 'FY27', announcement_date: '2026-09-12', key_takeaway: 'x'.repeat(200), tone_assessment: 'Cautiously positive on demand.' },
+    ];
+    const html = renderToStaticMarkup(<ConcallTab />);
+    expect(html).toContain('Tone (AI text)');
+    expect(html).toContain('Cautiously positive on demand.');
+    expect(html).toContain('deliberately never scored into a number');
+    expect(html).not.toContain('x'.repeat(200));
+    mockState.concall = undefined;
+  });
 });
+

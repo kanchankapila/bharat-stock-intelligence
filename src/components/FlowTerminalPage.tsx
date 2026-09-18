@@ -11,6 +11,7 @@ const TABS: TabItem[] = [
   { id: 'block', label: 'Block Deals' },
   { id: 'insider', label: 'Insider Transactions' },
   { id: 'superstar', label: 'Superstar Activity' },
+  { id: 'concall', label: 'Concall Takeaways' },
 ];
 
 type Row = Record<string, unknown>;
@@ -143,6 +144,36 @@ function SuperstarTab() {
   );
 }
 
+const CONCALL_COLUMNS: Column<Row>[] = [
+  { key: 'announcement_date', label: 'Date', sortable: true },
+  { key: 'symbol', label: 'Symbol', sortable: true },
+  { key: 'company_name', label: 'Company' },
+  { key: 'quarter', label: 'Quarter', render: (r) => (r.quarter && r.fiscal_year ? `${r.quarter} ${r.fiscal_year}` : String(r.quarter ?? '—')) },
+  { key: 'tone_assessment', label: 'Tone (AI text)' },
+  { key: 'key_takeaway', label: 'Key takeaway', render: (r) => {
+    const t = String(r.key_takeaway ?? '');
+    return t.length > 180 ? `${t.slice(0, 177)}…` : t || '—';
+  } },
+];
+
+export function ConcallTab() {
+  const query = trpc.getConcallTakeaways.useQuery({ limit: 30 }, { staleTime: 900_000, retry: false });
+  return (
+    <div className="space-y-4">
+      {query.isError && <QueryError retry={() => void query.refetch()} />}
+      <DataTable
+        data={(query.data ?? []) as Row[]}
+        columns={CONCALL_COLUMNS}
+        isLoading={query.isLoading}
+        rowKey={(r, i) => `${r.symbol}-${r.quarter}-${i}`}
+        emptyMessage="No concall takeaways stored (concall_takeaways, AI-summarised from earnings calls)."
+      />
+      <p className="bsi-intel-note">Tone assessment is AI-generated stored TEXT from the concall processor — deliberately never scored into a number (keyword-scoring AI prose is a guess this codebase refuses). Read it as prose, not a signal.</p>
+    </div>
+  );
+}
+
+
 export default function FlowTerminalPage() {
   const [tab, setTab] = React.useState('block');
   return (
@@ -160,6 +191,7 @@ export default function FlowTerminalPage() {
         {tab === 'block' && <BlockDealsTab />}
         {tab === 'insider' && <InsiderTab />}
         {tab === 'superstar' && <SuperstarTab />}
+        {tab === 'concall' && <ConcallTab />}
       </section>
       <p className="bsi-intel-note">Ownership and flow context, not advice — disclosure-based data lags the market by design. NOT FINANCIAL ADVICE.</p>
     </V1PageFrame>

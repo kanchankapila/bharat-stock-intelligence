@@ -27,7 +27,8 @@
       "Bash(python -m pytest src/server/__tests__/ src/server/tests/ -v --tb=short)",
       "mcp__postgres__execute_sql",
       "Bash(./backend-python/venv/Scripts/python.exe -)",
-      "Bash(./backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_assembly_ablation.py -q)"
+      "Bash(./backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_assembly_ablation.py -q)",
+      "Bash(npx tsc *)"
     ]
   },
   "skillOverrides": {

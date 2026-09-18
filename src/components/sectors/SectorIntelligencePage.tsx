@@ -18,7 +18,9 @@ interface SectorIntelligencePageProps {
   onSelectIndex?: (id: string, name: string) => void;
 }
 
-type DeskTab = 'overview' | 'rotation' | 'derivatives' | 'deepdive';
+import { SectorIntelTab } from './SectorIntelTab';
+
+type DeskTab = 'overview' | 'rotation' | 'derivatives' | 'deepdive' | 'intel';
 type Timeframe = '1d' | '5d' | '1m' | '3m' | '6m' | '1y';
 
 const FALLBACK_SECTORS = [
@@ -672,6 +674,19 @@ export const SectorIntelligencePage: React.FC<SectorIntelligencePageProps> = ({
           >
             <Target className="w-4 h-4" />
             Sector Deep-Dive Studio
+          </button>
+
+          <button
+            onClick={() => setActiveTab('intel')}
+            className={cn(
+              "px-4 py-2 rounded-xl text-xs font-bold tracking-wide transition-all flex items-center gap-2 border",
+              activeTab === 'intel'
+                ? "bg-sky-500/10 text-sky-400 border-sky-500/30 shadow-lg shadow-sky-500/10"
+                : "bg-slate-900/60 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800"
+            )}
+          >
+            <Compass className="w-4 h-4" />
+            RRG & Correlation
           </button>
         </div>
 
@@ -1509,6 +1524,12 @@ export const SectorIntelligencePage: React.FC<SectorIntelligencePageProps> = ({
               </table>
             </div>
           </Card>
+        </div>
+      )}
+
+      {activeTab === 'intel' && (
+        <div className="bsi-intel-panel min-w-0">
+          <SectorIntelTab />
         </div>
       )}
     </div>
