@@ -90,6 +90,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Search,     label: 'Discover',    id: 'discover'    },
       { icon: Briefcase,  label: 'Smart Money', id: 'smart-money' },
       { icon: Briefcase,  label: 'Institutional Flow', id: 'institutional-flow' },
+      { icon: Briefcase,  label: 'Block Deals', id: 'block-deals' },
       { icon: Users,      label: 'Money Flow',  id: 'money-flow'  },
       { icon: Calendar,   label: 'Earnings',    id: 'earnings'    },
       { icon: Calendar,   label: 'Earnings Desk', id: 'earnings-desk' },
@@ -122,6 +123,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: History,      label: 'Backtest',           id: 'backtest'           },
       { icon: Settings2,    label: 'ML Builder',         id: 'builder'            },
       { icon: FlaskConical, label: 'Research',           id: 'research'           },
+      { icon: FlaskConical, label: 'Model Studio',       id: 'models'             },
     ],
   },
   {

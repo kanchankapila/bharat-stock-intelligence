@@ -19,6 +19,8 @@ const TopRatedStocks          = React.lazy(() => import('../components/TopRatedS
 const FnOIntelligenceCenter   = React.lazy(() => import('../components/FnOIntelligenceCenter'));
 const OptionsIntelligence     = React.lazy(() => import('../components/OptionsIntelligence'));
 const PortfolioAnalytics      = React.lazy(() => import('../components/PortfolioAnalytics'));
+const ModelStudioPage         = React.lazy(() => import('../components/ModelStudioPage'));
+const FlowTerminalPage        = React.lazy(() => import('../components/FlowTerminalPage'));
 const StrategyBuilder         = React.lazy(() => import('../components/StrategyBuilder'));
 const ExportPortfolioView     = React.lazy(() => import('../components/ExportPortfolioView'));
 const SystemMonitorPage       = React.lazy(() => import('../components/SystemMonitorPage'));
@@ -306,6 +308,8 @@ const V1Routes = ({
                             <Route path="/jobs" element={<JobsDashboardPage />} />
                             <Route path="/profile" element={<ProfilePage />} />
                             <Route path="/portfolio" element={<V1PageFrame><PortfolioAnalytics /></V1PageFrame>} />
+                            <Route path="/models" element={<V1PageFrame><ModelStudioPage /></V1PageFrame>} />
+                            <Route path="/block-deals" element={<V1PageFrame><FlowTerminalPage /></V1PageFrame>} />
                             <Route path="/portfolio-tracker" element={<V1PageFrame title="Portfolio Tracker" kicker="POSITIONS · ENTRY · P&L"><PortfolioTrackerPage userId={userId} onSelectStock={onSelectStock} /></V1PageFrame>} />
                             <Route path="/builder" element={<V1PageFrame><StrategyBuilder /></V1PageFrame>} />
                             <Route path="/export-picks" element={<V1PageFrame><ExportPortfolioView /></V1PageFrame>} />
