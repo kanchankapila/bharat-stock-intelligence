@@ -169,13 +169,21 @@ def ensure_schema(con) -> None:
 
 # ── API 1: Upcoming earnings dates ───────────────────────────────────────────────
 
-def fetch_earnings_dates(con) -> None:
-    url = (
+def upcoming_earnings_url() -> str:
+    """The single definition of the upcoming-earnings request, shared with the live_datasource
+    test. That test used to rebuild this URL by hand and so copied the old `TODAY_PLUS_14`
+    constant; when the window widened to 90 days on 2026-09-15 the constant was renamed and the
+    gated test (which never runs in CI) broke with an AttributeError nobody saw until the next
+    full live run on 2026-09-18 (AF-20260918-04)."""
+    return (
         f"https://api.moneycontrol.com/mcapi/v1/earnings/get-earnings-data"
         f"?indexId=All&page=1&startDate={TODAY}&endDate={TODAY_PLUS_90}"
         f"&sector=&limit=10000"
     )
-    data = _get(url)
+
+
+def fetch_earnings_dates(con) -> None:
+    data = _get(upcoming_earnings_url())
     if not data:
         print("[EarningsFetcher] Upcoming: no data returned")
         return

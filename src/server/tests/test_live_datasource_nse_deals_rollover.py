@@ -43,22 +43,20 @@ def mem_db():
 
 @pytest.mark.live_datasource
 class TestDeliveryTrendDealsLiveDataSource:
+    # AF-20260918-05: both tests below go through `fetch_bulk_rows()` -- the fetcher's OWN source
+    # chain (NSE -> NSE historical -> MoneyControl). They used to probe the NSE routes by hand
+    # and skip when those came back empty; both NSE bulk routes retired in 2026, so the tests
+    # skipped on EVERY run as "holiday or blocked" while production quietly depended on the
+    # MoneyControl fallback that nothing tested. A skip that always fires is a canary that can
+    # never fire. They now fail, not skip, when every source is empty on a trading day.
     def test_real_bulk_deals_parse_into_ml_usable_rows(self):
         import delivery_trend_fetcher as dtf
 
-        session = dtf._nse_session()
-        raw = dtf._fetch_json(session, dtf.NSE_BULK_URL)
-        if not raw:
-            # Fall back to the historical endpoint the fetcher itself falls back to.
-            nse_date = (date.today() - timedelta(days=1)).strftime("%d-%m-%Y")
-            raw = dtf._fetch_json(session, dtf.NSE_BULK_HIST_URL.format(date=nse_date))
-        if not raw:
-            pytest.skip("NSE bulk-deals endpoint returned nothing (holiday or blocked from this host)")
-        assert_non_empty_response(raw, "delivery_trend_fetcher._fetch_json(bulk)")
-
-        parsed = [p for p in (dtf._parse_bulk(r, "BULK") for r in raw[:25]) if p]
-        assert parsed, f"_parse_bulk() rejected every one of the first 25 raw rows: {raw[0]!r}"
-        for p in parsed:
+        parsed = dtf.fetch_bulk_rows(dtf._nse_session())
+        assert parsed, (
+            "no bulk deals from NSE OR the MoneyControl fallback -- the bulk half of "
+            "bulk_block_deals would get nothing today")
+        for p in parsed[:25]:
             # The symbol must be a real ticker, not a company name or a scraped URL — the
             # exact failure mode of the 2026-07-23 corruption.
             assert_looks_like_ticker(p["symbol"], "bulk deal symbol")
@@ -66,25 +64,23 @@ class TestDeliveryTrendDealsLiveDataSource:
     def test_real_deals_store_and_read_back_ml_usable(self, mem_db):
         import delivery_trend_fetcher as dtf
 
-        session = dtf._nse_session()
-        raw = dtf._fetch_json(session, dtf.NSE_BULK_URL)
-        if not raw:
-            pytest.skip("NSE bulk-deals endpoint returned nothing (holiday or blocked from this host)")
-        parsed = [p for p in (dtf._parse_bulk(r, "BULK") for r in raw[:25]) if p]
-        if not parsed:
-            pytest.skip("no parseable bulk deals in the current feed")
+        parsed = dtf.fetch_bulk_rows(dtf._nse_session())[:25]
+        assert parsed, "no bulk deals from any source -- nothing to store"
 
         dtf.ensure_schema(mem_db)
         dtf.upsert_deals(parsed, mem_db)
 
+        # `upsert_deals` writes bulk_block_deals. This line used to read `block_deals` -- a
+        # different table -- and it had never once executed, because the skip above it always
+        # fired first. A test that has never run is not evidence the code under it works.
         rows = mem_db.execute(
-            "SELECT * FROM block_deals WHERE symbol = ?", (parsed[0]["symbol"],)
+            "SELECT * FROM bulk_block_deals WHERE symbol = ?", (parsed[0]["symbol"],)
         ).fetchall()
         assert rows, f"upsert_deals() wrote nothing readable back for {parsed[0]['symbol']}"
         stored = dict(rows[0])
-        assert_looks_like_ticker(stored["symbol"], "stored block_deals.symbol")
+        assert_looks_like_ticker(stored["symbol"], "stored bulk_block_deals.symbol")
         if stored.get("quantity") is not None:
-            assert_numeric_and_finite(stored["quantity"], "block_deals.quantity")
+            assert_numeric_and_finite(stored["quantity"], "bulk_block_deals.quantity")
 
 
 @pytest.mark.live_datasource
@@ -100,7 +96,9 @@ class TestFnoRolloverLiveDataSource:
     def test_real_bhavcopy_parses_into_ml_usable_rollover_rows(self):
         import fno_rollover_fetcher as frf
 
-        session = requests.Session()
+        # The fetcher's own session: nsearchives refuses a bare requests.Session(), which is
+        # why this skipped on every run while production wrote ~211 symbols/day.
+        session = frf.make_session()
         trade_date, df = self._recent_bhavcopy(frf, session)
         if df is None:
             pytest.skip("no F&O bhavcopy available in the last 6 sessions from this host")
@@ -124,7 +122,9 @@ class TestFnoRolloverLiveDataSource:
     def test_real_rollover_stores_and_reads_back_ml_usable(self, mem_db):
         import fno_rollover_fetcher as frf
 
-        session = requests.Session()
+        # The fetcher's own session: nsearchives refuses a bare requests.Session(), which is
+        # why this skipped on every run while production wrote ~211 symbols/day.
+        session = frf.make_session()
         trade_date, df = self._recent_bhavcopy(frf, session)
         if df is None:
             pytest.skip("no F&O bhavcopy available in the last 6 sessions from this host")

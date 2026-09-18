@@ -82,11 +82,11 @@ class TestMcEarningsFetcherLiveDataSource:
         """Hits the real upcoming-earnings-dates endpoint via the fetcher's own fetch_earnings_dates(),
         which both parses the response and backfills technical_signals.days_to_next_results --
         exercising the fetcher's own DB-write function, not a hand-rolled reimplementation."""
-        url = (
-            f"https://api.moneycontrol.com/mcapi/v1/earnings/get-earnings-data"
-            f"?indexId=All&page=1&startDate={mef.TODAY}&endDate={mef.TODAY_PLUS_14}&sector=&limit=10000"
-        )
-        raw = mef._get(url)
+        # The fetcher's OWN url builder, not a hand-copied URL: the copy this line used to hold
+        # referenced `mef.TODAY_PLUS_14`, which the 2026-09-15 window widening renamed to
+        # TODAY_PLUS_90 -- and because this test is gated it failed nowhere until a manual live
+        # run on 2026-09-18 (AF-20260918-04). data-sources.md rule 2: never reimplement.
+        raw = mef._get(mef.upcoming_earnings_url())
         assert raw is not None, "get-earnings-data endpoint returned no data at all -- endpoint may be down/blocked"
         items = raw.get("list") or []
         # A live 14-day window across the full NSE/BSE universe is virtually never empty in

@@ -93,19 +93,27 @@ def ensure_schema(con) -> None:
     """Add new columns to technical_signals and create bulk_block_deals table."""
     cur = con.cursor()
 
-    # bulk_block_deals — stores raw bulk and block deal rows from NSE
+    # bulk_block_deals — raw bulk and block deal rows from NSE and the MoneyControl fallback.
+    # MUST match db/schema.postgres.sql. Until 2026-09-18 this body predated migration
+    # 20260912120000 (source added to the PK): no `source` column, `deal_date TEXT` instead of
+    # DATE, and a PK without `source`. CREATE TABLE IF NOT EXISTS no-ops on the existing
+    # production table, so nothing noticed -- but on any fresh database the fetcher created a
+    # table its own upsert could not write to (`column "source" ... does not exist`). Found the
+    # first time the live store test actually ran instead of skipping (AF-20260918-05); same
+    # class as the high_flyer DDL reverting its DATE migration (AF-20260917-19).
     cur.execute(translate("""
         CREATE TABLE IF NOT EXISTS bulk_block_deals (
             symbol       TEXT NOT NULL,
-            deal_date    TEXT NOT NULL,
-            deal_type    TEXT,
-            client_name  TEXT,
+            deal_date    DATE NOT NULL,
+            deal_type    TEXT NOT NULL,
+            client_name  TEXT NOT NULL,
             buy_sell     TEXT,
-            quantity     REAL,
-            price        REAL,
-            value_cr     REAL,
-            fetched_at   TEXT DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (symbol, deal_date, client_name, deal_type)
+            quantity     DOUBLE PRECISION,
+            price        DOUBLE PRECISION,
+            value_cr     DOUBLE PRECISION,
+            fetched_at   TEXT DEFAULT now(),
+            source       TEXT NOT NULL DEFAULT 'nse',
+            PRIMARY KEY (source, symbol, deal_date, client_name, deal_type)
         )
     """))
     cur.execute(
@@ -433,48 +441,53 @@ def backfill_deal_flags(con) -> int:
     return updated
 
 
-def run_deals(con) -> tuple[int, int]:
-    """Fetch bulk/block deals and update flags. Returns (deals_saved, signals_updated)."""
-    session = _nse_session()
-    today = date.today().isoformat()
+def fetch_bulk_rows(session: requests.Session) -> list[dict]:
+    """Parsed BULK-deal rows via the full source chain: NSE -> NSE historical -> MoneyControl.
 
-    print(f"[DeliveryTrend] Fetching bulk deals from NSE ({today})…")
-    nse_date = date.today().strftime("%d-%m-%Y")
+    The single definition of where bulk deals come from, shared with the live_datasource test.
+    That test used to probe only the NSE routes itself, so once both retired it skipped on every
+    run with "holiday or blocked" -- a canary that could never fire, which hid for months that
+    the MoneyControl path production actually depends on had no live test at all
+    (AF-20260918-05)."""
+    today = date.today()
+    print(f"[DeliveryTrend] Fetching bulk deals from NSE ({today.isoformat()})…")
     bulk_raw = _fetch_json(session, NSE_BULK_URL)
     if not bulk_raw:
         # /api/bulk-deals is dead (404); try historical endpoint with today's date
-        bulk_raw = _fetch_json(session, NSE_BULK_HIST_URL.format(date=nse_date))
+        bulk_raw = _fetch_json(session, NSE_BULK_HIST_URL.format(date=today.strftime("%d-%m-%Y")))
     time.sleep(RATE_LIMIT_SEC)
+    if bulk_raw:
+        return [p for p in (_parse_bulk(r, "bulk") for r in bulk_raw) if p]
 
     # Both NSE bulk routes are retired as of 2026-09-12 (404 and 503, verified with a warm
     # cookie jar and Chrome TLS impersonation), so without this fallback the BULK half of this
     # table simply stopped being written while the job still reported success. MC rows carry
     # their own source tag and go in under the composite PK, so they coexist with NSE's block
     # rows instead of overwriting them (AF-20260912-11).
-    mc_bulk_rows: list[dict] = []
-    if not bulk_raw:
-        mc_raw = _fetch_json_plain(MC_DEALS_URL.format(limit=200), MC_DEALS_HEADERS)
-        mc_bulk_rows = [r for r in (_parse_mc_deal(x) for x in mc_raw) if r]
-        print(f"[DeliveryTrend] NSE bulk routes empty; MoneyControl fallback parsed "
-              f"{len(mc_bulk_rows)} NSE deal(s) from {len(mc_raw)} row(s)")
-        if not mc_bulk_rows:
-            # Not a silent degrade: both providers failing for the bulk half is a real error.
-            print("[DeliveryTrend] no bulk deals from NSE OR MoneyControl -- the bulk half of "
-                  "bulk_block_deals got NOTHING this run", file=sys.stderr)
+    mc_raw = _fetch_json_plain(MC_DEALS_URL.format(limit=200), MC_DEALS_HEADERS)
+    mc_bulk_rows = [r for r in (_parse_mc_deal(x) for x in mc_raw) if r]
+    print(f"[DeliveryTrend] NSE bulk routes empty; MoneyControl fallback parsed "
+          f"{len(mc_bulk_rows)} NSE deal(s) from {len(mc_raw)} row(s)")
+    if not mc_bulk_rows:
+        # Not a silent degrade: both providers failing for the bulk half is a real error.
+        print("[DeliveryTrend] no bulk deals from NSE OR MoneyControl -- the bulk half of "
+              "bulk_block_deals got NOTHING this run", file=sys.stderr)
+    return mc_bulk_rows
+
+
+def run_deals(con) -> tuple[int, int]:
+    """Fetch bulk/block deals and update flags. Returns (deals_saved, signals_updated)."""
+    session = _nse_session()
+    today = date.today().isoformat()
+
+    rows = fetch_bulk_rows(session)
 
     print(f"[DeliveryTrend] Fetching block deals from NSE ({today})…")
     block_raw = _fetch_json(session, NSE_BLOCK_URL)
-
-    rows = []
-    for raw in bulk_raw:
-        parsed = _parse_bulk(raw, "bulk")
-        if parsed:
-            rows.append(parsed)
     for raw in block_raw:
         parsed = _parse_bulk(raw, "block")
         if parsed:
             rows.append(parsed)
-    rows.extend(mc_bulk_rows)
 
     saved = upsert_deals(rows, con)
     updated = backfill_deal_flags(con)

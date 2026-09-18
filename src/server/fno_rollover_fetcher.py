@@ -107,6 +107,16 @@ def _trading_days_back(n: int, con=None) -> list[date]:
     return trading_days_back(n, con)
 
 
+def make_session() -> requests.Session:
+    """The session every bhavcopy request must use. nsearchives refuses a bare session, so the
+    live_datasource test -- which built `requests.Session()` itself -- got nothing on every run
+    and skipped with "no F&O bhavcopy in the last 6 sessions", while this fetcher was writing
+    ~211 symbols of rollover every trading day (AF-20260918-05)."""
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    return session
+
+
 def fetch_bhavcopy(trade_date: date, session: requests.Session) -> pd.DataFrame | None:
     """Download and parse the F&O bhavcopy for `trade_date`. Returns None on failure."""
     url = BHAVCOPY_URL.format(date=trade_date.strftime("%Y%m%d"))
@@ -262,8 +272,7 @@ def main() -> None:
     con = connect()
     ensure_schema(con)
 
-    session = requests.Session()
-    session.headers.update(HEADERS)
+    session = make_session()
 
     if args.date:
         dates = [datetime.strptime(args.date, "%Y-%m-%d").date()]

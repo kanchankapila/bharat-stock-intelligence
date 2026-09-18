@@ -190,3 +190,19 @@ Asked "are claude-mem / headroom / graphify correctly configured to reduce token
 - **Redis needs `REDIS_PASSWORD`** for any ad-hoc BullMQ inspection script (NOAUTH otherwise).
 - A concurrent session's snapshot commit swept my staged batch into `e1db34b0` under a generic
   message — nothing lost, but check `git log` before assuming your staged files are still yours.
+
+## 2026-09-18 (market hours) — full live_datasource run
+
+- TS live 39/40 (the 1 was a Trendlyne timeout under concurrent load, 4.8s alone) + GDELT skip (retired).
+- Python live: every non-pass was OURS. 28 errors = a UTF-8 BOM in `scripts/stocklist.json` since
+  2026-09-12 (production immune only because its readers use `utf-8-sig`). 1 failure = a gated test
+  hand-copying a renamed constant. 4 skips = tests probing retired/bare-session paths, hiding a
+  stale `ensure_schema` DDL (2nd instance in 2 days).
+- **Tells to reuse:** many vendors failing in the SAME few files at SETUP = a shared fixture;
+  a skip that blames a holiday on a weekday = a dead canary (run `-rs` and read the reasons).
+- **Live tests must call the fetcher's own entry point** (source chain / session factory / URL
+  builder) — all three rotted tests today were copies that had drifted.
+- **Guard design:** measure what a guard flags first. Full-column DDL scan = 42 hits (noise);
+  PRIMARY-KEY scan = the 1 real defect. Shipped the PK one.
+- Live tests write only to throwaway schemas via `pg_db_conn`/`pg_memory_conn`, so running them
+  during market hours is safe — but don't run them concurrently with the full suite (connection race).

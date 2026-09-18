@@ -163,6 +163,15 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   measurement.md's "a migration's ledger row proves execution of *a* statement, not necessarily
   the one you meant": here the ledger row is honest about the past and wrong about the present.
   Verify a column's type through `information_schema`, never through `pgmigrations`.
+  **RECURRED the next day (AF-20260918-05) and is now guarded:** `delivery_trend_fetcher.
+  ensure_schema()` still declared `bulk_block_deals` without the `source` column and PK that
+  migration `20260912120000` added -- a no-op against production, but a table its own upsert
+  cannot write to on any fresh database. Found only because a live store test ran instead of
+  skipping. Guarded by `src/server/tests/test_inline_ddl_pk_matches_schema.py`, which compares
+  every in-code DDL's PRIMARY KEY to `db/schema.postgres.sql`. **Deliberately the PK, not the
+  column list:** a full-column scan was measured first and flagged 42 blocks, mostly legitimate
+  (`safe_alter` adding columns after the CREATE) -- an always-fires guard. The PK is what every
+  `ON CONFLICT` target depends on; that scan flags the real defect and nothing else.
 
 - **A function that takes a `conn` argument and then ignores it (opens its own connection/pool instead) silently defeats every caller's isolation** — including schema scoping in tests, which can make a "test" write directly into production. Grep any function whose signature takes `conn`/`con` for `get_engine()`/`connect()`/a module-level pool inside its own body.
 - **Restricting a universe upstream re-tunes every absolute threshold downstream.** An engine fix that deflates one score can collapse actionable output under an unchanged floor (612→22 Buys, one incident). **A related, subtler cause: a multiplier whose INPUT is degenerate**, not the multiplier's own calibration — a crowding discount fired on 98.6% of the universe because 5 upstream factor columns were accidentally constant, and a uniform multiplier is invisible to every rank-based diagnostic since it can't change any ranking, only shift the population against absolute thresholds. **Two tells, either enough:** a gate/veto/discount firing on ~100% of its population carries zero information (check prevalence directly, don't assume miscalibration); a final blended score landing BELOW every component that fed it is not a weighted blend (grep for a `*=` applied after the blend). Measure the input's distribution before "fixing" the multiplier's threshold.
@@ -949,6 +958,24 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
 - **Deleting a thing does not delete the checks and instructions that point at it — and an orphaned check does not go quiet, it starts emitting false signals in the opposite direction.** Grep the removed identifier across `.md`, `.claude/commands/`, `.claude/skills/`, and validator/bootstrap code whenever you remove an env var, column, file, or fallback — a stale check can crash a correct process, or a freshness check pointed at a superseded table can warn on every run forever while the table nothing reads sits there as the actual bug. **Tell for the latter:** a freshness check that has NEVER passed is more likely watching an abandoned table than reporting a real outage — grep who actually reads the table before fixing the fetcher.
 
 - **A hook that cannot run exits 0 and prints nothing — indistinguishable from a hook that passed.** Measured 2026-09-15: all three `.claude/settings.json` hook commands were dead on this Windows host. `bash` on PATH resolves to WSL's `bash.exe`, which cannot open a Windows path (`/bin/bash: d:\Github\...\session-start.sh: No such file or directory`, exit 127), and where it did start, `session-start.sh`'s own `cd "$CLAUDE_PROJECT_DIR" || exit 0` hit the same mismatch and exited 0 — so the session-start environment/Definition-of-done check and both `graphify` PreToolUse reminders were documented in `CLAUDE.md` and every skill while enforcing nothing. **The two graphify hooks were inline bash one-liners wrapping `python3`**, and WSL bash could not parse their embedded `\"` quoting at all (`syntax error near unexpected token '('`, exit 127). **Tell:** a rule stated in three separate places with zero observed effect; test the hook by replaying its declared command with the payload on stdin and asserting stdout (`npx vitest run .claude/hooks/settings-hooks.replay.test.mjs`). Fix: a hook must be a `node .claude/hooks/*.mjs` module with a vitest suite beside it (the repo's other three already were — the two that broke were the two without tests), and a shell script it calls must be launched by a bash that resolves the repo (Git Bash) with a RELATIVE path from the repo root, never through `$CLAUDE_PROJECT_DIR`, which is a Windows path. A hook must never exit non-zero: bricking a session is worse than the problem it reports.
+- **Windows PowerShell 5.1 writes a UTF-8 BOM, and a BOM in a JSON data file breaks every reader
+  that isn't defensively coded -- while the defensive ones make it invisible.** 2026-09-18
+  (AF-20260918-03): `scripts/stocklist.json`, the provider-mapping master, gained `EF BB BF` in
+  commit `d6d39566` (2026-09-12) and kept it for six days. Every production fetcher reads it via
+  helpers using `encoding="utf-8-sig"`, so production was fine and nothing alerted; everything
+  reading plain `utf-8` broke -- 28 live_datasource tests across 9 vendors errored at SETUP, and the
+  mapping-regeneration scripts in `scripts/` would have failed on their next run. Node's
+  `JSON.parse` rejects a BOM too; RFC 8259 forbids one.
+  **Attribution tell: many unrelated vendors failing in the SAME few files at SETUP is a shared
+  fixture, not the vendors.** Group errors by message before reading any of them.
+  **Fix the file, not the readers** -- converting readers to `utf-8-sig` one by one is the
+  per-call-site guard class. From PowerShell 5.1 write BOM-less with
+  `[IO.File]::WriteAllText($p, $text, [Text.UTF8Encoding]::new($false))`; `Set-Content -Encoding
+  utf8` and `Out-File -Encoding utf8` both add one. Guarded by
+  `src/server/tests/test_json_files_have_no_bom.py` (derived from `git ls-files '*.json'`).
+  Same family as the `.graphify_python` BOM noted in memory and the CRLF entry below: Windows
+  tooling silently changing bytes that other tools treat as content.
+
 - **CRLF from a Windows checkout breaks every bash script under `.claude/hooks/`.** git's `core.autocrlf=true` rewrote `session-start.sh` to CRLF on checkout, so bash rejected it outright (`$'\r': command not found`, `set: pipefail: invalid option name`) — and the failure re-appears on every fresh clone until the repository pins it. `* text=auto` (if previously set) does not survive: the file must be pinned `*.sh text eol=lf` in `.gitattributes`, and re-normalized in the working copy (`scratch_verify/lf_fix.py`). `.mjs` hooks are immune (node tolerates CRLF); this is why hooks here should be node modules.
 
 ## Placeholder credential in an executable alert path = registered-but-never-delivered monitoring (2026-09-14)
@@ -965,6 +992,19 @@ successful registration is not evidence of a working delivery path.
 ## Testing
 
 - **A warning printed by a test runner is not a verdict — CI and hooks read the EXIT CODE.** A suite that skips everything it can't reach (e.g. no DB) and still exits 0 is advisory-only to any automation consuming it; flip the exit code non-zero when a test was skipped for a reason that shouldn't be silently tolerated (e.g. an unreachable required dependency).
+- **A live test that SKIPS when its source is empty stops testing anything the day that source
+  retires -- and the skip reason ("holiday or blocked") keeps it looking benign forever.**
+  2026-09-18 (AF-20260918-05): four tests skipped on every run. The bulk-deals test probed only
+  the NSE routes, which had retired, while production had moved to a MoneyControl fallback that
+  no test covered; the rollover test built a bare `requests.Session()` that nsearchives refuses,
+  while the fetcher (with a Referer) wrote 210 symbols a day. Behind the permanent skip sat a real
+  defect (stale DDL, above) and a read-back from the wrong table that had never executed.
+  **Two rules fall out.** (1) A live test must call the fetcher's OWN entry point -- its source
+  chain, its session factory, its URL builder -- never a copy; every case today was a copy that
+  had drifted (`TODAY_PLUS_14`, the NSE-only chain, the bare session). (2) On a trading day an
+  empty source is a FAILURE, not a skip; reserve skips for genuinely closed-market conditions.
+  **Tell:** `SKIPPED` lines whose reason blames a holiday on a weekday -- run with `-rs` and read
+  them, a skip count alone says nothing.
 - **A `live_datasource`-gated test is code that DOES NOT RUN by default, so it rots silently** — the gate must stay (a third-party outage must never redden CI), but treat these files as needing a periodic manual full run, and after any bulk change touching test fixtures, explicitly check which of the gated files it did not execute. A stub that dispatches on its input (not a blanket return) fails loudly on an unexpected call instead of confidently answering with someone else's data.
 - **An unqualified `information_schema.columns`/`information_schema.tables` query can silently read a leaked throwaway test schema as a second copy of a real table**, producing duplicate column names that break downstream code with an error naming no table or schema. 🤖 Automated — `check_information_schema_missing_table_schema`. Fix: `AND table_schema = current_schema()`, not a hardcoded `'public'` (which breaks inside test fixtures that deliberately scope into their own schema).
 - **A throwaway-schema fixture that keeps `public` on the `search_path` reaches PRODUCTION for every name the fixture forgot to create — and on a busy table the ACCESS EXCLUSIVE LOCK, not the DDL, is the damage.** Caught live 2026-09-17 (AF-20260917-11): `conftest.py`'s `pg_schema` used `SET search_path TO "<throwaway>", public` under a comment asserting "the throwaway schema is FIRST, so an unqualified name can only ever shadow a production table, never write to one." **"First" only protects a name the schema HAS.** A test whose schema held 2 tables ran `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS …` against `public.technical_signals`; the column already existed so the DDL was a no-op, but the queued ACCESS EXCLUSIVE lock — stuck behind the nightly `pg_dump` — blocked **every subsequent reader** of the platform's main feature table for minutes. An `IF NOT EXISTS` that changes nothing still takes the lock. **Two tells, both cheap:** (1) `SHOW search_path` in the fixture — if `public` is on it, the isolation is partial by construction; (2) in `pg_stat_activity`, a DDL statement whose backend has a `t_`/`pytest_` search_path but whose target table is not in that schema. **The meta-lesson is the one this file already states in the comments-vs-guards entry**: the sibling fixture `pg_test_support.pg_memory_conn()` omitted `public` and documented exactly this hazard, and `CLAUDE.md` said `pg_conn` "puts `public` on the search_path, so a table the fixture forgot silently resolves to the real one" — three sources, two of them right, and the wrong one was the one sitting next to the code. When two places describe the same guard incompatibly, believe neither until you run the probe. Immunized by `src/server/tests/test_pg_schema_isolation.py`, whose negative control is that `SELECT 1 FROM technical_signals` **does not raise** against the unfixed fixture.
