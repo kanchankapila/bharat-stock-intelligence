@@ -666,6 +666,13 @@ body {
   .bsi-badge-low { @apply bg-[var(--bsi-down-bg)] text-[var(--bsi-down)] border border-[var(--bsi-down-border)]; }
   .bsi-badge-neutral { @apply bg-[var(--bsi-border)] text-[var(--bsi-text-caption)]; }
 
+  /* ─── Correlation heatmap cells ────────────────────────────────────── */
+  .bsi-corr-high { background: rgba(244, 63, 94, 0.22); }
+  .bsi-corr-mid { background: rgba(245, 158, 11, 0.14); }
+  .bsi-corr-low { background: rgba(16, 185, 129, 0.14); }
+  .bsi-corr-self { background: rgba(148, 163, 184, 0.10); }
+  .bsi-corr-none { color: var(--bsi-text-muted); }
+
   /* Page container: standard padding + max-width */
   .v1-page {
     @apply w-full max-w-full p-4 md:p-6 space-y-6;

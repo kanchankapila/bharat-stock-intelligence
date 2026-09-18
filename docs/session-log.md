@@ -9198,10 +9198,25 @@ AF-20260917-07 (user decision), AF-20260914-02 (scoped new fetcher).
 - Full-suite result: `npx vitest run` exit 1 — **1418 passed / 1 failed / 44 skipped (160 files: 147 passed, 12 skipped)**, 165.84s. Sole failure: `signalReadersTechnicalFold.test.ts > excludes symbols above the RSI threshold` — "Test timed out in 5000ms" while three vitest processes plus the dev server ran concurrently. Isolation rerun of that file: **exit 0, 3/3 passed (2.84s)**, and its own stderr cites the repo-documented parallel-load flake mechanism (in-flight server-side work after a vitest-layer timeout — same mechanism as signalOutcomesServiceSource.test.ts). No backend/.py source changed this session; the file was green in the prior full run. Evidence: `%TEMP%\bsi-strip-full.log` / `.exit`, `%TEMP%\bsi-signalreaders.log` / `.exit`.
 - Final gate status: tsc exit 0; focused intelligenceDisplay suite 9/9 exit 0; full Vitest green modulo the one documented contention flake (green in isolation immediately after); pytest 2799 passed / 0 failed / 249 skipped (completed, production interpreter). DoD: PASS with the flake disclosed; browser acceptance complete (390px, keyboard, history, empty/error/retry paths, news markup fix verified live).
 
+## 2026-09-18 (close) — portfolio analytics upgrade: correlation heatmap, factor radar, DVM valuation snapshot
+
+- Trigger: user picked "Portfolio analytics" from the enhancement plan's open areas after an honest audit showed 2 of 15 areas shipped (DLI + News) and ~13 open.
+- Scoping first, per repo rules: read `.claude/rules/scoring-authority.md` BEFORE designing the "quant radar" — the spec's radar is only legal as a COMPONENT factor decomposition, never surfaced as a parallel final score (the rule's exact concern; `LegacyScoreBanner`-style disclosure required). Verified `getStockScoreDetail` was already router-exposed (`scoring.router.ts:36`, `{symbol, timeframe}` → `{score, factors}`) so NO backend change was needed. Also verified the spec's "valuation vs peers" premise is unsupported: no peer-set procedure exists anywhere — built the honest alternative (per-holding DVM snapshot + explicit note that peer-relative valuation is not implied), rather than faking a peer comparison.
+- Shipped on `/portfolio` (`PortfolioAnalytics.tsx` reworked to the bsi-* intel design, three tabs):
+  1. Risk & Correlation — kept the working `analyzePortfolio` sandbox (alpha-quant service), KPI tiles (Sharpe/Beta/Ann-return/VaR) now via `MetricTile` with `percent()` handling missing values, correlation matrix upgraded to a color-banded heatmap (`correlationCellClass`: >0.7 red/concentrated, <0.3 green/diversifying, diagonal shaded, missing never styled as a number; `.bsi-corr-*` classes in index.css).
+  2. Factor Radar — Recharts `RadarChart` of the six `stock_factor_breakdown` component scores (0–100), labeled "Screener composite (non-canonical)", disclosure that these are ranker inputs not a ranking; `factorEntries()` omits non-numeric/missing factors instead of zero-filling; no-row → honest empty state (≥3 components required to draw).
+  3. Valuation Snapshot — per-symbol `getTrendlyneDVM` tiles (Valuation/Durability/Momentum with Trendlyne's own colors), honest "Not scored yet" for unscored symbols, capped at 8, note that DVM is third-party synced data.
+- New tests `PortfolioAnalytics.test.tsx` (8): shell, both FactorRadar branches, both DvmTile states, correlationCellClass banding, factorEntries filtering. Found a self-inflicted cascade worth remembering: a failed `expect` threw BEFORE the mock-cleanup line, so stale seeded mock data leaked into the NEXT test and made it fail with a misleading diff — when two tests fail oddly in sequence, check for cleanup-after-assertion before believing the second failure's cause.
+- Evidence: tsc exit 0; focused vitest 17/17 (PortfolioAnalytics 8 + intelligenceDisplay 9, `%TEMP%\bsi-portfolio-regression.log`). Browser-verified live on the dev server: analysis ran end-to-end against the real alpha-quant service (12 banded cells; 0.16→low/green, 0.39→mid/amber; KPIs populated), RELIANCE radar mounted (`.recharts-radar`) with disclosure, all 4 symbols showed real synced DVM rows (RELIANCE V46/D60/M34, TCS V40/D55/M36, HDFCBANK V48/D65/M38, INFY V47/D60/M31).
+- Open — Evidence: FULL `npx vitest run` launched detached (PID 38616 → `%TEMP%\bsi-portfolio-full.log` / `.exit`); result appended below on completion. Full DoD = PASS if exit 0 (tsc already 0; no .py touched).
+
+
 - Trigger: user requested continuation of the interrupted frontend implementation.
 - Repaired interrupted JSX in `src/components/DLIIntelligenceCenter.tsx`, added its default page export, and restored the misplaced filtering/sorting hooks in `src/components/DataTable.tsx`. Read both complete files after editing.
 - Validation: ran `npx tsc --noEmit`; exit 2. Diagnostics: `src/components/MetricTile.tsx:142:21`, TS2604 and TS2786 (ReactNode-valued icon used as a JSX component). Evidence: `%TEMP%\bsi-frontend-resume-tsc.log`.
 - DoD: FAIL. Vitest, pytest, production build and browser validation not run: stopped at the TypeScript failure under the verify-gate-runner contract. No subsequent application edits made.
+- Full-suite result: `npx vitest run` **exit 0 — 1,427 passed / 0 failed / 44 skipped (149 files passed, 12 skipped), 96.42s** (`%TEMP%\bsi-portfolio-full.log` / `.exit`). Full DoD: **PASS** — tsc 0, focused 17/17, full suite green, browser-verified live; no .py changes.
+
 - Open — Sequential: fix MetricTile's icon rendering before continuing verification. DLI's remaining tabs, route integration, News Intelligence Hub and remaining modernization scope are unfinished. The compacted context does not retain the complete original recommendation list; do not treat this entry as full implementation.
 - Unrelated existing backend/staged changes preserved.
 
@@ -9372,3 +9387,44 @@ restart during the window, and this batch deliberately contains no `.ts` change.
 **Lesson worth keeping:** a metric that improves after a change is a hypothesis about that change.
 The uptime streak looked exactly like the autostart fix working. Confirm the fix exists in the
 running system before crediting it.
+
+## 2026-09-18 (market hours) — full live_datasource run: 3 real defects behind 33 non-passes
+
+User asked for every live datasource test to run while the market was open. First full live run
+since 2026-09-12.
+
+**TypeScript (`vitest --project live`): 39 passed, 1 failed, 1 skipped.** The failure was
+`trendlyneScreener.live` at a 30s timeout — not an assertion — and it passed in 4.8s in isolation;
+at that moment the Python suite was hitting Trendlyne concurrently, and Trendlyne rations a shared
+request allowance. The skip is GDELT, retired on purpose 2026-09-11. Net: TS live clean.
+
+**Python: 221 passed, 1 failed, 28 errors, 4 skipped. Every non-pass turned out to be ours, not a
+vendor's:**
+
+- **28 errors — one byte.** All `JSONDecodeError: Unexpected UTF-8 BOM`, at SETUP, in exactly three
+  files, across nine vendors. Seven vendors do not fail at once; a shared fixture does.
+  `scripts/stocklist.json` gained a BOM in `d6d39566` (2026-09-12, likely PowerShell 5.1's
+  `-Encoding utf8`). Production never noticed because every production fetcher reads it with
+  `utf-8-sig`; the tests and the mapping-maintenance scripts read plain `utf-8`. Stripped the 3
+  bytes (content verified identical, 2,005 entries), added a `git ls-files` BOM guard. **All 28
+  then passed in 20s** — nine vendors that had been unverifiable for six days are all healthy.
+  (AF-20260918-03)
+- **1 failure — a gated test that rotted.** It hand-copied a URL using `TODAY_PLUS_14`, renamed to
+  `TODAY_PLUS_90` on 09-15. Extracted `upcoming_earnings_url()` so the test uses the fetcher's own
+  definition. (AF-20260918-04)
+- **4 skips — canaries that could never fire, hiding a real defect.** Bulk deals probed only the
+  retired NSE routes (production uses a MoneyControl fallback nobody tested); rollover used a bare
+  `requests.Session()` that nsearchives refuses, while the fetcher writes 210 symbols a day. Gave
+  both tests the fetchers' own entry points (`fetch_bulk_rows()`, `make_session()`). The store
+  test then ran for the first time and failed on `column "source" does not exist` —
+  `ensure_schema()`'s DDL predated migration `20260912120000`, the **second** stale-DDL instance in
+  two days. Aligned it, and fixed a read-back from the wrong table that had never executed. File
+  went 4 skipped → 4 passed. (AF-20260918-05)
+
+**Guard design worth recording:** I measured two guards for the stale-DDL class before shipping
+one. Requiring every live column in the in-code DDL flagged 42 blocks, mostly legitimate — an
+always-fires monitor. Comparing only the PRIMARY KEY flagged exactly the real defect and nothing
+else. Shipped the PK version.
+
+**Also:** a "Postgres unreachable" skip appeared once and did not reproduce in two re-runs — the
+pytest fixture losing a connection race while three suites ran concurrently, not an outage.

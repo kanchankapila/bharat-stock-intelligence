@@ -38,6 +38,28 @@ export function stripHtmlToText(value: string): string {
   return decodeHtmlEntities(value.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
 
+const FACTOR_KEYS = ['technical', 'fundamental', 'momentum', 'valuation', 'delivery', 'news'] as const;
+
+// stock_factor_breakdown rows: six component scores (0–100) written by scoring_engine.
+// Non-numeric/missing factors are omitted — the radar must never zero-fill missing data.
+export function factorEntries(factors: unknown): { key: string; label: string; value: number }[] {
+  if (!factors || typeof factors !== 'object') return [];
+  const row = factors as Record<string, unknown>;
+  return FACTOR_KEYS
+    .filter((k) => typeof row[k] === 'number' && Number.isFinite(row[k]))
+    .map((k) => ({ key: k, label: k.charAt(0).toUpperCase() + k.slice(1), value: row[k] as number }));
+}
+
+// Correlation-matrix cell styling: >0.7 concentrated (red), <0.3 diversifying (green),
+// diagonal shaded separately, missing values never styled as a number.
+export function correlationCellClass(value: unknown, isSelf = false): string {
+  if (isSelf) return 'bsi-corr-self';
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'bsi-corr-none';
+  if (value > 0.7) return 'bsi-corr-high';
+  if (value < 0.3) return 'bsi-corr-low';
+  return 'bsi-corr-mid';
+}
+
 // Decode common HTML entities in upstream plain-text fields (titles/summaries).
 // Output is rendered as React text (escaped), so a decoded `<` can never inject markup.
 export function decodeHtmlEntities(value: string): string {
