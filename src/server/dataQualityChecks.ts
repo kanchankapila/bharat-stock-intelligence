@@ -275,15 +275,12 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     warnDays: 3, failDays: 5 },
   { id: 'mf-stock-holdings-recency', label: 'mf_stock_holdings (per-stock MF ownership, monthly disclosure)',
     category: 'flows', critical: false, table: 'mf_stock_holdings', dateColumn: 'as_of_date', warnDays: 45 },
-  // Empty because the UPSTREAM SOURCE IS DEAD, not because the fetcher is broken. AMFI's
-  // DownloadSchemeData_Po.aspx?mf=0&tp=1 returns HTTP 200 with a 4MB CSV that is the scheme
-  // MASTER list (AMC, Code, Scheme Name, ...) -- no ISINs, no market values -- so
-  // mf_sector_flow_fetcher.py's _parse_amfi() correctly finds 0 holding rows and run() exits 1
-  // rather than writing a fabricated month. Re-confirmed live 2026-08-11. test_live_datasource_
-  // mf_sector_flow.py already asserts this exact shape and will notice if AMFI restores it.
+  // Written by mf_sector_allocation_fetcher.py (ET/mcxlivefeeds), which replaced the dead AMFI
+  // DownloadSchemeData_Po.aspx feed (now returns the scheme MASTER list, no holdings). Monthly
+  // cadence -- `month` is the latest disclosed holding month, so warnDays 45 covers the lag.
   { id: 'mf-sector-allocation-recency', label: 'mf_sector_allocation (MF sector flow)',
     category: 'flows', critical: false, table: 'mf_sector_allocation', dateColumn: 'month', warnDays: 45,
-    emptyDetail: 'mf_sector_allocation is empty — AMFI\'s portfolio-disclosure endpoint now returns the scheme master list instead of holdings (upstream, not a fetcher bug; see mf_sector_flow_fetcher.py). Blocked until AMFI restores it or a replacement source is chosen.' },
+    emptyDetail: 'mf_sector_allocation is empty — its writer is mf_sector_allocation_fetcher.py (ET/mcxlivefeeds, ml-daily-ops). Check that step\'s last run; the old AMFI source is dead and is not the cause.' },
   // 2026-08-06 urls.txt data analysis (docs/url_explorer) -- see institutional_deals_fetcher.py.
   { id: 'institutional-deal-signals-recency', label: 'institutional_deal_signals (MC ranked topInvestor buy/sell)',
     category: 'flows', critical: false, table: 'institutional_deal_signals', dateColumn: 'deal_date', warnDays: 5, failDays: 10 },

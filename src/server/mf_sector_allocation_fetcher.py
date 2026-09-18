@@ -99,49 +99,17 @@ HEADERS = {
 # Unmapped names (`Services`, `Others`, `Unclassified`) are stored VERBATIM in
 # mf_scheme_sector_allocation and simply never propagate -- they have no
 # counterpart in nse_stocks.sector, so there is nothing honest to map them onto.
-# ET sector names -> our nse_stocks.sector GICS vocabulary (confirmed via
-# _load_sector_map(): Financials, Industrials, Consumer Discretionary, Consumer
-# Staples, Healthcare, Materials, Information Technology, Energy, Telecommunications).
 SECTOR_NAME_MAP = {
     "financial": "Financials",
-    "financial services": "Financials",
     "financials": "Financials",
+    "financial services": "Financials",
     "banks": "Financials",
-    "banking": "Financials",
-    "services": "Industrials",
-    "information technology": "Information Technology",
-    "it": "Information Technology",
-    "technology": "Information Technology",
-    "automobile": "Consumer Discretionary",
-    "auto": "Consumer Discretionary",
-    "automobile and auto components": "Consumer Discretionary",
-    "pharmaceuticals": "Healthcare",
-    "pharma": "Healthcare",
-    "healthcare": "Healthcare",
-    "fmcg": "Consumer Staples",
-    "consumer durables": "Consumer Discretionary",
-    "energy": "Energy",
-    "oil gas & consumable fuels": "Energy",
-    "metals & mining": "Materials",
-    "metals": "Materials",
-    "materials": "Materials",
-    "capital goods": "Industrials",
-    "industrials": "Industrials",
-    "construction materials": "Materials",
-    "chemicals": "Materials",
-    "textiles": "Consumer Discretionary",
-    "telecommunication": "Telecommunications",
-    "telecom": "Telecommunications",
-    "media entertainment & publication": "Media & Entertainment",
-}
-SECTOR_NAME_MAP = {
-    "financial": "Financials",
-    "financials": "Financials",
-    "financial services": "Financials",
     "banking": "Financials",
     "insurance": "Financials",
     "automobile": "Consumer Discretionary",
     "auto": "Consumer Discretionary",
+    "automobile and auto components": "Consumer Discretionary",
+    "textiles": "Consumer Discretionary",
     "consumer discretionary": "Consumer Discretionary",
     "consumer durables": "Consumer Discretionary",
     "consumer staples": "Consumer Staples",
