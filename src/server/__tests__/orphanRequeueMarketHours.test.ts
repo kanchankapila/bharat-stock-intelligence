@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { requeueOrphanedJob, HEAVY_MAKEUP_JOBS, msUntilMarketCloseIST } from '../jobs/registerJob';
 
 /**
@@ -46,6 +46,8 @@ describe('msUntilMarketCloseIST', () => {
 
 describe('requeueOrphanedJob market-hours deferral', () => {
   beforeEach(() => vi.restoreAllMocks());
+  // setSystemTime mocks Date even without useFakeTimers. restoreAllMocks does not undo it.
+  afterEach(() => vi.useRealTimers());
 
   it('defers a heavy trainer make-up past the close', async () => {
     vi.setSystemTime(MID_SESSION);

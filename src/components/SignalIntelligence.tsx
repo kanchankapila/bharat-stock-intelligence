@@ -319,11 +319,15 @@ export function SignalIntelligence() {
       </div>
 
       {/* ── Stats Row ────────────────────────────────────────────────────────── */}
+      {/* `stats` is undefined both while loading AND when getConfluenceStats fails, so
+          `?? 0` here reported a failed query as a measured zero -- "0 Total Signals" and
+          "Avg Score 0" read as real market facts. Render an unknown marker instead; the
+          distinction matters most for Avg Score, where 0 is a plausible-looking value. */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Total Signals"    value={stats?.total ?? 0}    sub="active screener stocks" />
-        <StatCard label="Elite Conviction" value={stats?.elite ?? 0}    sub="score ≥ 80" color="text-amber-400" />
-        <StatCard label="Strong Conviction" value={stats?.strong ?? 0}  sub="score 60–79" color="text-emerald-400" />
-        <StatCard label="Avg Score"        value={`${stats?.avgScore ?? 0}`} sub="across all signals" color="text-indigo-400" />
+        <StatCard label="Total Signals"    value={stats ? stats.total : '—'}    sub="active screener stocks" />
+        <StatCard label="Elite Conviction" value={stats ? stats.elite : '—'}    sub="score ≥ 80" color="text-amber-400" />
+        <StatCard label="Strong Conviction" value={stats ? stats.strong : '—'}  sub="score 60–79" color="text-emerald-400" />
+        <StatCard label="Avg Score"        value={stats ? `${stats.avgScore}` : '—'} sub="across all signals" color="text-indigo-400" />
       </div>
 
       {/* ── Filters ──────────────────────────────────────────────────────────── */}

@@ -117,6 +117,8 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: ChartLine,    label: 'Signal Report Card', id: 'signal-report-card' },
       { icon: ChartLine,    label: 'Signal Review',      id: 'signal-review'      },
       { icon: Activity,     label: 'Sentiment',          id: 'sentiment'          },
+      { icon: Radio,        label: 'News Intelligence',  id: 'news'               },
+      { icon: FlaskConical, label: 'Deep Learning',      id: 'deep-learning'      },
       { icon: History,      label: 'Backtest',           id: 'backtest'           },
       { icon: Settings2,    label: 'ML Builder',         id: 'builder'            },
       { icon: FlaskConical, label: 'Research',           id: 'research'           },

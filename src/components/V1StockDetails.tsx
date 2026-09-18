@@ -671,7 +671,7 @@ export const V1StockDetails: React.FC<{
           {activeTab === 'fno' && (
             <div className="space-y-6">
                <React.Suspense fallback={<PageFallback />}>
-                 <V1OptionChain symbol={symbol} stockPrice={stock?.price ?? 0} />
+                 <V1OptionChain symbol={symbol} stockPrice={stock?.price ?? null} />
                  <V1FnOSignals symbol={symbol} />
                </React.Suspense>
 

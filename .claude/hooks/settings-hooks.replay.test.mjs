@@ -52,20 +52,22 @@ describe('settings.json / hook wiring', () => {
 });
 
 describe('settings.json / graphify PreToolUse hooks actually fire', () => {
-  it('exits 0 for every simulated tool call', () => {
-    const probes = [
-      [preToolUse('Read|Glob'), { tool_name: 'Read', tool_input: { file_path: 'src/server/queues.ts' } }],
-      [preToolUse('Read|Glob'), { tool_name: 'Read', tool_input: { file_path: GRAPH_PATH } }],
-      [preToolUse('Bash'), { tool_name: 'Bash', tool_input: { command: 'grep -rn "drift" src/server/' } }],
-      [preToolUse('Bash'), { tool_name: 'Bash', tool_input: { command: 'git status --short' } }],
-    ];
-    for (const [entry, payload] of probes) {
-      for (const hook of entry.hooks) {
+  // Give each real shell/Node launch its own default timeout. Aggregating these
+  // probes took ~5s on Windows and made unrelated subprocess startup times add up.
+  const probes = [
+    ['source read', preToolUse('Read|Glob'), { tool_name: 'Read', tool_input: { file_path: 'src/server/queues.ts' } }],
+    ['graph read', preToolUse('Read|Glob'), { tool_name: 'Read', tool_input: { file_path: GRAPH_PATH } }],
+    ['source search', preToolUse('Bash'), { tool_name: 'Bash', tool_input: { command: 'grep -rn "drift" src/server/' } }],
+    ['git status', preToolUse('Bash'), { tool_name: 'Bash', tool_input: { command: 'git status --short' } }],
+  ];
+  for (const [label, entry, payload] of probes) {
+    for (const hook of entry.hooks) {
+      it(`exits 0 for ${label}: ${hook.command}`, () => {
         const { status, stderr } = replay(hook.command, payload);
         expect(status, `${hook.command} exited ${status}: ${stderr}`).toBe(0);
-      }
+      });
     }
-  });
+  }
 
   it('emits the query-the-graph reminder for source reads and raw searches', () => {
     // Without a local graph the hook is correct to stay silent -- assert that instead, so this

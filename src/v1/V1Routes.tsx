@@ -31,7 +31,8 @@ const TradeDecisionCockpit    = React.lazy(() => import('../components/TradeDeci
 const HedgeFundResearch       = React.lazy(() => import('../components/HedgeFundResearch'));
 const SignalIntelligence      = React.lazy(() => import('../components/SignalIntelligence'));
 const SignalReportCard        = React.lazy(() => import('../components/SignalReportCard').then(m => ({ default: m.SignalReportCard })));
-const DLDashboard             = React.lazy(() => import('../components/DLDashboard'));
+const DLIIntelligenceCenter   = React.lazy(() => import('../components/DLIIntelligenceCenter'));
+const NewsIntelligenceHub     = React.lazy(() => import('../components/NewsIntelligenceHub'));
 const TodaysPicks             = React.lazy(() => import('../components/TodaysPicks').then(m => ({ default: m.TodaysPicks })));
 const ScreenerIntelligencePage = React.lazy(() => import('../components/ScreenerIntelligencePage').then(m => ({ default: m.ScreenerIntelligencePage })));
 const AgentDataScientistPage   = React.lazy(() => import('../components/AgentDataScientistPage').then(m => ({ default: m.AgentDataScientistPage })));
@@ -272,12 +273,14 @@ const V1Routes = ({
                                             className={`text-xs px-3 py-1 rounded-full transition-colors ${researchSubTab === 'deep-learning' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}
                                         >Deep Learning</button>
                                     </div>
-                                    {researchSubTab === 'overview' ? <HedgeFundResearch onAddWatchlist={onToggleWatchlist} /> : <DLDashboard />}
+                                    {researchSubTab === 'overview' ? <HedgeFundResearch onAddWatchlist={onToggleWatchlist} /> : <DLIIntelligenceCenter onSelectStock={onSelectStock} />}
                                 </V1PageFrame>
                             } />
                             <Route path="/strategy" element={<StrategyIntelligence onSelectStock={onSelectStock} />} />
                             <Route path="/best-picks" element={<HighConvictionPage onSelectStock={onSelectStock} />} />
                             <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={onSelectStock} />} />
+                            <Route path="/deep-learning" element={<DLIIntelligenceCenter onSelectStock={onSelectStock} />} />
+                            <Route path="/news" element={<NewsIntelligenceHub />} />
                             <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={onSelectStock} />} />
                             <Route path="/economics" element={
                                 <V1PageFrame title="Economics & Macro" kicker="GLOBAL MACRO · EVENTS · SENTIMENT">

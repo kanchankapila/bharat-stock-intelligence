@@ -7,7 +7,6 @@ import {
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 import stockData from '../data/stocklist';
-import { LegacyScoreBanner } from './CanonicalSourceNote';
 import { PriceFreshnessBadge } from './PriceFreshnessBadge';
 
 interface ScoredStock {
@@ -23,6 +22,20 @@ interface ScoredStock {
   negative_count?: number;
   reasons?: Array<{ name?: string; sentiment?: string; source?: string }>;
   last_updated?: string;
+}
+
+// Use the oldest displayed generation time, never the query's fetch time.
+// Date-only or timezone-less values cannot establish precise recommendation age.
+function GenerationFreshness({ stocks, label }: { stocks: ScoredStock[] | undefined; label: string }) {
+  if (!stocks?.length) return <span className="text-xs text-slate-400">{label}: no recommendations</span>;
+  const timestamps = stocks.map(stock => {
+    const value = stock.last_updated;
+    return value && /T\d{2}:\d{2}.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? Date.parse(value) : NaN;
+  });
+  if (timestamps.some(timestamp => !Number.isFinite(timestamp) || timestamp > Date.now())) {
+    return <span className="text-xs text-amber-400">{label}: generation time unavailable</span>;
+  }
+  return <PriceFreshnessBadge updatedAt={Math.min(...timestamps)} thresholdMs={Infinity} label={`${label} oldest generation`} />;
 }
 
 const RankingList: React.FC<{ 
@@ -103,7 +116,6 @@ const RankingList: React.FC<{
                   </div>
                   <div className="flex items-center gap-3 mt-1.5">
                     <span className="text-[10px] font-black text-slate-400 uppercase">Score <span className="text-white">{stock.score?.toFixed(1) ?? '—'}</span></span>
-                    <span className="text-[10px] font-black text-slate-400 uppercase">Conf <span className="text-indigo-400">{stock.confidence?.toFixed(0) ?? '—'}%</span></span>
                     <span className="text-[10px] font-black text-indigo-500/80 uppercase tracking-tighter bg-indigo-500/5 px-1.5 py-0.5 rounded italic">Driver: {stock.top_domain ?? 'Unknown'}</span>
                     {(stock.position_size_pct ?? 0) > 0 && (
                       <span className="text-[10px] font-black text-emerald-400 uppercase tracking-tighter bg-emerald-500/10 px-1.5 py-0.5 rounded italic">Weight: {stock.position_size_pct!.toFixed(1)}%</span>
@@ -139,18 +151,13 @@ const TopRatedStocks: React.FC<{
   watchlist: string[];
   onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
 }> = ({ onSelectStock, watchlist = [], onToggleWatchlist }) => {
-  const { data: longTermStocks, isLoading: isLoadingLT, refetch: refetchLT, dataUpdatedAt: ltUpdatedAt } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'long_term' }, { refetchInterval: 15 * 60_000 });
-  const { data: intradayStocks, isLoading: isLoadingID, refetch: refetchID, dataUpdatedAt: idUpdatedAt } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'intraday' }, { refetchInterval: 5 * 60_000 });
-  const triggerStockScoring = trpc.triggerStockScoring.useMutation();
+  const { data: longTermStocks, isLoading: isLoadingLT, isFetching: isFetchingLT, isError: isErrorLT, refetch: refetchLT } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'long_term' }, { refetchInterval: 15 * 60_000 });
+  const { data: intradayStocks, isLoading: isLoadingID, isFetching: isFetchingID, isError: isErrorID, refetch: refetchID } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'intraday' }, { refetchInterval: 5 * 60_000 });
+  const isRefreshing = isFetchingLT || isFetchingID;
 
-  const handleRecalculate = async () => {
-    try {
-      await triggerStockScoring.mutateAsync();
-      refetchLT();
-      refetchID();
-    } catch (err) {
-      console.error("Scoring trigger failed:", err);
-    }
+  // Reload canonical readers; the legacy scoring mutation does not produce these lists.
+  const handleRefresh = async () => {
+    await Promise.all([refetchLT(), refetchID()]);
   };
 
   const isLoading = isLoadingLT || isLoadingID;
@@ -178,27 +185,32 @@ const TopRatedStocks: React.FC<{
           </div>
           <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2">
             <Zap className="w-3 h-3 text-amber-500" />
-            FinBERT-Powered Multi-Factor Multi-Horizon Ranking
+            Canonical Multi-Horizon Rankings
           </p>
         </div>
 
         <div className="flex flex-col items-end gap-2">
           <button
-            onClick={handleRecalculate}
-            disabled={triggerStockScoring.isPending}
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            title="Reload canonical results. Scheduled pipelines generate new recommendations."
             className="flex items-center gap-2 glass border border-slate-800/50 hover:border-indigo-500/50 text-white px-6 py-3 rounded-2xl text-xs font-black font-display uppercase tracking-widest transition-all group disabled:opacity-50"
           >
-            <RefreshCw className={cn("w-4 h-4 transition-transform group-hover:rotate-180", triggerStockScoring.isPending && "animate-spin")} />
-            {triggerStockScoring.isPending ? 'Syncing intelligence...' : 'Refresh All Scopes'}
+            <RefreshCw className={cn("w-4 h-4 transition-transform group-hover:rotate-180", isRefreshing && "animate-spin")} />
+            {isRefreshing ? 'Reloading results...' : 'Reload Rankings'}
           </button>
           <div className="flex items-center gap-3">
-            <PriceFreshnessBadge updatedAt={ltUpdatedAt} thresholdMs={20 * 60_000} label="long-term" />
-            <PriceFreshnessBadge updatedAt={idUpdatedAt} thresholdMs={8 * 60_000} label="intraday" />
+            {isErrorLT ? <span role="alert" className="text-xs text-amber-400">Long-term reload failed; any displayed results may be outdated.</span> : <GenerationFreshness stocks={longTermStocks} label="long-term" />}
+            {isErrorID ? <span role="alert" className="text-xs text-amber-400">Intraday reload failed; any displayed results may be outdated.</span> : <GenerationFreshness stocks={intradayStocks} label="intraday" />}
           </div>
         </div>
       </div>
 
-      <LegacyScoreBanner note="Ranked from the per-timeframe scoring engine (stock_scores), computed separately from the unified cross-engine model -- check Alpha / Buy Recs for the canonical, regime-aware view of the same stocks." />
+      <div className="rounded-lg border border-slate-800 px-3 py-2 text-xs text-slate-400">
+        Long-term reads canonical unified recommendations filtered to LONG_TERM; intraday reads the canonical intraday ranker.
+        Scores are rankings, not calibrated probabilities of profit. Reloading reads available results; it does not recompute them.
+        Generation age is not a guarantee that every underlying input is fresh.
+      </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
         <div className="xl:col-span-3 grid grid-cols-1 lg:grid-cols-2 gap-8">

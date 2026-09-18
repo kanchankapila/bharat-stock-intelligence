@@ -11,7 +11,15 @@ import { Card } from './Card';
 // Extracted from App.tsx (2026-08-02 perf pass) so it's lazy-loaded instead of always
 // bundled into the main entry chunk -- this tab only mounts when a user opens a stock's
 // F&O tab.
-export const V1OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol, stockPrice }) => {
+//
+// `stockPrice` is `number | null` on purpose. It used to be a plain `number`, and the only
+// call site passed `stock?.price ?? 0` -- so a failed/absent live-quote fetch became a real
+// 0. That is not a cosmetic problem: the ATM test below is
+// `Math.abs(stockPrice - strike) < stockPrice * 0.005`, which with stockPrice=0 collapses to
+// `strike < 0` and is therefore false for EVERY strike. The ATM row highlight (and every
+// downstream moneyness read) silently switched itself off instead of reporting "no price".
+// null now means "unknown", and the ATM branch is skipped rather than evaluated falsely.
+export const V1OptionChain: React.FC<{ symbol: string; stockPrice: number | null }> = ({ symbol, stockPrice }) => {
   const { data: fnoSignals } = trpc.getFnOSignals.useQuery({ symbol });
   const { data: ocResponse, isLoading } = trpc.getOptionChain.useQuery({ symbol }, {
     refetchInterval: 30000
@@ -150,7 +158,11 @@ export const V1OptionChain: React.FC<{ symbol: string; stockPrice: number }> = (
           <tbody className="divide-y divide-slate-800/50">
             {chain.map((row: any) => {
               const strike = row.strikePrice;
-              const isAtTheMoney = Math.abs(stockPrice - strike) < (stockPrice * 0.005);
+              // Only judge moneyness against a known price. `stockPrice` is null when the
+              // live quote is unavailable (see the prop comment) -- comparing against it
+              // would either throw or fabricate an ATM row, so no row is marked instead.
+              const isAtTheMoney = stockPrice != null && stockPrice > 0
+                && Math.abs(stockPrice - strike) < (stockPrice * 0.005);
 
               return (
                 <tr key={strike} className={cn(

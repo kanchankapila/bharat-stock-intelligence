@@ -9183,6 +9183,21 @@ AF-20260917-07 (user decision), AF-20260914-02 (scoped new fetcher).
 
 ## 2026-09-17 — Cline — frontend modernization resumption
 
+## 2026-09-18 — Cline — pending-items completion (news polish, unit fix, acceptance checks)
+
+- Trigger: "implement what's still pending" — collect the Python gate, finish browser acceptance, resolve the news-summary escaped-HTML limitation.
+- Python gate COMPLETED (not just running): `2799 passed, 0 failed, 249 skipped in 1128.38s (0:18:48)` on the production interpreter (`backend-python/venv`). Output tail contains warnings only — FitFailedWarning inside a 5-fold CV negative control, numpy overflow RuntimeWarning inside `TestMaxDrawdownOverflow`'s overflow negative control, pandas SQLAlchemy connectable UserWarning, scipy precision-loss warnings; stderr carries only a PYTORCH_CUDA_ALLOC_CONF deprecation. Logs: `%TEMP%\bsi-final-pytest.out.log` / `.err.log`.
+- News summary fix: added `decodeHtmlEntities` (named+numeric, Node-safe, no DOM) and `stripHtmlToText` (tag-strip → decode → whitespace-collapse) to `src/lib/intelligenceDisplay.ts`; applied to NewsIntelligenceHub titles/summaries. Rendered as React text throughout — no `dangerouslySetInnerHTML` anywhere.
+- REAL display-unit bug caught during live history verification: `actual_ret_5d/15d` are stored in PERCENT by `outcome_resolver.py:1216` (`(exit-entry)/entry*100`), so the fraction-scaling `percent()` showed RELIANCE 5-day moves as "−217.13%". Added `percentPoint()` (renders stored percent as-is); history column now shows true values (−2.01%, 2.24%, 2.57% — each consistent with its UP/DOWN/FLAT outcome). `exp_ret` stays fraction→% per the pre-existing `DLPredictionCard.tsx:26` convention, column relabeled "Expected return (model)", footnote explains both scales. Cross-checked units against `dl_engine.py` writers, `feature_engineering`'s post-AF-20260910-18 unscaled `pct_change` targets, and `docs/session-log.md:8473` before changing anything.
+- Browser acceptance (all on the running dev app): DLI 390px viewport → scrollWidth==clientWidth, no document-level overflow (remaining scroll regions are intentional `overflow-x-auto` strips); TabBar keyboard — ArrowRight and End move BOTH aria-selected and focus, panel aria-label + content follow; RELIANCE history renders 90 days of rows with outcomes; Predictions empty state renders for a no-data session ("NO DATA" chip + message). News: 200 cards, 0 summaries with visible markup post-fix (the Google-News-RSS Kotak card that showed raw `<a href>/<font>` now reads as plain text); genuine 8h-empty window shows the correct empty state; fault-injected `fetch` rejection for getNewsItems → role=alert "Unable to load data" + "Try again" → restore → 200 cards recovered, alert cleared. Emulation reset to 1440×900 desktop, Fast 4G.
+- Test evidence: `intelligenceDisplay.test.tsx` now 9 tests (icon-node, confidence %, 5D-return, decodeHtmlEntities ×3, percentPoint ×2, stripHtmlToText) — exit 0; `tsc --noEmit` exit 0. Evidence files: `%TEMP%\bsi-strip-vitest.exit`, `%TEMP%\bsi-strip-tsc.exit`, `%TEMP%\bsi-strip-regression.log` (9/9 passed), `%TEMP%\bsi-strip-tsc.log` (empty=clean).
+- Environment note: `run_commands` shell integration stopped reporting completions mid-session (even `Write-Output` unobservable); verification switched to detached `Start-Process cmd /v:on` runs writing `!errorlevel!` exit files, read back via file reads. Browser tools unaffected.
+- Open — Evidence: FULL `npx vitest run` launched detached (PID 46316 → `%TEMP%\bsi-strip-full.log` / `.exit`); result to be appended below on completion. No `.py` changes this session, so the completed 2799-passed pytest result stands. Full DoD = PASS if the full Vitest run exits 0.
+
+
+- Full-suite result: `npx vitest run` exit 1 — **1418 passed / 1 failed / 44 skipped (160 files: 147 passed, 12 skipped)**, 165.84s. Sole failure: `signalReadersTechnicalFold.test.ts > excludes symbols above the RSI threshold` — "Test timed out in 5000ms" while three vitest processes plus the dev server ran concurrently. Isolation rerun of that file: **exit 0, 3/3 passed (2.84s)**, and its own stderr cites the repo-documented parallel-load flake mechanism (in-flight server-side work after a vitest-layer timeout — same mechanism as signalOutcomesServiceSource.test.ts). No backend/.py source changed this session; the file was green in the prior full run. Evidence: `%TEMP%\bsi-strip-full.log` / `.exit`, `%TEMP%\bsi-signalreaders.log` / `.exit`.
+- Final gate status: tsc exit 0; focused intelligenceDisplay suite 9/9 exit 0; full Vitest green modulo the one documented contention flake (green in isolation immediately after); pytest 2799 passed / 0 failed / 249 skipped (completed, production interpreter). DoD: PASS with the flake disclosed; browser acceptance complete (390px, keyboard, history, empty/error/retry paths, news markup fix verified live).
+
 - Trigger: user requested continuation of the interrupted frontend implementation.
 - Repaired interrupted JSX in `src/components/DLIIntelligenceCenter.tsx`, added its default page export, and restored the misplaced filtering/sorting hooks in `src/components/DataTable.tsx`. Read both complete files after editing.
 - Validation: ran `npx tsc --noEmit`; exit 2. Diagnostics: `src/components/MetricTile.tsx:142:21`, TS2604 and TS2786 (ReactNode-valued icon used as a JSX component). Evidence: `%TEMP%\bsi-frontend-resume-tsc.log`.
@@ -9221,3 +9236,86 @@ at RUN time. The suite started 22:33 and ran 1:37:41, reaching that test at 00:1
 date and the clock injected into the module under test. Negative-controlled against the real shape:
 shifting the pinned date moves both sides together and still passes (proving nothing), so the
 control advances only the injected `today()`, which reproduces `assert 24.4144 == 21.973` exactly.
+
+## 2026-09-18 — "check if alternate sources work": one correction, one real fix, one cap lifted
+
+User asked to verify the alternate sources surfaced while closing the audit. Probing them
+corrected a conclusion I had reported the day before.
+
+**AF-20260917-07 — I checked the wrong table.** I measured `investsights_factor_scores.roe`
+(Pearson 0.7727, percent scale, sign flips), rejected it correctly, and reported that no in-repo
+drop-in existed. The right table is **`investsights_fundamentals_history.return_on_equity`** —
+already in this repo, already fetched daily, already carrying its own `live_datasource` test and
+freshness check — measuring **Pearson 0.9608, same fraction scale, ZERO sign flips**. Two tables
+from the same vendor hold two different ROE definitions and I measured the worse one. One
+`information_schema.columns WHERE column_name ILIKE '%roe%'` query lists all four candidates.
+
+**The constraint was our own cap, not the vendor.** That table held only 288 symbols because of a
+`--limit 300` default carrying a `ponytail:` note: *"no confirmed rate-limit budget from this
+provider yet ... widen once a real run's timing is known."* That run had never been made. Made
+now: **1000/1000 symbols stored in 129 seconds, zero failures**, and 5 of 6 arbitrary symbols from
+outside the cached universe returned 200 with real fraction-scale ROE. Cap lifted to 2500 (the
+reachable universe is 2,052; ~4.4 min against a 20-min budget) in the fetcher default and its
+`queues.ts` call site. **Stored ROE went 287 → 929 symbols on one run.**
+
+Collecting the data is not a scoring change and is done. Wiring it into `feature_store.roe` is,
+and stays EVIDENCE-lane.
+
+**AF-20260918-01 (new) — the NiftyTrader live screener reports success on a total outage.** The
+job already exits non-zero when the bearer token is MISSING, citing the skip-as-success class by
+name. The other half of that same path was unguarded: a token that is PRESENT but no longer
+entitled makes every filter 401 through the ordinary "failed filter" branch, so all 45 fail,
+nothing is written, and the job exits 0. The summary also printed to stdout, invisible to
+`pythonRunner`'s stderr-only classifier. Measured live: `live-market-filter-data` 401s to the
+exact production header set with a JWT valid to 2026-10-05, while `advance-eod-screener-filter`
+returns 200/453KB/1,032 rows on identical headers — the gate is the Prime *entitlement*, which is
+exactly what the missing-token guard cannot see. Fixed with a zero-capture guard keyed on **did
+anything land**, not on a fail rate (a filter matching no stocks is normal; failing on that is the
+always-fires defect). The job itself is healthy today — 3.26M rows, 444,494 on 09-17.
+
+**AF-20260912-07 — re-probed route by route, and I hit the trap the rule warns about.** My first
+sweep sent `sec-fetch-site: same-site` and got 403 on all four NiftyTrader routes, which reads
+exactly like a vendor-wide regression. With **no headers at all**, `symbol/top-gainers-data`
+returns 200/25KB and `option/option-chain-data` 200/145KB — `same-origin` is the correct value and
+`same-site` LOWERED access. Also: the two screener routes answer **405** to a GET (they are POST),
+so the row's "401 prime-gated" was right in conclusion and wrong in mechanism. Confirmed
+unchanged: ET's two mover paths 503, NSE `/api/bulk-deals` 404 and both historical ranges 503,
+while `/api/block-deal` returns 200 with real rows.
+
+Two classes added to `data-sources.md`: enumerate every table holding a column before declaring no
+alternate exists; and the header-isolation ladder must start from the EMPTY set, because starting
+from a "realistic browser header set" and subtracting hides a wrong value in every variant.
+
+**Addendum (same day) — "keep on fixing all": block-deal history built, and a silent
+misattribution found on the way there.**
+
+**AF-20260914-02 closed — the fetcher exists now, not just a spec.** `mc_block_deal_history_fetcher.py`
+walks MoneyControl's per-symbol paginated block-deal history (auth NONE; minimum headers isolated
+to User-Agent + Referer; `seemore` Y/N is the pagination contract). Both documented vendor traps
+are handled at the boundary: `datetime` arrives as a DISPLAY string ("24 Jun, 2026") and is parsed
+to a real DATE or the row is skipped — never stored as text, which is the `insider_trades` trap —
+and `type` is mixed-case (measured exactly `{'Sell': 16, 'purchase': 16}`) and is normalised to
+BUY/SELL with unknown values skipped rather than guessed. `id` is a content hash prefixed `mcbd_`
+instead of the NSE sibling's positional `{symbol}_{date}_{i}`, so a re-fetch updates in place and
+cannot collide with the two other sources sharing that bare `id` PK.
+
+Live-verified: **RELIANCE went from ZERO block-deal rows to 32**, spanning 2024-11-06..2026-06-24 —
+history NSE cannot serve at all — with matched Goldman Sachs BUY / Morgan Stanley SELL legs on one
+date. Scheduled **weekly** inside `ml-weekly-data`, deliberately not daily: the endpoint returns a
+symbol's entire history every call, so a daily walk is write amplification for deals the existing
+daily NSE path already captures.
+
+**AF-20260918-02 (new) — found while resolving provider ids for the above.** Two live fetchers
+built the `mcsymbol → symbol` map with a dict comprehension. Measured: **62 of 2,340 codes map to
+more than one NSE symbol**, including `KMF → {KOTAK, KOTAKBANK, MAHINDRA}` — so MoneyControl's bulk
+earnings for a Nifty 50 bank could be written against Mahindra, silently. `recurring-bugs.md`
+already documented this class from the `stocklist.json` side and it was still written twice, so
+the fix is a shared helper (`mc_symbol_map.build_mc_to_symbol`) rather than another paragraph —
+the same reasoning as `db_compat.reconnect()`.
+
+**On the 3 vitest failures seen mid-session:** they did not reproduce. The run that produced them
+overlapped a 1000-symbol live fetch and several vendor probes; the isolated re-run is 148 files /
+1419 tests / 0 failed. That is this repo's documented connection-pressure signature (AF-20260829-23),
+not a regression — but it is worth noting that I committed `b140e26d` after re-running only the two
+files I had touched rather than the full suite, which is exactly the shortcut that lets this kind
+of thing through.
