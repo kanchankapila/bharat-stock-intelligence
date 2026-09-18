@@ -18,6 +18,28 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
 | A `cronPattern` mirrored into `jobRegistry.ts` / `monitorScripts.ts` | Drifts from the real registration → phantom "late"/"stale" alerts forever. Guarded by 5 mirror-consistency test suites — keep them passing. | 6 |
 | A coverage/completeness **ratio** computed over a window that includes **today** | Same root cause as `daysStale()` above, different shape: if today's rows are written by one job and enriched by a later one, a same-day denominator reads as a false collapse for the whole gap between the two jobs, every weekday. Measure the ratio over the most recently **completed** day (`date = MAX(date) WHERE date < today`), not "last N days" inclusive of today. | 2 |
 
+- **A test that computes its fixture from `date.today()` at MODULE IMPORT and asserts on a
+  `date.today()`-dependent result at RUN time fails only when the suite crosses midnight.** Found
+  2026-09-17 (AF-20260917-20): `test_market_regime_fetcher.py` set
+  `_FUTURE_EXPIRY = date.today() + timedelta(days=10)` at module level; `_fetch_basis_from_nt()`
+  annualizes by `365 / (expiry - date.today()).days` and the test hardcodes the 10-day answer
+  (`21.973`). The full suite imported at 22:33 and reached that test at **00:12 the next day**, so
+  days-to-expiry was 9, the basis was 24.4144, and the run failed with the source perfectly correct.
+  **Profile to recognise: one failure in an otherwise clean run, passes in isolation, and the suite
+  ran long enough to span midnight.** That looks exactly like an order-dependent flake, which is how
+  this survives — this file's own rule ("a test dismissed as an order-dependent flake can be a real
+  defect") applies, and the runtime is the clue, not the ordering. A long suite here runs 25-95 min,
+  so any evening start can cross the boundary.
+  **Fix shape: pin BOTH sides.** Anchor the fixture to a fixed date and inject that same date into
+  the module under test, so import time and assert time cannot disagree. Do **not** "fix" it by
+  recomputing the expectation from the same formula the code uses — that passes vacuously against a
+  broken formula (see the derived-expectation entry under Testing).
+  **And negative-control the real shape:** shifting the pinned date alone moves the fixture and the
+  clock together and still passes, which proves nothing. The control has to advance only the
+  injected `today()` — that reproduced `assert 24.4144 == 21.973`, the exact observed value.
+  **Tell:** grep test files for a module-level (not inside a test function) `date.today()` /
+  `datetime.now()` feeding a fixture whose assertion is a hardcoded number.
+
 ## NaN & null
 
 | Signature | Why it breaks |
@@ -112,6 +134,36 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
 - **A column referenced in SQL that doesn't exist** nulls not just its own output but potentially the WHOLE batched `SELECT` it sits in (Postgres aborts the entire statement on `UndefinedColumn`), and if that's wrapped in a blanket `except: pass`, it does so silently. Check `information_schema.columns` before ordering/partitioning by a column you assume exists, and grep every reader of the table — this recurred 3 times in the same table (`quant_scores`, which has no `date` column).
 - 🤖 **`except Exception: pass` around a failed statement does NOT contain the failure on Postgres — it aborts the WHOLE transaction**, and every later statement on that connection dies with `current transaction is aborted`, naming a table that's perfectly fine. SQLite tolerates this (a failed statement is local there), which is why it survives — 5+ separate instances found in one day once someone checked. Fix at the source with `conn.rollback()` inside the `except` (only where the function owns its transaction — a shared helper can discard a caller's pending work). A generic backstop exists (`db_compat.ConnWrapper` rolls back before re-raising, gated on actually querying transaction status rather than inferring from the exception type) but does not restore data an earlier swallowed read should have returned. **Tell:** an error naming a table/column that demonstrably exists, or a "graceful" fallback returning empty instead of falling back — look for an earlier swallowed failure on the same connection.
 - **A connection checked out once at the top of a long function and then left idle while a separate connection does 10+ minutes of real work can be closed server-side, and `pool_pre_ping` will not catch it** — pre_ping only validates a connection at POOL CHECKOUT, not while it sits checked-out-but-unused. Recurred twice (`strategy_optimizer.py` 2026-08-25/26, `backtest_optimizer.py` 2026-08-27, both fixed the same way): reconnect (`conn.close(); conn = connect()`) right before the gap's first post-loop use. **Tell:** `psycopg2.OperationalError: server closed the connection unexpectedly` on the FIRST statement after a long CPU-bound loop that used a different connection/handle, plus orphaned scratch rows from the prior crashed run (the crash lands after the loop's own work committed via its own connection, but before this function's own cleanup could run).
+- **Recurrence of the entry directly below, 2026-09-17 (AF-20260917-19), and this one cost a
+  subsystem: `db_compat.safe_alter(conn_or_none, ddl)` documented its first argument as "accepted
+  for API compatibility, **ignored**" and always did `with get_engine().begin()`.** Three call
+  sites pass a real connection precisely because they are altering a table they just created in
+  the SAME still-open transaction. The private connection cannot see an uncommitted table, so the
+  `ADD COLUMN`s failed with `relation does not exist`, the `except` swallowed them into a
+  `print()`, and the caller committed a table missing three of its columns. `ml-daily-ops` then
+  failed nightly on `column "direction" does not exist`.
+  **What makes this the instructive one: that exact symptom had already been "fixed" on
+  2026-09-04** — the double `ADD COLUMN IF NOT EXISTS IF NOT EXISTS` regex bug, in this same
+  helper, with a careful comment naming `high_flyer_retrospective.py` as the discovering case.
+  That fix was correct and it was not the whole bug. **When a symptom returns to a function you
+  already fixed, the prior fix being right is not evidence that the cause is the same.** Fixed by
+  honouring the argument when supplied (a psycopg2 cursor and a `ConnWrapper` both take a plain
+  string; a raw SQLAlchemy `Connection` needs `text()`), which covers all three at-risk sites in
+  one diff and leaves the 11 `None` callers untouched.
+
+- **A stale `CREATE TABLE IF NOT EXISTS` body in application code silently UNDOES a migration the
+  moment the table is recreated — and `pgmigrations` keeps saying the migration ran.** Same
+  incident. `high_flyer_retrospective.py` still declared `date TEXT`; migrations `20260903150000`
+  and `20260903150002` had converted both tables to native `DATE`. Because `CREATE TABLE IF NOT
+  EXISTS` no-ops on an existing table, that stale body was invisible for as long as the table
+  survived — and the instant the table was dropped and the script recreated it, the column came
+  back TEXT with the migration ledger still recording the conversion as applied. **Tell:** any
+  table whose DDL exists in BOTH a migration and an in-code `CREATE TABLE IF NOT EXISTS` — diff
+  them, because only one of the two is ever exercised on a given run. This is the mirror image of
+  measurement.md's "a migration's ledger row proves execution of *a* statement, not necessarily
+  the one you meant": here the ledger row is honest about the past and wrong about the present.
+  Verify a column's type through `information_schema`, never through `pgmigrations`.
+
 - **A function that takes a `conn` argument and then ignores it (opens its own connection/pool instead) silently defeats every caller's isolation** — including schema scoping in tests, which can make a "test" write directly into production. Grep any function whose signature takes `conn`/`con` for `get_engine()`/`connect()`/a module-level pool inside its own body.
 - **Restricting a universe upstream re-tunes every absolute threshold downstream.** An engine fix that deflates one score can collapse actionable output under an unchanged floor (612→22 Buys, one incident). **A related, subtler cause: a multiplier whose INPUT is degenerate**, not the multiplier's own calibration — a crowding discount fired on 98.6% of the universe because 5 upstream factor columns were accidentally constant, and a uniform multiplier is invisible to every rank-based diagnostic since it can't change any ranking, only shift the population against absolute thresholds. **Two tells, either enough:** a gate/veto/discount firing on ~100% of its population carries zero information (check prevalence directly, don't assume miscalibration); a final blended score landing BELOW every component that fed it is not a weighted blend (grep for a `*=` applied after the blend). Measure the input's distribution before "fixing" the multiplier's threshold.
 
@@ -405,6 +457,32 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   the live registry so it is self-cleaning before the next sweep. Leave the append-only *history*
   table alone — it records what was true then, which is a different question.
 
+- **A vendor can stop returning ONE FIELD while still answering normally, and every freshness
+  check stays green for as long as it takes someone to look.** Found 2026-09-17 (AF-20260917-07):
+  `fundamentals_history.return_on_equity` decayed 1,928/2,229 symbols (86%, 2026-07-02) -> 1,443
+  (65%, 08-03) -> 1,092 (49%, 08-09) -> 476 (21%, 08-16) -> **151 (6.1%) from 08-23 onward**. Six
+  weeks, monotone, nothing fired — the table was written daily and was never stale for a moment.
+  ROE feeds the percentile ranks in `institutional_quant_engine.py`, `multi_factor_scorer.py` and
+  `quantScoringWorker.ts`, so all three were silently ranking 151 names out of ~2,474.
+  **Proving it is the vendor and not you costs one query, and skipping it sends you into the
+  fetcher for nothing:** `fundamentalsSyncService.ts` reads `debtToEquity` and `returnOnEquity`
+  from the SAME `financialData` object in the SAME Yahoo `quoteSummary` response. d/e reads 85%
+  and ROE 6.1%. Same request, same parse, same auth — therefore the field itself stopped coming
+  back. **Whenever a column looks broken, find a SIBLING column from the same response and compare
+  coverage before opening the fetcher.**
+  **Monitor shape:** per-field fill rates on the latest snapshot, not a table timestamp —
+  `fundamentals-history-vendor-field-decay` in `dataQualityChecks.ts`. Calibrate against live data
+  and confirm it DISCRIMINATES before shipping (ml-model-bugs.md's always-fires rule): as built it
+  reads FAIL on `return_on_equity` (6.1%) and pass on `debt_to_equity` (85.2%),
+  `operating_margins` (97.0%) and `piotroski_f_score` (97.3%).
+  **And do not "fix" it by COALESCE-ing in the first alternate that has coverage.** Measured here:
+  `historical_fundamentals.roe` is the same quantity (Pearson 1.0000) but shares the upstream and
+  decayed identically; `trendlyne_stock_profile.roe` is percent-scaled with 322 symbols; and
+  `investsights_factor_scores.roe` has the coverage (2,103 symbols, daily) but reads Pearson
+  **0.7727** with outright sign flips — a different ROE definition (standalone vs consolidated).
+  AF-20260913-02 rejected a substitute at 0.745 for exactly this reason. A correlation in the
+  0.7s is the tell, not a green light.
+
 - **A table-freshness check cannot see whether the FEATURE that table exists to produce ever landed.** A fresh table is not a delivered feature — count 100%-NULL columns on the last COMPLETED day, generically (via `jsonb_each` over the row), not via a hand-enumerated column list that only guards what someone remembered to add.
 - **A data-quality check's own assumption goes stale, silently, when the source logic it guards grows a new legitimate case.** When editing any date/provenance-rollforward function, grep every data-quality check reading the column it stamps — a check's SQL doesn't know when its premise changed underneath it.
 - 🤖 **A degraded-read message printed to stdout (not stderr) defeats the one hook that would surface it** — subprocess wrappers that only inspect stderr for "finished with warnings" never see a `print()`'d degradation message. Use `print(..., file=sys.stderr)` inside anything invoked via a subprocess wrapper that only checks stderr.
@@ -474,6 +552,35 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   threshold. Fixed 2026-09-09: gate reuses the scan's own actionable threshold (`signalScore >= 5`, 7 in BEAR —
   the same values that mirror into `recommendation_log`), one digest per date with retry-on-failure, and the
   send routed through `telegramService` so balancing/chunking/429-retry/DB-configured settings all apply.
+- **The same class, at its most destructive: a test that issues `DROP TABLE` on an unqualified name
+  will, on some run, really delete the production table — and the symptom surfaces weeks later as
+  "this whole subsystem is dead", never as a red test.** Found 2026-09-17 (AF-20260917-19) by
+  `npm run schema:drift`, not by any suite: `high_flyer_daily_stats` and `high_flyer_retrospective`
+  were in `db/schema.postgres.sql` and **absent from live Postgres**, while 15 files still read or
+  wrote them, including a scheduled `ml-daily-ops` step and the daily Telegram accuracy digest. No
+  `%flyer%` job had recorded a run in 21 days.
+  **The attribution is exact, and that is what makes this worth remembering:**
+  `src/server/__tests__/signalAccuracyDigest.test.ts` drops those TWO tables by name, and
+  `high_flyer_candidates` — created by the same Python `CREATE TABLE IF NOT EXISTS` block, in the
+  same function, but never named in any test — was still there. When a subsystem loses exactly the
+  objects some test names and keeps the ones it doesn't, stop theorising and read the test.
+  **Its guard was a dead env var.** The file opened with `process.env.DATABASE_URL = ':memory:'`,
+  which stopped steering anything when the SQLite path was deleted on 2026-08-19 (`a2a20d2`), so
+  `dbAsync` resolved to Postgres regardless. A guard written for an architecture that no longer
+  exists reads exactly like a guard that works. **Tell:** grep test files for env vars naming a
+  backend this repo no longer has.
+  **The real isolation is the throwaway schema, and it is not unconditional.** `pgClient.ts` pins
+  `search_path` to `"<throwaway>",public` under the comment "can only ever shadow a production
+  table, never write to one" — the same sentence AF-20260917-11 already disproved for
+  `conftest.py`'s `pg_schema`. Being FIRST protects only a name the throwaway schema HAS, and
+  protects nothing at all when `VITEST_PG_SCHEMA` is unset, which is every run outside the vitest
+  `unit` project including a developer running one file by hand. **Fix shape:** a test that drops
+  tables must ASSERT `VITEST_PG_SCHEMA` is set and throw otherwise — cheap, and it fails loudly in
+  the one situation where the damage is real. Immunized by
+  `src/server/__tests__/testsDoNotDropProductionTables.test.ts`, a source-derived scan (not an
+  allowlist) that only counts DROPs actually passed to a DB call, so `pgClient.test.ts` asserting
+  that a string is REJECTED is not a false positive.
+
 - **A test that can reach a network side effect without a mock WILL, on some full-suite run, perform it against production.**
   `addJobWithCatchupReclaims.test.ts` drove the real reclaim→requeue path; the dynamic `import('../telegramService')` inside
   `alertOrphanedJob` resolved to the REAL service, so `vitest run` sent live `job: orphan (queue fake-queue)` alerts to the

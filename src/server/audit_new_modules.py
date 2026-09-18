@@ -2,8 +2,8 @@
 """Comprehensive audit of all new modules."""
 import os, sys, importlib, traceback
 
-SERVER_DIR = os.path.join(os.path.dirname(__file__))
-PROJECT_ROOT = os.path.dirname(SERVER_DIR)
+SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(SERVER_DIR))
 sys.path.insert(0, PROJECT_ROOT)
 
 MODULES = [
@@ -11,7 +11,6 @@ MODULES = [
     "microstructure_signals",
     "cost_aware_sizing",
     "ndtv_profit_fetcher",
-    "investsights_fii_dii_fetcher",
     "dynamic_exit",
 ]
 
@@ -96,7 +95,7 @@ def audit_smoke_tests():
         vpin = compute_vpin(df, window=50)
         assert isinstance(vpin, pd.Series) and 0 <= vpin.min() <= vpin.max() <= 1.01
         bands = compute_vwap_bands(df)
-        for col in ["vwap", "vwap_band_upper_1", "vwap_band_lower_1", "vwap_dev_pct"]:
+        for col in ["vwap", "vwap_upper", "vwap_lower", "vwap_dev_pct"]:
             assert col in bands and len(bands[col]) == n
         vi = compute_volume_imbalance(df)
         assert isinstance(vi, pd.Series) and -1.0 <= vi.min() <= vi.max() <= 1.0
@@ -137,13 +136,10 @@ def audit_smoke_tests():
         traceback.print_exc()
         results["cost_aware_sizing"] = False
 
-
-
-
-
     try:
         from src.server.dynamic_exit import (
             DynamicExitManager, ExitConfig, ExitReason,
+            calculate_initial_stop, calculate_chandelier_stop,
         )
         config = ExitConfig(
             atr_period=14, initial_stop_mult=1.0, trail_mult=2.0,
@@ -151,29 +147,38 @@ def audit_smoke_tests():
             vol_expansion_threshold=1.5, move_stop_to_breakeven_at=1.5,
         )
         manager = DynamicExitManager(config)
-        assert manager.compute_initial_stop(1500, 45, "long") == 1455
-        assert manager.compute_trailing_stop(1550, 45, "long") == 1460
-        assert manager.compute_chandelier_exit(1550, 45, "long") == 1415
+        assert calculate_initial_stop(1500, 45, 1.0) == 1455
+        assert calculate_chandelier_stop(1550, 45, 3.0) == 1415
         sig = manager.check_exit(
-            current_price=1520, atr=45, high_since_entry=1530, low_since_entry=1510,
+            current_price=1520, atr=45, high=1530, low=1510,
             bars_held=5, entry_price=1500, highest_high=1530,
             current_stop=1455, entry_atr=45, target_price=1600,
         )
         assert not sig.should_exit and sig.reason == ExitReason.NONE
         sig2 = manager.check_exit(
-            current_price=1450, atr=45, high_since_entry=1530, low_since_entry=1450,
+            current_price=1450, atr=45, high=1530, low=1450,
             bars_held=5, entry_price=1500, highest_high=1530,
             current_stop=1455, entry_atr=45, target_price=1600,
         )
         assert sig2.should_exit and sig2.reason in (ExitReason.STOP_LOSS, ExitReason.CHANDELIER_EXIT)
         sig3 = manager.check_exit(
-            current_price=1550, atr=45, high_since_entry=1560, low_since_entry=1540,
+            current_price=1550, atr=45, high=1560, low=1540,
             bars_held=20, entry_price=1500, highest_high=1560,
             current_stop=1455, entry_atr=45, target_price=1600,
         )
         assert sig3.should_exit and sig3.reason == ExitReason.TIME_EXIT
         sig4 = manager.check_exit(
-            current_price=1480, atr=90, high_since_entry=1530, low_since_entry=1480,
+            current_price=1480, atr=90, high=1530, low=1480,
+            bars_held=5, entry_price=1500, highest_high=1530,
+            current_stop=1455, entry_atr=45, target_price=1600,
+        )
+        assert sig4.should_exit and sig4.reason == ExitReason.VOLATILITY_EXPANSION
+        print("[OK] dynamic_exit_manager")
+        results["dynamic_exit_manager"] = True
+    except Exception as e:
+        print(f"[FAIL] dynamic_exit_manager: {e}")
+        traceback.print_exc()
+        results["dynamic_exit_manager"] = False
 
     try:
         from src.server.ndtv_profit_fetcher import _get_session
@@ -186,21 +191,11 @@ def audit_smoke_tests():
         traceback.print_exc()
         results["ndtv_profit_fetcher"] = False
 
-            bars_held=5, entry_price=1500, highest_high=1530,
-            current_stop=1455, entry_atr=45, target_price=1600,
-        )
-
-    try:
-        from src.server.investsights_fii_dii_fetcher import INVESTSIGHTS_FIIDII_URL, fetch_fii_dii_flows
-        assert INVESTSIGHTS_FIIDII_URL.startswith("https://")
-        import inspect
-        assert "days" in inspect.signature(fetch_fii_dii_flows).parameters
-        print("[OK] investsights_fii_dii_fetcher structure (API calls skipped)")
-        results["investsights_fii_dii_fetcher"] = True
-    except Exception as e:
-        print(f"[FAIL] investsights_fii_dii_fetcher: {e}")
-        traceback.print_exc()
-        results["investsights_fii_dii_fetcher"] = False
+    # investsights_fii_dii_fetcher removed 2026-09-17 (AF-20260917-15): it was an unwired
+    # duplicate of fii_dii_history_fetcher.py -- no __main__, no caller, and its default write
+    # target `fii_dii_flows` never existed (only the singular `fii_dii_flow` does). This block
+    # was its ONLY reference in the repo, and it introspected a signature without ever calling
+    # the API, so it could never have caught that.
     return results
 
 
@@ -281,6 +276,7 @@ def audit_consistency():
     except Exception as e:
         print(f"[FAIL] cross_module_import: {e}")
         results["cross_module_import"] = False
+    return results
 
 
 def main():

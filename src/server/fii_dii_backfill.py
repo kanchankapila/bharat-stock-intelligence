@@ -1,4 +1,3 @@
-import polars as pl
 """One-time historical FII/DII backfill from the TradeBrains portal into fii_dii_flow.
 FII endpoint field equity_net_investment -> fii_net; DII net_value -> dii_net. Published EOD
 data (point-in-time). Run once: python fii_dii_backfill.py"""
@@ -69,10 +68,25 @@ def run() -> int:
             con.execute(
                 """INSERT INTO fii_dii_flow (date, fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net, source)
                    VALUES (?,?,?,?,?,?,?, 'tradebrains')
+                   -- NULL-safe merge (AF-20260917-16): the PK is (date) alone and four sources
+                   -- write this table, so a bare `= excluded.x` lets the last writer erase a
+                   -- column it has no value for.
                    ON CONFLICT(date) DO UPDATE SET
-                     fii_buy=excluded.fii_buy, fii_sell=excluded.fii_sell, fii_net=excluded.fii_net,
-                     dii_buy=excluded.dii_buy, dii_sell=excluded.dii_sell, dii_net=excluded.dii_net,
-                     source='tradebrains'""",
+                     fii_buy=COALESCE(excluded.fii_buy, fii_dii_flow.fii_buy),
+                     fii_sell=COALESCE(excluded.fii_sell, fii_dii_flow.fii_sell),
+                     fii_net=COALESCE(excluded.fii_net, fii_dii_flow.fii_net),
+                     dii_buy=COALESCE(excluded.dii_buy, fii_dii_flow.dii_buy),
+                     dii_sell=COALESCE(excluded.dii_sell, fii_dii_flow.dii_sell),
+                     dii_net=COALESCE(excluded.dii_net, fii_dii_flow.dii_net),
+                     source='tradebrains'
+                   -- Source precedence, the other half of AF-20260917-16. NULL-safety alone
+                   -- protects VALUES but not the `source` label: re-running this historical
+                   -- backfill on 2026-09-17 relabelled 38 NSE and 14 NSE_PROVISIONAL rows as
+                   -- 'tradebrains' because the SET assigned it unconditionally. NSE is the
+                   -- official publisher of these figures; a third-party mirror must not claim
+                   -- or overwrite a date NSE already owns.
+                   WHERE fii_dii_flow.source IS NULL
+                      OR fii_dii_flow.source NOT IN ('NSE', 'NSE_PROVISIONAL')""",
                 (r["date"], r["fii_buy"], r["fii_sell"], r["fii_net"],
                  r["dii_buy"], r["dii_sell"], r["dii_net"]))
             n += 1
@@ -85,9 +99,3 @@ def run() -> int:
 
 if __name__ == "__main__":
     run()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

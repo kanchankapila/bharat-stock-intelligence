@@ -30,7 +30,6 @@ Run:  python high_flyer_retrospective.py            # latest completed session
       python high_flyer_retrospective.py --date 2026-07-08
 """
 
-import polars as pl
 import argparse
 import sys
 import json
@@ -53,10 +52,16 @@ FRESHNESS_SESSIONS = 5      # a candidate needs a trusted precursor newly active
 
 def ensure_schema(con) -> None:
     cur = con.cursor()
+    # `date` is DATE, not TEXT, and this body must keep matching db/schema.postgres.sql.
+    # CREATE TABLE IF NOT EXISTS no-ops on an existing table, so a stale body here is invisible
+    # for as long as the table survives -- and then silently UNDOES a migration the moment the
+    # table is recreated. That happened: 20260903150000 converted this column TEXT -> DATE, the
+    # table was later dropped from live, this DDL recreated it as TEXT, and `pgmigrations` still
+    # read as if the conversion held (AF-20260917-19).
     cur.execute(translate("""
         CREATE TABLE IF NOT EXISTS high_flyer_retrospective (
             symbol       TEXT NOT NULL,
-            date         TEXT NOT NULL,
+            date         DATE NOT NULL,
             return_pct   REAL NOT NULL,
             volume_ratio REAL,
             new_52w_high INTEGER DEFAULT 0,
@@ -68,12 +73,15 @@ def ensure_schema(con) -> None:
     """))
     # direction/wrong_call added after the table's initial ship — safe_alter is a no-op
     # once applied, so this stays correct on every run against an already-migrated DB.
+    # These pass `cur` deliberately: the CREATE above is still uncommitted on THIS connection,
+    # and until 2026-09-17 safe_alter ignored the argument and opened its own, so the ALTERs
+    # could not see the table and were swallowed into a warning (AF-20260917-19).
     safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT 'up'")
     safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS wrong_call INTEGER DEFAULT 0")
     safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS prior_classification TEXT")
     cur.execute(translate("""
         CREATE TABLE IF NOT EXISTS high_flyer_daily_stats (
-            date                  TEXT PRIMARY KEY,
+            date                  DATE PRIMARY KEY,
             universe_n            INTEGER,
             flyer_n               INTEGER,
             recall_json           TEXT,
@@ -393,7 +401,7 @@ def _process_day(con, close, volume, day, prev_day) -> dict:
 
     stats = read_df(
         "SELECT flyer_n, universe_n, precursor_counts_json FROM high_flyer_daily_stats "
-        "ORDER BY date DESC LIMIT ?", (LIFT_WINDOW_DAYS,))
+        "WHERE date <= ? ORDER BY date DESC LIMIT ?", (day, LIFT_WINDOW_DAYS,))
     # SKIP rows with no precursor counts rather than coercing them: read_df returns a pandas
     # frame, so a SQL NULL arrives as float NaN and json.loads(NaN) raises TypeError, killing
     # the whole run. Live production has at least one such row (2026-08-11), and it aborted
@@ -476,9 +484,3 @@ if __name__ == "__main__":
                         help="Also process the N sessions before the target day (bootstraps lift stats)")
     args = parser.parse_args()
     run(target_date=args.date, backfill=args.backfill)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -3,6 +3,46 @@
 Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file and was being loaded into every context window).
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
+## 2026-09-17 — Full data-fetch/store architecture audit (user-triggered; evening, post-close)
+
+- **Agent**: Cline (act mode), user request: "review and audit all the data fetching and storing … are datasources working fine and on time … wired to decision-making … parallelisation/optimisation opportunities."
+- **What was done**:
+  - Mapped the live pipeline: 81 Python fetchers in `src/server/`, BullMQ registrations (`queues.ts` + `jobs/*.jobs.ts`), three health registries (`MONITOR_SCRIPTS`, `JOB_REGISTRY`, `dataQualityChecks.ts`), pm2 config, prior audits (`datasource_audit_report.md`, `docs/data-pipeline-audit-2026-09-17.md` P1-P2 rows, `docs/INGESTION_PIPELINE.md`).
+  - Ran three read-only probes against live Postgres :5433 (23:40-00:30 IST): per-table row counts + sizes, dynamic MAX(timestamp) freshness sweep over all fetcher tables (<300MB), job_heartbeat failure/staleness dump, job_run_history 7-day rollup + failures + raw unified-ranker stderr, DQ results, `pg_stat_activity` contention snapshot. Evidence files: `scratch_verify/audit_data_probe.py`, `audit_probe2.py`, `audit_probe_out.txt`, `audit_probe2_out.txt`, `audit_probe3_out.txt`.
+  - Filed 4 new findings **AF-20260917-20..23** in `docs/audit-findings.md` (unified-ranker timeout + missing 2026-09-17 `unified_recommendations` write + recommendations-digest race; screener-performance 4-step failures; staleness sweep incl. `market_holidays` no-future-entries + dead `bulk_deals`; unindexed MAX(ts) probes causing live DB contention).
+
+## 2026-09-18 — weekend-audit (continued) — root cause of missing 09-17 decision table
+
+**Trigger**: user "fix all" / "continue", continuing the data-pipeline audit.
+
+**What was done**
+- Traced the AF-20 symptom (zero `unified_recommendations` rows for 2026-09-17) to its cause instead of stopping at the symptom.
+- Read-only live probes: `scratch_verify/audit_probe6.py`, `audit_probe7.py`, `audit_probe10.py`, `cols_probe.py` (job_run_history + job_heartbeat schema, per-step errors, post-close overlap map, relation sizes, log counters).
+- Found and filed **AF-20260917-24**.
+
+**Evidence**
+- 3,863 `timeout exceeded when trying to connect` events in `logs/pm2-out.log`; **545 of them inside the single hour 23:37 IST on 09-17** (25x the neighbouring hours) — Postgres connection exhaustion under concurrent load.
+- Four unrelated jobs share the identical completion second `2026-09-17 23:37:56`; three more share `2026-09-18 01:34:20` — process-kill signature.
+- `ml-daily-ops` ran 21:35:09→01:05:09 IST = **exactly 210.0 min**, its full 3.5h `withJobTimeout`, then reported `13 steps failed` (including `fno_rollover_fetcher`, `delivery_volume_fetcher`, `block_deal_fetcher`, `reconcile-stock-ohlcv`, `marketsmojo_technical_fetcher`).
+- Consequence at source: `fno_rollover` max(date)=**2026-09-16** while `stock_delivery_data`/`block_deals` are 09-17 → the ranker's FNO-rollover input was stale.
+- `unified_recommendations`: `max_generated_at=2026-09-16 17:31:15Z`, `today_rows=0`.
+- Deploy status: the 09-17 failure error text is `Timed out after 1800000ms` (the pre-fix 30-min budget), proving this session's AF-20 edits are **not yet loaded**.
+
+**Verification**
+- `npx tsc --noEmit` → exit 0.
+- `npx vitest run` on jobRegistryCronMirror + jobPipelineOrdering + jobRegistryGraceMinutesConsistency + dataQualityChecks → **360 passed / 0 failed** (4 files).
+
+**Open items (blocking reason)**
+- Deploy the AF-20 + AF-24 fixes (pm2 restart) — **User Decision** (production restart on a `critical: true` surface).
+- Split/parallelise `ml-daily-ops`' 13 failing steps out of its 210-min serial chain — **User Decision** (needs budget re-derivation; a 13-step serial chain cannot fit).
+- Stagger the 23:00–01:30 IST window: `trendlyne-catchup`'s all-day `*/20 * * * *` (~39 min of the window) and `data-quality-daily`'s unindexed scans on 17M-row tables — **Sequential** (after AF-23 index work, to avoid adding load while measuring).
+- `market_holidays` future=0 (max 2026-09-14) — **Evidence** (NSE `api/holiday-master` returns HTTP 200 with a 0-byte body even with a warmed curl_cffi session; nsearchives mirrors 404).
+- Manually trigger a `unified-ranker` run so the next session has a fresh ranking — **Calendar** (needs the restart to load the new budget first).
+
+  - No application code, schedules, models, or services were changed. Probes are read-only (SET statement_timeout 8s, readonly transactions).
+- **Evidence**: `unified_recommendations` max(generated_at) = 2026-09-16 17:31 UTC (zero rows for 09-17 as of 18:18 UTC); unified-ranker timeout stderr (2,352-candidate RL-gate scan); 7-day job rollup (news-sentiment 3,263 runs/3 fails healthy; intraday-fetcher 96/1; unified-ranker 7/2; screener-performance 8/4; ml-weekly-retrain 4/3); freshness sweep — EOD/intraday/technical/feature/fundamentals/analyst/FII-DII/delivery/deals/options/FNO/macro/screeners/preopen/breadth all fresh to 2026-09-17; gaps: gdelt 09-13, fintrend 08-26, engine_composite 09-11, market_holidays ≤06-26, insider_transactions 05-02, bulk_deals 05-19.
+- **Open items** (blocking reason): AF-20260917-20 FIX (deploy-restart coupling + needs user decision on digest resequencing); -21 INVESTIGATE (step-level error text needed); -22 INVESTIGATE (per-writer cadence proof + holiday-list source); -23 INVESTIGATE (index/watermark decision needs measurement); prior session's AF-20260917-01..19 unchanged. DoD not run (no code touched; docs + scratch only).
+
 
 ## 2026-09-16 -- 3,000+ discovery registry rule rollout to all .md files & skills/DoD health check
 
@@ -9037,3 +9077,147 @@ Reviewed every uncommitted change in the shared working tree (sectors feature, O
 - Immunization: source-derived scan over the fixture modules (rung 4) — it immediately found a THIRD site I had missed twice (`_apply_schema`), which genuinely needs `public` for `gin_trgm_ops` (removing it errored 23 tests) and now carries a line-level `search-path-public-exempt` marker with its reason, never a file-level allowlist.
 - DoD: tsc exit 0; vitest 146/146 files, 1405 passed / 3 skipped; pytest **2795 passed / 249 skipped / 0 failed**, exit 0 (this also clears the two learner tests the prior Cline session was blocked on). `npm run schema:drift` exits 1 — **pre-existing, not caused by this work** (no migration or db/ file touched); filed as AF-20260917-18 needing a user call on whether the externally-owned `url_candidates_validation_audit` belongs in the snapshot at all.
 - Open (14 rows): 4 EVIDENCE, 5 INVESTIGATE, 2 DEPENDS, 1 MONITOR, 1 FIX-partial, 1 new schema-drift. Each carries a stated blocking reason. Not claimed resolved.
+
+## 2026-09-17 — Cline — Impeccable skill installation
+
+- Trigger: user requested installation from https://github.com/pbakaus/impeccable.
+- Installed the repository's prebuilt Claude Code skill (52 files) to `C:\Users\amitk\.claude\skills\impeccable` and four companion subagents to `C:\Users\amitk\.claude\agents`. Existing Claude settings and automatic hooks were not changed.
+- Commands: npm exec CLI help, shallow git clone to temporary storage, PowerShell Copy-Item, SHA-256 comparisons with Get-FileHash, git rev-parse HEAD. Source commit: `f2c7051853848826aac2f4646581d62a732155ad`; bundled scripts VERSION: 0.1.5.
+- Evidence: all 52 installed skill files and four subagents match source hashes; installed SKILL.md exists (12,201 bytes). No application code changed; application tests not run.
+- Open (Sequential): start a fresh Claude Code session to discover the skill. Open (Evidence): actual skill invocation and first-run engine download were not tested. Automatic hooks are outside this skill-only installation.
+
+## 2026-09-17 (later) — "fix all remaining ones": 11 open ledger rows closed, and a dead subsystem found by the schema gate
+
+Continuation of the same session's job-scheduling audit. User: "fix all remaining ones now."
+
+**Closed 11 rows.** Five needed only measurement and the measurement contradicted the row:
+
+- **AF-20260917-01** — intraday cycles read off the wrong column. `intraday_recommendations_history`
+  has BOTH `computed_at` (the DATE) and `cycle_at` (the per-cycle timestamp); the original pass read
+  the date column and saw "1 cycle". On `cycle_at`: 25/22/25/26/24/25/25 cycles over the last 7
+  trading days, first cycle **09:30-09:31 IST on 5 of 7** (NSE opens 09:15). 09-16's 10:56 start —
+  the day the row sampled — is a one-day incident. No sessions missing (09-12/13 weekend, 09-14
+  holiday).
+- **AF-20260917-02** — all four watermarks (feature_store / technical_signals / stock_ohlcv /
+  unified_recommendations) sit on 2026-09-17. Nothing precedes its inputs.
+- **AF-20260917-03** — `stock_scores` was NOT stuck at 15 Sept; live `max(last_updated)` is
+  2026-09-17T15:01 UTC. The real defect was underneath: `created_at`/`updated_at` **100% NULL across
+  9,641 rows** because `save_results()` never listed them. Fixed, with `created_at` deliberately
+  excluded from the DO UPDATE list so it cannot decay into a second last-seen column.
+- **AF-20260917-05** — measured, and 3 of its 4 mechanisms are correct by design. The closed-market
+  skip writes **zero `job_run_history` rows on non-trading days** and preserves `fail_count`, so it
+  cannot erase failures.
+- **AF-20260917-16** — the cited "5 dates of overwritten gross data" was **4x overstated**: 4 of the
+  5 are non-trading days (Good Friday, Maharashtra Day, a Saturday, Gandhi Jayanti — zero OHLCV
+  bars) and the 5th is empty at both vendors. Real damage: **zero**.
+
+**AF-20260917-19 (new, and the most serious thing found).** `npm run schema:drift`, run only to
+close AF-20260917-18, reported `high_flyer_daily_stats` and `high_flyer_retrospective` in the
+snapshot but **absent from live Postgres** — while 15 files still referenced them, including a
+scheduled `ml-daily-ops` step and the daily Telegram accuracy digest, and no `%flyer%` job had
+recorded a run in 21 days.
+
+Cause: `src/server/__tests__/signalAccuracyDigest.test.ts` issues `DROP TABLE IF EXISTS` on exactly
+those two, and `high_flyer_candidates` — same Python DDL block, never named in a test — survived.
+Its only apparent guard was a line-1 `process.env.DATABASE_URL = ':memory:'`, dead since the SQLite
+removal on 2026-08-19. Same class as AF-20260917-11 one layer over: `pgClient.ts` keeps `public` on
+the search_path under the identical "can only shadow, never write" comment that finding disproved.
+
+Repairing it surfaced two more root causes:
+
+1. **`db_compat.safe_alter()` documented its `conn_or_none` argument as "accepted and ignored"** and
+   always opened its own connection — so three `ADD COLUMN`s against a table created in the caller's
+   still-open transaction could not see it, failed, and were swallowed into a `print()`. The table
+   came back with 8 of 11 columns. **That exact symptom had already been "fixed" in this helper on
+   2026-09-04** via a different root cause (the double `IF NOT EXISTS` regex). Fixed at the helper,
+   covering all three at-risk call sites.
+2. **The script's own `CREATE TABLE IF NOT EXISTS` body still declared `date TEXT`**, silently
+   undoing the 2026-09-03 TEXT->DATE migrations on recreate while `pgmigrations` still recorded the
+   conversion as applied. Migrations `20260917200000`/`20260917200001` re-apply it (one statement per
+   file); effect verified through `information_schema`, not the tool's exit code.
+
+Live result: both tables restored with the full 11-column shape and repopulated — **144 rows, 97
+flyers / 47 divers**.
+
+**AF-20260917-07 — diagnosis completed, and the row's framing was wrong.** ROE is not statically
+sparse, it **decayed**: 86% (07-02) -> 65% (08-03) -> 49% (08-09) -> 21% (08-16) -> 6.1% (08-23 on).
+Six weeks, nothing fired. Proof it is the vendor and not us costs one query: `fundamentalsSyncService.ts`
+reads `debtToEquity` and `returnOnEquity` from the SAME `financialData` object in the SAME response,
+and d/e reads 85%. Alternates measured and all three rejected as drop-ins — `historical_fundamentals`
+(Pearson 1.0000 but same upstream, decayed identically), `trendlyne_stock_profile` (percent scale,
+322 symbols), `investsights_factor_scores` (coverage fine at 2,103 daily, but **Pearson 0.7727 with
+sign flips** — AF-20260913-02 rejected a substitute at 0.745 for this reason). Added
+`fundamentals-history-vendor-field-decay` to `dataQualityChecks.ts`, the first check here reading
+per-field FILL RATES rather than a timestamp; verified to discriminate (FAIL on ROE 6.1%, pass on the
+other three at 85/97/97%). The remaining choice is genuinely the user's.
+
+**AF-20260914-02 — advanced from "vendor down, nothing to do" to a scoped task.** Re-probed: NSE
+`/api/historical/block-deals` 503 on **30 of 30** dates. Then, per `data-sources.md`'s mandatory
+sequence, queried `market_endpoint_registry` BEFORE concluding — and found a per-symbol **paginated
+history** route, `mcapi/v1/extdata/mc-block-data?scId=<mcsymbol>&page=N`, `auth_type NONE`.
+Live-probed route by route: BE03 p1/p2 and **RI (RELIANCE) p1 all 200 with real deals** — exactly the
+large-cap hole the row documented as structurally empty. Minimum headers: UA + Referer, no token, no
+cookie. Left open deliberately: it is now a new fetcher needing the mandatory `live_datasource` test,
+a freshness check and a named hypothesis — half-building it would be worse than specifying it.
+
+**Also closed:** AF-20260917-15 (duplicate fetcher deleted, with its only reference),
+AF-20260917-18 (drift exit 0 — `screener_instances` absorbed as ours, the two externally-owned
+registry tables excluded in both SKIP sets), AF-20260916-07 (learner verified live: reads
+decision-time rows, `weights_published: false`, `candidate_written: true`, 8,611 trades).
+
+**Immunization:** `testsDoNotDropProductionTables.test.ts` (source-derived scan, negative-controlled
+— a new offending file fails with its exact file:line) and `test_fii_dii_flow_null_safe_upsert.py`
+(4 tests, negative-controlled). Both scans are derived from the source tree, not allowlists.
+
+**Self-correction worth recording:** re-running the tradebrains backfill to repair AF-20260917-16
+relabelled 38 NSE and 14 NSE_PROVISIONAL rows as `tradebrains`, because `source` was assigned
+unconditionally in the `ON CONFLICT` clause. NULL-safety protects VALUES, not the LABEL. Added a
+precedence guard so a third-party mirror cannot claim a date NSE owns; the 38 past labels could not
+be re-fetched (the NSE endpoint serves only the current day) and their values were sanity-checked
+instead — 662 of 663 gross rows satisfy `fii_net = fii_buy - fii_sell` to within 1 Cr.
+
+**Still open (5, each with a stated reason):** AF-20260913-02/03/05/07 (all gated on the DL
+rebuild + retrain, next clean weekly window Sat 2026-09-20 — each re-verified live today),
+AF-20260917-14 (calendar-blocked to ~2026-10-01; re-measured, zero gaps since 09-11),
+AF-20260917-07 (user decision), AF-20260914-02 (scoped new fetcher).
+
+## 2026-09-17 — Cline — frontend modernization resumption
+
+- Trigger: user requested continuation of the interrupted frontend implementation.
+- Repaired interrupted JSX in `src/components/DLIIntelligenceCenter.tsx`, added its default page export, and restored the misplaced filtering/sorting hooks in `src/components/DataTable.tsx`. Read both complete files after editing.
+- Validation: ran `npx tsc --noEmit`; exit 2. Diagnostics: `src/components/MetricTile.tsx:142:21`, TS2604 and TS2786 (ReactNode-valued icon used as a JSX component). Evidence: `%TEMP%\bsi-frontend-resume-tsc.log`.
+- DoD: FAIL. Vitest, pytest, production build and browser validation not run: stopped at the TypeScript failure under the verify-gate-runner contract. No subsequent application edits made.
+- Open — Sequential: fix MetricTile's icon rendering before continuing verification. DLI's remaining tabs, route integration, News Intelligence Hub and remaining modernization scope are unfinished. The compacted context does not retain the complete original recommendation list; do not treat this entry as full implementation.
+- Unrelated existing backend/staged changes preserved.
+
+
+## 2026-09-18 — Cline — frontend modernization continuation
+
+- Trigger: resolve MetricTile blocker and continue remaining frontend work.
+- Implemented/final state checked: ReactNode icon rendering in `d:\Github\bharat-stock-intelligence\src\components\MetricTile.tsx`; consolidated five-tab `DLIIntelligenceCenter.tsx` (predictions, evaluations, regime, stored attribution, history); `NewsIntelligenceHub.tsx`; shared error/display helpers; lazy routes and navigation for `/deep-learning` and `/news`, and Research integration. Existing shared modernization files preserved.
+- Corrected fractional confidence display and five-day expected-return display. Regression was reproduced (2 failing / 1 passing), fixed incrementally, and final `npx vitest run src/components/intelligenceDisplay.test.tsx` passed 3/3, exit 0 at 00:29. Returns retain two decimals; missing one-day returns are not fabricated.
+- Evidence: `npx tsc --noEmit` exit 0 (`C:\Users\amitk\AppData\Local\Temp\bsi-current-tsc.log`). Build log `C:\Users\amitk\AppData\Local\Temp\bsi-modern-build.log` ends with `built in 39.50s`, with chunk-size/mixed-import warnings.
+- Full `npx vitest run`: exit 1; 1408 passed / 2 failed / 44 skipped; files 146 passed / 2 failed / 12 skipped. Confirmed complete output and exit file at `C:\Users\amitk\AppData\Local\Temp\bsi-full-vitest-verification.log` and `.exit`.
+- Exact failures: `d:\Github\bharat-stock-intelligence\.claude\hooks\settings-hooks.replay.test.mjs:55` (5000ms timeout); `d:\Github\bharat-stock-intelligence\src\server\__tests__\async.test.ts:5` (date already mocked before useFakeTimers). No fixes to either failure attempted under verify-gate-runner contract; relationship to this frontend change not established.
+- Open — Evidence: full DoD FAIL; pytest not run; no completed live/browser interaction validation. Open — Sequential: resolve full-suite failures under applicable implementation instructions, then rerun gate. Open — User Decision: original compacted recommendation list is unavailable, so completion of every earlier suggestion cannot be certified. No inference/model/scoring changes made in this frontend work.
+
+
+## 2026-09-18 — Cline — frontend verification resumption
+
+- Trigger: continue modernization acceptance and resolve the two full-suite failures.
+- Test-only fixes verified: `d:\Github\bharat-stock-intelligence\src\server\__tests__\orphanRequeueMarketHours.test.ts` restores real timers after each mocked-date test; `d:\Github\bharat-stock-intelligence\.claude\hooks\settings-hooks.replay.test.mjs` splits subprocess probes into independent tests without dropping assertions. Re-read both edited regions at handoff.
+- Evidence: TypeScript exit 0 in `C:\Users\amitk\AppData\Local\Temp\bsi-resume-final-gate.log`. Latest complete full Vitest exit 0: 1413 passed / 0 failed / 44 skipped, 148 passed test files, 12 skipped (`C:\Users\amitk\AppData\Local\Temp\bsi-convergence-full-vitest.log` and `.exit`). Focused display regressions 3/3, async tests 13/13 passed.
+- Browser evidence: `http://localhost:3000/deep-learning` HTTP 200 with expected title/root; five-tab page rendered. Performance and regime displayed stored data; attribution correctly reported unavailable. History form accepted RELIANCE, but completed history rows were not verified. News loaded 200 cards; no-match search produced 0 cards and the correct empty state; bearish filter returned 156 cards, all bearish; tested source links were HTTP(S) with noopener. At the actual 502px browser viewport, no horizontal overflow and all filter controls fit. A requested 390px emulation was configured but not subsequently validated.
+- Python gate launched with production interpreter: `d:\Github\bharat-stock-intelligence\backend-python\venv\Scripts\python.exe -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/ -q --tb=short`. Still running at handoff (launcher PID 48300); output reached 61% plus subsequent passing dots, no failure marker observed. This is NOT a completed pass. Logs: `C:\Users\amitk\AppData\Local\Temp\bsi-final-pytest.out.log` and `C:\Users\amitk\AppData\Local\Temp\bsi-final-pytest.err.log`.
+- Open — Evidence: collect Python completion before marking full DoD PASS. Keyboard navigation, strict 390px layout, completed history results and error/retry behavior were not browser-verified. News summaries sometimes display escaped upstream HTML; recorded as a polish limitation, no raw HTML injection added. Original compacted recommendation list remains unavailable, so broader completion is not certified. Existing unrelated changes preserved; no model/scoring changes in this continuation.
+
+
+**Addendum — the one pytest failure was real, not a flake.** The full suite came back 2,795 passed /
+1 failed: `test_market_regime_fetcher.py::TestFetchBasisFromNt::test_happy_path...`, which passes in
+isolation. It was a genuine latent defect (AF-20260917-20): `_FUTURE_EXPIRY` is computed from
+`date.today()` at MODULE IMPORT, while the code under test divides by `(expiry - date.today()).days`
+at RUN time. The suite started 22:33 and ran 1:37:41, reaching that test at 00:12 — days-to-expiry
+9 instead of 10, basis 24.4144 instead of the hardcoded 21.973. Fixed by pinning both the fixture
+date and the clock injected into the module under test. Negative-controlled against the real shape:
+shifting the pinned date moves both sides together and still passes (proving nothing), so the
+control advances only the injected `today()`, which reproduces `assert 24.4144 == 21.973` exactly.

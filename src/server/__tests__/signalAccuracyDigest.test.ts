@@ -1,6 +1,22 @@
-process.env.DATABASE_URL = ':memory:';
+// NOTE: this file used to open with `process.env.DATABASE_URL = ':memory:'`, which read as the
+// isolation guard and was not one. The SQLite path was deleted on 2026-08-19 (a2a20d2) and
+// use_postgres() is now unconditional, so that line steered nothing -- dbAsync resolved to
+// Postgres regardless, and the DROP TABLE statements below ran wherever the pool's search_path
+// pointed. Production lost `high_flyer_daily_stats` and `high_flyer_retrospective` -- exactly the
+// two tables this file drops, while `high_flyer_candidates` (created by the same script, never
+// named here) survived. The real guard is the throwaway schema vitest.globalSetup.ts creates, so
+// assert it is actually in force instead of trusting a dead env var. See AF-20260917-19 and
+// recurring-bugs.md's "a test that can reach a side effect WILL perform it against production".
 
 import { describe, it, expect, beforeEach } from 'vitest';
+
+if (!process.env.VITEST_PG_SCHEMA) {
+  throw new Error(
+    'signalAccuracyDigest.test.ts refuses to run without VITEST_PG_SCHEMA: it issues ' +
+    'DROP TABLE on unqualified names, which without a throwaway schema resolves to ' +
+    'PRODUCTION public (AF-20260917-19).'
+  );
+}
 
 const { buildAccuracyDigest, formatAccuracyDigest, RECALL_ALERT_FLOOR } = await import(
   '../signalAccuracyDigest'

@@ -111,7 +111,14 @@ interface IndexRow {
 // in sync with the identical skip in scripts/checkSchemaDrift.ts's fetchLiveSchema() -- those
 // two are now the only copies (generate_pg_schema.py, which also carried one for the
 // SQLite-internal tables, was deleted 2026-08-15).
-const SKIP_TABLES = new Set(["pgmigrations"]);
+// The two registry tables are externally owned (AF-20260917-18) -- populated by urls-explorer,
+// with zero readers or writers anywhere in this repo. See the matching note in
+// checkSchemaDrift.ts's SKIP_LIVE_TABLES; both sets must list the same names.
+const SKIP_TABLES = new Set([
+  "pgmigrations",
+  "market_endpoint_registry",
+  "url_candidates_validation_audit",
+]);
 
 async function fetchAll(pool: import("pg").Pool) {
   // Every extension actually installed live (besides the always-present plpgsql) -- e.g.

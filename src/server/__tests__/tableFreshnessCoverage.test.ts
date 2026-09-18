@@ -44,6 +44,11 @@ for (const t of schemaTables) { if (tokens.has(t)) covered.add(t); }
 
 // Documented exclusions. Each entry MUST carry a reason.
 const EXCLUDED_TABLES: Record<string, string> = {
+  // Entered the snapshot on 2026-09-17 when AF-20260917-18's regen absorbed it, and this gate
+  // correctly caught it the same run. It is url_explorer catalog bookkeeping written by
+  // store.py -- internal tool state, not a market datasource -- so it takes an exclusion for
+  // the same reason as its five url_* siblings below, not a freshness check.
+  screener_instances: 'url_explorer tool store (store.py)',
   url_endpoints: 'url_explorer tool store (store.py)',
   url_fields: 'url_explorer tool store (store.py)',
   url_params: 'url_explorer tool store (store.py)',

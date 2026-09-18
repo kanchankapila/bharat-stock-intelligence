@@ -468,7 +468,10 @@ def safe_alter(conn_or_none, ddl: str) -> bool:
     ERROR, no transaction abort.
 
     Args:
-        conn_or_none: Accepted for API compatibility, ignored (Postgres-only).
+        conn_or_none: The caller's OWN connection/cursor, used when supplied. Passing None
+                      opens a private connection, which is correct only when the target table
+                      is already committed. See the note below -- this argument used to be
+                      accepted and then ignored, which was a live bug.
         ddl:          The DDL string, e.g.
                       ``"ALTER TABLE technical_signals ADD COLUMN foo REAL"``
 
@@ -495,6 +498,37 @@ def safe_alter(conn_or_none, ddl: str) -> bool:
         ddl,
         count=1,
     )
+    # Use the CALLER'S connection when it gave us one. Until 2026-09-17 this argument was
+    # documented as "accepted for API compatibility, ignored" and safe_alter always opened a
+    # private connection -- so when a caller does CREATE TABLE and then safe_alter() inside one
+    # still-open transaction, the ALTER ran on a DIFFERENT connection that could not yet see the
+    # uncommitted table. It failed with `relation does not exist`, the except below swallowed it
+    # into a print(), and the caller committed a table missing those columns.
+    #
+    # This is the SECOND root cause of one symptom. The 2026-09-04 fix above (the double
+    # "IF NOT EXISTS IF NOT EXISTS" syntax error) was real and correct, but it was not the whole
+    # bug: high_flyer_retrospective.py kept failing every ml-daily-ops run on
+    # `column "direction" does not exist` afterwards, because its three columns are altered onto
+    # a table it creates in the same transaction. Measured live 2026-09-17 -- the table came back
+    # with 8 of its 11 columns. Same shape as recurring-bugs.md's "a function that takes a `conn`
+    # and then ignores it silently defeats every caller's isolation".
+    #
+    # Callers passing None keep the old behaviour, which is correct for an already-committed
+    # table (11 of the 14 call sites). A psycopg2 cursor and a db_compat ConnWrapper both take a
+    # plain SQL string; a raw SQLAlchemy Connection needs text().
+    if conn_or_none is not None:
+        try:
+            try:
+                conn_or_none.execute(pg_ddl)
+            except Exception:
+                # A raw SQLAlchemy Connection rejects a bare string with
+                # ObjectNotExecutableError (not TypeError), so retry wrapped rather than
+                # keying on one exception type.
+                conn_or_none.execute(text(pg_ddl))
+            return True
+        except Exception as exc:
+            print(f"[db_compat] safe_alter warning (caller conn): {exc}")
+            return False
     try:
         with get_engine().begin() as conn:
             conn.execute(text(pg_ddl))

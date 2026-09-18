@@ -1450,6 +1450,52 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'fundamentals-history-vendor-field-decay',
+    label: 'fundamentals_history per-field coverage (vendor field silently dropped)',
+    category: 'fundamentals',
+    critical: true,
+    // AF-20260917-07. A freshness check cannot see a vendor QUIETLY DROPPING ONE FIELD while
+    // still answering: fundamentals_history stayed fresh daily the whole time its
+    // return_on_equity decayed 1,928/2,229 symbols (86%, 2026-07-02) -> 1,443 (65%, 08-03)
+    // -> 476 (21%, 08-16) -> 151 (6.1%, 08-23 onward). Six weeks, no alert. Yahoo's
+    // quoteSummary returns debtToEquity and returnOnEquity from the SAME financialData object
+    // in the SAME response (fundamentalsSyncService.ts), so parsing and auth were provably
+    // fine -- the field itself stopped coming back. ROE feeds institutional_quant_engine /
+    // multi_factor_scorer / quantScoringWorker percentile ranks, so a collapsed column
+    // silently re-bases every one of them.
+    // Thresholds measured against live coverage on 2026-09-17, NOT chosen by convention -- a
+    // check that fires on every field carries no information (ml-model-bugs.md). Today
+    // debt_to_equity reads 85%, operating_margins 97% and piotroski_f_score 97% (all pass);
+    // only return_on_equity at 6.1% trips the fail branch. It is meant to be red right now.
+    sql: `SELECT COUNT(*) AS total,
+                 COUNT(return_on_equity) AS has_roe,
+                 COUNT(debt_to_equity) AS has_de,
+                 COUNT(operating_margins) AS has_om,
+                 COUNT(piotroski_f_score) AS has_pf
+          FROM fundamentals_history
+          WHERE as_of_date = (SELECT MAX(as_of_date) FROM fundamentals_history)`,
+    evaluate: (row) => {
+      const total = Number(row?.total) || 0;
+      if (total === 0) return { status: 'fail', detail: 'fundamentals_history has no rows on its latest as_of_date' };
+      const fields: Array<[string, number]> = [
+        ['return_on_equity', safeRatio(row?.has_roe, row?.total)],
+        ['debt_to_equity', safeRatio(row?.has_de, row?.total)],
+        ['operating_margins', safeRatio(row?.has_om, row?.total)],
+        ['piotroski_f_score', safeRatio(row?.has_pf, row?.total)],
+      ];
+      const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+      const failed = fields.filter(([, c]) => c < 0.25);
+      const warned = fields.filter(([, c]) => c >= 0.25 && c < 0.5);
+      if (failed.length) {
+        return { status: 'fail', detail: `vendor field(s) collapsed on the latest snapshot of ${total} rows: ${failed.map(([n, c]) => `${n} ${pct(c)}`).join(', ')}` };
+      }
+      if (warned.length) {
+        return { status: 'warn', detail: `vendor field(s) degraded: ${warned.map(([n, c]) => `${n} ${pct(c)}`).join(', ')} of ${total} rows` };
+      }
+      return { status: 'pass', detail: `${total} rows; ${fields.map(([n, c]) => `${n} ${pct(c)}`).join(', ')}` };
+    },
+  },
+  {
     id: 'analyst-estimates-freshness',
     label: 'analyst_estimates_history freshness',
     category: 'fundamentals',
@@ -2031,6 +2077,37 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         return { status: 'warn', detail: `Thin coverage (<50% of ${rows} rows): ${thin.join(', ')}.` };
       }
       return { status: 'pass', detail: `All ${cols.length} ML signal columns populated across ${rows} rows.` };
+    },
+  },
+
+  {
+    id: 'ml-scoring-due-grid-coverage',
+    label: 'ML probabilities cover the latest grid due before the next morning',
+    category: 'ml',
+    critical: true,
+    // AF-20260916-05: an old successful batch or one fresh manual score must not hide
+    // a stopped scorer. Allow overnight processing until 09:15 IST the following day.
+    // Select an actual grid date, so weekends do not manufacture missing daily batches.
+    // Upstream grid freshness is monitored separately; this checks completion, not edge.
+    sql: `WITH due AS (
+            SELECT MAX(date) AS d FROM technical_signals
+            WHERE (date::date + INTERVAL '1 day 3 hours 45 minutes') AT TIME ZONE 'UTC' <= NOW()
+          )
+          SELECT MAX(t.date)::text AS grid_date, COUNT(*) AS rows,
+                 COUNT(*) FILTER (WHERE t.win_probability BETWEEN 0 AND 1
+                   AND t.win_probability_scored_at IS NOT NULL
+                   AND t.win_probability_scored_at >= t.date::date
+                   AND t.win_probability_scored_at <= NOW()) AS scored
+          FROM technical_signals t JOIN due ON t.date = due.d`,
+    evaluate: (row) => {
+      const rows = Number(row?.rows ?? 0);
+      const scored = Number(row?.scored ?? 0);
+      if (!rows) return { status: 'fail', detail: 'No due technical_signals grid available to verify ML scoring.' };
+      const detail = `${scored}/${rows} valid, timestamped ML probabilities on due grid ${row?.grid_date}.`;
+      // Operational coverage thresholds, not model-quality or trading thresholds.
+      if (scored / rows < 0.95) return { status: 'fail', detail: `${detail} Check ml-api and ml-ensemble-score; older scores do not establish recovery.` };
+      if (scored < rows) return { status: 'warn', detail: `${detail} Partial batch; investigate missing symbols.` };
+      return { status: 'pass', detail };
     },
   },
 

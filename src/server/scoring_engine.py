@@ -2,7 +2,6 @@ from pathlib import Path
 import json
 import datetime
 import pandas as pd
-import polars as pl
 import difflib
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -1072,15 +1071,20 @@ class AlphaQuantScoringEngine:
                 conn.execute(text("""
                     INSERT INTO stock_scores
                         (symbol, timeframe, score, confidence, classification, top_domain,
-                         positive_count, negative_count, reasons, last_updated)
+                         positive_count, negative_count, reasons, last_updated,
+                         created_at, updated_at)
                     VALUES
                         (:symbol, :timeframe, :score, :confidence, :classification, :top_domain,
-                         :positive_count, :negative_count, :reasons, :last_updated)
+                         :positive_count, :negative_count, :reasons, :last_updated,
+                         now(), now())
                     ON CONFLICT(symbol, timeframe) DO UPDATE SET
                         score=excluded.score, confidence=excluded.confidence,
                         classification=excluded.classification, top_domain=excluded.top_domain,
                         positive_count=excluded.positive_count, negative_count=excluded.negative_count,
-                        reasons=excluded.reasons, last_updated=excluded.last_updated
+                        reasons=excluded.reasons, last_updated=excluded.last_updated,
+                        -- created_at deliberately NOT refreshed: first write wins, so it stays a
+                        -- creation time instead of decaying into a second last-seen column.
+                        updated_at=now()
                 """), results)
 
                 breakdowns = []
@@ -1385,9 +1389,3 @@ if __name__ == "__main__":
     engine = AlphaQuantScoringEngine()
     engine.process_scoring(force_rebuild=args.rebuild)
 
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

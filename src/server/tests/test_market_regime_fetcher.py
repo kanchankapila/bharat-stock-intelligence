@@ -85,7 +85,44 @@ class _FakeEngine:
         return _FakeConnCtx(self._spot)
 
 
-_FUTURE_EXPIRY = (datetime.date.today() + datetime.timedelta(days=10)).isoformat() + "T00:00:00"
+# Both the expiry AND the "today" the code under test subtracts it from are PINNED, because
+# `_fetch_basis_from_nt()` annualizes by `365 / (expiry - date.today()).days` and the assertions
+# below hardcode the result for exactly 10 days.
+#
+# This used to be `date.today() + timedelta(days=10)` evaluated at MODULE IMPORT, while the
+# subtraction happens at TEST RUN time. Those are the same instant in a fast run and are NOT the
+# same instant in a full-suite run: on 2026-09-17 the suite imported this module at 22:33 and
+# reached this test at 00:12 the next day, so days-to-expiry was 9, the basis came out 24.414
+# instead of 21.973, and the run failed with nothing wrong in the source. A test that only breaks
+# when the suite crosses midnight reads as a flake, which is exactly how this class survives --
+# see recurring-bugs.md's `date.today()` entries and its "a test dismissed as an order-dependent
+# flake can be a real defect" rule.
+#
+# Pinning both sides (rather than deriving the expected value from the same formula, which would
+# pass vacuously against a broken formula) keeps 21.973 a real, independent expectation.
+_PINNED_TODAY = datetime.date(2026, 9, 17)
+_FUTURE_EXPIRY = (_PINNED_TODAY + datetime.timedelta(days=10)).isoformat() + "T00:00:00"
+
+
+class _PinnedDate(datetime.date):
+    """`market_regime_fetcher` calls `datetime.date.today()`; pin it via its `datetime` module."""
+
+    @classmethod
+    def today(cls):
+        return _PINNED_TODAY
+
+
+_dt = datetime  # alias: inside the class body `datetime = ...` would shadow the module name
+
+
+class _PinnedDatetimeModule:
+    date = _PinnedDate
+    datetime = _dt.datetime
+    timedelta = _dt.timedelta
+
+
+def _pin_today(monkeypatch):
+    monkeypatch.setattr(mrf, "datetime", _PinnedDatetimeModule)
 
 
 class TestFetchBasisFromNt:
@@ -104,7 +141,9 @@ class TestFetchBasisFromNt:
             ]}})
         monkeypatch.setattr(requests, "get", _fake_get)
         monkeypatch.setattr(mrf, "get_engine", lambda: _FakeEngine(25000.0))
+        _pin_today(monkeypatch)
         basis, contango = mrf._fetch_basis_from_nt()
+        # (25150.5 - 25000) / 25000 * 100 * (365 / 10) -- the 10 is why today must be pinned.
         assert basis == 21.973
         assert contango == 1
 

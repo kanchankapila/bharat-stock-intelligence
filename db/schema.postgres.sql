@@ -613,9 +613,9 @@ CREATE TABLE IF NOT EXISTS "factor_edge_history" (
   "hit_auc" REAL,
   "n" INTEGER,
   "dates" INTEGER,
+  "verdict" TEXT,
   "eff_dates" REAL,
   "symbols" INTEGER,
-  "verdict" TEXT,
   PRIMARY KEY ("run_at", "table_name", "score_col", "regime", "horizon_days")
 );
 
@@ -722,6 +722,12 @@ CREATE TABLE IF NOT EXISTS "feature_store" (
   "iv_skew" DOUBLE PRECISION,
   "insider_buy_pct_90d" DOUBLE PRECISION,
   "block_deal_net_qty" DOUBLE PRECISION,
+  "call_wall_dist_pct" DOUBLE PRECISION,
+  "put_wall_dist_pct" DOUBLE PRECISION,
+  "near_expiry_gamma" DOUBLE PRECISION,
+  "sector_ret_5d" DOUBLE PRECISION,
+  "sector_ret_21d" DOUBLE PRECISION,
+  "price_to_book" DOUBLE PRECISION,
   "block_deal_value_cr" DOUBLE PRECISION,
   "block_deal_net_qty_5d" DOUBLE PRECISION,
   "block_deal_value_cr_5d" DOUBLE PRECISION,
@@ -739,12 +745,6 @@ CREATE TABLE IF NOT EXISTS "feature_store" (
   "delivery_pct_chg_5d" DOUBLE PRECISION,
   "delivery_qty_5d" DOUBLE PRECISION,
   "nifty_pcr" DOUBLE PRECISION,
-  "call_wall_dist_pct" DOUBLE PRECISION,
-  "put_wall_dist_pct" DOUBLE PRECISION,
-  "near_expiry_gamma" DOUBLE PRECISION,
-  "sector_ret_5d" DOUBLE PRECISION,
-  "sector_ret_21d" DOUBLE PRECISION,
-  "price_to_book" DOUBLE PRECISION,
   PRIMARY KEY ("symbol", "date", "timeframe")
 );
 CREATE INDEX idx_fs_date ON public.feature_store USING btree (date);
@@ -1742,6 +1742,15 @@ CREATE TABLE IF NOT EXISTS "mc_pricefeed_daily" (
 );
 CREATE INDEX idx_mcpf_sym ON public.mc_pricefeed_daily USING btree (symbol, date DESC);
 
+-- ── mc_scid_map ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "mc_scid_map" (
+  "scid" TEXT NOT NULL PRIMARY KEY,
+  "symbol" TEXT NOT NULL,
+  "stock_name" TEXT,
+  "source" TEXT,
+  "resolved_at" TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ── mc_seasonality_best_stocks ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "mc_seasonality_best_stocks" (
   "tab_type" TEXT NOT NULL,
@@ -2545,6 +2554,23 @@ CREATE TABLE IF NOT EXISTS "screener_history_log" (
   PRIMARY KEY ("symbol", "screener_id", "entry_date")
 );
 
+-- ── screener_instances ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "screener_instances" (
+  "provider" TEXT NOT NULL,
+  "scan_id" TEXT NOT NULL,
+  "name" TEXT,
+  "category" TEXT,
+  "sentiment" TEXT,
+  "timeframe" TEXT,
+  "endpoint" TEXT,
+  "query_condition" TEXT,
+  "description" TEXT,
+  "ue_status" TEXT,
+  "ue_stocks_count" INTEGER,
+  "updated_at" TEXT,
+  PRIMARY KEY ("provider", "scan_id")
+);
+
 -- ── screener_master ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "screener_master" (
   "scan_id" TEXT NOT NULL,
@@ -3082,22 +3108,6 @@ CREATE TABLE IF NOT EXISTS "stock_earnings_dates" (
   "exchange" TEXT,
   "fetched_at" TEXT DEFAULT now(),
   PRIMARY KEY ("scid", "result_date")
-);
-
--- ── mc_scid_map ──────────────────────────────────────────────────────
--- scid -> NSE symbol for stock_earnings_dates rows the nse_stocks.mcsymbol map
--- cannot place (recently-listed / SME names the universe refresh hasn't ingested).
--- Backfilled from MC's autosuggestion API by scripts/sync_mc_scid_map.py, which
--- accepts ONLY entries whose sc_id equals the feed's scid (exact id match -- the
--- URL slug code can differ, e.g. Shiprocket price page SL26 vs earnings scid SL25).
--- feature_engineering._merge_earnings_clock consults this as the fallback after
--- nse_stocks. Re-run weekly; new work appears only when new listings do.
-CREATE TABLE IF NOT EXISTS "mc_scid_map" (
-  "scid" TEXT NOT NULL PRIMARY KEY,
-  "symbol" TEXT NOT NULL,
-  "stock_name" TEXT,
-  "source" TEXT,
-  "resolved_at" TEXT DEFAULT now()
 );
 
 -- ── stock_event_triggers ─────────────────────────────────────────────
@@ -4333,6 +4343,14 @@ CREATE TABLE IF NOT EXISTS "url_endpoints" (
   "n_urls" INTEGER DEFAULT 0,
   "last_run_at" TEXT,
   "last_status" TEXT,
+  "provider" TEXT,
+  "category" TEXT,
+  "description" TEXT,
+  "feature_targets_json" TEXT,
+  "sources_json" TEXT,
+  "refs_json" TEXT,
+  "updated_at" TEXT,
+  "verified_json" TEXT,
   UNIQUE ("template")
 );
 

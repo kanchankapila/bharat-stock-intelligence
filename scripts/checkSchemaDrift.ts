@@ -185,7 +185,22 @@ export function formatReport(report: DriftReport): string {
 // the identical skip in scripts/generatePgSchemaFromLive.ts -- if it isn't, this checker will
 // permanently report "pgmigrations live but not in file" against a file that deliberately never
 // includes it (or the reverse, once the file's own legacy nextval()-sequence default is fixed).
-const SKIP_LIVE_TABLES = new Set(["pgmigrations"]);
+// market_endpoint_registry and url_candidates_validation_audit are the endpoint-DISCOVERY
+// registry (AF-20260917-18). They live in bharat_intel but are populated entirely OUTSIDE this
+// repo -- by urls-explorer's scratch/build_pg_registry.py -- and grepping .ts/.py here returns
+// ZERO readers or writers for either (data-sources.md says the same in its "Endpoint discovery
+// registry" section, which is the only pointer to them that exists in this repo at all).
+// Regenerating them into db/schema.postgres.sql would make the gate green by adopting tables
+// this project does not own, and would then recreate them in every throwaway vitest/pytest
+// schema for no reason. Excluded rather than absorbed. `screener_instances` is deliberately NOT
+// here: src/server/url_explorer/store.py writes it, so it is genuinely ours and belongs in the
+// snapshot. Keep this set identical to the one in scripts/generatePgSchemaFromLive.ts, or the
+// checker reports permanent drift in one direction or the other.
+const SKIP_LIVE_TABLES = new Set([
+  "pgmigrations",
+  "market_endpoint_registry",
+  "url_candidates_validation_audit",
+]);
 
 async function fetchLiveSchema(): Promise<SchemaMap> {
   const { getPool } = await import("../src/server/pgClient");

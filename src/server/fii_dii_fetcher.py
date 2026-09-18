@@ -8,7 +8,6 @@ Run:  python fii_dii_fetcher.py
       python fii_dii_fetcher.py --days 30
 """
 
-import polars as pl
 import os
 import datetime
 import argparse
@@ -21,21 +20,6 @@ from db_compat import get_engine
 from fetch_utils import retry_get
 import sys
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher
-
-class FiiDiiRowSchema(BaseModel):
-    category: str
-    date: str
-    buy_value: float | None = None
-    sell_value: float | None = None
-    net_value: float | None = None
-
-class FiiDiiBaseFetcher(BaseFetcher[FiiDiiRowSchema]):
-    fetcher_name = "FiiDiiFetcher"
-    domain = "nseindia.com"
-    schema = FiiDiiRowSchema
-    min_interval_sec = 0.5
-
 
 NSE_FII_DII_URL = "https://www.nseindia.com/api/fiidiiTradeReact"
 
@@ -168,13 +152,21 @@ class FiiDiiFetcher:
                         (date, fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net, source, fetched_at)
                     VALUES
                         (:date, :fii_buy, :fii_sell, :fii_net, :dii_buy, :dii_sell, :dii_net, :source, :fetched_at)
+                    -- AF-20260917-16: four sources upsert this table on a PK of (date) alone,
+                    -- so a bare `= excluded.x` lets whoever writes last erase a column it has
+                    -- no value for. Measured live: 5 dates where an investsights row carrying
+                    -- nets only overwrote a tradebrains row that had the gross buy/sell
+                    -- breakdown. COALESCE keeps a real value from being replaced by NULL while
+                    -- still letting a real value supersede one (so final NSE numbers still
+                    -- overwrite NSE_PROVISIONAL). fii_dii_history_fetcher.py already merges
+                    -- this way; these upserts did not.
                     ON CONFLICT(date) DO UPDATE SET
-                        fii_buy    = excluded.fii_buy,
-                        fii_sell   = excluded.fii_sell,
-                        fii_net    = excluded.fii_net,
-                        dii_buy    = excluded.dii_buy,
-                        dii_sell   = excluded.dii_sell,
-                        dii_net    = excluded.dii_net,
+                        fii_buy    = COALESCE(excluded.fii_buy,  fii_dii_flow.fii_buy),
+                        fii_sell   = COALESCE(excluded.fii_sell, fii_dii_flow.fii_sell),
+                        fii_net    = COALESCE(excluded.fii_net,  fii_dii_flow.fii_net),
+                        dii_buy    = COALESCE(excluded.dii_buy,  fii_dii_flow.dii_buy),
+                        dii_sell   = COALESCE(excluded.dii_sell, fii_dii_flow.dii_sell),
+                        dii_net    = COALESCE(excluded.dii_net,  fii_dii_flow.dii_net),
                         source     = excluded.source,
                         fetched_at = excluded.fetched_at
                 """), {**r, "fetched_at": now})
@@ -268,13 +260,14 @@ class FiiDiiFetcher:
                     (date, fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net, source, fetched_at)
                 VALUES
                     (:date, :fii_buy, :fii_sell, :fii_net, :dii_buy, :dii_sell, :dii_net, :source, :fetched_at)
+                -- NULL-safe merge, same reason as the upsert above (AF-20260917-16).
                 ON CONFLICT(date) DO UPDATE SET
-                    fii_buy    = excluded.fii_buy,
-                    fii_sell   = excluded.fii_sell,
-                    fii_net    = excluded.fii_net,
-                    dii_buy    = excluded.dii_buy,
-                    dii_sell   = excluded.dii_sell,
-                    dii_net    = excluded.dii_net,
+                    fii_buy    = COALESCE(excluded.fii_buy,  fii_dii_flow.fii_buy),
+                    fii_sell   = COALESCE(excluded.fii_sell, fii_dii_flow.fii_sell),
+                    fii_net    = COALESCE(excluded.fii_net,  fii_dii_flow.fii_net),
+                    dii_buy    = COALESCE(excluded.dii_buy,  fii_dii_flow.dii_buy),
+                    dii_sell   = COALESCE(excluded.dii_sell, fii_dii_flow.dii_sell),
+                    dii_net    = COALESCE(excluded.dii_net,  fii_dii_flow.dii_net),
                     source     = excluded.source,
                     fetched_at = excluded.fetched_at
             """), {
@@ -319,9 +312,3 @@ if __name__ == "__main__":
 
     fetcher = FiiDiiFetcher()
     fetcher.run(days=args.days)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
