@@ -131,12 +131,16 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // Takes one bounded slice of one trendlyne.com fetcher per run (see trendlyneWeekly.jobs.ts).
   // critical:false — a single missed slice is made up by the next one; only a sustained outage
   // matters, which the 60min grace against a 20min cadence is what catches.
-  { jobName: 'trendlyne-catchup', label: 'Trendlyne Catch-up Slice', cronPattern: '*/20 * * * *', graceMinutes: 60, critical: false },
+  { jobName: 'trendlyne-catchup', label: 'Trendlyne Catch-up Slice', cronPattern: '*/15 0-15,20-23 * * *', graceMinutes: 60, critical: false }, // 21:30-01:29 IST excluded: post-close peak (AF-20260917-24)
   { jobName: 'agent-data-scientist', label: 'Agent: Data Scientist', cronPattern: '30 1 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-strategist', label: 'Agent: Strategist', cronPattern: '20 3 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-auditor', label: 'Agent: Auditor', cronPattern: '0 11 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-optimizer', label: 'Agent: Optimizer', cronPattern: '0 12 * * 1-5', graceMinutes: 60, critical: false },
-  { jobName: 'unified-ranker', label: 'Unified Daily Ranker', cronPattern: '0 17 * * 1-5', graceMinutes: 45, critical: true },
+  // graceMinutes 45 -> 75 (AF-20260917-20): the Worker's lockDuration is now 55 min
+  // (covering the raised 45-min runPython budget), and jobRegistryGraceMinutesConsistency
+  // asserts grace >= lock — 45 vs 55 would fail it. Real runs measure 7-12 min; the grace
+  // is judged against a hung-under-load run, not a typical one.
+  { jobName: 'unified-ranker', label: 'Unified Daily Ranker', cronPattern: '0 17 * * 1-5', graceMinutes: 75, critical: true },
   { jobName: 'live-screener-collect', label: 'Live Screener Poller', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 30, critical: false,
     lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
   // graceMinutes 45 -> 360: the processor's own comment says "5.5h backstop... the last
@@ -268,5 +272,5 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'recommendations-digest', label: 'Daily Stock Recommendations (Telegram)', cronPattern: '10 17 * * 1-5', graceMinutes: 90, critical: true },
 
   // Formal daily wrapper around dataQualityChecks.ts's 25-check suite (2026-08-01).
-  { jobName: 'data-quality-daily', label: 'Daily Data-Integrity Report (Telegram)', cronPattern: '30 17 * * *', graceMinutes: 90, critical: true },
+  { jobName: 'data-quality-daily', label: 'Daily Data-Integrity Report (Telegram)', cronPattern: '30 21 * * *', graceMinutes: 90, critical: true }, // 03:00 IST — moved out of the post-close peak (AF-20260917-24)
 ];

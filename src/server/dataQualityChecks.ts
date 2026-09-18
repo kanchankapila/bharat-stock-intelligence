@@ -762,17 +762,38 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'OHLCV bar plausibility (high>=low, close>0)',
     category: 'ohlcv',
     critical: true,
+    // AF-20260917-22 companion fix: this check's own label and contract are "high>=low,
+    // close>0" — GENUINELY malformed bars. It also counted `is_suspect = 1` rows as bad,
+    // conflating two different states: is_suspect is the QUARANTINE flag written by the
+    // closed-session repair/ingest guards for known-bad bars (excluded from every
+    // measurement panel by spec), and UNflagged fabricated days have their own critical
+    // check below (ohlcv-fabricated-session). Live 2026-09-18: 8,201 recent bars held
+    // 1,047 is_suspect flags (1,045 of them the already-quarantined 2026-09-14 holiday
+    // fabrication) vs exactly 2 genuinely malformed (close <= 0) — so the check read
+    // "12.8% malformed" and fired its CRITICAL alarm daily on a state that was already
+    // detected, quarantined and panel-safe. The suspect count stays in the detail (and
+    // warns above 5% — a large quarantine jump means new contamination upstream even if
+    // every bad row is correctly flagged, e.g. a partially-fabricated day that the
+    // >=95%-flat detector below cannot see).
     sql: `SELECT
             (SELECT COUNT(*) FROM stock_ohlcv WHERE date >= current_date - 5
-               AND (close <= 0 OR high < low OR is_suspect = 1)) AS bad,
-            (SELECT COUNT(*) FROM stock_ohlcv WHERE date >= current_date - 5) AS total`,
+               AND (close <= 0 OR high < low)) AS bad,
+            (SELECT COUNT(*) FROM stock_ohlcv WHERE date >= current_date - 5) AS total,
+            (SELECT COUNT(*) FROM stock_ohlcv WHERE date >= current_date - 5
+               AND COALESCE(is_suspect, 0) = 1) AS suspect`,
     evaluate: (row) => {
       const ratio = safeRatio(row?.bad, row?.total);
       const total = Number(row?.total) || 0;
+      const suspect = Number(row?.suspect) || 0;
+      const suspectNote = suspect > 0
+        ? `; ${suspect} quarantined is_suspect=1 rows excluded (panel-safe; watched by ohlcv-fabricated-session)`
+        : '';
       if (total === 0) return { status: 'fail', detail: 'No bars in the last 5 days to evaluate' };
-      if (ratio > 0.05) return { status: 'fail', detail: `${(ratio * 100).toFixed(1)}% of recent bars are malformed/suspect` };
-      if (ratio > 0.01) return { status: 'warn', detail: `${(ratio * 100).toFixed(1)}% of recent bars are malformed/suspect` };
-      return { status: 'pass', detail: `${(ratio * 100).toFixed(2)}% malformed (${row?.bad}/${total})` };
+      if (ratio > 0.05) return { status: 'fail', detail: `${(ratio * 100).toFixed(1)}% of recent bars are malformed (${row?.bad}/${total})${suspectNote}` };
+      if (ratio > 0.01 || suspect / total > 0.05) {
+        return { status: 'warn', detail: `${(ratio * 100).toFixed(1)}% of recent bars are malformed (${row?.bad}/${total})${suspectNote}` };
+      }
+      return { status: 'pass', detail: `${(ratio * 100).toFixed(2)}% malformed (${row?.bad}/${total})${suspectNote}` };
     },
   },
   {

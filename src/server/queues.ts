@@ -11,7 +11,8 @@
 
 import { Queue, Worker, QueueEvents, Job, ConnectionOptions } from 'bullmq';
 import { fetchAllLiveStocks } from './liveStockData';
-import { cacheSet } from './cacheService';
+import { cacheDelPrefix } from './cacheService';
+import { FILED_CORP_ACTIONS_CACHE_PREFIX } from './cacheKeys';
 import { generateStockAnalysis } from '../services/aiService';
 import { dbGet, dbAll, dbRun } from './dbAsync';
 import Redis from 'ioredis';
@@ -605,10 +606,19 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
     .catch(e => T.fail('investsights_investor_activity_fetcher', e));
 
   // InvestSights per-stock TTM/FMP-ratios/growth-metrics/DCF fair-value snapshot (onboard-
-  // data-source batch, 2026-08-13) → investsights_fundamentals_history. --limit 300 (liquid-
-  // by-market-cap): 4 sequential requests/symbol, measured ~2.3s/symbol incl. rate limit —
-  // 20 min budget is generous headroom over the ~12 min measured full-limit runtime.
-  await runPython('investsights_fundamentals_fetcher.py', ['--limit', '300'], 20 * 60_000)
+  // data-source batch, 2026-08-13) → investsights_fundamentals_history.
+  //
+  // --limit 300 → 2500 on 2026-09-18 (AF-20260917-07). The 300 was a deliberate placeholder
+  // ("no confirmed rate-limit budget from this provider yet ... widen once a real run's timing
+  // is known"), and the run that would settle it had never been done. Measured: --limit 1000
+  // stored 1000/1000 symbols in 129s with ZERO failures (4 calls/symbol, 8 workers), so the
+  // whole reachable universe (2,052 rows qualify) costs ~4.4 min against this 20-min budget --
+  // the earlier "~12 min at full limit" note was an estimate against the 300 cap, not a
+  // measurement of the full universe. The cap, not the vendor, was the binding constraint on
+  // ROE coverage: this table is the only in-repo source of a return_on_equity that agrees with
+  // yfinance (Pearson 0.9608, same scale, zero sign flips) now that Yahoo's own field has
+  // decayed to 6.1% of the universe. One widened run took stored ROE from 287 → 929 symbols.
+  await runPython('investsights_fundamentals_fetcher.py', ['--limit', '2500'], 20 * 60_000)
     .catch(e => T.fail('investsights_fundamentals_fetcher', e));
 
   // InvestSights per-stock filings/announcements/concall/rating documents (same batch) →
@@ -639,7 +649,10 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // "1 steps failed: marketsmojo_technical_fetcher"), cascading to DL Engine Inference going
   // stale and the Telegram DI report being ~24h late. 30min absorbs the worst observed spikes.
   // --full forces a complete re-upsert if the vendor ever restates history.
-  await runPython('marketsmojo_technical_fetcher.py', [], 30 * 60_000)
+  // 30min → 40min (AF-20260917-24): 30 was sized as "absorbs the worst observed spikes" and
+  // was exceeded on 2026-09-17 inside the connection-pool collapse. If this clips again at
+  // 40min on a NORMAL night, the fix is the fetcher's own worker count, not this budget.
+  await runPython('marketsmojo_technical_fetcher.py', [], 40 * 60_000)
     .catch(e => T.fail('marketsmojo_technical_fetcher', e));
   // 81 indices, one call each — the BSE-family/sectoral coverage macro_asset_prices lacks.
   await runPython('marketsmojo_index_fetcher.py', [], 10 * 60_000)
@@ -741,7 +754,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   ]);
   // iv_features reads the ATM IV that pcr_fetcher just wrote to stock_options_oi → technical_signals.iv_rank.
   // Kept serial: it writes technical_signals, which several later steps also update — avoids row-lock churn.
-  await runPython('iv_features.py', ['--date', 'today'], 300_000)
+  // 300s → 10min (AF-20260917-24): failed 2026-09-17 under post-close pool collapse; a
+  // 697k-row options_oi aggregation is a once-daily batch step, not a 5-minute one.
+  await runPython('iv_features.py', ['--date', 'today'], 10 * 60_000)
     .catch(e => T.fail('iv_features', e));
 
   // NSE full bhavcopy -> nse_universe_history: the exchange's own record of what actually
@@ -764,8 +779,12 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // reconcile_stock_ohlcv_from_bhavcopy.py's own docstring for the cutover plan once this is
   // proven clean over several sessions. T.run() records a reconciliation failure into the job
   // verdict without aborting the chain, so it cannot silently no-op.
+  // 10min (AF-20260917-24): clipped at 5min on 2026-09-17 inside the post-close
+  // connection-pool collapse (545 connect-timeouts in the 23:00 IST hour). A full-universe
+  // bhavcopy reconcile needs the same once-daily contention headroom the file already gives
+  // performance-tracker (15min) and live_screener_resolver (20min) below.
   await T.run('reconcile-stock-ohlcv',
-    () => runPython('reconcile_stock_ohlcv_from_bhavcopy.py', [], 5 * 60_000));
+    () => runPython('reconcile_stock_ohlcv_from_bhavcopy.py', [], 10 * 60_000));
 
   // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
   await runPython('ohlcv_quality.py', ['--no-ingest'], 600_000)
@@ -773,13 +792,17 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
 
   // Cross-sectional relative strength from (cleaned) OHLCV → technical_signals.rs_rank_21d/63d.
   // 180 s is tight on this RAM-pressured box (measured timeout 2026-08-26 00:20); 300 s
-  // matches the pythonRunner default and the slot-pool overhead.
-  await runPython('relative_strength.py', [], 300_000)
+  // matches the pythonRunner default and the slot-pool overhead. 300s → 10min
+  // (AF-20260917-24): clipped AGAIN on 2026-09-17 under pool collapse — a cross-sectional
+  // scan over the full 2.7M-row stock_ohlcv is a once-daily batch step and gets batch headroom.
+  await runPython('relative_strength.py', [], 10 * 60_000)
     .catch(e => T.fail('relative_strength', e));
 
   // Cross-sectional ownership flow: sector-relative + universe-rank of MF net flow already
   // stamped on technical_signals → mf_flow_vs_sector / mf_flow_rank. Same-day, no look-ahead.
-  await runPython('ownership_relative.py', [], 120_000)
+  // 120s → 5min (AF-20260917-24): one of the 13 steps that failed 2026-09-17 under pool
+  // collapse; raised to the file's 5min batch floor with the rest of the feature steps.
+  await runPython('ownership_relative.py', [], 5 * 60_000)
     .catch(e => T.fail('ownership_relative', e));
 
   // multi_factor_scorer.py (quant_scores.mf_*) used to run here — but this step (ml-daily-ops,
@@ -793,21 +816,28 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
     .catch(e => T.fail('market_breadth', e));
 
   // Rolling 90d insider buy/sell ratio from insider_trades → technical_signals.insider_buy_pct_90d.
-  await runPython('insider_features.py', [], 60_000)
+  // 60s → 5min (AF-20260917-24): failed 2026-09-17; 60s left zero contention headroom for a
+  // step that rolls a 23k-row trade table into technical_signals.
+  await runPython('insider_features.py', [], 5 * 60_000)
     .catch(e => T.fail('insider_features', e));
 
   // Intraday microstructure: opening-range break, VWAP deviation, first-hour vol share.
   // Runs post-close so the full session (9:15–15:30 IST) is in intraday_ohlcv.
-  await runPython('intraday_features.py', [], 60_000)
+  // 60s → 5min (AF-20260917-24): failed 2026-09-17; the intraday_ohlcv hypertable has grown
+  // well past what a 60s ceiling assumes.
+  await runPython('intraday_features.py', [], 5 * 60_000)
     .catch(e => T.fail('intraday_features', e));
 
   // Anchored VWAP deviation (20-day rolling anchor from stock_ohlcv) → technical_signals.avwap_deviation_pct.
-  await runPython('avwap_features.py', [], 120_000)
+  // 120s → 5min (AF-20260917-24): failed 2026-09-17; a 20-day rolling anchor over 2.7M rows
+  // gets the same 5min floor as its sibling feature steps.
+  await runPython('avwap_features.py', [], 5 * 60_000)
     .catch(e => T.fail('avwap_features', e));
 
   // OI net-change delta (day-over-day total OI % change from stock_options_oi) → oi_net_change_pct.
   // Depends on pcr_fetcher.py having run earlier in this same daily ops cycle.
-  await runPython('oi_delta_features.py', [], 60_000)
+  // 60s → 5min (AF-20260917-24): failed 2026-09-17; same batch-headroom floor as its siblings.
+  await runPython('oi_delta_features.py', [], 5 * 60_000)
     .catch(e => T.fail('oi_delta_features', e));
 
   // Sector-level F&O sentiment: aggregate stock_options_oi by sector → sector_fo_sentiment.
@@ -816,15 +846,21 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
     .catch(e => T.fail('sector_fo_proxy', e));
 
   // F&O rollover % and cost of carry from NSE bhavcopies → fno_rollover → technical_signals.
-  await runPython('fno_rollover_fetcher.py', ['--days', '1'], 3 * 60_000)
+  // 3min → 6min (AF-20260917-24): the highest-consequence failure of the 2026-09-17 pool
+  // collapse — this step dying left fno_rollover max(date) at 09-16 while every sibling table
+  // was 09-17, so unified_ranker consumed a one-day-stale rollover for that session's ranking.
+  await runPython('fno_rollover_fetcher.py', ['--days', '1'], 6 * 60_000)
     .catch(e => T.fail('fno_rollover_fetcher', e));
 
   // Cash market delivery % from NSE MTO DAT → stock_delivery_volume → technical_signals.
-  await runPython('delivery_volume_fetcher.py', ['--days', '1'], 2 * 60_000)
+  // 2min → 5min (AF-20260917-24): failed 2026-09-17 under pool collapse; 734k-row table.
+  await runPython('delivery_volume_fetcher.py', ['--days', '1'], 5 * 60_000)
     .catch(e => T.fail('delivery_volume_fetcher', e));
 
   // Block deals from NSE live API → stock_block_deal_daily → technical_signals.
-  await runPython('block_deal_fetcher.py', ['--days', '1'], 60_000)
+  // 60s → 5min (AF-20260917-24): failed 2026-09-17; 60s assumed an uncontended DB that no
+  // longer exists at 23:00 IST.
+  await runPython('block_deal_fetcher.py', ['--days', '1'], 5 * 60_000)
     .catch(e => T.fail('block_deal_fetcher', e));
 
   // MC pricefeed: IND_PE, CAGR 3/5y, consensus PE/PB, delivery avg (fundamentals/delivery only —
@@ -842,7 +878,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // frozen per-symbol for weeks — see mc_price_features_ohlcv.py's docstring).
   // MUST run after ohlcv_quality.py above -- it reads WHERE is_suspect=0 so a bad-print/
   // extreme-level-shift bar doesn't poison every moving-average window it falls inside.
-  await runPython('mc_price_features_ohlcv.py', [], 15 * 60_000)
+  // 15min → 25min (AF-20260917-24): failed 2026-09-17; 25min matches its sibling
+  // mc_pricefeed_fetcher's budget for the same 2,328-symbol universe.
+  await runPython('mc_price_features_ohlcv.py', [], 25 * 60_000)
     .catch(e => T.fail('mc_price_features_ohlcv', e));
 
   // MC chart patterns: professional pattern detection with target price, stop-loss, direction.
@@ -932,6 +970,20 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
     // API call, ~40 rows): the completeness cross-check for mc_corporate_actions_fetcher.py's
     // weekly per-stock crawl, so it should stay fresher than the thing it's checking.
     runPython('investsights_corporate_actions_fetcher.py', [], 2 * 60_000)
+      .then(async () => {
+        // Invalidate AFTER the fetcher has written. The router caches this same table for
+        // 1800s, keyed on the QUERY'S INPUT PARAMETERS
+        // (`fund:filed-corp-actions:${daysBack}:${daysForward}:${symbol}`), so this job has no
+        // single exact key to hand to cacheDel — only the shared prefix. Without this, the
+        // fetcher's stated purpose above could not hold: a cache entry kept being served for
+        // up to 30 min after new filings had already landed in the table.
+        // cacheDelPrefix is contractually non-throwing (see its own docstring), so a failed
+        // invalidation cannot turn a good fetch into a failed job.
+        const evicted = await cacheDelPrefix(FILED_CORP_ACTIONS_CACHE_PREFIX);
+        if (evicted > 0) {
+          console.log(`[CORP ACTIONS] invalidated ${evicted} cached calendar entr${evicted === 1 ? 'y' : 'ies'}`);
+        }
+      })
       .catch(e => T.fail('investsights_corporate_actions_fetcher', e)),
     // NDTV Profit futures basis/roll-spread/PCR, independent cross-check for fno_rollover_fetcher.py
     // (2026-08-07 urls.txt follow-up) → ndtv_fno_basis. F&O-eligible universe only (209 symbols) --
@@ -1371,6 +1423,20 @@ async function processMlWeeklyData(_job: Job): Promise<{ success: boolean; skipp
   // Refresh earnings beat/miss history (quarterly data, no need to run daily).
   await runPython('earnings_surprise_fetcher.py', [], 20 * 60_000)
     .catch(e => T.fail('earnings_surprise_fetcher', e));
+  // MoneyControl block-deal HISTORY (AF-20260914-02). NSE's historical ranges have answered 503
+  // on every probe since 2026-09-14 (30/30 dates re-confirmed 09-17 and 09-18), so block_deals
+  // could be kept current by the daily NSE `--days 1` path but never backfilled -- and the
+  // tickertape crawl that supplied 8,849 of its 8,921 rows is small/mid-cap heavy, leaving
+  // RELIANCE/TCS/INFY/HDFCBANK with ZERO rows. That made feature_store.block_deal_* structurally
+  // empty for precisely the most liquid names.
+  //
+  // WEEKLY, not daily, and the cadence is the point: this endpoint returns a symbol's ENTIRE
+  // history on every call, so re-walking it daily is write amplification for a handful of new
+  // deals that the daily NSE path already captures (recurring-bugs.md: "fetch cadence must match
+  // the DATA's own cadence, not the job's convenience"). Its role here is backfill and repair.
+  // Measured live 2026-09-18: RELIANCE walks 4 pages to 32 deals reaching 2024-11-06, ~1.5s/symbol.
+  await runPython('mc_block_deal_history_fetcher.py', ['--limit', '300'], 20 * 60_000)
+    .catch(e => T.fail('mc_block_deal_history_fetcher', e));
   // MF holdings: mf_holdings_fetcher.py REWRITTEN 2026-08-13 -- its old source
   // (mfapps.indiatimes.com's MFPortfolioHolding.cms) was dead (confirmed live, 404 for every
   // symbol, upstream retired). Repointed at ET's shareholding-pattern endpoint
@@ -3161,10 +3227,17 @@ export async function initQueues(): Promise<boolean> {
           return { skipped: true };
         }
         console.log('[QUEUE] unified-ranker starting...');
-        // 30 min: a full run now takes 15-20+ min (700k-row confluence window scans +
-        // quality/win-prob loaders). The old 5-min budget timeout-killed 19 of its last
-        // 24 runs, leaving unified_recommendations stale for the Top Rated tab.
-        await runPython('unified_ranker.py', [], 30 * 60_000);
+        // 45 min (AF-20260917-20): the previous 30-min budget — itself a raise from 5 min,
+        // which had timeout-killed 19 of its last 24 runs — timeout-killed AGAIN on
+        // 2026-09-16 AND 2026-09-17 at exactly 17:30:08 UTC, leaving unified_recommendations
+        // with ZERO rows for 09-17 (the 09-16 slot was saved only by a 17:42 catch-up).
+        // Healthy runs measure 7-12 min (job_run_history duration_ms 418-708s), so the two
+        // failures were HANGS under concurrent evening load (confluence-compute's own 30-min
+        // cadence + the 17:10 digest reads + dq pollers), not legitimately longer work —
+        // this budget is headroom against DB-contention tail latency, not a growing workload.
+        // The run itself scans 2,352 candidates through a 90d recommendation_log RL-gate
+        // map plus 700k-row confluence window scans (its own stderr).
+        await runPython('unified_ranker.py', [], 45 * 60_000);
 
         // Push today's highest-conviction canonical picks over WebSocket (2026-08-05 fix --
         // see unifiedSignalBroadcast.ts's header for the gap this closes). Best-effort: the
@@ -3181,8 +3254,11 @@ export async function initQueues(): Promise<boolean> {
       },
       // No lockDuration previously -- fell back to BullMQ's 30s default while awaiting a
       // runPython call allowed up to 5 minutes, causing repeated "job stalled" failures
-      // (confirmed in job_heartbeat: 3 stalls on 2026-07-09 alone).
-      { connection, concurrency: 1, lockDuration: 35 * 60_000 },
+      // (confirmed in job_heartbeat: 3 stalls on 2026-07-09 alone). 35 -> 55 min
+      // (AF-20260917-20): the lock must cover the runPython budget, now 45 min; a lock
+      // shorter than the budget is the exact lock-vs-budget undercount recurring-bugs.md
+      // records (AF-20260912-16's nse-sync lesson).
+      { connection, concurrency: 1, lockDuration: 55 * 60_000 },
     );
     unifiedRankerWorker = unifiedRankerWorkerInstance;
 
@@ -3211,14 +3287,38 @@ export async function initQueues(): Promise<boolean> {
       console.log('[QUEUE] unified-ranker done');
       recordHeartbeat('unified-ranker', 'success', undefined, bullJobDurationMs(job));
     });
-    unifiedRankerWorkerInstance.on('failed', (job, err) => {
+    unifiedRankerWorkerInstance.on('failed', async (job, err) => {
       console.error('[QUEUE] unified-ranker failed:', err.message);
       recordHeartbeat('unified-ranker', 'failed', err.message, bullJobDurationMs(job));
+      // AF-20260917-20: a timeout-failed scheduled run used to leave unified_recommendations
+      // stale until the NEXT day's cron — addJobWithCatchup's miss detector takes the most
+      // recent completed OR failed BullMQ job as "schedule covered" (its 2026-08-29
+      // anti-storm rule), and the attempts:2 retry proved unreliable live: the 2026-09-17
+      // 17:30 UTC failure produced no second run. Queue ONE bounded make-up, 15 min later,
+      // when nothing is already pending. The name check makes this non-recursive: only a
+      // failed SCHEDULED run queues a make-up, and a failed make-up queues nothing.
+      try {
+        if (!job || job.name !== 'unified-ranker-daily') return;
+        const counts = await Promise.all([
+          unifiedRankerQueue!.getActiveCount(),
+          unifiedRankerQueue!.getWaitingCount(),
+          unifiedRankerQueue!.getDelayedCount(),
+        ]);
+        if (counts.some(c => c > 0)) return; // a retry or make-up is already in flight
+        await unifiedRankerQueue!.add('unified-ranker-makeup', {}, {
+          delay: 15 * 60_000,
+          removeOnComplete: { age: 86400 * 3 },
+          removeOnFail: { age: 86400 * 3, count: 20 },
+        });
+        console.warn('[QUEUE] unified-ranker failed — queued one bounded make-up run in 15 min (AF-20260917-20)');
+      } catch (e) {
+        console.warn('[QUEUE] unified-ranker make-up scheduling failed:', (e as Error).message);
+      }
     });
 
     await registerDigestJobs(connection);
 
-    // ── Daily data-integrity report — 11:00 PM IST (17:30 UTC), every day ──────────
+    // ── Daily data-integrity report — 3:00 AM IST (21:30 UTC), every day (moved out of the post-close peak, AF-20260917-24) ──────────
     // Formal cron wrapper around dataQualityChecks.ts's ~25-check suite (2026-08-01 audit).
     // The 15-min setInterval poll in jobWatchdog.ts already runs these checks continuously
     // and pages on critical failures -- this does NOT replace that, it exists because the
@@ -3308,8 +3408,14 @@ export async function initQueues(): Promise<boolean> {
 
     const dataQualityRepeatables = await dataQualityDailyQueue.getRepeatableJobs();
     for (const r of dataQualityRepeatables) await dataQualityDailyQueue.removeRepeatableByKey(r.key);
+    // 17:30 → 21:30 UTC (AF-20260917-24): 23:00 IST sat inside the post-close cluster, where
+    // this job's own ~40-min run of unindexed max(date) scans over the 17M-row giants both
+    // suffered and amplified the connection-pool collapse that killed the 09-17 evening chain
+    // (545 connect-timeouts in the 23:00 IST hour). 03:00 IST is after the cluster's observed
+    // end (~01:35 IST) and before the 04:00 IST logical-session cutoff, so the report still
+    // labels the same trading day — and unified-ranker + digests still precede it.
     await addJobWithCatchup(dataQualityDailyQueue, 'data-quality-daily-run', {}, {
-      repeat: { pattern: '30 17 * * *' }, // 11:00 PM IST (17:30 UTC), daily after unified-ranker & digests
+      repeat: { pattern: '30 21 * * *' }, // 3:00 AM IST (21:30 UTC), daily after unified-ranker & digests
       jobId: 'data-quality-daily-repeatable',
       removeOnComplete: 3,
       removeOnFail: 3,

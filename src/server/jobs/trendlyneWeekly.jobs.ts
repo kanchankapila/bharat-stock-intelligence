@@ -258,13 +258,21 @@ export async function registerTrendlyneWeeklyJobs(connection: any) {
     connection,
     queueName: QUEUE_TRENDLYNE_CATCHUP,
     jobName: 'trendlyne-catchup-slice',
-    // Every 20 min, all day: one fetcher per run, so each of the four gets a slice every 80
-    // min (~18 slices/day => ~1,980 symbols/day for the 1-request-per-symbol fetchers). That
-    // converges a 2,234-symbol universe in ~1-2 days, which is the cadence these near-static
-    // datasets need — and it mirrors the one Trendlyne job that has never failed
-    // (trendlyne-daily-fetch, 87,721 runs / 0 failures), which spreads its per-symbol requests
-    // across a 12-hour window instead of bursting them.
-    repeat: { pattern: '*/20 * * * *' },
+    // One fetcher per run. Off-peak cadence is every 15 min, so each of the four fetchers gets
+    // a slice every 60 min (~20 slices/day => ~2,200 symbols/day for the 1-request-per-symbol
+    // fetchers). That converges a 2,234-symbol universe in ~1-2 days, which is the cadence
+    // these near-static datasets need — and it mirrors the one Trendlyne job that has never
+    // failed (trendlyne-daily-fetch, 87,721 runs / 0 failures), which spreads its per-symbol
+    // requests across a 12-hour window instead of bursting them.
+    //
+    // '*/15 0-15,20-23' (AF-20260917-24): was '*/20 * * * *' (72 slices/day, 24/7). The new
+    // pattern runs every 15 min EXCEPT 16:00-19:59 UTC (21:30-01:29 IST) — exactly the
+    // post-close cluster (ml-daily-ops, unified-ranker, screener-performance,
+    // data-quality-daily) whose contention collapsed the connection pool on 2026-09-17 (545
+    // connect-timeouts in one hour). Net throughput still RISES (80 vs 72 slices/day) because
+    // the off-peak cadence is denser; near-static datasets gain nothing from landing at 11 PM
+    // rather than 2 AM, and lockDuration 15min covers the measured 3-5min slice runtime.
+    repeat: { pattern: '*/15 0-15,20-23 * * *' },
     jobId: 'trendlyne-catchup-slice',
     removeOnComplete: 3,
     removeOnFail: 3,

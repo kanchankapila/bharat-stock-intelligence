@@ -890,6 +890,28 @@ describe('technical-signals-provenance-timestamps', () => {
   });
 });
 
+describe('ml-scoring-due-grid-coverage', () => {
+  const check = DATA_QUALITY_CHECKS.find(c => c.id === 'ml-scoring-due-grid-coverage')!;
+  const now = new Date('2026-09-17T04:00:00Z');
+
+  it('alerts through the critical watchdog path', () => {
+    expect(check.critical).toBe(true);
+    expect(check.sql).toContain("INTERVAL '1 day 3 hours 45 minutes'");
+    expect(check.sql).toContain('t.date = due.d');
+    expect(check.sql).toContain('t.win_probability_scored_at <= NOW()');
+  });
+  it.each([undefined, { rows: 0 }, { rows: 2168, scored: 0 }, { rows: 2168, scored: 1 }])(
+    'fails for missing data or an unscored/one-row batch: %j', (row) => {
+      expect(check.evaluate(row, now).status).toBe('fail');
+    },
+  );
+  it('warns on a small partial batch and passes only on complete coverage', () => {
+    expect(check.evaluate({ rows: 100, scored: 95 }, now).status).toBe('warn');
+    expect(check.evaluate({ rows: 100, scored: 94 }, now).status).toBe('fail');
+    expect(check.evaluate({ rows: 2168, scored: 2168 }, now).status).toBe('pass');
+  });
+});
+
 describe('win-probability-scored-in-time', () => {
   const check = DATA_QUALITY_CHECKS.find(c => c.id === 'win-probability-scored-in-time')!;
   const now = new Date('2026-08-15T12:00:00Z');

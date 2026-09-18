@@ -102,11 +102,20 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; skippe
   await T.run('screener-performance-compute', () => runPython('screener_performance.py', [], 45 * 60_000));
 
   // 4. Stamp per-stock screener ML features into technical_signals
-  await runPython('screener_features_fetcher.py', [], 5 * 60_000)
+  // 30 min (AF-20260917-21, measured not guessed): the 5-min budget timeout-killed this
+  // step on 2026-09-16 AND 2026-09-17 at exactly 300000ms, while completed runs in the
+  // sibling ml-daily-ops chain take 15-16 min (2026-09-16 20:24 IST / 2026-09-17 20:46 IST,
+  // peak ~590MB). A 5-min ceiling over 15+ min of real work is the recurring
+  // budget-sized-once-never-revisited defect class (recurring-bugs.md).
+  await runPython('screener_features_fetcher.py', [], 30 * 60_000)
     .catch(e => T.fail('screener_features_fetcher', e));
 
   // 5. Aggregate sector screener rotation signals
-  await runPython('screener_sector_rotation.py', [], 2 * 60_000)
+  // 10 min (AF-20260917-21, measured): the 120s budget killed the run at exactly 2:00 with
+  // "execution completed" racing the timeout in the same second (09-16 22:44:34 IST,
+  // 09-17 22:50:01 IST) — the work needs just over 2 min and any heavy evening pushes it
+  // past the line. 10 min matches the headroom the neighbouring steps carry.
+  await runPython('screener_sector_rotation.py', [], 10 * 60_000)
     .catch(e => T.fail('screener_sector_rotation', e));
 
   // 6. Generate screener surfacing alerts → unified_signals
@@ -120,7 +129,11 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; skippe
   // 8. Recompute optimal filter combinations using the latest resolved outcomes. Trains both
   // the swing-horizon model and an isolated same-day intraday model in one run (see
   // live_screener_optimizer.py's optimize_combinations()).
-  await runPython('live_screener_optimizer.py', [], 5 * 60_000)
+  // 25 min (AF-20260917-21, measured): the 5-min budget killed this on 09-16 AND 09-17 at
+  // exactly 300000ms right after "[LiveScreenerOptimizer] Starting optimization" -- peak
+  // 8.5GB on its last completed pass (09-16 22:50 IST), so this is the heaviest step in the
+  // chain and 5 min was never a real ceiling for it.
+  await runPython('live_screener_optimizer.py', [], 25 * 60_000)
     .catch(e => T.fail('live_screener_optimizer', e));
 
   // 8b. Retrain the ML win-probability classifier on the same freshly-resolved outcomes.
@@ -137,7 +150,11 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; skippe
   // 9. Auto-backtest top combinations so frontend cockpit always has fresh performance data
   await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5'], 10 * 60_000)
     .catch(e => T.fail('backtest_live_screener', e));
-  await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5', '--intraday'], 10 * 60_000)
+  // 30 min (AF-20260917-21, measured): the 10-min budget killed this on 2026-09-17 at
+  // exactly 600000ms; its swing sibling above kept passing, so only the intraday leg was
+  // under-ceiling. Same measured-not-guessed rule as live_screener_ml_ranker's 10->30min
+  // bump two steps above (AF-20260911-16).
+  await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5', '--intraday'], 30 * 60_000)
     .catch(e => T.fail('backtest_live_screener_intraday', e));
 
   await T.runQuiet('screener-classification', async () => {
@@ -289,10 +306,12 @@ export async function registerSyncJobs(connection: any) {
     connection,
     queueName: QUEUE_SCREENER_PERFORMANCE,
     jobName: 'screener-performance-daily',
-    // 2:00 AM IST (20:30 UTC), Tue-Sat -- i.e. after each weekday's ml-daily-ops chain
-    // finishes (~12:00 AM) and well before unified-ranker (7:30 AM), in an otherwise
-    // empty window. This job runs 10 sequential Python steps (~145 min of budget), so it
-    // needs one; at its old slot it collided with the EOD cluster.
+    // 10:10 PM IST (16:40 UTC), Mon-Fri (the `40 16 * * 1-5` repeat below is the operative
+    // schedule). The old comment ("2:00 AM IST, Tue-Sat") described a slot the code had
+    // already moved away from — MONITOR_SCRIPTS' own entry was corrected to 40 16 * * 1-5
+    // on 2026-07-31; this comment was not, until now. This job runs 12 sequential Python
+    // steps (~258 min of budget after AF-20260917-21's measured raises), so it needs the
+    // long lockDuration below.
     //
     // Was `every: 24h`, which is NOT a wall-clock schedule -- it fires 24h after the last
     // run, so the time DRIFTS on every restart. Deliberately NOT moved ahead of
@@ -309,13 +328,18 @@ export async function registerSyncJobs(connection: any) {
     processor: processScreenerPerf,
     monitorName: 'screener-performance',
     concurrency: 1,
-    // processScreenerPerf runs 10 sequential runPython steps (30+5+20+45+5+2+3+20+5+10 =
-    // 145 min of individual timeouts) plus an in-process classifyAllScreeners() -- the
-    // previous 20-min lockDuration was only enough for step 1 alone, so BullMQ correctly
+    // processScreenerPerf runs 12 sequential runPython steps (30+5+20+45+30+10+3+20+25+30+
+    // 10+30 = 258 min of individual timeouts) plus an in-process classifyAllScreeners() --
+    // the previous 20-min lockDuration was only enough for step 1 alone, so BullMQ correctly
     // considered the worker dead partway through step 3-4 on every run, moving the job
     // back to "wait" and eventually failing it with "stalled more than allowable limit"
     // regardless of whether the Python side would have actually succeeded.
-    lockDuration: 180 * 60_000,
+    // 180 -> 270 min (AF-20260917-21): the lock must exceed the SUM of the step budgets
+    // (AF-20260912-16's rule), and the old comment's 145-min sum both undercounted (it
+    // omitted live_screener_ml_ranker's 30 min and one backtest 10) and was invalidated by
+    // this pass's measured budget raises (features 5->30, rotation 2->10, optimizer 5->25,
+    // backtest-intraday 10->30). 270 covers the 258-min sum.
+    lockDuration: 270 * 60_000,
     lockRenewTime: 20 * 60_000,
     monitorFn: updateMonitorState,
     suppressLockErrors: true,

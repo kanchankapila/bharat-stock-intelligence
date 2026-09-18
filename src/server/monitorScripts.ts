@@ -335,7 +335,10 @@ export const MONITOR_SCRIPTS = [
     queueName: 'screener-performance',
     staleLimitHours: 26,
     cronPatterns: ['40 16 * * 1-5'],
-    graceMinutes: 180,
+    // 180 -> 300 (AF-20260917-21): the chain's step budgets now sum to 258 min, so a
+    // legitimate near-budget run ends ~20:50 UTC -- past the old 19:40 UTC deadline
+    // (16:40 + 180min) and would false-flag 'late' on its heaviest evenings.
+    graceMinutes: 300,
   },
   {
     id: 'company-profiles-sync',

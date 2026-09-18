@@ -14,6 +14,7 @@
 import { buildDailyDigest } from '../jobWatchdog';
 import { telegramService } from '../telegramService';
 import { registerRepeatableJob } from './registerJob';
+import { dbGet } from '../dbAsync';
 
 export const QUEUE_JOB_DIGEST = 'job-digest';
 export const QUEUE_JOB_DIGEST_MORNING = 'job-digest-morning';
@@ -29,7 +30,56 @@ async function processJobDigest(): Promise<void> {
   }
 }
 
+/**
+ * AF-20260917-20: the digest's SQL reads MAX(substring(computed_at,1,10)) — whichever DATE is
+ * newest in unified_recommendations, however old. The ranker (17:00 UTC) regularly finishes
+ * 15-40+ min after this digest's 17:10 UTC slot (measured: 17:11:07 success stamp on 09-15,
+ * 17:42:57 on 09-16, timeout 17:30+45min on 09-17), so the digest raced it by design and
+ * silently shipped YESTERDAY's ranking whenever the ranker ran long or failed — exactly what
+ * happened 2026-09-17 (zero 09-17 rows; digest sent anyway at 17:10).
+ *
+ * Gate: before sending, require that the newest unified_recommendations date is TODAY's
+ * logical trading date AND was generated within the last 6 hours (a morning generated_at
+ * with today's date, e.g. a closed-day-early run, is also acceptable). Today's date is taken
+ * from technical_signals (written by ml-daily-ops and the technical scanner), NOT
+ * date.today(), so a Friday-evening server in any TZ still matches the platform's own
+ * trading-day notion. If the gate fails, the digest records a SKIP (heartbeat 'success' with
+ * the reason — there is nothing wrong with the digest; its INPUT is not ready) instead of
+ * sending a stale ranking with no marker at all.
+ */
+async function unifiedRankingIsFresh(): Promise<boolean> {
+  try {
+    const ur = await dbGet<{ generated_at: string; d: string }>(
+      `SELECT MAX(generated_at)::text AS generated_at,
+              (MAX(generated_at) AT TIME ZONE 'Asia/Kolkata')::date::text AS d
+       FROM unified_recommendations`);
+    if (!ur?.d || !ur.generated_at) return false;
+    const sig = await dbGet<{ d: string }>(
+      `SELECT MAX(date)::text AS d FROM technical_signals`);
+    // Both must agree on the trading date, and the rank must be younger than 6h.
+    if (ur.d !== sig?.d) return false;
+    const ageMs = Date.now() - new Date(ur.generated_at.endsWith('Z') ? ur.generated_at : ur.generated_at + 'Z').getTime();
+    return ageMs >= 0 && ageMs < 6 * 60 * 60 * 1000;
+  } catch (e) {
+    // If the gate itself cannot run, do NOT block the digest on it — degrade to the old
+    // behaviour and say so in the log. A monitoring outage must not silence the digest.
+    console.warn('[QUEUE] recommendations-digest freshness gate errored, sending anyway:', (e as Error).message);
+    return true;
+  }
+}
+
 async function processRecommendationsDigest(): Promise<void> {
+  const fresh = await unifiedRankingIsFresh();
+  if (!fresh) {
+    const msg = 'SKIPPED: unified_recommendations does not hold a fresh ranking for the current '
+      + 'trading date (unified-ranker still running or failed — see its heartbeat; AF-20260917-20 gate)';
+    console.warn('[QUEUE] recommendations-digest', msg);
+    // Return the StepTracker-style verdict rather than throwing: registerRepeatableJob's
+    // completed handler turns { success:false, failedSteps } into a 'failed' heartbeat whose
+    // message names the gate, distinguishing "input not ready" from "nothing sent" — the same
+    // surface AF-20260910-03 gave company-profiles-sync.
+    return { success: false, failedSteps: [msg] } as unknown as void;
+  }
   const { sendRecommendationsDigest } = await import('../telegramRecommendations');
   const res = await sendRecommendationsDigest();
   if (!res.sent && res.picks > 0) {

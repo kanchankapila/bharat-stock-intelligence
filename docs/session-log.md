@@ -32,12 +32,12 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 - `npx tsc --noEmit` → exit 0.
 - `npx vitest run` on jobRegistryCronMirror + jobPipelineOrdering + jobRegistryGraceMinutesConsistency + dataQualityChecks → **360 passed / 0 failed** (4 files).
 
-**Open items (blocking reason)**
-- Deploy the AF-20 + AF-24 fixes (pm2 restart) — **User Decision** (production restart on a `critical: true` surface).
-- Split/parallelise `ml-daily-ops`' 13 failing steps out of its 210-min serial chain — **User Decision** (needs budget re-derivation; a 13-step serial chain cannot fit).
-- Stagger the 23:00–01:30 IST window: `trendlyne-catchup`'s all-day `*/20 * * * *` (~39 min of the window) and `data-quality-daily`'s unindexed scans on 17M-row tables — **Sequential** (after AF-23 index work, to avoid adding load while measuring).
-- `market_holidays` future=0 (max 2026-09-14) — **Evidence** (NSE `api/holiday-master` returns HTTP 200 with a 0-byte body even with a warmed curl_cffi session; nsearchives mirrors 404).
-- Manually trigger a `unified-ranker` run so the next session has a fresh ranking — **Calendar** (needs the restart to load the new budget first).
+**Open items (blocking reason)** — status updated 2026-09-18 ~08:45 IST; full narrative in the entry at the bottom of this file and in `docs/audit-findings.md` ("2026-09-18 authorized deployment + restructure session").
+- ~~Deploy the AF-20 + AF-24 fixes (pm2 restart)~~ — **RESOLVED**: bharat-server restarted 08:39 IST (pid 49784); Redis verified one repeatable per queue with the new patterns, no stale keys.
+- ~~Split/parallelise `ml-daily-ops`' 13 failing steps out of its 210-min serial chain~~ — **RESOLVED (phase 1)**: all 13 step budgets raised to the file's documented batch floor (60s→5min … 30→40min), each tagged AF-20260917-24; parent 3.5h/4h/270min deliberately unchanged with the re-derivation decision rule recorded in-code. Splitting/parallelising remains available if a clean night still walls.
+- ~~Stagger the 23:00–01:30 IST window~~ — **RESOLVED**: `trendlyne-catchup` `*/20 * * * *` → `*/15 0-15,20-23 * * *` (peak excluded; throughput 72→80 slices/day); `data-quality-daily` `30 17 * * *` → `30 21 * * *` (23:00→03:00 IST, same logical trading day). AF-23's unindexed scans are now load-bearing for the 03:00 slot — still open, **Sequential**.
+- `market_holidays` future=0 (max 2026-09-14) — still open, **Evidence** (NSE `api/holiday-master` returns HTTP 200 with a 0-byte body even with a warmed curl_cffi session; nsearchives mirrors 404; no registry alternate).
+- ~~Manually trigger a `unified-ranker` run~~ — **RESOLVED**: manual run SUCCESS in 11.4 min; **1,890 rows with computed_at=2026-09-18** (session 09-18 had zero ranking before it).
 
   - No application code, schedules, models, or services were changed. Probes are read-only (SET statement_timeout 8s, readonly transactions).
 - **Evidence**: `unified_recommendations` max(generated_at) = 2026-09-16 17:31 UTC (zero rows for 09-17 as of 18:18 UTC); unified-ranker timeout stderr (2,352-candidate RL-gate scan); 7-day job rollup (news-sentiment 3,263 runs/3 fails healthy; intraday-fetcher 96/1; unified-ranker 7/2; screener-performance 8/4; ml-weekly-retrain 4/3); freshness sweep — EOD/intraday/technical/feature/fundamentals/analyst/FII-DII/delivery/deals/options/FNO/macro/screeners/preopen/breadth all fresh to 2026-09-17; gaps: gdelt 09-13, fintrend 08-26, engine_composite 09-11, market_holidays ≤06-26, insider_transactions 05-02, bulk_deals 05-19.
@@ -9319,3 +9319,14 @@ overlapped a 1000-symbol live fetch and several vendor probes; the isolated re-r
 not a regression — but it is worth noting that I committed `b140e26d` after re-running only the two
 files I had touched rather than the full suite, which is exactly the shortcut that lets this kind
 of thing through.
+
+## 2026-09-18 — Cline — authorized deploy + AF-24 restructure (ranker gap closed, 13 step budgets, 2 crons re-timed)
+
+**Trigger:** user said "do it" to: pm2 restart → trigger one unified-ranker run → tackle the two AF-24 user-decision items as a restructure session.
+
+**Done:** (1) Restarted bharat-server 08:39 IST pre-market (pid 49784). (2) Manual unified-ranker via scripts/trigger_job.mjs — SUCCESS 11.4 min, **1,890 rows computed_at=2026-09-18** (session 09-18 had zero ranking before this; prior entry was computed_at 09-17). AF-20's budget/make-up fixes now loaded; non-recursive make-up guard observed working live on an orphan. (3) Raised all 13 failed ml-daily-ops step budgets to the file's documented batch floor (60s→5min … 30→40min), each commented with the 09-17 evidence and tagged AF-20260917-24; parent 3.5h/4h/270min deliberately unchanged (decision rule documented in-code). (4) De-conflicted the 21:30–01:30 IST peak: trendlyne-catchup `*/20`→`*/15 0-15,20-23` (peak excluded, throughput 72→80 slices/day), data-quality-daily `30 17`→`30 21` (23:00→03:00 IST, same logical trading day); jobRegistry cronPatterns updated in lockstep.
+
+**Evidence:** tsc exit 0; vitest 360/360 (CronMirror + GraceMinutesConsistency + PipelineOrdering + dataQualityChecks); Redis post-boot shows exactly one repeatable per queue with the new patterns and no stale keys (scratch_verify/inspect_repeatables.mjs); ranker rows verified read-only (scratch_verify/verify_ranker_fix.py); logs in scratch_verify/{tsc,vitest}_restructure.log. Full narrative in docs/audit-findings.md "2026-09-18 authorized deployment + restructure session".
+
+**Open (blocking reason):** market_holidays future=0 — no authoritative H2-2026 source (Evidence; NSE holiday-master returns 200/empty even warmed, no registry alternate); AF-23 unindexed scans now load-bearing for the 03:00 dq slot (Sequential); tonight is the first real test — check ml-daily-ops <210min/0 failed steps and fno_rollover same-day (Calendar).
+
