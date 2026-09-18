@@ -37,24 +37,12 @@ Run standalone:
     python intraday_fetcher.py --lookback-days 30   # backfill 30 days
     python intraday_fetcher.py --symbols INFY TCS   # specific symbols
 """
-import polars as pl
 
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class IntradayFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class IntradayFetcherBaseFetcher(BaseFetcher[IntradayFetcherSchema]):
-    fetcher_name = 'IntradayFetcher'
-    domain = 'niftytrader.in'
-    schema = IntradayFetcherSchema
-    min_interval_sec = 0.5
-
 
 import argparse
 import datetime
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -324,8 +312,11 @@ def _fetch_live(symbol: str, from_ts: int, to_ts: int, countback: int = 500) -> 
         data = resp.json()
         if data and data.get("t"):
             return data
-    except Exception:
-        pass
+    except Exception as exc:
+        # Return None is the contract, but the caller cannot tell an empty window from a
+        # failed request -- and for intraday bars those are opposite conclusions about the
+        # market. Name the symbol so a missing session is traceable.
+        print(f"[Intraday] live fetch failed for {symbol}: {exc}", file=sys.stderr)
     return None
 
 
@@ -509,9 +500,3 @@ if __name__ == "__main__":
     parser.add_argument("--symbols", nargs="*", help="NSE symbols to fetch (default: all with mcsymbol)")
     args = parser.parse_args()
     run(lookback_days=args.lookback_days, symbols=args.symbols)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

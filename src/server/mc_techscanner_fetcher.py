@@ -20,26 +20,14 @@ already exist for the latest date (the grid-ensurer guarantees full-universe cov
 Run:  python mc_techscanner_fetcher.py
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class McTechscannerFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class McTechscannerFetcherBaseFetcher(BaseFetcher[McTechscannerFetcherSchema]):
-    fetcher_name = 'McTechscannerFetcher'
-    domain = 'moneycontrol.com'
-    schema = McTechscannerFetcherSchema
-    min_interval_sec = 0.5
-
 
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
+from mc_symbol_map import build_mc_to_symbol
 from db_compat import connect
 from as_of import logical_write_floor
 import sys
@@ -113,9 +101,12 @@ def run() -> int:
     if not latest:
         print("[MCScan] no OHLCV rows.")
         return 0
-    sc2sym = {r["mcsymbol"]: r["symbol"] for r in conn.execute(
+    # NOT a dict comprehension: 62 mcsymbols map to more than one NSE symbol (measured live
+    # 2026-09-18), so `{r["mcsymbol"]: r["symbol"] for r in ...}` silently keeps whichever row
+    # came last -- e.g. KMF -> {KOTAK, KOTAKBANK, MAHINDRA}. See mc_symbol_map (AF-20260918-02).
+    sc2sym = build_mc_to_symbol(conn.execute(
         "SELECT symbol, mcsymbol FROM nse_stocks WHERE mcsymbol IS NOT NULL AND mcsymbol != ''"
-    ).fetchall()}
+    ).fetchall(), log=print)
 
     session = requests.Session()
     session.headers.update(HEADERS)
@@ -176,9 +167,3 @@ def run() -> int:
 
 if __name__ == "__main__":
     run()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

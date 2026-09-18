@@ -318,3 +318,47 @@ to the 2026-09-12 "host-wide 503" note in `recurring-bugs.md`; re-probe before t
 | §5 / §6 "drop-in production client" | a second generic HTTP client in `src/` duplicates existing fetcher helpers and bypasses the `live_datasource` / freshness mandates | reference it for header/payload shapes only; build the fetcher with `/onboard-data-source` |
 | §9 Recipe 1 `output_fields @> ARRAY['pe_ttm']` | `output_fields` is a template (caveat 2) | search `use_case` / the URL's `columns=` param, confirm in a real response |
 | §"File Location Reference" `file:///d:/Github/urls-explorer/...` | those links point at a different repo | the guide's copy here is the repo-root file; the CSV/XLSX live only in `urls-explorer` |
+
+## The alternate is often already in your own database — check the TABLE, not just the fetcher (2026-09-18)
+
+**Before concluding that no in-repo source can replace a decayed vendor field, enumerate every
+table with a column of that name and measure each one.** AF-20260917-07: Yahoo's
+`returnOnEquity` decayed from 86% to 6.1% coverage over six weeks. Four candidate tables carry an
+ROE column. I measured `investsights_factor_scores.roe` (Pearson 0.7727 vs yfinance, percent
+scale, sign flips), rejected it correctly, and **reported that no drop-in existed — which was
+wrong.** The right table was `investsights_fundamentals_history.return_on_equity`: **Pearson
+0.9608, same fraction scale, ZERO sign flips**, already fetched daily, already carrying its own
+`live_datasource` test and freshness check. Two tables from the SAME vendor held two different
+ROE definitions, and I measured the worse one.
+
+`SELECT table_name, column_name FROM information_schema.columns WHERE column_name ILIKE '%roe%'`
+takes one second and lists every candidate. Run it before saying "no alternate exists".
+
+**And check whether the constraint is the vendor or your own cap.** The real reason that table
+only had 288 symbols was a `--limit 300` default in its fetcher, carrying a `ponytail:` note
+saying *"no confirmed rate-limit budget from this provider yet ... widen once a real run's timing
+is known."* Nobody had taken that measurement. Taken: **1000/1000 symbols stored in 129 seconds,
+zero failures**; six arbitrary symbols from outside the cached universe returned 200 with real
+data. Coverage went 287 -> 929 symbols from one run. **A self-documented placeholder cap is a
+measurement someone deferred, not a vendor limit — and it will read as "this source doesn't have
+the data" forever until someone runs it.** Tell: a `--limit`/`LIMIT` default that is a round
+number with a comment explaining why it is provisional.
+
+## Isolating headers: `sec-fetch-site` has a WRONG value as well as a right one (2026-09-18)
+
+`recurring-bugs.md` records that adding a token can LOWER access. The same is true of a header
+with the wrong VALUE, and it is easier to walk into. Probing NiftyTrader with
+`sec-fetch-site: same-site` returned **403 on all four routes** — which reads exactly like a
+vendor-wide regression, and was very nearly reported as one. With **no headers at all**,
+`symbol/top-gainers-data` returns 200/25KB and `option/option-chain-data` 200/145KB. The correct
+value is `same-origin` (`niftytraderService.ts` documents this from its own 2026-09-08 probe).
+
+**So the isolation ladder must include the empty set.** Probe bare (no headers) first, then add
+one header at a time. Starting from a "realistic browser header set" and subtracting is how a
+wrong value hides: every variant carries it, so every variant fails identically and the vendor
+looks dead.
+
+**Also distinguish 405 from 401 before concluding a route is gated.** NiftyTrader's two screener
+routes answer **405 Method Not Allowed** to a GET — they are POST endpoints. Only when POSTed
+with the real payload and a valid Bearer token do they return 401, which is what actually proves
+the Prime gate. A 403/405 on a GET proves nothing about entitlement.

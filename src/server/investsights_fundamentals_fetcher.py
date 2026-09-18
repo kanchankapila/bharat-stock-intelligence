@@ -54,10 +54,20 @@ ENDPOINT SHAPE -- verified live, do not "fix" these
 
 UNIVERSE
 --------
-`nse_stocks WHERE status = 'ACTIVE'`, ranked by `market_cap DESC`, bounded by `--limit`
-(default 300) -- ponytail: no confirmed rate-limit budget from this provider yet, this cap
-keeps a first run bounded and observable; widen once a real run's timing is known. `--symbol`
-overrides for a single-stock run (used by the live_datasource test).
+`nse_stocks WHERE status = 'ACTIVE' AND market_cap IS NOT NULL`, ranked by `market_cap DESC`,
+bounded by `--limit` (default 2500, i.e. the whole reachable universe -- 2,052 rows qualify).
+`--symbol` overrides for a single-stock run (used by the live_datasource test).
+
+The default was 300 with a `ponytail:` note saying "no confirmed rate-limit budget from this
+provider yet ... widen once a real run's timing is known". That measurement was taken on
+2026-09-18: **--limit 1000 completed 1000/1000 symbols stored in 129 seconds with zero
+failures** (4 HTTP calls per symbol = ~4,000 requests, 8 workers, RATE_LIMIT_SEC 0.3). At that
+rate the full 2,052-symbol universe costs ~4.4 min against the caller's 20-min budget in
+queues.ts, so the cap is lifted. Why it mattered: this table is the only in-repo source of a
+full-coverage `return_on_equity` that agrees with the yfinance value (Pearson 0.9608, same
+fraction scale, ZERO sign flips over the overlap), and Yahoo's own `returnOnEquity` has decayed
+to 6.1% of the universe (AF-20260917-07). The 300 cap was the binding constraint on ROE
+coverage, not the vendor.
 
 AS-OF DISCIPLINE
 -----------------
@@ -67,10 +77,9 @@ this fetcher can run post-close (evening market-metadata batch, matching its sib
 crossing class documented in `recurring-bugs.md`.
 
 Run:
-  python investsights_fundamentals_fetcher.py --limit 300
+  python investsights_fundamentals_fetcher.py --limit 2500
   python investsights_fundamentals_fetcher.py --symbol RELIANCE
 """
-import polars as pl
 import argparse
 import sys
 import time
@@ -79,22 +88,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from pydantic import BaseModel
 
-from base_fetcher import BaseFetcher
 
-
-class InvestSightsFundamentalsSchema(BaseModel):
-    symbol: str
-    dcf_valuation: float | None = None
-    piotroski_score: float | None = None
-    altman_z_score: float | None = None
-    pe_ratio: float | None = None
-
-
-class InvestSightsFundamentalsFetcher(BaseFetcher[InvestSightsFundamentalsSchema]):
-    fetcher_name = "InvestSightsFundamentalsFetcher"
-    domain = "investsights.in"
-    schema = InvestSightsFundamentalsSchema
-    min_interval_sec = 0.5
 
 from db_compat import connect, ConnWrapper
 from fetch_utils import retry_get
@@ -322,7 +316,7 @@ def _fetch_one(session: requests.Session, symbol: str):
         return symbol, None, None, None, None, e
 
 
-def run(symbol_filter: str | None = None, limit: int = 300) -> dict:
+def run(symbol_filter: str | None = None, limit: int = 2500) -> dict:
     session = requests.Session()
     session.headers.update(HEADERS)
     conn = connect()
@@ -358,7 +352,7 @@ def run(symbol_filter: str | None = None, limit: int = 300) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--symbol", default=None)
-    ap.add_argument("--limit", type=int, default=300)
+    ap.add_argument("--limit", type=int, default=2500)
     args = ap.parse_args()
     result = run(symbol_filter=args.symbol, limit=args.limit)
     return 0 if result["stored"] > 0 else 1
@@ -366,9 +360,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

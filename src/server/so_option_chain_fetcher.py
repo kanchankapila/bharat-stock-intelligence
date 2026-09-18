@@ -26,20 +26,7 @@ Run:
   python so_option_chain_fetcher.py --delay 0.5    # seconds between requests (default 0.3)
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class SoOptionChainFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class SoOptionChainFetcherBaseFetcher(BaseFetcher[SoOptionChainFetcherSchema]):
-    fetcher_name = 'SoOptionChainFetcher'
-    domain = 'general'
-    schema = SoOptionChainFetcherSchema
-    min_interval_sec = 0.5
-
 
 import argparse
 import time
@@ -189,8 +176,12 @@ def _get_nearest_expiry(symbol: str, exchange: str = "NSE") -> str:
         )
         if rows:
             return rows[0]["expiry"][:10]
-    except Exception:
-        pass
+    except Exception as exc:
+        # Falls back to last_tuesday_expiry(), which is a GUESS. Logging matters here because
+        # a wrong expiry silently repoints the whole option-chain fetch at a contract that may
+        # not exist, and the fallback is indistinguishable from a correct lookup without this.
+        print(f"[SOOptionChain] expiry lookup failed for {symbol}/{exchange}, "
+              f"falling back to last-Tuesday guess: {exc}", file=sys.stderr)
     return last_tuesday_expiry()
 
 
@@ -483,9 +474,3 @@ if __name__ == "__main__":
 
     sym = args.symbol or args.index
     run(target_symbol=sym, expiry=args.expiry, delay=args.delay)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -31,8 +31,6 @@ Run:  python ml_ensemble.py
       python ml_ensemble.py --retrain-full      # discard saved model, retrain from scratch
       python ml_ensemble.py --min-samples 30
 """
-import polars as pl
-from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import os, sys, json, math, datetime, argparse, pickle, shutil, warnings
 import re
@@ -4388,9 +4386,3 @@ if __name__ == "__main__":
     run(do_train=do_train, do_score=do_score,
         retrain_full=args.retrain_full, min_samples=args.min_samples, label=args.label,
         do_tune=args.tune, dry_run=args.dry_run)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

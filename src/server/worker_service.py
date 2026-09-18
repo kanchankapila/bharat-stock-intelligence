@@ -6,7 +6,6 @@ and ingestion health monitoring.
 """
 
 import logging
-import polars as pl
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -83,13 +82,6 @@ def get_dlq_entries(limit: int = 20):
         return {"entries": [dict(r) for r in rows]}
     finally:
         conn.close()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
-
 
 if __name__ == "__main__":
     # Without this block the module only DEFINES `app` and exits 0 immediately -- which

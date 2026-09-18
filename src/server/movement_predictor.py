@@ -37,7 +37,6 @@ Run:
     python movement_predictor.py --score             # write today's movement_probability
 """
 
-import polars as pl
 import argparse
 import datetime
 import json
@@ -660,9 +659,3 @@ if __name__ == "__main__":
         score()
     if not (args.train or args.report or args.score):
         train(report_only=True, enrich=True)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

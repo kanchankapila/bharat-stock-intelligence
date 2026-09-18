@@ -72,6 +72,14 @@ Each of these has bitten this repo **more than once**. Full signatures in
 A failing external call is **my code broke** / **their code broke** / **their server is down**.
 Say which. The 2026-08-17 live-suite run had 3 failures and only 1 was an upstream blip.
 
+**If the failure is upstream (route moved, 401/403/404, or schema change):**
+Do NOT conclude the vendor is permanently dead or immediately ask the user. Follow the mandatory 3,000+ data source lookup sequence:
+1. Query `market_endpoint_registry` in PostgreSQL (`bharat_intel` on `:5433`, 3,408 live working endpoints; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`).
+2. Run `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` against `url_endpoints` (830 templates).
+3. Check `unique_urls.txt` (3,103 raw URLs) and `DATA_FETCHING_GUIDE.md` for proven headers/payloads.
+4. Grep the repo for sibling endpoints and isolate minimum required headers.
+5. Only if all alternates are exhausted, ask the user with per-route evidence.
+
 ## 5. Deliver
 
 1. **Code functionality breakdown** — what the path actually does, per stage.

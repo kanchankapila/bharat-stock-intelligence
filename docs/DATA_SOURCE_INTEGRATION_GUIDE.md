@@ -877,6 +877,51 @@ duplicate, or exploration-only. A new project should import the normalized corpu
 retain the original URL and capture status, and promote a template only after a real-network shape
 test, parser test, idempotent writer, and freshness monitor exist.
 
+### 9.5 3,000+ Endpoint Discovery Registry (`market_endpoint_registry`)
+
+**Standing rule (added 2026-09-13):** Whenever a data source stops returning data (401, 403, 404, empty payload) or you need to onboard a new source or metric, **query the discovery registry in PostgreSQL (:5433) before grepping the repo, seeking web scrapers, or asking the user**.
+
+Populated in the `bharat_intel` database on `:5433`, this discovery registry holds:
+
+| Object | Rows (live) | What it is |
+|---|---|---|
+| `market_endpoint_registry` | **3,408** (2,864 GET / 544 POST) | One row per endpoint that answered HTTP 200: `provider`, `data_domain`, `category`/`sub_category`, `scope`, `update_frequency`, `use_case` (prose), `target_url`, `url_template`, `required_params[]`, `request_headers`/`request_payload` (jsonb), `auth_type`, `output_fields[]`, `latency_ms`, `response_bytes`, `sample_info`, `validated_at`. |
+| `url_candidates_validation_audit` | **4,477** (3,408 ok / 1,069 failed) | Every candidate probed, including failures with `status_code`/`error_msg` — check before re-probing a URL already proven dead. |
+| `v_working_market_endpoints` | View | All verified working endpoints. |
+| `v_stock_screeners` | **2,709** rows | Direct projection of all screener endpoints across Trendlyne, MoneyControl, ETnow, etc. |
+| `v_fno_endpoints` | **82** rows | Dedicated derivatives, PCR, max pain, and option chain endpoints. |
+| `v_endpoint_discovery_summary` | View | Summary roll-up by provider and domain. |
+
+#### How to Query
+Indexes exist on `output_fields`, `required_params`, and full-text `use_case || endpoint_name || category`:
+
+```sql
+-- Search by intent/feature:
+SELECT provider, http_method, target_url, url_template, required_params, auth_type, use_case
+FROM market_endpoint_registry
+WHERE to_tsvector('english', use_case||' '||endpoint_name||' '||category) @@ to_tsquery('english', 'option & chain');
+
+-- Search by category and scope:
+SELECT provider, target_url, url_template, use_case
+FROM market_endpoint_registry
+WHERE category = 'Fundamental Financials & Valuation' AND scope = 'SINGLE_STOCK';
+
+-- Check if an endpoint was already tried and why it failed:
+SELECT status_code, error_msg, validated_at
+FROM url_candidates_validation_audit
+WHERE url ILIKE '%<host>%';
+```
+
+#### Calling & Parsing Specifications
+For exact header dictionaries, session cookie initialization (e.g. SapphireBroking, NSE), POST request bodies, and Trendlyne matrix parsing, consult [`DATA_FETCHING_GUIDE.md`](../DATA_FETCHING_GUIDE.md) at the repository root.
+
+**Mandatory Lookup Order**:
+1. `market_endpoint_registry` (3,408 verified endpoints)
+2. `url_endpoints` via `python -m url_explorer.ingest --find-alternates "<targets>"` (830 templates)
+3. `unique_urls.txt` (3,103 raw URLs) / `DATA_FETCHING_GUIDE.md`
+4. Sibling routes in repository fetchers
+5. Only then ask the user with the per-route breakdown.
+
 ## 10. Scheduling and Ownership
 
 The source of truth for scheduling is the BullMQ registration code, not prose documentation:

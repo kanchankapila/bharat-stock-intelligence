@@ -48,7 +48,6 @@ Run:
   python mc_stockvitals_history_fetcher.py --symbol BEL
 """
 
-import polars as pl
 
 import argparse
 import time
@@ -260,20 +259,3 @@ if __name__ == "__main__":
     main()
 
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class McStockvitalsHistoryFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class McStockvitalsHistoryFetcherBaseFetcher(BaseFetcher[McStockvitalsHistoryFetcherSchema]):
-    fetcher_name = 'McStockvitalsHistoryFetcher'
-    domain = 'moneycontrol.com'
-    schema = McStockvitalsHistoryFetcherSchema
-    min_interval_sec = 0.5
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

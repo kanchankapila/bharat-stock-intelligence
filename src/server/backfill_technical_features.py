@@ -31,7 +31,6 @@ Usage:
   python backfill_technical_features.py
   python backfill_technical_features.py --limit 500   # process first 500 pairs
 """
-import polars as pl
 import sys, argparse
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -495,8 +494,3 @@ if __name__ == '__main__':
     else:
         run(limit=args.limit)
 
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

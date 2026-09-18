@@ -22,8 +22,6 @@ Usage:
 
 NOTE: this is deliberately read-only except for its own results table.
 """
-import polars as pl
-from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import argparse
 import datetime
@@ -497,9 +495,3 @@ if __name__ == "__main__":
 
 
 
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

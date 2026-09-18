@@ -7,7 +7,6 @@ docstring for the full rule (must beat the active version's roc_auc by a margin,
 refuses anything with diverged/non-finite weights).
 """
 
-import polars as pl
 import os
 import subprocess
 import sys
@@ -360,9 +359,3 @@ if __name__ == "__main__":
     # SKIPPED (concurrent-lock) is not a failure, so gate only on 'error'.
     if result.get("error"):
         sys.exit(1)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

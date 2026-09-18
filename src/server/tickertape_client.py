@@ -17,7 +17,6 @@ sid is resolved via scripts/stocklist.json's tickertape_sid field
 lookup — see that script for how sid is obtained.
 """
 
-import polars as pl
 import json
 from pathlib import Path
 
@@ -116,11 +115,4 @@ def fetch_screener_query(session: requests.Session | None = None,
     except Exception as e:
         print(f"  [Tickertape screener query] error at offset={offset}: {e}")
         return []
-
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
 

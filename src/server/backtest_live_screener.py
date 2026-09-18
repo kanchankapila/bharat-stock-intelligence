@@ -6,8 +6,6 @@ Backtests custom combinations of NiftyTrader live screener filters using
 resolved historical outcomes (returns over 1d, 3d, 5d) and compares vs Nifty 50.
 Stores runs in `backtesting_runs` table so they are visible in UI dashboards.
 """
-import polars as pl
-from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import os
 import sys
@@ -388,8 +386,3 @@ if __name__ == '__main__':
     else:
         parser.print_help()
 
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

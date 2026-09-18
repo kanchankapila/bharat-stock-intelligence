@@ -139,6 +139,11 @@ def backup() -> None:
 
     cmd = _docker_base(interactive=False) + [
         "pg_dump", "-U", PG_USER, "-d", PG_DB, "-Fc", "--no-owner",
+        # AF-20260917-06: disposable test schemas can disappear between dump
+        # enumeration and locking. Exclude only the UUID-shaped fixture names;
+        # never use --schema=public (that would omit TimescaleDB chunk data).
+        "--exclude-schema=pytest_[0-9a-f]{12}",
+        "--exclude-schema=vitest_[0-9a-f]{12}",
     ]
     print(f"[BACKUP] dumping {PG_DB} -> {out.name} ...")
     with open(out, "wb") as fh:

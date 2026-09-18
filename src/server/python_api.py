@@ -5,7 +5,6 @@ except Exception:
     pass
 
 import asyncio
-import polars as pl
 import os
 import sys
 import logging

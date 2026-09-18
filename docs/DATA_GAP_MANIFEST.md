@@ -19,6 +19,7 @@ the time it stopped being updated, and the rest have since shipped too (`stock_f
 - **New-vendor onboarding discipline** (what to check before adding another feed) — `.claude/
   rules/data-sources.md`'s vendor-onboarding-freeze section, written specifically because more
   data kept not helping.
+- **Available data source discovery (3,000+ endpoints)** — `.claude/rules/data-sources.md` §"Endpoint discovery registry" and `DATA_FETCHING_GUIDE.md`: query `market_endpoint_registry` in Postgres :5433 (3,408 endpoints), `url_endpoints` (830 templates via `--find-alternates`), and `unique_urls.txt` (3,103 raw URLs) before proposing new data sources or scrapers.
 - **Open work items** — `docs/audit-findings.md`.
 
 Full prior content (255 lines: the B1–B4/C1–C3/D/E1–E6 gap catalog, the sprint plan, the quant

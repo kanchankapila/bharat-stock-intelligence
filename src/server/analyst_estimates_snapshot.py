@@ -10,7 +10,6 @@ Run:  python analyst_estimates_snapshot.py
       python analyst_estimates_snapshot.py --as-of 2026-06-22
       python analyst_estimates_snapshot.py --symbols RELIANCE,TCS
 """
-import polars as pl
 
 import argparse
 import datetime
@@ -21,6 +20,8 @@ import requests
 
 from db_compat import execute, query_all
 from fetch_utils import retry_get
+
+import sys
 
 # ── MoneyControl API endpoints (same ones mcApiService.ts wraps) ──────────────
 
@@ -129,8 +130,12 @@ def _mc_get(url: str, session: requests.Session) -> Optional[dict]:
         j = resp.json()
         if j.get("success") == 1:
             return j.get("data")
-    except Exception:
-        pass
+    except Exception as exc:
+        # Returns None, which callers read as "MC has no data for this symbol" -- that is also
+        # what a 403/timeout/malformed payload looks like. Without this the symbol silently
+        # falls back to the Yahoo path (or to NULL columns) with no trace of why.
+        print(f"[AnalystEstimates] MC fetch failed for {url.split('/')[-1][:40]}: {exc}",
+              file=sys.stderr)
     return None
 
 
@@ -175,8 +180,11 @@ def _fetch_symbol_hybrid(symbol: str, mcsymbol: str, session: requests.Session) 
             # training. Real counts arrive from the MoneyControl merge below
             # whenever MC has the symbol; if neither source has them they stay
             # NULL (honest unknown), never fabricated.
-    except Exception:
-        pass
+    except Exception as exc:
+        # Yahoo path failed; MC fills the gaps below. Logged rather than swallowed because the
+        # result is a HALF-POPULATED estimate row, and "which of the two sources failed" is
+        # exactly what an audit needs to tell a vendor outage from a parser regression.
+        print(f"[AnalystEstimates] Yahoo parse failed: {exc}", file=sys.stderr)
 
     if (result["target_mean"] is None or result["n_analysts"] is None
             or result["eps_est_next"] is None or result["buy_count"] is None) and mcsymbol:
@@ -283,8 +291,3 @@ if __name__ == "__main__":
     syms = [s.strip() for s in args.symbols.split(",")] if args.symbols else None
     run(as_of=args.as_of, symbols=syms)
 
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

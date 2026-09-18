@@ -139,6 +139,7 @@ Tests: `src/server/tests/test_analyst_estimates_snapshot.py` (24 cases).
 | Quarterly revenue/EPS/growth history (deep, 2005+) | **DalalOS table** (§3) | Largest, deepest; extend via MCP bridge |
 | Analyst targets/consensus/forward EPS | **Hybrid engine** (§5) | Fastest (2.6 min), widest coverage, daily |
 | Revenue estimates next-period | MC fallback inside hybrid | Only source carrying them |
+| New source onboarding / failing feed alternate | **Discovery Registry (3,000+ endpoints)** | `market_endpoint_registry` (3,408 live endpoints in Postgres), `url_endpoints` (830 templates via `--find-alternates`), `unique_urls.txt` (3,103 raw URLs) |
 
 ## 7. Operational notes
 
@@ -157,4 +158,12 @@ Tests: `src/server/tests/test_analyst_estimates_snapshot.py` (24 cases).
   rides the existing monthly ET budget. No new timeouts introduced.
 - Honest-unknown rule applies across all four pipelines: a missing symbol/figure is skipped
   and stays NULL — it is never fabricated, never backfilled with guesses.
+
+## 8. Master Discovery Registry for Onboarding & Alternates
+
+Whenever a pipeline's upstream provider fails or when onboarding new features:
+1. **Query `market_endpoint_registry` in PostgreSQL (:5433)**: 3,408 live verified endpoints across Trendlyne, MoneyControl, ETnow, NiftyTrader, SapphireBroking, and NSE. Check views `v_working_market_endpoints`, `v_stock_screeners` (2,709 screeners), and `v_fno_endpoints` (82 F&O endpoints).
+2. **Search `url_endpoints`**: `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server`.
+3. **Inspect `unique_urls.txt` (3,103 URLs) and `DATA_FETCHING_GUIDE.md`** for tested request shapes, session cookies, and response matrix structures.
+4. **Probe sibling routes in repository fetchers** before concluding an external source is dead or requesting user intervention.
 

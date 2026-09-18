@@ -21,6 +21,14 @@ Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC ba
 | Bulk / Block Deals | NSE + MoneyControl | `bulk_deals_fetcher.py` | Daily |
 | Screener Movers | Trendlyne / NSE | `mover_screener_fetcher.py` | 15m during market hours |
 
+### Endpoint Discovery Registry & Catalog (3,000+ Endpoints)
+The platform maintains a master discovery registry and URL corpus for onboarding new data sources and finding alternates whenever an existing source fails:
+- **`market_endpoint_registry`** (PostgreSQL `:5433`, 3,408 live working endpoints: 2,864 GET / 544 POST): master verified endpoint inventory with `target_url`, `url_template`, `required_params`, `auth_type`, `use_case`. Key views: `v_working_market_endpoints`, `v_stock_screeners` (2,709 screeners), `v_fno_endpoints` (82), `v_endpoint_discovery_summary`. Audit history: `url_candidates_validation_audit` (4,477 rows).
+- **`url_endpoints`** (PostgreSQL table): 830 consolidated templates carrying `feature_targets_json`. Query via `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server`.
+- **`unique_urls.txt` / `urls_v2.db`**: 3,103 deduplicated verified concrete URLs at repo root.
+- **`DATA_FETCHING_GUIDE.md`**: Master fetching reference for headers, session cookies, POST payload templates, and response matrices.
+**Mandatory Rule:** Always query `market_endpoint_registry` and `url_endpoints` before declaring an endpoint dead, building a scraper from scratch, or asking the user.
+
 ## Architecture Notes
 - **DB**: TimescaleDB hypertables (`stock_ohlcv`, `feature_store`, `signals`) — compression + retention policies active
 - **Jobs**: BullMQ on Redis — `pythonRunner.ts` enforces per-script memory ceilings (Job Objects on Windows)

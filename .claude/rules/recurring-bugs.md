@@ -260,6 +260,22 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   recorded `INFY returns 4 quarters (reported in USD)` as a documented quirk when it was the
   NYSE ADR.
 
+- **RECURRED 2026-09-18 (AF-20260918-02), from the DATABASE side rather than `stocklist.json`,
+  and this time on a Nifty 50 name.** Two live fetchers -- `eps_surprise_fetcher.py` and
+  `mc_techscanner_fetcher.py` -- built `{row["mcsymbol"]: row["symbol"] for row in rows}` over
+  `nse_stocks`. Measured: **2,340 rows carry an mcsymbol, only 2,274 codes are distinct, 62 codes
+  map to more than one symbol** -- `KMF -> {KOTAK, KOTAKBANK, MAHINDRA}`,
+  `TEL -> {TATAMOTORS, TMPV, TOUCHWOOD}`, `AI -> {AARTIIND, ARCHIDPLY}`. So MoneyControl's bulk
+  earnings for Kotak Mahindra Bank could be written against Mahindra, silently.
+  **The entry below was already in this file and the bug was still written twice**, which is the
+  argument for fixing it somewhere a future caller cannot miss: it now lives in shared
+  `src/server/mc_symbol_map.py` (`build_mc_to_symbol`, keeps singletons, drops and REPORTS
+  ambiguous codes), not as a paragraph. Same reasoning as `db_compat.reconnect()` -- a guard
+  re-typed per call site is a guard that will be missing from the next call site.
+  **Tell, cheapest first:** `SELECT count(*), count(DISTINCT <code>) FROM <table>` -- if those two
+  numbers differ, every dict comprehension over that column is lossy. Guarded by
+  `test_mc_symbol_map.py`'s source-derived scan for `["mcsymbol"]:`.
+
 - **A reverse map built from a provider-id column is ambiguous unless you prove the column is
   unique, and a dict comprehension silently resolves the ambiguity by file position.**
   `mcsymbol` in `stocklist.json` looks like a unique MoneyControl code and is not: **39 of 1,940

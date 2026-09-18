@@ -5,7 +5,6 @@ Provides dependency-aware task graphs with state preservation, automatic retries
 and step execution tracking for ingestion and ML pipelines.
 """
 
-import polars as pl
 import logging
 import time
 from typing import Any, Callable, Dict, List, Optional, Set
@@ -145,9 +144,3 @@ if __name__ == "__main__":
     pipeline = sys.argv[1] if len(sys.argv) > 1 else "daily_ml"
     res = run_pipeline(pipeline)
     print(json.dumps(res, indent=2))
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

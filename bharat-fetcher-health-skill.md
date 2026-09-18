@@ -57,7 +57,11 @@ This skill uses the `bharat-intelligence` MCP server which exposes:
    over the missed window with run_fetcher — the DLQ row itself cannot be
    replayed (payload_sample is truncated to 2000 chars).
 3. Monitor job_heartbeat / the next daily digest for the re-run's outcome
-4. If same fetcher fails repeatedly: check upstream data source
+4. If same fetcher fails repeatedly: check upstream data source.
+   **Lookup alternate working sources in the 3,000+ discovery registry:**
+   - Query `market_endpoint_registry` in Postgres (:5433, 3,408 live working endpoints; `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`).
+   - Run `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server` to check `url_endpoints` (830 templates).
+   - Check `unique_urls.txt` (3,103 raw URLs) and `DATA_FETCHING_GUIDE.md` for proven headers, cookies, and payload shapes.
 ```
 
 ### 4. Trading Holiday Awareness
@@ -73,7 +77,7 @@ Many jobs skip on trading holidays (NSE/BSE closed). Check:
 | `last_status: null` | Never ran | Check schedule, dependencies, manual run |
 | `last_error: timeout` | Budget too low | Increase lockDuration/timeout in job config |
 | `DLQ count > 0` | Partial failures | Re-run the missed window with `run_fetcher` (DLQ rows are not replayable), then check root cause |
-| `data_quality: FAIL` | Stale/freshness breach | Run fetcher manually, check source API |
+| `data_quality: FAIL` | Stale/freshness breach | Run fetcher manually; if upstream is dead/stale, query `market_endpoint_registry` (3,408 endpoints) / `url_endpoints` (`--find-alternates`) for active alternates |
 
 ## Integration with Hermes
 

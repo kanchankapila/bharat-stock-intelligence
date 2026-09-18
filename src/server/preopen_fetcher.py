@@ -12,20 +12,7 @@ backfilling iep_gap_pct + preopen_imbalance into technical_signals.
 Run:  python preopen_fetcher.py
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class PreopenFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class PreopenFetcherBaseFetcher(BaseFetcher[PreopenFetcherSchema]):
-    fetcher_name = 'PreopenFetcher'
-    domain = 'general'
-    schema = PreopenFetcherSchema
-    min_interval_sec = 0.5
-
 
 import datetime
 
@@ -180,14 +167,22 @@ def _nse_session():
             s.headers.update(NSE_HEADERS)
             s.get("https://www.nseindia.com/", timeout=10)
             return s
-        except Exception:
-            pass
+        except Exception as exc:
+            # Falling through is a real capability loss, not a cosmetic one: the plain
+            # requests session below has no TLS/JA3 impersonation, which is precisely what
+            # NSE's WAF rejects. Every downstream pre-open request then 403s and the fetch
+            # returns [] -- previously with nothing printed to explain why. See
+            # AF-20260911-10 for the same family (job reports success, data is absent).
+            print(f"[NSE PreOpen] impersonated session failed, falling back to plain "
+                  f"requests (expect 403s): {exc}", file=sys.stderr)
     s = requests.Session()
     s.headers.update(NSE_HEADERS)
     try:
         s.get("https://www.nseindia.com/", timeout=10)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Cookie priming failed. The endpoint calls below need the homepage cookie, so this
+        # is the difference between "no data published" and "we could not ask".
+        print(f"[NSE PreOpen] cookie priming failed: {exc}", file=sys.stderr)
     return s
 
 
@@ -448,9 +443,3 @@ def run() -> None:
 
 if __name__ == "__main__":
     run()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

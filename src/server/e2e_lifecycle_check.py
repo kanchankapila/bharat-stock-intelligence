@@ -31,7 +31,6 @@ so that step is universe-wide or nothing.
 Run:  backend-python/venv/Scripts/python.exe src/server/e2e_lifecycle_check.py
       ... --n 10 --symbols RELIANCE,INFY --run-ranker --json out.json
 """
-import polars as pl
 import argparse
 import json
 import subprocess
@@ -415,9 +414,3 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

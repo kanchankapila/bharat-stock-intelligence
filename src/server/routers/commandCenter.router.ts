@@ -47,7 +47,7 @@ export const commandCenterRouter = router({
       }
       if (input.horizon !== 'ALL') {
         query += ` AND timeframe = ?`;
-        params.push(input.horizon);
+        params.push(input.horizon.toUpperCase());
       }
       // trpc-surface-review, 2026-08-14: Postgres sorts NaN highest on ORDER BY DESC, so an
       // unscored/NaN row would rank #1 instead of last. No live NaN currently (dormant), but
@@ -137,7 +137,7 @@ export const commandCenterRouter = router({
       let horizonFilter = '';
       if (input.horizon !== 'ALL') {
         horizonFilter = ` AND ur.timeframe = ?`;
-        params.push(input.horizon);
+        params.push(input.horizon.toUpperCase());
       }
       let sectorFilter = '';
       if (input.sector) {

@@ -14,7 +14,6 @@ Table: screener_sector_rotation
 Run daily after screener_features_fetcher.py.
 """
 
-import polars as pl
 import json
 import datetime
 from collections import defaultdict
@@ -185,9 +184,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

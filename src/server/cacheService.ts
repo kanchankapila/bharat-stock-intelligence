@@ -141,6 +141,59 @@ export async function cacheDel(key: string): Promise<void> {
   }
 }
 
+/**
+ * Delete every cached entry whose key starts with `prefix`, from BOTH tiers. Returns the
+ * number of entries evicted.
+ *
+ * Why this exists (and why `cacheDel` alone was not enough): `fetchWithCache` call sites key
+ * on their own INPUT PARAMETERS, e.g. the corporate-actions calendar uses
+ * `fund:filed-corp-actions:${daysBack}:${daysForward}:${symbol}`. A background job that has
+ * just refreshed the underlying table cannot know which parameter combinations have been
+ * requested, so it has no exact key to pass to `cacheDel` — only a prefix.
+ *
+ * Concrete case this fixes: `investsights_corporate_actions_fetcher.py` refreshes
+ * nse_filed_corporate_actions daily, while fundamentals.router caches the same table for
+ * 1800 s. Without prefix invalidation the fetcher's own stated goal ("it should stay fresher
+ * than the thing it's checking") could not hold, because the month-old cache entry kept
+ * being served for up to 30 minutes after new filings landed.
+ *
+ * Uses cursor-based SCAN, NOT KEYS: KEYS is O(keyspace) and blocks Redis's single thread for
+ * the entire scan, stalling every other caller of this cache. SCAN is incremental.
+ */
+export async function cacheDelPrefix(prefix: string): Promise<number> {
+  let removed = 0;
+
+  // L1 first — synchronous and always available, even when Redis is down.
+  for (const key of memCache.keys()) {
+    if (key.startsWith(prefix)) {
+      memCache.delete(key);
+      removed++;
+    }
+  }
+
+  if (redisAvailable && redis) {
+    try {
+      let cursor = '0';
+      do {
+        const [next, keys] = await redis.scan(
+          cursor, 'MATCH', `${prefix}*`, 'COUNT', 100,
+        );
+        cursor = next;
+        if (keys.length > 0) {
+          await redis.del(...keys);
+          removed += keys.length;
+        }
+      } while (cursor !== '0');
+    } catch {
+      // Redis error — L1 is already cleared; the remaining Redis entries expire on their own
+      // TTL. Must not throw: this runs inside background jobs whose failures are caught and
+      // reported separately, and a failed invalidation is not worth failing the job over.
+    }
+  }
+
+  return removed;
+}
+
 export function isCacheAvailable(): boolean {
   return redisAvailable;
 }

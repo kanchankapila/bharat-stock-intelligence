@@ -14,7 +14,6 @@ stock_ohlcv.is_suspect so label/feature code can exclude them. A corporate-actio
   python ohlcv_quality.py             # ingest actions, then flag bad prints
   python ohlcv_quality.py --no-ingest # flag from already-ingested actions only
 """
-import polars as pl
 import argparse
 import datetime
 from datetime import timedelta, timezone
@@ -358,9 +357,3 @@ if __name__ == '__main__':
                              f'within the last {CORPORATE_ACTIONS_STALENESS_DAYS} days')
     args = parser.parse_args()
     run(ingest=not args.no_ingest, force_ingest=args.force_ingest)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

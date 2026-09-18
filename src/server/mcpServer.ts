@@ -208,7 +208,7 @@ server.tool(
           const breakdown = factorBreakdowns.find(b => b.timeframe === score.timeframe);
           markdown += `### Timeframe: \`${score.timeframe}\`\n`;
           markdown += `* **Score:** ${score.score?.toFixed(2) || "N/A"} (Confidence: ${(score.confidence * 100).toFixed(0)}%)\n`;
-          markdown += `* **Classification:** **${score.classification}** (Primary Driver: ${score.top_domain})\n`;
+          markdown += `* **Classification:** **${score.classification}** (Primary Driver: ${score.top_domain ?? "n/a"})\n`;
           if (breakdown) {
             markdown += `* **Factor Breakdown:** Technical: ${breakdown.technical?.toFixed(2) || 0} | Fundamental: ${breakdown.fundamental?.toFixed(2) || 0} | Momentum: ${breakdown.momentum?.toFixed(2) || 0} | Valuation: ${breakdown.valuation?.toFixed(2) || 0} | Delivery: ${breakdown.delivery?.toFixed(2) || 0}\n`;
           }

@@ -20,20 +20,7 @@ Endpoints:
 scId in MC response == mcsymbol in nse_stocks → resolve to symbol.
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class McCorporateCalendarFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class McCorporateCalendarFetcherBaseFetcher(BaseFetcher[McCorporateCalendarFetcherSchema]):
-    fetcher_name = 'McCorporateCalendarFetcher'
-    domain = 'moneycontrol.com'
-    schema = McCorporateCalendarFetcherSchema
-    min_interval_sec = 0.5
-
 
 import os
 import sys
@@ -187,8 +174,11 @@ def _fetch_nse_corporate_actions(con, ex_div: dict, dry_run: bool = False) -> in
         })
         try:
             sess.get("https://www.nseindia.com/", timeout=10)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Non-fatal (NSE_CA_URL is often servable without the cookie), but silence here
+            # hid WHY a run returned 0 rows. Recurring-bugs.md: a swallow that contains the
+            # failure also contains the evidence.
+            log.warning("NSE homepage cookie priming failed: %s", exc)
         r = sess.get(NSE_CA_URL, timeout=12)
         if r.status_code != 200:
             log.warning("NSE corporate actions HTTP %s", r.status_code)
@@ -478,9 +468,3 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     run(dry_run=args.dry_run)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

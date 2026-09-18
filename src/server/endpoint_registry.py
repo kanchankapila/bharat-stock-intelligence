@@ -9,7 +9,6 @@ exposes only parser-ready endpoints to the existing extra_endpoints_fetcher path
 
 from __future__ import annotations
 
-import polars as pl
 from dataclasses import dataclass, field
 from datetime import datetime
 from collections import Counter, defaultdict
@@ -952,9 +951,3 @@ def _provider_key(provider: str | None) -> str:
 
 def _quote_query_part(value: str) -> str:
     return quote(value, safe="{}:,/;")
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 
@@ -94,7 +94,16 @@ async def health():
         llm_type = type(llm).__name__
     except Exception:
         llm_type = "unavailable"
-    return {"status": "ok", "llm": llm_type, "graph_ready": _graph is not None}
+    # This is local readiness, not an external provider authentication probe.
+    ready = _graph is not None and llm_type != "unavailable"
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={
+            "status": "ok" if ready else "degraded",
+            "llm": llm_type,
+            "graph_ready": _graph is not None,
+        },
+    )
 
 
 @app.post("/chat", response_model=ChatResponse)

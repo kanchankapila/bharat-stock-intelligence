@@ -21,7 +21,7 @@ Derive these lists from the source tree — grep for the actual call sites (`run
 Three gaps to report, each separately:
 
 - **Fetcher with no `live_datasource` test.** Silent-wrong-on-day-one risk.
-- **Table with no freshness check.** Silent-dead-on-day-200 risk — `mf_sector_allocation` was completely empty and indistinguishable from healthy in every dashboard; so was `mf_holdings_fetcher.py`'s `stock_mf_holdings`, found 2026-08-13 (the table didn't exist at all — traced to a dead upstream endpoint, 404ing on every symbol, silently swallowed by the queue's own `.catch()`).
+- **Table with no freshness check.** Silent-dead-on-day-200 risk — `mf_sector_allocation` was completely empty and indistinguishable from healthy in every dashboard; so was `mf_holdings_fetcher.py`'s `stock_mf_holdings`, found 2026-08-13 (the table didn't exist at all — traced to a dead upstream endpoint, 404ing on every symbol, silently swallowed by the queue's own `.catch()`). **Triage mandate**: when a dead/empty upstream source is found, query the 3,000+ endpoint discovery registry (`market_endpoint_registry` in Postgres `:5433`, `url_endpoints` via `--find-alternates`, `unique_urls.txt`) for working alternates rather than immediately marking it permanently unfixable.
 - **Table WITH a freshness check that only measures row recency, not the columns the fetcher exists to populate.** Pick the columns downstream consumers (`ml_ensemble.py`, `unified_ranker.py`, scoring engines) actually read from each, and check what fraction is 100%-NULL on the most recently completed trading day:
 
   ```sql

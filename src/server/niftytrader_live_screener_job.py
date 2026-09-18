@@ -431,11 +431,37 @@ def run_job(concurrency=5, dry_run=False):
     finally:
         conn.close()
 
-    # Summary
+    # Summary. To STDERR, not stdout: pythonRunner.ts classifies a step by inspecting stderr
+    # only, so a degradation printed to stdout is invisible to the one thing that would surface
+    # it (recurring-bugs.md, "degraded-read print() to stdout").
     if failed_filters:
-        print(f"[NT_LIVE] Failed filters:")
+        print("[NT_LIVE] Failed filters:", file=sys.stderr)
         for fname, err in failed_filters:
-            print(f"  - {fname}: {err}")
+            print(f"  - {fname}: {err}", file=sys.stderr)
+
+    # The missing-token path above already exits non-zero, deliberately and with a comment citing
+    # the skip-as-success class. This is the OTHER half of that same path, and it was not
+    # guarded: a token that is PRESENT but no longer entitled (Prime lapsed, or the JWT rejected
+    # server-side) makes every filter return 401 through `fetch_single_filter`'s
+    # `(name, [], "unauthorized ...")` branch -- which is an ordinary "failed filter", not a
+    # missing token. Every one of the 45 filters then lands in `failed_filters`, nothing is
+    # written, and the job returned normally and exited 0. Measured live 2026-09-18:
+    # `live-market-filter-data` answers 401 to the production header set with a JWT still valid
+    # until 2026-10-05, so this is reachable today and not hypothetical -- the route is
+    # Prime-gated and the entitlement, not the token, is what would lapse.
+    #
+    # Gate on "did anything land", not on the fail RATE: partial failures are normal (a filter
+    # can legitimately match no stocks) and failing on those would be the always-fires defect
+    # from ml-model-bugs.md. Zero rows written WHILE filters are failing is unambiguous -- a
+    # healthy run writes ~450k rows/day across 45 filters.
+    if failed_filters and total_written == 0:
+        print(
+            f"[NT_LIVE] ZERO rows written and all {len(failed_filters)} filter(s) failed -- "
+            f"capture produced nothing. Exiting non-zero so this cannot be recorded as a "
+            f"successful run over an empty capture.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

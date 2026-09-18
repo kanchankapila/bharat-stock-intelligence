@@ -387,6 +387,35 @@ any row: `docs/measurement-history.md`.
 
 ## Not testable — do not spend time here without a genuinely new angle
 
+- **⚠ `fundamentals_history.return_on_equity` DECAYED to 6.1% and the row below does not say so
+  (measured 2026-09-18, AF-20260917-07).** Per-as-of-date non-null symbol counts: **1,928/2,229
+  (86%) on 2026-07-02 -> 1,443 (65%) 08-03 -> 1,092 (49%) 08-09 -> 476 (21%) 08-16 -> 151 (6.1%)
+  from 08-23 onward.** The table stayed fresh daily throughout, so no freshness check fired. The
+  cause is upstream and provable in one query rather than by reading the fetcher:
+  `fundamentalsSyncService.ts` reads `debtToEquity` and `returnOnEquity` from the SAME
+  `financialData` object in the SAME Yahoo response, and d/e still reads 85% -- so parsing and auth
+  are fine and the vendor field itself stopped coming back.
+  **Do not grade anything on `roe`, `feature_store.roe`, or any percentile rank derived from them
+  across this window without filtering on the date.** `institutional_quant_engine.py`,
+  `multi_factor_scorer.py` and `quantScoringWorker.ts` all `pct_rank` this column, so from ~08-23
+  they have been ranking ~151 names out of ~2,474. **2026-08-23 is a population boundary** in the
+  same sense as this file's 2026-08-18 zero-vs-NULL and 2026-08-23 calendar-cutoff boundaries: do
+  not pool across it.
+  **A clean replacement exists and is now collected, but is NOT yet wired into features.**
+  `investsights_fundamentals_history.return_on_equity` measures **Pearson 0.9608 against the
+  yfinance value, same fraction scale, ZERO sign flips**, and its fetcher's `--limit 300` cap (the
+  real constraint -- not the vendor) was lifted on 2026-09-18 after measuring 1000/1000 symbols in
+  129s with zero failures; stored coverage went **287 -> 929 symbols** on one run.
+  **Note the near-miss, because it is the reusable part:** the sibling table
+  `investsights_factor_scores.roe` is a DIFFERENT ROE definition -- Pearson 0.7727, percent scale,
+  outright sign flips -- and was measured first and wrongly reported as "the" investsights ROE.
+  Two tables from one vendor, two definitions. `information_schema.columns WHERE column_name
+  ILIKE '%roe%'` enumerates all four candidates in a second; do that before concluding no
+  alternate exists. Monitored since 2026-09-18 by `fundamentals-history-vendor-field-decay`
+  (`dataQualityChecks.ts`), which reads per-field FILL RATES rather than a table timestamp and was
+  verified to discriminate: FAIL on ROE 6.1%, pass on debt_to_equity 85.2% / operating_margins
+  97.0% / piotroski_f_score 97.3%.
+
 - **Fundamentals, analyst, ownership and earnings factors**: still calendar-constrained, but **re-counted live 2026-09-10 — `fundamentals_history` now holds 56 distinct dates (2026-06-30..2026-09-09) across 2,232 symbols, not the ~30 this line used to claim.** Still only 1-2 independent quarterly observations, so the constraint is unchanged in substance. **A backfill route now exists and is worth costing before waiting another quarter:** `trendlyne_pe_history` holds **4.16M rows back to 2013-12-24**, with **2,997 distinct dates across 1,940 symbols BEFORE `fundamentals_history` even begins** (`trendlyne_pb_history` is comparable at 4.21M rows). `_merge_fundamentals` already does a correct point-in-time `merge_asof`, so the machinery is in place. **The one thing to verify first:** vendor valuation history can be retrospectively restated, which would inject look-ahead into a point-in-time join — check a known historical snapshot against an independent source before building on it. This is the single largest available unblock in this section.
 - **FnO / positioning (long/short buildup, short covering)**: built (`mc_stock_futures_oi_fetcher.py`, `stock_futures_oi_history`, composite-keyed `(source, symbol, date, expiry)`, scheduled daily, live-graded LOW-DATA at **14 dates as of 2026-09-10**, was 9 on 2026-09-04) — see "Standing architecture facts" above. Not yet enough dates to verdict; ~6 more sessions to the floor.
 - Of 60 symbol+date tables audited 2026-08-11, only 9 have enough history to test anything at all; the other 35 start ~2026-06-30.

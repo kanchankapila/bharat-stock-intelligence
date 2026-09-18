@@ -29,7 +29,7 @@ Exit code 0 = clear (WARNs allowed), 1 = at least one FAIL.
   2. *trend-watch* (`ur-engine-dispersion-collapse`: per `measurement.md` the ml-engine
      collapse is isotonic calibration working as intended — do NOT "fix" it; watch the rate
      and the retrain freshness instead),
-  3. *genuinely new* — root-cause it now (see `.claude/commands/production-debug.md`).
+  3. *genuinely new* — root-cause it now (see `.claude/commands/production-debug.md`). If a vendor endpoint is failing, consult the 3,000+ endpoint discovery registry (`market_endpoint_registry` on `:5433`, `url_endpoints` via `--find-alternates`, `unique_urls.txt`) for active alternates before concluding data is unobtainable.
 - **SKIP** — `--full`-only checks not run; run `--full` before any commit that touches
   `src/server` or frontend code.
 

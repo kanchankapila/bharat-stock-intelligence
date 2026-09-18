@@ -22,7 +22,6 @@ Usage:
 
 from __future__ import annotations
 
-import polars as pl
 import sys
 import time
 import random
@@ -438,11 +437,4 @@ async def async_batch_fetch(urls: list[str], headers: dict | None = None,
         tasks = [_fetch_one(client, url) for url in urls]
         results = await asyncio.gather(*tasks, return_exceptions=False)
     return results
-
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
 

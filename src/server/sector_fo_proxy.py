@@ -11,7 +11,6 @@ Run: python sector_fo_proxy.py
      python sector_fo_proxy.py --backfill
 """
 
-import polars as pl
 import sys
 import os
 import argparse
@@ -122,9 +121,3 @@ if __name__ == "__main__":
         backfill()
     else:
         run(args.date)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

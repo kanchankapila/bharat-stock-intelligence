@@ -7,6 +7,7 @@ import { getFinologyData } from "../finologyService";
 import { dbAll } from "../dbAsync";
 import { router, publicProcedure, adminProcedure } from "../trpc";
 import { fetchWithCache } from "../cacheService";
+import { FILED_CORP_ACTIONS_CACHE_PREFIX } from "../cacheKeys";
 
 export const fundamentalsRouter = router({
   triggerFundamentalsSync: adminProcedure
@@ -247,7 +248,7 @@ export const fundamentalsRouter = router({
       symbol: z.string().optional(),
     }))
     .query(async ({ input }) => fetchWithCache(
-      `fund:filed-corp-actions:${input.daysBack}:${input.daysForward}:${input.symbol ?? ''}`,
+      `${FILED_CORP_ACTIONS_CACHE_PREFIX}${input.daysBack}:${input.daysForward}:${input.symbol ?? ''}`,
       async () => {
         try {
           // JS-computed cutoffs -- see getCorporateActionsCalendar above for why (same

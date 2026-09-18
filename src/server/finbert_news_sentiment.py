@@ -20,7 +20,6 @@ Usage:
     # (₹, apostrophes) that real headlines routinely contain.
     # Prints JSON to stdout: [{"id": "...", "sentiment": "BULLISH|BEARISH|NEUTRAL", "score": -1.0..1.0}, ...]
 """
-import polars as pl
 import base64
 import json
 import sys
@@ -61,9 +60,3 @@ def score_batch(items: list[dict]) -> list[dict]:
 if __name__ == "__main__":
     payload = json.loads(base64.b64decode(sys.argv[1]).decode("utf-8"))
     print(json.dumps(score_batch(payload)))
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

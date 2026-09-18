@@ -49,7 +49,6 @@ Run:
   python investsights_concall_fetcher.py
 """
 
-import polars as pl
 import sys
 
 import requests
@@ -177,20 +176,3 @@ if __name__ == "__main__":
     sys.exit(main())
 
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class InvestsightsConcallFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class InvestsightsConcallFetcherBaseFetcher(BaseFetcher[InvestsightsConcallFetcherSchema]):
-    fetcher_name = 'InvestsightsConcallFetcher'
-    domain = 'investsights.in'
-    schema = InvestsightsConcallFetcherSchema
-    min_interval_sec = 0.5
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -17,7 +17,6 @@ Run:  python performance_tracker.py
       python performance_tracker.py --resolve-recs   # resolve pending recommendation_log rows
 """
 
-import polars as pl
 import os
 import math
 import json
@@ -518,9 +517,3 @@ if __name__ == "__main__":
         )
     finally:
         tracker.close()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

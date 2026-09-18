@@ -17,20 +17,7 @@ Run:
     python stock_option_chain_fetcher.py --limit 10      # first N stocks
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class StockOptionChainFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class StockOptionChainFetcherBaseFetcher(BaseFetcher[StockOptionChainFetcherSchema]):
-    fetcher_name = 'StockOptionChainFetcher'
-    domain = 'general'
-    schema = StockOptionChainFetcherSchema
-    min_interval_sec = 0.5
-
 
 import os
 import sys
@@ -170,20 +157,19 @@ _STOCK_OPTION_FEATURES_COLS = [
 
 
 def _add_columns_if_missing(engine, table: str, cols: list[tuple[str, str]]):
-    pg = use_postgres()
     for col, dtype in cols:
         try:
             with engine.begin() as conn:
-                if pg:
-                    conn.execute(text(
-                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {dtype}"
-                    ))
-                else:
-                    conn.execute(text(
-                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {dtype}"
-                    ))
-        except Exception:
-            pass   # column already exists on SQLite (no IF NOT EXISTS support)
+                conn.execute(text(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {dtype}"
+                ))
+        except Exception as exc:
+            # The IF/ELSE branches that used to live here were byte-identical, so they are
+            # collapsed to one. And "column already exists on SQLite" was wrong for the
+            # configured Postgres path: IF NOT EXISTS makes re-adding a no-op SUCCESS, so an
+            # exception means {table}.{col} was NOT added -- yet the old `pass` let the fetcher
+            # proceed to write/read a column that does not exist.
+            print(f"[StockOptionChain] could not add {table}.{col}: {exc}", file=sys.stderr)
 
 
 def ensure_schema(engine):
@@ -611,9 +597,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

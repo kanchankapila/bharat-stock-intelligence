@@ -56,3 +56,6 @@ re-deriving what "done" means. Do not write the missing test or check yourself; 
 diagnoses, it doesn't implement — hand the gap back to be fixed deliberately, since the
 freshness-check factory (`makeFreshnessCheck()`) and the live-test helpers both need judgment
 calls (cadence, `failDays` vs. warn-only) this agent shouldn't make unsupervised.
+If a live test fails due to upstream route retirement/HTTP failure, note that active alternate
+endpoints should be resolved from the 3,000+ discovery registry (`market_endpoint_registry` on `:5433`,
+`url_endpoints`, `unique_urls.txt`) per `data-sources.md`.

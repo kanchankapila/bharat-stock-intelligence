@@ -28,7 +28,6 @@ Run:
   python block_deal_fetcher.py --date 2026-06-24
 """
 
-import polars as pl
 import argparse
 import time
 from datetime import date, datetime, timedelta
@@ -40,21 +39,6 @@ from db_compat import connect
 from fetch_utils import retry_get
 import sys
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher
-
-class BlockDealRowSchema(BaseModel):
-    symbol: str
-    date: str
-    price: float | None = None
-    qty: int | None = None
-    value_cr: float | None = None
-
-class BlockDealFetcher(BaseFetcher[BlockDealRowSchema]):
-    fetcher_name = "BlockDealFetcher"
-    domain = "nseindia.com"
-    schema = BlockDealRowSchema
-    min_interval_sec = 0.5
-
 
 LIVE_URL  = "https://www.nseindia.com/api/block-deal"
 HIST_URL  = "https://www.nseindia.com/api/historical/block-deals"
@@ -122,8 +106,12 @@ def _prime_session(session: requests.Session) -> None:
     try:
         session.get("https://www.nseindia.com/", timeout=10)
         time.sleep(0.5)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Without the homepage cookie the API returns 403 and this fetcher reports 0 deals.
+        # That degradation is expected sometimes (NSE blocks by IP), but it was invisible,
+        # which is how AF-20260914-02's "503 on every historical request" looked identical to
+        # "no deals happened that day". Non-fatal by design -- see the update guidance.
+        print(f"[BlockDeal] NSE cookie priming failed (API may 403): {exc}", file=sys.stderr)
 
 
 def fetch_live(session: requests.Session) -> list[dict]:
@@ -368,9 +356,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

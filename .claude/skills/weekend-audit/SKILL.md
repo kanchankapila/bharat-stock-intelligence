@@ -111,6 +111,8 @@ WHERE status <> 'pass' ORDER BY critical DESC, status;
 A `checked_at` more than a day old on any row means the watchdog itself stopped running — that
 finding outranks every individual check below it.
 
+**For any failing/stale fetcher or data quality failure**: do not conclude the vendor is dead without checking the 3,000+ endpoint discovery registry (`market_endpoint_registry` in Postgres :5433, 3,408 live endpoints; `url_endpoints` 830 templates via `--find-alternates`; `unique_urls.txt` 3,103 raw URLs) for active alternates per `data-sources.md`.
+
 Then grep the logs for the silent-truncation class (`recurring-bugs.md`: a step at the end of a
 script that gets killed at its budget has *never executed*):
 

@@ -16,7 +16,7 @@ Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC ba
 | Touching… | Read |
 |---|---|
 | scoring, ranking, any `*_signals` / `*_outcomes` table | `.claude/rules/scoring-authority.md` |
-| a fetcher, a new provider, a provider-issued id | `.claude/rules/data-sources.md` |
+| a fetcher, a new provider, a provider-issued id, or onboarding/triaging datasources | `.claude/rules/data-sources.md` (mandates checking the 3,000+ discovery registry first) |
 | any accuracy / win-rate / IC / backtest number | `.claude/rules/measurement.md` |
 | a model, a promotion gate, a measurement harness | `.claude/rules/ml-model-bugs.md` |
 | **anything** — skim before writing Python or SQL | `.claude/rules/recurring-bugs.md` |
@@ -42,14 +42,12 @@ the row itself:
 - **Needs a user decision** — a tradeoff only the user can make (e.g. which of two designs, or
   whether to accept a known bounded risk). Ask, don't leave it silently open. **"Needs a user
   decision" is not a lane you may enter until you have exhausted what you can determine
-  yourself.** For a vendor/endpoint that stopped returning data that means: probe it route by
-  route, isolate the MINIMUM headers/credentials it needs (adding a token can LOWER access —
-  see `recurring-bugs.md`), **and grep the repo for an alternate source and probe that too**
-  before asking. Reinforced by the user 2026-09-12 after a sweep reported three "dead vendors":
-  two were already covered by endpoints sitting in this repo (MoneyControl `deals/list` for NSE
-  bulk deals, MarketsMojo movers for ET gainers), and NSE's own `/api/block-deal` was still
-  returning 200 — only one route had actually retired. Ask with the per-route breakdown and the
-  alternates already ruled in or out, never with "this vendor is dead."
+  yourself.** For a vendor/endpoint that stopped returning data, or when onboarding a new data source, that means:
+  1. **Query the 3,000+ discovery registry FIRST**: `market_endpoint_registry` in Postgres (`bharat_intel` on `:5433`, 3,408 live endpoints: 2,864 GET / 544 POST; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`) — see `data-sources.md` §"Endpoint discovery registry" and `DATA_FETCHING_GUIDE.md`.
+  2. **Check the consolidated catalog `url_endpoints`**: 830 templates; run `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server`.
+  3. **Inspect the raw 3,103 URL corpus**: `unique_urls.txt` and `urls_v2.db` in repo root.
+  4. **Grep the repo for sibling endpoints** and probe route by route, isolating the MINIMUM headers/credentials needed (adding a token can LOWER access — see `recurring-bugs.md`).
+  5. **Only then ask the user**, with the per-route breakdown and the alternates already ruled in or out — never with "this vendor is dead." (Reinforced by the user 2026-09-12 after a sweep reported three "dead vendors": two were already covered by endpoints sitting in this repo — MoneyControl `deals/list` for NSE bulk deals, MarketsMojo movers for ET gainers — and NSE's own `/api/block-deal` was still returning 200; only one route had actually retired).
 - **Depends on an earlier fix landing first** — genuinely sequential, and the blocking row is
   named.
 

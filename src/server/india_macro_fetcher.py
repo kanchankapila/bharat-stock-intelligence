@@ -25,20 +25,7 @@ Usage:
   python india_macro_fetcher.py --days 90
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class IndiaMacroFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class IndiaMacroFetcherBaseFetcher(BaseFetcher[IndiaMacroFetcherSchema]):
-    fetcher_name = 'IndiaMacroFetcher'
-    domain = 'general'
-    schema = IndiaMacroFetcherSchema
-    min_interval_sec = 0.5
-
 
 import argparse
 import re
@@ -297,8 +284,11 @@ def _get_latest_india_10y() -> float | None:
         )
         if row:
             return float(row[0]["close"] or row[0][0])
-    except Exception:
-        pass
+    except Exception as exc:
+        # Returns None on failure, which downstream treats as "no 10Y print available".
+        # That is the right fallback, but a failed QUERY is not the same as an absent value
+        # and the caller cannot distinguish them without this line.
+        print(f"[IndiaMacro] INDIA_10Y read failed: {exc}", file=sys.stderr)
     return None
 
 
@@ -329,9 +319,3 @@ if __name__ == "__main__":
                         help="Number of past days of eco-calendar actuals to scan (default: 60)")
     args = parser.parse_args()
     main(args.days)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

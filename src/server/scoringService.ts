@@ -11,7 +11,7 @@ export interface ScoredStock {
   timeframe: string;
   stock_id: string;
   score: number;
-  confidence: number;
+  confidence?: number;
   classification: string;
   positive_count: number;
   negative_count: number;
@@ -90,25 +90,36 @@ function mapRecToScoredStock(rec: any): ScoredStock {
   if (reasons.length === 0 && rec.trade_reasoning) {
     reasons = [{ name: rec.trade_reasoning, sentiment, source: 'unified' }];
   }
-  const domains: Array<[string, number]> = [
-    ['Screener',   rec.screener_stock_score ?? 0],
-    ['ML',         rec.ml_score ?? 0],
-    ['Confluence', rec.confluence_score ?? 0],
-    ['Technical',  rec.technical_score ?? 0],
-    ['DL',         rec.dl_score ?? 0],
-  ];
-  const top_domain = domains.reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+  // Only scores that actually EXIST are eligible to be the "top domain".
+  //
+  // These used to be `rec.screener_stock_score ?? 0` etc. Since unified_ranker writes NULL
+  // (not 0) for an engine that returned nothing -- deliberately, so the UI can tell "n/a"
+  // from a real 0 (AF-20260818-31) -- the old default turned every absent engine into a
+  // legitimate-looking 0. On a row where all five are NULL the reduce then returned the
+  // FIRST element, so every such stock was labelled "Screener" purely because Screener is
+  // listed first, not because it scored highest. Filtering before the reduce means a
+  // cold-start row reports no top domain instead of a fabricated winner.
+  const domains: Array<[string, number]> = ([
+    ['Screener',   rec.screener_stock_score],
+    ['ML',         rec.ml_score],
+    ['Confluence', rec.confluence_score],
+    ['Technical',  rec.technical_score],
+    ['DL',         rec.dl_score],
+  ] as Array<[string, number | null | undefined]>)
+    .filter((d): d is [string, number] => d[1] != null);
+  const top_domain = domains.length > 0
+    ? domains.reduce((a, b) => (b[1] > a[1] ? b : a))[0]
+    : undefined;
   return {
     symbol:         rec.symbol,
-    timeframe:      'long_term',
+    timeframe:      rec.timeframe ?? 'UNSPECIFIED',
     stock_id:       rec.symbol,
     score:          rec.unified_score,
-    confidence:     rec.unified_score ?? 0,   // 0-100; the UI renders confidence.toFixed(0) + '%'
     classification: rec.classification ?? 'Hold',
     positive_count: rec.bullish_screener_count ?? 0,
     negative_count: rec.bearish_screener_count ?? 0,
     reasons,
-    last_updated:   rec.computed_at,
+    last_updated:   rec.generated_at ?? rec.computed_at,
     top_domain,
     position_size_pct: rec.position_size_pct ?? 0,
   };
@@ -122,12 +133,19 @@ export function clearTopRatedCache(): void {
 }
 
 /**
- * Get top rated stocks. Long-term reads the canonical cross-source ranking
- * (unified_recommendations); intraday stays on stock_scores (the ranker has negligible
- * intraday coverage). Falls back to stock_scores if the ranker has produced no rows yet.
+ * Get top rated stocks. Long-term reads LONG_TERM rows from the latest canonical
+ * unified batch; intraday reads intraday_recommendations. Neither substitutes legacy
+ * scores when canonical results are empty. Other horizons retain their legacy path.
  */
 export async function getTopRatedStocks(limit: number = 50, timeframe: string = 'long_term'): Promise<ScoredStock[]> {
   const cacheKey = `${timeframe}:${limit}`;
+  // Canonical intraday read: the intraday list reads intraday_recommendations (produced by
+  // intraday_ranker.py, the intraday authority) -- NOT the legacy stock_scores table.
+  // No legacy fallback: an empty or stale canonical batch renders as empty rather than
+  // silently presenting legacy scores that no intraday engine produced.
+  if (timeframe === 'intraday') {
+    return getTopRatedIntraday(limit);
+  }
   const cached = _topRatedCache.get(cacheKey);
   if (cached) {
     if (cached.expires > Date.now()) return cached.data;
@@ -141,14 +159,14 @@ export async function getTopRatedStocks(limit: number = 50, timeframe: string = 
       const recs = await dbAll<any>(`
         SELECT * FROM unified_recommendations
         WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
+          AND timeframe = 'LONG_TERM'
         ORDER BY unified_score DESC
         LIMIT ?
       `, [limit]);
-      if (recs.length > 0) {
-        result = recs.map(mapRecToScoredStock);
-        _topRatedCache.set(cacheKey, { data: result, expires: Date.now() + TOP_RATED_TTL_MS });
-        return result;
-      }
+      // Do not resurrect an older horizon batch or substitute a component score.
+      result = recs.map(mapRecToScoredStock);
+      _topRatedCache.set(cacheKey, { data: result, expires: Date.now() + TOP_RATED_TTL_MS });
+      return result;
     }
 
     const rows = await dbAll<any>(`
@@ -200,4 +218,35 @@ export async function getStockScoreDetail(symbol: string, timeframe: string = 'l
     console.error(`❌ Error fetching score details for ${symbol} (${timeframe}):`, error);
     return null;
   }
+}
+
+/**
+ * Canonical intraday ranking for the TopRated intraday column.
+ * Reads ONLY the latest intraday_recommendations batch, bounded for freshness:
+ * intraday_ranker.py runs every 15 minutes in market hours, so anything older than
+ * ~90 minutes is not a live recommendation. An empty result is the honest cold-start /
+ * stale answer -- this function must never fall back to the legacy stock_scores table.
+ */
+export async function getTopRatedIntraday(limit: number): Promise<ScoredStock[]> {
+  const cutoff = new Date(Date.now() - 90 * 60_000).toISOString();
+  const rows = await dbAll(
+    `SELECT symbol, computed_ts, classification, conviction_level, intraday_score AS score
+       FROM intraday_recommendations
+      WHERE computed_at = (SELECT MAX(computed_at) FROM intraday_recommendations)
+        AND computed_ts >= ?
+      ORDER BY intraday_score DESC
+      LIMIT ?`,
+    [cutoff, limit],
+  ) as any[];
+  return rows.map((r) => ({
+    symbol: r.symbol,
+    timeframe: 'intraday',
+    stock_id: r.symbol,
+    score: Number(r.score),
+    classification: r.classification ?? '',
+    positive_count: 0,
+    negative_count: 0,
+    reasons: [],
+    last_updated: r.computed_ts instanceof Date ? r.computed_ts.toISOString() : r.computed_ts,
+  }));
 }

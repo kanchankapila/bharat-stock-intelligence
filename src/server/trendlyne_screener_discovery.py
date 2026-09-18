@@ -18,7 +18,6 @@ Run:
   python trendlyne_screener_discovery.py --pk 12345 # fetch a single PK
 """
 
-import polars as pl
 import re
 import sys
 import time
@@ -651,9 +650,3 @@ if __name__ == "__main__":
         run("full")
     else:
         run("known")
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

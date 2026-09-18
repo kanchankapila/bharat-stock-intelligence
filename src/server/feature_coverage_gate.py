@@ -43,7 +43,6 @@ half (a pinned count that forces whoever adds a 9th engine to consciously update
 which is the point at which they should have already run this tool).
 """
 
-import polars as pl
 import argparse
 import sys
 
@@ -170,9 +169,3 @@ def _cli():
 
 if __name__ == "__main__":
     _cli()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -24,20 +24,7 @@ Run:
   python mc_chart_patterns_fetcher.py --symbol BEL
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class McChartPatternsFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class McChartPatternsFetcherBaseFetcher(BaseFetcher[McChartPatternsFetcherSchema]):
-    fetcher_name = 'McChartPatternsFetcher'
-    domain = 'moneycontrol.com'
-    schema = McChartPatternsFetcherSchema
-    min_interval_sec = 0.5
-
 
 import argparse
 import json
@@ -200,8 +187,13 @@ def _parse_pattern(raw: dict) -> dict | None:
             sl_price      = _sf(meta.get("stoploss_price"))
             target_pct    = _sf(meta.get("target_return_prcnt"))
             sl_pct        = _sf(meta.get("stoploss_prcnt"))
-    except (json.JSONDecodeError, TypeError):
-        pass
+    except (json.JSONDecodeError, TypeError) as exc:
+        # Previously `pass`: yahoo_data_json was unparseable, so direction/entry/target/SL all
+        # stay at their defaults and the row is written as a real pattern with no levels -- a
+        # fabricated-looking signal from a parse failure. MoneyControl changed this payload
+        # shape before; this print is what makes the next change visible immediately.
+        print(f"[MCChartPatterns] pattern {pid}: unparseable yahoo_data_json: {exc}",
+              file=sys.stderr)
 
     return {
         "pattern_id":      int(pid),
@@ -439,9 +431,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

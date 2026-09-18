@@ -80,6 +80,7 @@ Walk `recurring-bugs.md`'s table against this diff:
 - A per-call API with no since-parameter, re-upserting full history every run — check what fraction of a typical response is actually new data; under 1% means the upsert, not the fetch, is the bottleneck.
 - A parsing/enrichment step that's the *last* statement in a script that routinely hits a job-runner timeout — check the job's logs for "killed by timeout" on a recurring basis; if so, assume anything after the kill point has never run.
 - A verification number the fetcher prints about itself. Cross-check it against a row count you already know from `psql`/`db_compat`. (The old form of this check — "print `process.env.USE_POSTGRES` to confirm you aren't on SQLite" — is **dead as of 2026-08-15**: `use_postgres()` consults no env var for a real process, so a correct script prints `undefined`. There is no wrong database left to land on, only a wrong number.)
+- **Failing, retired, or broken upstream endpoint**: check the 3,000+ endpoint discovery registry (`market_endpoint_registry` in Postgres `:5433`, 3,408 working endpoints; `url_endpoints` 830 templates via `--find-alternates`; `unique_urls.txt` 3,103 URLs) to locate working alternate routes or updated hosts (per `data-sources.md` §"Endpoint discovery registry" and `DATA_FETCHING_GUIDE.md`) before reporting the vendor as dead.
 
 ## 6. Report
 

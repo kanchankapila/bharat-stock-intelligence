@@ -26,7 +26,6 @@ Run: python earnings_surprise_fetcher.py
      python earnings_surprise_fetcher.py --symbol INFY
 """
 
-import polars as pl
 import os
 import sys
 import time
@@ -39,23 +38,6 @@ from curl_cffi import requests
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_compat import get_engine, use_postgres
 from pydantic import BaseModel, Field
-from base_fetcher import BaseFetcher
-
-class EarningsBeatRowSchema(BaseModel):
-    quarter_date: str
-    period_type: str
-    beat_type: str
-    beat_score: int
-    eps_actual: float | None = None
-    eps_avg: float | None = None
-    surprise_pct: float | None = None
-
-class EarningsSurpriseFetcher(BaseFetcher[EarningsBeatRowSchema]):
-    fetcher_name = "EarningsSurpriseFetcher"
-    domain = "moneycontrol.com"
-    schema = EarningsBeatRowSchema
-    min_interval_sec = 0.5
-
 
 HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -309,9 +291,3 @@ if __name__ == "__main__":
     parser.add_argument("--symbol", default=None, help="Fetch a single NSE symbol")
     args = parser.parse_args()
     run(limit=args.limit, symbol_filter=args.symbol)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

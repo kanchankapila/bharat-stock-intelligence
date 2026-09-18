@@ -164,7 +164,17 @@ async function fetchBatchYahooFinance(
     const nseSymbol = (q.symbol as string).replace(/\.(NS|BO)$/, "");
     const name = _nameMap.get(nseSymbol) || nseSymbol;
 
-    const price: number = q.regularMarketPrice ?? 0;
+    // A quote with no price is not a quote. Yahoo returns regularMarketPrice: null for
+    // delisted/suspended names and for instruments it cannot price, and the old
+    // `?? 0` wrote that straight into MarketData as a real ₹0.00 -- which then read as a
+    // genuine price to every consumer (valuation, option-chain moneyness, breadth). Skip
+    // the symbol instead: the caller counts it in `missed` and tries the per-symbol
+    // fallback, and if that also has no price the symbol is simply absent, so consumers
+    // fall back to their own last-known value rather than to a fabricated zero.
+    const rawPrice = q.regularMarketPrice;
+    if (rawPrice == null || !Number.isFinite(rawPrice) || rawPrice <= 0) continue;
+
+    const price: number = rawPrice;
     const prevClose: number = q.regularMarketPreviousClose ?? 0;
     const change: number = q.regularMarketChange ?? price - prevClose;
     const changePct: number = q.regularMarketChangePercent ?? 0;
@@ -213,7 +223,13 @@ async function fetchStockQuoteYahooFinance(
     if (!result) return null;
 
     const meta = result.meta;
-    const price: number = meta.regularMarketPrice ?? 0;
+    // Same rule as the batch path: no price means no quote. Returning null is already part
+    // of this function's contract (it does so for a non-ok response and a missing result),
+    // so an unpriceable instrument propagates as "absent" instead of as ₹0.00.
+    const rawPrice = meta.regularMarketPrice;
+    if (rawPrice == null || !Number.isFinite(rawPrice) || rawPrice <= 0) return null;
+
+    const price: number = rawPrice;
     const prevClose: number =
       meta.chartPreviousClose ?? meta.previousClose ?? 0;
     const change = price - prevClose;
@@ -254,7 +270,14 @@ export async function fetchStockQuoteMoneyControl(
   const quote = data?.data?.quote;
   if (!quote) return null;
 
-  const price: number = quote.ltPrice ?? quote.lastPrice ?? 0;
+  // Same rule as the Yahoo paths above: an unpriceable quote is not a quote. The old
+  // `?? 0` published ₹0.00 as a real price, which downstream valuation, option-chain
+  // moneyness and breadth all read as genuine. Returning null is already this function's
+  // contract, so the caller simply falls through to the next source in the chain.
+  const rawPrice = quote.ltPrice ?? quote.lastPrice;
+  if (rawPrice == null || !Number.isFinite(rawPrice) || rawPrice <= 0) return null;
+
+  const price: number = rawPrice;
   const prevClose: number = quote.previousPrice ?? quote.prevClose ?? 0;
   const change = price - prevClose;
   const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
@@ -289,7 +312,13 @@ export async function fetchStockQuoteFinnhub(
     if (!response.ok) return null;
 
     const data = await response.json();
-    const price: number = data.c ?? 0;
+    // Finnhub returns c: 0 for an unpriced/unlisted symbol. Treat that as "no quote" rather
+    // than publishing ₹0.00 -- same class as the Yahoo `?? 0` fix in the batch path above,
+    // and `null` is already this function's documented return for an unavailable quote.
+    const rawPrice = data.c;
+    if (rawPrice == null || !Number.isFinite(rawPrice) || rawPrice <= 0) return null;
+
+    const price: number = rawPrice;
     const prevClose: number = data.pc ?? 0;
 
     return {

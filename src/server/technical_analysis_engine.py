@@ -1,5 +1,4 @@
 import pandas as pd
-import polars as pl
 import os
 import json
 import datetime
@@ -256,10 +255,3 @@ def run_ta_engine():
 if __name__ == "__main__":
     engine = TechnicalAnalysisEngine()
     engine.process_all()
-from workflow_orchestrator import WorkflowDAG, TaskNode
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

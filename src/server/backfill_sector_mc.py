@@ -19,7 +19,6 @@ their `industry` written but `sector` left untouched, and are listed at the end 
 map can be extended.
 """
 
-import polars as pl
 import argparse
 import json
 import random
@@ -192,8 +191,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

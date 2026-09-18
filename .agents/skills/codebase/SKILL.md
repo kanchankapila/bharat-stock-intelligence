@@ -17,6 +17,7 @@ This skill optimizes how the agent interacts with and maps the codebase structur
 ### 1. Leverage the Architecture Map
 - **Symbol Lookup**: Use `grep_search` to target class, function, or endpoint names instead of scrolling through directories or reading long files.
 - **Imports Tracking**: Prioritize understanding imports at the top of active files to trace dependencies rather than searching all files in the project.
+- **Data Source & Endpoint Discovery**: When exploring endpoints, financial metrics, or alternate data feeds, query the 3,000+ endpoint discovery registry in PostgreSQL (`market_endpoint_registry` on `:5433`, 3,408 live endpoints; `v_stock_screeners`, `v_fno_endpoints`), `url_endpoints` (830 templates via `--find-alternates`), or inspect `unique_urls.txt` (3,103 raw URLs) and `DATA_FETCHING_GUIDE.md` instead of performing broad directory searches or web scraping.
 
 ### 2. Incremental Exploration
 - When mapping a new component:

@@ -19,7 +19,6 @@ Run:  python exit_policy.py --train
       python exit_policy.py --train --min-samples 200
 """
 
-import polars as pl
 import argparse
 import datetime
 import os
@@ -512,9 +511,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.train:
         train(min_samples=args.min_samples)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -10,20 +10,7 @@ Run: python src/server/moneycontrol_fetcher.py --symbols INFY RELIANCE
      python src/server/moneycontrol_fetcher.py --batch-size 150
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class MoneycontrolFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class MoneycontrolFetcherBaseFetcher(BaseFetcher[MoneycontrolFetcherSchema]):
-    fetcher_name = 'MoneycontrolFetcher'
-    domain = 'moneycontrol.com'
-    schema = MoneycontrolFetcherSchema
-    min_interval_sec = 0.5
-
 
 import os
 import re
@@ -237,7 +224,11 @@ def ensure_tables_exist(engine):
             try:
                 conn.execute(text(idx))
             except Exception as e:
-                pass
+                # The matching table-DDL loop just above already logs its failures; this one
+                # swallowed them. CREATE INDEX IF NOT EXISTS makes "exists" a no-op success,
+                # so an exception means the index is genuinely missing (and the fetcher's
+                # symbol/date lookups stay unindexed while the run still reports success).
+                print(f"[MC Fetcher] Index DDL Error: {e} - Query: {idx[:80]}...", file=sys.stderr)
 
 
 class MoneyControlFetcher:
@@ -316,8 +307,13 @@ class MoneyControlFetcher:
                 res = conn.execute(text("SELECT value FROM app_settings WHERE key = 'mc_fetcher_cursor'")).fetchone()
                 if res:
                     cursor = int(res[0])
-            except Exception:
-                pass
+            except Exception as exc:
+                # cursor stays 0, so this run restarts the rolling sweep from the beginning of
+                # the non-high-priority list. Silent here means the same first N symbols get
+                # re-fetched every run while later ones are never reached -- a coverage stall
+                # that looks like a healthy run.
+                print(f"[MC Fetcher] could not read mc_fetcher_cursor, restarting sweep at 0: {exc}",
+                      file=sys.stderr)
 
         # Select a slice of remaining stocks
         rolling_batch_size = max(50, self.batch_size - len(hp_stocks))
@@ -1002,9 +998,3 @@ if __name__ == "__main__":
         fetcher.run_seasonality()
     else:
         fetcher.run()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

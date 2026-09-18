@@ -20,20 +20,7 @@ Run modes:
 Designed to run every 15 minutes during market hours (09:15–15:30 IST Mon–Fri).
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class MarketRegimeFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class MarketRegimeFetcherBaseFetcher(BaseFetcher[MarketRegimeFetcherSchema]):
-    fetcher_name = 'MarketRegimeFetcher'
-    domain = 'general'
-    schema = MarketRegimeFetcherSchema
-    min_interval_sec = 0.5
-
 
 import argparse
 import datetime
@@ -475,9 +462,3 @@ if __name__ == "__main__":
 
     engine = get_engine()
     run_all(engine, do_vix=do_vix, do_fx=do_fx, do_basis=do_basis)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

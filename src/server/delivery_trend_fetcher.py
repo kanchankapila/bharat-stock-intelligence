@@ -35,20 +35,7 @@ Run:
   python delivery_trend_fetcher.py --short     # only short interest proxy
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class DeliveryTrendFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class DeliveryTrendFetcherBaseFetcher(BaseFetcher[DeliveryTrendFetcherSchema]):
-    fetcher_name = 'DeliveryTrendFetcher'
-    domain = 'general'
-    schema = DeliveryTrendFetcherSchema
-    min_interval_sec = 0.5
-
 
 import argparse
 import json
@@ -201,8 +188,12 @@ def _nse_session() -> requests.Session:
     try:
         s.get("https://www.nseindia.com/", timeout=10)
         time.sleep(0.5)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Same class as block_deal_fetcher._prime_session: without the homepage cookie the
+        # bulk/block-deal endpoint answers 403 and this fetcher yields 0 rows, which is
+        # indistinguishable from a genuine no-deals session unless the failure is logged.
+        print(f"[DeliveryTrend] NSE cookie priming failed (bulk/block deals may 403): {exc}",
+              file=sys.stderr)
     return s
 
 
@@ -576,9 +567,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

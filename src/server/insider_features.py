@@ -12,7 +12,6 @@ insider_buy_pct_90d in [0, 1]:
 Run: python insider_features.py
 """
 
-import polars as pl
 import sys
 import os
 import datetime
@@ -140,9 +139,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

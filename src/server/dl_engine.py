@@ -51,7 +51,6 @@ except (ImportError, OSError) as _torch_err:
         nn = _TorchUnavailable()
         autocast = GradScaler = None
 
-import polars as pl
 
 
 import json

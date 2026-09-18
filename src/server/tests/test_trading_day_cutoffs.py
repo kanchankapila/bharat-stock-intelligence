@@ -28,7 +28,7 @@ SERVER = Path(__file__).resolve().parents[1]
 
 # file -> the cutoff-assigning variables that must be trading-day anchored.
 GUARDED = {
-    "unified_ranker.py": 6,          # 6 engine getters, days=1/2/3
+    "unified_ranker.py": 5,          # five live getters; decommissioned CS returns {} without a scan
     "scoring_engine.py": 2,          # win_prob_map (days=1), sym_signal_types (days=3)
     "screener_sector_rotation.py": 1,  # primary technical_signals read (days=2)
 }

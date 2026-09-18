@@ -29,8 +29,12 @@ of them from turning into twenty disconnected, redundant passes.
    (the `*-post-requests.json` shape already used for `et_marketstats`/`etnow`), or a
    description to search for. Turn whatever you're given into an explicit list before doing
    anything else — don't discover URL #6 mid-way through building the fetcher for #1-5.
-2. **Dedupe against what's already onboarded**, per-URL, before spending time on any of
-   them: `grep` the domain across `src/server/*.ts`/`*.py` and `dataQualityChecks.ts`. A URL
+2. **Check the 3,000+ discovery registry and dedupe against what's already onboarded**,
+   per-URL, before spending time on any of them:
+   - **Query `market_endpoint_registry` first** in PostgreSQL (`bharat_intel` on `:5433`, 3,408 live working endpoints: 2,864 GET / 544 POST; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`). Most screeners, financial metrics, and options endpoints are already cataloged here.
+   - **Check `url_endpoints`** (830 templates) via `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>`.
+   - **Check `unique_urls.txt`** (3,103 raw URLs in repo root) and consult [`DATA_FETCHING_GUIDE.md`](../../DATA_FETCHING_GUIDE.md) for proven headers, cookies, POST payloads, and JSON unwrap patterns.
+   - `grep` the domain across `src/server/*.ts`/`*.py` and `dataQualityChecks.ts`. A URL
    whose domain is already fetched elsewhere may just be one more endpoint on an existing
    fetcher file (add a function there, per Phase 4/5) rather than a new source needing its
    own resolution/table/test/check from scratch.

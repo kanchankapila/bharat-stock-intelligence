@@ -18,5 +18,7 @@ genuinely open" → P4). Two other items this file's own later updates had alrea
 `ACTION_ITEMS.md`'s copy — that mismatch is exactly the kind of thing scattering trackers across
 files causes, and part of why this consolidation happened.
 
+**Standing discovery rule (2026-09-13):** Whenever evaluating any broken or failing data source, query the 3,000+ endpoint discovery registry (`market_endpoint_registry` in Postgres :5433 with 3,408 working endpoints, `url_endpoints` 830 templates via `--find-alternates`, `unique_urls.txt` 3,103 raw URLs) and consult `DATA_FETCHING_GUIDE.md` to identify verified working alternate endpoints before concluding an upstream source is dead.
+
 Full prior content (137 lines: fetcher-by-fetcher pass results back to 2026-07-04, the false-alarm
 list, the confirmed-working roster) remains readable via `git log -- docs/FETCHER_HEALTH_TRACKER.md`.

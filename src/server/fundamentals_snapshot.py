@@ -20,9 +20,9 @@ Run:  python fundamentals_snapshot.py
       python fundamentals_snapshot.py --as-of 2026-06-21
 """
 
-import polars as pl
 import argparse
 import datetime
+import sys
 
 from db_compat import execute, query_all, use_postgres, connect
 from as_of import logical_write_floor
@@ -118,12 +118,19 @@ WHERE  symbol = ? AND date >= ?
 
 
 def _ensure_schema() -> None:
-    """Add new columns to existing tables; silently ignore if already present."""
+    """Add new columns to existing tables, ignoring "already present" but not real failures.
+
+    The migrations use IF NOT EXISTS, so re-adding an existing column raises nothing; an
+    exception therefore means the column was NOT added. The old bare `except Exception: pass`
+    reported that as success. On Postgres it is doubly bad: a failed statement poisons the
+    transaction, so every later query on the same connection dies with InFailedSqlTransaction
+    -- the same failure mode documented at length in mf_holdings_fetcher.ensure_schema.
+    """
     for ddl in _SCHEMA_MIGRATIONS:
         try:
             execute(ddl)
-        except Exception:
-            pass  # column already exists
+        except Exception as exc:
+            print(f"[FundamentalsSnapshot] DDL failed ({ddl[:70]}...): {exc}", file=sys.stderr)
 
 
 def _last_trading_session_floor(as_of: str) -> str:
@@ -186,9 +193,3 @@ if __name__ == "__main__":
     parser.add_argument("--as-of", help="Snapshot date YYYY-MM-DD (default: today)")
     args = parser.parse_args()
     run(as_of=args.as_of)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -43,7 +43,6 @@ Run:
   python institutional_deals_fetcher.py
 """
 
-import polars as pl
 import sys
 
 from curl_cffi import requests as cffi_req
@@ -186,20 +185,3 @@ if __name__ == "__main__":
     sys.exit(main())
 
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class InstitutionalDealsFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class InstitutionalDealsFetcherBaseFetcher(BaseFetcher[InstitutionalDealsFetcherSchema]):
-    fetcher_name = 'InstitutionalDealsFetcher'
-    domain = 'general'
-    schema = InstitutionalDealsFetcherSchema
-    min_interval_sec = 0.5
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -37,19 +37,7 @@ Usage:
     python mf_holdings_fetcher.py --limit 50
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class MfHoldingsFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class MfHoldingsFetcherBaseFetcher(BaseFetcher[MfHoldingsFetcherSchema]):
-    fetcher_name = 'MfHoldingsFetcher'
-    domain = 'amfiindia.com'
-    schema = MfHoldingsFetcherSchema
-    min_interval_sec = 0.5
 
 import argparse
 import time
@@ -156,8 +144,13 @@ def ensure_schema(con) -> None:
     ]:
         try:
             cur.execute(ddl)
-        except Exception:
-            pass
+        except Exception as exc:
+            # These use IF NOT EXISTS, so "already exists" does NOT raise -- an exception here
+            # means the column genuinely was not added. The bare `pass` this replaces is the
+            # exact hazard the comment above describes: on Postgres the failed statement
+            # aborts the transaction, so the trailing commit() then discards any work in it
+            # while the fetcher still exits 0.
+            print(f"[MFHoldings] DDL failed ({ddl[:70]}...): {exc}", file=sys.stderr)
     con.commit()
 
 
@@ -374,9 +367,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

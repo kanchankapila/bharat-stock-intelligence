@@ -1,4 +1,3 @@
-import polars as pl
 """
 MF Sector Allocation Fetcher (Economic Times / mcxlivefeeds)
 ============================================================
@@ -492,20 +491,3 @@ if __name__ == "__main__":
         limit_schemes=args.limit_schemes, sleep_s=args.sleep)
 
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class MfSectorAllocationFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class MfSectorAllocationFetcherBaseFetcher(BaseFetcher[MfSectorAllocationFetcherSchema]):
-    fetcher_name = 'MfSectorAllocationFetcher'
-    domain = 'amfiindia.com'
-    schema = MfSectorAllocationFetcherSchema
-    min_interval_sec = 0.5
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

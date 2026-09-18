@@ -10,7 +10,6 @@ repo uses, so a test file's import resolves here regardless of sys.path order.
 conftest.py imports from this module and owns the pytest-facing surface (fixtures, hooks).
 """
 
-import polars as pl
 import os
 import pathlib
 import uuid
@@ -310,9 +309,3 @@ def drain_memory_conns() -> None:
             drop_throwaway_schema(admin, schema)
         finally:
             admin.close()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

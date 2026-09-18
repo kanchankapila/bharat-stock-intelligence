@@ -24,19 +24,7 @@ Run:
   python stockedge_high_delivery_fetcher.py
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class StockedgeHighDeliveryFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class StockedgeHighDeliveryFetcherBaseFetcher(BaseFetcher[StockedgeHighDeliveryFetcherSchema]):
-    fetcher_name = 'StockedgeHighDeliveryFetcher'
-    domain = 'stockedge.com'
-    schema = StockedgeHighDeliveryFetcherSchema
-    min_interval_sec = 0.5
 
 import sys
 
@@ -169,9 +157,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

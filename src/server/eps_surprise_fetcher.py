@@ -29,24 +29,12 @@ Run:
   python eps_surprise_fetcher.py --limit 50     # first 50 resolved stocks
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class EpsSurpriseFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class EpsSurpriseFetcherBaseFetcher(BaseFetcher[EpsSurpriseFetcherSchema]):
-    fetcher_name = 'EpsSurpriseFetcher'
-    domain = 'general'
-    schema = EpsSurpriseFetcherSchema
-    min_interval_sec = 0.5
-
 
 import argparse
 import sys
 
+from mc_symbol_map import build_mc_to_symbol
 from db_compat import connect, translate, use_postgres, read_df, executemany
 from fetch_utils import retry_get
 
@@ -424,7 +412,11 @@ def main() -> None:
     mc_map_rows = con.execute(
         "SELECT symbol, mcsymbol FROM nse_stocks WHERE mcsymbol IS NOT NULL AND mcsymbol != ''"
     ).fetchall()
-    mc_to_symbol = {row["mcsymbol"]: row["symbol"] for row in mc_map_rows}
+    # NOT a dict comprehension: 62 mcsymbols map to more than one NSE symbol (measured live
+    # 2026-09-18), and the last row silently wins -- KMF -> {KOTAK, KOTAKBANK, MAHINDRA} would
+    # book Kotak Mahindra Bank's earnings against Mahindra. Ambiguous codes are dropped, never
+    # guessed (data-sources.md). See mc_symbol_map (AF-20260918-02).
+    mc_to_symbol = build_mc_to_symbol(mc_map_rows, log=print)
 
     # Pass 1: bulk
     print("[EPSSurprise] Pass 1 — fetching bulk earnings from MC...")
@@ -448,9 +440,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -65,7 +65,6 @@ Run:
   python ohlcv_adjust.py --persist           # write ohlcv_adjustment_factors
 """
 
-import polars as pl
 import argparse
 import sys
 from datetime import date
@@ -430,9 +429,3 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

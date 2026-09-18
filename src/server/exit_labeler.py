@@ -28,7 +28,6 @@ Run:  python exit_labeler.py
       python exit_labeler.py --limit 500
 """
 
-import polars as pl
 import pandas as pd
 import numpy as np
 import argparse

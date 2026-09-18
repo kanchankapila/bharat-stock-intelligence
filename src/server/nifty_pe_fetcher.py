@@ -22,20 +22,7 @@ Run:  python nifty_pe_fetcher.py              # last 30 days from MC
       python nifty_pe_fetcher.py --days 365   # last 365 days from MC
 """
 
-import polars as pl
 from pydantic import BaseModel
-from base_fetcher import BaseFetcher, governed_fetcher
-
-class NiftyPeFetcherSchema(BaseModel):
-    symbol: str | None = None
-    date: str | None = None
-
-class NiftyPeFetcherBaseFetcher(BaseFetcher[NiftyPeFetcherSchema]):
-    fetcher_name = 'NiftyPeFetcher'
-    domain = 'general'
-    schema = NiftyPeFetcherSchema
-    min_interval_sec = 0.5
-
 
 import argparse
 import datetime
@@ -105,11 +92,15 @@ def _ensure_table():
             PRIMARY KEY (index_name, date)
         )
     """)
-    # Add eps column if upgrading from older schema
+    # Add eps column if upgrading from older schema.
+    # IF NOT EXISTS makes "already present" a no-op success, so a raised exception here is a
+    # REAL failure (permissions, missing table). It used to be swallowed by a bare `pass`,
+    # which is how a missing index_valuation.eps stayed invisible while downstream reads of
+    # `pe`/`pb`/`eps` still reported success with the column absent.
     try:
         execute("ALTER TABLE index_valuation ADD COLUMN IF NOT EXISTS eps REAL")
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[NiftyPE] could not add index_valuation.eps: {exc}", file=sys.stderr)
 
 
 def _parse_mc_graph(resp_json: dict) -> list[tuple[str, float]]:
@@ -218,8 +209,12 @@ def fetch_mc_pe_pb(ind_id: int, days: int = 365) -> dict[str, dict]:
             entry["div_yield"] = float(ov["div_yield"])
         if ov.get("ttmEps"):
             entry["eps"] = float(str(ov["ttmEps"]).replace(",", ""))
-    except Exception:
-        pass
+    except Exception as exc:
+        # The sibling graph loop just above already prints its failures; this overview call
+        # feeds div_yield + eps and used to fail in total silence. Those two columns are
+        # already the weakest-covered ones here (see the note above), so an unnoticed failure
+        # is indistinguishable from the coverage gap it was meant to close.
+        print(f"[PE] MC overview fetch error for indId={ind_id}: {exc}", file=sys.stderr)
 
     return combined
 
@@ -335,9 +330,3 @@ if __name__ == "__main__":
     parser.add_argument("--full", action="store_true", help="Full history from Trendlyne")
     args = parser.parse_args()
     run(days=args.days, full=args.full)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
