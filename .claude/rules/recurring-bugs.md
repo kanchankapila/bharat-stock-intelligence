@@ -726,6 +726,18 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   you fix it, **re-run and check the fallback path actually executes** — here it then revealed
   that this box refuses task registration unelevated for ANY trigger set, so the promise was
   doubly false.
+  **RECURRED 2026-09-18, one level deeper, and this time it hid for 8 days behind a good-looking
+  metric.** The 2026-09-10 fix moved the try to the right statement and added a logon-only retry
+  -- but put that retry OUTSIDE any try. It raised the same `Access is denied`, so the script
+  still exited having installed NOTHING. Meanwhile AF-20260917-14 read 6 clean days of
+  `job_run_history` gaps and credited them to this script "having taken effect". Checked live:
+  no scheduled task, empty Startup folder -- the host had simply not rebooted since 09-13, and
+  that boot was restarted BY HAND 3.5 minutes later. **Tell, and it generalises well beyond
+  installers: before crediting a good outcome to a fix, confirm the fix EXISTS in the running
+  system** (`Get-ScheduledTask`, the Startup folder, `pm2 describe` -- not the script's source).
+  A metric that improves after a change is a hypothesis about that change, not evidence of it.
+  Fixed with a third rung that needs no privilege (per-user Startup-folder `.cmd` ->
+  `pm2 resurrect`), and actually run.
 
 - **A dotted-string monkeypatch target silently stops intercepting when the package is
   importable under two module identities — and the test then performs the real side effect

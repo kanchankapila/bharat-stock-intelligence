@@ -418,6 +418,29 @@ class FeatureEngineer:
         ).set_index(date_col).reindex(feat.index)
 
         feat["roe"]            = merged["return_on_equity"]
+        # AF-20260917-07. Yahoo's returnOnEquity decayed 86% -> 6.1% of the universe between
+        # 2026-07-02 and 2026-08-23 while fundamentals_history stayed fresh, so from ~08-23 this
+        # column was NaN for ~94% of names. Fill ONLY those gaps from InvestSights' FMP ROE,
+        # which measured Pearson 0.9608 against the yfinance value on the overlap, SAME fraction
+        # scale, ZERO sign flips (2026-09-18). Deliberately NOT investsights_factor_scores.roe:
+        # that sibling table is a different definition (0.7727, percent scale, sign flips).
+        # COALESCE direction matters: yfinance stays primary where present, so every date before
+        # investsights coverage began (2026-08-13) is byte-identical to before -- this only
+        # fills the decayed window instead of rewriting history, which for the DL model's
+        # per-symbol scaler would be a serve-time shift (AF-20260913-02).
+        # Consumer is the DL path only; the ensemble reads ROE from fundamentals_history /
+        # stock_fundamentals directly and is untouched here on purpose (see AF-20260917-07).
+        if feat["roe"].isna().any():
+            alt = read_as_of_history(
+                "investsights_fundamentals_history", symbol, ["return_on_equity"],
+                date_col="fetched_date",
+            )
+            if not alt.empty:
+                alt_merged = pd.merge_asof(
+                    left, alt.rename(columns={"return_on_equity": "_roe_alt"}),
+                    left_on=date_col, right_on="as_of_date", direction="backward",
+                ).set_index(date_col).reindex(feat.index)
+                feat["roe"] = feat["roe"].fillna(alt_merged["_roe_alt"])
         feat["debt_to_equity"] = merged["debt_to_equity"]
         feat["op_margins"]     = merged["operating_margins"]
         feat["piotroski_f"]    = merged["piotroski_f_score"]

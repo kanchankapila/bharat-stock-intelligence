@@ -172,3 +172,21 @@ Asked "are claude-mem / headroom / graphify correctly configured to reduce token
   reproduce (the documented under-load class — the isolated re-run is 1419/1419, and a concurrent
   session independently recorded the same signature the same day), but that shortcut is exactly what
   lets a real regression through.
+
+## 2026-09-18 (afternoon) — the three "still open" items moved forward
+
+- **pm2 autostart was never installed.** AF-20260917-14 credited 6 clean days to the fix; live, there
+  was no scheduled task and nothing in Startup — the host just hadn't rebooted. The installer's
+  logon-only retry sat outside any try, so it died having installed nothing. Third privilege-free
+  rung added (per-user Startup `.cmd` → `pm2 resurrect`) and RUN; `dump.pm2` refreshed to 6 apps.
+  **Before crediting a good metric to a fix, confirm the fix exists in the running system.**
+- **Recovered ROE wired into the DL path only** (`_merge_fundamentals`, InvestSights fills NaN only,
+  point-in-time on `fetched_date`). Safe because DL's blend weight is 0.0. The ensemble has seen
+  ROE = 0 for ~94% of names since ~08-23 via `num('return_on_equity', 0)` — consistently in train and
+  serve, so no skew today; swapping the source is folded into AF-20260913-07's retrain measurement.
+- **09-18 is a Friday.** Weekend windows: `ml-weekly-data` Fri 23:30 IST, `ml-weekly-retrain` Sat
+  09-19, `dl-retrain-weekly` Sun 09-20 (I had written "Sat 09-20" — re-read BullMQ, not the ledger).
+  All retained retrain failures are orphans from mid-run restarts → no `.ts` changes this weekend.
+- **Redis needs `REDIS_PASSWORD`** for any ad-hoc BullMQ inspection script (NOAUTH otherwise).
+- A concurrent session's snapshot commit swept my staged batch into `e1db34b0` under a generic
+  message — nothing lost, but check `git log` before assuming your staged files are still yours.

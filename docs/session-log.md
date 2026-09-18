@@ -9330,3 +9330,45 @@ of thing through.
 
 **Open (blocking reason):** market_holidays future=0 — no authoritative H2-2026 source (Evidence; NSE holiday-master returns 200/empty even warmed, no registry alternate); AF-23 unindexed scans now load-bearing for the 03:00 dq slot (Sequential); tonight is the first real test — check ml-daily-ops <210min/0 failed steps and fno_rollover same-day (Calendar).
 
+
+## 2026-09-18 (afternoon) — docs synced, then the three "still open" items moved forward
+
+**Housekeeping first.** A concurrent session's snapshot commit (`e1db34b0`, "chore: snapshot
+pre-existing working-tree changes") swept my staged morning batch into main under its own generic
+message — nothing is lost, and main is pushed (0 ahead / 0 behind), but the morning's work carries
+no commit message of its own. The full pytest I had started was killed at a session boundary, so I
+re-ran it against main: **2,822 passed, 0 failed.**
+
+**Downtime monitor (AF-20260917-14) — its premise was wrong.** The row credited the clean-uptime
+streak since 09-11 to `install-pm2-autostart.ps1` "having taken effect". Checked live: **no
+scheduled task existed and the Startup folder was empty.** The script's logon-only fallback sat
+outside any try, so on this box (which refuses `Register-ScheduledTask` unelevated for ANY
+trigger) it died having installed nothing. The streak was the host not rebooting since 09-13 —
+and that boot was restarted by hand 3.5 minutes later. Added a third, privilege-free rung (a
+per-user Startup-folder `.cmd` running `pm2 resurrect`), ran it, and refreshed `dump.pm2`
+(stale since 09-13) to all 6 apps. Automatic Restart Sign-On is not disabled, so a Windows Update
+restart — the measured 09-10 cause — now self-recovers. A crash/power-loss reboot still waits for
+a login; only an elevated run adds the boot trigger, which needs the user.
+
+**Recovered ROE, wired where it is safe (AF-20260917-07).** Two consumers, and they split cleanly:
+DL reads `feature_store.roe`, and DL's blend weight is paused at 0.0 — so `_merge_fundamentals` now
+fills ROE from InvestSights ONLY where yfinance is NaN, point-in-time on `fetched_date`, and that
+moves only the `dl_score` reporting column until Sunday's coordinated DL retrain. Verified live:
+3MINDIA keeps July's yfinance 0.289 and fills September at 0.2954; ABB keeps yfinance 0.1913 over
+InvestSights' 0.2129; 63MOONS correctly stays NaN because its only InvestSights row was fetched
+today (no look-ahead). The ensemble reads ROE straight from the decayed tables with
+`num('return_on_equity', 0)`, so it has seen **ROE = 0 for ~94% of names** since ~08-23 — in
+training and serving alike, so there is no skew today, only a starved feature. Changing that is a
+live scoring change; it is folded into AF-20260913-07's measurement as a second arm rather than
+landed before the retrain.
+
+**Weekend retrains (AF-20260913-02/03/05/07).** Re-read the schedule from BullMQ rather than the
+ledger — and corrected my own error: 09-18 is a **Friday**, so the windows are `ml-weekly-data`
+tonight 23:30 IST, `ml-weekly-retrain` Sat 09-19, `dl-retrain-weekly` Sun 09-20 (I had written
+"Sat 09-20"). All three armed with 0 active jobs. Every retained failure on both retrain queues is
+an orphan from a mid-run restart, plus one deliberate stop — no code defect. So the live risk is a
+restart during the window, and this batch deliberately contains no `.ts` change.
+
+**Lesson worth keeping:** a metric that improves after a change is a hypothesis about that change.
+The uptime streak looked exactly like the autostart fix working. Confirm the fix exists in the
+running system before crediting it.

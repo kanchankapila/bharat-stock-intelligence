@@ -63,16 +63,21 @@ def as_of_join_sql(hist_table: str, alias: str, base_alias: str, base_symbol_col
     )
 
 
-def read_as_of_history(table: str, symbol: str, columns: Sequence[str]) -> pd.DataFrame:
+def read_as_of_history(table: str, symbol: str, columns: Sequence[str],
+                       date_col: str = "as_of_date") -> pd.DataFrame:
     """Load a symbol's full as-of history from `table` (as_of_date + the given columns),
     normalized to a sorted, NaT-free, datetime64[ns] `as_of_date` column ready for
     pandas.merge_asof. Extracted from feature_engineering.py's _merge_fundamentals, which
     hand-rolled this same "load, normalize dtype, dropna, sort" boilerplate -- including the
     dtype-resolution fix documented there (PG timestamptz vs SQLite text-parsed as_of_date can
     come back as different datetime64 resolutions; merge_asof requires an exact dtype match).
+
+    `date_col` names the table's own as-of column when it is not called `as_of_date`
+    (`investsights_fundamentals_history` uses `fetched_date`); it is aliased to `as_of_date` so
+    every caller merges on one name.
     """
-    cols_sql = ", ".join(["as_of_date"] + list(columns))
-    hist = read_df(f"SELECT {cols_sql} FROM {table} WHERE symbol = ? ORDER BY as_of_date", (symbol,))
+    cols_sql = ", ".join([f"{date_col} AS as_of_date"] + list(columns))
+    hist = read_df(f"SELECT {cols_sql} FROM {table} WHERE symbol = ? ORDER BY {date_col}", (symbol,))
     if hist.empty:
         return hist
     hist["as_of_date"] = pd.to_datetime(hist["as_of_date"]).astype("datetime64[ns]")

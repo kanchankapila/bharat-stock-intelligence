@@ -103,13 +103,33 @@ try {
   # admin shell.
   Write-Warning "Could not register with the at-startup trigger (needs elevation): $($_.Exception.Message)"
   Write-Warning "Retrying with the logon trigger only."
-  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $logonTrigger `
-    -Settings $settings -Description $desc -ErrorAction Stop | Out-Null
-  $registered = $true
-  $triggerNote = 'logon ONLY -- re-run this script from an ELEVATED PowerShell to add the boot trigger'
+  try {
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $logonTrigger `
+      -Settings $settings -Description $desc -ErrorAction Stop | Out-Null
+    $registered = $true
+    $triggerNote = 'logon ONLY -- re-run this script from an ELEVATED PowerShell to add the boot trigger'
+  } catch {
+    # Third rung, and the only one that needs NO privilege. This box refuses
+    # Register-ScheduledTask unelevated for ANY trigger set (measured 2026-09-10), and until
+    # 2026-09-18 this retry sat outside any try -- so the script died here and NOTHING was
+    # installed. That went unnoticed for 8 days because AF-20260917-14's clean-uptime streak was
+    # credited to this script "having taken effect"; on 2026-09-18 Get-ScheduledTask showed no
+    # task at all and the Startup folder held nothing. The streak was the host simply not
+    # rebooting (last boot 2026-09-13 15:46, restarted by hand 3.5 min later).
+    # The per-user Startup folder runs at LOGON with no elevation. Weaker than a boot trigger (a
+    # reboot that nobody logs in to will not start the platform), but it is real, and a partial
+    # install beats a script that exits having installed nothing.
+    Write-Warning "Logon-trigger registration was ALSO refused: $($_.Exception.Message)"
+    Write-Warning "Falling back to the per-user Startup folder (no elevation needed)."
+    $startup = [Environment]::GetFolderPath('Startup')
+    $cmdPath = Join-Path $startup "$TaskName.cmd"
+    Set-Content -Path $cmdPath -Encoding ascii -Value "@echo off`r`n$command`r`n"
+    $registered = $true
+    $triggerNote = "Startup-folder script at $cmdPath (LOGON only; re-run ELEVATED for a boot trigger)"
+  }
 }
 
 Write-Host ""
 Write-Host "Registered '$TaskName' ($triggerNote)." -ForegroundColor Green
 Write-Host "IMPORTANT: run 'pm2 save' whenever you change which apps are running, so the dump this task restores stays current."
-Write-Host "Test it now without rebooting:  Start-ScheduledTask -TaskName '$TaskName'"
+Write-Host "Test it now without rebooting:  Start-ScheduledTask -TaskName '$TaskName'  (or run the Startup-folder .cmd directly)"
