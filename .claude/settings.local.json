@@ -28,7 +28,15 @@
       "mcp__postgres__execute_sql",
       "Bash(./backend-python/venv/Scripts/python.exe -)",
       "Bash(./backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_assembly_ablation.py -q)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(python -m graphify query \"what audit findings are currently open or recently closed\")",
+      "Bash(psql *)",
+      "Bash(backend-python/venv/Scripts/python.exe *)",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(pm2 jlist *)",
+      "Bash(awk '{print $NF}')",
+      "Bash(xargs -I {} basename {})",
+      "Bash(sed 's/\\\\.md//')"
     ]
   },
   "skillOverrides": {
