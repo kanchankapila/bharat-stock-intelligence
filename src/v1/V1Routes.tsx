@@ -21,6 +21,9 @@ const OptionsIntelligence     = React.lazy(() => import('../components/OptionsIn
 const PortfolioAnalytics      = React.lazy(() => import('../components/PortfolioAnalytics'));
 const ModelStudioPage         = React.lazy(() => import('../components/ModelStudioPage'));
 const FlowTerminalPage        = React.lazy(() => import('../components/FlowTerminalPage'));
+const MarketMapPage           = React.lazy(() => import('../components/MarketMapPage'));
+const ValuationLabPage        = React.lazy(() => import('../components/ValuationLabPage'));
+const IndexValuationPage      = React.lazy(() => import('../components/IndexValuationPage'));
 const StrategyBuilder         = React.lazy(() => import('../components/StrategyBuilder'));
 const ExportPortfolioView     = React.lazy(() => import('../components/ExportPortfolioView'));
 const SystemMonitorPage       = React.lazy(() => import('../components/SystemMonitorPage'));
@@ -110,6 +113,12 @@ const V1Routes = ({
     const pathParts = location.pathname.split('/').filter(Boolean);
     const activeTab = pathParts[0] || 'dashboard';
 
+    // /details has no live setter for selectedSymbol (stock cards open the SlideOutDrawer
+    // instead, and nothing calls App.tsx's setSelectedSymbol), so the route was orphaned.
+    // Accept a deep link (/details?symbol=RELIANCE) as the fallback so the page — and the
+    // Derivatives / Ownership & Flows tabs inside it — remain reachable and testable.
+    const detailSymbol = selectedSymbol ?? new URLSearchParams(location.search).get('symbol');
+
     // The V1 shell has a different structure, so we need to handle the watchlist route separately
     // and then have a catch-all for the rest of the pages which are children of the AppShell.
     return (
@@ -175,6 +184,7 @@ const V1Routes = ({
                                 </V1PageFrame>
                             } />
                             <Route path="/indices" element={<IndicesPage onSelectStock={onSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
+                            <Route path="/index-valuation" element={<IndexValuationPage />} />
                             <Route path="/sectors" element={
                                 <V1PageFrame title="Sector Intelligence Studio" kicker="ROTATION · BREADTH · DERIVATIVES · ANALYST CALLS">
                                     <SectorIntelligencePage
@@ -184,16 +194,20 @@ const V1Routes = ({
                                 </V1PageFrame>
                             } />
                             <Route path="/market-map" element={
-                                <V1PageFrame title="Market Map" kicker="SECTOR INTELLIGENCE">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <SectorPerformance />
-                                        <SectorHeatmap />
+                                <>
+                                    <MarketMapPage />
+                                    <div className="p-6 space-y-6">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <SectorPerformance />
+                                            <SectorHeatmap />
+                                        </div>
+                                        <SectorAdvanceDecline />
+                                        <SectorConstituents onSelectStock={onSelectStock} />
                                     </div>
-                                    <SectorAdvanceDecline />
-                                    <SectorConstituents onSelectStock={onSelectStock} />
-                                </V1PageFrame>
+                                </>
                             } />
                             <Route path="/screener" element={<V1Screener stocks={stocks} onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />} />
+                            <Route path="/valuation-lab" element={<ValuationLabPage onSelectStock={onSelectStock} />} />
                             <Route path="/screener-browser" element={
                                 <V1PageFrame title="Screener Browser" kicker="ALL SOURCES · ONE CATALOG">
                                     <ScreenerBrowserPage onSelectStock={onSelectStock} />
@@ -242,11 +256,11 @@ const V1Routes = ({
                             <Route path="/agent-auditor" element={<AgentAuditorPage />} />
                             <Route path="/agent-optimizer" element={<AgentOptimizerPage />} />
                             <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={onSelectStock} />} />
-                            <Route path="/details" element={selectedSymbol ? (
+                            <Route path="/details" element={detailSymbol ? (
                                 <V1StockDetails
-                                    key={selectedSymbol}
-                                    symbol={selectedSymbol}
-                                    stock={stocks.find(s => s.symbol === selectedSymbol)}
+                                    key={detailSymbol}
+                                    symbol={detailSymbol}
+                                    stock={stocks.find(s => s.symbol === detailSymbol)}
                                     onBack={() => navigate('/dashboard')}
                                     watchlist={watchlist}
                                     onToggleWatchlist={onToggleWatchlist}

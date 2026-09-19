@@ -40,6 +40,10 @@ const V1MFAnalysis          = React.lazy(() => import('./V1MFAnalysis').then(m =
 const V1NewsTab             = React.lazy(() => import('./V1NewsTab').then(m => ({ default: m.V1NewsTab })));
 const V1OptionChain         = React.lazy(() => import('./V1OptionChain').then(m => ({ default: m.V1OptionChain })));
 const V1FnOSignals          = React.lazy(() => import('./V1FnOSignals').then(m => ({ default: m.V1FnOSignals })));
+// Enhancement-plan #10/#13: derivatives positioning + ownership & flows tabs, built on the
+// verified fno.router chain summary and fundamentals/misc.router ownership procedures.
+const StockDerivativesTab   = React.lazy(() => import('./StockDerivativesTab').then(m => ({ default: m.StockDerivativesTab })));
+const StockOwnershipTab     = React.lazy(() => import('./StockOwnershipTab').then(m => ({ default: m.StockOwnershipTab })));
 
 // Extracted from App.tsx (2026-08-02 perf pass) so it's lazy-loaded instead of always
 // bundled into the main entry chunk -- this is the largest single inline component (~770
@@ -265,6 +269,8 @@ export const V1StockDetails: React.FC<{
           { id: 'analysis', label: 'Analysis' },
           { id: 'mf', label: 'MF Insights' },
           { id: 'fno', label: 'F&O Insights' },
+          { id: 'derivatives', label: 'Derivatives' },
+          { id: 'ownership', label: 'Ownership & Flows' },
           { id: 'trendlyne', label: 'Trendlyne' },
           { id: 'news', label: 'News Feed' },
         ].map(tab => (
@@ -708,8 +714,12 @@ export const V1StockDetails: React.FC<{
             </div>
           )}
 
+          {/* Enhancement-plan #10/#13: derivatives + ownership tabs */}
+          {activeTab === 'derivatives' && <React.Suspense fallback={<PageFallback />}><StockDerivativesTab symbol={symbol} /></React.Suspense>}
+          {activeTab === 'ownership' && <React.Suspense fallback={<PageFallback />}><StockOwnershipTab symbol={symbol} /></React.Suspense>}
+
           {/* Other tabs can be implemented similarly */}
-          {activeTab !== 'insights' && activeTab !== 'ai-insights' && activeTab !== 'fno' && activeTab !== 'technicals' && activeTab !== 'fundamentals' && activeTab !== 'financials' && activeTab !== 'peers' && activeTab !== 'mf' && activeTab !== 'news' && activeTab !== 'mc' && activeTab !== 'trendlyne' && (
+          {activeTab !== 'insights' && activeTab !== 'ai-insights' && activeTab !== 'fno' && activeTab !== 'technicals' && activeTab !== 'fundamentals' && activeTab !== 'financials' && activeTab !== 'peers' && activeTab !== 'mf' && activeTab !== 'news' && activeTab !== 'mc' && activeTab !== 'trendlyne' && activeTab !== 'derivatives' && activeTab !== 'ownership' && (
             <div className="flex flex-col items-center justify-center py-20 glass-strong rounded-2xl border border-slate-800/50 border-dashed">
                <Activity className="w-12 h-12 text-slate-200 animate-pulse mb-4" />
                <h3 className="text-slate-400 font-black text-lg uppercase tracking-tighter italic">Coming to Bharat Stock Pro</h3>

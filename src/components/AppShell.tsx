@@ -59,6 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Search,          label: 'Stock Intelligence', id: 'stock-intelligence-hub' },
       { icon: LayoutDashboard, label: 'Dashboard',  id: 'dashboard'   },
       { icon: BarChart2,       label: 'Indices',    id: 'indices'     },
+      { icon: TrendingUp,      label: 'Index Valuation', id: 'index-valuation' },
       { icon: PieChart,        label: 'Sectors',    id: 'sectors'     },
       { icon: Activity,        label: 'Market Map', id: 'market-map'  },
       { icon: Sunrise,         label: 'Pre-Market', id: 'premarket'   },
@@ -78,6 +79,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Analysis',
     items: [
       { icon: Filter,  label: 'Screener',   id: 'screener'    },
+      { icon: FlaskConical, label: 'Valuation Lab', id: 'valuation-lab' },
       { icon: Layers,  label: 'Screener Browser', id: 'screener-browser' },
       { icon: Filter,  label: 'Live Screener', id: 'live-screener' },
       { icon: History, label: 'EOD Screener',  id: 'eod-screener'  },
