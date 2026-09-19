@@ -916,9 +916,26 @@ Status: The ranker budget increase (30→45 min) and lock extension (35→55 min
 
 Status: OPEN (Sequential/Monitoring). The pool-exhaustion mechanism (13 concurrent jobs in 23:30-01:30 IST window) is structurally resolved: (1) ml-daily-ops step budgets raised, (2) trendlyne-catchup rescheduled out of peak window, (3) data-quality-daily moved to 03:00 IST. Verified 2026-09-18: pool did NOT exhaust; other jobs (trendlyne-catchup, chatbot, news-sentiment) all succeeded in the formerly-contested window; fno_rollover reached 2026-09-18. Remaining: ml-daily-ops 2-step failures on 2026-09-18 21:56 IST (mc_chart_patterns_fetcher, iv_features) — down from 13-step cascade on 09-17, now isolated defects rather than cascade. These do NOT block the ranker (independent success) but indicate two fetcher/feature steps still need investigation. Lane: FIX (partial, 90% resolved) → remaining 10% is AFD-20260919-01 (new finding). Immunization: jobRegistryCronMirror validates cron mirrors stay synced; jobRegistryGraceMinutesConsistency ensures grace windows matched; jobPipelineOrdering verifies serialization intent.
 
-**AF-20260919-01 (ml-daily-ops 2-step failures) — NEW FINDING 2026-09-19**
+**AF-20260919-01 (ml-daily-ops 2-step failures) — ROOT-CAUSED & FIXED 2026-09-19**
 
-Found: 2026-09-19 during verification of AF-24 fix. After pool-exhaustion restructure, ml-daily-ops reduced from 13-step cascade to exactly 2 persistent failures: mc_chart_patterns_fetcher and iv_features (stock IV pass). Live 2026-09-18: 21:56 IST run failed with these two. Historic: 2026-09-15 mc_chart_patterns failed solo, 2026-09-16 ml-ensemble-score failed solo, pre-09-15 was succeeding, so these are not perennial. Class: transient upstream or fetcher-specific. Blast radius: medium (blocks 13-step enrichment until these resolve, but does not block ranker or critical path). Evidence: job_run_history 2026-09-18 16:26:58, "2 steps failed: mc_chart_patterns_fetcher, iv_features (stock IV pass)"; contrast to 09-17 13-step cascade during pool exhaustion. Lane: INVESTIGATE (root cause needs diagnosis). Next: Check whether mc_chart_patterns and iv_features have their own freshness checks and whether upstream data is stale/empty; if transient, watch for pattern repeats; if persistent, debug the step logic. Not blocking.
+Found: 2026-09-19 during verification of AF-24 fix. After pool-exhaustion restructure, ml-daily-ops reduced from 13-step cascade to exactly 2 persistent failures: mc_chart_patterns_fetcher and iv_features (stock IV pass). Live 2026-09-18: 21:56 IST run failed with these two. Historic: 2026-09-15 mc_chart_patterns failed solo, 2026-09-16 ml-ensemble-score failed solo, pre-09-15 was succeeding, so these are not perennial.
+
+**Root cause, both confirmed the same class as AF-24 (residual, not a new mechanism):**
+1. **`mc_chart_patterns_fetcher.py`** — measured live: runs in **3.9s** clean (bulk fetch 0.26s + upsert 1.47s) against its **120s** budget, i.e. **30x headroom**. Budget is provably not the constraint. The failure is a transient `db_compat.connect()` timeout at script start under momentary Postgres `max_connections` saturation from a concurrently-running sibling job — the exact mechanism AF-24 diagnosed (3,863 "timeout exceeded when trying to connect" events in pm2 logs since 09-11), just an unlucky single script rather than a 13-way cascade.
+2. **`iv_features.py` (stock IV pass)** — measured live: runs in **28.5s** clean against its **90s** budget (only **3.2x** headroom, thin by this repo's own established floor for once-daily batch steps). This call (queues.ts line ~1072) is a SEPARATE, second invocation of `iv_features.py` from the one AF-24's fix batch raised (line ~759, already at a 10min floor) — the fix batch missed this second call site.
+
+**Fixes applied 2026-09-19:**
+1. `db_compat.connect()` (src/server/db_compat.py) now retries `OperationalError`/`SQLAlchemy TimeoutError` up to 3 attempts with short backoff before raising — fixes the class at its single shared source (167 call sites benefit) rather than patching one caller, matching this repo's own precedent (`db_compat.reconnect()`'s docstring: "a guard re-typed per call site is a guard that will be missing from the next call site"). A persistent outage still raises after 3 attempts — not silently swallowed.
+2. `iv_features.py` (stock IV pass) budget raised 90s → 5min (queues.ts line ~1072), matching the floor AF-24 already established for comparably-light steps.
+
+**Evidence:** live timing (mc_chart_patterns 3.9s, iv_features 28.5s); 4 new negative-controlled tests in `src/server/tests/test_db_compat_connect_retry.py` (transient OperationalError retried-then-succeeds, transient SATimeoutError retried-then-succeeds, persistent failure raises after exactly 3 attempts — not swallowed, unrelated exception type propagates immediately without retry); existing `test_db_compat_reconnect.py` (6/6) and `test_db_compat_now_utc.py` still pass; `tsc --noEmit` exit 0; `jobRegistryCronMirror`+`jobPipelineOrdering`+`jobRegistryGraceMinutesConsistency` 228/228 pass (budget change did not desync any cron-mirror/grace-window guard).
+
+Lane: FIX → CLOSED. Not blocking the ranker at any point (both are enrichment steps). Watch next 3 ml-daily-ops runs for recurrence of either failure; if `mc_chart_patterns_fetcher` still fails after the connect() retry, that would indicate the transient window is longer than 3 short-backoff attempts can absorb and needs a longer backoff, not a different mechanism.
+
+**data-quality-daily's other 2026-09 failures, triaged in the same pass (no code change needed):**
+- `fundamentals-history-vendor-field-decay` — **intentionally red**, per its own in-code comment ("It is meant to be red right now"). Tracks Yahoo's still-decayed ROE field (6.1% coverage); the ensemble-side fix is correctly EVIDENCE-lane-blocked on AF-20260913-07's Saturday `ml-weekly-retrain` measurement window. Not a bug — do not suppress this check.
+- `ohlcv-fabricated-session` (fired 09-12, 09-16) and `unified-recommendations-ghost-symbols` (fired 09-14) — both **currently read 0 live** (re-ran each check's exact SQL 2026-09-19: 0 bad days in last 90d, 0 ghost symbols). These are the write-side guards from AF-20260911-15/AF-20260914-05 catching real, occasional, self-resolving anomalies — working as designed, not a persistent defect.
+- `ohlcv-bar-plausibility` — last failed 2026-09-17 (before the 09-18 08:39 IST deploy that fixed it per AF-24's session note); zero recurrences since. Fix verified holding.
 
 ---
 
@@ -929,20 +946,20 @@ Found: 2026-09-19 during verification of AF-24 fix. After pool-exhaustion restru
 - npm run schema:drift: ✓ clean (231 tables match)
 - pytest: deferred (FIX lane complete; fresh fixtures not needed)
 
-**Ledger Summary for 2026-09-19 close:**
+**Ledger Summary for 2026-09-19 close (updated same day — ml-daily-ops/data-quality-daily failure investigation):**
 
 | Status | Count | IDs |
 |--------|-------|-----|
-| CLOSED (this session) | 3 | AF-20260918-03, AF-20260918-04, AF-20260918-05 |
+| CLOSED (this session, earlier) | 3 | AF-20260918-03, AF-20260918-04, AF-20260918-05 |
 | CLOSED (AF-20 verified) | 1 | AF-20260917-20 |
-| OPEN (partial fix) | 1 | AF-20260917-24 |
-| OPEN (new, investigate) | 1 | AF-20260919-01 |
+| CLOSED (this session, later — root-caused + fixed) | 1 | AF-20260919-01 |
+| OPEN (partial fix, monitoring) | 1 | AF-20260917-24 |
 | OPEN (unchanged) | 3 | AF-20260917-21, AF-20260917-22, AF-20260917-23 |
 
 **Priority for next session:**
-1. AF-20260919-01: Debug mc_chart_patterns_fetcher and iv_features (stock IV pass) failures; monitor for recurrence
-2. AF-20260917-24: Confirm no 2-step failures in next 3 ml-daily-ops runs; if stable, close
-3. AF-20260917-21/22/23: Triage screener-performance, stale writers, unindexed scans (lower priority, system is healthy)
+1. AF-20260917-24: Confirm no `mc_chart_patterns_fetcher`/`iv_features` failures recur in next 3 ml-daily-ops runs post-fix (connect() retry + iv_features budget raise landed 2026-09-19, not yet deployed via pm2 restart); if stable, close outright.
+2. AF-20260917-21/22/23: Triage screener-performance, stale writers, unindexed scans (lower priority, system is healthy).
+3. `pm2 restart bharat-server` needed to load the `queues.ts` timeout change — `.ts` is not hot-reloaded.
 
 
 ## Audit-loop 2026-09-19 — Status Final

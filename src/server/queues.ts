@@ -1069,7 +1069,11 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   await runPython('stock_option_chain_fetcher.py', [], 6 * 60_000)
     .catch(e => T.fail('stock_option_chain_fetcher', e));
   // Re-run iv_features after stock chains so per-stock iv_rank reflects BS-computed ATM IV (not just index IV from pcr_fetcher).
-  await runPython('iv_features.py', [], 90_000)
+  // 90s -> 5min (AF-20260919-01): measured 28.4s clean, but that left only ~3x headroom --
+  // thin enough to clip under the same ml-daily-ops-window DB contention AF-20260917-24
+  // already diagnosed. The OTHER iv_features call above (line ~759) already runs at a 10min
+  // floor for the same reason; this second pass was missed by that fix batch.
+  await runPython('iv_features.py', [], 5 * 60_000)
     .catch(e => T.fail('iv_features (stock IV pass)', e));
 
   // EPS surprise streak: beat/miss history from MC actual-estimate API → eps_surprise_history + technical_signals.

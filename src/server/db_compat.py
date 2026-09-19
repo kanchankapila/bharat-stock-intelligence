@@ -16,6 +16,7 @@ Conversion notes for P3f:
   - SQLite-only SQL (INSERT OR REPLACE, strftime, PRAGMA table_info) must be hand-converted.
 """
 import os
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,7 @@ from urllib.parse import quote_plus
 
 import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError, TimeoutError as SATimeoutError
 
 # Auto-load .env once per process (not on every importlib.reload).
 # Uses override=False so tests that set DATABASE_URL/USE_POSTGRES before importing are unaffected.
@@ -381,8 +383,28 @@ class ConnWrapper:
 
 def connect() -> ConnWrapper:
     """Open a connection with the sqlite3-style surface. Caller commits and closes
-    (or use it as a `with` block)."""
-    return ConnWrapper(get_engine().connect())
+    (or use it as a `with` block).
+
+    Retries transient pool/server connection-timeout failures (AF-20260919-01,
+    AF-20260917-24): ~15+ Python steps in ml-daily-ops connect to the same Postgres
+    within a short evening window, and a momentary server-side max_connections
+    saturation from a concurrently-running sibling job fails an unlucky script's very
+    first connect() with no chance to recover -- measured live: mc_chart_patterns_fetcher
+    (3.9s runtime, 30x its own budget) still failed outright on 2026-09-15 and
+    2026-09-18 with nothing wrong in the script itself. 3 attempts / short backoff is
+    enough to ride out a momentary spike; a persistently-down server still raises after
+    the last attempt, so a real outage is never silently swallowed."""
+    last_exc = None
+    for attempt in range(3):
+        try:
+            return ConnWrapper(get_engine().connect())
+        except (OperationalError, SATimeoutError) as e:
+            last_exc = e
+            if attempt < 2:
+                print(f"[db_compat] connect() attempt {attempt + 1} failed "
+                      f"(transient?): {e}. Retrying...", file=_sys.stderr)
+                time.sleep(0.5 * (attempt + 1))
+    raise last_exc
 
 
 def reconnect(conn):
