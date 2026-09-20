@@ -36,7 +36,13 @@
       "Bash(pm2 jlist *)",
       "Bash(awk '{print $NF}')",
       "Bash(xargs -I {} basename {})",
-      "Bash(sed 's/\\\\.md//')"
+      "Bash(sed 's/\\\\.md//')",
+      "Bash(awk -F'|' '{print $7}')",
+      "Bash(awk -F'|' '{print $2, $3, $5}')",
+      "Bash(node .claude/skills/repo-doctor/doctor.mjs)",
+      "Bash(node -e ' *)",
+      "Bash(node C:\\\\Users\\\\amitk\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--Github-bharat-stock-intelligence\\\\57a25055-d2b5-4f11-8736-c4572a480aee\\\\scratchpad\\\\fix-ml-daily-ops.mjs)",
+      "Bash(node scratchpad/fix-ml-daily-ops.mjs)"
     ]
   },
   "skillOverrides": {
