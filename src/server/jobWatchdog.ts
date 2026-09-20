@@ -19,6 +19,7 @@ import {
   hasOccurrenceOnIstDate,
   istDateStr,
   patternsAreWeekdayOnly,
+  describeCadence,
 } from './jobHeartbeat';
 import { JOB_REGISTRY } from './jobRegistry';
 import { getSystemStatus } from './routers/monitor.router';
@@ -130,7 +131,10 @@ export async function checkAndAlertLateJobs(now: Date = new Date()): Promise<voi
     // Wrapped in backticks (inline code), but the message-level entity is still unbalanced if
     // the error text itself contains a stray backtick/underscore/asterisk -- sanitize regardless.
     const errorLine = item.lastError ? `\nLast error: \`${sanitizeMarkdown(item.lastError.slice(0, 300))}\`` : '';
-    const text = `⚠️ *Job running late*: \`${sanitizeMarkdown(item.label)}\`\nExpected by ~${item.expectedAt.toISOString()} (${item.hoursLate}h late)${errorLine}`;
+    // Cadence label so "5.2h late" on a weekly/monthly job doesn't read the same as 5.2h late
+    // on a daily one -- display only, `item` is already `isJobSupposedToRunOnDate`-filtered.
+    const cadence = entry ? ` (${describeCadence(entry)})` : '';
+    const text = `⚠️ *Job running late*: \`${sanitizeMarkdown(item.label)}\`${cadence}\nExpected by ~${item.expectedAt.toISOString()} (${item.hoursLate}h late)${errorLine}`;
     await telegramService.sendMarkdownMessage(text);
     await markAlerted(item.job, item.expectedAt.getTime());
   }
@@ -267,7 +271,10 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
       const delayText = lateEntry!.hoursLate >= 1
         ? `~${lateEntry!.hoursLate}h late`
         : `~${Math.max(1, Math.round(lateEntry!.hoursLate * 60))}m late`;
-      attention.push(`⚠️ ${j.label} (${delayText})`);
+      // Cadence label so a delayed weekly/monthly job (still well inside its own catch-up
+      // window) doesn't read the same as a delayed daily one -- `j` already passed
+      // isJobSupposedToRunOnDate, this is purely how the delay is DESCRIBED.
+      attention.push(`⚠️ ${j.label} (${delayText}, ${describeCadence(j)})`);
     }
 
     if (prev === undefined) continue; // first time this key is tracked — nothing to diff yet

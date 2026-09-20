@@ -533,7 +533,14 @@ def upsert_profile(symbol: str, today: str, profile: dict, con) -> None:
             last_dividend_amt   = excluded.last_dividend_amt,
             last_ex_date        = excluded.last_ex_date,
             days_since_dividend = excluded.days_since_dividend,
-            company_description = excluded.company_description,
+            -- Never let a same-day re-run (e.g. a manual --resync-all retry) that failed to
+            -- extract the description clobber one already captured earlier the same day.
+            -- (The cross-day loss -- AF-20260920-01, AXISBANK's 2026-07-05 description going
+            -- NULL on 2026-07-06 -- is a SEPARATE row under this table's (symbol, date) PK and
+            -- is not something ON CONFLICT can see; fixed instead in the reader,
+            -- companyProfileSyncService.ts, which now falls back to the latest non-null
+            -- description instead of the latest date's row.)
+            company_description = COALESCE(excluded.company_description, trendlyne_stock_profile.company_description),
             fetched_at          = CURRENT_TIMESTAMP
     """, (
         symbol, today,

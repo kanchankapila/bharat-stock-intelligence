@@ -66,8 +66,21 @@ export async function syncAndAnalyzeCompanyProfiles() {
   // universe every day instead of just the stocks the scrape actually refreshed. Cutoff is
   // computed in JS (not SQL INTERVAL) to stay portable across the Postgres/SQLite backends.
   const reanalysisCutoff = new Date(Date.now() - SHARD_COUNT * 24 * 60 * 60 * 1000).toISOString();
+  // AF-20260920-01: this used to read tsp.company_description off the row at MAX(date), which
+  // is wrong whenever the most recent scrape failed to extract the description (a transient
+  // vendor-page miss, not a sync failure) -- company_description is near-static, so a symbol
+  // that had a good description on an earlier date should not be treated as never-analyzable
+  // just because the LATEST date's row happens to be null. Live case: AXISBANK's 2026-07-05
+  // description went null on 2026-07-06 and was never re-picked up (the "already synced" gate
+  // meant it wasn't re-scraped), permanently failing company-profiles-sync every time it came
+  // due for re-analysis. Sourcing the description from the latest NON-NULL row instead keeps
+  // the "due" gate (still keyed on the latest row's date/cp.last_updated) but stops a single
+  // bad scrape day from erasing previously-captured, still-valid data.
   const stocks = await dbAll<{ symbol: string; name: string; company_description: string | null }>(`
-    SELECT tsp.symbol, ns.name, tsp.company_description
+    SELECT tsp.symbol, ns.name,
+      (SELECT tsp2.company_description FROM trendlyne_stock_profile tsp2
+       WHERE tsp2.symbol = tsp.symbol AND tsp2.company_description IS NOT NULL
+       ORDER BY tsp2.date DESC LIMIT 1) AS company_description
     FROM trendlyne_stock_profile tsp
     JOIN nse_stocks ns ON ns.symbol = tsp.symbol
     LEFT JOIN company_profiles cp ON cp.symbol = tsp.symbol

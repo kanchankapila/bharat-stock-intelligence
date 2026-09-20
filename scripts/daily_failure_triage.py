@@ -38,11 +38,36 @@ MUTED = {
     # mf_sector_flow_fetcher.py, exits 1 deliberately so it stays visible rather than silent.
     "mf_sector_flow_fetcher.py",
     # mem_hog.py is a test fixture in __tests__/fixtures/ that intentionally allocates beyond the
-    # PY_CHILD_MEM_LIMIT_MB ceiling to verify the memory guard works. It crashes ~20x/day in CI
-    # and its failures are by design, not defects. Any script path under __tests__/fixtures/ is
-    # similarly a test fixture whose failures are intentional.
+    # PY_CHILD_MEM_LIMIT_MB ceiling to verify the memory guard works. Its failures are by design,
+    # not defects.
     "mem_hog.py",
 }
+
+# Directory segments that mark a script as a TEST FIXTURE regardless of which OS's path
+# separator wrote it into the log. This is a separate check from MUTED (an exact-basename
+# allowlist for real production scripts with a known-benign upstream cause) because `key` here
+# is whatever `runPython(script, ...)` was called with -- e.g. pythonRunnerMemoryCeiling.test.ts
+# passes `path.join('__tests__', 'fixtures', 'mem_hog.py')`, which on Windows logs as
+# `__tests__\fixtures\mem_hog.py`, not the bare `mem_hog.py` MUTED actually matched against.
+# AF-20260920-03: that mismatch meant the MUTED entry above never fired for the real logged key,
+# and mem_hog.py's deliberate crash -- written to the SAME shared logs/ this script scans every
+# time a session runs `npx vitest run` per CLAUDE.md's Definition of Done -- surfaced as an
+# "untracked step failure" in the daily digest, ~4x/day, indistinguishable from a real one.
+_TEST_FIXTURE_DIR_SEGMENTS = ("__tests__", "tests")
+
+
+def _is_test_fixture_path(key: str) -> bool:
+    parts = re.split(r"[\\/]+", key)
+    return "fixtures" in parts and any(seg in _TEST_FIXTURE_DIR_SEGMENTS for seg in parts)
+
+
+def is_muted(key: str) -> bool:
+    if key in MUTED:
+        return True
+    basename = re.split(r"[\\/]+", key)[-1]
+    if basename in MUTED:
+        return True
+    return _is_test_fixture_path(key)
 
 
 def _read(path):
@@ -140,7 +165,7 @@ def main():
             print(f"No NEW failure signatures in the last {args.days} day(s) (nothing that wasn't already failing).")
             return 0
 
-    actionable_groups = [(k, g) for k, g in groups.items() if k not in MUTED]
+    actionable_groups = [(k, g) for k, g in groups.items() if not is_muted(k)]
 
     if args.json:
         # Only the actionable (non-muted) ones -- the caller (queues.ts) folds this straight
@@ -155,7 +180,7 @@ def main():
     print(f"\n{'='*80}\nJOB/STEP FAILURES -- last {args.days} day(s), {len(events)} events in "
           f"{len(groups)} distinct signatures\n{'='*80}")
     for key, g in sorted(groups.items(), key=lambda kv: -kv[1]["n"]):
-        tag = "MUTED (known upstream)" if key in MUTED else "ACTIONABLE"
+        tag = "MUTED (known upstream)" if is_muted(key) else "ACTIONABLE"
         print(f"\n[{tag}] {key}")
         print(f"   {g['n']} event(s) across {len(g['days'])} day(s): {', '.join(sorted(g['days']))}")
         if g["sample"]:

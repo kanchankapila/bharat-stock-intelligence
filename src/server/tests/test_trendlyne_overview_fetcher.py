@@ -129,3 +129,28 @@ def test_upsert_profile_persists_shareholding_changes():
         assert row == (0.5, 1.5, -0.8, -2.0)
     finally:
         con.close()
+
+
+def test_upsert_profile_same_day_retry_does_not_null_an_already_captured_description():
+    """A same-day re-run (e.g. a manual --resync-all retry) that fails to extract the
+    description must not clobber one already written earlier the same run/day -- ON CONFLICT
+    fires only when (symbol, date) repeats, so this is the one case the writer itself can
+    protect against. The cross-day loss this was originally written to explain (AF-20260920-01
+    -- a description present on one date going NULL on a LATER date, a different row under
+    this table's (symbol, date) PK) is not visible to ON CONFLICT at all; that is fixed in the
+    reader, companyProfileSyncService.ts (see its own test for the real regression case).
+    """
+    con = pg_memory_conn()
+    try:
+        con.execute("CREATE TABLE technical_signals (symbol TEXT)")
+        tof.ensure_schema(con)
+
+        tof.upsert_profile("AXISBANK", "2026-07-05", {"company_description": "Axis Bank Limited provides..."}, con)
+        tof.upsert_profile("AXISBANK", "2026-07-05", {"company_description": None}, con)
+
+        row = con.execute(
+            "SELECT company_description FROM trendlyne_stock_profile WHERE symbol = ?", ("AXISBANK",)
+        ).fetchone()
+        assert row == ("Axis Bank Limited provides...",)
+    finally:
+        con.close()

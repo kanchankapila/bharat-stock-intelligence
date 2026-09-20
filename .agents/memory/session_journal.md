@@ -206,3 +206,37 @@ Asked "are claude-mem / headroom / graphify correctly configured to reduce token
   PRIMARY-KEY scan = the 1 real defect. Shipped the PK one.
 - Live tests write only to throwaway schemas via `pg_db_conn`/`pg_memory_conn`, so running them
   during market hours is safe — but don't run them concurrently with the full suite (connection race).
+
+## 2026-09-20 — Resolved a pasted Daily Integrity Report / Job Health Digest, AF-20260920-01..06
+
+User pasted several days of the platform's Telegram digests and asked to fix everything, plus
+specifically complained about jobs "not supposed to run today" showing as delayed.
+
+- **Real bug, fixed:** `company-profiles-sync` failed 2 straight nights. `companyProfileSyncService.ts`'s
+  query read `company_description` off the row at literal `MAX(date)`, but a transient scrape-day
+  extraction miss writes a NEW (symbol, date) row with NULL — so a symbol with a perfectly good
+  description weeks earlier reads as never-analyzable (AXISBANK, NULL for 2.5 months). Fixed the
+  reader to source the description from the latest NON-NULL row instead; added a `COALESCE` in
+  `trendlyne_overview_fetcher.py`'s upsert for the same-day-retry variant. Backfilled both stuck
+  symbols live.
+- **Real (small) bug, fixed:** `daily_failure_triage.py`'s `MUTED` set checked the bare
+  `"mem_hog.py"`, but the real logged key (from `path.join('__tests__','fixtures','mem_hog.py')`)
+  is the full Windows path — never matched, so the fixture's deliberate crash (from every
+  `npx vitest run`) surfaced as an "untracked step failure" ~4x/day. Added `is_muted()`: basename
+  match OR any path with a `fixtures` segment under `__tests__`/`tests`.
+- **Correctly left alone (ledger explains why, don't re-investigate):** `so_option_chain` 36/213
+  dip (same shape as a documented 09-01 self-recovering dip, calendar-blocked on Monday's read);
+  `cs_score` 100% NULL (deliberate `cs_ranker.py` retirement 08-31, self-clears from the DQ
+  check's rolling reference window within days); ROE decay (DL path already has an InvestSights
+  fallback since 09-18, ensemble path deliberately gated on AF-20260913-07's retrain-and-compare
+  measurement — do NOT wire a fix into `ml_ensemble.py` without that measurement).
+- **Job-lateness complaint: the filtering already works.** `getLateJobs()` already gates on
+  `isJobSupposedToRunOnDate()`, and both the digest and the standalone Telegram alert go through
+  it. Traced every named example in the user's report against live `job_heartbeat` — all
+  genuinely due, genuinely late, genuinely recovered. No cron-mirror drift (236/236 tests green).
+  Added `describeCadence()` purely for readability (labels a late line `weekly`/`monthly`/etc) —
+  polish, not a bugfix; said so explicitly rather than presenting it as "the fix".
+- Full DoD: `tsc --noEmit` clean, full `vitest run` 1472 passed/44 skipped/0 failed,
+  `check_recurring_bugs.py` clean on all changed files. Full pytest run in progress at write time
+  (long-running per prior notes); the specific touched-file suites (`test_trendlyne_overview_fetcher.py`
+  8/8, new `test_daily_failure_triage.py` 6/6) are green.

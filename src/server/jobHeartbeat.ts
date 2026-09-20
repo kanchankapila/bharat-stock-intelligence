@@ -368,6 +368,29 @@ export function patternsAreWeekdayOnly(cronPatterns: string[]): boolean {
   });
 }
 
+/**
+ * A short, human-readable cadence label for a JOB_REGISTRY entry, so a "late" line never has
+ * to be read next to the job's raw cron string to tell whether N hours late is alarming (a
+ * daily job) or unremarkable (a job that only runs once a week/month and is still well inside
+ * its own catch-up window). Purely a DISPLAY helper -- computes nothing that feeds
+ * `isJobSupposedToRunOnDate`/`getLateJobs`, which already gate correctly on cron occurrence;
+ * this only labels what those functions already decided was due today.
+ */
+export function describeCadence(entry: { cronPattern?: string; everyMs?: number }): string {
+  if (entry.everyMs) {
+    const mins = entry.everyMs / 60_000;
+    return mins % 60 === 0 ? `every ${mins / 60}h` : `every ${mins}m`;
+  }
+  if (!entry.cronPattern) return 'event-driven';
+  const fields = entry.cronPattern.trim().split(/\s+/);
+  if (fields.length < 5) return 'daily';
+  const [, , dom, , dow] = fields;
+  if (dom !== '*') return 'monthly';
+  if (patternsAreWeekdayOnly([entry.cronPattern])) return 'daily (weekdays)';
+  if (dow !== '*') return 'weekly';
+  return 'daily';
+}
+
 /** True when `expectedAt`'s IST calendar date is a weekday the exchange provably never
  *  opened — i.e. the job's skip that day was the PLANNED holiday behavior, not a miss.
  *  The provable-idle verdicts are precomputed into `sessions.idleDates` (see the field's

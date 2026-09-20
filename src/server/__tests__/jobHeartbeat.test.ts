@@ -33,7 +33,7 @@ vi.mock('../dataQualityChecks', async () => {
   };
 });
 
-import { getLateJobs, getStaleJobs, bullJobDurationMs } from '../jobHeartbeat';
+import { getLateJobs, getStaleJobs, bullJobDurationMs, describeCadence } from '../jobHeartbeat';
 
 describe('getLateJobs', () => {
   beforeEach(() => { mockRows.length = 0; });
@@ -185,5 +185,35 @@ describe('bullJobDurationMs', () => {
     // 0 is a real measurement; coercing it to undefined would silently drop the fastest jobs
     // from every duration statistic, which is exactly the population most likely to be a no-op.
     expect(bullJobDurationMs({ processedOn: 5_000, finishedOn: 5_000 } as any)).toBe(0);
+  });
+});
+
+describe('describeCadence', () => {
+  it('labels a plain daily cron', () => {
+    expect(describeCadence({ cronPattern: '30 21 * * *' })).toBe('daily');
+  });
+
+  it('labels a weekday-only cron as daily (weekdays), not weekly', () => {
+    // The dow field ('1-5') is not '*', so a naive "dow set -> weekly" check would mislabel
+    // this -- it must reuse patternsAreWeekdayOnly's own weekday-range logic.
+    expect(describeCadence({ cronPattern: '20 13 * * 1-5' })).toBe('daily (weekdays)');
+  });
+
+  it('labels a single-day-of-week cron as weekly', () => {
+    expect(describeCadence({ cronPattern: '30 8 * * 6' })).toBe('weekly'); // mover-study-weekly
+  });
+
+  it('labels a day-of-month-restricted cron as monthly', () => {
+    expect(describeCadence({ cronPattern: '0 3 1 * *' })).toBe('monthly');
+  });
+
+  it('labels an everyMs job by its interval', () => {
+    expect(describeCadence({ everyMs: 15 * 60 * 1000 })).toBe('every 15m');
+    expect(describeCadence({ everyMs: 30 * 60 * 1000 })).toBe('every 30m');
+    expect(describeCadence({ everyMs: 60 * 60 * 1000 })).toBe('every 1h');
+  });
+
+  it('falls back to event-driven when neither schedule field is set', () => {
+    expect(describeCadence({})).toBe('event-driven');
   });
 });
