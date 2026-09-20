@@ -151,7 +151,13 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Tools',
     items: [
       { icon: MessageSquare, label: 'AI Chat',    id: 'chat'      },
-      { icon: Sparkles,      label: 'Switch to V5', id: 'v5'      },
+      // 'Switch to V5' stood here pointing at id 'v5' -- a route that ceased to exist when the
+      // v2-v6 shells were retired (2026-08-31, see App.tsx's consolidation comment): clicking it
+      // navigated to /v5, matched V1Routes' `path="/*"` catch-all, and rendered nothing at all.
+      // Replaced (2026-09-20) with the one created-but-unlinked surface, the /details deep-dive
+      // page that hosts the new Derivatives / Ownership & Flows tabs -- previously reachable only
+      // from the SlideOutDrawer's "Full analysis" button, i.e. never from the sidebar.
+      { icon: Layers,        label: 'Stock Deep Dive', id: 'details' },
       { icon: Globe,         label: 'Economics',  id: 'economics' },
       { icon: CheckCircle2,  label: 'ToDo',       id: 'todo'      },
       { icon: SlidersHorizontal, label: 'Settings', id: 'settings' },

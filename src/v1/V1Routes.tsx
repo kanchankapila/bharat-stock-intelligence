@@ -266,7 +266,22 @@ const V1Routes = ({
                                     onToggleWatchlist={onToggleWatchlist}
                                     onSelectStock={onSelectStock}
                                 />
-                            ) : <div className="p-6">Select a stock to view details</div>} />
+                            ) : (
+                                // The sidebar's "Stock Deep Dive" entry lands here with no symbol,
+                                // so this is a real landing state rather than a dead end: it names
+                                // the three ways in, all of which already exist.
+                                <V1PageFrame title="Stock Deep Dive" kicker="DERIVATIVES · OWNERSHIP & FLOWS">
+                                    <p className="text-[13px] text-slate-400 max-w-xl leading-relaxed">
+                                        No symbol selected. Open a stock any of three ways — the sidebar
+                                        search box (or Ctrl/⌘+K), any row on the Index Valuation, Screener
+                                        or Sector pages, or{' '}
+                                        <span className="text-slate-200 font-semibold">Full analysis</span> in
+                                        the drawer header — then its Derivatives and Ownership &amp; Flows
+                                        tabs appear here. Deep-linking works too:{' '}
+                                        <span className="font-mono text-slate-200">/details?symbol=RELIANCE</span>
+                                    </p>
+                                </V1PageFrame>
+                            )} />
                             <Route path="/backtest" element={<V1Backtest stocks={stocks} />} />
                             <Route path="/signals" element={<DailySignals onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />} />
                             <Route path="/signal-tracking" element={<SignalTracking />} />
