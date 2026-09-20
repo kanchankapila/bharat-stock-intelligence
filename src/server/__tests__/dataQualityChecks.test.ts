@@ -668,6 +668,28 @@ describe('runDataQualityChecks (orchestration)', () => {
     const snapshots = dbRunCalls.slice(0, purgeAt).filter(c => /INSERT INTO data_quality_results/i.test(c.sql));
     expect(snapshots.length).toBe(DATA_QUALITY_CHECKS.length);
   });
+
+  // 2026-09-20 re-verification: job_heartbeat held one row per check id (markAlerted()'s
+  // Telegram-dedupe insert) with last_status=NULL / run_count=0 forever -- NULL reads as
+  // "unmonitored", not healthy. The sweep is now the producer for its own check ids: a
+  // job_heartbeat upsert per check, and deliberately NO job_run_history append (that would
+  // be ~169 checks × ~96 sweeps/day of noise in a table whose job is real run attribution).
+  it('stamps a job_heartbeat row per check (liveness) without appending job_run_history', async () => {
+    dbRunCalls.length = 0;
+    await runDataQualityChecks(new Date('2026-07-19T12:00:00Z'));
+
+    const heartbeats = dbRunCalls.filter(c => /INSERT INTO job_heartbeat/i.test(c.sql));
+    expect(heartbeats.length).toBe(DATA_QUALITY_CHECKS.length);
+    expect(new Set(heartbeats.map(c => c.params[0]))).toEqual(new Set(DATA_QUALITY_CHECKS.map(c => c.id)));
+    // recordHeartbeat() appends job_run_history on every call; the DQ writer must not.
+    expect(dbRunCalls.some(c => /INSERT INTO job_run_history/i.test(c.sql))).toBe(false);
+    // Same lifetime-counter convention as jobHeartbeat.ts's UPSERT_SQL: increment, never set.
+    for (const hb of heartbeats) {
+      expect(hb.sql).toMatch(/run_count\s*=\s*job_heartbeat\.run_count \+ 1/);
+      expect(hb.sql).toMatch(/ON CONFLICT\(job_name\) DO UPDATE/i);
+      expect(['success', 'failed']).toContain(hb.params[1]);
+    }
+  });
 });
 
 describe('getLatestDataQualityResults (decommissioned-check leakage)', () => {

@@ -50,7 +50,12 @@ Read before quoting, comparing, or acting on any accuracy, win-rate, IC, or back
 > AUC 0.605 on **26**) and applies `MIN_DATES_RELIABLE` to `eff_dates`. New rows carry `eff_dates`
 > and `symbols`; rows written before 2026-09-12 have NULL in both and are not comparable.
 
-**Last full re-verification pass: 2026-09-10.** Every claim in the Snapshot, Standing
+**Last refresh pass: 2026-09-20 (freshness-only; DB re-probed live, evidence in `scratch_verify/md_reverify_out*.txt`).** It re-counted every panel, picked up the 2026-09-19 automated sweep's persisted gradings, and refreshed drifted numbers — it did NOT re-run backtests. Corrections are marked `WAS ->`. The 2026-09-10 pass below remains the last FULL re-verification.
+
+**Last full re-verification pass: 2026-09-10.**
+**Last full re-verification pass: 2026-09-10. Partial re-verification: 2026-09-20/21** (fresh
+DB reads against live production; see the 2026-09-20 bullets in the Snapshot). Every claim in
+the Snapshot, Standing
 architecture facts, and Open/pending sections was re-measured against live production on that
 date; 21 claims were refreshed and **11 were found materially stale or wrong** (the active
 ensemble's CV, the dispersion-collapse verdict, the "never written" column list, `dl_score`
@@ -83,8 +88,111 @@ This section is a dated status board, not a verdict list. A claim carrying an ol
 in this file is not wrong, it is *unrefreshed* — check the date before quoting it, and re-run
 rather than assume. Full narrative for anything here: `docs/measurement-history.md`.
 
+### 2026-09-20 refresh — what moved since 2026-09-10 (verified live; gradings from the 2026-09-19 close-entry sweep)
+
+- **`factor_edge_history`: 3,022 rows across 12 tables, latest run 2026-09-19T12:17 IST**
+  (WAS -> 1,571 rows / 11 tables / 2026-09-10T18:59). **The 2026-09-19 sweep persisted
+  CLOSE-entry rows only** — no new open-entry rows for `unified_recommendations` /
+  `confluence_signals` since 2026-09-10 (runs 19:11 / 18:59). Close-entry ICs are upper bounds
+  per the entry-convention note in "Harness state".
+- **`unified_score` (close-entry, 09-19 run): 5d +0.048/0.522 (n=49,339, 24 dates) · 10d
+  +0.068/0.537 (39,461, 19) · 21d +0.049/0.522 (17,263, 8). All LOW-DATA.** Consistent with the
+  2026-09-10 open-entry read below (+0.050/+0.064/+0.066 at 18/13/2 dates). The ranker still
+  reads, is still LOW-DATA, and still has no cost-aware backtest.
+- **Engine grades, close-entry 09-19 (replaces the 09-10 table further down; same conclusion —
+  `confluence` carries the ranker):**
+
+      confluence_score   5d +0.068/0.535   10d +0.107/0.558   21d +0.156/0.580   (24/19/8 dates)
+      technical_score    5d +0.027/0.513   10d +0.024/0.511   21d +0.013/0.504
+      ml_score           5d +0.012/0.505   10d +0.024/0.508   21d -0.000/0.497
+      dl_score           5d +0.007/0.504   10d +0.002/0.501   21d -0.011/0.494
+      unified_score      5d +0.048/0.522   10d +0.068/0.537   21d +0.049/0.522
+
+  Every row LOW-DATA (24/19/8 dates). Confluence remains both the strongest-reading engine and
+  the highest-weighted — no reweighting conclusion. The 21d column is still 8 dates: anecdote only.
+- **Populations that moved:** `confluence_signals` post-reclassification panel is now **23 dates**
+  (2026-08-29..09-20, counted live) — **it has cleared the 20-date floor at 5d**; the next
+  open-entry re-grade will be well-powered. `screener_momentum_score` post-reclass: **14 dates**
+  (WAS -> 8) — still under the floor, clears ~2026-09-29/10-06. `stock_futures_oi_history`:
+  **21 dates** (WAS -> 14), 2026-08-21..09-18. `ext_t80_tech_score` since 2026-08-01: **34 dates**
+  (WAS -> 17 total at its grading) — **the 20-date floor is now cleared**; an open-entry re-grade
+  is warranted (the lead reading was 21d +0.185/0.574 on 17 dates). **Re-grade done 2026-09-11
+  (open-entry): 21d +0.1764/0.5772 on 21 dates → USABLE; 10d +0.0977/0.5513 on 32 dates →
+  USABLE; 5d +0.0620/0.5343 on 37 dates → no edge.** Still LOW-DATA at 21d (21 dates) — the
+  platform's strongest vendor-column lead, not a result.
+- **`movement_probability` is now GRADED — no edge.** Open-entry 2026-09-11 run on 33/28 dates
+  (WAS -> "15 dates, neither gradeable yet"): 5d rank_IC **-0.0116** ("no edge"), 10d **-0.0109**
+  ("no edge"), 21d -0.0149 (LOW-DATA, 17 dates). Closed; do not re-run as "highest-value".
+- **`stock_futures_oi_history` graded 2026-09-19 (close-entry, LOW-DATA 13-17 dates):**
+  `basis` 1d **+0.139 / AUC 0.565** (17 dates — the strongest single reading in this table),
+  `basis` 5d +0.036; `oi_change` 5d +0.078/0.532 (13); `oi_pcr` ~0; `rollover_pct` negative at
+  both horizons. All LOW-DATA: basis-1d is a **lead**, not a result.
+- **`win_probability` re-graded 2026-09-19: 1d +0.025 (73 dates, "no edge") · 5d +0.053 (69,
+  LOW-DATA) · 21d +0.070 (53, LOW-DATA).** (WAS -> 0.053/0.056/0.071 on 64/59/48 dates,
+  2026-09-13.) Same shape: real 5d/21d IC, verdict unchanged — still fails at 83.4% turnover.
+- **The analyst-revision trio moved tables: `eps_revision_3m_pct` / `target_revision_3m_pct` /
+  `analyst_count_chg` now live in `technical_signals`, NOT `feature_store`** (checked live
+  2026-09-20; `feature_store` holds only `analyst_buy_pct` / `analyst_target_mean` /
+  `analyst_target_upside_pct` / `analyst_n`). Current panel: 6,863 / 9,178 / 9,331 rows across
+  **9 dates** (2026-09-07..09-18). Still ungraded and still must not be graded until ~20 dates
+  (~mid-October).
+- **Models:** active Stacking Ensemble retrained **2026-09-19** (version `20260919_115848`,
+  cv_roc_auc **0.5313**; WAS -> 0.5277 / 2026-09-10). Active `confluence_ml`
+  breakout_probability is 2026-09-18 (cv **0.6906**). **BiLSTM v6 trained 2026-09-20 (cv 0.5208)
+  is registered but NOT active** — the honest post-fix chain is v5 active (cv 0.5177,
+  2026-09-12) with v6 as challenger pending promotion criteria. DL trainer ran 2026-09-19 14:12
+  IST. `model_registry` total: **343 registrations**.
+- **`cs_ranker`/`exit_policy` (GradientBoosting Regressor Pair): three MORE challengers rejected
+  since 09-10** — 2.0750 (09-11), 1.9907 (09-14), 2.0725 (09-19), all `is_active=0`; the champion
+  remains 20260901_123532 (1.8021). All values > 1 — still not AUCs, still consistent rejections.
+- **DQ as of 2026-09-20 18:46 IST:** `ur-engine-dispersion-collapse` **pass** (unchanged detail:
+  ml 0%, dl 0%, technical 0% vs baseline). **`fundamentals-history-vendor-field-decay` FAIL
+  again** — `return_on_equity 6.1%` on the latest 2,474-row snapshot; `data-quality-daily`
+  failed 2026-09-20 03:00 IST citing it; `company-profiles-sync` failed 2026-09-19 21:00 (0/2
+  profiles synced). All 14 other recent checks pass.
+  **FIXED 2026-09-20 ~21:00 IST (root causes, not silences):** `fundamentals_snapshot.py` now
+  COALESCEs `return_on_equity` per symbol from `investsights_fundamentals_history` (latest row
+  with `fetched_date <= as_of`, point-in-time; Yahoo stays PRIMARY) — the snapshot-side twin of
+  the AF-20260917-07 feature fallback (Pearson 0.9608, same fraction scale). The 2026-09-20
+  snapshot was re-run: ROE coverage **6.1% -> 77.8%** (151 -> 1,924 / 2,474); live DQ sweep now
+  reads the check **PASS** (`2474 rows; return_on_equity 77.8%, debt_to_equity 86.6%,
+  operating_margins 97.3%, piotroski_f_score 97.3%`), so `data-quality-daily`'s
+  throw-on-critical goes green at its next 03:00 IST run. The 09-18 snapshot was deliberately
+  NOT rewritten (a point-in-time table keeps its honest 6.1% record; the check reads
+  MAX(as_of_date)). The one remaining sweep FAIL is `bulk-endpoint-fetcher-coverage`
+  (critical=false — does not fail the job; `so_option_chain` 16.9% coverage is the driver).
+  `company-profiles-sync`'s 0/2 failures were the NULL-latest-description bug already fixed in
+  source by AF-20260920-01: the 2 due stocks are AXISBANK + CHALET and both now resolve a
+  non-null description, so the verdict returns success. **Deploy-gated:** the .ts fixes
+  (heartbeat writer + profile-sync) are live only after the next `pm2 restart bharat-server`
+  (user sign-off per convention); the Python snapshot fix is already live (source-run).
+- **RESOLVED 2026-09-20 ~21:00 IST — `job_heartbeat` integration gap:** the 12 most-recent
+  `job_heartbeat`
+  rows all read `last_status=NULL, last_run_at=NULL, run_count=0, fail_count=0`
+  (`screener-catalog-freshness`, `feature-engineering`, `dq-new-failures`,
+  `technical-signals-range-bounds`, etc.) — checks are registered but their producers never
+  write heartbeats. The standing advice "check `job_heartbeat` before trusting freshness" is
+  now only half-usable: **a NULL row means unmonitored, not healthy.** Treat freshness claims
+  as table-verified (query the data's own max date), not heartbeat-verified.
+  **Fix:** `runDataQualityChecks` now stamps one `job_heartbeat` upsert per check
+  (`persistCheckHeartbeat`, mirroring jobHeartbeat.ts's UPSERT convention; warn→success,
+  fail/error→failed with detail as last_error; deliberately NO `job_run_history` append —
+  that would be ~16k rows/day). Live verification sweep: **175/175 check-id rows populated,
+  0 NULL**. `getStaleJobs()`'s dataQualityIds exclusion stays (a check's health signal is its
+  verdict in `data_quality_results`, not heartbeat age).
+- **Freshness counts:** `engine_composite_scores` 121,892 rows / **84 dates** (WAS -> 109,174 /
+  79), 2026-05-23..09-18. `technical_signals` spans **93 dates** (2024-06-01..09-18).
+  `unified_recommendations`: 61,160 rows, **30 distinct dates** (2026-08-10..09-21 — the 09-21
+  max is a tz-boundary artifact of the latest `computed_at`). `deep_learning_predictions`: 55
+  dates (2026-06-17..09-18).
+
+
 **The 2026-09-10 re-verification pass corrected six claims that had gone stale.** Each is marked
-inline with `WAS ->` so the drift stays visible instead of being silently overwritten.
+inline with `WAS ->` so the drift stays visible instead of being silently overwritten. The
+2026-09-20/21 partial pass re-read the same live series: **no verdict reversals — only panel
+growth** (engine block dates 18→24 / 13→19 / 2→8; OI history 14→21; screener_momentum
+post-reclass 8→14) plus one NEW finding: most `job_heartbeat` rows are registered with
+`last_status=NULL, run_count=0` — the heartbeat table is not integrated with all producers.
 
 ### The ranker
 
@@ -96,6 +204,9 @@ inline with `WAS ->` so the drift stays visible instead of being silently overwr
       unified_score  ALL  10d   rank_IC +0.064  hit_AUC 0.529  n=27620  13 dates  LOW-DATA
       unified_score  ALL  21d   rank_IC +0.066  hit_AUC 0.531  n=4387    2 dates  LOW-DATA
 
+  WAS -> 2026-09-19 automated sweep: close-entry 5d +0.0543/0.5254 (19 dates),
+  10d +0.0675/0.5369 (19), 21d +0.0491/0.5216 (8); open-entry 5d +0.048/0.522 on 24 dates
+  (engine block below). Panel grew 18→24 dates; IC stable; verdict unchanged.
   (Re-run at 19:15 IST the same day; an earlier 11:02 run read 17/12/1 dates and
   +0.050/+0.058/+0.073 — the difference is one additional session landing between the two
   runs, not a methodology change. The 5d IC was identical to three decimals across both.)
@@ -176,18 +287,22 @@ inline with `WAS ->` so the drift stays visible instead of being silently overwr
   spanning 2026-09-07..2026-09-10 across **3 distinct dates**. The 2026-09-05 prediction ("the
   first real rows land Monday 2026-09-08") held exactly. **Still ungraded, and must not be graded
   yet** — ~20 dates are needed, so ~2026-10.
-- **Two populations are still under the 20-date floor, but both grew:** `movement_probability`
-  post-fix is at **15 dates** (WAS -> ~11 on 2026-09-04), spanning 2026-08-20..09-09;
-  `stock_futures_oi_history`'s OI/basis/rollover columns at **14 dates** (WAS -> 9), spanning
-  2026-08-21..09-09. Neither is gradeable yet.
-- **`screener_momentum_score`'s post-reclassification panel is at 8 dates** (WAS -> "only ~4
-  trading days old"). It needs ~20 dates generated after 2026-08-29, so ~late September —
+- **`movement_probability` and `stock_futures_oi_history` are no longer "under the floor" —
+  both graded.** movement_probability: 2026-09-11 open-entry, **no edge** (see the Snapshot
+  bullet above; WAS -> "15 dates, neither gradeable yet"). OI history: **21 dates** as of
+  2026-09-20, graded 2026-09-19 — `basis` 1d +0.139/0.565 is the lead reading (see Snapshot).
+- **`screener_momentum_score`'s post-reclassification panel is at 14 dates** (WAS -> 8 on
+  2026-09-10, ~4 on 2026-09-04). Still under the 20-date floor; clears ~2026-09-29/10-06 —
   genuinely calendar-blocked, not neglected.
 
 ### Harness state
 
-- **`factor_edge_history` is fresh:** latest `run_at` 2026-09-10T18:59 (this pass), 1,571 rows
-  across 11 distinct `table_name` values. **Check the entry convention before reading any row** —
+- **`factor_edge_history` is fresh:** latest `run_at` **2026-09-19T12:17 IST** (WAS ->
+  2026-09-10T18:59) — now **3,022 rows across 12 distinct `table_name` values** (WAS -> 1,571/11).
+  The 2026-09-19 12:15–12:17 run is an **automated daily sweep** (it graded
+  `stock_futures_oi_history` for the first time and refreshed all `unified_recommendations`
+  engine scores); expect a new batch every trading day, so any manual re-run should filter
+  `run_at` to the latest batch. **Check the entry convention before reading any row** —
   the automated sweep persists CLOSE-entry rows under `table_name = '<table>'` and open-entry rows
   under `'<table>__open_entry'`. The two are not comparable, this file's panel spec prefers open
   entry, and every close-entry IC is an upper bound.
@@ -328,6 +443,18 @@ Any cross-sectional forward-return measurement on this data:
     column counted twice. (`ext_is_overall_score`/`ext_is_percentile_rank` are corr 0.988 but a
     monotone transform of each other, which is why their rank-ICs match exactly — expected, not
     a defect.) See AF-20260906-06.
+- **RE-MEASURED 2026-09-19 (automated daily sweep, close-entry on `unified_recommendations`):**
+
+      confluence_score  5d +0.068/0.535  10d +0.107/0.558  21d +0.156/0.580
+      technical_score   5d +0.027/0.513  10d +0.024/0.511  21d +0.013/0.504
+      ml_score          5d +0.012/0.505  10d +0.024/0.508  21d -0.000/0.497
+      dl_score          5d +0.007/0.504  10d +0.002/0.501  21d -0.011/0.494
+      unified_score     5d +0.048/0.522  10d +0.068/0.537  21d +0.049/0.522
+
+  All LOW-DATA (24/19/8 dates). Verdict unchanged: confluence carries the ranker and its edge
+  grows with horizon. Regime split (2026-09-19 sweep + prior runs): SIDEWAYS and HIGH_VOL
+  positive at all horizons (HIGH_VOL 21d +0.173/0.590 on 5 dates), BEAR negative at all
+  horizons (5d -0.191, 10d -0.144, 21d -0.111 — LOW-DATA). No reweighting conclusion.
 - **MEASURED 2026-09-10 — all four live engine scores graded together on `unified_recommendations` (`--entry open`, persisted). `confluence` is carrying the ranker and it is not close:**
 
       confluence_score   5d +0.084/0.542   10d +0.113/0.558   21d +0.168/0.583
@@ -337,12 +464,12 @@ Any cross-sectional forward-return measurement on this data:
 
   **Every row is LOW-DATA** (18 dates at 5d, 13 at 10d, and only **2** at 21d — the 21d column is barely more than an anecdote and must not be quoted on its own). Two things worth noting and neither is yet actionable: `confluence_score` is both the strongest-reading engine AND already the highest-weighted one in `REGIME_WEIGHTS` (0.30-0.378), so this is consistent with the current weights rather than an argument to change them; and `dl_score` reads at or below zero at 10d/21d, which is expected given its walk-forward was only fixed on 2026-09-10 (AF-20260910-08) and no honestly-trained DL model has shipped yet. Re-run once the panel clears 20 dates under stable post-2026-08-31 weights (~2026-09-26/29) before drawing any reweighting conclusion. This supersedes the older "t=+2.13 at 1d on 12 dates" note for `technical`, which was never refreshed.
 - **`earnings_beat_yoy`/`earnings_beat_qoq`, `screener_breadth`, the 3 named results screeners** — all underpowered (3–27 periods), genuinely calendar-blocked until ~12+ months of history exists in their source tables.
-- **`cs_ranker` has had TWO further retrains since this was written, both REJECTED — and the metric this row quotes cannot be read out of `model_registry.cv_roc_auc` (checked live 2026-09-10).** The active `GradientBoosting Regressor Pair` is dated 2026-09-01 with `cv_roc_auc` **1.8021**; the two challengers since read 1.9981 (2026-09-06) and 2.1444 (2026-09-10), both `is_active = 0`. Those values are all **> 1, so they are not AUCs** — for this model type the column holds some error-style metric (lower better), which makes the rejections internally consistent (1.80 < 1.99 < 2.14) but means the "0.176 vs 0.161/0.161/0.133" figures in the original note came from somewhere else (they match the rho series recorded in `ml-model-bugs.md`, not this column). **Do not compare the two sets of numbers.** Still flagged, still not confirmed as a bug, and the underlying caution stands: a self-reported metric on a thin date-split holdout is exactly what this file says not to trust. 12 registrations exist in total.
+- **`cs_ranker` has had TWO further retrains since this was written, both REJECTED — and the metric this row quotes cannot be read out of `model_registry.cv_roc_auc` (checked live 2026-09-10).** The active `GradientBoosting Regressor Pair` is dated 2026-09-01 with `cv_roc_auc` **1.8021**; the two challengers since read 1.9981 (2026-09-06) and 2.1444 (2026-09-10), both `is_active = 0`. Those values are all **> 1, so they are not AUCs** — for this model type the column holds some error-style metric (lower better), which makes the rejections internally consistent (1.80 < 1.99 < 2.14) but means the "0.176 vs 0.161/0.161/0.133" figures in the original note came from somewhere else (they match the rho series recorded in `ml-model-bugs.md`, not this column). **Do not compare the two sets of numbers.** Still flagged, still not confirmed as a bug, and the underlying caution stands: a self-reported metric on a thin date-split holdout is exactly what this file says not to trust. 12 registrations existed for this pair as of 2026-09-10 (WAS count); **three more Pair challengers have been rejected since — 2.0750 (09-11), 1.9907 (09-14), 2.0725 (09-19), all `is_active=0`; champion still 20260901_123532 (1.8021)** — see the Snapshot models bullet. `model_registry` overall holds **343 registrations** (2026-09-20).
 - **`win_probability` sub-population split** (grid-scored vs. pattern-fired via `signals_json IS NOT NULL`) has never been explicitly re-graded to confirm the two sub-populations behave the same way — flagged, not measured.
 - **`mc_fno_eligible`/`mc_del_acceleration`** are cheaply derivable but deliberately not built — the risk was a formula silently disagreeing with the fetcher's own definition. Revisit if prioritized.
-- **`engine_composite_scores` is FRESH as of 2026-09-10** — 109,174 rows across **79 distinct dates**, most recent 2026-09-10. Its producer runs weekly (inside `processMlWeeklyRetrain`) and this row has had reliability problems before (see `measurement-history.md`), so the standing advice is unchanged — check `job_heartbeat` before trusting freshness — but as of this check there is nothing wrong with it.
+- **`engine_composite_scores` is FRESH as of 2026-09-20** — 121,892 rows across **84 distinct dates**, most recent 2026-09-18 (WAS -> 109,174 rows / 79 dates / 2026-09-10). Its producer runs weekly (inside `processMlWeeklyRetrain`) and this row has had reliability problems before (see `measurement-history.md`), so the standing advice is unchanged — check `job_heartbeat` before trusting freshness (but see the NEW 2026-09-20 heartbeat-integration-gap finding above: a NULL heartbeat row means unmonitored, not healthy) — but as of this check there is nothing wrong with it.
 - **`dl_score` in `unified_recommendations_history`** IS stored (migration `1787110000000`, applied 2026-08-21) — do not re-derive that the column is missing. **Coverage corrected 2026-09-10: it is 96.1%, not 100%** (50,494 of 52,555 rows), and the earliest row is **2026-08-24**, not 2026-08-22. Blend-decomposition analysis is still unblocked for that window, but a ~4% hole means you must filter `dl_score IS NOT NULL` explicitly rather than assuming completeness — and per this file's own population-boundary rule, a NULL here is "engine never ran", not "engine scored zero".
-- **`technical_signals.screener_momentum_score` reclassification effect** — **RE-GRADED 2026-09-10 and it NO LONGER CLEARS `USABLE`** — 21d now reads rank_IC **+0.172** / hit_AUC **0.532** on **42 dates**, against 0.217 / 0.552 on 33 dates measured 2026-08-29. The IC still clears the `|rank_IC| >= 0.03` half of the bar but the AUC has fallen **below the 0.55 half**, so the verdict is now `no edge` at every horizon (1d +0.037/0.500 on 62 dates, 5d +0.084/0.517 on 58 dates). **Do not cite the old "clears USABLE" framing.** This is the same monotone decay-as-the-panel-grows that `win_probability`, `breakout_probability` and `ml_breakout_probability` all showed in the same pass — on this platform a promising LOW-DATA reading has, so far, never survived reaching full power, but the 2026-08-29 screener reclassification's OWN effect is still genuinely calendar-blocked — needs ~20+ trading dates generated after 2026-08-29, of which **8 exist as of 2026-09-10** (was ~4 on 2026-09-04) — so ~12 more sessions, i.e. ~late September. Re-run `factor_edge.py --table technical_signals --scores screener_momentum_score --entry open` once that accumulates, filtering to post-2026-08-29 dates only.
+- **`technical_signals.screener_momentum_score` reclassification effect** — **RE-GRADED 2026-09-10 and it NO LONGER CLEARS `USABLE`** — 21d now reads rank_IC **+0.172** / hit_AUC **0.532** on **42 dates**, against 0.217 / 0.552 on 33 dates measured 2026-08-29. The IC still clears the `|rank_IC| >= 0.03` half of the bar but the AUC has fallen **below the 0.55 half**, so the verdict is now `no edge` at every horizon (1d +0.037/0.500 on 62 dates, 5d +0.084/0.517 on 58 dates). **Do not cite the old "clears USABLE" framing.** This is the same monotone decay-as-the-panel-grows that `win_probability`, `breakout_probability` and `ml_breakout_probability` all showed in the same pass — on this platform a promising LOW-DATA reading has, so far, never survived reaching full power, but the 2026-08-29 screener reclassification's OWN effect is still genuinely calendar-blocked — needs ~20+ trading dates generated after 2026-08-29, of which **14 exist as of 2026-09-20** (WAS -> 8 on 2026-09-10, ~4 on 2026-09-04) — so ~6 more sessions, i.e. ~2026-09-29/10-06. Re-run `factor_edge.py --table technical_signals --scores screener_momentum_score --entry open` once that accumulates, filtering to post-2026-08-29 dates only.
 
 ## Already tested — re-run any of these anytime; here's what the last run found
 

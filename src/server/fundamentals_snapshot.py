@@ -16,6 +16,10 @@ it to technical_signals so ML engines and the UI can consume the trend:
   - pledge_chg_90d > +2 : promoter pledging more → financial distress → bearish
   - pledge_chg_90d < -2 : promoter reducing pledges → deleveraging → bullish
 
+ROE fallback (2026-09-20, AF-20260917-07): return_on_equity is COALESCEd per symbol from
+investsights_fundamentals_history (latest row with fetched_date <= as_of) wherever Yahoo's
+decayed column is NULL. Yahoo stays PRIMARY; see the comment above _INSERT_SQL.
+
 Run:  python fundamentals_snapshot.py
       python fundamentals_snapshot.py --as-of 2026-06-21
 """
@@ -39,6 +43,22 @@ _SCHEMA_MIGRATIONS = [
 # SQLite cannot parse `INSERT ... SELECT ... ON CONFLICT` (parser ambiguity with the SELECT's
 # ON). Delete-then-insert-select is idempotent per day and portable to Postgres.
 _DELETE_SQL = "DELETE FROM fundamentals_history WHERE as_of_date = ?"
+# AF-20260917-07 (wired 2026-09-20): Yahoo's returnOnEquity decayed to 6.1% of the universe
+# (2026-08-23 onward) while everything else in stock_fundamentals kept arriving, so this
+# snapshot faithfully copied the collapse into fundamentals_history every day -- and tripped
+# the critical fundamentals-history-vendor-field-decay DQ check, failing data-quality-daily
+# 27x since 09-15. investsights_fundamentals_history.return_on_equity measured Pearson 0.9608
+# against yfinance on the overlapping panel, SAME fraction scale, zero sign flips
+# (src/server/tests/test_roe_investsights_fallback.py pins the feature-side fallback; this is
+# the snapshot-side twin, pinned by test_fundamentals_snapshot_roe_fallback.py), so it fills
+# ONLY the gaps:
+#   - a present sf.return_on_equity is never overwritten (COALESCE argument order);
+#   - POINT-IN-TIME: only rows with fetched_date <= as_of qualify -- an InvestSights row
+#     fetched AFTER the snapshot date must not leak backward into it (the live verification
+#     of the feature-side fallback caught exactly this look-ahead shape);
+#   - debt_to_equity is deliberately NOT fallback-filled: it still reads 85% from Yahoo
+#     (passes the check), and InvestSights' D/E never got the overlap validation ROE did --
+#     Yahoo reports debtToEquity as a percent, so an unvalidated merge risks a unit collision.
 _INSERT_SQL = """
 INSERT INTO fundamentals_history
     (symbol, as_of_date, fifty_two_week_high, piotroski_f_score, debt_to_equity,
@@ -51,7 +71,16 @@ SELECT
     sf.piotroski_f_score,
     sf.debt_to_equity,
     sf.operating_margins,
-    sf.return_on_equity,
+    COALESCE(
+        sf.return_on_equity,
+        (SELECT isf.return_on_equity
+         FROM investsights_fundamentals_history isf
+         WHERE isf.symbol = sf.symbol
+           AND isf.return_on_equity IS NOT NULL
+           AND isf.fetched_date <= ?
+         ORDER BY isf.fetched_date DESC
+         LIMIT 1)
+    ),
     sf.revenue_growth,
     sf.earnings_growth,
     sf.earnings_yield,
@@ -167,6 +196,20 @@ def _compute_and_write_pledge_trend(pg: bool, ts_floor: str) -> int:
     return len(rows)
 
 
+def snapshot_fundamentals(as_of: str) -> int:
+    """Delete-then-insert the fundamentals snapshot for `as_of`; returns rows written.
+
+    Extracted 2026-09-20 so tests can exercise the InvestSights ROE fallback directly
+    (test_fundamentals_snapshot_roe_fallback.py) without run()'s pledge-trend side
+    effects, which need technical_signals/stock_ohlcv populated.
+    """
+    _ensure_schema()
+    execute(_DELETE_SQL, (as_of,))
+    # Two params: the as_of_date column value, and the point-in-time ceiling for the
+    # InvestSights ROE fallback (isf.fetched_date <= as_of).
+    return execute(_INSERT_SQL, (as_of, as_of))
+
+
 def run(as_of: str | None = None) -> int:
     """Snapshot current stock_fundamentals (+ pledge_pct from trendlyne_stock_profile) into
     fundamentals_history for `as_of` (default today). Then computes pledge_chg_90d and writes
@@ -175,10 +218,7 @@ def run(as_of: str | None = None) -> int:
     as_of = as_of or datetime.date.today().isoformat()
     pg    = use_postgres()
 
-    _ensure_schema()
-
-    execute(_DELETE_SQL, (as_of,))
-    n = execute(_INSERT_SQL, (as_of,))
+    n = snapshot_fundamentals(as_of)
     print(f"[FUND-SNAP] Wrote {n} fundamentals snapshots as_of {as_of}.")
 
     ts_floor = _last_trading_session_floor(as_of)

@@ -2888,6 +2888,55 @@ async function persistResult(check: DataQualityCheck, result: { status: DataQual
   }
 }
 
+// ── Per-check heartbeat (2026-09-20, measurement.md re-verification) ──────────────────
+// job_heartbeat held one row per DATA_QUALITY_CHECKS id (written only by markAlerted()'s
+// Telegram-dedupe insert) with last_status=NULL / run_count=0 forever -- "NULL = unmonitored,
+// not healthy": the checks reported only into data_quality_results, so every heartbeat reader
+// saw a producer that had never run. The sweep is now the producer for its own check ids.
+// This upsert mirrors jobHeartbeat.ts's UPSERT_SQL convention with two DELIBERATE deviations
+// from recordHeartbeat():
+//   1. NO job_run_history append. recordHeartbeat() writes one on every call; here that would
+//      be ~169 checks × ~96 sweeps/day ≈ 16k rows/day of noise in a table whose whole job is
+//      real run attribution. The sweep-level runs are already attributed ('data-quality-daily'
+//      and the watchdog's own heartbeat rows).
+//   2. warn maps to 'success'. The heartbeat answers "is this producer alive", not "is the
+//      data healthy" -- a warn is a completed run with a degraded verdict, and its severity
+//      already lives in data_quality_results and the Telegram path. fail/error → 'failed',
+//      with the verdict detail as last_error (a later success clears it, same as the job
+//      convention).
+// getStaleJobs()'s dataQualityIds exclusion STAYS regardless of these rows now being live:
+// a 15-min cadence can never trip a 26h-staleness window, and a check's health signal is its
+// verdict, not its heartbeat age.
+const DQ_HEARTBEAT_UPSERT_SQL = `
+  INSERT INTO job_heartbeat (job_name, last_status, last_run_at, last_success_at, last_error, run_count, fail_count)
+  VALUES (?, ?, ?, ?, ?, 1, ?)
+  ON CONFLICT(job_name) DO UPDATE SET
+    last_status     = ?,
+    last_run_at     = ?,
+    last_success_at = CASE WHEN ? = 'success' THEN ? ELSE job_heartbeat.last_success_at END,
+    last_error      = ?,
+    run_count       = job_heartbeat.run_count + 1,
+    fail_count      = job_heartbeat.fail_count + ?
+`;
+
+async function persistCheckHeartbeat(checkId: string, status: DataQualityStatus, detail: string): Promise<void> {
+  const heartbeatStatus = status === 'fail' || status === 'error' ? 'failed' : 'success';
+  const now = Date.now();
+  const successAt = heartbeatStatus === 'success' ? now : null;
+  const err = heartbeatStatus === 'failed' ? detail : null;
+  const failInc = heartbeatStatus === 'failed' ? 1 : 0;
+  try {
+    // Params follow placeholder order: VALUES(id,status,now,successAt,err,failInc),
+    // then UPDATE(status, now, status, now, err, failInc) -- same shape as recordHeartbeat().
+    await dbRun(DQ_HEARTBEAT_UPSERT_SQL, [
+      checkId, heartbeatStatus, now, successAt, err, failInc,
+      heartbeatStatus, now, heartbeatStatus, now, err, failInc,
+    ]);
+  } catch {
+    // Heartbeat must never break the check run itself (same contract as persistResult).
+  }
+}
+
 /** Checks in flight at once. They were strictly sequential: 169 checks took 45.7s warm / 93.2s
  *  cold per sweep (2026-09-11), every 15 minutes. Each is an independent pool query, so a few can
  *  overlap; small enough that a sweep never takes a large share of the 22-connection pool. */
@@ -2907,6 +2956,7 @@ export async function runDataQualityChecks(now: Date = new Date()): Promise<Data
       outcome = { status: 'error', detail: (err as Error).message.slice(0, 300) };
     }
     await persistResult(check, outcome);
+    await persistCheckHeartbeat(check.id, outcome.status, outcome.detail);
     return { id: check.id, label: check.label, category: check.category, critical: check.critical, ...outcome };
   });
   await purgeOrphanResults(results.map(r => r.id));

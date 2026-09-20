@@ -163,12 +163,14 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
     for (const r of rows) {
       if (registryNames.has(r.job_name)) continue; // covered by cron-aware getLateJobs() instead
       if (monitorScriptIds.has(r.job_name)) continue; // covered by getSystemStatus() instead
-      // markAlerted() inserts a job_heartbeat row keyed by check id to dedupe Telegram
-      // alerts for failing data-quality checks (checkAndAlertDataQuality in jobWatchdog.ts).
-      // recordHeartbeat() is never called with these ids, so last_success_at is permanently
-      // NULL — without this exclusion every DQ check that has ever failed once logs
-      // "has never succeeded" here forever, even after it starts passing again, duplicating
-      // the check's own real freshness signal in data_quality_results/getLatestDataQualityResults().
+      // DQ check ids: since 2026-09-20 the sweep itself stamps these rows live
+      // (dataQualityChecks.ts persistCheckHeartbeat -- liveness only, deliberately NO
+      // job_run_history append, which recordHeartbeat() would add ~16k rows/day of).
+      // markAlerted() in jobWatchdog.ts also upserts them (last_alert_sent_at only) to dedupe
+      // Telegram alerts for failing checks. The exclusion from generic 26h staleness STAYS:
+      // the 15-min sweep cadence can never trip that window anyway, and a check's health
+      // signal is its verdict in data_quality_results/getLatestDataQualityResults(), not the
+      // heartbeat's binary success age.
       if (dataQualityIds.has(r.job_name)) continue;
       if (decommissionedJobs.has(r.job_name)) continue;
       if (r.last_success_at == null) {
