@@ -1,5 +1,16 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
+// 2026-09-20: Google RETIRED `gemini-2.0-flash` — every call started 404ing with
+// "This model models/gemini-2.0-flash is no longer available. Please update your code to use
+// models/gemini-3.6-flash" (caught live in company-profiles-sync's make-up run: the job still
+// reported Success 7/0 because analyzeCompanyProfile() stores a default on analysis.error —
+// the same "green while degraded" shape as the ROE vendor decay). Default now follows the
+// vendor's own recommendation; GEMINI_MODEL overrides without a code change next time.
+// Also: the 3.x generation spends hundreds of tokens THINKING before answering (measured
+// 316 thoughtsTokenCount on a trivial profile prompt), so the old maxOutputTokens: 300
+// returned EMPTY text (all budget consumed, finishReason MAX_TOKENS). 2048 measured good.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
+
 let _ai: GoogleGenAI | null = null;
 function getAiClient() {
   if (!_ai) {
@@ -53,11 +64,11 @@ export async function generateStockAnalysis(symbol: string, data: any) {
   try {
     const ai = getAiClient();
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: GEMINI_MODEL,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        maxOutputTokens: 300,
+        maxOutputTokens: 2048,
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -113,11 +124,11 @@ Determine if the company has high growth scope and whether it is in the news for
   try {
     const ai = getAiClient();
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: GEMINI_MODEL,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        maxOutputTokens: 300,
+        maxOutputTokens: 2048,
         responseSchema: {
           type: Type.OBJECT,
           properties: {

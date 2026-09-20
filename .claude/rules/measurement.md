@@ -163,9 +163,20 @@ rather than assume. Full narrative for anything here: `docs/measurement-history.
   (critical=false — does not fail the job; `so_option_chain` 16.9% coverage is the driver).
   `company-profiles-sync`'s 0/2 failures were the NULL-latest-description bug already fixed in
   source by AF-20260920-01: the 2 due stocks are AXISBANK + CHALET and both now resolve a
-  non-null description, so the verdict returns success. **Deploy-gated:** the .ts fixes
-  (heartbeat writer + profile-sync) are live only after the next `pm2 restart bharat-server`
-  (user sign-off per convention); the Python snapshot fix is already live (source-run).
+  non-null description, so the verdict returns success. **DEPLOYED 2026-09-20 21:36 IST:**
+  `pm2 restart bharat-server` after a zero-active-BullMQ-jobs check (AF-20260910-04 protocol);
+  HTTP 200 + `pm2 save` + `check_deploy_drift` OK (started after HEAD `da0b3581`). Today's
+  scheduled 21:00 IST run (id 34189) and the post-restart make-up (id 34209, 7/0) both synced
+  green. The production 15-min sweep (21:53 IST) stamped the check-id heartbeat rows itself
+  (run_count 1 -> 2) — the heartbeat writer is live in production, not just probe-verified.
+  **Found + fixed during deploy verification: Google RETIRED `gemini-2.0-flash`** — every AI
+  analysis was 404ing while the job stayed green (defaults stored; AXISBANK/CHALET
+  growth_score 0.0 was this, not the sync bug). `geminiService.ts` now defaults to
+  `gemini-3.6-flash` (GEMINI_MODEL override) with maxOutputTokens 300 -> 2048 (the 3.x
+  generation burns ~316 thinking tokens — 300 returned EMPTY text); live-verified a real
+  analysis through the service path. Same default fixed in `agents/narrative_client.py` +
+  `chatbot/llm.py` (chatbot restarted); already-stored default analyses refresh on each
+  symbol's normal 7-day re-analysis cycle.
 - **RESOLVED 2026-09-20 ~21:00 IST — `job_heartbeat` integration gap:** the 12 most-recent
   `job_heartbeat`
   rows all read `last_status=NULL, last_run_at=NULL, run_count=0, fail_count=0`

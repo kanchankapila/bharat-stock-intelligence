@@ -7,7 +7,9 @@ logger = logging.getLogger(__name__)
 # ponytail: Ollama removed 2026-08-20 (local model didn't fit this box's VRAM; see
 # measurement.md/CLAUDE.md session notes). Gemini is now the only chatbot LLM backend.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+# 2026-09-20: gemini-2.0-flash RETIRED by Google (404 on every call) -> gemini-3.6-flash
+# per the API's own replacement recommendation (same fix as geminiService.ts).
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
 _cached_llm = None
 

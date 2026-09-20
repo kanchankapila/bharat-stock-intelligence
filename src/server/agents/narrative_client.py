@@ -2,7 +2,9 @@ import os
 import sys
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+# 2026-09-20: gemini-2.0-flash RETIRED by Google (404 on every call) -> gemini-3.6-flash
+# per the API's own replacement recommendation (same fix as geminiService.ts).
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
 
 _cached_llm = None
 
