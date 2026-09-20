@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { X, Bookmark, CheckCircle2, History, TrendingUp, Activity, Award, ShieldAlert, Maximize2, Minimize2, PieChart, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Bookmark, CheckCircle2, History, TrendingUp, Activity, Award, ShieldAlert, Maximize2, Minimize2, PieChart, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
 import stockData from '../data/stocklist';
@@ -28,6 +29,7 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
 }) => {
   const [isMaximized, setIsMaximized] = React.useState(false);
   const [impactSignalId, setImpactSignalId] = React.useState<number | null>(null);
+  const navigate = useNavigate();
   const isWatchlisted = symbol ? watchlist.includes(symbol) : false;
 
   React.useEffect(() => {
@@ -116,6 +118,21 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* /details was orphaned for a while (nothing navigated to it; stock clicks opened
+                this drawer instead). This is the single bridge back: from ANY drawer entry
+                point — search, watchlist, screener rows — the full page (with its Derivatives
+                and Ownership & Flows tabs) is one click away. */}
+            <button
+              onClick={() => {
+                onClose();
+                navigate(`/details?symbol=${encodeURIComponent(symbol)}`);
+              }}
+              className="p-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:text-white hover:bg-indigo-600/40 transition-all flex items-center gap-1.5 text-xs font-semibold font-display uppercase tracking-wider"
+              title="Open the full stock-analysis page (charts, Derivatives, Ownership & Flows)"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Full analysis</span>
+            </button>
             <button
               onClick={() => {
                 const currentPrice = quantScore?.pricecurrent || undefined;

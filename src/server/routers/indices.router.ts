@@ -53,18 +53,31 @@ export const indicesRouter = router({
       return fetchIndexGraph(input.indId, input.range, input.type);
     }),
 
+  // Both chart reads come from the platform's index_valuation history first (repaired
+  // Trendlyne backfill + daily append) with MoneyControl's live graph as the documented
+  // fallback -- see indexValuationService.ts. The returned { points, source, asOf } lets the
+  // page disclose which feed produced the numbers. Cached 5 min: the table refreshes daily,
+  // and the fallback path must not hammer the vendor graph either.
   getIndexPeChart: publicProcedure
     .input(z.object({ indId: z.string(), duration: z.string().optional().default('1Y') }))
     .query(async ({ input }) => {
-      const { fetchIndexPeChart } = await import('../indexApiService');
-      return fetchIndexPeChart(input.indId, input.duration);
+      const { fetchIndexValuationChart } = await import('../indexValuationService');
+      return fetchWithCache(
+        `indices:pe-chart:${input.indId}:${input.duration}`,
+        () => fetchIndexValuationChart(input.indId, input.duration, 'pe'),
+        300,
+      );
     }),
 
   getIndexPbChart: publicProcedure
     .input(z.object({ indId: z.string(), duration: z.string().optional().default('1Y') }))
     .query(async ({ input }) => {
-      const { fetchIndexPbChart } = await import('../indexApiService');
-      return fetchIndexPbChart(input.indId, input.duration);
+      const { fetchIndexValuationChart } = await import('../indexValuationService');
+      return fetchWithCache(
+        `indices:pb-chart:${input.indId}:${input.duration}`,
+        () => fetchIndexValuationChart(input.indId, input.duration, 'pb'),
+        300,
+      );
     }),
 
   getIndicesList: publicProcedure

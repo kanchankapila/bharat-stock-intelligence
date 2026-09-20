@@ -36,15 +36,20 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
   
   const breadthEx: 'N' | 'B' = bridgeSymbol?.includes('NSX') || name.toUpperCase().includes('NIFTY') ? 'N' : 'B';
 
-  const { data: peChart } = trpc.getIndexPeChart.useQuery(
+  // { points, source, asOf } — platform index_valuation history first, MoneyControl live
+  // graph as fallback (see indexValuationService.ts). The valuation panels below only need
+  // the point array.
+  const { data: peResult } = trpc.getIndexPeChart.useQuery(
     { indId },
     { enabled: !!indId, staleTime: 3600000 }
   );
 
-  const { data: pbChart } = trpc.getIndexPbChart.useQuery(
+  const { data: pbResult } = trpc.getIndexPbChart.useQuery(
     { indId },
     { enabled: !!indId, staleTime: 3600000 }
   );
+  const peChart = peResult?.points;
+  const pbChart = pbResult?.points;
   
   const { data: graphData, isLoading: loadingGraph } = trpc.getIndexGraph.useQuery(
     { indId, range: graphRange, type: graphType },

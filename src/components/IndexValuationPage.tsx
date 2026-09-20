@@ -5,10 +5,13 @@ import { V1PageFrame } from './v1/V1PageFrame';
 import { QueryError } from './IntelligenceQueryError';
 import { cn } from '../lib/utils';
 
-// fetchIndexPeChart / fetchIndexPbChart (src/server/indexApiService.ts) normalise MoneyControl's
-// fundamentals graph to [{ date, value, indexValue }] where `value` is the ratio and
-// `indexValue` is the index level on that date. Returns null when the feed has nothing.
-type Point = { date: string; value: number; indexValue: number };
+// getIndexPeChart / getIndexPbChart return { points, source, asOf }: the platform's repaired
+// index_valuation history first (indexValuationService.ts), MoneyControl's live fundamentals
+// graph only as a documented fallback. Points are [{ date, value, indexValue }] where `value`
+// is the ratio and `indexValue` is the index level on that date (null when the source does not
+// carry levels). Empty points means the feed had nothing — an absence, not a zero.
+type Point = { date: string; value: number; indexValue?: number | null };
+type ChartResult = { points: Point[]; source: 'index_valuation' | 'moneycontrol'; asOf: string | null };
 
 const INDEX_CHOICES = [
   { id: '9', name: 'NIFTY 50' },
@@ -48,7 +51,7 @@ export function percentileRank(values: number[], value: number): number {
   return (below / values.length) * 100;
 }
 
-function RatioPanel({ title, ratioLabel, points, loading }: { title: string; ratioLabel: string; points: Point[]; loading: boolean }) {
+function RatioPanel({ title, ratioLabel, points, loading, source, asOf }: { title: string; ratioLabel: string; points: Point[]; loading: boolean; source: ChartResult['source']; asOf: string | null }) {
   const stats = React.useMemo(() => {
     const values = points.map(p => p.value).filter(v => Number.isFinite(v));
     const sorted = [...values].sort((a, b) => a - b);
@@ -145,12 +148,18 @@ function RatioPanel({ title, ratioLabel, points, loading }: { title: string; rat
 
       {stats.outliers.length > 0 && (
         <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
-          Vendor data-quality flag: MoneyControl's {ratioLabel} feed returns {stats.outliers.length} of {stats.count} sessions
+          Vendor data-quality flag: the {source === 'moneycontrol' ? "MoneyControl" : 'stored'} {ratioLabel} series returns {stats.outliers.length} of {stats.count} sessions
           far outside the series' 3×IQR fence (e.g. {stats.outliers[0].value.toFixed(2)} on {stats.outliers[0].date}).
           Every figure above includes them verbatim — treat the range line, and the percentile verdict below, with suspicion
-          until the upstream series is clean.
+          until the series is clean.
         </p>
       )}
+
+      <p className="bsi-intel-note mt-3">
+        Source: {source === 'index_valuation'
+          ? <>platform index-valuation history (Trendlyne full-history backfill + daily 18:00 IST append){asOf ? `, through ${asOf}` : ''}. MoneyControl's live graph — which has carried junk points on isolated sessions — is only a fallback.</>
+          : <>MoneyControl live fundamentals feed (platform history lacked coverage for this index/window){asOf ? `, through ${asOf}` : ''}.</>}
+      </p>
 
       <p className="bsi-intel-note mt-3">
         {rich
@@ -170,8 +179,10 @@ export default function IndexValuationPage() {
   const peQuery = trpc.getIndexPeChart.useQuery({ indId, duration }, { staleTime: 3_600_000 });
   const pbQuery = trpc.getIndexPbChart.useQuery({ indId, duration }, { staleTime: 3_600_000 });
 
-  const pePoints = (peQuery.data ?? []) as Point[];
-  const pbPoints = (pbQuery.data ?? []) as Point[];
+  const peResult = peQuery.data as ChartResult | undefined;
+  const pbResult = pbQuery.data as ChartResult | undefined;
+  const pePoints = peResult?.points ?? [];
+  const pbPoints = pbResult?.points ?? [];
   const indexName = INDEX_CHOICES.find(i => i.id === indId)?.name ?? indId;
 
   const latestIndexValue = React.useMemo(() => {
@@ -233,8 +244,8 @@ export default function IndexValuationPage() {
         </div>
 
         <div className="space-y-4">
-          <RatioPanel title={`${indexName} price-to-earnings`} ratioLabel="P/E" points={pePoints} loading={peQuery.isLoading} />
-          <RatioPanel title={`${indexName} price-to-book`} ratioLabel="P/B" points={pbPoints} loading={pbQuery.isLoading} />
+          <RatioPanel title={`${indexName} price-to-earnings`} ratioLabel="P/E" points={pePoints} loading={peQuery.isLoading} source={peResult?.source ?? 'moneycontrol'} asOf={peResult?.asOf ?? null} />
+          <RatioPanel title={`${indexName} price-to-book`} ratioLabel="P/B" points={pbPoints} loading={pbQuery.isLoading} source={pbResult?.source ?? 'moneycontrol'} asOf={pbResult?.asOf ?? null} />
         </div>
 
         <p className="bsi-intel-note">
