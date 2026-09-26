@@ -56,6 +56,18 @@ const EXCLUDED_TABLES: Record<string, string> = {
   url_field_correlations: 'url_explorer tool store (store.py)',
   ai_endpoint_registry: 'url_explorer endpoint_registry.py tool store',
   provider_score_consistency_audit: 'reverse-engineering study tool table',
+  telegram_report_log: 'telegram reporting event log; app log',
+  kg_alignment: 'ontology knowledge graph; internal metadata',
+  kg_binding: 'ontology knowledge graph; internal metadata',
+  kg_card: 'ontology knowledge graph; internal metadata',
+  kg_class: 'ontology knowledge graph; internal metadata',
+  kg_guardrail: 'ontology knowledge graph; internal metadata',
+  kg_meta: 'ontology knowledge graph; internal metadata',
+  kg_metric: 'ontology knowledge graph; internal metadata',
+  kg_property: 'ontology knowledge graph; internal metadata',
+  kg_relation: 'ontology knowledge graph; internal metadata',
+  kg_term: 'ontology knowledge graph; internal metadata',
+  kg_vocabulary: 'ontology knowledge graph; internal metadata',
   _migrations: 'node-pg-migrate bookkeeping table',
   job_sweep_results: 'dev/runJobSweep.ts artifact',
   data_ingestion_dlq: 'DLQ queue table; monitored by inspect_ingestion_health MCP count, not freshness',
@@ -123,6 +135,10 @@ const EXCLUDED_TABLES: Record<string, string> = {
   tick_data: '0 rows, no active writer; effectively retired',
   screener_performance_history: 'screener_performance.py performance-calculation history log; app log',
   screener_reliability: 'screener reliability score history (screener_performance.py); app log',
+  // Semantic layer (2026-09-25): link table has only (claim_key, evidence_key, relation,
+  // contribution, note) -- no timestamp for the generic freshness factory to read. Its parent
+  // tables (market_claim, market_evidence) carry the monitored timestamps.
+  market_claim_evidence: 'semantic claim->evidence link table; no timestamp column, parents monitored',
 };
 
 describe('table-coverage gate: exclusion map', () => {

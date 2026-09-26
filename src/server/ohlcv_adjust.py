@@ -90,6 +90,10 @@ DEADBAND = 0.15
 # How close to a clean corporate-action ratio the observed factor must land.
 RATIO_TOL = 0.025
 
+# Corporate actions occurring before modern electronic trading (NSE equity trading began Nov 1994)
+# are excluded from ohlcv_adjustment_factors to prevent corrupting factor chains (AF-20260831-03).
+MIN_CORPORATE_ACTION_DATE = date(1995, 1, 1)
+
 # Real Indian split/bonus/consolidation ratios are small integers. The extras cover
 # penny-stock consolidations (1:100) and gold-ETF style splits (1:1000).
 _SMALL = list(range(1, 11))
@@ -301,6 +305,9 @@ def cross_validate_with_mc_actions(conn: ConnWrapper, persist: bool = False) -> 
             rdate = date.fromisoformat(str(rdate_s)[:10])
             factor = float(factor)
         except (TypeError, ValueError):
+            continue
+
+        if rdate < MIN_CORPORATE_ACTION_DATE:
             continue
 
         nearby = []

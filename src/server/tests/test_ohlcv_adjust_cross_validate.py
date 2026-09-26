@@ -133,3 +133,14 @@ class TestScopeGuards:
         res = oa.cross_validate_with_mc_actions(con)
         assert len(res['filled']) == 1
         assert res['confirmed'] == []
+
+    def test_pre_1995_corporate_actions_are_ignored_entirely(self):
+        """AF-20260831-03: Pre-1995 actions (such as L&T 1965-03-06 bonus) must be excluded
+        from ohlcv_adjustment_factors to prevent corrupting factor normalization chains."""
+        con = _make_db()
+        _add_authoritative(con, 'LT', 'bonus', '1965-03-06', 0.875, '1:7')
+        res = oa.cross_validate_with_mc_actions(con, persist=True)
+        assert res == {'confirmed': [], 'filled': [], 'disagreement': []}
+        count = con.execute("SELECT COUNT(*) FROM ohlcv_adjustment_factors").fetchone()[0]
+        assert count == 0
+

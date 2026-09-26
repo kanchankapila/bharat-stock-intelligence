@@ -3,6 +3,28 @@
 Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file and was being loaded into every context window).
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
+
+## 2026-09-26 — Claims verification & audit findings resolution pass (AF-20260831-03, AF-20260917-22, AF-20260917-23)
+
+- **Agent**: Antigravity. **Trigger**: "Double check if all claims made are correct and then resolve each issue one by one".
+- **Claims Verified against Live Production**:
+  - Claim of 26 open audit findings: **FALSE / OVERCOUNTED** (regex matched historical sections; true open count ~10).
+  - Claim of 4 undeployed fixes in memory: **VERIFIED TRUE** (chatbot uptime 5D, bharat-server uptime 2D, 4 python jobs holding venv).
+  - Claim of `et_cashflow_history` sparse: **FALSE** (has 11,700 rows spanning 2012-2026).
+  - Claim of 474 suspect bars: **OUTDATED** (live count is 8,790 suspect bars across 2,329 symbols).
+  - Claim that `basis` 1d factor is on 17-21 dates: **OUTDATED** (26 dates in `stock_futures_oi_history`, 21 effective dates at h=5). Re-measured: 1d rank_IC decayed from +0.139 to +0.059, hit_AUC from 0.565 to 0.531 (no edge; does not survive the 20-date floor).
+- **Issues Resolved**:
+  - **AF-20260831-03 (Permanent Fix)**: Root-caused recurring pre-1995 corporate actions (e.g. L&T 1965 1:7 bonus) being re-injected by `cross_validate_with_mc_actions`. Added `MIN_CORPORATE_ACTION_DATE = date(1995, 1, 1)` floor in `src/server/ohlcv_adjust.py`, purged all 180 pre-1995 corrupt rows from live Postgres `ohlcv_adjustment_factors`, and added unit test in `src/server/tests/test_ohlcv_adjust_cross_validate.py`.
+  - **AF-20260917-22 (Market Holidays Q4 2026)**: Live table had max date `2026-09-14`. Seeded 5 official NSE trading holidays for Oct-Dec 2026 (Gandhi Jayanti, Dussehra, Diwali Balipratipada, Guru Nanak Jayanti, Christmas). Live `MAX(date)` is now `2026-12-25`.
+  - **AF-20260917-23 (57-Second DQ Sweep Contention)**: `SELECT MAX(date) FROM marketsmojo_technical_history` (17.3M rows) took 57.08 seconds due to missing `date` index, causing severe DB lock contention during daily DQ runs. Created and applied migration `migrations/20260926130000_idx_marketsmojo_technical_history_date.sql`. Live query dropped from 57,082 ms to 0.75 ms (76,000x speedup). Schema synchronized and verified clean.
+  - **tableFreshnessCoverage test exclusion fix**: Updated `src/server/__tests__/tableFreshnessCoverage.test.ts` to exclude non-freshness tables (`telegram_report_log`, `kg_*` ontology tables).
+- **DoD Verification**:
+  - `npx tsc --noEmit` -> PASS (exit 0)
+  - `npm run schema:drift` -> PASS (matches live schema 259 tables)
+  - `npx vitest run src/server/__tests__/tableFreshnessCoverage.test.ts` -> PASS (4/4 tests passed)
+  - `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_ohlcv_adjust_cross_validate.py` -> PASS (9/9 passed)
+- **Files Modified**: `src/server/ohlcv_adjust.py`, `src/server/tests/test_ohlcv_adjust_cross_validate.py`, `migrations/20260926130000_idx_marketsmojo_technical_history_date.sql`, `db/schema.postgres.sql`, `docs/audit-findings.md`, `src/server/__tests__/tableFreshnessCoverage.test.ts`, `docs/session-log.md`.
+
 ## 2026-09-26 — IC/AUC improvement pass: backtests actually RE-RUN; one verdict flipped, the mean-reversion headline corrected, a harness blind spot closed
 
 - **Agent**: Claude Code (Opus 5). **Trigger**: "Analyse and do what is necessary to improve IC and AUC after doing latest calculations instead of relying on old data, also update docs with latest data, fix wherever you find issues."
@@ -9745,3 +9767,14 @@ Collision: a concurrent session (b453b177) landed the same SECTOR_LABEL fix with
 - **Recommendation:** keep the current ontology as the semantic control plane, adopt the greenfield bitemporal/provenance discipline as the target data contract, materialize only the high-value instance graph in PostgreSQL first, and add a graph database later only if measured traversal/reasoning workloads justify it. LLM output should explain deterministic, versioned evidence bundles; it should not be the authority that creates a trade decision.
 - **Open items:** implementation intentionally not started. Choosing this target architecture versus a greenfield cutover is a **User Decision**; before any migration, define the compatibility strategy and point-in-time replay acceptance tests.
 
+
+## 2026-09-26 (afternoon) — Claude Code — Claude setup audit: rules scoping, context docs, diagnosis tooling (AF-20260926-05)
+- **Rules were always-on.** `.claude/rules/*.md` carried no `paths:` frontmatter, so all five (~308 KB, ~77k tokens) were injected into every session, contradicting CLAUDE.md's own "load on demand" table. Added path-scoped frontmatter mirroring `rules-pointer.mjs`'s regexes (compared glob vs hook over `git ls-files`: remaining gaps are `greenfield/` only). CLAUDE.md notes that auto-load fires only on a file read.
+- **CONTEXT.md / AGENTS.md were hallucinated** (2026-09-15, another agent): 5 nonexistent fetchers, a GPT-4o `agents/openai.yaml`, non-Claude tool names, the dropped `signals` table, ML+DL "same Sat slot" (DL is Sun). Rewritten from verified facts, pointing at sources of truth instead of copying inventories.
+- **New guard** `.claude/hooks/claude-config.test.mjs`: every rule has `paths:` and every glob matches a tracked file; every skill/command/subagent is listed in AGENTS.md; every file cited in AGENTS/CONTEXT exists. Negative-controlled (frontmatter removed -> fails; phantom path -> fails).
+- **graphify-pointer** fired on every Read/grep all session; now goes quiet once a real `graphify query|explain|path` runs (per-session marker, command-position match so a heredoc mentioning it doesn't count). Negative-controlled.
+- **`scripts/sql.py`**: read-only transaction + server-side `statement_timeout` + prints target DB. Verified live: read OK, `CREATE TABLE` -> `ReadOnlySqlTransaction`, `pg_sleep(3)` at 1s -> `QueryCanceled`.
+- **session-start.sh**: replaced the dead `USE_POSTGRES` check with `POSTGRES_URL`; replaced `pg_isready` (not installed here, so the check silently skipped) with a bounded `/dev/tcp` probe (negative-controlled on a closed port). Removed an empty CRLF-named `.claude/.session-start\r` dir.
+- **settings.json**: deny `git add -A/--all/.`, force-push, `reset --hard`, `clean -f`; `git checkout/restore/stash/reset/push`, pm2 restart/stop, migrations -> ask; retired `webapi.niftytrader.in` -> `www.niftytrader.in`; dropped a duplicate rule and a no-op `additionalDirectories`.
+- **Evidence:** `npx vitest run .claude/hooks` 7 files / 70 tests passed; `graphify update .` run; pytest result recorded in AF-20260926-05.
+- **Not changed (user-level or decision):** `.claude/settings.local.json` is git-tracked; ~400 plugin skill descriptions load per session; ECC's PreToolUse bash hook false-positives on command text mentioning force flags; `recurring-bugs.md` alone is ~127 KB and loads on the first `.py`/`.ts` read.
