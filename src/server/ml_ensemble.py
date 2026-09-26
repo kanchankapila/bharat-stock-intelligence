@@ -1925,23 +1925,21 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
             ).fetchone())
         except Exception:
             _has_sfs = False
-        try:
-            _has_gdelt = bool(_con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='gdelt_sentiment'"
-            ).fetchone())
-        except Exception:
-            _has_gdelt = False
         finally:
             _con.close()
-
-        if _has_gdelt:
-            news_sent_sel = """COALESCE(ts.news_sentiment_score, (
-                       SELECT AVG(g.avg_tone) / 10.0 FROM gdelt_sentiment g
-                       WHERE g.symbol = so.symbol AND g.date <= so.signal_date
-                         AND g.date >= date(so.signal_date, '-30 days')::text
-                   )) AS news_sentiment_score"""
-        else:
-            news_sent_sel = "ts.news_sentiment_score"
+        # SQLite is decommissioned platform-wide (CLAUDE.md, 2026-08-19: use_postgres() returns
+        # True unconditionally, including inside pytest), so this entire `else:` branch is
+        # unreachable in every runtime AND every test — which is precisely why it must not carry
+        # its own private copy of a feature definition. It did: a COALESCE fallback into
+        # gdelt_sentiment, a source RETIRED on 2026-09-11 (throttled this host with HTTP 429 and
+        # filled 0 technical_signals rows over the last 10 trading dates). test_own_news_fallback.py
+        # was supposed to make that impossible, but it slices load_training_data() at `else:` and
+        # only asserts on the Postgres half, so the retired fallback sat safely outside its own
+        # guard for two weeks while the test stayed green and its docstring claimed GDELT was gone.
+        # If this branch is ever revived, the fallback must be own_news_fallback_join()'s
+        # definition (mean of news_symbol_link.sentiment_score over the prior 30d) — that helper
+        # uses LEFT JOIN LATERAL + interval '30 days', so it cannot run on SQLite unchanged.
+        news_sent_sel = "ts.news_sentiment_score"
 
         if _has_sfs:
             sfs_train_sel = "sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi"

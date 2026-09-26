@@ -15,7 +15,7 @@ Run (market hours, every 15 min):  python intraday_ranker.py
 """
 import json
 import math
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from db_compat import connect
 # Index series stored alongside stocks in intraday_ohlcv -- excluded from the stock ranking.
@@ -434,10 +434,36 @@ class IntradayRanker:
 
     def _news_sentiment(self, days: int = 2):
         """Avg recent news sentiment per symbol in [-1, +1] (mirrors technicalSignalsService's
-        loadRecentNewsSentiment: news_sentiment_items.symbols_json → sentiment_score)."""
+        loadRecentNewsSentiment: news_sentiment_items.symbols_json → sentiment_score).
+
+        Bounds are tz-aware INSTANTS, exactly as the TS mirror builds them with
+        new Date(...).toISOString(). The Python used to bind `date.today().±N days` ISO strings
+        ('2026-09-24') against a `fetched_at TIMESTAMPTZ` column, which is wrong three ways —
+        none of them a crash, which is why they survived this long:
+
+        1. NON-DETERMINISM. A bare date is midnight in the SESSION timezone (UTC live), so
+           `days=2` did not mean 48 hours: it meant "since midnight UTC N days back", i.e.
+           anywhere from 48h to 72h of news depending purely on what time the ranker happened to
+           run. Two runs of the same code on the same day scored different news volumes.
+        2. HOST-CLOCK DEPENDENCE. `date.today()` is the *machine's* local calendar day while the
+           comparison happens in the session timezone. This box runs at IST (UTC+05:30) under a
+           UTC session, so the window slid by up to 5.5h with the host clock setting.
+        3. LATENT LOOK-AHEAD. The upper bound was anchored to TODAY+1 rather than to the scan's
+           as-of date — precisely what the TS guards against in its own comment ("Upper-bound by
+           the scan date + 1d so a historical scan never sees news fetched after it"). Harmless
+           while this method only runs live (it has no as-of parameter); the first historical
+           replay would have scored yesterday with today's news.
+
+        Measured live 2026-09-26 (session TZ=UTC, host=IST) at days=2: the old bound kept 19,010
+        tagged articles / 2,041 symbols, the new one keeps 18,550 / 2,026 — so on the live box the
+        old window was ~3.4% WIDER (652 stale half-day articles plus the tail out to tomorrow's
+        midnight), not narrower. No score claim either way: per CLAUDE.md a wiring fix is not
+        evidence of edge, and the intraday news tilt's weight is itself unmeasured.
+        """
         import json as _json
-        upper = (date.today() + timedelta(days=1)).isoformat()
-        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        now = datetime.now(timezone.utc)
+        upper = (now + timedelta(days=1)).isoformat()
+        cutoff = (now - timedelta(days=days)).isoformat()
         try:
             rows = self.conn.execute(
                 "SELECT symbols_json, sentiment_score FROM news_sentiment_items "

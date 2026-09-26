@@ -12,6 +12,7 @@ column. That is train/serve skew by construction (recurring-bugs / ml-model-bugs
 text of all four queries is checked for the same expression -- same shape as
 test_ml_ensemble_pricefeed_fallback.py.
 """
+import ast
 import os
 import re
 import sys
@@ -56,9 +57,44 @@ def test_every_live_query_uses_the_same_own_news_fallback():
             f"{name}: fallback expression without the own-news join"
 
 
-def test_no_live_query_reads_gdelt_any_more():
-    for name, sql in _live_queries().items():
-        assert "gdelt_sentiment" not in sql, f"{name} still reads the retired GDELT table"
+def _code_lines(src):
+    """(lineno, line) for every line EXCEPT docstrings. Docstrings are documentation and are
+    allowed to name a retired source; executable code and SQL strings are not. `#` comments are
+    filtered by the caller. Bare string statements that are not first-in-body (i.e. not
+    docstrings) are treated as code and correctly fail the check."""
+    drop = set()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = getattr(node, "body", [])
+            if body and isinstance(body[0], ast.Expr) \
+                    and isinstance(body[0].value, ast.Constant) \
+                    and isinstance(body[0].value.value, str):
+                drop.update(range(body[0].lineno, (body[0].end_lineno or body[0].lineno) + 1))
+    return [(i + 1, line) for i, line in enumerate(src.splitlines()) if i + 1 not in drop]
+
+
+def test_ml_ensemble_never_reads_the_retired_gdelt_table():
+    """Whole-file check, because the per-query version had a hole in it.
+
+    _live_queries() slices load_training_data() at `    else:`, i.e. it deliberately reads only
+    the Postgres half of that function. A retired source can therefore sit in the other half and
+    this guard stays green while the file's own docstring says GDELT was retired — which is
+    exactly what happened: load_training_data's unreachable SQLite branch kept a
+    `COALESCE(ts.news_sentiment_score, (SELECT AVG(avg_tone) ... FROM gdelt_sentiment ...))`
+    fallback for two weeks after the 2026-09-11 retirement.
+
+    Assert over the entire file instead: the identifier may appear in prose (docstrings, comments —
+    recording WHY it was retired is wanted) but in no executable line. A SQL fragment embedded in
+    an f-string or triple-quoted query is an executable line, so the shape that actually broke
+    still fails here.
+    """
+    for lineno, line in _code_lines(_source()):
+        if "gdelt" in line.lower() and not line.lstrip().startswith("#"):
+            raise AssertionError(
+                "line %d names the retired GDELT table in executable code (retired 2026-09-11; "
+                "the only sentiment fallback is own_news_fallback_join()): %s"
+                % (lineno, line.strip()[:110])
+            )
 
 
 def _fallback_value(pg_conn, as_of):
