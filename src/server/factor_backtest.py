@@ -261,6 +261,14 @@ FACTORS = {
     # values (no assumed sign -- these are exploratory, not literature-backed like the block
     # above). See FEATURE_STORE_FACTORS / _add_feature_store for the exclusion rationale.
     **{f'fs_{c}': (lambda d, c=c: d[c]) for c in FEATURE_STORE_FACTORS},
+    # Long-only top-k can only ever test the HIGH side of a column, so every fs_* column whose
+    # edge sits on the LOW side was untestable by this harness -- which is most of them: 14 of 23
+    # cleared Bonferroni negative (see mean_reversion_14 below). Reading "fs_atr_pct is negative"
+    # and inferring the inverted long book works does NOT follow: bottom-50 of x is a different
+    # portfolio from top-50 of -x only in name, but its TURNOVER and its universe overlap are
+    # not the mirror of the high side, and turnover is what killed win_probability. These make
+    # the low side directly measurable one column at a time, instead of only as a 14-column blend.
+    **{f'fs_{c}_inv': (lambda d, c=c: -d[c]) for c in FEATURE_STORE_FACTORS},
 
     # -- Mean-reversion composite (2026-08-20). The 14 fs_* columns above that clear Bonferroni
     # are ALL negative long-only -- i.e. going long the highest readings on these
@@ -1415,10 +1423,33 @@ def todays_picks(panel: pd.DataFrame, factor: str, top_k: int = 50) -> pd.DataFr
     universe = panel[panel['signal_eligible']]
     if universe.empty:
         raise RuntimeError('no signal-eligible rows in panel')
-    last = universe['date'].max()
-    cur = universe[universe['date'] == last].copy()
-    cur['score'] = FACTORS[factor](cur)
-    cur = cur.dropna(subset=['score']).sort_values('score', ascending=False).head(top_k)
+    last_price_date = universe['date'].max()
+
+    # Score the WHOLE signal-eligible universe once, then pick the newest date that actually
+    # has scores for THIS factor. The previous code took the newest price date and crashed with
+    # a bare IndexError ("single positional indexer is out-of-bounds") when every score on it
+    # was NaN -- observed live 2026-09-21: quant-scoring ran at 15:23 UTC while that day's
+    # trendlyne_pe/pb_history rows did not land until 16:01 UTC (catch-up drift after the
+    # overnight server outage), so the newest bar had book_to_price on zero symbols and
+    # `picks['date'].iloc[0]` exploded on an empty frame. Selecting the newest SCORED date keeps
+    # the step succeeding, and the fallback's own printed warning + the payload's asOf keep the
+    # staleness honest (the same "asOf travels with the list" contract as entryStatus).
+    universe = universe.copy()
+    universe['score'] = FACTORS[factor](universe)
+    scored = universe[universe['score'].notna()]
+    if scored.empty:
+        raise RuntimeError(
+            f"{factor}: no scoreable rows anywhere in the panel "
+            f"({universe['date'].min()}..{last_price_date}) -- the factor's source data is "
+            "entirely missing, not merely late")
+    last = scored['date'].max()
+    if last != last_price_date:
+        print(f"[FactorBacktest] WARNING: {factor} has no scores on the newest bar "
+              f"{last_price_date} (source rows for that session not yet fetched); showing the "
+              f"newest scored date {last} instead. asOf reflects this -- the list is a record "
+              "of that session, not of the newest close.", file=sys.stderr)
+    cur = scored[scored['date'] == last].copy()
+    cur = cur.sort_values('score', ascending=False).head(top_k)
 
     # Two ways this list can mislead someone who skips the docstring, both worth shouting about.
     if top_k < VALIDATED_MIN_TOP_K:

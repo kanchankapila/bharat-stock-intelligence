@@ -1,3 +1,8 @@
+---
+paths:
+  - "{src,scripts,migrations}/**/*{backtest,Backtest,factor_,accuracy,Accuracy,performance_tracker,calibrat,_edge}*"
+  - "docs/measurement-history.md"
+---
 # Measurement Discipline
 
 Read before quoting, comparing, or acting on any accuracy, win-rate, IC, or backtest number.
@@ -50,7 +55,9 @@ Read before quoting, comparing, or acting on any accuracy, win-rate, IC, or back
 > AUC 0.605 on **26**) and applies `MIN_DATES_RELIABLE` to `eff_dates`. New rows carry `eff_dates`
 > and `symbols`; rows written before 2026-09-12 have NULL in both and are not comparable.
 
-**Last refresh pass: 2026-09-20 (freshness-only; DB re-probed live, evidence in `scratch_verify/md_reverify_out*.txt`).** It re-counted every panel, picked up the 2026-09-19 automated sweep's persisted gradings, and refreshed drifted numbers — it did NOT re-run backtests. Corrections are marked `WAS ->`. The 2026-09-10 pass below remains the last FULL re-verification.
+**Last refresh pass: 2026-09-26 — and unlike the two before it, this one RE-RAN BACKTESTS rather than only re-counting panels. Three cost-aware `factor_backtest.py` runs plus a fresh 18-column `feature_store` grading on the liquid universe. It flipped one verdict (`mean_reversion_14`, now significantly NEGATIVE), drifted `momentum_12_1`, and corrected this file's headline mean-reversion framing. See "2026-09-26 refresh" in the Snapshot.**
+
+**Prior refresh pass: 2026-09-20 (freshness-only; DB re-probed live, evidence in `scratch_verify/md_reverify_out*.txt`).** It re-counted every panel, picked up the 2026-09-19 automated sweep's persisted gradings, and refreshed drifted numbers — it did NOT re-run backtests. Corrections are marked `WAS ->`. The 2026-09-10 pass below remains the last FULL re-verification.
 
 **Last full re-verification pass: 2026-09-10.**
 **Last full re-verification pass: 2026-09-10. Partial re-verification: 2026-09-20/21** (fresh
@@ -87,6 +94,105 @@ only relocated, so a fact missing here is one line away in history, not lost).
 This section is a dated status board, not a verdict list. A claim carrying an older date elsewhere
 in this file is not wrong, it is *unrefreshed* — check the date before quoting it, and re-run
 rather than assume. Full narrative for anything here: `docs/measurement-history.md`.
+
+### 2026-09-26 refresh — backtests RE-RUN, not just panels re-counted
+
+- **The ranker, re-graded live today** (`--entry open --persist`, panel 35 dates 2026-08-10..09-28,
+  2,310 symbols; the 09-28 max is CORRECT — today is Saturday and `as_of.logical_session_date()`
+  deliberately labels a weekend run with the session it is FOR, so those 1,920 rows are Monday's
+  snapshot, not a future-dated bug):
+
+      unified_score     5d +0.051/0.525   10d +0.069/0.536   21d +0.065/0.530
+      confluence_score  5d +0.065/0.534   10d +0.093/0.551   21d +0.147/0.578
+      technical_score   5d +0.028/0.511   10d +0.024/0.512   21d +0.010/0.503
+      ml_score          5d +0.017/0.505   10d +0.022/0.505   21d +0.015/0.503
+      dl_score          5d +0.010/0.506   10d +0.003/0.499   21d -0.002/0.498
+
+  Every row LOW-DATA — **eff_dates 5.4 / 2.3 / 0.6**. The 21d column is 12 raw dates = 0.6
+  independent windows and is not evidence of anything; do not quote confluence's +0.147 as a
+  result. `dl_score` at ~0 is expected (weight PAUSED 2026-09-13). Verdict unchanged: the ranker
+  reads positive, has no cost-aware evidence, and cannot yet distinguish a change from noise.
+
+- **⚠ THE HEADLINE MEAN-REVERSION FRAMING IN THIS FILE IS PARTLY A MICROCAP EFFECT.** The
+  `feature_store` readings the "Harness state" section quotes were taken on the FULL universe with
+  no liquidity floor. Re-graded 2026-09-26 with the panel spec actually applied (open entry,
+  >=Rs 1cr trailing-20d ADT computed with no look-ahead, forward returns winsorised 1/99 with
+  `interpolation='lower'/'higher'`, 2024-01-01+, 1.00M rows, 654-675 dates, 2,189 symbols —
+  eff 130 at h=5, 30 at h=21, i.e. FAR better powered than anything in the ranker sections):
+
+      column            h=5      h=10     h=21      | full-universe reading this file quotes @5d
+      ret_5d          -0.040   -0.026   -0.012      | -0.051
+      bb_pct          -0.028   -0.016   -0.005      | -0.042
+      rsi_14          -0.022   -0.011   -0.002      | -0.038
+      adx             +0.003   +0.005   -0.000      | -0.004
+
+  **Every reversal column is ~30-45% WEAKER on names you can actually trade, and at h=21 they are
+  gone entirely.** The mean-reversion result is real but concentrated in illiquid names and in the
+  shortest horizon. This is the panel spec's own "without a liquidity floor you are measuring
+  microcaps you cannot trade" rule biting this file's own headline claim.
+
+- **The strongest, most horizon-persistent `feature_store` columns are VOLATILITY, not reversal** —
+  a finding this file did not have. Same panel: `atr_pct` **-0.056 / -0.064 / -0.077** (AUC 0.475 /
+  0.471 / 0.465) and `bb_width` -0.030 / -0.035 / -0.047, both STRENGTHENING with horizon, i.e.
+  low-volatility names win and do so more at 21d. `vwap_dist_pct` is the mirror image: **+0.022 /
+  +0.032 / +0.043**, positive and strengthening.
+
+- **A 5-column composite, signs fitted on a TRAIN window only and evaluated out-of-sample, holds
+  up on IC and then dies on costs. Both halves matter.** Train 2024-01-01..2025-06-30 (372 dates)
+  selected `atr_pct`/`bb_width`/`di_plus` (negative) + `vwap_dist_pct`/`volume_ratio_20d`
+  (positive) at |IC_h21| >= 0.02; held-out 2025-07-01..2026-09-25 (287-303 dates):
+
+      composite_all       TEST  5d +0.049/0.526   10d +0.058/0.531   21d +0.076/0.538  (t=+10.71, 21% of dates negative)
+      atr_pct_inv         TEST  5d +0.048/0.523   10d +0.050/0.525   21d +0.059/0.530  (t=+6.96)
+
+  **The h=5 arm is WELL-POWERED (eff 60.6) and its +0.049 IC is comparable to the entire ranker's
+  +0.051 — measured on ~11x more independent observations.** Leak-checked per
+  `ml-model-bugs.md`'s standing rule: corr(selection variable, SAME-day return) = +0.131
+  (composite), +0.070 (atr_pct_inv), both under the 0.2 bar. (`ret_5d` reads +0.446 and is
+  contemporaneous by construction — it is NOT in the composite; a trailing 5d return legitimately
+  contains day d's move, and entry is d+1 open, so the traded window does not overlap.)
+  Train IC ~= test IC (+0.073 vs +0.076) is the documented leak tell and was checked rather than
+  waved through; here it is explained — the "fit" is 5 signs and no parameters, and volatility is
+  a persistent characteristic, so cross-period stability is expected.
+
+  **Then the cost-aware arbiter kills all of it** (`factor_backtest.py`, 21d rebalance, top-50,
+  25bps/side, disjoint periods so `periods` is already an independent count):
+
+      mean_reversion_14  67 periods  net excess -0.9374%/period  t=-3.26  turnover 89.6%  0/6 years positive
+      fs_atr_pct_inv     67 periods  net excess -0.7932%/period  t=-1.78  turnover 41.6%  2/6 years positive
+      fs_bb_width_inv    65 periods  net excess -0.5361%/period  t=-1.55  turnover 83.5%  1/6 years positive
+
+- **WHY positive IC and negative net return are both true here, and it is not a contradiction —
+  this is a reusable trap.** `factor_edge.py` centres its excess return on the per-date **MEDIAN**
+  (`xs_N = fwd - median`); `factor_backtest.py` benchmarks against the equal-weight universe
+  **MEAN** (`universe_per_period_pct` = 1.4532%/period over 2021-2026). Indian equity cross-
+  sectional returns are strongly right-skewed, so mean >> median, and low-volatility names
+  systematically MISS the right tail. A low-vol factor therefore beats the median name (positive
+  rank IC, honestly) while losing to the equal-weight universe (negative net excess, also
+  honestly). **Before treating any rank IC as evidence of money, ask which centre it was measured
+  against.** A factor can be a genuine median-beater and still be the wrong book to hold.
+
+- **`factor_edge.py` now reports the mean benchmark alongside the median one, so this trap is
+  visible without running a backtest (added 2026-09-26).** Two new output columns, `top50_exc` and
+  `t_eff`: the per-date mean forward return of the top-50 by score MINUS the equal-weight universe
+  mean, averaged over dates, with `t` divided by `sqrt(eff_dates)` (the same overlap correction as
+  the reliability bar). **A positive `rank_IC` beside a negative `top50_exc` now prints
+  `<-- median-beater: +IC but top-50 LOSES to universe mean` on the row.** It is a cheap early
+  warning, NOT a replacement for `factor_backtest.py` — no costs, no turnover, no survivorship
+  handling, and it holds to d+N instead of rebalancing. Verified to DISCRIMINATE rather than always
+  fire (`ml-model-bugs.md`'s always-fires rule): silent on the ranker (`unified_score` top50_exc
+  **+0.727%**, t_eff 1.90; `confluence_score` +0.813%) and on `dl_score` (+0.303%, t_eff 0.57 —
+  correctly weak), firing on 5 of the 6 low-vol arms above. Existing columns were checked
+  bit-identical after the change (`unified_score` 5d 0.051/0.525/n=55112/27 dates/eff 5.4/2291 syms
+  before and after), so historical readings stay comparable. Immunized by
+  `src/server/tests/test_factor_edge_mean_benchmark.py` (6 tests, negative-controlled by swapping
+  the mean for the median, which breaks exactly the median-beater case).
+- **New harness capability, added 2026-09-26:** `factor_backtest.py` now exposes `fs_<col>_inv`
+  for every `FEATURE_STORE_FACTORS` column. Long-only top-k can only test the HIGH side of a
+  column, so every column whose edge is on the low side — 14 of 23 — had been untestable by this
+  repo's own arbiter except as the one hand-built 14-column blend. Bottom-50-of-x and top-50-of-(-x)
+  are the same book, but its turnover and universe overlap are NOT the mirror of the high side,
+  and turnover is what killed both `win_probability` and `mean_reversion_14`.
 
 ### 2026-09-20 refresh — what moved since 2026-09-10 (verified live; gradings from the 2026-09-19 close-entry sweep)
 
@@ -142,7 +248,7 @@ rather than assume. Full narrative for anything here: `docs/measurement-history.
   is registered but NOT active** — the honest post-fix chain is v5 active (cv 0.5177,
   2026-09-12) with v6 as challenger pending promotion criteria. DL trainer ran 2026-09-19 14:12
   IST. `model_registry` total: **343 registrations**.
-- **`cs_ranker`/`exit_policy` (GradientBoosting Regressor Pair): three MORE challengers rejected
+- **`exit_policy` (GradientBoosting Regressor Pair; the label "`cs_ranker`/" that used to precede it was WRONG — see the CORRECTION on the `cs_ranker` bullet in "Open / pending"): three MORE challengers rejected
   since 09-10** — 2.0750 (09-11), 1.9907 (09-14), 2.0725 (09-19), all `is_active=0`; the champion
   remains 20260901_123532 (1.8021). All values > 1 — still not AUCs, still consistent rejections.
 - **DQ as of 2026-09-20 18:46 IST:** `ur-engine-dispersion-collapse` **pass** (unchanged detail:
@@ -345,9 +451,18 @@ post-reclass 8→14) plus one NEW finding: most `job_heartbeat` rows are registe
   inverted; the platform's dominant 5d mean-reversion result stands, now on honest raw columns.
   Note `rsi_14` and `bb_pct` at 5d clear the `|rank_IC| >= 0.03` half of the bar while AUC stays
   at 0.485-0.488 — the same IC-real-but-AUC-stalls shape this file records for 7+ unrelated
-  engines, in its inverted form. **The remaining `feature_store` rows below (both
-  `mean_reversion_14` arms, and the 23-column Bonferroni sweep) have NOT been individually
-  re-run** — only these four representative columns were, so those rows keep their tags.
+  engines, in its inverted form.
+
+  **⚠ QUALIFIED 2026-09-26 — these four readings were taken with NO LIQUIDITY FLOOR, so they
+  overstate the effect on tradeable names by 30-45%.** Re-graded on >=Rs 1cr ADT (2024-01-01+,
+  654-675 dates, 2,189 symbols): ret_5d **-0.040** @5d (not -0.051), bb_pct **-0.028** (not
+  -0.042), rsi_14 **-0.022** (not -0.038), adx +0.003. At h=21 all three are ~0. The
+  mean-reversion finding is real but is **concentrated in illiquid names and in the shortest
+  horizon** — and on the liquid panel the strongest, most horizon-persistent columns are
+  VOLATILITY (`atr_pct` -0.077 @21d) rather than reversal. See the 2026-09-26 Snapshot block.
+  Both `mean_reversion_14` arms and the low-vol single columns have since been run through the
+  cost-aware harness and are negative; the 23-column Bonferroni sweep has still NOT been
+  individually re-run and keeps its tag.
 
 - **[superseded by the entry above, kept for the record] `feature_store`-sourced readings were QUARANTINED pending a rebuild (AF-20260910-18 / -20).**
   Until 2026-09-10 that table stored per-symbol `RobustScaler` output for every numeric column,
@@ -410,6 +525,8 @@ Any cross-sectional forward-return measurement on this data:
 - **Liquidity floor ≥ ₹1cr ADT.** Without it you are measuring microcaps you cannot trade.
 - **Next-day OPEN entry, and treat any close-to-close IC as an upper bound.** Signals computed off a close cannot be bought at that close — `factor_edge.py`'s default grades close-to-close, and measured 2026-08-22 every IC it has ever produced overstates the honest open-entry number (h=1 by more than half: +0.045→+0.021; h=5 barely moves; h=21 loses −0.012). An `--entry open` mode now exists and should be preferred when available; where only close-entry numbers exist, discount h=1 hardest.
 - **Check `label_definition` before comparing any two win rates.** `terminal_pct2` and `path_barrier` are not comparable — same calendar window, 41–44% vs 88–91%, almost entirely the label.
+- **Read `factor_edge.py`'s `top50_exc` column, not just `rank_IC`/`hit_AUC`** (added 2026-09-26). A positive IC beside a negative `top50_exc` means the factor beats the median name and loses to the universe — the row prints `<-- median-beater` when that happens. It is a cheap pre-screen for the next bullet, not a substitute for the cost-aware run.
+- **Ask which CENTRE an excess return was measured against before reading a rank IC as money.** `factor_edge.py` centres on the per-date **median**; `factor_backtest.py` benchmarks the equal-weight universe **mean**. Indian cross-sectional returns are strongly right-skewed (measured: universe mean 1.4532%/21d period over 2021-2026), so a factor that avoids the right tail can beat the median name — real, positive, well-powered rank IC — and still lose to the universe it is benchmarked against. Demonstrated 2026-09-26: a low-volatility composite read TEST rank IC +0.049@5d (eff 60.6, t=+10.71 at 21d, leak-checked) and its cost-aware arms read −0.53 to −0.94%/period net excess. **A positive rank IC is a claim about ordering, never about the book being worth holding** — the cost-aware run is not a formality after a good IC, it is the arbiter, and this is the clearest case in this file of the two disagreeing while both are correct.
 - **Check `signal_source` before joining `signal_outcomes`.** Three writers share that table.
 - **Decompose a "% of rows affected" figure by liquidity before believing it.** A defect reading 42% of rows read ~100% of the *tradeable* slice.
 - **Judge any datasource by dates PER SYMBOL and by its DENSE span, never by raw `min(date)`/`count(DISTINCT date)` over the whole table.** A table can report years of span while being 4-5 rows per symbol. Run both: `SELECT min(n), median(n), max(n) FROM (SELECT symbol, count(DISTINCT date) n FROM t GROUP BY 1)` and a per-year distinct-date count.
@@ -475,6 +592,7 @@ Any cross-sectional forward-return measurement on this data:
 
   **Every row is LOW-DATA** (18 dates at 5d, 13 at 10d, and only **2** at 21d — the 21d column is barely more than an anecdote and must not be quoted on its own). Two things worth noting and neither is yet actionable: `confluence_score` is both the strongest-reading engine AND already the highest-weighted one in `REGIME_WEIGHTS` (0.30-0.378), so this is consistent with the current weights rather than an argument to change them; and `dl_score` reads at or below zero at 10d/21d, which is expected given its walk-forward was only fixed on 2026-09-10 (AF-20260910-08) and no honestly-trained DL model has shipped yet. Re-run once the panel clears 20 dates under stable post-2026-08-31 weights (~2026-09-26/29) before drawing any reweighting conclusion. This supersedes the older "t=+2.13 at 1d on 12 dates" note for `technical`, which was never refreshed.
 - **`earnings_beat_yoy`/`earnings_beat_qoq`, `screener_breadth`, the 3 named results screeners** — all underpowered (3–27 periods), genuinely calendar-blocked until ~12+ months of history exists in their source tables.
+- **⚠ CORRECTION 2026-09-25 — this bullet and the Snapshot "models" bullet attributed the Pair's champion and rejected challengers to `cs_ranker`. They are `exit_policy`'s.** Live `model_registry`: `exit_policy` has 1 active row (id 312, trained 2026-09-01 12:34, `cv_roc_auc` 1.8021 = MFE holdout MAE, `cv_accuracy` 1.2761 = MAE holdout MAE) and 16 inactive (latest 2026-09-19) — those are the "champion 20260901_123532" and the rejected 1.9981/2.1444/2.0750/1.9907/2.0725 challengers below. **`cs_ranker` (LightGBM Regressor) has 35 registrations, ZERO active, latest 2026-08-29: it was deliberately deactivated and unscheduled 2026-08-31 (commit `9ceb4e72`, live CV 0.176, worse than random; `queues.ts:1622`, `jobRegistry.ts:248`), so it has no champion and no further retrains. `online_sgd` (95 registrations, 0 active, latest 08-30) was retired the same day (live AUC 0.5017).** Do not read "no active cs_ranker / online_sgd row" as a bug, and do not attribute the Pair numbers to cs_ranker. Original text follows unedited:
 - **`cs_ranker` has had TWO further retrains since this was written, both REJECTED — and the metric this row quotes cannot be read out of `model_registry.cv_roc_auc` (checked live 2026-09-10).** The active `GradientBoosting Regressor Pair` is dated 2026-09-01 with `cv_roc_auc` **1.8021**; the two challengers since read 1.9981 (2026-09-06) and 2.1444 (2026-09-10), both `is_active = 0`. Those values are all **> 1, so they are not AUCs** — for this model type the column holds some error-style metric (lower better), which makes the rejections internally consistent (1.80 < 1.99 < 2.14) but means the "0.176 vs 0.161/0.161/0.133" figures in the original note came from somewhere else (they match the rho series recorded in `ml-model-bugs.md`, not this column). **Do not compare the two sets of numbers.** Still flagged, still not confirmed as a bug, and the underlying caution stands: a self-reported metric on a thin date-split holdout is exactly what this file says not to trust. 12 registrations existed for this pair as of 2026-09-10 (WAS count); **three more Pair challengers have been rejected since — 2.0750 (09-11), 1.9907 (09-14), 2.0725 (09-19), all `is_active=0`; champion still 20260901_123532 (1.8021)** — see the Snapshot models bullet. `model_registry` overall holds **343 registrations** (2026-09-20).
 - **`win_probability` sub-population split** (grid-scored vs. pattern-fired via `signals_json IS NOT NULL`) has never been explicitly re-graded to confirm the two sub-populations behave the same way — flagged, not measured.
 - **`mc_fno_eligible`/`mc_del_acceleration`** are cheaply derivable but deliberately not built — the risk was a formula silently disagreeing with the fetcher's own definition. Revisit if prioritized.
@@ -492,7 +610,7 @@ any row: `docs/measurement-history.md`.
 
 | Factor | Result | Verdict |
 |---|---|---|
-| `momentum_12_1` | net excess +0.686%/period, t=1.45 (post-fix; `factor_backtest.py --factor momentum_12_1 --rebalance 21 --top-k 50 --cost-bps 25`) — bit-identical across three independent runs (2026-08-23, 08-27, 08-29). The older "+0.53%/mo, t=1.10" this row previously quoted was stale and did not match any of the three reproductions; corrected 2026-08-29, live-verified rather than assumed | not significant |
+| `momentum_12_1` | **Re-run 2026-09-26: net excess +0.7889%/period, t=1.61, 55 periods/4.58yr, 35.2% turnover, 4/5 years positive, CAGR 18.2%, Sharpe 0.75.** WAS -> +0.686%/period, t=1.45 (bit-identical across 2026-08-23/08-27/08-29). The drift is the panel growing, not a harness change — this run was used as the reproduce-a-known-result check before trusting the harness for the 2026-09-26 reversal re-runs, and the verdict is unchanged. (`factor_backtest.py --factor momentum_12_1 --rebalance 21 --top-k 50 --cost-bps 25`.) The older "+0.53%/mo, t=1.10" is stale and matched no reproduction. | still not significant, but the closest thing to a survivor among the price factors — note it is the only one whose turnover (35%) is low enough that costs are not the binding constraint |
 | `value_book_to_price` | +0.78%/mo, t=1.99 (post-fix) | not significant; vendor history may be retrospectively restated |
 | `insider_net` | net excess +0.29%/period, t=1.73 (re-run 2026-08-12, superseding the earlier +0.48%/t=2.05 which did not reproduce) | not significant |
 | `momentum_21d` / `63d` / `reversal_21d` | negative, t up to −3.96 | dead |
@@ -520,8 +638,9 @@ any row: `docs/measurement-history.md`.
 | **`screener_combo_finder.py --tier1`'s "capitulation" triple** (`gap_down AND open_eq_low AND top_loser`, next-session open→close, single day) | 430→658 signal-rows through 2026-08-20, spread +0.5064%/day net of 0.15%, **t=+3.48, p=0.0005**, clears the 41-combination Bonferroni bar, robust to winsorization and to dropping the top 3 most extreme days. 5/6 years positive (2026 YTD is the exception, thin partial year, t=−0.49 not significant). Reproduced bit-identical 2026-08-27. | **The one validated edge on this platform — but capacity-constrained, not scale-tradeable.** Median deployable capital ≈₹0.46cr/signal-day at a conservative 2%-of-ADTV convention (p90 ₹3.54cr); signals cluster at ~1/day (median), max 28 on one day. Real at small/personal/prop scale; do not build production infrastructure assuming it scales to meaningful AUM. |
 | **screener CONCEPT-TAG membership as of D-1** (40 tags via `screener_name_concepts.decompose`, point-in-time from `screener_membership_snapshot`, top-20 daily gainers, 25 dates, `screener_tenure_mover_analysis.py`) | Winners-only: **8 of 40 tags clear a 40-tag Bonferroni** with large lifts (`mech_52w_high` 23.8% of gainers vs 10.6% of universe, t=6.70; `mech_overbought` t=6.43; `fund_growth` t=5.15). Graded against BOTH tails: **0 of 40 survive** — every one of the 8 lifts the LOSING tail as much or more (`mech_overbought` +13.7pp on gainers vs **+16.1pp on losers**; `flow_volume_surge` +7.9 vs **+12.5**; `mech_momentum` +8.8 vs +8.8, separation exactly 0.000). Best winners-minus-losers separation is `mech_52w_high` at 3.0pp, t=1.04. | **No directional edge — these are volatility detectors.** Screener membership predicts that a stock will MOVE, not which way, which is the same "AUC excellent and useless" shape `ml-model-bugs.md` records for `flyer_classifier`. Reproduces this file's standing finding by a new route. **The winners-only number is the trap**: it looks like a strong, multiply-corrected result and is entirely an artifact of selecting on the dependent variable. LOW-DATA (25 dates, just above the 20-date floor) but the both-tails collapse is not marginal. Tenure ("since when") inherits the same limitation — `tf_daily` t=-5.03 etc. says fresh entries MOVE, not that they rise. |
 | **exit-target quantile head** (replace `exit_policy.py`'s `MFE_CAPTURE=0.6` haircut with a `GradientBoostingRegressor(loss='quantile')` MFE head) | Time-ordered embargoed holdout, 40k most recent `signal_excursions`, n_test=4,004. **The shipped constant is a median rule and is near-perfectly calibrated as one: `0.6 x pred_MFE` is reached 50.1% of the time (0.1pp off a true median).** Every quantile head is systematically OVER-optimistic -- claimed/actual: a=0.20 80%/74.5%, a=0.30 70%/62.9%, a=0.40 60%/52.2%, a=0.50 50%/41.5% (calibration error 5.5-8.5pp). At a MATCHED hit rate there is no gain: c=0.6 -> 1.37% median target @50.1%; a=0.40 -> 1.35% @52.2%. | **REJECTED — the constant wins.** The a=0.50 head does this constant's exact job 8.5pp worse. Capture/hit curve for any future retune: c=0.4->63.0%, 0.5->56.3%, 0.6->50.1%, 0.7->43.6%, 1.0->29.7%. Do not re-propose a quantile exit head without a new angle (different features, conformal wrapper, or a recalibration layer) — the appeal is real in principle and false on this data. |
-| **`mean_reversion_14`** (sign-flipped composite of the 14 negative feature_store factors, standalone long factor) | **⚠ MEASURED THROUGH A KNOWN DEFECT (AF-20260910-18) — re-grade before quoting.** Until 2026-09-10 `feature_store` stored per-symbol `RobustScaler` output, not raw values, so every reading below graded the SELF-NORMALIZED column. Rank IC is cross-sectional and a per-symbol affine transform reorders the cross-section. Columns rebuilt raw 2026-09-10; re-run pending. 278 periods/5.52yr: net excess +0.044%/period, **t=+0.64, NOT significant**, 2/6 years positive | Confirms this file's "combining/reweighting reduces performance" prior applies to this hypothesis too |
-| **`mean_reversion_14`** (as a VETO on `momentum_12_1`'s pool instead — 2026-08-30, re-run same day against the full backfilled 2021-2026 `feature_store` history) | **⚠ MEASURED THROUGH A KNOWN DEFECT (AF-20260910-18) — re-grade before quoting.** Until 2026-09-10 `feature_store` stored per-symbol `RobustScaler` output, not raw values, so every reading below graded the SELF-NORMALIZED column. Rank IC is cross-sectional and a per-symbol affine transform reorders the cross-section. Columns rebuilt raw 2026-09-10; re-run pending. Same-dates paired, full history: 21d +0.27pp/period, paired t=1.50, n=54 (well-powered, down from a truncated-window t=1.75/n=17); 5d -0.01pp/period, t=-0.24, n=230 (no effect) | **NOT significant, CLOSED** — the earlier truncated-window "promising" reading was a regime-confounded artifact, not a real effect; do not re-test again without a genuinely new angle |
+| **`mean_reversion_14`** (sign-flipped composite of the 14 negative feature_store factors, standalone long factor) | **RE-RUN DONE 2026-09-26 on the rebuilt RAW columns, and the verdict FLIPPED from "not significant" to significantly NEGATIVE: 67 periods, net excess −0.9374%/period, t=−3.26, 0/6 years positive (every single year negative: 2021 −1.43, 2022 −0.65, 2023 −1.49, 2024 −0.90, 2025 −0.24, 2026 −0.99), 89.6% one-way turnover, 5.38%/yr cost drag, max DD −33.2%.** WAS -> "+0.044%/period, t=+0.64, NOT significant, 2/6 years positive" — that reading was taken through the AF-20260910-18 scaling defect and must not be quoted. **Also found 2026-09-26: the composite's SIGN SET is stale.** Its 14 columns were chosen from the 2026-08-12 Bonferroni sweep, run on the same defective scaled data; graded on raw columns at h=21 three of them are no longer negative — `vwap_dist_pct` **+0.043**, `volume_ratio_20d` **+0.023**, `stoch_d` +0.007 — so the composite shorts a column that now reads positive. Rebuilding it with fresh signs was deliberately NOT done: the lowest-turnover member of the whole family (`fs_atr_pct_inv`, 41.6%) already reads t=−1.78, so a re-signed 89%-turnover blend has no path to positive net. | **significantly NEGATIVE net of costs — do not trade, and do not rebuild.** Turnover is the mechanism: 89.6% one-way per 21d rebalance, independently reproduced at 88.1% by a separate top-50 membership-persistence count. Family closed. |
+| **`fs_atr_pct_inv` / `fs_bb_width_inv`** (low-volatility, tested as single columns for the first time — 2026-09-26, via the new `fs_*_inv` harness entries) | `fs_atr_pct_inv`: 67 periods, net excess **−0.7932%/period, t=−1.78**, turnover **41.6%** (the lowest of the whole reversal/low-vol family), 2/6 years positive, CAGR 7.47%, Sharpe 0.67, max DD −18.6%. `fs_bb_width_inv`: 65 periods, −0.5361%/period, t=−1.55, turnover 83.5%, 1/6 years positive. Both have a real, well-powered, out-of-sample POSITIVE rank IC (atr_pct_inv +0.048 @5d on eff 60.6, +0.059 @21d, t=+6.96) — see the 2026-09-26 Snapshot block for why that coexists with negative net excess (median-centred IC vs mean-benchmarked backtest on right-skewed returns). | **NOT significant, and negative in sign — do not trade.** Worth recording precisely because the IC looked good: this is the cleanest example in this file of a factor with genuine, well-powered, leak-checked, out-of-sample rank IC that is still the wrong book to hold. It is also the family's best case — the low-turnover member — so nothing else in the reversal/low-vol family needs re-testing. |
+| **`mean_reversion_14`** (as a VETO on `momentum_12_1`'s pool instead — 2026-08-30, re-run same day against the full backfilled 2021-2026 `feature_store` history) | **⚠ STILL MEASURED THROUGH THE AF-20260910-18 DEFECT — the standalone arm above was re-run 2026-09-26, this VETO arm was NOT.** Do not quote it. It is now doubly superseded: the standalone composite it vetoes on is significantly negative on raw data, so a veto built from it is ranking on a signal whose sign set is stale (3 of 14 columns flipped). Its defect-era numbers, for the record only: same-dates paired, 21d +0.27pp/period, paired t=1.50, n=54; 5d -0.01pp/period, t=-0.24, n=230. | **NOT significant, CLOSED, and the re-run is deliberately not owed** — the standalone arm's 2026-09-26 result (t=−3.26, 0/6 years) removes the hypothesis this veto was testing. Do not re-test without a genuinely new angle. |
 
 ## Not testable — do not spend time here without a genuinely new angle
 

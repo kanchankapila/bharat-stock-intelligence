@@ -124,6 +124,44 @@ def _metrics(d, score, N, min_per_date, min_n):
     return mic, auc, len(d), int(d["date"].nunique()), int(d["symbol"].nunique())
 
 
+def _mean_benchmark(d, score, N, min_per_date, top_k=50):
+    """What a TOP-K BOOK would have earned against the equal-weight universe MEAN.
+
+    Why this exists (added 2026-09-26). `rank_IC` above is a rank correlation, so it is invariant
+    to per-date centring, and `hit_AUC` asks "does this score separate names that beat the per-date
+    MEDIAN". `factor_backtest.py` -- this repo's arbiter -- asks a different question: does a top-50
+    book beat the equal-weight universe MEAN (`universe_per_period_pct`, measured 1.4532%/21d
+    period over 2021-2026). On right-skewed cross-sectional returns mean >> median, so a factor
+    that systematically avoids the right tail can post a real, well-powered, leak-checked POSITIVE
+    rank IC and still lose money, and nothing in this harness's output said so.
+
+    Measured 2026-09-26, which is why this is here and not a hypothetical: a low-volatility
+    composite read TEST rank IC +0.049@5d (eff 60.6) / +0.076@21d (t=+10.71) and its cost-aware
+    arms came back -0.53 to -0.94%/period net excess. Two full backtest runs to learn what this
+    column reports in the same pass as the IC.
+
+    Deliberately NOT a replacement for `factor_backtest.py`: no transaction costs, no turnover, no
+    survivorship handling, and it holds to d+N rather than rebalancing. It is a CHEAP EARLY WARNING
+    -- if `topk_exc` is negative while `rank_IC` is positive, the factor is a median-beater and the
+    cost-aware run will very likely refuse it. `t_eff` divides by sqrt(eff_dates), not sqrt(dates),
+    for the same overlapping-window reason as `_effective_dates`.
+    """
+    d = d.dropna(subset=[score, f"fwd_{N}"])
+    per_date = []
+    for _, g in d.groupby("date"):
+        if len(g) < max(min_per_date, top_k) or g[score].nunique() <= 3:
+            continue
+        top = g.nlargest(top_k, score)
+        per_date.append(float(top[f"fwd_{N}"].mean() - g[f"fwd_{N}"].mean()))
+    if len(per_date) < 2:
+        return float("nan"), float("nan"), 0
+    arr = np.asarray(per_date, dtype=float)
+    eff = max(_effective_dates(len(arr), N), 1.0)
+    sd = arr.std(ddof=1)
+    t_eff = float(arr.mean() / (sd / np.sqrt(eff))) if sd > 0 else float("nan")
+    return float(arr.mean()), t_eff, len(arr)
+
+
 def _effective_dates(dates, horizon):
     """Independent observations behind a rank-IC average over OVERLAPPING forward windows.
 
@@ -203,8 +241,9 @@ def run(table, scores, symbol_col, date_col, horizons, by_regime, min_per_date, 
         groups = [("ALL", m)] + [(r, g) for r, g in m.groupby("regime")]
 
     print()
-    print(f"{'score':22} {'regime':9} {'horiz':5} {'rank_IC':>8} {'hit_AUC':>8} {'n':>7} {'dates':>6} {'eff':>7} {'syms':>5}  verdict")
-    print("-" * 96)
+    print(f"{'score':22} {'regime':9} {'horiz':5} {'rank_IC':>8} {'hit_AUC':>8} {'n':>7} {'dates':>6} {'eff':>7} {'syms':>5}  "
+          f"{'top50_exc':>9} {'t_eff':>6}  verdict")
+    print("-" * 116)
     for score in scores:
         for reg_name, g in groups:
             for N in horizons:
@@ -214,8 +253,16 @@ def run(table, scores, symbol_col, date_col, horizons, by_regime, min_per_date, 
                 mic, auc, n, dates, symbols = res
                 vd = _verdict(mic, auc, dates, symbols, N)
                 eff = _effective_dates(dates, N)
+                exc, t_eff, _ = _mean_benchmark(g, score, N, min_per_date)
+                # A positive rank_IC beside a NEGATIVE top50_exc is the median-beater trap: the
+                # ordering is real and the book still loses to the equal-weight universe. Say so
+                # here rather than leaving it to be rediscovered by a backtest.
+                flag = "  <-- median-beater: +IC but top-50 LOSES to universe mean" \
+                    if (mic == mic and exc == exc and mic > 0 and exc < 0) else ""
                 print(f"{score:22} {reg_name:9} {N:4}d {mic:8.3f} {auc:8.3f} {n:7} {dates:6} "
-                      f"{eff:7.1f} {symbols:5}  {vd}")
+                      f"{eff:7.1f} {symbols:5}  "
+                      f"{'n/a' if exc != exc else f'{exc*100:+8.3f}%'} "
+                      f"{'n/a' if t_eff != t_eff else f'{t_eff:6.2f}'}  {vd}{flag}")
                 if persist:
                     # NaN -> NULL (never store NaN in a REAL — it poisons downstream reads, same
                     # lesson as win_probability). run_at makes each row unique, so DO NOTHING is safe.
