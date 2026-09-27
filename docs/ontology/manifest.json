@@ -1,0 +1,111 @@
+{
+  "ontology_version": "1.1.0",
+  "database": "bharat_intel",
+  "counts": {
+    "classes": 58,
+    "properties": 309,
+    "cards": 65,
+    "bindings": 729,
+    "relations": 39,
+    "metrics": 18,
+    "vocabularies": 32,
+    "vocabulary_terms": 145
+  },
+  "standards": [
+    "skos",
+    "owl",
+    "shacl",
+    "jsonld",
+    "prov",
+    "dcat",
+    "qudt",
+    "schema_org",
+    "fibo",
+    "identifiers",
+    "graph_formats"
+  ],
+  "alignment": {
+    "assertions": 14,
+    "emitted": 12,
+    "unverified_excluded": [
+      "bsi:FuturesPositioning",
+      "bsi:OptionChainRow"
+    ],
+    "no_counterpart": 15
+  },
+  "guardrails": 10,
+  "files": [
+    {
+      "file": "ontology.ttl",
+      "bytes": 524535,
+      "sha256": "91ec9643dcc2729c75cf671f3a18fae8e47772b7520cd2c1557a3b1305236fdd"
+    },
+    {
+      "file": "ontology.jsonld",
+      "bytes": 777635,
+      "sha256": "bc264541472ddeca0706a006c8e46eedb34755984e29a371deb3b88323182162"
+    },
+    {
+      "file": "context.jsonld",
+      "bytes": 2459,
+      "sha256": "7695822976008463a81339127fb282c9ba070be5e0c418f2ee2f979250febbe4"
+    },
+    {
+      "file": "ontology.shacl.ttl",
+      "bytes": 334073,
+      "sha256": "4d578d310172b866d7bec203d41c5ef34006eac168627c2bc155cdb14c7abbae"
+    },
+    {
+      "file": "ontology.prov.ttl",
+      "bytes": 23184,
+      "sha256": "f5a8156b74a526504d828a200200d3fc86f6553be5f64d29870d5832b5f77031"
+    },
+    {
+      "file": "catalog.ttl",
+      "bytes": 213821,
+      "sha256": "851a37ba20df8625f7f7eb9254174ff63c969a79265ef2731eb1c23c54111ac3"
+    },
+    {
+      "file": "catalog.jsonld",
+      "bytes": 317471,
+      "sha256": "55ec5dc8faaecaa9027f36d29f11a325b333e321ed0c0a0f3f9170acfac8922a"
+    },
+    {
+      "file": "ontology.cypher",
+      "bytes": 675105,
+      "sha256": "c83f91f0a0be7048042b9543b6edbe104e49b59f6d9d32c18f5752ab85248790"
+    },
+    {
+      "file": "ontology.graphml",
+      "bytes": 99999,
+      "sha256": "c4bc0ea7e7e286ee54e92b55fbf3fe9e0e3859097e0f4486b75fba7222531dba"
+    },
+    {
+      "file": "ontology.mmd",
+      "bytes": 12910,
+      "sha256": "c2131cf52fd2ce557263c6a1448963fe644712afa82be159d9b1c409f46d9c81"
+    },
+    {
+      "file": "ontology.md",
+      "bytes": 230783,
+      "sha256": "265183ef9e04a37b8eb8dfc9e02675cf8379192e30ea6a66a94f50904f4d0be4"
+    },
+    {
+      "file": "llms.txt",
+      "bytes": 14303,
+      "sha256": "8164c70424829a0974c0beac20de19de8533aad85870b013e5b9299270412c60"
+    },
+    {
+      "file": "standards.txt",
+      "bytes": 10496,
+      "sha256": "583e858ca90c5825d550e6ea63c74c656d895c74b51d770249dbb07bab0a258c"
+    }
+  ],
+  "removed": [
+    "coverage.json"
+  ],
+  "coverage": {
+    "status": "unavailable",
+    "note": "no database reachable; coverage.json was not written. If a coverage.json is still present it is stale and must not be read as a current verdict."
+  }
+}

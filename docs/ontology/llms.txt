@@ -1,0 +1,112 @@
+# Bharat Stock Intelligence — Market Knowledge Graph
+
+> A semantic layer over the `bharat_intel` Postgres database: 58 entity classes, 309 semantic properties, 65 table data cards, 39 typed relations, 18 executable metrics and 32 controlled vocabularies. Every fact here is generated from `src/server/ontology/definitions/`, which validates against the live schema.
+
+## Guardrails (read before using any column as a feature)
+
+- Columns with leakage_risk 'high' or 'target' are NEVER features. Columns whose semantic_type is 'label' ARE the target.
+- `technical_signals`, `feature_store`, score-typed columns and the recommendation tables are platform OUTPUTS: a model may predict something else from them, but feeding an engine score back in as a feature leaks that engine into its own inputs.
+- Point-in-time: entry is the NEXT session's open after `signal_date`. A feature must have been knowable before that open.
+- Labels are not comparable across `label_definition` values (`path_barrier` vs `terminal_pct2`). Filter it before aggregating any accuracy number.
+- `PENDING` outcome rows have not elapsed yet and are not negative examples.
+- Mixing `adjustment_basis` values inside one price series invalidates every result derived from it.
+- `screener_*` tables are vendor OPINIONS used to surface candidates. They are never ground truth, and their aggregate score no longer clears the USABLE bar.
+- Read `eff_dates` before any rank-IC reading: overlapping forward windows inflate a correlation by roughly the horizon factor.
+- Every historical read is an as-of read: a feature value must come from rows whose data was knowable at or before entry — never from today's state projected back.
+- Nothing in this layer is investment advice or a solicitation to trade; it describes data semantics only, and any output built from it is not financial advice.
+
+## Start here
+
+- [ontology.md](ontology.md): the whole layer as one document — start here; it is the only artifact that needs no tooling to read.
+- [catalog.jsonld](catalog.jsonld): every documented table as a `dcat:Dataset`.
+- [ontology.jsonld](ontology.jsonld): the machine-readable graph (classes, properties, relations, metrics, vocabularies, column mapping, alignment).
+- [ontology.shacl.ttl](ontology.shacl.ttl): the data contract (a shape per class).
+- [coverage.json](coverage.json): **live** drift report — documented vs actual tables and columns, with freshness verdicts.
+
+## Concept index
+
+### Identity & reference
+
+- **Instrument** (Instrument): Anything that is quoted and traded. The canonical instrument identity is table-backed in `market_instrument`; legacy observation tables still key on the exchange ticker. — `market_instrument`
+- **Issuer** (Issuer): The legal issuer behind one or more instruments. ISIN issuer-prefix keys are authoritative when a checksum-valid ISIN is available; symbol-only rows remain explicitly provisional. — `market_issuer`
+- **Listing** (Listing): One tradable exchange/segment/symbol representation of an instrument. — `market_listing`
+- **ProviderIdentifier** (Provider identifier): A provider-qualified identifier for an instrument. Provider and scheme are part of the identity; collisions are recorded rather than resolved by row order. — `market_identifier, market_identifier_gap`
+- **Equity** (Equity): A listed equity, one row per exchange ticker. This is the platform's universal join key and the subject of every other class. — `stock_master, nse_stocks`
+- **Index** (Index): A market index used as a benchmark or as a derivatives underlying (NIFTY 50, BANK NIFTY, SENSEX, INDIA VIX, GIFT NIFTY, ...).
+- **Sector** (Sector): An industry grouping used for relative-strength and rotation analysis. Stored as free text across several tables rather than resolved to a scheme.
+- **Exchange** (Exchange): The venue an instrument is admitted to. A two-value dimension (NSE / BSE): usually encoded inside `symbol`, but carried as its own column in seven tables (nse_stocks, market_holidays, nt_fno_expiry, stock_earnings_dates, institutional_deal_signals, mc_advance_decline, mc_chart_patterns).
+- **ScripCodeMapping** (Vendor scrip-code mapping): The vendor's private scid mapped onto the platform symbol and issuer name — the only sanctioned route from one to the other. — `mc_scid_map`
+- **CompanyProfile** (CompanyProfile): Narrative and high-level attributes about the issuer behind a ticker. — `company_profiles`
+
+### Observations (point-in-time facts)
+
+- **Observation** (Observation): Abstract parent for anything measured at a point in time without the platform adding an opinion to it. Raw or vendor-supplied; never a label.
+- **Bar** (Daily bar): One daily OHLCV bar per symbol per trading session — the platform's only self-owned source of truth. — `stock_ohlcv`
+- **IntradayBar** (Intraday bar): Sub-daily OHLCV with VWAP. Currently a single interval (15m) of recent history. — `intraday_ohlcv`
+- **DeliveryObservation** (Delivery observation): The deliverable-to-traded quantity ratio — the highest-frequency ownership-behaviour proxy the platform owns, and a T+1 lag by construction. — `stock_delivery_data, stock_delivery_volume`
+- **CorporateAction** (Corporate action): A capital-structure event with a price consequence (dividend, split, bonus, rights) plus the record/ex dates that make it usable point-in-time. — `corporate_actions`
+- **FundamentalSnapshot** (Fundamental snapshot): Vendor-supplied accounting ratios and market-cap for a symbol, captured with an as-of date. Lagging information: the publication delay is the point-in-time risk. — `fundamentals_history`
+- **AnalystEstimate** (Analyst estimate): Consensus ratings, target prices and next-period estimates captured as a dated snapshot. Genuinely leading information; short panel relative to the news table. — `analyst_estimates_history`
+- **EarningsSurprise** (Earnings surprise): Actual versus estimated net profit and revenue for a quarter, with the surprise computed per line. Coincident for the print, leading for the drift after it. — `eps_surprise_history`
+- **InsiderTransaction** (Insider transaction): A promoter/insider buy or sell filing. Leading in principle; graded weak as a standalone signal on this platform and kept as a confluence input. — `insider_trades`
+- **BlockDeal** (Block / bulk deal): An off-book or bulk transaction with quantity, price and value. Value is stored in CRORES as a bare number, with no currency or unit term attached. — `block_deals`
+- **MFHolding** (Mutual-fund holding): Aggregate mutual-fund ownership of a symbol: holding percentage, fund count and the change versus the previous disclosure. — `stock_mf_holdings`
+- **NewsItem** (News item): A news article or exchange announcement with vendor sentiment, a FinBERT tone ensemble, an impact bucket and the symbols it mentions. 15 years deep — the only panel here that supports a real event study. — `news_sentiment_items, news_symbol_link`
+- **OptionChainRow** (Option chain row): One strike, one expiry, one session: call and put leg premium, volume, open interest, IV and greeks. A grid, not a time series. — `so_option_chain`
+- **FuturesPositioning** (Futures positioning): Stock-futures open interest, buildup label, rollover percentage, basis and cost of carry for one expiry and session. — `stock_futures_oi_history, fno_rollover`
+- **IndexDerivativesSnapshot** (Index derivatives snapshot): Index-level positioning: PCR (single-strike time series and EOD), max pain, and aggregate call/put open interest. — `index_max_pain, nt_index_pcr_ts`
+- **MoverSnapshot** (Mover snapshot): A ranked intraday mover list entry from a vendor feed: the platform's within-day event backbone alongside the event triggers. — `mover_snapshots`
+
+### Market context & regime
+
+- **RegimeState** (Regime state): The macro regime for a session, with its posterior probability and the decoded HMM path. Also covers the intraday regime panel. — `market_regimes, intraday_regime_history`
+- **BreadthObservation** (Breadth observation): Market-wide participation statistics: share of the universe above its 200-day average, advance/decline ratio, net highs minus lows. — `market_breadth`
+- **SectorRotationPoint** (Sector rotation point): Weekly relative-rotation coordinates and quadrant per sector — the intended input to sector-plus-stock relative strength. — `sector_rrg_history`
+
+### Derived intelligence (platform-computed)
+
+- **PlatformOutput** (Platform output): Abstract parent for anything this platform computes and serves. Every subclass is an OPINION of this system, not an observation of the market.
+- **FeatureVector** (Feature vector): The rolling per-symbol, per-date feature panel the models train on. Features, not information: they re-express price, flow and vendor data. — `feature_store`
+- **TechnicalSignal** (Technical signal): The wide per-symbol, per-date technical panel: indicators, regime stamp, flow and fundamental context columns, plus the model's probability outputs. — `technical_signals`
+- **EngineScore** (Engine score): A single engine's, or the multi-engine composite's, score for a symbol and date with its engine-coverage count. — `confluence_signals, engine_composite_scores, stock_scores`
+- **Recommendation** (Recommendation): The served trade: composite score, conviction bucket, action label, entry zone, stop, targets, risk/reward and position size for one symbol, date and timeframe. — `unified_recommendations, unified_recommendations_history, intraday_recommendations`
+- **ModelArtifact** (Model artifact): A registered trained model: type, version, evaluation metrics, feature count, horizon and active flag. — `model_registry`
+- **FeatureImportance** (Feature importance): Per-model, per-run feature importance with rank — the audit trail behind which inputs a model actually used. — `feature_importance_log`
+- **MarketClaim** (Market claim): An explicit, status-bearing assertion about a market entity, separate from raw evidence. — `market_claim`
+- **DecisionEvent** (Decision event): An append-only, reconstructable decision record with cutoff, versions, quality, and structured supporting or contradictory evidence. — `market_decision_event, market_decision_evidence`
+
+### Candidate generation (vendor opinions)
+
+- **CandidateRecord** (Candidate record): Abstract parent for vendor-opinion streams. These SURFACE candidates; they are never ground truth.
+- **Screener** (Screener): A vendor screener definition with its inferred sentiment, category, reliability tier and classification confidence. — `screener_master`
+- **ScreenerAppearance** (Screener appearance): A single surfacing event: this screener listed this symbol at this instant, with the price, change and volume at that moment. — `live_screener_appearances`
+- **EventTrigger** (Event trigger): Detector output: which composite trigger classes fired for a symbol on a date, with news counts and bullish-tenure state. — `stock_event_triggers`
+
+### Outcomes & labels (ground truth)
+
+- **OutcomeRecord** (Outcome record): Abstract parent for resolved results. Labels live here and nowhere else: nothing in this branch may ever appear on the input side of a model.
+- **EdgeReading** (Edge reading): One factor-grading result: rank-IC and hit-AUC for a table/column, per regime and horizon, with the effective-date count and a verdict. — `factor_edge_history`
+- **SignalOutcome** (Signal outcome): The resolved result of a signal: entry, exit, horizon, return and the outcome label, under one of two possibly-different labelling rules. — `signal_outcomes, unified_signal_outcomes`
+- **SignalExcursion** (Signal excursion): Path statistics inside the evaluation window: maximum favourable and adverse excursion, days to each, and whether MFE preceded MAE. — `signal_excursions`
+- **ScreenerOutcome** (Screener outcome): Forward returns pre-tracked and attached to an appearance at surfacing time. — `live_screener_outcomes`
+- **DecisionOutcome** (Decision outcome): A realized outcome attached to a decision under an explicit label definition and horizon. — `market_decision_outcome`
+
+### Provenance, quality & governance
+
+- **GovernanceRecord** (Governance record): Abstract parent for operational metadata. These answer 'when was this true and who wrote it', which on this platform is the difference between a usable value and a guess.
+- **Endpoint** (Data endpoint): A discovered, verified market-data endpoint: provider, domain, scope, update frequency and the template to call it. The platform's data-sourcing registry. — `market_endpoint_registry, url_endpoints`
+- **JobRun** (Job run): Per-job heartbeat: last status, last success, last error and run/failure counts. — `job_heartbeat`
+- **DataQualityCheck** (Data-quality check): The result of one named validation check: category, criticality, status and a detail string. — `data_quality_results`
+- **DataContract** (Data contract): A versioned machine-readable contract describing one dataset's grain, timing, source, training use, and physical lineage. — `market_data_contract`
+- **FeatureDefinition** (Semantic feature definition): A versioned authored definition of a model-facing property, including leakage and feature-use constraints. — `semantic_feature_definition`
+- **DataWatermark** (Data completeness watermark): Producer-published completeness and input/output boundary for a dataset partition. — `market_data_watermark`
+- **GraphNode** (Instance graph node): A canonical entity projected into the bitemporal market graph. — `market_graph_node`
+- **GraphEdge** (Instance graph edge): A typed, bitemporal assertion between graph nodes or a literal object value. — `market_graph_edge`
+- **EvidenceRecord** (Evidence record): Source material retained separately from the claim extracted or inferred from it. — `market_evidence, market_claim_evidence`
+
+## Query surfaces
+
+- `python -m ontology ask "<question>"` — lexical search over every concept.
+- `python -m ontology context "<question>"` — a bounded, caveat-carrying prompt pack.
+- `python -m ontology card <table>` — the card for one table.
+- SQL, after `python -m ontology store`: `kg_v_column`, `kg_v_feature`, `kg_v_never_feature`, `kg_v_dataset`, `kg_v_metric`, `kg_v_term`.

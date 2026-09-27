@@ -1,0 +1,589 @@
+@prefix bsi: <https://bharat-stock-intelligence.dev/ontology/market#> .
+@prefix bsim: <https://bharat-stock-intelligence.dev/ontology/metric#> .
+@prefix bsis: <https://bharat-stock-intelligence.dev/ontology/source#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix dct: <http://purl.org/dc/terms/> .
+
+bsi:Ontology     rdf:type prov:Entity ;
+    prov:wasDerivedFrom bsis:database ;
+    prov:wasGeneratedBy bsi:job_ontology_export .
+
+bsi:job_ontology_export     rdf:type prov:Activity ;
+    rdfs:label "ontology export (python -m ontology export)" .
+
+bsis:database     rdf:type prov:Entity ;
+    rdfs:label "PostgreSQL database bharat_intel" ;
+    bsis:cadence "continuous" .
+
+bsis:stock_ohlcv     rdf:type prov:Entity ;
+    dct:title "Daily OHLCV bars" ;
+    bsis:cadence "per_session" ;
+    bsis:expectedLagHours "5.0"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_nse-bhavcopy-fetcher-py, bsi:job_bse-bhavcopy-fetcher-py .
+
+bsi:job_nse-bhavcopy-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "nse_bhavcopy_fetcher.py" .
+
+bsi:job_bse-bhavcopy-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "bse_bhavcopy_fetcher.py" .
+
+bsis:intraday_ohlcv     rdf:type prov:Entity ;
+    dct:title "Intraday bars" ;
+    bsis:cadence "intraday_15m" ;
+    bsis:expectedLagHours "0.5"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_intraday-fetcher-py .
+
+bsi:job_intraday-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "intraday_fetcher.py" .
+
+bsis:stock_delivery_data     rdf:type prov:Entity ;
+    dct:title "Daily delivery data" ;
+    bsis:cadence "daily_t_plus_1" ;
+    bsis:expectedLagHours "24.0"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_stock-delivery-fetcher-py .
+
+bsi:job_stock-delivery-fetcher-py     rdf:type prov:Activity, prov:Activity ;
+    rdfs:label "stock_delivery_fetcher.py", "stock_delivery_fetcher.py" .
+
+bsis:stock_delivery_volume     rdf:type prov:Entity ;
+    dct:title "Delivery volume (series-level)" ;
+    bsis:cadence "daily_t_plus_1" ;
+    bsis:expectedLagHours "24.0"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_stock-delivery-fetcher-py .
+
+bsis:stock_master     rdf:type prov:Entity ;
+    dct:title "Instrument master" ;
+    bsis:cadence "on_change" ;
+    prov:wasGeneratedBy bsi:job_sync-stock-master-ts, bsi:job_syncallstockmappings-ts .
+
+bsi:job_sync-stock-master-ts     rdf:type prov:Activity ;
+    rdfs:label "sync_stock_master.ts" .
+
+bsi:job_syncallstockmappings-ts     rdf:type prov:Activity ;
+    rdfs:label "syncAllStockMappings.ts" .
+
+bsis:company_profiles     rdf:type prov:Entity ;
+    dct:title "Company profile" ;
+    bsis:cadence "on_change" ;
+    prov:wasGeneratedBy bsi:job_company-profile-fetcher-py .
+
+bsi:job_company-profile-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "company_profile_fetcher.py" .
+
+bsis:corporate_actions     rdf:type prov:Entity ;
+    dct:title "Corporate actions" ;
+    bsis:cadence "event_driven" ;
+    prov:wasGeneratedBy bsi:job_mc-corporate-actions-fetcher-py, bsi:job_investsights-corporate-actions-fetcher-py .
+
+bsi:job_mc-corporate-actions-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "mc_corporate_actions_fetcher.py" .
+
+bsi:job_investsights-corporate-actions-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "investsights_corporate_actions_fetcher.py" .
+
+bsis:fundamentals_history     rdf:type prov:Entity ;
+    dct:title "Fundamental snapshots" ;
+    bsis:cadence "vendor_periodic" ;
+    prov:wasGeneratedBy bsi:job_trendlyne-fundamentals-fetcher-py, bsi:job_investsights-fundamentals-fetcher-py .
+
+bsi:job_trendlyne-fundamentals-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "trendlyne_fundamentals_fetcher.py" .
+
+bsi:job_investsights-fundamentals-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "investsights_fundamentals_fetcher.py" .
+
+bsis:analyst_estimates_history     rdf:type prov:Entity ;
+    dct:title "Analyst estimate snapshots" ;
+    bsis:cadence "vendor_periodic" ;
+    prov:wasGeneratedBy bsi:job_trendlyne-analyst-targets-fetcher-py .
+
+bsi:job_trendlyne-analyst-targets-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "trendlyne_analyst_targets_fetcher.py" .
+
+bsis:eps_surprise_history     rdf:type prov:Entity ;
+    dct:title "Earnings surprises" ;
+    bsis:cadence "vendor_periodic" ;
+    prov:wasGeneratedBy bsi:job_eps-surprise-fetcher-py .
+
+bsi:job_eps-surprise-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "eps_surprise_fetcher.py" .
+
+bsis:insider_trades     rdf:type prov:Entity ;
+    dct:title "Insider transactions" ;
+    bsis:cadence "event_driven" ;
+    prov:wasGeneratedBy bsi:job_moneycontrol-fetcher-py .
+
+bsi:job_moneycontrol-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "moneycontrol_fetcher.py" .
+
+bsis:block_deals     rdf:type prov:Entity ;
+    dct:title "Block and bulk deals" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_block-deals-fetcher-py, bsi:job_mc-block-deal-history-fetcher-py .
+
+bsi:job_block-deals-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "block_deals_fetcher.py" .
+
+bsi:job_mc-block-deal-history-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "mc_block_deal_history_fetcher.py" .
+
+bsis:stock_mf_holdings     rdf:type prov:Entity ;
+    dct:title "Mutual-fund holdings" ;
+    bsis:cadence "vendor_periodic" ;
+    prov:wasGeneratedBy bsi:job_mf-stock-holdings-fetcher-py .
+
+bsi:job_mf-stock-holdings-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "mf_stock_holdings_fetcher.py" .
+
+bsis:news_sentiment_items     rdf:type prov:Entity ;
+    dct:title "News and announcements" ;
+    bsis:cadence "intraday" ;
+    bsis:expectedLagHours "1.0"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_news-fetcher-py, bsi:job_finbert-scorer-py .
+
+bsi:job_news-fetcher-py     rdf:type prov:Activity, prov:Activity ;
+    rdfs:label "news_fetcher.py", "news_fetcher.py" .
+
+bsi:job_finbert-scorer-py     rdf:type prov:Activity ;
+    rdfs:label "finbert_scorer.py" .
+
+bsis:news_symbol_link     rdf:type prov:Entity ;
+    dct:title "News-to-symbol links" ;
+    bsis:cadence "intraday" ;
+    bsis:expectedLagHours "1.0"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_news-fetcher-py .
+
+bsis:so_option_chain     rdf:type prov:Entity ;
+    dct:title "Stock option chain" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_stock-option-chain-fetcher-py .
+
+bsi:job_stock-option-chain-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "stock_option_chain_fetcher.py" .
+
+bsis:stock_futures_oi_history     rdf:type prov:Entity ;
+    dct:title "Stock futures positioning" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_fno-oi-fetcher-py .
+
+bsi:job_fno-oi-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "fno_oi_fetcher.py" .
+
+bsis:fno_rollover     rdf:type prov:Entity ;
+    dct:title "Futures rollover" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_fno-rollover-fetcher-py .
+
+bsi:job_fno-rollover-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "fno_rollover_fetcher.py" .
+
+bsis:index_max_pain     rdf:type prov:Entity ;
+    dct:title "Index max pain" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_mc-index-oi-fetcher-py .
+
+bsi:job_mc-index-oi-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "mc_index_oi_fetcher.py" .
+
+bsis:nt_index_pcr_ts     rdf:type prov:Entity ;
+    dct:title "Index PCR time series" ;
+    bsis:cadence "intraday" ;
+    bsis:expectedLagHours "0.5"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_nt-pcr-ts-fetcher-py .
+
+bsi:job_nt-pcr-ts-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "nt_pcr_ts_fetcher.py" .
+
+bsis:mover_snapshots     rdf:type prov:Entity ;
+    dct:title "Mover snapshots" ;
+    bsis:cadence "intraday" ;
+    bsis:expectedLagHours "0.5"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_mover-screener-fetcher-py .
+
+bsi:job_mover-screener-fetcher-py     rdf:type prov:Activity, prov:Activity ;
+    rdfs:label "mover_screener_fetcher.py", "mover_screener_fetcher.py" .
+
+bsis:stock_event_triggers     rdf:type prov:Entity ;
+    dct:title "Stock event triggers" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_event-triggers-py .
+
+bsi:job_event-triggers-py     rdf:type prov:Activity ;
+    rdfs:label "event_triggers.py" .
+
+bsis:market_regimes     rdf:type prov:Entity ;
+    dct:title "Market regimes" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_regime-detector-py .
+
+bsi:job_regime-detector-py     rdf:type prov:Activity ;
+    rdfs:label "regime_detector.py" .
+
+bsis:market_breadth     rdf:type prov:Entity ;
+    dct:title "Market breadth" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_market-breadth-py .
+
+bsi:job_market-breadth-py     rdf:type prov:Activity ;
+    rdfs:label "market_breadth.py" .
+
+bsis:intraday_regime_history     rdf:type prov:Entity ;
+    dct:title "Intraday regime history" ;
+    bsis:cadence "intraday" ;
+    bsis:expectedLagHours "0.5"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_intraday-ranker-py .
+
+bsi:job_intraday-ranker-py     rdf:type prov:Activity, prov:Activity ;
+    rdfs:label "intraday_ranker.py", "intraday_ranker.py" .
+
+bsis:sector_rrg_history     rdf:type prov:Entity ;
+    dct:title "Sector rotation history" ;
+    bsis:cadence "weekly" ;
+    prov:wasGeneratedBy bsi:job_trendlyne-sector-rotation-fetcher-py .
+
+bsi:job_trendlyne-sector-rotation-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "trendlyne_sector_rotation_fetcher.py" .
+
+bsis:technical_signals     rdf:type prov:Entity ;
+    dct:title "Technical signal panel" ;
+    bsis:cadence "daily" ;
+    bsis:expectedLagHours "5.0"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_technical-analysis-engine-py, bsi:job_feature-engineering-py .
+
+bsi:job_technical-analysis-engine-py     rdf:type prov:Activity ;
+    rdfs:label "technical_analysis_engine.py" .
+
+bsi:job_feature-engineering-py     rdf:type prov:Activity, prov:Activity ;
+    rdfs:label "feature_engineering.py", "feature_engineering.py" .
+
+bsis:feature_store     rdf:type prov:Entity ;
+    dct:title "Feature store" ;
+    bsis:cadence "daily" ;
+    bsis:expectedLagHours "5.0"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_feature-engineering-py .
+
+bsis:unified_recommendations     rdf:type prov:Entity ;
+    dct:title "Served recommendations" ;
+    bsis:cadence "daily" ;
+    bsis:expectedLagHours "5.0"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_unified-ranker-py .
+
+bsi:job_unified-ranker-py     rdf:type prov:Activity, prov:Activity, prov:Activity, prov:Activity, prov:Activity ;
+    rdfs:label "unified_ranker.py", "unified_ranker.py", "unified_ranker.py", "unified_ranker.py", "unified_ranker.py" .
+
+bsis:unified_recommendations_history     rdf:type prov:Entity ;
+    dct:title "Recommendation history" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_unified-ranker-py .
+
+bsis:intraday_recommendations     rdf:type prov:Entity ;
+    dct:title "Intraday recommendations" ;
+    bsis:cadence "intraday" ;
+    bsis:expectedLagHours "0.5"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_intraday-ranker-py .
+
+bsis:confluence_signals     rdf:type prov:Entity ;
+    dct:title "Confluence signals" ;
+    bsis:cadence "every_15m" ;
+    bsis:expectedLagHours "0.5"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_confluence-ml-engine-py .
+
+bsi:job_confluence-ml-engine-py     rdf:type prov:Activity ;
+    rdfs:label "confluence_ml_engine.py" .
+
+bsis:engine_composite_scores     rdf:type prov:Entity ;
+    dct:title "Engine composite scores" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_unified-ranker-py .
+
+bsis:signal_outcomes     rdf:type prov:Entity ;
+    dct:title "Signal outcomes" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_outcome-resolver-py .
+
+bsi:job_outcome-resolver-py     rdf:type prov:Activity, prov:Activity, prov:Activity, prov:Activity ;
+    rdfs:label "outcome_resolver.py", "outcome_resolver.py", "outcome_resolver.py", "outcome_resolver.py" .
+
+bsis:unified_signal_outcomes     rdf:type prov:Entity ;
+    dct:title "Unified signal outcomes" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_outcome-resolver-py .
+
+bsis:signal_excursions     rdf:type prov:Entity ;
+    dct:title "Signal excursions" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_outcome-resolver-py .
+
+bsis:screener_master     rdf:type prov:Entity ;
+    dct:title "Screener catalog" ;
+    bsis:cadence "on_change" ;
+    prov:wasGeneratedBy bsi:job_screener-catalog-enricher-py, bsi:job_trendlyne-screener-discovery-py .
+
+bsi:job_screener-catalog-enricher-py     rdf:type prov:Activity ;
+    rdfs:label "screener_catalog_enricher.py" .
+
+bsi:job_trendlyne-screener-discovery-py     rdf:type prov:Activity ;
+    rdfs:label "trendlyne_screener_discovery.py" .
+
+bsis:stock_scores     rdf:type prov:Entity ;
+    dct:title "Domain scores" ;
+    bsis:cadence "on_write" ;
+    prov:wasGeneratedBy bsi:job_scoring-engine-py .
+
+bsi:job_scoring-engine-py     rdf:type prov:Activity ;
+    rdfs:label "scoring_engine.py" .
+
+bsis:live_screener_appearances     rdf:type prov:Entity ;
+    dct:title "Live screener appearances" ;
+    bsis:cadence "every_15m" ;
+    prov:wasGeneratedBy bsi:job_mover-screener-fetcher-py, bsi:job_live-screener-ml-ranker-py .
+
+bsi:job_live-screener-ml-ranker-py     rdf:type prov:Activity, prov:Activity ;
+    rdfs:label "live_screener_ml_ranker.py", "live_screener_ml_ranker.py" .
+
+bsis:live_screener_outcomes     rdf:type prov:Entity ;
+    dct:title "Live screener outcomes" ;
+    bsis:cadence "every_15m" ;
+    prov:wasGeneratedBy bsi:job_live-screener-ml-ranker-py .
+
+bsis:job_heartbeat     rdf:type prov:Entity ;
+    dct:title "Job heartbeats" ;
+    bsis:cadence "continuous" ;
+    prov:wasGeneratedBy bsi:job_jobheartbeat-ts, bsi:job_pythonrunner-ts .
+
+bsi:job_jobheartbeat-ts     rdf:type prov:Activity ;
+    rdfs:label "jobHeartbeat.ts" .
+
+bsi:job_pythonrunner-ts     rdf:type prov:Activity ;
+    rdfs:label "pythonRunner.ts" .
+
+bsis:data_quality_results     rdf:type prov:Entity ;
+    dct:title "Data-quality results" ;
+    bsis:cadence "continuous" ;
+    prov:wasGeneratedBy bsi:job_run-data-quality-checks-ts .
+
+bsi:job_run-data-quality-checks-ts     rdf:type prov:Activity ;
+    rdfs:label "run_data_quality_checks.ts" .
+
+bsis:model_registry     rdf:type prov:Entity ;
+    dct:title "Model registry" ;
+    bsis:cadence "on_training" ;
+    prov:wasGeneratedBy bsi:job_ml-ensemble-py, bsi:job_dl-engine-py, bsi:job_online-learner-py .
+
+bsi:job_ml-ensemble-py     rdf:type prov:Activity, prov:Activity ;
+    rdfs:label "ml_ensemble.py", "ml_ensemble.py" .
+
+bsi:job_dl-engine-py     rdf:type prov:Activity ;
+    rdfs:label "dl_engine.py" .
+
+bsi:job_online-learner-py     rdf:type prov:Activity ;
+    rdfs:label "online_learner.py" .
+
+bsis:feature_importance_log     rdf:type prov:Entity ;
+    dct:title "Feature importance log" ;
+    bsis:cadence "on_training" ;
+    prov:wasGeneratedBy bsi:job_ml-ensemble-py .
+
+bsis:factor_edge_history     rdf:type prov:Entity ;
+    dct:title "Factor edge ledger" ;
+    bsis:cadence "on_grading" ;
+    prov:wasGeneratedBy bsi:job_factor-edge-py .
+
+bsi:job_factor-edge-py     rdf:type prov:Activity ;
+    rdfs:label "factor_edge.py" .
+
+bsis:market_endpoint_registry     rdf:type prov:Entity ;
+    dct:title "Endpoint discovery registry" ;
+    bsis:cadence "on_discovery" ;
+    prov:wasGeneratedBy bsi:job_build-pg-registry-py-urls-explorer-outside-this-repo .
+
+bsi:job_build-pg-registry-py-urls-explorer-outside-this-repo     rdf:type prov:Activity ;
+    rdfs:label "build_pg_registry.py (urls-explorer, outside this repo)" .
+
+bsis:url_endpoints     rdf:type prov:Entity ;
+    dct:title "Consolidated endpoint templates" ;
+    bsis:cadence "on_discovery" ;
+    prov:wasGeneratedBy bsi:job_url-explorer-ingest .
+
+bsi:job_url-explorer-ingest     rdf:type prov:Activity ;
+    rdfs:label "url_explorer.ingest" .
+
+bsis:nse_stocks     rdf:type prov:Entity ;
+    dct:title "NSE listing snapshot" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_scripts-syncallstockmappings-ts, bsi:job_scripts-sync-mc-scid-map-py .
+
+bsi:job_scripts-syncallstockmappings-ts     rdf:type prov:Activity ;
+    rdfs:label "scripts/syncAllStockMappings.ts" .
+
+bsi:job_scripts-sync-mc-scid-map-py     rdf:type prov:Activity, prov:Activity ;
+    rdfs:label "scripts/sync_mc_scid_map.py", "scripts/sync_mc_scid_map.py" .
+
+bsis:mc_scid_map     rdf:type prov:Entity ;
+    dct:title "Vendor scrip-code crosswalk" ;
+    bsis:cadence "on_discovery" ;
+    prov:wasGeneratedBy bsi:job_scripts-sync-mc-scid-map-py .
+
+bsis:market_issuer     rdf:type prov:Entity ;
+    dct:title "Canonical issuer" ;
+    bsis:cadence "on_change" ;
+    prov:wasGeneratedBy bsi:job_semantic-identity-py .
+
+bsi:job_semantic-identity-py     rdf:type prov:Activity, prov:Activity, prov:Activity, prov:Activity, prov:Activity, prov:Activity, prov:Activity, prov:Activity ;
+    rdfs:label "semantic_identity.py", "semantic_identity.py", "semantic_identity.py", "semantic_identity.py", "semantic_identity.py", "semantic_identity.py", "semantic_identity.py", "semantic_identity.py" .
+
+bsis:market_instrument     rdf:type prov:Entity ;
+    dct:title "Canonical instrument" ;
+    bsis:cadence "on_change" ;
+    prov:wasGeneratedBy bsi:job_semantic-identity-py .
+
+bsis:market_listing     rdf:type prov:Entity ;
+    dct:title "Canonical listing" ;
+    bsis:cadence "on_change" ;
+    prov:wasGeneratedBy bsi:job_semantic-identity-py .
+
+bsis:market_identifier     rdf:type prov:Entity ;
+    dct:title "Provider identifier mapping" ;
+    bsis:cadence "on_change" ;
+    prov:wasGeneratedBy bsi:job_semantic-identity-py .
+
+bsis:market_identifier_gap     rdf:type prov:Entity ;
+    dct:title "Identifier mapping gap" ;
+    bsis:cadence "on_discovery" ;
+    prov:wasGeneratedBy bsi:job_semantic-identity-py .
+
+bsis:market_graph_node     rdf:type prov:Entity ;
+    dct:title "Instance graph node" ;
+    bsis:cadence "on_write" ;
+    prov:wasGeneratedBy bsi:job_semantic-identity-py, bsi:job_semantic-evidence-py .
+
+bsi:job_semantic-evidence-py     rdf:type prov:Activity, prov:Activity, prov:Activity, prov:Activity, prov:Activity, prov:Activity, prov:Activity, prov:Activity ;
+    rdfs:label "semantic_evidence.py", "semantic_evidence.py", "semantic_evidence.py", "semantic_evidence.py", "semantic_evidence.py", "semantic_evidence.py", "semantic_evidence.py", "semantic_evidence.py" .
+
+bsis:market_graph_edge     rdf:type prov:Entity ;
+    dct:title "Instance graph edge" ;
+    bsis:cadence "on_write" ;
+    prov:wasGeneratedBy bsi:job_semantic-identity-py, bsi:job_semantic-evidence-py .
+
+bsis:market_evidence     rdf:type prov:Entity ;
+    dct:title "Source evidence" ;
+    bsis:cadence "on_write" ;
+    prov:wasGeneratedBy bsi:job_semantic-evidence-py .
+
+bsis:market_claim     rdf:type prov:Entity ;
+    dct:title "Explicit market claim" ;
+    bsis:cadence "on_write" ;
+    prov:wasGeneratedBy bsi:job_semantic-evidence-py .
+
+bsis:market_claim_evidence     rdf:type prov:Entity ;
+    dct:title "Claim evidence link" ;
+    bsis:cadence "on_write" ;
+    prov:wasGeneratedBy bsi:job_semantic-evidence-py .
+
+bsis:market_decision_event     rdf:type prov:Entity ;
+    dct:title "Decision event" ;
+    bsis:cadence "on_write" ;
+    prov:wasGeneratedBy bsi:job_unified-ranker-py .
+
+bsis:market_decision_evidence     rdf:type prov:Entity ;
+    dct:title "Decision evidence" ;
+    bsis:cadence "on_write" ;
+    prov:wasGeneratedBy bsi:job_unified-ranker-py, bsi:job_semantic-evidence-py .
+
+bsis:market_decision_outcome     rdf:type prov:Entity ;
+    dct:title "Decision outcome" ;
+    bsis:cadence "on_outcome" ;
+    prov:wasGeneratedBy bsi:job_outcome-resolver-py, bsi:job_semantic-evidence-py .
+
+bsis:market_data_contract     rdf:type prov:Entity ;
+    dct:title "Semantic data contract" ;
+    bsis:cadence "on_change" ;
+    prov:wasGeneratedBy bsi:job_semantic-contracts-py .
+
+bsi:job_semantic-contracts-py     rdf:type prov:Activity, prov:Activity ;
+    rdfs:label "semantic_contracts.py", "semantic_contracts.py" .
+
+bsis:semantic_feature_definition     rdf:type prov:Entity ;
+    dct:title "Semantic feature definition" ;
+    bsis:cadence "on_change" ;
+    prov:wasGeneratedBy bsi:job_semantic-contracts-py .
+
+bsis:market_data_watermark     rdf:type prov:Entity ;
+    dct:title "Data completeness watermark" ;
+    bsis:cadence "per_run" ;
+    prov:wasGeneratedBy bsi:job_semantic-evidence-py, bsi:job_semantic-identity-py .
+
+bsim:delivery_surprise_z     rdf:type prov:Entity ;
+    rdfs:label "Delivery surprise z-score" ;
+    prov:wasDerivedFrom bsis:stock_delivery_data .
+
+bsim:close_price     rdf:type prov:Entity ;
+    rdfs:label "Closing price (basis-tagged)" ;
+    prov:wasDerivedFrom bsis:stock_ohlcv .
+
+bsim:delivery_pct_latest     rdf:type prov:Entity ;
+    rdfs:label "Latest delivery percentage" ;
+    prov:wasDerivedFrom bsis:stock_delivery_data .
+
+bsim:delivery_pct_30d_average     rdf:type prov:Entity ;
+    rdfs:label "Delivery percentage, 30-session average" ;
+    prov:wasDerivedFrom bsis:stock_delivery_data .
+
+bsim:rsi_14_latest     rdf:type prov:Entity ;
+    rdfs:label "RSI (14), latest" ;
+    prov:wasDerivedFrom bsis:technical_signals .
+
+bsim:signal_win_rate_5d     rdf:type prov:Entity ;
+    rdfs:label "Signal win rate, 5-day horizon" ;
+    prov:wasDerivedFrom bsis:signal_outcomes .
+
+bsim:usable_factor_readings_5d     rdf:type prov:Entity ;
+    rdfs:label "Usable factor readings at 5 days" ;
+    prov:wasDerivedFrom bsis:factor_edge_history .
+
+bsim:unified_score_latest     rdf:type prov:Entity ;
+    rdfs:label "Unified score, latest served" ;
+    prov:wasDerivedFrom bsis:unified_recommendations .
+
+bsim:confluence_score_latest     rdf:type prov:Entity ;
+    rdfs:label "Confluence score, latest" ;
+    prov:wasDerivedFrom bsis:confluence_signals .
+
+bsim:index_pcr_latest     rdf:type prov:Entity ;
+    rdfs:label "Index put-call ratio, latest" ;
+    prov:wasDerivedFrom bsis:nt_index_pcr_ts .
+
+bsim:rollover_pct_latest     rdf:type prov:Entity ;
+    rdfs:label "Futures rollover, latest" ;
+    prov:wasDerivedFrom bsis:fno_rollover .
+
+bsim:market_breadth_latest     rdf:type prov:Entity ;
+    rdfs:label "Market breadth, latest" ;
+    prov:wasDerivedFrom bsis:market_breadth .
+
+bsim:current_regime     rdf:type prov:Entity ;
+    rdfs:label "Current market regime" ;
+    prov:wasDerivedFrom bsis:market_regimes .
+
+bsim:asm_flag_latest     rdf:type prov:Entity ;
+    rdfs:label "Surveillance flag, latest" ;
+    prov:wasDerivedFrom bsis:technical_signals .
+
+bsim:analyst_consensus_latest     rdf:type prov:Entity ;
+    rdfs:label "Analyst consensus, latest" ;
+    prov:wasDerivedFrom bsis:analyst_estimates_history .
+
+bsim:screener_5d_forward_return     rdf:type prov:Entity ;
+    rdfs:label "Screener 5-day forward return" ;
+    prov:wasDerivedFrom bsis:live_screener_outcomes .
+
+bsim:news_sentiment_5d     rdf:type prov:Entity ;
+    rdfs:label "News sentiment, trailing 5 sessions" ;
+    prov:wasDerivedFrom bsis:news_symbol_link .
+
+bsim:excursion_path_5d     rdf:type prov:Entity ;
+    rdfs:label "Excursion path, 5-day horizon" ;
+    prov:wasDerivedFrom bsis:signal_excursions .

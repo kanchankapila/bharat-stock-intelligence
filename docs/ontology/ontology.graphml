@@ -1,0 +1,1947 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
+  <key id="kind" for="node" attr.name="kind" attr.type="string" />
+  <key id="label" for="node" attr.name="label" attr.type="string" />
+  <key id="layer" for="node" attr.name="layer" attr.type="string" />
+  <key id="grain" for="node" attr.name="grain" attr.type="string" />
+  <key id="tables" for="node" attr.name="tables" attr.type="string" />
+  <key id="entity" for="node" attr.name="entity" attr.type="string" />
+  <key id="cadence" for="node" attr.name="cadence" attr.type="string" />
+  <key id="training_use" for="node" attr.name="training_use" attr.type="string" />
+  <key id="writers" for="node" attr.name="writers" attr.type="string" />
+  <key id="pk" for="node" attr.name="pk" attr.type="string" />
+  <key id="unit" for="node" attr.name="unit" attr.type="string" />
+  <key id="graded_status" for="node" attr.name="graded_status" attr.type="string" />
+  <key id="leakage_risk" for="node" attr.name="leakage_risk" attr.type="string" />
+  <key id="description" for="node" attr.name="description" attr.type="string" />
+  <graph id="bsi" edgedefault="directed">
+    <node id="class:Instrument">
+      <data key="kind">class</data>
+      <data key="label">Instrument</data>
+      <data key="layer">identity</data>
+      <data key="grain">instrument_key</data>
+      <data key="tables">market_instrument</data>
+      <data key="description">Anything that is quoted and traded. The canonical instrument identity is table-backed in `market_instrument`; legacy observation tables still key on the exchange ticker.</data>
+    </node>
+    <node id="class:Issuer">
+      <data key="kind">class</data>
+      <data key="label">Issuer</data>
+      <data key="layer">identity</data>
+      <data key="grain">issuer_key</data>
+      <data key="tables">market_issuer</data>
+      <data key="description">The legal issuer behind one or more instruments. ISIN issuer-prefix keys are authoritative when a checksum-valid ISIN is available; symbol-only rows remain explicitly provisional.</data>
+    </node>
+    <node id="class:Listing">
+      <data key="kind">class</data>
+      <data key="label">Listing</data>
+      <data key="layer">identity</data>
+      <data key="grain">listing_key</data>
+      <data key="tables">market_listing</data>
+      <data key="description">One tradable exchange/segment/symbol representation of an instrument.</data>
+    </node>
+    <node id="class:ProviderIdentifier">
+      <data key="kind">class</data>
+      <data key="label">Provider identifier</data>
+      <data key="layer">identity</data>
+      <data key="grain">(provider, scheme, identifier_value)</data>
+      <data key="tables">market_identifier, market_identifier_gap</data>
+      <data key="description">A provider-qualified identifier for an instrument. Provider and scheme are part of the identity; collisions are recorded rather than resolved by row order.</data>
+    </node>
+    <node id="class:Equity">
+      <data key="kind">class</data>
+      <data key="label">Equity</data>
+      <data key="layer">identity</data>
+      <data key="grain">one row per exchange ticker in `stock_master`</data>
+      <data key="tables">stock_master, nse_stocks</data>
+      <data key="description">A listed equity, one row per exchange ticker. This is the platform's universal join key and the subject of every other class.</data>
+    </node>
+    <node id="class:Index">
+      <data key="kind">class</data>
+      <data key="label">Index</data>
+      <data key="layer">identity</data>
+      <data key="grain">one row per index</data>
+      <data key="description">A market index used as a benchmark or as a derivatives underlying (NIFTY 50, BANK NIFTY, SENSEX, INDIA VIX, GIFT NIFTY, ...).</data>
+    </node>
+    <node id="class:Sector">
+      <data key="kind">class</data>
+      <data key="label">Sector</data>
+      <data key="layer">identity</data>
+      <data key="grain">one row per label, no canonical table</data>
+      <data key="description">An industry grouping used for relative-strength and rotation analysis. Stored as free text across several tables rather than resolved to a scheme.</data>
+    </node>
+    <node id="class:Exchange">
+      <data key="kind">class</data>
+      <data key="label">Exchange</data>
+      <data key="layer">identity</data>
+      <data key="grain">dimension</data>
+      <data key="description">The venue an instrument is admitted to. A two-value dimension (NSE / BSE): usually encoded inside `symbol`, but carried as its own column in seven tables (nse_stocks, market_holidays, nt_fno_expiry, stock_earnings_dates, institutional_deal_signals, mc_advance_decline, mc_chart_patterns).</data>
+    </node>
+    <node id="class:ScripCodeMapping">
+      <data key="kind">class</data>
+      <data key="label">Vendor scrip-code mapping</data>
+      <data key="layer">identity</data>
+      <data key="grain">(scid, symbol)</data>
+      <data key="tables">mc_scid_map</data>
+      <data key="description">The vendor's private scid mapped onto the platform symbol and issuer name — the only sanctioned route from one to the other.</data>
+    </node>
+    <node id="class:CompanyProfile">
+      <data key="kind">class</data>
+      <data key="label">CompanyProfile</data>
+      <data key="layer">identity</data>
+      <data key="grain">one row per symbol</data>
+      <data key="tables">company_profiles</data>
+      <data key="description">Narrative and high-level attributes about the issuer behind a ticker.</data>
+    </node>
+    <node id="class:Observation">
+      <data key="kind">class</data>
+      <data key="label">Observation</data>
+      <data key="layer">observation</data>
+      <data key="description">Abstract parent for anything measured at a point in time without the platform adding an opinion to it. Raw or vendor-supplied; never a label.</data>
+    </node>
+    <node id="class:Bar">
+      <data key="kind">class</data>
+      <data key="label">Daily bar</data>
+      <data key="layer">observation</data>
+      <data key="grain">(symbol, date)</data>
+      <data key="tables">stock_ohlcv</data>
+      <data key="description">One daily OHLCV bar per symbol per trading session — the platform's only self-owned source of truth.</data>
+    </node>
+    <node id="class:IntradayBar">
+      <data key="kind">class</data>
+      <data key="label">Intraday bar</data>
+      <data key="layer">observation</data>
+      <data key="grain">(symbol, datetime, series)</data>
+      <data key="tables">intraday_ohlcv</data>
+      <data key="description">Sub-daily OHLCV with VWAP. Currently a single interval (15m) of recent history.</data>
+    </node>
+    <node id="class:DeliveryObservation">
+      <data key="kind">class</data>
+      <data key="label">Delivery observation</data>
+      <data key="layer">observation</data>
+      <data key="grain">(symbol, date)</data>
+      <data key="tables">stock_delivery_data, stock_delivery_volume</data>
+      <data key="description">The deliverable-to-traded quantity ratio — the highest-frequency ownership-behaviour proxy the platform owns, and a T+1 lag by construction.</data>
+    </node>
+    <node id="class:CorporateAction">
+      <data key="kind">class</data>
+      <data key="label">Corporate action</data>
+      <data key="layer">observation</data>
+      <data key="grain">(symbol, ex_date, action_type)</data>
+      <data key="tables">corporate_actions</data>
+      <data key="description">A capital-structure event with a price consequence (dividend, split, bonus, rights) plus the record/ex dates that make it usable point-in-time.</data>
+    </node>
+    <node id="class:FundamentalSnapshot">
+      <data key="kind">class</data>
+      <data key="label">Fundamental snapshot</data>
+      <data key="layer">observation</data>
+      <data key="grain">(symbol, as_of_date)</data>
+      <data key="tables">fundamentals_history</data>
+      <data key="description">Vendor-supplied accounting ratios and market-cap for a symbol, captured with an as-of date. Lagging information: the publication delay is the point-in-time risk.</data>
+    </node>
+    <node id="class:AnalystEstimate">
+      <data key="kind">class</data>
+      <data key="label">Analyst estimate</data>
+      <data key="layer">observation</data>
+      <data key="grain">(symbol, as_of_date)</data>
+      <data key="tables">analyst_estimates_history</data>
+      <data key="description">Consensus ratings, target prices and next-period estimates captured as a dated snapshot. Genuinely leading information; short panel relative to the news table.</data>
+    </node>
+    <node id="class:EarningsSurprise">
+      <data key="kind">class</data>
+      <data key="label">Earnings surprise</data>
+      <data key="layer">observation</data>
+      <data key="grain">(symbol, quarter)</data>
+      <data key="tables">eps_surprise_history</data>
+      <data key="description">Actual versus estimated net profit and revenue for a quarter, with the surprise computed per line. Coincident for the print, leading for the drift after it.</data>
+    </node>
+    <node id="class:InsiderTransaction">
+      <data key="kind">class</data>
+      <data key="label">Insider transaction</data>
+      <data key="layer">observation</data>
+      <data key="grain">(symbol, date, acquirer, transaction)</data>
+      <data key="tables">insider_trades</data>
+      <data key="description">A promoter/insider buy or sell filing. Leading in principle; graded weak as a standalone signal on this platform and kept as a confluence input.</data>
+    </node>
+    <node id="class:BlockDeal">
+      <data key="kind">class</data>
+      <data key="label">Block / bulk deal</data>
+      <data key="layer">observation</data>
+      <data key="grain">(symbol, date, deal)</data>
+      <data key="tables">block_deals</data>
+      <data key="description">An off-book or bulk transaction with quantity, price and value. Value is stored in CRORES as a bare number, with no currency or unit term attached.</data>
+    </node>
+    <node id="class:MFHolding">
+      <data key="kind">class</data>
+      <data key="label">Mutual-fund holding</data>
+      <data key="layer">observation</data>
+      <data key="grain">(symbol, disclosure date)</data>
+      <data key="tables">stock_mf_holdings</data>
+      <data key="description">Aggregate mutual-fund ownership of a symbol: holding percentage, fund count and the change versus the previous disclosure.</data>
+    </node>
+    <node id="class:NewsItem">
+      <data key="kind">class</data>
+      <data key="label">News item</data>
+      <data key="layer">observation</data>
+      <data key="grain">one row per article/announcement</data>
+      <data key="tables">news_sentiment_items, news_symbol_link</data>
+      <data key="description">A news article or exchange announcement with vendor sentiment, a FinBERT tone ensemble, an impact bucket and the symbols it mentions. 15 years deep — the only panel here that supports a real event study.</data>
+    </node>
+    <node id="class:OptionChainRow">
+      <data key="kind">class</data>
+      <data key="label">Option chain row</data>
+      <data key="layer">observation</data>
+      <data key="grain">(symbol, date, expiry, strike)</data>
+      <data key="tables">so_option_chain</data>
+      <data key="description">One strike, one expiry, one session: call and put leg premium, volume, open interest, IV and greeks. A grid, not a time series.</data>
+    </node>
+    <node id="class:FuturesPositioning">
+      <data key="kind">class</data>
+      <data key="label">Futures positioning</data>
+      <data key="layer">observation</data>
+      <data key="grain">(symbol, date, expiry)</data>
+      <data key="tables">stock_futures_oi_history, fno_rollover</data>
+      <data key="description">Stock-futures open interest, buildup label, rollover percentage, basis and cost of carry for one expiry and session.</data>
+    </node>
+    <node id="class:IndexDerivativesSnapshot">
+      <data key="kind">class</data>
+      <data key="label">Index derivatives snapshot</data>
+      <data key="layer">observation</data>
+      <data key="grain">(index_name, date, expiry)</data>
+      <data key="tables">index_max_pain, nt_index_pcr_ts</data>
+      <data key="description">Index-level positioning: PCR (single-strike time series and EOD), max pain, and aggregate call/put open interest.</data>
+    </node>
+    <node id="class:MoverSnapshot">
+      <data key="kind">class</data>
+      <data key="label">Mover snapshot</data>
+      <data key="layer">observation</data>
+      <data key="grain">(source, trade_date, symbol, rank)</data>
+      <data key="tables">mover_snapshots</data>
+      <data key="description">A ranked intraday mover list entry from a vendor feed: the platform's within-day event backbone alongside the event triggers.</data>
+    </node>
+    <node id="class:RegimeState">
+      <data key="kind">class</data>
+      <data key="label">Regime state</data>
+      <data key="layer">context</data>
+      <data key="grain">one row per date</data>
+      <data key="tables">market_regimes, intraday_regime_history</data>
+      <data key="description">The macro regime for a session, with its posterior probability and the decoded HMM path. Also covers the intraday regime panel.</data>
+    </node>
+    <node id="class:BreadthObservation">
+      <data key="kind">class</data>
+      <data key="label">Breadth observation</data>
+      <data key="layer">context</data>
+      <data key="grain">one row per date</data>
+      <data key="tables">market_breadth</data>
+      <data key="description">Market-wide participation statistics: share of the universe above its 200-day average, advance/decline ratio, net highs minus lows.</data>
+    </node>
+    <node id="class:SectorRotationPoint">
+      <data key="kind">class</data>
+      <data key="label">Sector rotation point</data>
+      <data key="layer">context</data>
+      <data key="grain">(sector, week_date)</data>
+      <data key="tables">sector_rrg_history</data>
+      <data key="description">Weekly relative-rotation coordinates and quadrant per sector — the intended input to sector-plus-stock relative strength.</data>
+    </node>
+    <node id="class:PlatformOutput">
+      <data key="kind">class</data>
+      <data key="label">Platform output</data>
+      <data key="layer">derived</data>
+      <data key="description">Abstract parent for anything this platform computes and serves. Every subclass is an OPINION of this system, not an observation of the market.</data>
+    </node>
+    <node id="class:FeatureVector">
+      <data key="kind">class</data>
+      <data key="label">Feature vector</data>
+      <data key="layer">derived</data>
+      <data key="grain">(symbol, date, timeframe)</data>
+      <data key="tables">feature_store</data>
+      <data key="description">The rolling per-symbol, per-date feature panel the models train on. Features, not information: they re-express price, flow and vendor data.</data>
+    </node>
+    <node id="class:TechnicalSignal">
+      <data key="kind">class</data>
+      <data key="label">Technical signal</data>
+      <data key="layer">derived</data>
+      <data key="grain">(symbol, date)</data>
+      <data key="tables">technical_signals</data>
+      <data key="description">The wide per-symbol, per-date technical panel: indicators, regime stamp, flow and fundamental context columns, plus the model's probability outputs.</data>
+    </node>
+    <node id="class:EngineScore">
+      <data key="kind">class</data>
+      <data key="label">Engine score</data>
+      <data key="layer">derived</data>
+      <data key="grain">(symbol, date)</data>
+      <data key="tables">confluence_signals, engine_composite_scores, stock_scores</data>
+      <data key="description">A single engine's, or the multi-engine composite's, score for a symbol and date with its engine-coverage count.</data>
+    </node>
+    <node id="class:Recommendation">
+      <data key="kind">class</data>
+      <data key="label">Recommendation</data>
+      <data key="layer">derived</data>
+      <data key="grain">(symbol, computed_at, timeframe)</data>
+      <data key="tables">unified_recommendations, unified_recommendations_history, intraday_recommendations</data>
+      <data key="description">The served trade: composite score, conviction bucket, action label, entry zone, stop, targets, risk/reward and position size for one symbol, date and timeframe.</data>
+    </node>
+    <node id="class:ModelArtifact">
+      <data key="kind">class</data>
+      <data key="label">Model artifact</data>
+      <data key="layer">derived</data>
+      <data key="grain">one row per version</data>
+      <data key="tables">model_registry</data>
+      <data key="description">A registered trained model: type, version, evaluation metrics, feature count, horizon and active flag.</data>
+    </node>
+    <node id="class:FeatureImportance">
+      <data key="kind">class</data>
+      <data key="label">Feature importance</data>
+      <data key="layer">derived</data>
+      <data key="grain">(model, run, feature)</data>
+      <data key="tables">feature_importance_log</data>
+      <data key="description">Per-model, per-run feature importance with rank — the audit trail behind which inputs a model actually used.</data>
+    </node>
+    <node id="class:OutcomeRecord">
+      <data key="kind">class</data>
+      <data key="label">Outcome record</data>
+      <data key="layer">outcome</data>
+      <data key="description">Abstract parent for resolved results. Labels live here and nowhere else: nothing in this branch may ever appear on the input side of a model.</data>
+    </node>
+    <node id="class:EdgeReading">
+      <data key="kind">class</data>
+      <data key="label">Edge reading</data>
+      <data key="layer">outcome</data>
+      <data key="grain">(run_at, table_name, score_col, horizon_days, regime)</data>
+      <data key="tables">factor_edge_history</data>
+      <data key="description">One factor-grading result: rank-IC and hit-AUC for a table/column, per regime and horizon, with the effective-date count and a verdict.</data>
+    </node>
+    <node id="class:SignalOutcome">
+      <data key="kind">class</data>
+      <data key="label">Signal outcome</data>
+      <data key="layer">outcome</data>
+      <data key="grain">(symbol, signal_date, horizon_days, signal_source)</data>
+      <data key="tables">signal_outcomes, unified_signal_outcomes</data>
+      <data key="description">The resolved result of a signal: entry, exit, horizon, return and the outcome label, under one of two possibly-different labelling rules.</data>
+    </node>
+    <node id="class:SignalExcursion">
+      <data key="kind">class</data>
+      <data key="label">Signal excursion</data>
+      <data key="layer">outcome</data>
+      <data key="grain">(symbol, signal_date, horizon_days)</data>
+      <data key="tables">signal_excursions</data>
+      <data key="description">Path statistics inside the evaluation window: maximum favourable and adverse excursion, days to each, and whether MFE preceded MAE.</data>
+    </node>
+    <node id="class:CandidateRecord">
+      <data key="kind">class</data>
+      <data key="label">Candidate record</data>
+      <data key="layer">candidate</data>
+      <data key="description">Abstract parent for vendor-opinion streams. These SURFACE candidates; they are never ground truth.</data>
+    </node>
+    <node id="class:Screener">
+      <data key="kind">class</data>
+      <data key="label">Screener</data>
+      <data key="layer">candidate</data>
+      <data key="grain">one row per screener</data>
+      <data key="tables">screener_master</data>
+      <data key="description">A vendor screener definition with its inferred sentiment, category, reliability tier and classification confidence.</data>
+    </node>
+    <node id="class:ScreenerAppearance">
+      <data key="kind">class</data>
+      <data key="label">Screener appearance</data>
+      <data key="layer">candidate</data>
+      <data key="grain">(run_id, symbol, filter_key)</data>
+      <data key="tables">live_screener_appearances</data>
+      <data key="description">A single surfacing event: this screener listed this symbol at this instant, with the price, change and volume at that moment.</data>
+    </node>
+    <node id="class:ScreenerOutcome">
+      <data key="kind">class</data>
+      <data key="label">Screener outcome</data>
+      <data key="layer">outcome</data>
+      <data key="grain">(appearance_id, symbol)</data>
+      <data key="tables">live_screener_outcomes</data>
+      <data key="description">Forward returns pre-tracked and attached to an appearance at surfacing time.</data>
+    </node>
+    <node id="class:EventTrigger">
+      <data key="kind">class</data>
+      <data key="label">Event trigger</data>
+      <data key="layer">candidate</data>
+      <data key="grain">(symbol, date)</data>
+      <data key="tables">stock_event_triggers</data>
+      <data key="description">Detector output: which composite trigger classes fired for a symbol on a date, with news counts and bullish-tenure state.</data>
+    </node>
+    <node id="class:GovernanceRecord">
+      <data key="kind">class</data>
+      <data key="label">Governance record</data>
+      <data key="layer">governance</data>
+      <data key="description">Abstract parent for operational metadata. These answer 'when was this true and who wrote it', which on this platform is the difference between a usable value and a guess.</data>
+    </node>
+    <node id="class:Endpoint">
+      <data key="kind">class</data>
+      <data key="label">Data endpoint</data>
+      <data key="layer">governance</data>
+      <data key="grain">one row per endpoint</data>
+      <data key="tables">market_endpoint_registry, url_endpoints</data>
+      <data key="description">A discovered, verified market-data endpoint: provider, domain, scope, update frequency and the template to call it. The platform's data-sourcing registry.</data>
+    </node>
+    <node id="class:JobRun">
+      <data key="kind">class</data>
+      <data key="label">Job run</data>
+      <data key="layer">governance</data>
+      <data key="grain">one row per job</data>
+      <data key="tables">job_heartbeat</data>
+      <data key="description">Per-job heartbeat: last status, last success, last error and run/failure counts.</data>
+    </node>
+    <node id="class:DataQualityCheck">
+      <data key="kind">class</data>
+      <data key="label">Data-quality check</data>
+      <data key="layer">governance</data>
+      <data key="grain">(check_id, checked_at)</data>
+      <data key="tables">data_quality_results</data>
+      <data key="description">The result of one named validation check: category, criticality, status and a detail string.</data>
+    </node>
+    <node id="class:DataContract">
+      <data key="kind">class</data>
+      <data key="label">Data contract</data>
+      <data key="layer">governance</data>
+      <data key="grain">contract_key</data>
+      <data key="tables">market_data_contract</data>
+      <data key="description">A versioned machine-readable contract describing one dataset's grain, timing, source, training use, and physical lineage.</data>
+    </node>
+    <node id="class:FeatureDefinition">
+      <data key="kind">class</data>
+      <data key="label">Semantic feature definition</data>
+      <data key="layer">governance</data>
+      <data key="grain">feature_key</data>
+      <data key="tables">semantic_feature_definition</data>
+      <data key="description">A versioned authored definition of a model-facing property, including leakage and feature-use constraints.</data>
+    </node>
+    <node id="class:DataWatermark">
+      <data key="kind">class</data>
+      <data key="label">Data completeness watermark</data>
+      <data key="layer">governance</data>
+      <data key="grain">(dataset, partition_key)</data>
+      <data key="tables">market_data_watermark</data>
+      <data key="description">Producer-published completeness and input/output boundary for a dataset partition.</data>
+    </node>
+    <node id="class:GraphNode">
+      <data key="kind">class</data>
+      <data key="label">Instance graph node</data>
+      <data key="layer">governance</data>
+      <data key="grain">node_key</data>
+      <data key="tables">market_graph_node</data>
+      <data key="description">A canonical entity projected into the bitemporal market graph.</data>
+    </node>
+    <node id="class:GraphEdge">
+      <data key="kind">class</data>
+      <data key="label">Instance graph edge</data>
+      <data key="layer">governance</data>
+      <data key="grain">assertion_key</data>
+      <data key="tables">market_graph_edge</data>
+      <data key="description">A typed, bitemporal assertion between graph nodes or a literal object value.</data>
+    </node>
+    <node id="class:EvidenceRecord">
+      <data key="kind">class</data>
+      <data key="label">Evidence record</data>
+      <data key="layer">governance</data>
+      <data key="grain">evidence_key</data>
+      <data key="tables">market_evidence, market_claim_evidence</data>
+      <data key="description">Source material retained separately from the claim extracted or inferred from it.</data>
+    </node>
+    <node id="class:MarketClaim">
+      <data key="kind">class</data>
+      <data key="label">Market claim</data>
+      <data key="layer">derived</data>
+      <data key="grain">claim_key</data>
+      <data key="tables">market_claim</data>
+      <data key="description">An explicit, status-bearing assertion about a market entity, separate from raw evidence.</data>
+    </node>
+    <node id="class:DecisionEvent">
+      <data key="kind">class</data>
+      <data key="label">Decision event</data>
+      <data key="layer">derived</data>
+      <data key="grain">decision_key</data>
+      <data key="tables">market_decision_event, market_decision_evidence</data>
+      <data key="description">An append-only, reconstructable decision record with cutoff, versions, quality, and structured supporting or contradictory evidence.</data>
+    </node>
+    <node id="class:DecisionOutcome">
+      <data key="kind">class</data>
+      <data key="label">Decision outcome</data>
+      <data key="layer">outcome</data>
+      <data key="grain">(decision_key, label_definition, horizon_days)</data>
+      <data key="tables">market_decision_outcome</data>
+      <data key="description">A realized outcome attached to a decision under an explicit label definition and horizon.</data>
+    </node>
+    <node id="table:stock_ohlcv">
+      <data key="kind">table</data>
+      <data key="label">Daily OHLCV bars</data>
+      <data key="entity">Bar</data>
+      <data key="grain">(symbol, date)</data>
+      <data key="cadence">per_session</data>
+      <data key="training_use">caution</data>
+      <data key="writers">nse_bhavcopy_fetcher.py, bse_bhavcopy_fetcher.py</data>
+      <data key="pk">symbol, date</data>
+      <data key="description">One daily OHLCV bar per symbol per session. The platform's only self-owned source of truth and the basis of every return calculation.</data>
+    </node>
+    <node id="table:intraday_ohlcv">
+      <data key="kind">table</data>
+      <data key="label">Intraday bars</data>
+      <data key="entity">IntradayBar</data>
+      <data key="grain">(symbol, datetime, interval)</data>
+      <data key="cadence">intraday_15m</data>
+      <data key="training_use">allowed</data>
+      <data key="writers">intraday_fetcher.py</data>
+      <data key="pk">symbol, datetime, interval</data>
+      <data key="description">Sub-daily OHLCV with VWAP for a single interval (15m) over recent history.</data>
+    </node>
+    <node id="table:stock_delivery_data">
+      <data key="kind">table</data>
+      <data key="label">Daily delivery data</data>
+      <data key="entity">DeliveryObservation</data>
+      <data key="grain">(symbol, date)</data>
+      <data key="cadence">daily_t_plus_1</data>
+      <data key="training_use">allowed</data>
+      <data key="writers">stock_delivery_fetcher.py</data>
+      <data key="pk">symbol, date</data>
+      <data key="description">Deliverable quantity as a share of traded quantity: the platform's highest-frequency ownership proxy, published T+1 by the exchange.</data>
+    </node>
+    <node id="table:stock_delivery_volume">
+      <data key="kind">table</data>
+      <data key="label">Delivery volume (series-level)</data>
+      <data key="entity">DeliveryObservation</data>
+      <data key="grain">(symbol, date, series)</data>
+      <data key="cadence">daily_t_plus_1</data>
+      <data key="training_use">caution</data>
+      <data key="writers">stock_delivery_fetcher.py</data>
+      <data key="pk">symbol, date, series</data>
+      <data key="description">Delivery and traded quantity broken out by NSE trading series.</data>
+    </node>
+    <node id="table:stock_master">
+      <data key="kind">table</data>
+      <data key="label">Instrument master</data>
+      <data key="entity">Equity</data>
+      <data key="grain">(symbol)</data>
+      <data key="cadence">on_change</data>
+      <data key="training_use">context</data>
+      <data key="writers">sync_stock_master.ts, syncAllStockMappings.ts</data>
+      <data key="pk">symbol</data>
+      <data key="description">One row per exchange ticker with its ISIN and every vendor-private id the platform uses to reach that instrument at each provider.</data>
+    </node>
+    <node id="table:company_profiles">
+      <data key="kind">table</data>
+      <data key="label">Company profile</data>
+      <data key="entity">CompanyProfile</data>
+      <data key="grain">(symbol)</data>
+      <data key="cadence">on_change</data>
+      <data key="training_use">caution</data>
+      <data key="writers">company_profile_fetcher.py</data>
+      <data key="pk">symbol</data>
+      <data key="description">Vendor narrative and high-level growth attributes for the issuer.</data>
+    </node>
+    <node id="table:corporate_actions">
+      <data key="kind">table</data>
+      <data key="label">Corporate actions</data>
+      <data key="entity">CorporateAction</data>
+      <data key="grain">(symbol, ex_date, action_type)</data>
+      <data key="cadence">event_driven</data>
+      <data key="training_use">allowed</data>
+      <data key="writers">mc_corporate_actions_fetcher.py, investsights_corporate_actions_fetcher.py</data>
+      <data key="pk">symbol, ex_date, action_type</data>
+      <data key="description">Dividends, splits, bonuses and rights with their ex/record dates — the anchor for price adjustment and event-aware risk filtering.</data>
+    </node>
+    <node id="table:fundamentals_history">
+      <data key="kind">table</data>
+      <data key="label">Fundamental snapshots</data>
+      <data key="entity">FundamentalSnapshot</data>
+      <data key="grain">(symbol, as_of_date)</data>
+      <data key="cadence">vendor_periodic</data>
+      <data key="training_use">caution</data>
+      <data key="writers">trendlyne_fundamentals_fetcher.py, investsights_fundamentals_fetcher.py</data>
+      <data key="pk">symbol, as_of_date</data>
+      <data key="description">Dated snapshots of accounting ratios, market cap and the Piotroski score.</data>
+    </node>
+    <node id="table:analyst_estimates_history">
+      <data key="kind">table</data>
+      <data key="label">Analyst estimate snapshots</data>
+      <data key="entity">AnalystEstimate</data>
+      <data key="grain">(symbol, as_of_date)</data>
+      <data key="cadence">vendor_periodic</data>
+      <data key="training_use">caution</data>
+      <data key="writers">trendlyne_analyst_targets_fetcher.py</data>
+      <data key="pk">symbol, as_of_date</data>
+      <data key="description">Consensus rating counts, target prices and next-period estimates captured per as-of date: one of the few genuinely leading datasets here.</data>
+    </node>
+    <node id="table:eps_surprise_history">
+      <data key="kind">table</data>
+      <data key="label">Earnings surprises</data>
+      <data key="entity">EarningsSurprise</data>
+      <data key="grain">(symbol, quarter)</data>
+      <data key="cadence">vendor_periodic</data>
+      <data key="training_use">caution</data>
+      <data key="writers">eps_surprise_fetcher.py</data>
+      <data key="pk">symbol, quarter</data>
+      <data key="description">Actual versus estimated profit and revenue per quarter, with the surprise computed per line.</data>
+    </node>
+    <node id="table:insider_trades">
+      <data key="kind">table</data>
+      <data key="label">Insider transactions</data>
+      <data key="entity">InsiderTransaction</data>
+      <data key="grain">(symbol, date_iso, acquirerName)</data>
+      <data key="cadence">event_driven</data>
+      <data key="training_use">caution</data>
+      <data key="writers">moneycontrol_fetcher.py</data>
+      <data key="pk">symbol, date_iso, acquirerName</data>
+      <data key="description">Promoter and insider buy/sell filings with quantity, rupee value and the percentage of capital transacted.</data>
+    </node>
+    <node id="table:block_deals">
+      <data key="kind">table</data>
+      <data key="label">Block and bulk deals</data>
+      <data key="entity">BlockDeal</data>
+      <data key="grain">(symbol, date, id)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">caution</data>
+      <data key="writers">block_deals_fetcher.py, mc_block_deal_history_fetcher.py</data>
+      <data key="pk">symbol, date, id</data>
+      <data key="description">Off-book and bulk transactions with quantity, price, counterparty and value.</data>
+    </node>
+    <node id="table:stock_mf_holdings">
+      <data key="kind">table</data>
+      <data key="label">Mutual-fund holdings</data>
+      <data key="entity">MFHolding</data>
+      <data key="grain">(symbol, date)</data>
+      <data key="cadence">vendor_periodic</data>
+      <data key="training_use">allowed</data>
+      <data key="writers">mf_stock_holdings_fetcher.py</data>
+      <data key="pk">symbol, date</data>
+      <data key="description">Aggregate mutual-fund ownership per disclosure date, with fund count and the change versus the previous disclosure.</data>
+    </node>
+    <node id="table:news_sentiment_items">
+      <data key="kind">table</data>
+      <data key="label">News and announcements</data>
+      <data key="entity">NewsItem</data>
+      <data key="grain">(id)</data>
+      <data key="cadence">intraday</data>
+      <data key="training_use">caution</data>
+      <data key="writers">news_fetcher.py, finbert_scorer.py</data>
+      <data key="pk">id</data>
+      <data key="description">Scored news articles and exchange announcements across 15 years — the only panel here deep enough for a real event study.</data>
+    </node>
+    <node id="table:news_symbol_link">
+      <data key="kind">table</data>
+      <data key="label">News-to-symbol links</data>
+      <data key="entity">NewsItem</data>
+      <data key="grain">(news_id, symbol)</data>
+      <data key="cadence">intraday</data>
+      <data key="training_use">allowed</data>
+      <data key="writers">news_fetcher.py</data>
+      <data key="pk">news_id, symbol</data>
+      <data key="description">Exploded news/announcement to symbol mapping with per-link sentiment — the joinable form of the mention relation.</data>
+    </node>
+    <node id="table:so_option_chain">
+      <data key="kind">table</data>
+      <data key="label">Stock option chain</data>
+      <data key="entity">OptionChainRow</data>
+      <data key="grain">(symbol, date, expiry, strike)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">caution</data>
+      <data key="writers">stock_option_chain_fetcher.py</data>
+      <data key="pk">symbol, date, expiry, strike</data>
+      <data key="description">Per-strike, per-expiry option grid: call and put premium, volume, OI, IV and greeks.</data>
+    </node>
+    <node id="table:stock_futures_oi_history">
+      <data key="kind">table</data>
+      <data key="label">Stock futures positioning</data>
+      <data key="entity">FuturesPositioning</data>
+      <data key="grain">(source, symbol, date, expiry)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">caution</data>
+      <data key="writers">fno_oi_fetcher.py</data>
+      <data key="pk">source, symbol, date, expiry</data>
+      <data key="description">Stock-futures open interest, buildup label, rollover percentage, basis and cost of carry per expiry and session.</data>
+    </node>
+    <node id="table:fno_rollover">
+      <data key="kind">table</data>
+      <data key="label">Futures rollover</data>
+      <data key="entity">FuturesPositioning</data>
+      <data key="grain">(symbol, date)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">caution</data>
+      <data key="writers">fno_rollover_fetcher.py</data>
+      <data key="pk">symbol, date</data>
+      <data key="description">Near-versus-next expiry open interest with the rollover percentage and the annualised cost of carry.</data>
+    </node>
+    <node id="table:index_max_pain">
+      <data key="kind">table</data>
+      <data key="label">Index max pain</data>
+      <data key="entity">IndexDerivativesSnapshot</data>
+      <data key="grain">(index_name, date, expiry)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">context</data>
+      <data key="writers">mc_index_oi_fetcher.py</data>
+      <data key="pk">index_name, date, expiry</data>
+      <data key="description">Max-pain strike with aggregate call/put open interest and the index PCR, per index and expiry.</data>
+    </node>
+    <node id="table:nt_index_pcr_ts">
+      <data key="kind">table</data>
+      <data key="label">Index PCR time series</data>
+      <data key="entity">IndexDerivativesSnapshot</data>
+      <data key="grain">(index_name, ts, expiry)</data>
+      <data key="cadence">intraday</data>
+      <data key="training_use">context</data>
+      <data key="writers">nt_pcr_ts_fetcher.py</data>
+      <data key="pk">index_name, ts, expiry</data>
+      <data key="description">Intraday index put-call ratio time series measured on OI, volume and OI change.</data>
+    </node>
+    <node id="table:mover_snapshots">
+      <data key="kind">table</data>
+      <data key="label">Mover snapshots</data>
+      <data key="entity">MoverSnapshot</data>
+      <data key="grain">(source, trade_date, symbol, rank)</data>
+      <data key="cadence">intraday</data>
+      <data key="training_use">allowed</data>
+      <data key="writers">mover_screener_fetcher.py</data>
+      <data key="pk">source, trade_date, symbol, rank</data>
+      <data key="description">Ranked intraday mover lists from vendor feeds: the within-day event backbone behind the mover studies and breakout detectors.</data>
+    </node>
+    <node id="table:stock_event_triggers">
+      <data key="kind">table</data>
+      <data key="label">Stock event triggers</data>
+      <data key="entity">EventTrigger</data>
+      <data key="grain">(date, symbol)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">allowed</data>
+      <data key="writers">event_triggers.py</data>
+      <data key="pk">date, symbol</data>
+      <data key="description">Detector output per symbol and date: which composite trigger classes fired, with news counts and bullish-tenure state.</data>
+    </node>
+    <node id="table:market_regimes">
+      <data key="kind">table</data>
+      <data key="label">Market regimes</data>
+      <data key="entity">RegimeState</data>
+      <data key="grain">(date)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">context</data>
+      <data key="writers">regime_detector.py</data>
+      <data key="pk">date</data>
+      <data key="description">The macro regime label per session with its posterior probability, the HMM state path and the model's input features.</data>
+    </node>
+    <node id="table:market_breadth">
+      <data key="kind">table</data>
+      <data key="label">Market breadth</data>
+      <data key="entity">BreadthObservation</data>
+      <data key="grain">(date)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">context</data>
+      <data key="writers">market_breadth.py</data>
+      <data key="pk">date</data>
+      <data key="description">Participation statistics: share of the universe above its 200-day average, advance/decline ratio, and net highs minus lows.</data>
+    </node>
+    <node id="table:intraday_regime_history">
+      <data key="kind">table</data>
+      <data key="label">Intraday regime history</data>
+      <data key="entity">RegimeState</data>
+      <data key="grain">(computed_at, date)</data>
+      <data key="cadence">intraday</data>
+      <data key="training_use">context</data>
+      <data key="writers">intraday_ranker.py</data>
+      <data key="pk">computed_at, date</data>
+      <data key="description">Within-session risk state with the composite, VIX, PCR, INR move and basis that produced it.</data>
+    </node>
+    <node id="table:sector_rrg_history">
+      <data key="kind">table</data>
+      <data key="label">Sector rotation history</data>
+      <data key="entity">SectorRotationPoint</data>
+      <data key="grain">(sector, week_date)</data>
+      <data key="cadence">weekly</data>
+      <data key="training_use">context</data>
+      <data key="writers">trendlyne_sector_rotation_fetcher.py</data>
+      <data key="pk">sector, week_date</data>
+      <data key="description">Weekly relative-rotation coordinates and quadrant per sector — the intended input to sector-plus-stock relative strength.</data>
+    </node>
+    <node id="table:technical_signals">
+      <data key="kind">table</data>
+      <data key="label">Technical signal panel</data>
+      <data key="entity">TechnicalSignal</data>
+      <data key="grain">(symbol, date)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">caution</data>
+      <data key="writers">technical_analysis_engine.py, feature_engineering.py</data>
+      <data key="pk">symbol, date</data>
+      <data key="description">The wide per-symbol, per-date technical panel: indicators, regime stamp, flow and fundamental context columns, plus model probability outputs.</data>
+    </node>
+    <node id="table:feature_store">
+      <data key="kind">table</data>
+      <data key="label">Feature store</data>
+      <data key="entity">FeatureVector</data>
+      <data key="grain">(symbol, date, timeframe)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">caution</data>
+      <data key="writers">feature_engineering.py</data>
+      <data key="pk">symbol, date, timeframe</data>
+      <data key="description">The rolling feature panel the models train on: returns, moving averages, oscillators, volatility, volume and flow families.</data>
+    </node>
+    <node id="table:unified_recommendations">
+      <data key="kind">table</data>
+      <data key="label">Served recommendations</data>
+      <data key="entity">Recommendation</data>
+      <data key="grain">(symbol, computed_at, timeframe)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">caution</data>
+      <data key="writers">unified_ranker.py</data>
+      <data key="pk">symbol, computed_at, timeframe</data>
+      <data key="description">The authoritative served signal: composite score, conviction bucket, action, entry zone, stop, targets, risk/reward and position size per timeframe.</data>
+    </node>
+    <node id="table:unified_recommendations_history">
+      <data key="kind">table</data>
+      <data key="label">Recommendation history</data>
+      <data key="entity">Recommendation</data>
+      <data key="grain">(symbol, computed_at)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">caution</data>
+      <data key="writers">unified_ranker.py</data>
+      <data key="pk">symbol, computed_at</data>
+      <data key="description">The accumulating record of every served recommendation with its raw win-probability meta-label — the substrate for forward testing the ranker.</data>
+    </node>
+    <node id="table:intraday_recommendations">
+      <data key="kind">table</data>
+      <data key="label">Intraday recommendations</data>
+      <data key="entity">Recommendation</data>
+      <data key="grain">(symbol, computed_at)</data>
+      <data key="cadence">intraday</data>
+      <data key="training_use">caution</data>
+      <data key="writers">intraday_ranker.py</data>
+      <data key="pk">symbol, computed_at</data>
+      <data key="description">Within-session picks with their intraday risk state, entry price and size.</data>
+    </node>
+    <node id="table:confluence_signals">
+      <data key="kind">table</data>
+      <data key="label">Confluence signals</data>
+      <data key="entity">EngineScore</data>
+      <data key="grain">(symbol, computed_at)</data>
+      <data key="cadence">every_15m</data>
+      <data key="training_use">caution</data>
+      <data key="writers">confluence_ml_engine.py</data>
+      <data key="pk">symbol, computed_at</data>
+      <data key="description">The multi-engine agreement score with the contributing screeners, their weights at scoring time, and the model probabilities that fed it.</data>
+    </node>
+    <node id="table:engine_composite_scores">
+      <data key="kind">table</data>
+      <data key="label">Engine composite scores</data>
+      <data key="entity">EngineScore</data>
+      <data key="grain">(symbol, date)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">allowed</data>
+      <data key="writers">unified_ranker.py</data>
+      <data key="pk">symbol, date</data>
+      <data key="description">The blended multi-engine composite per symbol and date with its engine-coverage count.</data>
+    </node>
+    <node id="table:signal_outcomes">
+      <data key="kind">table</data>
+      <data key="label">Signal outcomes</data>
+      <data key="entity">SignalOutcome</data>
+      <data key="grain">(symbol, signal_date, horizon_days, signal_source)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">labels</data>
+      <data key="writers">outcome_resolver.py</data>
+      <data key="pk">symbol, signal_date, horizon_days, signal_source</data>
+      <data key="description">The resolved result of each technical or confluence signal: entry, exit, horizon, return and label.</data>
+    </node>
+    <node id="table:unified_signal_outcomes">
+      <data key="kind">table</data>
+      <data key="label">Unified signal outcomes</data>
+      <data key="entity">SignalOutcome</data>
+      <data key="grain">(symbol, signal_date, horizon_days)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">labels</data>
+      <data key="writers">outcome_resolver.py</data>
+      <data key="pk">symbol, signal_date, horizon_days</data>
+      <data key="description">Outcomes for served signals with the exit reason that closed them — the forward-test surface for the ranker.</data>
+    </node>
+    <node id="table:signal_excursions">
+      <data key="kind">table</data>
+      <data key="label">Signal excursions</data>
+      <data key="entity">SignalExcursion</data>
+      <data key="grain">(symbol, signal_date, horizon_days)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">labels</data>
+      <data key="writers">outcome_resolver.py</data>
+      <data key="pk">symbol, signal_date, horizon_days</data>
+      <data key="description">MFE/MAE path statistics per signal and horizon, with days-to-each and whether the favourable move came first.</data>
+    </node>
+    <node id="table:screener_master">
+      <data key="kind">table</data>
+      <data key="label">Screener catalog</data>
+      <data key="entity">Screener</data>
+      <data key="grain">(scan_id)</data>
+      <data key="cadence">on_change</data>
+      <data key="training_use">caution</data>
+      <data key="writers">screener_catalog_enricher.py, trendlyne_screener_discovery.py</data>
+      <data key="pk">scan_id</data>
+      <data key="description">The catalog of vendor screeners with this platform's inferred sentiment, category, tier and classification confidence.</data>
+    </node>
+    <node id="table:stock_scores">
+      <data key="kind">table</data>
+      <data key="label">Domain scores</data>
+      <data key="entity">EngineScore</data>
+      <data key="grain">(symbol, timeframe)</data>
+      <data key="cadence">on_write</data>
+      <data key="training_use">caution</data>
+      <data key="writers">scoring_engine.py</data>
+      <data key="pk">symbol, timeframe</data>
+      <data key="description">Per-domain score rows (technical, fundamental, ownership, ...) each with a classification and a confidence value.</data>
+    </node>
+    <node id="table:live_screener_appearances">
+      <data key="kind">table</data>
+      <data key="label">Live screener appearances</data>
+      <data key="entity">ScreenerAppearance</data>
+      <data key="grain">(id)</data>
+      <data key="cadence">every_15m</data>
+      <data key="training_use">allowed</data>
+      <data key="writers">mover_screener_fetcher.py, live_screener_ml_ranker.py</data>
+      <data key="pk">id</data>
+      <data key="description">Every live surfacing event: which screener listed which symbol at which instant, with the price, change and volume at that moment.</data>
+    </node>
+    <node id="table:live_screener_outcomes">
+      <data key="kind">table</data>
+      <data key="label">Live screener outcomes</data>
+      <data key="entity">ScreenerOutcome</data>
+      <data key="grain">(appearance_id, symbol)</data>
+      <data key="cadence">every_15m</data>
+      <data key="training_use">labels</data>
+      <data key="writers">live_screener_ml_ranker.py</data>
+      <data key="pk">appearance_id, symbol</data>
+      <data key="description">Forward returns attached to each appearance at surfacing time: the platform's largest pre-labelled dataset.</data>
+    </node>
+    <node id="table:job_heartbeat">
+      <data key="kind">table</data>
+      <data key="label">Job heartbeats</data>
+      <data key="entity">JobRun</data>
+      <data key="grain">(job_name)</data>
+      <data key="cadence">continuous</data>
+      <data key="training_use">forbidden</data>
+      <data key="writers">jobHeartbeat.ts, pythonRunner.ts</data>
+      <data key="pk">job_name</data>
+      <data key="description">Per-job last status, last success, last error and run/failure counts. The operational truth behind every freshness claim.</data>
+    </node>
+    <node id="table:data_quality_results">
+      <data key="kind">table</data>
+      <data key="label">Data-quality results</data>
+      <data key="entity">DataQualityCheck</data>
+      <data key="grain">(check_id)</data>
+      <data key="cadence">continuous</data>
+      <data key="training_use">forbidden</data>
+      <data key="writers">run_data_quality_checks.ts</data>
+      <data key="pk">check_id</data>
+      <data key="description">The latest result of each named validation check with its category, criticality and a detail string.</data>
+    </node>
+    <node id="table:model_registry">
+      <data key="kind">table</data>
+      <data key="label">Model registry</data>
+      <data key="entity">ModelArtifact</data>
+      <data key="grain">(id)</data>
+      <data key="cadence">on_training</data>
+      <data key="training_use">forbidden</data>
+      <data key="writers">ml_ensemble.py, dl_engine.py, online_learner.py</data>
+      <data key="pk">id</data>
+      <data key="description">Every trained model version with its type, evaluation metrics, feature count, horizon and active flag.</data>
+    </node>
+    <node id="table:feature_importance_log">
+      <data key="kind">table</data>
+      <data key="label">Feature importance log</data>
+      <data key="entity">FeatureImportance</data>
+      <data key="grain">(id)</data>
+      <data key="cadence">on_training</data>
+      <data key="training_use">forbidden</data>
+      <data key="writers">ml_ensemble.py</data>
+      <data key="pk">id</data>
+      <data key="description">Per-model, per-run feature importance with rank — the audit trail behind which inputs a model actually used.</data>
+    </node>
+    <node id="table:factor_edge_history">
+      <data key="kind">table</data>
+      <data key="label">Factor edge ledger</data>
+      <data key="entity">EdgeReading</data>
+      <data key="grain">(run_at, table_name, score_col, horizon_days)</data>
+      <data key="cadence">on_grading</data>
+      <data key="training_use">forbidden</data>
+      <data key="writers">factor_edge.py</data>
+      <data key="pk">run_at, table_name, score_col, horizon_days</data>
+      <data key="description">The platform's own measurement ledger: rank-IC and hit-AUC per factor, regime and horizon, with the independent-observation count and a verdict.</data>
+    </node>
+    <node id="table:market_endpoint_registry">
+      <data key="kind">table</data>
+      <data key="label">Endpoint discovery registry</data>
+      <data key="entity">Endpoint</data>
+      <data key="grain">(uid)</data>
+      <data key="cadence">on_discovery</data>
+      <data key="training_use">forbidden</data>
+      <data key="writers">build_pg_registry.py (urls-explorer, outside this repo)</data>
+      <data key="pk">uid</data>
+      <data key="description">3,408 verified market-data endpoints with provider, domain, scope, update frequency, required params and the template to call each one.</data>
+    </node>
+    <node id="table:url_endpoints">
+      <data key="kind">table</data>
+      <data key="label">Consolidated endpoint templates</data>
+      <data key="entity">Endpoint</data>
+      <data key="grain">(id)</data>
+      <data key="cadence">on_discovery</data>
+      <data key="training_use">forbidden</data>
+      <data key="writers">url_explorer.ingest</data>
+      <data key="pk">id</data>
+      <data key="description">830 consolidated endpoint templates carrying the feature targets each one can populate — the alternate-lookup index.</data>
+    </node>
+    <node id="table:nse_stocks">
+      <data key="kind">table</data>
+      <data key="label">NSE listing snapshot</data>
+      <data key="entity">Equity</data>
+      <data key="grain">(symbol)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">context</data>
+      <data key="writers">scripts/syncAllStockMappings.ts, scripts/sync_mc_scid_map.py</data>
+      <data key="pk">symbol</data>
+      <data key="description">One row per NSE ticker carrying ISIN, sector, industry, venue, index-membership flags, lot size and the vendor id cross-references (mcsymbol, trendlyne, tickertape, fincode, scripcode). The richest identity table in the database.</data>
+    </node>
+    <node id="table:mc_scid_map">
+      <data key="kind">table</data>
+      <data key="label">Vendor scrip-code crosswalk</data>
+      <data key="entity">ScripCodeMapping</data>
+      <data key="grain">(scid, symbol)</data>
+      <data key="cadence">on_discovery</data>
+      <data key="training_use">context</data>
+      <data key="writers">scripts/sync_mc_scid_map.py</data>
+      <data key="pk">scid, symbol</data>
+      <data key="description">Maps the vendor's private scid to the platform symbol and issuer name. Vendor tables reachable only by scid are joined through here.</data>
+    </node>
+    <node id="table:market_issuer">
+      <data key="kind">table</data>
+      <data key="label">Canonical issuer</data>
+      <data key="entity">Issuer</data>
+      <data key="grain">(issuer_key)</data>
+      <data key="cadence">on_change</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_identity.py</data>
+      <data key="pk">issuer_key</data>
+      <data key="description">Issuer identity keyed by a verified seven-character Indian ISIN issuer prefix when available, otherwise by an explicitly provisional exchange/symbol key.</data>
+    </node>
+    <node id="table:market_instrument">
+      <data key="kind">table</data>
+      <data key="label">Canonical instrument</data>
+      <data key="entity">Instrument</data>
+      <data key="grain">(instrument_key)</data>
+      <data key="cadence">on_change</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_identity.py</data>
+      <data key="pk">instrument_key</data>
+      <data key="description">Stable instrument identity, normally keyed by full checksum-valid ISIN and owned by one canonical issuer.</data>
+    </node>
+    <node id="table:market_listing">
+      <data key="kind">table</data>
+      <data key="label">Canonical listing</data>
+      <data key="entity">Listing</data>
+      <data key="grain">(listing_key)</data>
+      <data key="cadence">on_change</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_identity.py</data>
+      <data key="pk">listing_key</data>
+      <data key="description">One exchange/segment/symbol representation of an instrument with bitemporal validity.</data>
+    </node>
+    <node id="table:market_identifier">
+      <data key="kind">table</data>
+      <data key="label">Provider identifier mapping</data>
+      <data key="entity">ProviderIdentifier</data>
+      <data key="grain">(mapping_key)</data>
+      <data key="cadence">on_change</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_identity.py</data>
+      <data key="pk">mapping_key</data>
+      <data key="description">Provider-qualified identifier mappings with confidence, validity, and explicit ambiguity status.</data>
+    </node>
+    <node id="table:market_identifier_gap">
+      <data key="kind">table</data>
+      <data key="label">Identifier mapping gap</data>
+      <data key="entity">ProviderIdentifier</data>
+      <data key="grain">(provider, scheme, identifier_value)</data>
+      <data key="cadence">on_discovery</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_identity.py</data>
+      <data key="pk">provider, scheme, identifier_value</data>
+      <data key="description">Queryable record of provider identifiers that could not be safely resolved.</data>
+    </node>
+    <node id="table:market_graph_node">
+      <data key="kind">table</data>
+      <data key="label">Instance graph node</data>
+      <data key="entity">GraphNode</data>
+      <data key="grain">(node_key)</data>
+      <data key="cadence">on_write</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_identity.py, semantic_evidence.py</data>
+      <data key="pk">node_key</data>
+      <data key="description">Canonical entity projection for graph traversal; normalized identity tables remain authoritative for issuer/instrument/listing resolution.</data>
+    </node>
+    <node id="table:market_graph_edge">
+      <data key="kind">table</data>
+      <data key="label">Instance graph edge</data>
+      <data key="entity">GraphEdge</data>
+      <data key="grain">(assertion_key)</data>
+      <data key="cadence">on_write</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_identity.py, semantic_evidence.py</data>
+      <data key="pk">assertion_key</data>
+      <data key="description">Typed bitemporal assertions with source and availability metadata.</data>
+    </node>
+    <node id="table:market_evidence">
+      <data key="kind">table</data>
+      <data key="label">Source evidence</data>
+      <data key="entity">EvidenceRecord</data>
+      <data key="grain">(evidence_key)</data>
+      <data key="cadence">on_write</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_evidence.py</data>
+      <data key="pk">evidence_key</data>
+      <data key="description">Source material retained independently from claims and decision interpretations.</data>
+    </node>
+    <node id="table:market_claim">
+      <data key="kind">table</data>
+      <data key="label">Explicit market claim</data>
+      <data key="entity">MarketClaim</data>
+      <data key="grain">(claim_key)</data>
+      <data key="cadence">on_write</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_evidence.py</data>
+      <data key="pk">claim_key</data>
+      <data key="description">Typed claim with stance, method, status, and bitemporal availability.</data>
+    </node>
+    <node id="table:market_claim_evidence">
+      <data key="kind">table</data>
+      <data key="label">Claim evidence link</data>
+      <data key="entity">EvidenceRecord</data>
+      <data key="grain">(claim_key, evidence_key)</data>
+      <data key="cadence">on_write</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_evidence.py</data>
+      <data key="pk">claim_key, evidence_key</data>
+      <data key="description">Supports/opposes/context links from explicit claims to retained source evidence.</data>
+    </node>
+    <node id="table:market_decision_event">
+      <data key="kind">table</data>
+      <data key="label">Decision event</data>
+      <data key="entity">DecisionEvent</data>
+      <data key="grain">(decision_key)</data>
+      <data key="cadence">on_write</data>
+      <data key="training_use">context</data>
+      <data key="writers">unified_ranker.py</data>
+      <data key="pk">decision_key</data>
+      <data key="description">Append-only decision event carrying cutoff, versions, quality, watermarks, vetoes, and guardrails.</data>
+    </node>
+    <node id="table:market_decision_evidence">
+      <data key="kind">table</data>
+      <data key="label">Decision evidence</data>
+      <data key="entity">DecisionEvent</data>
+      <data key="grain">(decision_key, evidence_key)</data>
+      <data key="cadence">on_write</data>
+      <data key="training_use">context</data>
+      <data key="writers">unified_ranker.py, semantic_evidence.py</data>
+      <data key="pk">decision_key, evidence_key</data>
+      <data key="description">Structured support, contradiction, context, and veto evidence for each decision.</data>
+    </node>
+    <node id="table:market_decision_outcome">
+      <data key="kind">table</data>
+      <data key="label">Decision outcome</data>
+      <data key="entity">DecisionOutcome</data>
+      <data key="grain">(decision_key, label_definition, horizon_days)</data>
+      <data key="cadence">on_outcome</data>
+      <data key="training_use">labels</data>
+      <data key="writers">outcome_resolver.py, semantic_evidence.py</data>
+      <data key="pk">decision_key, label_definition, horizon_days</data>
+      <data key="description">Realized outcome attached to a decision under an explicit label definition.</data>
+    </node>
+    <node id="table:market_data_contract">
+      <data key="kind">table</data>
+      <data key="label">Semantic data contract</data>
+      <data key="entity">DataContract</data>
+      <data key="grain">(contract_key)</data>
+      <data key="cadence">on_change</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_contracts.py</data>
+      <data key="pk">contract_key</data>
+      <data key="description">Versioned executable contract for dataset grain, timing, source, and allowed use.</data>
+    </node>
+    <node id="table:semantic_feature_definition">
+      <data key="kind">table</data>
+      <data key="label">Semantic feature definition</data>
+      <data key="entity">FeatureDefinition</data>
+      <data key="grain">(feature_key)</data>
+      <data key="cadence">on_change</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_contracts.py</data>
+      <data key="pk">feature_key</data>
+      <data key="description">Materialized authored feature/label contract with physical bindings and leakage rules.</data>
+    </node>
+    <node id="table:market_data_watermark">
+      <data key="kind">table</data>
+      <data key="label">Data completeness watermark</data>
+      <data key="entity">DataWatermark</data>
+      <data key="grain">(dataset, partition_key)</data>
+      <data key="cadence">per_run</data>
+      <data key="training_use">context</data>
+      <data key="writers">semantic_evidence.py, semantic_identity.py</data>
+      <data key="pk">dataset, partition_key</data>
+      <data key="description">Producer-published input/output completeness state, distinct from freshness.</data>
+    </node>
+    <node id="metric:delivery_surprise_z">
+      <data key="kind">metric</data>
+      <data key="label">Delivery surprise z-score</data>
+      <data key="entity">Equity</data>
+      <data key="unit">z</data>
+      <data key="graded_status">research-candidate</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">Today's NSE delivery percentage as a z-score against the symbol's own trailing 20-session history: unusual ownership behaviour on a session, the T+1-lag edge the master report names.</data>
+    </node>
+    <node id="metric:close_price">
+      <data key="kind">metric</data>
+      <data key="label">Closing price (basis-tagged)</data>
+      <data key="entity">Bar</data>
+      <data key="unit">per_share_INR</data>
+      <data key="graded_status">live</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">The most recent clean closing price on or before an as-of date, excluding quarantined bars.</data>
+    </node>
+    <node id="metric:delivery_pct_latest">
+      <data key="kind">metric</data>
+      <data key="label">Latest delivery percentage</data>
+      <data key="entity">DeliveryObservation</data>
+      <data key="unit">percent</data>
+      <data key="graded_status">research-candidate</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">Delivered shares as a share of traded shares on the most recent session at or before the as-of date.</data>
+    </node>
+    <node id="metric:delivery_pct_30d_average">
+      <data key="kind">metric</data>
+      <data key="label">Delivery percentage, 30-session average</data>
+      <data key="entity">DeliveryObservation</data>
+      <data key="unit">percent</data>
+      <data key="graded_status">research-candidate</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">Mean delivery percentage over the trailing window ending at the as-of date — the baseline a delivery surprise is measured against.</data>
+    </node>
+    <node id="metric:rsi_14_latest">
+      <data key="kind">metric</data>
+      <data key="label">RSI (14), latest</data>
+      <data key="entity">TechnicalSignal</data>
+      <data key="unit">index_points</data>
+      <data key="graded_status">measured</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">Wilder RSI from the technical panel on the most recent date at or before the as-of date.</data>
+    </node>
+    <node id="metric:signal_win_rate_5d">
+      <data key="kind">metric</data>
+      <data key="label">Signal win rate, 5-day horizon</data>
+      <data key="entity">SignalOutcome</data>
+      <data key="unit">probability</data>
+      <data key="graded_status">live</data>
+      <data key="leakage_risk">high</data>
+      <data key="description">Share of resolved 5-day signals that ended in a win under a single labelling rule, with its sample size.</data>
+    </node>
+    <node id="metric:usable_factor_readings_5d">
+      <data key="kind">metric</data>
+      <data key="label">Usable factor readings at 5 days</data>
+      <data key="entity">EdgeReading</data>
+      <data key="unit">count</data>
+      <data key="graded_status">live</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">How many graded factor readings at a 5-day horizon currently clear the power and independence guards.</data>
+    </node>
+    <node id="metric:unified_score_latest">
+      <data key="kind">metric</data>
+      <data key="label">Unified score, latest served</data>
+      <data key="entity">Recommendation</data>
+      <data key="unit">score_0_100</data>
+      <data key="graded_status">live</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">The highest composite score served for a symbol at or before the as-of date, with its conviction bucket and timeframe.</data>
+    </node>
+    <node id="metric:confluence_score_latest">
+      <data key="kind">metric</data>
+      <data key="label">Confluence score, latest</data>
+      <data key="entity">EngineScore</data>
+      <data key="unit">score_0_100</data>
+      <data key="graded_status">measured</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">The most recent multi-engine agreement score with the number of screeners holding the name and the model probabilities behind it.</data>
+    </node>
+    <node id="metric:index_pcr_latest">
+      <data key="kind">metric</data>
+      <data key="label">Index put-call ratio, latest</data>
+      <data key="entity">IndexDerivativesSnapshot</data>
+      <data key="unit">ratio</data>
+      <data key="graded_status">research-candidate</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">The most recent index PCR reading with the index close at the same instant.</data>
+    </node>
+    <node id="metric:rollover_pct_latest">
+      <data key="kind">metric</data>
+      <data key="label">Futures rollover, latest</data>
+      <data key="entity">FuturesPositioning</data>
+      <data key="unit">percent</data>
+      <data key="graded_status">low-data</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">The latest rollover percentage and annualised cost of carry for a stock's futures, with its total open interest.</data>
+    </node>
+    <node id="metric:market_breadth_latest">
+      <data key="kind">metric</data>
+      <data key="label">Market breadth, latest</data>
+      <data key="entity">BreadthObservation</data>
+      <data key="unit">percent</data>
+      <data key="graded_status">ungraded</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">Share of the universe above its 200-day average and the advance/decline ratio for the most recent session.</data>
+    </node>
+    <node id="metric:current_regime">
+      <data key="kind">metric</data>
+      <data key="label">Current market regime</data>
+      <data key="entity">RegimeState</data>
+      <data key="graded_status">live</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">The regime label and its posterior probability for the most recent session at or before the as-of date.</data>
+    </node>
+    <node id="metric:asm_flag_latest">
+      <data key="kind">metric</data>
+      <data key="label">Surveillance flag, latest</data>
+      <data key="entity">TechnicalSignal</data>
+      <data key="graded_status">live</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">Whether the symbol is under exchange surveillance measures as of the most recent signal date.</data>
+    </node>
+    <node id="metric:analyst_consensus_latest">
+      <data key="kind">metric</data>
+      <data key="label">Analyst consensus, latest</data>
+      <data key="entity">AnalystEstimate</data>
+      <data key="unit">per_share_INR</data>
+      <data key="graded_status">ungraded</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">Mean analyst target, contributor count and consensus rating from the most recent snapshot at or before the as-of date.</data>
+    </node>
+    <node id="metric:screener_5d_forward_return">
+      <data key="kind">metric</data>
+      <data key="label">Screener 5-day forward return</data>
+      <data key="entity">ScreenerOutcome</data>
+      <data key="unit">percent</data>
+      <data key="graded_status">live</data>
+      <data key="leakage_risk">high</data>
+      <data key="description">Average 5-session forward return across the times this symbol was surfaced by a live screener, with the sample size.</data>
+    </node>
+    <node id="metric:news_sentiment_5d">
+      <data key="kind">metric</data>
+      <data key="label">News sentiment, trailing 5 sessions</data>
+      <data key="entity">NewsItem</data>
+      <data key="unit">score_minus1_1</data>
+      <data key="graded_status">measured</data>
+      <data key="leakage_risk">none</data>
+      <data key="description">Mean scored sentiment across news items mentioning the symbol in the five sessions up to the as-of date, with the mention count.</data>
+    </node>
+    <node id="metric:excursion_path_5d">
+      <data key="kind">metric</data>
+      <data key="label">Excursion path, 5-day horizon</data>
+      <data key="entity">SignalExcursion</data>
+      <data key="unit">percent</data>
+      <data key="graded_status">live</data>
+      <data key="leakage_risk">high</data>
+      <data key="description">Average maximum favourable and adverse excursion for resolved 5-day signals on a symbol, with the sample size.</data>
+    </node>
+    <edge id="e0" source="class:Listing" target="class:Instrument">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e1" source="class:Equity" target="class:Instrument">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e2" source="class:CompanyProfile" target="class:Instrument">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e3" source="class:Bar" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e4" source="class:IntradayBar" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e5" source="class:DeliveryObservation" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e6" source="class:CorporateAction" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e7" source="class:FundamentalSnapshot" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e8" source="class:AnalystEstimate" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e9" source="class:EarningsSurprise" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e10" source="class:InsiderTransaction" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e11" source="class:BlockDeal" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e12" source="class:MFHolding" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e13" source="class:NewsItem" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e14" source="class:OptionChainRow" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e15" source="class:FuturesPositioning" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e16" source="class:IndexDerivativesSnapshot" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e17" source="class:MoverSnapshot" target="class:Observation">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e18" source="class:FeatureVector" target="class:PlatformOutput">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e19" source="class:TechnicalSignal" target="class:PlatformOutput">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e20" source="class:EngineScore" target="class:PlatformOutput">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e21" source="class:Recommendation" target="class:PlatformOutput">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e22" source="class:ModelArtifact" target="class:PlatformOutput">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e23" source="class:FeatureImportance" target="class:PlatformOutput">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e24" source="class:EdgeReading" target="class:OutcomeRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e25" source="class:SignalOutcome" target="class:OutcomeRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e26" source="class:SignalExcursion" target="class:OutcomeRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e27" source="class:ScreenerAppearance" target="class:CandidateRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e28" source="class:ScreenerOutcome" target="class:OutcomeRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e29" source="class:EventTrigger" target="class:CandidateRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e30" source="class:Endpoint" target="class:GovernanceRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e31" source="class:JobRun" target="class:GovernanceRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e32" source="class:DataQualityCheck" target="class:GovernanceRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e33" source="class:DataContract" target="class:GovernanceRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e34" source="class:FeatureDefinition" target="class:GovernanceRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e35" source="class:DataWatermark" target="class:GovernanceRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e36" source="class:GraphNode" target="class:GovernanceRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e37" source="class:GraphEdge" target="class:GovernanceRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e38" source="class:EvidenceRecord" target="class:GovernanceRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e39" source="table:stock_ohlcv" target="class:Bar">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e40" source="table:intraday_ohlcv" target="class:IntradayBar">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e41" source="table:stock_delivery_data" target="class:DeliveryObservation">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e42" source="table:stock_delivery_volume" target="class:DeliveryObservation">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e43" source="table:stock_master" target="class:Equity">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e44" source="table:company_profiles" target="class:CompanyProfile">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e45" source="table:corporate_actions" target="class:CorporateAction">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e46" source="table:fundamentals_history" target="class:FundamentalSnapshot">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e47" source="table:analyst_estimates_history" target="class:AnalystEstimate">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e48" source="table:eps_surprise_history" target="class:EarningsSurprise">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e49" source="table:insider_trades" target="class:InsiderTransaction">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e50" source="table:block_deals" target="class:BlockDeal">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e51" source="table:stock_mf_holdings" target="class:MFHolding">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e52" source="table:news_sentiment_items" target="class:NewsItem">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e53" source="table:news_symbol_link" target="class:NewsItem">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e54" source="table:so_option_chain" target="class:OptionChainRow">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e55" source="table:stock_futures_oi_history" target="class:FuturesPositioning">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e56" source="table:fno_rollover" target="class:FuturesPositioning">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e57" source="table:index_max_pain" target="class:IndexDerivativesSnapshot">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e58" source="table:nt_index_pcr_ts" target="class:IndexDerivativesSnapshot">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e59" source="table:mover_snapshots" target="class:MoverSnapshot">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e60" source="table:stock_event_triggers" target="class:EventTrigger">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e61" source="table:market_regimes" target="class:RegimeState">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e62" source="table:market_breadth" target="class:BreadthObservation">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e63" source="table:intraday_regime_history" target="class:RegimeState">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e64" source="table:sector_rrg_history" target="class:SectorRotationPoint">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e65" source="table:technical_signals" target="class:TechnicalSignal">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e66" source="table:feature_store" target="class:FeatureVector">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e67" source="table:unified_recommendations" target="class:Recommendation">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e68" source="table:unified_recommendations_history" target="class:Recommendation">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e69" source="table:intraday_recommendations" target="class:Recommendation">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e70" source="table:confluence_signals" target="class:EngineScore">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e71" source="table:engine_composite_scores" target="class:EngineScore">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e72" source="table:signal_outcomes" target="class:SignalOutcome">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e73" source="table:unified_signal_outcomes" target="class:SignalOutcome">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e74" source="table:signal_excursions" target="class:SignalExcursion">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e75" source="table:screener_master" target="class:Screener">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e76" source="table:stock_scores" target="class:EngineScore">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e77" source="table:live_screener_appearances" target="class:ScreenerAppearance">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e78" source="table:live_screener_outcomes" target="class:ScreenerOutcome">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e79" source="table:job_heartbeat" target="class:JobRun">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e80" source="table:data_quality_results" target="class:DataQualityCheck">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e81" source="table:model_registry" target="class:ModelArtifact">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e82" source="table:feature_importance_log" target="class:FeatureImportance">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e83" source="table:factor_edge_history" target="class:EdgeReading">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e84" source="table:market_endpoint_registry" target="class:Endpoint">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e85" source="table:url_endpoints" target="class:Endpoint">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e86" source="table:nse_stocks" target="class:Equity">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e87" source="table:mc_scid_map" target="class:ScripCodeMapping">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e88" source="table:market_issuer" target="class:Issuer">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e89" source="table:market_instrument" target="class:Instrument">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e90" source="table:market_listing" target="class:Listing">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e91" source="table:market_identifier" target="class:ProviderIdentifier">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e92" source="table:market_identifier_gap" target="class:ProviderIdentifier">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e93" source="table:market_graph_node" target="class:GraphNode">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e94" source="table:market_graph_edge" target="class:GraphEdge">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e95" source="table:market_evidence" target="class:EvidenceRecord">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e96" source="table:market_claim" target="class:MarketClaim">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e97" source="table:market_claim_evidence" target="class:EvidenceRecord">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e98" source="table:market_decision_event" target="class:DecisionEvent">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e99" source="table:market_decision_evidence" target="class:DecisionEvent">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e100" source="table:market_decision_outcome" target="class:DecisionOutcome">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e101" source="table:market_data_contract" target="class:DataContract">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e102" source="table:semantic_feature_definition" target="class:FeatureDefinition">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e103" source="table:market_data_watermark" target="class:DataWatermark">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e104" source="class:Equity" target="class:Bar">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasBar</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e105" source="class:Equity" target="class:IntradayBar">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasIntradayBar</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e106" source="class:Equity" target="class:DeliveryObservation">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasDelivery</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">research-candidate</data>
+    </edge>
+    <edge id="e107" source="class:Equity" target="class:CorporateAction">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasCorporateAction</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e108" source="class:Equity" target="class:FundamentalSnapshot">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasFundamentalSnapshot</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">measured</data>
+    </edge>
+    <edge id="e109" source="class:Equity" target="class:AnalystEstimate">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasAnalystEstimate</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">ungraded</data>
+    </edge>
+    <edge id="e110" source="class:Equity" target="class:EarningsSurprise">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasEarningsSurprise</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">ungraded</data>
+    </edge>
+    <edge id="e111" source="class:Equity" target="class:InsiderTransaction">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasInsiderTransaction</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">measured</data>
+    </edge>
+    <edge id="e112" source="class:Equity" target="class:BlockDeal">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasBlockDeal</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">measured</data>
+    </edge>
+    <edge id="e113" source="class:Equity" target="class:MFHolding">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasMFHolding</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">ungraded</data>
+    </edge>
+    <edge id="e114" source="class:Equity" target="class:OptionChainRow">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasOptionChain</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">ungraded</data>
+    </edge>
+    <edge id="e115" source="class:Equity" target="class:FuturesPositioning">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasFuturesPositioning</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">low-data</data>
+    </edge>
+    <edge id="e116" source="class:Equity" target="class:FeatureVector">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasFeatureVector</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e117" source="class:Equity" target="class:TechnicalSignal">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasTechnicalSignal</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e118" source="class:Equity" target="class:Recommendation">
+      <data key="label">relation</data>
+      <data key="label">instrumentServedRecommendation</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e119" source="class:TechnicalSignal" target="class:SignalOutcome">
+      <data key="label">relation</data>
+      <data key="label">signalResolvedToOutcome</data>
+      <data key="cardinality">N:1</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e120" source="class:SignalOutcome" target="class:SignalExcursion">
+      <data key="label">relation</data>
+      <data key="label">outcomeHasExcursion</data>
+      <data key="cardinality">1:1</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e121" source="class:NewsItem" target="class:Equity">
+      <data key="label">relation</data>
+      <data key="label">newsMentionsInstrument</data>
+      <data key="cardinality">N:M</data>
+      <data key="graded_status">measured</data>
+    </edge>
+    <edge id="e122" source="class:Equity" target="class:EventTrigger">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasEventTrigger</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">ungraded</data>
+    </edge>
+    <edge id="e123" source="class:Equity" target="class:MoverSnapshot">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasMoverSnapshot</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">measured</data>
+    </edge>
+    <edge id="e124" source="class:Screener" target="class:Equity">
+      <data key="label">relation</data>
+      <data key="label">screenerSurfacesInstrument</data>
+      <data key="cardinality">N:M</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e125" source="class:ScreenerAppearance" target="class:ScreenerOutcome">
+      <data key="label">relation</data>
+      <data key="label">appearanceHasOutcome</data>
+      <data key="cardinality">1:1</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e126" source="class:Index" target="class:IndexDerivativesSnapshot">
+      <data key="label">relation</data>
+      <data key="label">indexHasDerivativesSnapshot</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">ungraded</data>
+    </edge>
+    <edge id="e127" source="class:RegimeState" target="class:Bar">
+      <data key="label">relation</data>
+      <data key="label">regimeConditionsBar</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e128" source="class:RegimeState" target="class:EngineScore">
+      <data key="label">relation</data>
+      <data key="label">regimeModulatesEngineWeight</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e129" source="class:SectorRotationPoint" target="class:Equity">
+      <data key="label">relation</data>
+      <data key="label">sectorRotationInformsInstrument</data>
+      <data key="cardinality">N:M</data>
+      <data key="graded_status">research-candidate</data>
+    </edge>
+    <edge id="e130" source="class:EdgeReading" target="class:ModelArtifact">
+      <data key="label">relation</data>
+      <data key="label">edgeReadingGatesModelInput</data>
+      <data key="cardinality">N:1</data>
+      <data key="graded_status">measured</data>
+    </edge>
+    <edge id="e131" source="class:ModelArtifact" target="class:FeatureImportance">
+      <data key="label">relation</data>
+      <data key="label">modelProducesImportance</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e132" source="class:Endpoint" target="class:Observation">
+      <data key="label">relation</data>
+      <data key="label">endpointServesObservation</data>
+      <data key="cardinality">N:M</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e133" source="class:Issuer" target="class:Instrument">
+      <data key="label">relation</data>
+      <data key="label">issuerIssuesInstrument</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e134" source="class:Instrument" target="class:Listing">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasListing</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e135" source="class:Instrument" target="class:ProviderIdentifier">
+      <data key="label">relation</data>
+      <data key="label">instrumentHasProviderIdentifier</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e136" source="class:GraphNode" target="class:GraphNode">
+      <data key="label">relation</data>
+      <data key="label">graphNodeConnects</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e137" source="class:EvidenceRecord" target="class:MarketClaim">
+      <data key="label">relation</data>
+      <data key="label">evidenceSupportsClaim</data>
+      <data key="cardinality">N:M</data>
+      <data key="graded_status">ungraded</data>
+    </edge>
+    <edge id="e138" source="class:DecisionEvent" target="class:EvidenceRecord">
+      <data key="label">relation</data>
+      <data key="label">decisionHasEvidence</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e139" source="class:DecisionEvent" target="class:DecisionOutcome">
+      <data key="label">relation</data>
+      <data key="label">decisionHasOutcome</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e140" source="class:DataContract" target="class:FeatureDefinition">
+      <data key="label">relation</data>
+      <data key="label">contractDescribesFeature</data>
+      <data key="cardinality">N:M</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e141" source="class:DataWatermark" target="class:DecisionEvent">
+      <data key="label">relation</data>
+      <data key="label">watermarkGatesDecision</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e142" source="class:JobRun" target="class:PlatformOutput">
+      <data key="label">relation</data>
+      <data key="label">jobProducesOutput</data>
+      <data key="cardinality">1:N</data>
+      <data key="graded_status">live</data>
+    </edge>
+    <edge id="e143" source="metric:delivery_surprise_z" target="table:stock_delivery_data">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e144" source="metric:close_price" target="table:stock_ohlcv">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e145" source="metric:delivery_pct_latest" target="table:stock_delivery_data">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e146" source="metric:delivery_pct_30d_average" target="table:stock_delivery_data">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e147" source="metric:rsi_14_latest" target="table:technical_signals">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e148" source="metric:signal_win_rate_5d" target="table:signal_outcomes">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e149" source="metric:usable_factor_readings_5d" target="table:factor_edge_history">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e150" source="metric:unified_score_latest" target="table:unified_recommendations">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e151" source="metric:confluence_score_latest" target="table:confluence_signals">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e152" source="metric:index_pcr_latest" target="table:nt_index_pcr_ts">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e153" source="metric:rollover_pct_latest" target="table:fno_rollover">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e154" source="metric:market_breadth_latest" target="table:market_breadth">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e155" source="metric:current_regime" target="table:market_regimes">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e156" source="metric:asm_flag_latest" target="table:technical_signals">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e157" source="metric:analyst_consensus_latest" target="table:analyst_estimates_history">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e158" source="metric:screener_5d_forward_return" target="table:live_screener_outcomes">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e159" source="metric:news_sentiment_5d" target="table:news_symbol_link">
+      <data key="label">derived_from</data>
+    </edge>
+    <edge id="e160" source="metric:excursion_path_5d" target="table:signal_excursions">
+      <data key="label">derived_from</data>
+    </edge>
+  </graph>
+</graphml>

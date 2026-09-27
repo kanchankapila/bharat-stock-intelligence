@@ -1,0 +1,194 @@
+Bharat Stock Intelligence — ontology standards
+
+THIRD-PARTY TERMS IN THE GENERATED ARTIFACTS
+
+The generated ontology documents reference terms from the standards and vocabularies
+below. The generated files are derived works of this repository. The notices here
+satisfy the attribution conditions of the referenced vocabularies.
+
+- SKOS (Simple Knowledge Organization System)
+    spec:    https://www.w3.org/TR/skos-reference/
+    license: W3C Document License (royalty-free) (no attribution required)
+- OWL 2 (class/property subset)
+    spec:    https://www.w3.org/TR/owl2-overview/
+    license: W3C Document License (royalty-free) (no attribution required)
+- SHACL (Shapes Constraint Language)
+    spec:    https://www.w3.org/TR/shacl/
+    license: W3C Document License (royalty-free) (no attribution required)
+- JSON-LD 1.1
+    spec:    https://www.w3.org/TR/json-ld11/
+    license: W3C Document License (royalty-free) (no attribution required)
+- PROV-O (Provenance Ontology)
+    spec:    https://www.w3.org/TR/prov-o/
+    license: W3C Document License (royalty-free) (no attribution required)
+- DCAT 3 (Data Catalog Vocabulary)
+    spec:    https://www.w3.org/TR/vocab-dcat-3/
+    license: W3C Document License (royalty-free) (no attribution required)
+- QUDT 2.1 (Quantities, Units, Dimensions and Data Types)
+    spec:    https://qudt.org/
+    license: CC BY 4.0 (attribution required)
+- schema.org Dataset / DataFeed
+    spec:    https://schema.org/Dataset
+    license: CC BY-SA 3.0 (no attribution required)
+- FIBO (Financial Industry Business Ontology)
+    spec:    https://spec.edmcouncil.org/fibo/
+    license: MIT (EDM Council) (attribution required)
+- ISO 10962 CFI / ISO 6166 ISIN / FIGI / ISO 17442 LEI
+    spec:    https://www.iso.org/standard/81140.html
+    license: ISO identifier schemes (free to reference) (no attribution required)
+- Cypher (Neo4j) / GraphML / Mermaid
+    spec:    https://opencypher.org/
+    license: Apache-2.0 / BSD-style / MIT (no attribution required)
+
+FIBO is a trademark of EDM Council, Inc.
+QUDT is licensed CC BY 4.0; the QUDT ontology is NOT redistributed here — only IRIs
+into it are referenced.
+
+The generated artifacts are provided AS IS, WITHOUT WARRANTY OF ANY KIND, express
+or implied — including any implied warranty of fitness for a particular trading
+purpose.
+
+NOTE: this repository has no root LICENSE file, so the generated artifacts currently
+carry no license grant of their own. Choosing one is a user decision, not one this
+tooling should make silently.
+
+Adopted standards
+-----------------
+
+  skos         SKOS (Simple Knowledge Organization System)
+               spec:    https://www.w3.org/TR/skos-reference/
+               license: W3C Document License (royalty-free)
+               used:    The 30 controlled vocabularies: regimes, conviction buckets, outcome labels, OI buildup, edge verdicts, adjustment bases, suspect reasons.
+               artifacts: ontology.ttl (skos:ConceptScheme + skos:Concept), ontology.jsonld
+               rejected: A bespoke enum table — unreadable outside this repo.
+
+  owl          OWL 2 (class/property subset)
+               spec:    https://www.w3.org/TR/owl2-overview/
+               license: W3C Document License (royalty-free)
+               used:    The T-Box: 40+ classes, the subClassOf hierarchy, datatype and object properties, domain/range.
+               artifacts: ontology.ttl, ontology.jsonld
+               rejected: OWL 2 DL with restrictions — needs HermiT/ELK to draw any conclusion.
+
+  shacl        SHACL (Shapes Constraint Language)
+               spec:    https://www.w3.org/TR/shacl/
+               license: W3C Document License (royalty-free)
+               used:    A generated NodeShape per class: required key properties, expected datatypes, vocabulary membership (sh:in) for enum-typed columns, and per-card shapes that make an unexpected column visible.
+               artifacts: ontology.shacl.ttl
+               rejected: JSON Schema alone — cannot express vocabulary membership, per-table closedness, or graph relations.
+
+  jsonld       JSON-LD 1.1
+               spec:    https://www.w3.org/TR/json-ld11/
+               license: W3C Document License (royalty-free)
+               used:    The agent/LLM-facing serialization of the whole graph, with an `@context` that binds bsi:/bsip:/bsim: alongside the aligned FIBO prefixes.
+               artifacts: ontology.jsonld, context.jsonld
+               rejected: RDF/XML — verbose, and nothing in this stack parses it.
+
+  prov         PROV-O (Provenance Ontology)
+               spec:    https://www.w3.org/TR/prov-o/
+               license: W3C Document License (royalty-free)
+               used:    Lineage: which job writes each table, when it last succeeded, what the freshness column is, and which tables a metric was derived from.
+               artifacts: ontology.prov.ttl, coverage.json
+               rejected: A
+
+  dcat         DCAT 3 (Data Catalog Vocabulary)
+               spec:    https://www.w3.org/TR/vocab-dcat-3/
+               license: W3C Document License (royalty-free)
+               used:    A catalog of every documented table as `dcat:Dataset`, with distribution, accrual periodicity, temporal coverage, row count and quality verdict.
+               artifacts: catalog.ttl, catalog.jsonld
+               rejected: s
+
+  qudt         QUDT 2.1 (Quantities, Units, Dimensions and Data Types)
+               spec:    https://qudt.org/
+               license: CC BY 4.0   [attribution required]
+               used:    Units for every measure: INR and the crore multiplier, percent, shares, days, contracts, index points, per-session counts.
+               artifacts: ontology.ttl (qudt:unit annotations)
+               rejected: FIBO CurrencyAmount for units — a large module to declare one term.
+
+  schema_org   schema.org Dataset / DataFeed
+               spec:    https://schema.org/Dataset
+               license: CC BY-SA 3.0
+               used:    Web-facing discovery metadata for the same datasets DCAT describes.
+               artifacts: catalog.jsonld
+               rejected: Atom / RFC 4287 feeds as the discovery layer — no measure or unit model, and no place for a training-use verdict.
+
+  fibo         FIBO (Financial Industry Business Ontology)
+               spec:    https://spec.edmcouncil.org/fibo/
+               license: MIT (EDM Council)   [attribution required]
+               used:    Alignment only — asserted mappings from local concepts onto FIBO / OMG-Commons IRIs, emitted as skos:exactMatch / closeMatch.
+               artifacts: ontology.ttl (skos:*Match triples)
+               rejected: Vendoring and importing FIBO — a multi-megabyte OWL 2 DL closure with no reasoner, against this repo's rule against unpinned dependencies.
+
+  identifiers  ISO 10962 CFI / ISO 6166 ISIN / FIGI / ISO 17442 LEI
+               spec:    https://www.iso.org/standard/81140.html
+               license: ISO identifier schemes (free to reference)
+               used:    Naming the identifier schemes: which column is an ISIN, which is a vendor scrip code, which is a per-vendor opaque id.
+               artifacts: ontology.ttl (identifier typing on bsi:Equity)
+               rejected: T
+
+  graph_formats Cypher (Neo4j) / GraphML / Mermaid
+               spec:    https://opencypher.org/
+               license: Apache-2.0 / BSD-style / MIT
+               used:    Loadable graph exports and human-readable diagrams of the same graph.
+               artifacts: ontology.cypher, ontology.graphml, schema.mmd
+               rejected: A bespoke node/edge dump with no loader — unreadable by the one tool (a graph database) that would consume it.
+
+  reviewed_not_adopted XBRL / IFRS taxonomy
+               spec:    https://www.xbrl.org/
+               license: Public specifications
+               used:    REVIEWED, NOT ADOPTED — recorded because it is the obvious candidate for fundamentals.
+               artifacts: 
+               rejected: A
+
+License summary
+---------------
+THIRD-PARTY TERMS IN THE GENERATED ARTIFACTS
+
+The generated ontology documents reference terms from the standards and vocabularies
+below. The generated files are derived works of this repository. The notices here
+satisfy the attribution conditions of the referenced vocabularies.
+
+- SKOS (Simple Knowledge Organization System)
+    spec:    https://www.w3.org/TR/skos-reference/
+    license: W3C Document License (royalty-free) (no attribution required)
+- OWL 2 (class/property subset)
+    spec:    https://www.w3.org/TR/owl2-overview/
+    license: W3C Document License (royalty-free) (no attribution required)
+- SHACL (Shapes Constraint Language)
+    spec:    https://www.w3.org/TR/shacl/
+    license: W3C Document License (royalty-free) (no attribution required)
+- JSON-LD 1.1
+    spec:    https://www.w3.org/TR/json-ld11/
+    license: W3C Document License (royalty-free) (no attribution required)
+- PROV-O (Provenance Ontology)
+    spec:    https://www.w3.org/TR/prov-o/
+    license: W3C Document License (royalty-free) (no attribution required)
+- DCAT 3 (Data Catalog Vocabulary)
+    spec:    https://www.w3.org/TR/vocab-dcat-3/
+    license: W3C Document License (royalty-free) (no attribution required)
+- QUDT 2.1 (Quantities, Units, Dimensions and Data Types)
+    spec:    https://qudt.org/
+    license: CC BY 4.0 (attribution required)
+- schema.org Dataset / DataFeed
+    spec:    https://schema.org/Dataset
+    license: CC BY-SA 3.0 (no attribution required)
+- FIBO (Financial Industry Business Ontology)
+    spec:    https://spec.edmcouncil.org/fibo/
+    license: MIT (EDM Council) (attribution required)
+- ISO 10962 CFI / ISO 6166 ISIN / FIGI / ISO 17442 LEI
+    spec:    https://www.iso.org/standard/81140.html
+    license: ISO identifier schemes (free to reference) (no attribution required)
+- Cypher (Neo4j) / GraphML / Mermaid
+    spec:    https://opencypher.org/
+    license: Apache-2.0 / BSD-style / MIT (no attribution required)
+
+FIBO is a trademark of EDM Council, Inc.
+QUDT is licensed CC BY 4.0; the QUDT ontology is NOT redistributed here — only IRIs
+into it are referenced.
+
+The generated artifacts are provided AS IS, WITHOUT WARRANTY OF ANY KIND, express
+or implied — including any implied warranty of fitness for a particular trading
+purpose.
+
+NOTE: this repository has no root LICENSE file, so the generated artifacts currently
+carry no license grant of their own. Choosing one is a user decision, not one this
+tooling should make silently.

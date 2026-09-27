@@ -1,9 +1,23 @@
 """Semantic graph, data-quality and decision-evidence services.
 
 The canonical serving table remains ``unified_recommendations``. This module
-adds an append-only, reconstructable evidence ledger beside it and a small
-PostgreSQL graph for source facts and claims. It is dependency-free and keeps
-working before the semantic migration is deployed by checking table presence.
+adds a reconstructable evidence ledger beside it and a small PostgreSQL graph
+for source facts and claims. It is dependency-free and keeps working before
+the semantic migration is deployed by checking table presence.
+
+**Not append-only; immutable-provenance upsert (corrected 2026-09-27,
+AF-20260927-10).** These tables were documented as "append-only" while every
+writer used ``ON CONFLICT DO UPDATE`` -- including on ``available_at``, so a
+refresh silently moved the one column that records when a fact became
+knowable, and the bitemporal ``as_of`` reads this layer exists for could not
+be trusted. Mutable columns still update in place (one row per key, not an
+event stream), but **``available_at`` is now first-write-wins in every writer
+here and in ``semantic_identity``** -- it is deliberately absent from every
+``DO UPDATE SET`` list. Do not add it back: a corrupted provenance column
+cannot be repaired after the fact, and its failure mode is a confident wrong
+answer from a biased slice rather than a visible error. If this layer ever
+needs full event-sourcing (a new row per change), that is a schema change,
+not a writer change.
 """
 from __future__ import annotations
 
@@ -285,7 +299,7 @@ def persist_decision_evidence_bundles(conn, recommendations: Iterable[Dict[str, 
                  relation=excluded.relation, evidence_type=excluded.evidence_type,
                  metric=excluded.metric, value_json=excluded.value_json,
                  source_table=excluded.source_table, source_ref=excluded.source_ref,
-                 observed_at=excluded.observed_at, available_at=excluded.available_at,
+                 observed_at=excluded.observed_at,
                  confidence_kind=excluded.confidence_kind, note=excluded.note""",
             evidence_rows,
         )
@@ -484,7 +498,7 @@ def upsert_market_entity(
            ON CONFLICT (node_type, node_key) DO UPDATE SET
              label=excluded.label, canonical_symbol=excluded.canonical_symbol,
              attributes=excluded.attributes, valid_from=excluded.valid_from,
-             valid_to=excluded.valid_to, available_at=excluded.available_at,
+             valid_to=excluded.valid_to,
              source=excluded.source, source_ref=excluded.source_ref, revision=excluded.revision
            RETURNING node_id""",
         [node_key, node_type, label, canonical_symbol, _json(attributes or {}), valid_from,
@@ -521,7 +535,7 @@ def record_market_evidence(
              source_type=excluded.source_type, source_ref=excluded.source_ref,
              source_uri=excluded.source_uri, content_hash=excluded.content_hash,
              content=excluded.content, observed_at=excluded.observed_at,
-             available_at=excluded.available_at, extraction_method=excluded.extraction_method,
+             extraction_method=excluded.extraction_method,
              extraction_version=excluded.extraction_version, quality_status=excluded.quality_status""",
         [evidence_key, source_type, source_ref, source_uri, content_hash, _json(content),
          observed_at, available_at, extraction_method, extraction_version, quality_status],
@@ -554,7 +568,7 @@ def record_market_fact(
            ON CONFLICT (assertion_key) DO UPDATE SET
              from_node_id=excluded.from_node_id, predicate=excluded.predicate,
              object_value=excluded.object_value, valid_from=excluded.valid_from,
-             valid_to=excluded.valid_to, available_at=excluded.available_at,
+             valid_to=excluded.valid_to,
              source=excluded.source, source_ref=excluded.source_ref
            RETURNING edge_id""",
         [from_id, predicate, _json(object_value), valid_from, valid_to, available_at,
@@ -594,7 +608,7 @@ def record_market_claim(
              subject_node_id=excluded.subject_node_id, predicate=excluded.predicate,
              object_value=excluded.object_value, horizon=excluded.horizon,
              stance=excluded.stance, claim_status=excluded.claim_status,
-             method=excluded.method, available_at=excluded.available_at""",
+             method=excluded.method""",
         [claim_key, subject_id, predicate, _json(object_value), horizon, stance,
          claim_status, method, available_at],
     )

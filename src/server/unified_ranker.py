@@ -3060,6 +3060,23 @@ class UnifiedRanker:
             self._degraded(f"[UnifiedRanker] sector backfill failed: {e}")
             self.conn.rollback()
 
+        # Evidence is an additive provenance ledger, not a second ranking surface.
+        # It is deliberately best-effort here so a pre-migration deployment does not
+        # take down the canonical ranker; after the migration is applied this same
+        # commit writes an auditable bundle for every result in the run.
+        try:
+            from semantic_evidence import persist_decision_evidence_bundles
+            evidence_count = persist_decision_evidence_bundles(self.conn, results)
+            if evidence_count:
+                self.conn.commit()
+                print(f"[UnifiedRanker] persisted {evidence_count} semantic decision bundles", file=sys.stderr)
+        except Exception as e:
+            self._degraded(f"semantic decision evidence unavailable: {e}")
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+
         breakdown = {}
         for r in results:
             c = r['conviction_level']
