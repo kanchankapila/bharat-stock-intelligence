@@ -371,7 +371,17 @@ async function persistNewsRows(
         ON CONFLICT(id) DO UPDATE SET
           sentiment=excluded.sentiment, sentiment_score=excluded.sentiment_score,
           impact=excluded.impact, category=excluded.category,
-          symbols_json=excluded.symbols_json, sector=excluded.sector`);
+          symbols_json=excluded.symbols_json, sector=excluded.sector,
+          -- fetched_at must advance on re-insert (fixed 2026-09-24). It is the fetch contact
+          -- stamp, not the article's publication date, and the DO UPDATE branch is the common
+          -- case: a daily RSS re-lists items already in the table, so without this the column
+          -- froze at each item's FIRST sighting. That silently disarmed the four
+          -- per-source freshness checks (nse-announcements / nse-financial-results /
+          -- mc-earnings-news / mc-deals-news): nse-financial-results-freshness reported 30.6d
+          -- stale while its own hourly cycle logged "2 mapped" -- the source was live, the
+          -- column just could not move. A freshness check must read a column the writer
+          -- actually advances; widening the threshold instead would also mask a real outage.
+          fetched_at=now()`);
 
     await bulkUpsert(tx, [...legacyRows.values()], 9,
       n => `INSERT INTO news_articles

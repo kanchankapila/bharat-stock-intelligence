@@ -13,6 +13,7 @@ vi.mock('../dbAsync', () => ({
 import {
   DATA_QUALITY_CHECKS, daysStale, tradingDaysStale, safeRatio, runDataQualityChecks,
   getLatestDataQualityResults, DQ_CHECK_CONCURRENCY,
+  DQ_STATIC_PROPERTY_CHECK_IDS, RETIRED_TECHNICAL_SIGNAL_COLUMNS,
 } from '../dataQualityChecks';
 import { dbGet } from '../dbAsync';
 
@@ -204,18 +205,54 @@ describe('individual evaluate() functions', () => {
     expect(r.detail).toMatch(/not.*enough history|no regime/i);
   });
 
-  it('regime-edge-trust-floor warns when a ready regime is below the 0.55 trust floor', () => {
+  // 2026-09-24: a breach used to WARN unconditionally. The breach is the mitigation's INPUT --
+  // ml_calibration.py's regime_edge_weight() already shrinks every breached regime toward neutral
+  // 0.5 and edge_adjusted_probability() consumes it live (HIGH_VOL measured AUC 0.473 -> weight
+  // pinned at 0.0). Re-warning every morning about a state the system neutralises is what trains a
+  // reader to skip the line. The check now grades MECHANISM health: a breach with the decay applied
+  // is correct behaviour; a breach WITHOUT it is the genuine defect (full-confidence no-edge
+  // scoring). The breach itself is still named in the detail, so nothing is hidden.
+  it('regime-edge-trust-floor passes on a breach WHEN the decay is enabled (mitigation verified, no action)', () => {
     const r = byId('regime-edge-trust-floor').evaluate(
-      { breached_count: 1, ready_count: 3, latest_computed_at: now.toISOString() }, now);
-    expect(r.status).toBe('warn');
+      { breached_count: 1, ready_count: 3, latest_computed_at: now.toISOString(), worst_breached_auc: 0.473, adjustment_enabled: true }, now);
+    expect(r.status).toBe('pass');
     expect(r.detail).toMatch(/1 of 3/);
+    // The no-edge regime stays visible in the report even though it is not a warning.
+    expect(r.detail).toMatch(/0\.473/);
+    expect(r.detail).toMatch(/shrinking each toward neutral/);
+  });
+
+  it('regime-edge-trust-floor FAILS on a breach when edge adjustment is disabled (unmitigated no-edge scoring)', () => {
+    // The regression the old warn-only version could not express: the decay silently turning off
+    // left a below-floor regime scoring at FULL confidence, which is strictly worse than a breach.
+    const r = byId('regime-edge-trust-floor').evaluate(
+      { breached_count: 2, ready_count: 3, latest_computed_at: now.toISOString(), worst_breached_auc: 0.473, adjustment_enabled: false }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/2 of 3/);
+    expect(r.detail).toMatch(/FULL confidence/);
+  });
+
+  it('regime-edge-trust-floor does not treat a missing adjustment flag as enabled (fails safe)', () => {
+    // A NULL/unreadable flag must not silently satisfy the `if (!row?.adjustment_enabled)`
+    // branch into the passing path -- if the row lacks the field entirely, treat it as off.
+    const r = byId('regime-edge-trust-floor').evaluate(
+      { breached_count: 1, ready_count: 1, latest_computed_at: now.toISOString() }, now);
+    expect(r.status).toBe('fail');
+  });
+
+  it('regime-edge-trust-floor SQL reads the edge_adjustment_enabled app setting (not hard-coded)', () => {
+    // The mechanism grade is only meaningful if the flag is actually read from the live setting --
+    // a hard-coded assumption would make the new pass branch unfalsifiable.
+    const sql = byId('regime-edge-trust-floor').sql!;
+    expect(sql).toMatch(/edge_adjustment_enabled/);
+    expect(sql).toMatch(/app_settings/);
   });
 
   it('regime-edge-trust-floor passes when every ready regime clears the trust floor', () => {
     const r = byId('regime-edge-trust-floor').evaluate(
-      { breached_count: 0, ready_count: 2, latest_computed_at: now.toISOString() }, now);
+      { breached_count: 0, ready_count: 2, latest_computed_at: now.toISOString(), adjustment_enabled: true }, now);
     expect(r.status).toBe('pass');
-    expect(r.detail).toMatch(/clear live-edge trust floor/);
+    expect(r.detail).toMatch(/clear the 0\.55 live-edge trust floor/);
   });
 
   it('regime-edge-trust-floor warns if its own snapshot has gone stale, even with no breach', () => {
@@ -510,6 +547,43 @@ describe('bulk-endpoint-fetcher-coverage (hand-rolled: a fresh table is not a de
     expect(check().evaluate({ ...healthyRow, canon_universe: 0 }, new Date()).status).toBe('fail');
     expect(check().evaluate(undefined, new Date()).status).toBe('fail');
   });
+
+  it('REGRESSION GUARD: preopen is graded against its OWN demonstrated ceiling, not the canonical universe', () => {
+    // The live 2026-09-24 shape that produced the false alarm: 2,208 symbols on a day whose own
+    // trailing-45d ceiling was 2,479. Against canon_universe (2,366) that reads 93.3% and warned
+    // every morning; the feed was healthy and 2,208 is the middle of its own range.
+    // 2208/2479 = 89.1% -> above the 85% warn floor, so this must PASS.
+    const liveShape = { ...healthyRow, preopen_n: 2208, preopen_universe: 2479 };
+    expect(check().evaluate(liveShape, new Date()).status).toBe('pass');
+
+    // ...and the check must still catch a genuine collapse against that SAME denominator. The
+    // 210-symbol F&O-only stuck state is the exact regression this check was written for
+    // (AF-20260904-01); 210/2479 = 8.5%, far below the 60% fail floor.
+    const collapse = check().evaluate({ ...liveShape, preopen_n: 210 }, new Date());
+    expect(collapse.status).toBe('fail');
+    expect(collapse.detail).toContain('preopen_stock_snapshot');
+
+    // The whole point of a max-based ceiling: a sustained collapse must not be able to
+    // re-baseline itself into a pass. Feeding back a window whose max has ratcheted down to the
+    // collapsed value cannot rescue it, because the fail floor is absolute -- but the SQL must
+    // also never report a denominator BELOW the worst healthy day, which is why it uses MAX.
+    expect(check().evaluate({ ...liveShape, preopen_n: 210, preopen_universe: 210 }, new Date()).status).toBe('fail');
+  });
+
+  it('falls back to the canonical universe for preopen only when the SQL supplies no measured ceiling', () => {
+    // A table with no 45-day history has nothing to learn a ceiling from; the old denominator is
+    // then strictly better than dividing by zero, and the empty-table branch still fails.
+    expect(check().evaluate({ ...healthyRow, preopen_n: 2364 }, new Date()).status).toBe('pass');
+  });
+
+  it('a healthy preopen day can never trip the warn band, but a partial degradation still surfaces', () => {
+    // warnBelow 0.85 = 2,107 symbols, i.e. below the WORST healthy session measured (2,179).
+    // 2,179/2,479 = 87.9% passes; 1,900/2,479 = 76.6% warns.
+    expect(check().evaluate({ ...healthyRow, preopen_n: 2179, preopen_universe: 2479 }, new Date()).status).toBe('pass');
+    const r = check().evaluate({ ...healthyRow, preopen_n: 1900, preopen_universe: 2479 }, new Date());
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('preopen_stock_snapshot');
+  });
 });
 
 describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCheck)', () => {
@@ -559,18 +633,29 @@ describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCh
     expect(r.status).toBe('pass');
   });
 
-  it('confluence-signals-freshness is NOT trading-day-aware, but tolerates the real ~9h daily skip window', () => {
+  it('confluence-signals-freshness is NOT trading-day-aware, but tolerates the real 9h30m daily skip window', () => {
     // Fixed 2026-08-07: confluence-compute does NOT run every 30 minutes every day (that was
     // the bug this threshold was originally, wrongly, sized around) -- processConfluenceCompute
-    // deliberately skips ALL real writes for ~9h/trading day (isMarketOpen() 9:15am-3:30pm PLUS
+    // deliberately skips ALL real writes for ~9.5h/trading day (isMarketOpen() 9:15am-3:30pm PLUS
     // isConfluenceComputeWindow()'s wider 8am-9:15am/3:30pm-5pm skip -- see confluence.jobs.ts).
     // A naive hour-scale threshold false-alarmed WARN then CRITICAL FAIL every single trading
-    // day -- live-caught via `npm run dq:check` mid-warn at 10am IST. 3 hours stale (well inside
-    // the legitimate gap) must NOT warn; something genuinely beyond the ~9h/12h window must.
+    // day -- live-caught via `npm run dq:check` mid-warn at 10am IST.
+    //
+    // Re-calibrated 2026-09-24 (AF-20260924-04): the window's LAST compute slot is 07:30 IST
+    // (jobRegistry's lateDeadlineCronPatterns end at UTC 02:00), not 08:00, so the true
+    // structural gap is 07:30 -> 17:00 = 9h30m. warnDays 0.375 was EXACTLY 9.00h, which made a
+    // WARN an arithmetic certainty inside the last 30 minutes of every normal day -- live-caught
+    // 16:48 IST at a 9.31h gap with the 17:00 run 12 minutes away. Now 0.42d = 10.08h.
+    //
+    // The pins below are the real numbers, not round ones chosen to look tidy: 9h sits inside the
+    // legitimate 9h30m gap and must PASS; 10.5h is past it and must WARN; 13h must still FAIL, so
+    // the abnormal 15h scheduler-pause case this check exists for is still reported.
     const threeHoursAgo = new Date(now.getTime() - 3 * 3_600_000).toISOString();
     expect(byId('confluence-signals-freshness').evaluate({ last_date: threeHoursAgo }, now).status).toBe('pass');
-    const tenHoursAgo = new Date(now.getTime() - 10 * 3_600_000).toISOString();
-    expect(byId('confluence-signals-freshness').evaluate({ last_date: tenHoursAgo }, now).status).toBe('warn');
+    const nineHoursAgo = new Date(now.getTime() - 9 * 3_600_000).toISOString();
+    expect(byId('confluence-signals-freshness').evaluate({ last_date: nineHoursAgo }, now).status).toBe('pass');
+    const tenAndAHalfHoursAgo = new Date(now.getTime() - 10.5 * 3_600_000).toISOString();
+    expect(byId('confluence-signals-freshness').evaluate({ last_date: tenAndAHalfHoursAgo }, now).status).toBe('warn');
     const thirteenHoursAgo = new Date(now.getTime() - 13 * 3_600_000).toISOString();
     expect(byId('confluence-signals-freshness').evaluate({ last_date: thirteenHoursAgo }, now).status).toBe('fail');
     // A weekend gap must still NOT be absorbed here (not trading-day-aware) -- Saturday's data
@@ -998,15 +1083,36 @@ describe('dq-uninformative-checks', () => {
 
   it('is registered', () => expect(check).toBeDefined());
 
-  it('NEGATIVE CONTROL: an always-PASS check with 200+ runs is now flagged (was invisible pre-fix)', () => {
+  it('NEGATIVE CONTROL: an always-PASS check whose measured value is FROZEN is flagged (was invisible pre-fix)', () => {
     // Found live 2026-08-17 (/threshold-calibration-audit): the SQL only ever computed
     // stuck_bad, so a check that is structurally incapable of ever failing had no way to
     // surface here no matter how much history accumulated. This is the "candidate list", not
     // proof any one of them is broken -- status is 'warn', matching stuck_bad's severity.
-    const r = check.evaluate!({ judged: 50, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 3, stuck_good_ids: 'foo, bar, baz' }, now);
+    //
+    // Updated 2026-09-24: the green half now requires a FROZEN detail as well as a uniform
+    // verdict. Counting a uniform verdict alone reported 106 checks, 103 of which were live
+    // monitors reading values that move every run.
+    const r = check.evaluate!({ judged: 50, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 3, stuck_good_ids: 'foo, bar, baz', earned_green: 0 }, now);
     expect(r.status).toBe('warn');
-    expect(r.detail).toContain('passed on EVERY one of their last 200+ runs');
+    expect(r.detail).toContain('byte-identical measured value');
     expect(r.detail).toContain('foo, bar, baz');
+  });
+
+  it('REGRESSION GUARD: a green check whose measured value MOVES is not flagged (103 live monitors were false-alarmed)', () => {
+    // The false alarm this guards against is loud: 78 of those 106 were makeFreshnessCheck()
+    // monitors, which are SILENT BY DESIGN -- MAX(date) on a healthy table only moves forward,
+    // so their green is correct and earned, not proof they "cannot fail". Reporting them every
+    // ~30 min buried the 3 genuinely frozen ones. earned_green carries them as context instead.
+    const r = check.evaluate!({ judged: 50, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 0, stuck_good_ids: '', earned_green: 103 }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toContain('none stuck on a single verdict either direction');
+  });
+
+  it('reports earned greens as context alongside a real frozen finding, so a real one is never hidden', () => {
+    const r = check.evaluate!({ judged: 180, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 1, stuck_good_ids: 'frozen-one', earned_green: 103 }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('frozen-one');
+    expect(r.detail).toContain('103 further check(s)');
   });
 
   it('does not flag stuck-good below the 200-run bar, even if the same check would clear the 10-run stuck-bad bar', () => {
@@ -1027,6 +1133,48 @@ describe('dq-uninformative-checks', () => {
     const r = check.evaluate!({ judged: 120, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 0, stuck_good_ids: '' }, now);
     expect(r.status).toBe('pass');
     expect(r.detail).toContain('none stuck on a single verdict either direction');
+  });
+
+  // The meta-check grades itself in SQL, and SQL cannot see object properties -- so the
+  // `assertsStaticProperty` marker on a check had no path into this check at all. These three
+  // assert a STATIC property of code/schema, so their detail is legitimately invariant forever,
+  // and the first version of the frozen-detail discriminator flagged all three as "cannot fail".
+  // The id set is the bridge between the marker and the SQL; this pins the two in agreement so
+  // neither can drift, and the SQL must actually exclude them.
+  it('DQ_STATIC_PROPERTY_CHECK_IDS matches exactly the checks tagged assertsStaticProperty', () => {
+    const tagged = DATA_QUALITY_CHECKS.filter(c => c.assertsStaticProperty).map(c => c.id).sort();
+    expect([...DQ_STATIC_PROPERTY_CHECK_IDS].sort()).toEqual(tagged);
+    // Every exemption must name a real check, and every tagged id must be unique.
+    expect(new Set(DQ_STATIC_PROPERTY_CHECK_IDS).size).toBe(DQ_STATIC_PROPERTY_CHECK_IDS.size);
+    expect(tagged.length).toBeGreaterThan(0);
+  });
+
+  it('excludes the marked static assertions from stuck_good in SQL (the marker is actually read)', () => {
+    for (const id of DQ_STATIC_PROPERTY_CHECK_IDS) {
+      expect(check.sql).toContain(`'${id}'`);
+    }
+    expect(check.sql).toMatch(/NOT IN/);
+    expect(check.sql).toMatch(/static_invariant/);
+  });
+
+  it('does not warn when only marked static assertions are frozen — they are exempt, but still reported', () => {
+    const r = check.evaluate!({
+      judged: 180, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 0, stuck_good_ids: '',
+      earned_green: 103, static_invariant: 3,
+    }, now);
+    expect(r.status).toBe('pass');
+    // Still surfaced as context, so the exemption set cannot grow silently.
+    expect(r.detail).toContain('assert a static property');
+  });
+
+  it('still warns on a real frozen check even when static assertions are exempt', () => {
+    const r = check.evaluate!({
+      judged: 180, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 1, stuck_good_ids: 'truly-frozen',
+      earned_green: 103, static_invariant: 3,
+    }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('truly-frozen');
+    expect(r.detail).toContain('3 further check(s)');
   });
 });
 
@@ -1090,5 +1238,50 @@ describe('technical-signals-feature-coverage — self-baselining (AF-20260816-11
     const check = byId('technical-signals-feature-coverage');
     expect(check.sql).not.toMatch(/baseline 53/);
     expect(JSON.stringify(check.sql)).toMatch(/newly_dead/);
+  });
+
+  // The check's own message used to say a deliberate retirement "ages out of the reference window
+  // on its own and this clears without action". That is true but slow, and cs_score proved the
+  // cost: it stopped 2026-08-31 and sat at rank 18 of a 20-date window, so the same un-actionable
+  // warn repeated for ~2 more sessions. RETIRED_TECHNICAL_SIGNAL_COLUMNS makes the decision
+  // explicit instead of leaving the check to ask a human the same question every morning.
+  it('splits recorded retirements out of newly_dead_count rather than counting them as writer deaths', () => {
+    const check = byId('technical-signals-feature-coverage');
+    // The SQL must carry BOTH sides, or a retirement is either counted or invisible.
+    expect(check.sql).toMatch(/NOT IN/);
+    expect(check.sql).toMatch(/retired_dead_cols/);
+    for (const col of Object.keys(RETIRED_TECHNICAL_SIGNAL_COLUMNS)) {
+      expect(check.sql).toContain(`'${col}'`);
+    }
+  });
+
+  it('every recorded retirement carries a non-empty reason (an entry cannot be added silently)', () => {
+    for (const [col, reason] of Object.entries(RETIRED_TECHNICAL_SIGNAL_COLUMNS)) {
+      expect(reason, `${col} is missing a retirement reason`).toBeTruthy();
+      expect(reason.trim().length).toBeGreaterThan(20);
+    }
+  });
+
+  it('passes and NAMES the retirement when the only dead column is a recorded one', () => {
+    // The live cs_score case: SQL now returns it under retired_dead_cols, not newly_dead_count.
+    const r = byId('technical-signals-feature-coverage').evaluate(
+      { newly_dead_count: 0, newly_dead_cols: null, retired_dead_cols: 'cs_score', recent_dates: 10, ref_dates: 10 }, now);
+    expect(r.status).toBe('pass');
+    // Visible, not a silent hole in coverage.
+    expect(r.detail).toContain('cs_score');
+    expect(r.detail).toContain('RETIRED_TECHNICAL_SIGNAL_COLUMNS');
+    expect(r.detail).toMatch(/no unexplained/i);
+  });
+
+  it('still warns for a genuine writer death alongside recorded retirements', () => {
+    // The registry must not become a blanket allowlist that swallows real regressions.
+    const r = byId('technical-signals-feature-coverage').evaluate(
+      { newly_dead_count: 1, newly_dead_cols: 'brand_new_writer', retired_dead_cols: 'cs_score', recent_dates: 10, ref_dates: 10 }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('brand_new_writer');
+  });
+
+  it('cs_score is registered as retired, with its decommission recorded', () => {
+    expect(RETIRED_TECHNICAL_SIGNAL_COLUMNS.cs_score).toMatch(/DECOMMISSIONED/i);
   });
 });

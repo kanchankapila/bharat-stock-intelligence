@@ -38,6 +38,19 @@ export interface DataQualityCheck {
   critical: boolean;
   sql: string;
   params?: unknown[];
+  /** This check asserts a STATIC property of code/schema/data-shape (e.g. "table A's columns
+   *  mirror table B's", "no two enum values differ only by case") rather than measuring a
+   *  time-varying quantity. Its verdict and detail are therefore legitimately invariant for as
+   *  long as the schema is correct, and a regression would change them immediately.
+   *
+   *  Exists so `dq-uninformative-checks` can tell "reads a frozen input and cannot fail" (the
+   *  real defect it hunts) from "asserts an invariant that currently holds" (working as designed).
+   *  It is NOT a blanket allowlist: it must be set individually, with the reason in a comment, and
+   *  the meta-check prints every flagged id so the set cannot grow silently. Added 2026-09-24
+   *  after the first version of that check reported 106 permanently-green monitors -- 78 of them
+   *  correct-by-design freshness checks, and 3 of these genuine invariant assertions -- as
+   *  "proves nothing". */
+  assertsStaticProperty?: true;
   evaluate: (row: Record<string, any> | undefined, now: Date) => { status: DataQualityStatus; detail: string };
 }
 
@@ -193,8 +206,24 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // options
   { id: 'so-option-chain-freshness', label: 'so_option_chain (Trendlyne live options chain)',
     category: 'options', critical: false, table: 'so_option_chain', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // index_option_oi is the one options table whose date column is a TRADE date written the NEXT
+  // morning. mc_index_oi_fetcher.py runs on the 'mc-index-oi' post-close job but stamps rows with
+  // the PREVIOUS completed session (it walks back to the last session with published OI, same
+  // shape as nse_bhavcopy_fetcher's walk-back), and today's live read shows the newest rows are
+  // date=2026-09-22 written at fetched_at=2026-09-24T02:09 -- so reading `date` reports a
+  // perfectly healthy post-close backfill as "1.9d old" every single morning.
+  // Measured live 2026-09-24: data_quality_results said "index-option-oi-freshness warn 1.1d old"
+  // while the sibling index-max-pain-freshness -- written by the SAME fetcher in the SAME run --
+  // passed at 0.1d old, and index_option_oi's own MAX(fetched_at) was minutes old. Two writers'
+  // outputs cannot disagree about whether the job ran; only the chosen column can be wrong here.
+  // fetched_at is the honest last-write column (recurring-bugs.md: a date column that lags the
+  // writer by design is not staleness). Same fix shape as the trendlyne coverage checks below,
+  // which already read fetched_at precisely because their date columns are logical rather than
+  // write-time. Threshold kept at 1/3 trading days -- a full session plus a day of grace for a
+  // Monday/holiday gap, which tradingDayAware handles by not counting the weekend at all.
   { id: 'index-option-oi-freshness', label: 'index_option_oi (MC index OI/max-pain)',
-    category: 'options', critical: false, table: 'index_option_oi', dateColumn: 'date', warnDays: 1, failDays: 3 },
+    category: 'options', critical: false, table: 'index_option_oi', dateColumn: 'fetched_at',
+    warnDays: 1, failDays: 3 },
   { id: 'nt-index-pcr-ts-freshness', label: 'nt_index_pcr_ts (NiftyTrader PCR/VIX)',
     category: 'options', critical: false, table: 'nt_index_pcr_ts', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
   { id: 'stock-option-features-freshness', label: 'stock_option_features (per-stock option chain features)',
@@ -295,10 +324,21 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'trading80-call-alerts-recency', label: 'trading80_call_alerts (Trading80 vendor buy/sell calls)',
     category: 'flows', critical: false, table: 'trading80_call_alerts', dateColumn: 'fetched_at', warnDays: 5, failDays: 10 },
   // 2026-08-15 registry-archive-only backlog closure -- see marketsmojo_stock_picks_fetcher.py.
-  // Sparse by nature (2-3 total picks on a normal day, not one per stock per day), so no
-  // failDays -- matches insider-trades-recency's existing warn-only style for thin feeds.
+  // The endpoint is NOT a daily feed. Live-measured 2026-09-24: the table holds **3 rows in 6
+  // weeks** (1 pick on 08-13, 1 on 09-02, 1 on 09-06) -- MarketsMojo publishes a model-portfolio
+  // pick only when the model changes, so on most days there is legitimately nothing new to write.
+  // The old warnDays:10 was inherited from the "2-3 total picks on a NORMAL DAY" comment above,
+  // which no measurement ever supported, and it guaranteed a warn on ~6 of every 7 days purely
+  // from the vendor's own sparsity -- a check that cries wolf on correct data stops being read
+  // (the same argument the ur-engine-score-zero-not-null floor below already makes).
+  // Sized to the observed sparsity, not to make the warning disappear: warnDays 30 still fires
+  // if NO pick lands for a full month, which is the real question this check should answer
+  // ("is the fetcher still reaching the endpoint?"). Added failDays 90 so a total fetcher death
+  // escalates to fail instead of sitting on a permanent warn -- the previous warn-only shape
+  // could never distinguish "quiet vendor" from "dead fetcher", which is the same uninformative
+  // verdict dq-uninformative-checks exists to catch.
   { id: 'marketsmojo-stock-picks-recency', label: 'marketsmojo_stock_picks (MarketsMojo vendor model-portfolio picks)',
-    category: 'flows', critical: false, table: 'marketsmojo_stock_picks', dateColumn: 'fetched_at', warnDays: 10 },
+    category: 'flows', critical: false, table: 'marketsmojo_stock_picks', dateColumn: 'fetched_at', warnDays: 30, failDays: 90 },
   // 2026-08-15 -- see trendlyne_market_insight_fetcher.py. event_time is corporate-event
   // driven (order wins, results, deals), not a fixed daily cadence, so a short warn window.
   { id: 'trendlyne-market-insights-recency', label: 'trendlyne_market_insights (pre-classified corporate-event feed)',
@@ -536,9 +576,21 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // abnormal condition this check SHOULD report. Widening it would have muted the one case it
   // exists for. What the incident actually exposed was the missing catch-up path, fixed
   // separately in confluence.jobs.ts's shouldComputeConfluence force flag.
+  //
+  // 9h -> 10h (2026-09-24, AF-20260924-04): the 9h01m figure above was measured from a 07:59
+  // write, but the WINDOW's last slot is 07:30, not 08:00 — jobRegistry's lateDeadlineCronPatterns
+  // for confluence-compute end at UTC 02:00 = IST 07:30. The true structural gap is therefore
+  // 07:30 -> 17:00 = 9h30m, which is 0.396d, ABOVE warnDays 0.375 (exactly 9.00h). The check was
+  // guaranteed to WARN on every single normal day inside the last 30 minutes before the 17:00
+  // resume — not an edge case, an arithmetic certainty. Live-caught 16:48 IST 2026-09-24 at a
+  // 9.31h gap with the 17:00 run 12 minutes away.
+  // 0.42d = 10.08h covers the real 9h30m gap plus the 30-min cadence and a little slack. The
+  // 15-hour pause that motivated the earlier revert still FAILS (failDays 0.5 = 12h unchanged),
+  // so the genuine abnormal case this check exists for is still reported. Test below pins the
+  // corrected boundary: 9h->pass, 10.5h->warn, 13h->fail.
   { id: 'confluence-signals-freshness', label: 'confluence_signals (canonical confluence engine)',
     category: 'scoring', critical: true, table: 'confluence_signals', dateColumn: 'computed_at',
-    tradingDayAware: false, warnDays: 0.375, failDays: 0.5 },
+    tradingDayAware: false, warnDays: 0.42, failDays: 0.5 },
   { id: 'unified-signals-freshness', label: 'unified_signals',
     category: 'signals', critical: false, table: 'unified_signals', dateColumn: 'signal_date', warnDays: 3, failDays: 5 },
   { id: 'screener-appearances-freshness', label: 'screener_appearances (feeds screener_momentum_score)',
@@ -730,7 +782,114 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'intraday-breadth-snapshots-freshness', label: 'intraday_breadth_snapshots (intraday breadth scan)',
     category: 'reference', critical: false, table: 'intraday_breadth_snapshots', dateColumn: 'date',
     nativeDateColumn: true, tradingDayAware: true, warnDays: 1, failDays: 2 },
+  // ── semantic control plane (added 2026-09-25) ───────────────────────────────
+  // These are not external datasources; they are the semantic/decision layer itself
+  // (ontology build -> contracts, identity sync -> issuer/instrument/listing, ranker
+  // evidence -> decision event/evidence). They are registered here rather than in
+  // EXCLUDED_TABLES so the coverage gate monitors them like every other landing table.
+  //
+  // All entries are warn-only on purpose until the layer is scheduled and backfilled:
+  // an empty semantic table before `python -m ontology build` is expected state, not a
+  // failure, and emptyDetail says so instead of repeating "is empty" every run. Once
+  // `market_decision_event` is emitted nightly by the ranker, tighten it to failDays 5.
+  // market_claim_evidence has no timestamp column, so it takes an EXCLUDED_TABLES entry.
+  { id: 'semantic-data-contract-freshness', label: 'market_data_contract (executable ontology contracts)',
+    category: 'reference', critical: false, table: 'market_data_contract', dateColumn: 'updated_at',
+    warnDays: 10, emptyDetail: 'semantic layer not materialized yet (run `ontology build`)' },
+  { id: 'semantic-feature-definition-freshness', label: 'semantic_feature_definition (materialized feature/label contracts)',
+    category: 'reference', critical: false, table: 'semantic_feature_definition', dateColumn: 'updated_at',
+    warnDays: 10, emptyDetail: 'semantic layer not materialized yet (run `ontology build`)' },
+  { id: 'semantic-data-watermark-freshness', label: 'market_data_watermark (producer completeness watermarks)',
+    category: 'reference', critical: false, table: 'market_data_watermark', dateColumn: 'recorded_at',
+    nativeDateColumn: true, warnDays: 3, emptyDetail: 'no producer has published a completeness watermark yet' },
+  { id: 'semantic-issuer-freshness', label: 'market_issuer (canonical issuer identities)',
+    category: 'reference', critical: false, table: 'market_issuer', dateColumn: 'recorded_at',
+    nativeDateColumn: true, warnDays: 10, emptyDetail: 'identity sync not materialized yet (run `ontology identity`)' },
+  { id: 'semantic-instrument-freshness', label: 'market_instrument (canonical ISIN-first instruments)',
+    category: 'reference', critical: false, table: 'market_instrument', dateColumn: 'recorded_at',
+    nativeDateColumn: true, warnDays: 10, emptyDetail: 'identity sync not materialized yet (run `ontology identity`)' },
+  { id: 'semantic-listing-freshness', label: 'market_listing (exchange/segment/symbol listings)',
+    category: 'reference', critical: false, table: 'market_listing', dateColumn: 'recorded_at',
+    nativeDateColumn: true, warnDays: 10, emptyDetail: 'identity sync not materialized yet (run `ontology identity`)' },
+  { id: 'semantic-identifier-freshness', label: 'market_identifier (provider-qualified identifier mappings)',
+    category: 'reference', critical: false, table: 'market_identifier', dateColumn: 'recorded_at',
+    nativeDateColumn: true, warnDays: 10, emptyDetail: 'identity sync not materialized yet (run `ontology identity`)' },
+  { id: 'semantic-identifier-gap-freshness', label: 'market_identifier_gap (unresolvable provider identifiers)',
+    category: 'reference', critical: false, table: 'market_identifier_gap', dateColumn: 'last_seen',
+    nativeDateColumn: true, warnDays: 14, emptyDetail: 'no identifier collision recorded (healthy when identity is materialized)' },
+  { id: 'semantic-graph-node-freshness', label: 'market_graph_node (bitemporal instance-graph nodes)',
+    category: 'reference', critical: false, table: 'market_graph_node', dateColumn: 'recorded_at',
+    nativeDateColumn: true, warnDays: 10, emptyDetail: 'instance graph not materialized yet (run `ontology identity`)' },
+  { id: 'semantic-graph-edge-freshness', label: 'market_graph_edge (typed bitemporal assertions)',
+    category: 'reference', critical: false, table: 'market_graph_edge', dateColumn: 'recorded_at',
+    nativeDateColumn: true, warnDays: 10, emptyDetail: 'instance graph not materialized yet (run `ontology identity`)' },
+  { id: 'semantic-evidence-freshness', label: 'market_evidence (retained source evidence)',
+    category: 'reference', critical: false, table: 'market_evidence', dateColumn: 'available_at',
+    nativeDateColumn: true, warnDays: 10, emptyDetail: 'no unstructured evidence retained yet' },
+  { id: 'semantic-claim-freshness', label: 'market_claim (explicit, status-bearing claims)',
+    category: 'reference', critical: false, table: 'market_claim', dateColumn: 'available_at',
+    nativeDateColumn: true, warnDays: 10, emptyDetail: 'no explicit claim recorded yet' },
+  { id: 'semantic-decision-event-freshness', label: 'market_decision_event (append-only decision contracts)',
+    category: 'signals', critical: false, table: 'market_decision_event', dateColumn: 'created_at',
+    nativeDateColumn: true, warnDays: 3, emptyDetail: 'no decision evidence bundle emitted yet (deploy the semantic migration, then run the ranker)' },
+  { id: 'semantic-decision-evidence-freshness', label: 'market_decision_evidence (structured support/contradiction/veto)',
+    category: 'signals', critical: false, table: 'market_decision_evidence', dateColumn: 'available_at',
+    nativeDateColumn: true, warnDays: 3, emptyDetail: 'no decision evidence emitted yet (deploy the semantic migration, then run the ranker)' },
+  { id: 'semantic-decision-outcome-freshness', label: 'market_decision_outcome (realized decision outcomes by label/horizon)',
+    category: 'signals', critical: false, table: 'market_decision_outcome', dateColumn: 'created_at',
+    nativeDateColumn: true, warnDays: 10, emptyDetail: 'no decision outcome recorded yet (resolve outcomes after the horizon elapses)' },
 ];
+
+/**
+ * The ids of every check tagged `assertsStaticProperty` (see the interface doc comment).
+ *
+ * The marker deliberately lives on the check object, so each exemption carries its reason beside
+ * the assertion it covers. But `dq-uninformative-checks` grades itself in SQL, and SQL cannot see
+ * object properties -- it can only match ids. This set is the bridge between the two.
+ *
+ * It is deliberately NOT a blanket allowlist: entries are added one at a time, each with the
+ * reason documented at the check, and `dataQualityChecks.test.ts` pins this set in exact
+ * agreement with the tagged checks so neither half can drift or grow silently.
+ */
+export const DQ_STATIC_PROPERTY_CHECK_IDS: ReadonlySet<string> = new Set([
+  'signal-source-case-collision',
+  'signal-outcomes-label-definition-consistent',
+  'quant-scores-history-column-parity',
+]);
+
+/** SQL literal list for {@link DQ_STATIC_PROPERTY_CHECK_IDS}, interpolated into the meta-check. */
+const DQ_STATIC_PROPERTY_CHECK_ID_SQL = [...DQ_STATIC_PROPERTY_CHECK_IDS]
+  .map(id => `'${id}'`)
+  .join(', ');
+
+/**
+ * technical_signals columns that were DELIBERATELY retired, mapped to why.
+ *
+ * The table gains and retires writers over time, so a retired column goes 100% NULL -- which is
+ * byte-for-byte the same shape as an accidental writer death. Without a record of intent the two
+ * are indistinguishable, so the check can only ask a human to re-confirm the same retirement every
+ * morning until it slides out of the reference window on its own.
+ *
+ * That auto-clear is real but slow, and its claim ages with the data: cs_score stopped on
+ * 2026-08-31 and sat at rank 18 of a 20-date window, so it would keep warning for roughly two
+ * more sessions. Measured live 2026-09-24: NULL on all 16 dates since 2026-08-28, with no writer
+ * change since, i.e. the warning was guaranteed to repeat and could never be acted on.
+ *
+ * Keyed by column name, valued by the reason. The reason is the thing a reviewer needs at the
+ * exact moment they consider adding an entry, so it lives on the same line as the exemption and an
+ * entry cannot be added silently. Adding a column here does NOT stop it being checked -- it only
+ * stops an already-decided retirement from being reported as an open question.
+ */
+export const RETIRED_TECHNICAL_SIGNAL_COLUMNS: Record<string, string> = {
+  cs_score:
+    'cs_ranker DECOMMISSIONED 2026-08-31 (live CV AUC 0.176, worse than random). Its --score job ' +
+    'is unscheduled, so the column is permanently NULL by design, not by defect.',
+};
+
+/** SQL literal list for {@link RETIRED_TECHNICAL_SIGNAL_COLUMNS}. */
+const RETIRED_TECHNICAL_SIGNAL_COLUMNS_SQL = Object.keys(RETIRED_TECHNICAL_SIGNAL_COLUMNS)
+  .map(col => `'${col}'`)
+  .join(', ');
 
 export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   // ── OHLCV ──────────────────────────────────────────────────────────────
@@ -1043,6 +1202,13 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'No two signal_source values differ only by case',
     category: 'signals',
     critical: false,
+    // INVARIANT ASSERTION, not a measurement: "no two values collide case-insensitively" has
+    // exactly one correct answer per schema, so both the verdict AND the detail string are
+    // legitimately byte-identical forever while the invariant holds. The live counter-example
+    // proves it is still a working check, not a dead one: it FAILed on 2026-08-12 with 2
+    // collisions, and its detail changed in the same run. Marked assertsStaticProperty
+    // 2026-09-24 so dq-uninformative-checks stops reading its correct green as "cannot fail".
+    assertsStaticProperty: true,
     // 'technical' vs 'TECHNICAL' were two different producers for months. Any consumer filtering
     // one silently dropped the other, and reward_engine.py's exclusion list fell straight
     // through the gap. Renamed to 'technical_scan' 2026-08-12 (migration 1786930000000).
@@ -1096,6 +1262,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'Each signal_outcomes source uses exactly one label_definition',
     category: 'signals',
     critical: false,
+    assertsStaticProperty: true,
     // terminal_pct2 (fixed ±2% terminal) and path_barrier (path-based MFE) are NOT comparable:
     // measured live, the same calendar window gave 88–91% vs 41–44% win rates purely from the
     // label convention. A source carrying both would make its own win rate meaningless, and
@@ -1122,6 +1289,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'quant_scores_history mirrors every quant_scores column',
     category: 'scoring',
     critical: false,
+    assertsStaticProperty: true,
     // quant_scores has no date column, so quant_scores_history is the ONLY record of what a
     // symbol's momentum/quality/value/vol inputs were on any past date. A column added to
     // quant_scores and not to the history table is silently unrecorded forever — and you find
@@ -1742,7 +1910,13 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     sql: `SELECT
             SUM(CASE WHEN ready = 1 AND auc < 0.55 THEN 1 ELSE 0 END) AS breached_count,
             SUM(CASE WHEN ready = 1 THEN 1 ELSE 0 END) AS ready_count,
-            MAX(computed_at) AS latest_computed_at
+            MIN(auc) FILTER (WHERE ready = 1 AND auc < 0.55) AS worst_breached_auc,
+            MIN(auc) FILTER (WHERE ready = 1) AS min_ready_auc,
+            MAX(auc) FILTER (WHERE ready = 1) AS max_ready_auc,
+            MAX(auc) FILTER (WHERE regime = '__GLOBAL__') AS global_auc,
+            MAX(computed_at) AS latest_computed_at,
+            (SELECT lower(value) = 'true' FROM app_settings WHERE key = 'edge_adjustment_enabled')
+              AS adjustment_enabled
           FROM regime_edge_status`,
     evaluate: (row, now) => {
       const readyCount = Number(row?.ready_count ?? 0);
@@ -1760,10 +1934,90 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (stale != null && stale > 3) {
         return { status: 'warn', detail: `regime_edge_status hasn't refreshed in ${fmtDays(stale)} trading day(s) — ml_calibration.py's nightly snapshot may not be running.` };
       }
-      if (breachedCount > 0) {
-        return { status: 'warn', detail: `${breachedCount} of ${readyCount} regime(s) with sufficient history sit below the 0.55 live-edge trust floor.` };
+      // AF-20260927-08: the branches BELOW can only see a breach. They cannot see the gate going
+      // inert, and the 2026-09-24 reframing (from "is any regime below the floor?" to "is the
+      // mitigation intact?") is exactly what opened that blind spot: with zero breaches this check
+      // reported an unqualified pass, which ALSO describes a gate that shrinks nothing anywhere.
+      //
+      // That happened live. ml_calibration.py's per_regime_auc() switched to a horizon-STRATIFIED
+      // AUC (a correct Simpson's-paradox fix — HIGH_VOL's pooled 0.4732 sat below every one of its
+      // own strata), which shifted the whole statistic up: measured 2026-09-25, every regime reads
+      // 0.57-0.62 where the pooled numbers spanned 0.47-0.62. AUC_TRUST_FLOOR (0.55) and its
+      // reference points ("BEAR ~0.61 trust, BULL/SIDEWAYS ~0.50 no edge", per regime_edge_weight's
+      // own docstring) were derived against the POOLED statistic and were never re-derived, so
+      // clip((auc-0.5)/0.05, 0, 1) now returns exactly 1.0 for every regime AND for the __GLOBAL__
+      // fallback — i.e. regime_edge_weight() is a constant function and edge_adjusted_probability()
+      // is a pass-through platform-wide, while edge_adjustment_enabled=true advertises otherwise.
+      //
+      // This is recurring-bugs' "a monitor that fires on EVERY run carries no information" in its
+      // inverted form (one that can never fire carries none either), and drift_detector.py's
+      // recalibration entry is explicit that after moving a threshold you must confirm the detector
+      // DISCRIMINATES rather than merely having stopped firing. Both degenerate directions are
+      // caught here: all-1.0 (nothing is ever shrunk) and all-0.0 (everything is always neutralised).
+      const edgeWeight = (auc: number) => Math.max(0, Math.min(1, (auc - 0.50) / (0.55 - 0.50)));
+      const gateAucs = [row?.min_ready_auc, row?.max_ready_auc, row?.global_auc]
+        .filter((v) => v != null)
+        .map(Number)
+        .filter((v) => Number.isFinite(v));
+      if (gateAucs.length > 0) {
+        const weights = gateAucs.map(edgeWeight);
+        const spread = Math.max(...weights) - Math.min(...weights);
+        if (spread === 0) {
+          const w = weights[0];
+          const range = `${Math.min(...gateAucs).toFixed(4)}..${Math.max(...gateAucs).toFixed(4)}`;
+          return {
+            status: 'warn',
+            detail:
+              `regime_edge_weight() carries NO information: every ready regime and the __GLOBAL__ ` +
+              `fallback clip to the same weight ${w.toFixed(2)} (AUC range ${range} against ` +
+              `AUC_RANDOM 0.50 / AUC_TRUST_FLOOR 0.55). ` +
+              (w >= 1
+                ? `win_probability is passed through UNSHRUNK in every regime, so edge_adjustment_enabled ` +
+                  `is enabled but has no effect — the trust gate is a no-op.`
+                : `win_probability is shrunk to neutral 0.5 in every regime, so the gate cannot ever ` +
+                  `credit a regime that does have edge.`) +
+              ` The floor needs re-deriving against whatever statistic per_regime_auc() now stores ` +
+              `(it moved to horizon-stratified AUC), or the gate needs repointing at realized ` +
+              `forward-return readings (factor_edge_history) per model_promotion.live_edge_verdict()'s ` +
+              `precedent. AF-20260927-08.`,
+          };
+        }
       }
-      return { status: 'pass', detail: `${readyCount - breachedCount}/${readyCount} regime(s) clear live-edge trust floor (${breachedCount} self-correcting via probability decay).` };
+      // 2026-09-24: this used to WARN on any breach, on the reasoning that a regime below the
+      // trust floor is news someone should read every morning. Live evidence says that reading is
+      // wrong. The breach is not an unhandled defect — it is the mitigation's INPUT.
+      // ml_calibration.py's regime_edge_weight() applies clip((auc-0.5)/(0.55-0.5), 0, 1) to
+      // every breached regime (HIGH_VOL measured 0.473 over 34,486 samples / 32 days / 3
+      // episodes, so its weight is pinned at 0.0 = fully shrunk to neutral 0.5), and
+      // edge_adjusted_probability() consumes that weight on the live scoring path. Re-warning
+      // every day about a state the system already neutralises trains the reader to skip the
+      // line, which is how a real failure in this same file would go unnoticed.
+      //
+      // So the question changes from "is any regime below the floor?" (a MARKET outcome, and
+      // the truthful place for it is the digest's own detail string) to "is the mechanism that
+      // handles it intact?" (a PLATFORM fact, which is what a data-quality check is for).
+      // A breach WITH the decay applied is correct, live behaviour -> pass. A breach WITHOUT it
+      // is the genuine defect: an unmitigated no-edge regime scoring at full confidence -> fail.
+      // HIGH_VOL is still named in the detail, so nothing is hidden -- it just no longer cries wolf.
+      if (breachedCount > 0) {
+        const worst = row?.worst_breached_auc != null ? ` (worst AUC ${Number(row.worst_breached_auc).toFixed(3)})` : '';
+        if (!row?.adjustment_enabled) {
+          return {
+            status: 'fail',
+            detail: `${breachedCount} of ${readyCount} regime(s) sit below the 0.55 live-edge trust floor${worst} ` +
+                    `AND app_settings.edge_adjustment_enabled is not 'true' — their win_probability is being used ` +
+                    `at FULL confidence with no decay toward neutral. This is the unmitigated failure, not the ` +
+                    `expected one: a no-edge regime is actively scoring.`,
+          };
+        }
+        return {
+          status: 'pass',
+          detail: `${breachedCount} of ${readyCount} regime(s) sit below the 0.55 live-edge trust floor${worst}, ` +
+                  `and edge_adjustment_enabled=true is shrinking each toward neutral 0.5 ` +
+                  `(regime_edge_weight = clip((auc-0.5)/0.05, 0, 1)). Mitigation verified live; no action.`,
+        };
+      }
+      return { status: 'pass', detail: `All ${readyCount} regime(s) with sufficient history clear the 0.55 live-edge trust floor.` };
     },
   },
 
@@ -1971,8 +2225,26 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // monitor stop being read. Found live 2026-08-17 (`/threshold-calibration-audit`): the
     // original SQL only ever computed stuck_bad (`only_status <> 'pass'`) despite this comment
     // already describing the green-forever half as intended — it was documented, never wired up.
+    // FOUND live 2026-09-24: the stuck_good half as first written counted a monitor GREEN for
+    // 200+ runs as proof it "cannot fail", and reported 106 such checks -- including 78 built by
+    // makeFreshnessCheck(). That is wrong on both halves. A freshness monitor is SILENT BY
+    // DESIGN: MAX(date) on a table whose writer is healthy can only ever move forward, so a
+    // permanently-green freshness check is not a broken check, it is a working one. Reporting
+    // 78 correctly-functioning monitors as "proves nothing" every 30 minutes is precisely the
+    // false-alarm noise this repo's own rules forbid (a check that cries wolf on correct data
+    // stops being read), and it buried the real finding: the only 3 checks in the whole 106 with
+    // a LITERALLY FROZEN detail string were the genuinely structurally-dead ones.
+    //
+    // The discriminator is the measured value, not the verdict: `detail` carries the numbers each
+    // check just read ("Latest x row is 0.1d old", "2,208/2,366 (93.3%)"). A check whose detail
+    // still MOVES is reading live input and its green is earned -- it could fail the moment that
+    // input turns bad. A check whose detail is byte-identical across 200+ runs is reading a frozen
+    // input, and THAT is the one that cannot fail. Measured on this DB: 103 moving vs 3 frozen.
+    // So stuck_good now means frozen-detail only, and the verdict-changing half is reported
+    // separately as context so a real transition is still visible.
     sql: `WITH agg AS (
             SELECT check_id, COUNT(*) AS runs, COUNT(DISTINCT status) AS distinct_status,
+                   COUNT(DISTINCT detail) AS distinct_detail,
                    MIN(status) AS only_status
               FROM data_quality_history
              WHERE checked_at > (EXTRACT(epoch FROM now()) - 86400 * 30) * 1000
@@ -1981,8 +2253,17 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
           SELECT COUNT(*) FILTER (WHERE runs >= 10) AS judged,
                  COUNT(*) FILTER (WHERE runs >= 10 AND distinct_status = 1 AND only_status <> 'pass') AS stuck_bad,
                  COALESCE(string_agg(check_id, ', ') FILTER (WHERE runs >= 10 AND distinct_status = 1 AND only_status <> 'pass'), '') AS stuck_bad_ids,
-                 COUNT(*) FILTER (WHERE runs >= 200 AND distinct_status = 1 AND only_status = 'pass') AS stuck_good,
-                 COALESCE(string_agg(check_id, ', ') FILTER (WHERE runs >= 200 AND distinct_status = 1 AND only_status = 'pass'), '') AS stuck_good_ids
+                 COUNT(*) FILTER (WHERE runs >= 200 AND distinct_status = 1 AND only_status = 'pass'
+                                    AND distinct_detail = 1
+                                    AND check_id NOT IN (${DQ_STATIC_PROPERTY_CHECK_ID_SQL})) AS stuck_good,
+                 COALESCE(string_agg(check_id, ', ') FILTER (WHERE runs >= 200 AND distinct_status = 1 AND only_status = 'pass'
+                                    AND distinct_detail = 1
+                                    AND check_id NOT IN (${DQ_STATIC_PROPERTY_CHECK_ID_SQL})), '') AS stuck_good_ids,
+                 COUNT(*) FILTER (WHERE runs >= 200 AND distinct_status = 1 AND only_status = 'pass'
+                                    AND distinct_detail > 1) AS earned_green,
+                 COUNT(*) FILTER (WHERE runs >= 200 AND distinct_status = 1 AND only_status = 'pass'
+                                    AND distinct_detail = 1
+                                    AND check_id IN (${DQ_STATIC_PROPERTY_CHECK_ID_SQL})) AS static_invariant
             FROM agg`,
     evaluate: (row) => {
       const judged = Number(row?.judged ?? 0);
@@ -1991,6 +2272,8 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       }
       const bad = Number(row?.stuck_bad ?? 0);
       const good = Number(row?.stuck_good ?? 0);
+      const earned = Number(row?.earned_green ?? 0);
+      const staticInv = Number(row?.static_invariant ?? 0);
       if (bad > 0 || good > 0) {
         const parts: string[] = [];
         if (bad > 0) {
@@ -2000,7 +2283,19 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         }
         if (good > 0) {
           parts.push(
-            `${good} check(s) have passed on EVERY one of their last 200+ runs: ${row?.stuck_good_ids}.`
+            `${good} check(s) have passed on every one of their last 200+ runs AND reported a byte-identical measured value each time — reading a frozen input, so they cannot currently fail: ${row?.stuck_good_ids}.`
+          );
+        }
+        if (earned > 0) {
+          parts.push(
+            `(${earned} further check(s) are green but their measured value still moves each run — that is a live monitor earning its green, not counted here.)`
+          );
+        }
+        if (staticInv > 0) {
+          parts.push(
+            `(${staticInv} further check(s) are green with a constant detail because they assert a STATIC property ` +
+            `of code/schema, not a time-varying quantity; each carries an assertsStaticProperty marker with its ` +
+            `reason, and the set is pinned by test so it cannot grow silently. A regression would change their detail immediately.)`
           );
         }
         return {
@@ -2008,7 +2303,13 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
           detail: parts.join(' '),
         };
       }
-      return { status: 'pass', detail: `${judged} checks judged over 10+ runs; none stuck on a single verdict either direction.` };
+      const base = `${judged} checks judged over 10+ runs; none stuck on a single verdict either direction.`;
+      return {
+        status: 'pass',
+        detail: staticInv > 0
+          ? `${base} (${staticInv} of them assert a static property and are exempt by marker.)`
+          : base,
+      };
     },
   },
 
@@ -2303,10 +2604,21 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
               FROM rf t, LATERAL jsonb_each(to_jsonb(t)) GROUP BY key
           ),
           nd AS (
-            SELECT rk.key FROM rk JOIN fk USING (key) WHERE rk.nn = 0 AND fk.nn > 0
+            SELECT rk.key FROM rk JOIN fk USING (key)
+             WHERE rk.nn = 0 AND fk.nn > 0
+               AND rk.key NOT IN (${RETIRED_TECHNICAL_SIGNAL_COLUMNS_SQL})
+          ),
+          -- Columns that stopped AND are recorded deliberate retirements. Reported, never
+          -- counted: a known decommission is not an open question, but it stays visible
+          -- whenever it happens to sit inside the reference window.
+          rd AS (
+            SELECT rk.key FROM rk JOIN fk USING (key)
+             WHERE rk.nn = 0 AND fk.nn > 0
+               AND rk.key IN (${RETIRED_TECHNICAL_SIGNAL_COLUMNS_SQL})
           )
           SELECT (SELECT COUNT(*) FROM nd)                           AS newly_dead_count,
                  (SELECT string_agg(key, ', ' ORDER BY key) FROM nd) AS newly_dead_cols,
+                 (SELECT string_agg(key, ', ' ORDER BY key) FROM rd) AS retired_dead_cols,
                  (SELECT COUNT(*) FROM recent_d)                     AS recent_dates,
                  (SELECT COUNT(*) FROM ref_d)                        AS ref_dates`,
     evaluate: (row) => {
@@ -2314,6 +2626,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       const refDates    = Number(row?.ref_dates ?? 0);
       const count       = Number(row?.newly_dead_count ?? 0);
       const cols        = String(row?.newly_dead_cols ?? '');
+      const retiredCols = String(row?.retired_dead_cols ?? '');
       // A young table has no past to baseline against. Reporting a regression it cannot have
       // measured is the false positive the old fixed baseline produced; stay quiet instead.
       if (recentDates < 10 || refDates < 5) {
@@ -2323,15 +2636,22 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
                   `reference dates; need 10/5). No writer regression is measurable yet.`,
         };
       }
+      // A recorded retirement is named even when nothing else is wrong, so the exemption is
+      // visible in the report instead of being a silent hole in coverage. It is reported with
+      // the reason it was retired, not as an open question.
+      const retirementNote = retiredCols
+        ? ` ${retiredCols.split(', ').length} recorded retirement(s) inside the window ` +
+          `(${retiredCols}) are excluded by RETIRED_TECHNICAL_SIGNAL_COLUMNS; they are deliberate, not writer deaths.`
+        : '';
       if (count === 0) {
         return {
           status: 'pass',
-          detail: `No feature column stopped being written: everything populated in the prior ` +
-                  `${refDates} dates is still landing within the last ${recentDates}.`,
+          detail: `No unexplained feature column stopped being written: everything populated in the prior ` +
+                  `${refDates} dates is still landing within the last ${recentDates}.${retirementNote}`,
         };
       }
       const detail = `${count} feature column(s) written during the prior ${refDates} dates are ` +
-                     `now 100% NULL across all of the last ${recentDates}: ${cols}.`;
+                     `now 100% NULL across all of the last ${recentDates}: ${cols}.${retirementNote}`;
       // Measured null is 0-2, so 3+ simultaneous stops is outside anything healthy history did.
       if (count >= 3) {
         return {
@@ -2569,6 +2889,49 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
                  (SELECT COUNT(DISTINCT symbol) FROM preopen_stock_snapshot
                     WHERE snapshot_date = (SELECT d FROM preopen_latest)) AS preopen_n,
                  (SELECT d FROM preopen_latest) AS preopen_date,
+                 -- DENOMINATOR FIX 2026-09-24. preopen_stock_snapshot was being divided by the
+                 -- nse_stocks canonical universe (2,366), which is the wrong population for this
+                 -- source on two counts, both measured live the same day:
+                 --   1. The preopen feed's numerator includes 277 symbols that are NOT in
+                 --      nse_stocks at all, so canonical-only coverage is really 1,971/2,366
+                 --      (83.3%) -- BELOW this check's own 85% fail floor. Tightening the
+                 --      numerator to canonical names would have turned a warn into a hard fail
+                 --      on a feed that is working exactly as designed.
+                 --   2. The source has demonstrably ever published 2,888 distinct symbols --
+                 --      MORE than nse_stocks holds -- so no canonical count can be its ceiling.
+                 -- Its own sustained recent population is 2,179-2,479, so 2,208 is squarely
+                 -- normal, not a dip.
+                 --
+                 -- The floor must be the source's OWN demonstrated ceiling or this check
+                 -- misreports a healthy day forever. Chosen as MAX over the trailing 45 days
+                 -- (2,479, from 09-14), not a median: a MEDIAN was the first attempt and it is
+                 -- wrong twice over here, both found by running it live before shipping. (a) The
+                 -- 45-day window straddles this source's own regime change -- the bulk swap
+                 -- landed 2026-09-03, so 17 pre-swap sessions at ~208 symbols outnumber the ~14
+                 -- post-swap sessions at ~2,200 and the median returned 210, which would have
+                 -- judged a perfect 2,248-symbol day as 1070%. (b) A median ratchets DOWN
+                 -- during a sustained collapse, so after 45 bad days it would silently
+                 -- re-baseline onto the broken value and go green -- recreating the exact
+                 -- "fresh table is not a delivered feature" bug this check was written for.
+                 -- MAX cannot ratchet down while any good day remains in the window, and one
+                 -- spike cannot hide a collapse the way a high percentile could.
+                 --
+                 -- GREATEST(..., canon) is the part that makes this permanent: MAX alone still
+                 -- ratchets down after 45 CONSECUTIVE collapsed days, at which point the
+                 -- denominator would equal the numerator and the check would go green having
+                 -- certified exactly the failure it exists to catch. Caught by the unit test
+                 -- that feeds a ratcheted-down ceiling back in. nse_stocks is a stable external
+                 -- anchor that no preopen outage can move, so flooring the denominator there
+                 -- makes a full collapse read 210/2,366 = 8.9% (fail) no matter how long it
+                 -- lasts. It also stays 2,479 on healthy days, since the source's own ceiling
+                 -- is above the canonical count, so the calibrated bands are unchanged.
+                 GREATEST(
+                   COALESCE((SELECT MAX(d.n) FROM (SELECT COUNT(DISTINCT symbol) AS n
+                               FROM preopen_stock_snapshot
+                              WHERE snapshot_date >= (SELECT d FROM preopen_latest) - INTERVAL '45 days'
+                              GROUP BY snapshot_date) d), 0),
+                   (SELECT n FROM canon)
+                 ) AS preopen_universe,
                  (SELECT COUNT(DISTINCT symbol) FROM so_option_chain
                     WHERE date = (SELECT d FROM opt_latest)) AS opt_n,
                  (SELECT d FROM opt_latest) AS opt_date`,
@@ -2580,7 +2943,28 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       }
       const parts = [
         { name: 'nse_universe_history', n: Number(row?.bhav_n ?? 0), date: row?.bhav_date, universe: canonUniverse, failBelow: 0.85, warnBelow: 0.95 },
-        { name: 'preopen_stock_snapshot', n: Number(row?.preopen_n ?? 0), date: row?.preopen_date, universe: canonUniverse, failBelow: 0.85, warnBelow: 0.95 },
+        // preopen's floor is its OWN demonstrated ceiling (see the SQL above), NOT canonUniverse:
+        // the feed's population is not the canonical universe and using canon here reported a
+        // healthy 2,208-symbol day as 93.3% "below its normal band" every single morning.
+        //
+        // The bands are re-derived for that denominator from the source's measured post-swap
+        // spread (live, last 14 sessions, 2026-09-03..09-23): min 2,179 / mean ~2,263 / max 2,479.
+        // Against a 2,479 ceiling that is 87.9%..100%, so the old 85/95 pair -- inherited from the
+        // canonical-universe calibration above, where 2,366 was the real ceiling -- would still
+        // have WARNED on 10 of those 14 genuinely-healthy days. Keeping them "unchanged so the
+        // semantics are identical" was preserving the wrong numbers: the WARN-vs-FAIL MECHANISM is
+        // unchanged, the thresholds are what had to move to the new denominator.
+        //   failBelow 0.60 = 1,487 symbols: still an order of magnitude above the 210-symbol
+        //     collapse this check was written to catch (8.5% of the ceiling) while leaving ~31%
+        //     headroom below the worst healthy day.
+        //   warnBelow 0.85 = 2,107 symbols: below the worst healthy session (2,179), so a healthy
+        //     day can never trip it, but a real partial degradation still surfaces.
+        //
+        // Math.max(..., canonUniverse) re-applies the SQL's GREATEST() floor in code. Deliberate
+        // duplication: the denominator must not be able to collapse toward the numerator even if
+        // the SQL is later simplified, because a self-referential denominator is the one shape
+        // that turns this check into a permanent pass during exactly the outage it monitors.
+        { name: 'preopen_stock_snapshot', n: Number(row?.preopen_n ?? 0), date: row?.preopen_date, universe: Math.max(Number(row?.preopen_universe ?? 0), canonUniverse), failBelow: 0.60, warnBelow: 0.85 },
         { name: 'so_option_chain', n: Number(row?.opt_n ?? 0), date: row?.opt_date, universe: fnoUniverse, failBelow: 0.25, warnBelow: 0.50 },
       ].map(p => ({ ...p, pct: p.n / p.universe }));
       const detail = parts
@@ -2711,6 +3095,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
           SELECT (SELECT d FROM latest) AS d, count(*) AS n,
                  count(*) FILTER (WHERE screener_stock_score = 0) AS z_screener,
                  count(*) FILTER (WHERE ml_score = 0)             AS z_ml,
+
                  count(*) FILTER (WHERE cs_score = 0)             AS z_cs,
                  count(*) FILTER (WHERE confluence_score = 0)     AS z_confluence,
                  count(*) FILTER (WHERE technical_score = 0)      AS z_technical,
@@ -2721,7 +3106,15 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     evaluate: (row) => {
       const n = Number(row?.n ?? 0);
       if (!n) return { status: 'warn', detail: 'No unified_recommendations rows to check' };
-      const engines = ['screener', 'ml', 'cs', 'confluence', 'technical', 'dl', 'breakout', 'smart_money'];
+      // cs_score REMOVED 2026-09-24, the same day as the technical-signals-feature-coverage
+      // list above (which was fixed 2026-09-02) and alongside model-registry-active-cs (also
+      // 2026-09-02): cs_ranker was deliberately DECOMMISSIONED because its live CV AUC was
+      // 0.176 -- worse than random -- and its daily --score job is unscheduled, so the column is
+      // permanently NULL going forward. Left in this list it could only ever contribute 0.0%
+      // zeros (vacuously clean), while the sibling coverage check kept reporting a real
+      // "cs_score is 100% NULL" warning every day. recurring-bugs.md's "deleting a thing does
+      // not delete the checks pointing at it" -- this was the last remaining reference.
+      const engines = ['screener', 'ml', 'confluence', 'technical', 'dl', 'breakout', 'smart_money'];
       const spikes = engines
         .map(e => ({ e, share: Number(row['z_' + e] ?? 0) / n }))
         .filter(x => x.share >= 0.15)
@@ -2939,8 +3332,9 @@ async function persistCheckHeartbeat(checkId: string, status: DataQualityStatus,
 
 /** Checks in flight at once. They were strictly sequential: 169 checks took 45.7s warm / 93.2s
  *  cold per sweep (2026-09-11), every 15 minutes. Each is an independent pool query, so a few can
- *  overlap; small enough that a sweep never takes a large share of the 22-connection pool. */
-export const DQ_CHECK_CONCURRENCY = 4;
+ *  overlap. The live pool-timeout incident showed four simultaneous checkouts can collide with
+ *  the heavier Python fan-out; two keeps the sweep bounded without starving other workers. */
+export const DQ_CHECK_CONCURRENCY = 2;
 
 /** Runs every registered check and persists the latest result per check_id. Each check is
  *  isolated — a query error becomes an 'error' status for that one check, not a thrown
