@@ -610,6 +610,35 @@ def test_slope_is_horizon_stratified_not_pooled():
     assert res['slope'] == pytest.approx(expected, abs=1e-12)
 
 
+def test_loader_degrades_to_the_auc_path_when_calib_slope_is_not_migrated_yet(pg_conn):
+    """Deploy-order safety net: code live BEFORE migration 20260927160000 is applied.
+
+    The failure this prevents is silent and maximally bad: a missing column would raise, the
+    loader's outer handler would return {}, and regime_edge_weight() reads an empty snapshot as
+    "no data" -> FULL trust. So a missing column would disable the gate AND take the AUC fallback
+    down with it. The loader must retry on the legacy column set instead.
+    """
+    conn = pg_conn
+    # The pre-migration shape: no calib_slope / calib_slope_n.
+    conn.execute("""
+        CREATE TABLE regime_edge_status (
+            regime TEXT PRIMARY KEY, auc REAL, auc_n INTEGER, distinct_days INTEGER,
+            episodes INTEGER, ready INTEGER NOT NULL DEFAULT 0, first_day TEXT, last_day TEXT,
+            computed_at TEXT NOT NULL
+        )""")
+    conn.execute(
+        "INSERT INTO regime_edge_status (regime, auc, auc_n, ready, computed_at) "
+        "VALUES (?, ?, ?, ?, ?)", ('BEAR', 0.525, 5000, 1, '2026-09-27T00:00:00'))
+    conn.commit()
+
+    st = load_regime_edge_status(conn)
+    assert st, "loader returned {} on a pre-migration table -- that silently means FULL trust"
+    assert st['BEAR']['auc'] == pytest.approx(0.525)
+    assert st['BEAR']['calib_slope'] is None
+    # ...and the weight therefore still comes from the AUC path, not from a collapse to 1.0.
+    assert regime_edge_weight('BEAR', st) == pytest.approx(0.5, abs=1e-6)
+
+
 def test_slope_drops_tiny_and_single_class_strata():
     # Same floors as stratified_auc: a 25-row stratum must not swing the n-weighted mean, and a
     # single-class stratum carries no slope information.

@@ -492,13 +492,29 @@ def load_regime_edge_status(conn: ConnWrapper) -> dict:
     """Read the last persisted per-regime edge snapshot. Returns {} if the table doesn't exist
     yet or is empty -- callers must treat that as 'no data', which regime_edge_weight() already
     treats as full trust (weight=1.0, no-op) rather than assuming no edge."""
+    _LEGACY = ("SELECT regime, auc, auc_n, distinct_days, episodes, ready, first_day, last_day, "
+               "computed_at FROM regime_edge_status")
+    has_slope = True
     try:
-        rows = conn.execute(
-            "SELECT regime, auc, auc_n, distinct_days, episodes, ready, first_day, last_day, "
-            "computed_at, calib_slope, calib_slope_n FROM regime_edge_status"
-        ).fetchall()
+        rows = conn.execute(_LEGACY.replace(
+            "computed_at FROM", "computed_at, calib_slope, calib_slope_n FROM")).fetchall()
     except Exception:
-        return {}
+        # Deploy-order safety net (AF-20260927-08): if this code is live before migration
+        # 20260927160000 has been applied, the two new columns do not exist yet. Letting that fall
+        # through to the outer `return {}` would be the WORST outcome -- an empty snapshot is the
+        # "no data" branch, which regime_edge_weight() deliberately treats as FULL trust, so a
+        # missing column would silently disable the gate AND lose the AUC fallback with it. Retry
+        # on the legacy column set instead: the AUC path still applies, and the gate degrades to
+        # its previous behaviour rather than to no behaviour.
+        has_slope = False
+        try:
+            conn.rollback()   # the failed SELECT aborted the transaction on Postgres
+        except Exception:
+            pass
+        try:
+            rows = conn.execute(_LEGACY).fetchall()
+        except Exception:
+            return {}   # table genuinely absent -- the documented "no data" case
     out = {}
     for r in rows:
         out[r['regime']] = {
@@ -506,7 +522,8 @@ def load_regime_edge_status(conn: ConnWrapper) -> dict:
             'distinct_days': r['distinct_days'], 'episodes': r['episodes'],
             'ready': bool(r['ready']), 'first_day': r['first_day'],
             'last_day': r['last_day'], 'computed_at': r['computed_at'],
-            'calib_slope': r['calib_slope'], 'calib_slope_n': r['calib_slope_n'],
+            'calib_slope': r['calib_slope'] if has_slope else None,
+            'calib_slope_n': r['calib_slope_n'] if has_slope else None,
         }
     return out
 
