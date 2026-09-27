@@ -3,6 +3,11 @@ import { cacheGet, cacheSet } from './cacheService';
 import { fetchTrendlyneWithAuth } from './trendlyneAuthService';
 import { dbGet } from './dbAsync';
 import { parseChecklistHtml, type TrendlyneChecklistResult } from './trendlyneChecklistParser';
+import {
+  getTrendlyneTaCircuitState,
+  isTrendlyneTaBlocked,
+  markTrendlyneTaBlocked,
+} from './trendlyneTechnicalCircuit';
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -295,9 +300,22 @@ async function fetchTrendlyneAdvTechnicalAnalysisRaw(symbol: string, timeframe: 
   console.log(`[TRENDLYNE] Fetching Adv Technical Analysis (${timeframe}) for ${symbol} using tlid: ${tlid}`);
   const url = `https://trendlyne.com/equity/api/stock/adv-technical-analysis/${tlid}/${dur}/?format=json`;
   try {
+    if (isTrendlyneTaBlocked()) {
+      const state = getTrendlyneTaCircuitState();
+      console.warn(`[TRENDLYNE] TA endpoint is in local cooldown after HTTP ${state.reason}; skipping ${symbol}.`);
+      return null;
+    }
     const response = await fetchTrendlyneWithAuth(url, { headers: { ...HEADERS, 'Referer': 'https://trendlyne.com/' } });
     if (!response.ok) {
-      console.warn(`[TRENDLYNE] TA API failed with status ${response.status} for ${symbol}.`);
+      // The live endpoint and registry both verify this as GET. 403/405/429 are therefore
+      // provider/WAF block responses, not a bad HTTP verb; stop this process before the next
+      // symbol spends another request from the exhausted allowance.
+      if ([403, 405, 429].includes(response.status)) {
+        markTrendlyneTaBlocked(String(response.status) as '403' | '405' | '429');
+        console.error(`[TRENDLYNE] TA endpoint returned HTTP ${response.status}; opening local cooldown.`);
+      } else {
+        console.warn(`[TRENDLYNE] TA API failed with status ${response.status} for ${symbol}.`);
+      }
       return null;
     }
     const contentType = response.headers.get('content-type') || '';

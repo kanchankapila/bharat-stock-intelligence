@@ -205,7 +205,10 @@ def fetch_adv_tech(tlid: str, session: requests.Session) -> dict | None:
     Returns the parsed ``body.parameters`` dict or None on failure."""
     url = BASE_URL.format(tlid=tlid)
     try:
-        r = retry_get(session, url, params={"format": "json"}, timeout=15)
+        # The registry and live probes confirm this is a GET. A bare 405 from Trendlyne is a
+        # WAF/allowance refusal, not a method error; retrying it only burns more allowance.
+        r = retry_get(session, url, params={"format": "json"}, timeout=15,
+                      stop_statuses={403, 405, 429})
         data = r.json()
         body = data.get("body") or {}
         params = body.get("parameters")
@@ -215,9 +218,13 @@ def fetch_adv_tech(tlid: str, session: requests.Session) -> dict | None:
         return params
     except Exception as e:
         # A WAF challenge means OUR ALLOWANCE ended, not that this stock has no data -- see
-        # fetch_utils.FetchTracker.record_allowance_exhausted.
-        if _is_waf_challenge(e):
-            print(f"  [{tlid}] allowance exhausted (WAF): {e}", file=sys.stderr)
+        # fetch_utils.FetchTracker.record_allowance_exhausted. Trendlyne also returns a bare
+        # 405 (without the optional WAF header) when the request allowance is exhausted, so
+        # classify the status-bearing response as the same terminal state.
+        response = getattr(e, "response", None)
+        status = getattr(response, "status_code", None)
+        if _is_waf_challenge(e) or status in {403, 405, 429}:
+            print(f"  [{tlid}] allowance/vendor block (HTTP {status or 'WAF'}): {e}", file=sys.stderr)
             return WAF_BLOCKED
         print(f"  fetch error (tlid={tlid}): {e}", file=sys.stderr)
         return None

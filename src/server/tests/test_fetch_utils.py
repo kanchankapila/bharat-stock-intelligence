@@ -98,6 +98,16 @@ def test_retry_get_does_not_retry_a_waf_challenge():
     )
 
 
+def test_retry_get_does_not_retry_a_bare_configured_block_status():
+    session = _FakeSession([_FakeResponse(405, headers={}), _FakeResponse(200)])
+    with pytest.raises(Exception):
+        retry_get(session, "https://example.com/x", retries=3, backoff_base=0.01,
+                  stop_statuses={405})
+    assert session.calls == 1, (
+        "a configured provider block status must fail fast; retrying burns more allowance"
+    )
+
+
 def test_retry_get_still_retries_an_ordinary_failure():
     # First two calls fail with a plain error, third succeeds -- normal transient-failure
     # retries (network blips, a genuine 500) must be unaffected by the WAF short-circuit.

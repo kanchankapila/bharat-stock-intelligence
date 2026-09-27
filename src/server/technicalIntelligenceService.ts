@@ -1,5 +1,6 @@
 import { dbRun } from './dbAsync';
 import { fetchTrendlyneAdvTechnicalAnalysis } from './trendlyneService';
+import { getTrendlyneTaCircuitState, isTrendlyneTaBlocked } from './trendlyneTechnicalCircuit';
 
 export interface TechnicalCompositeScore {
   symbol: string;
@@ -278,6 +279,16 @@ export async function syncTrendlyneTechnicals() {
     try {
       const result = await fetchAndProcessTechnicalData(stock.symbol, 'D');
       if (!result) {
+        // A 405/403/429 is a provider-level block, not a per-symbol missing payload. The TA
+        // service opens a local cooldown on the first such response; fail this queue step now
+        // instead of sleeping 30/60/120s and issuing more requests from the exhausted allowance.
+        if (isTrendlyneTaBlocked()) {
+          const state = getTrendlyneTaCircuitState();
+          throw new Error(
+            `[TRENDLYNE] TA vendor block (HTTP ${state.reason}); aborting after ${count} synced ` +
+            `of ${stocks.length} without further requests`
+          );
+        }
         consecutiveFailures++;
         if (consecutiveFailures >= 5) {
           blockedCycles++;
@@ -305,6 +316,10 @@ export async function syncTrendlyneTechnicals() {
       count++;
     } catch (e: any) {
       console.error(`[TRENDLYNE TECHNICALS] Error for ${stock.symbol}:`, e.message);
+      // Do not turn the provider-level block into a per-symbol retry loop. The exception above
+      // is deliberately rethrown so quantStep records the step as failed and BullMQ can retry
+      // it later, after the local circuit has had time to expire.
+      if (isTrendlyneTaBlocked()) throw e;
     }
 
     // Jittered sleep to evade rate limits

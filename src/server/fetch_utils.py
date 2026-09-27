@@ -58,7 +58,8 @@ def _is_waf_challenge(exc: Exception) -> bool:
     return bool(resp.headers.get("x-amzn-waf-action"))
 
 
-def retry_get(session_or_requests, url: str, retries: int = 3, backoff_base: float = 1.0, **kwargs):
+def retry_get(session_or_requests, url: str, retries: int = 3, backoff_base: float = 1.0,
+              stop_statuses: set[int] | None = None, **kwargs):
     """GET with exponential backoff + jitter. Raises the last exception after `retries` attempts.
 
     Mirrors requests' call signature (session.get(url, **kwargs) or requests.get(url, **kwargs))
@@ -82,14 +83,50 @@ def retry_get(session_or_requests, url: str, retries: int = 3, backoff_base: flo
             return resp
         except Exception as e:
             last_exc = e
-            if _is_waf_challenge(e):
-                print(f"[RETRY] {url} blocked by WAF challenge (not retrying -- would not "
-                      f"self-clear, and would waste this run's request allowance)")
+            response = getattr(e, "response", None)
+            status = getattr(response, "status_code", None)
+            if _is_waf_challenge(e) or (stop_statuses and status in stop_statuses):
+                print(f"[RETRY] {url} blocked with status {status} (not retrying -- "
+                      f"the provider has refused this request class)")
                 break
             if attempt == retries:
                 break
             sleep_s = backoff_base * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
             print(f"[RETRY] {url} attempt {attempt}/{retries} failed ({e}); retrying in {sleep_s:.1f}s")
+            time.sleep(sleep_s)
+    raise last_exc  # type: ignore[misc]
+
+
+def retry_post(session_or_requests, url: str, retries: int = 3, backoff_base: float = 1.0, **kwargs):
+    """POST with the same exponential backoff + jitter as retry_get. Raises the last exception
+    after `retries` attempts.
+
+    Mirrors retry_get's call shape (session.post(url, **kwargs)) so it is a drop-in at call
+    sites, and keeps the same WAF-challenge carve-out. POST is idempotent at every current
+    caller (query/reporting endpoints), so a retry never double-writes.
+
+    Why it exists: investsights_factor_scores_fetcher.py's single un-retried session.post()
+    (the "no retry_post helper" ponytail precedent of 2026-08-13) died 2026-09-21 21:38 IST on
+    ONE `requests.exceptions.ConnectionError: Read timed out` against investsights.in, failing
+    the whole ml-daily-ops chain on a transient network blip. Same-day this helper was added
+    and the fetcher moved onto it.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = session_or_requests.post(url, **kwargs)
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            last_exc = e
+            if _is_waf_challenge(e):
+                print(f"[RETRY] POST {url} blocked by WAF challenge (not retrying -- would not "
+                      f"self-clear, and would waste this run's request allowance)")
+                break
+            if attempt == retries:
+                break
+            sleep_s = backoff_base * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
+            print(f"[RETRY] POST {url} attempt {attempt}/{retries} failed ({e}); retrying in {sleep_s:.1f}s")
             time.sleep(sleep_s)
     raise last_exc  # type: ignore[misc]
 

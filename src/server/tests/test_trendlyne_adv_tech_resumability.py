@@ -26,7 +26,10 @@ import pytest
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from conftest import pg_available  # noqa: E402
-from trendlyne_adv_tech_fetcher import _load_stocks, ensure_schema  # noqa: E402
+from trendlyne_adv_tech_fetcher import (
+    _load_stocks,
+    ensure_schema,
+)  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not pg_available(), reason="live Postgres not reachable")
 
