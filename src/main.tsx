@@ -13,6 +13,11 @@ import './index.css';
 // Standalone design-direction concept (no shell, no backend, all data simulated client-side).
 const ConceptLedger = lazy(() => import('./concept/ConceptLedger'));
 
+// TALA — the new decision-first trading terminal (src/tala/). Its own route tree, its own theme,
+// its own component library; it shares only the tRPC/react-query/Firebase providers above and the
+// existing AppRouter. Mounted BEFORE the `/*` catch-all so /tala/* never reaches the legacy v1 shell.
+const TalaApp = lazy(() => import('./tala/TalaApp'));
+
 
 // No-op without VITE_SENTRY_DSN. Init before render so it can capture render-time errors too.
 initSentry();
@@ -79,6 +84,9 @@ const Main = () => {
         <BrowserRouter>
           <Routes>
             <Route path="/concept" element={<Suspense fallback={null}><ConceptLedger /></Suspense>} />
+            {/* TALA — the new trading terminal. Declared BEFORE the `/*` catch-all so
+                /tala/* is matched here and never falls through to the legacy shell. */}
+            <Route path="/tala/*" element={<Suspense fallback={null}><TalaApp /></Suspense>} />
             <Route path="/*" element={<App />} />
           </Routes>
         </BrowserRouter>
