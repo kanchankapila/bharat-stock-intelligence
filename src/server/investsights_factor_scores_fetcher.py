@@ -79,11 +79,13 @@ def _num(raw, k):
 
 
 def fetch_page(session: requests.Session, offset: int) -> dict:
-    # ponytail: no retry_post helper exists in fetch_utils.py (only retry_get) -- matches the
-    # un-retried session.post() precedent in marketsmojo_financials_fetcher.py/fintrend_fetcher.py
-    # rather than adding a new shared helper for one caller.
-    resp = session.post(URL, json={"filters": {}, "limit": PAGE_SIZE, "offset": offset}, timeout=20)
-    resp.raise_for_status()
+    # 2026-09-21: the un-retried session.post() here (the "no retry_post helper exists"
+    # ponytail precedent) died on ONE `ConnectionError: Read timed out` against
+    # investsights.in mid-pagination, failing the whole ml-daily-ops chain on a transient
+    # network blip. retry_post (same backoff/WAF rules as retry_get) now absorbs exactly
+    # that class; the chain's step-level .catch() still surfaces a genuinely-dead vendor.
+    from fetch_utils import retry_post
+    resp = retry_post(session, URL, json={"filters": {}, "limit": PAGE_SIZE, "offset": offset}, timeout=20)
     return resp.json()
 
 

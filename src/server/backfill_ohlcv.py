@@ -2,6 +2,7 @@ import asyncio
 import sys
 
 from db_compat import connect
+from as_of import filter_stock_ohlcv_records
 from datetime import date as _date_type
 
 
@@ -358,6 +359,9 @@ def _download_one(symbol: str) -> pd.DataFrame | None:
     return None
 
 def _upsert(conn, records: list):
+    records, guard_stats = filter_stock_ohlcv_records(records, conn)
+    if any(guard_stats.values()):
+        print(f"[OHLCV WRITE GUARD] skipped {guard_stats}")
     trading, skipped = filter_holiday_records(records, conn)
     if skipped:
         holiday_dates = {r[1] for r in skipped}

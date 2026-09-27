@@ -132,7 +132,19 @@ def store(conn: ConnWrapper, rows: list) -> int:
     if not rows:
         return 0
     ph = ",".join(["?"] * len(COLS))
-    updates = ", ".join(f"{c}=excluded.{c}" for c in COLS[1:])
+    # `fetched_at` is the fetcher's contact stamp, not the pick's publication date -- so the
+    # DO UPDATE must advance it. WITHOUT it (fixed 2026-09-24) the column was written only on
+    # first insert, making it a permanent "first seen" timestamp: MarketsMojo re-serves the SAME
+    # portfolio pick every day (the model only changes occasionally), so every subsequent run hit
+    # the ON CONFLICT branch and left fetched_at frozen at the pick's creation date. The daily
+    # fetcher was provably alive (heartbeat green, "1 stored" every night) while
+    # marketsmojo-stock-picks-recency reported the table 12.5d stale and growing every day.
+    # That is the same class as the NSE-Financial-Results ON CONFLICT found the same day: a
+    # freshness check reading a column that structurally cannot move can never report healthy,
+    # no matter how the threshold is tuned -- and tuning the threshold is exactly the wrong fix,
+    # because it would silence a real future fetcher death too. monotonic now() is the
+    # last-write time, which is what "has the fetcher reached the endpoint recently?" means.
+    updates = ", ".join([*(f"{c}=excluded.{c}" for c in COLS[1:]), "fetched_at=now()"])
     sql = (f"INSERT INTO marketsmojo_stock_picks ({', '.join(COLS)}) VALUES ({ph}) "
            f"ON CONFLICT (id) DO UPDATE SET {updates}")
     n = 0

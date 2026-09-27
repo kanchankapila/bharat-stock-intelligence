@@ -22,7 +22,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import datetime as _dt
 
-from as_of import post_exit_symbols, POST_EXIT_GRACE_DAYS
+from as_of import filter_stock_ohlcv_records, post_exit_symbols, POST_EXIT_GRACE_DAYS
 
 
 def _setup(conn):
@@ -70,3 +70,48 @@ def test_missing_table_fails_open(pg_conn):
     """Fail OPEN, matching the TS guard: an unreachable exchange record must not block
     a legitimate backfill. The DQ check is the backstop."""
     assert post_exit_symbols(pg_conn) == set()
+
+
+def test_write_guard_drops_post_exit_and_universe_wide_flat_rows(pg_conn):
+    _setup(pg_conn)
+    today = _dt.date.today().isoformat()
+    rows = [
+        ("DEAD", today, 10, 10, 10, 10, 0, "yfinance"),
+        ("ALIVE", today, 10, 11, 9, 10, 100, "yfinance"),
+    ]
+    kept, stats = filter_stock_ohlcv_records(rows, pg_conn)
+    assert [r[0] for r in kept] == ["ALIVE"]
+    assert stats["post_exit"] == 1
+
+
+def test_write_guard_drops_universe_wide_flat_zero_session(pg_conn):
+    _setup(pg_conn)
+    day = _dt.date.today().isoformat()
+    rows = [
+        (f"S{i}", day, 10, 10, 10, 10, 0, "yfinance")
+        for i in range(51)
+    ]
+    kept, stats = filter_stock_ohlcv_records(rows, pg_conn)
+    assert kept == []
+    assert stats["closed_session"] == 51
+
+
+def test_write_guard_uses_existing_universe_for_small_carry_forward_batch(pg_conn):
+    _setup(pg_conn)
+    pg_conn.execute("""
+        CREATE TABLE stock_ohlcv (
+            symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER
+        )
+    """)
+    day = _dt.date.today().isoformat()
+    pg_conn.executemany(
+        "INSERT INTO stock_ohlcv VALUES (?, ?, 10, 10, 10, 10, 0)",
+        [(f"S{i}", day) for i in range(51)],
+    )
+    pg_conn.commit()
+
+    kept, stats = filter_stock_ohlcv_records(
+        [("NEW", day, 10, 10, 10, 10, 0, "yfinance")], pg_conn
+    )
+    assert kept == []
+    assert stats["closed_session"] == 1

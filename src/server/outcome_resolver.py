@@ -9,7 +9,7 @@ Run:  python outcome_resolver.py
       python outcome_resolver.py --dry-run
 """
 
-import datetime, argparse, math, re
+import datetime, argparse, math, re, sys
 
 from db_compat import connect, ConnWrapper, query_all, query_one
 
@@ -292,6 +292,15 @@ def _prefetch_vol_and_atr(conn, pairs) -> tuple:
     return closes_map, atr_map
 
 
+def _warn_prefetch_failed(fn: str, n_keys: int, exc: Exception) -> None:
+    """A swallowed prefetch failure is what hid AF-20260901's 136 syntax errors. Say so on stderr
+    (never stdout -- pythonRunner only inspects stderr) and keep the message to one short line:
+    a psycopg2 error repr embeds the whole statement plus ~1,600 bound params."""
+    first = (str(exc).splitlines() or [""])[0][:200]
+    print(f"[outcome_resolver] {fn}: chunk of {n_keys} keys skipped: {type(exc).__name__}: {first}",
+          file=sys.stderr)
+
+
 def _prefetch_next_price(conn, triples) -> dict:
     """For each (symbol, anchor_date, mode): mode 'AFTER_OPEN' = first clean bar
     STRICTLY AFTER the anchor with its open (entry pricing); mode 'GEQ_CLOSE' =
@@ -334,7 +343,8 @@ def _prefetch_next_price(conn, triples) -> dict:
                 """,
                 params,
             ).fetchall()
-        except Exception:
+        except Exception as exc:
+            _warn_prefetch_failed("_prefetch_next_price", len(chunk), exc)
             continue
         for sym, anchor, mode, bd, val in rows:
             out[(str(sym), _norm_iso(anchor), str(mode))] = (bd, val)
@@ -376,7 +386,8 @@ def _prefetch_sl_hits(conn, quads) -> dict:
                 """,
                 params,
             ).fetchall()
-        except Exception:
+        except Exception as exc:
+            _warn_prefetch_failed("_prefetch_sl_hits", len(chunk), exc)
             continue
         for sym, sd, ed, sl, bd, low, opn in rows:
             out[(str(sym), _norm_iso(sd), _norm_iso(ed), round(float(sl), 6))] = (bd, low, opn)
@@ -548,7 +559,8 @@ def _prefetch_resolved_keys(conn, triples) -> set:
                 """,
                 params,
             ).fetchall()
-        except Exception:
+        except Exception as exc:
+            _warn_prefetch_failed("_prefetch_resolved_keys", len(chunk), exc)
             continue
         for s, d, h in rows:
             out.add((str(s), _norm_iso(d), int(h)))
@@ -586,7 +598,8 @@ def _prefetch_bar_windows(conn, triples) -> dict:
                 """,
                 params,
             ).fetchall()
-        except Exception:
+        except Exception as exc:
+            _warn_prefetch_failed("_prefetch_bar_windows", len(chunk), exc)
             continue
         for s, a, b, d, h, l, c in rows:
             out.setdefault((str(s), _norm_iso(a), _norm_iso(b)), []).append((d, h, l, c))

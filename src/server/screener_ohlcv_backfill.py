@@ -23,6 +23,7 @@ except ImportError:
     sys.exit(1)
 
 from db_compat import connect
+from as_of import filter_stock_ohlcv_records
 
 START_DATE = (datetime.date.today() - datetime.timedelta(days=730)).strftime("%Y-%m-%d")
 BATCH_SIZE = 50          # yfinance can batch 50 tickers at once
@@ -103,6 +104,10 @@ def fetch_and_store(conn, symbols: list[str]) -> int:
             print(f"  [WARN] {sym}: {e}", file=sys.stderr)
             continue
 
+    if records:
+        records, guard_stats = filter_stock_ohlcv_records(records, conn)
+        if any(guard_stats.values()):
+            print(f"  [OHLCV WRITE GUARD] skipped {guard_stats}")
     if records:
         try:
             conn.executemany("""

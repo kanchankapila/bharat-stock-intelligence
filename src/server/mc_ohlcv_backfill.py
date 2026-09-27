@@ -29,6 +29,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 from db_compat import connect, read_df, translate, use_postgres, get_engine
+from as_of import filter_stock_ohlcv_records
 
 URL = "https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history"
 HEADERS = {
@@ -101,6 +102,9 @@ def upsert(conn, rows: list[tuple], overwrite: bool) -> int:
     """Bulk upsert. On Postgres uses psycopg2 execute_values (one multi-row INSERT per
     chunk) — orders of magnitude faster than per-row executemany, which turned a ~2-min
     fetch into a ~1-hour write. Falls back to executemany on SQLite (tests)."""
+    rows, guard_stats = filter_stock_ohlcv_records(rows, conn)
+    if any(guard_stats.values()):
+        print(f"[MCBackfill] OHLCV write guard skipped {guard_stats}")
     if not rows:
         return 0
     conflict = ("DO UPDATE SET open=excluded.open, high=excluded.high, low=excluded.low, "

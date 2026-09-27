@@ -520,3 +520,25 @@ def test_resolve_unified_outcomes_produces_all_horizons_independently():
     assert 1 in horizons_resolved, "h1 outcome missing"
     assert 5 in horizons_resolved, "h5 outcome missing — Bug 2: COMPLETED flag starved h5"
     assert 15 in horizons_resolved, "h15 outcome missing — Bug 2: COMPLETED flag starved h15"
+
+
+class _FailingConn:
+    def execute(self, *_a, **_k):
+        raise RuntimeError("boom: syntax error at or near \":\"\nDETAIL: second line is dropped")
+
+
+@pytest.mark.parametrize("fn_name, arg, empty", [
+    ("_prefetch_next_price", [("A", "2026-01-02", "AFTER_OPEN")], {}),
+    ("_prefetch_sl_hits", [("A", "2026-01-02", "2026-01-09", 95.0)], {}),
+    ("_prefetch_resolved_keys", [("A", "2026-01-02", 1)], set()),
+    ("_prefetch_bar_windows", [("A", "2026-01-02", "2026-01-09")], {}),
+])
+def test_prefetch_failure_is_loud_not_silent(capsys, fn_name, arg, empty):
+    """AF-20260901: a batched prefetch died with a SQL syntax error 136 times and the bare
+    `except Exception: continue` hid it. Result stays empty (callers fall back), but the failure
+    must reach stderr, naming the function, and must not dump the statement/params."""
+    import outcome_resolver
+    assert getattr(outcome_resolver, fn_name)(_FailingConn(), arg) == empty
+    err = capsys.readouterr().err
+    assert fn_name in err and "RuntimeError" in err and "boom" in err
+    assert "second line" not in err

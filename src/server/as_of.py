@@ -322,3 +322,94 @@ def post_exit_symbols(conn, grace_days: int = POST_EXIT_GRACE_DAYS) -> set:
         except Exception:
             pass
         return set()
+
+
+# Keep this floor identical to liveStockData.ts and data_integrity_repair.py. It is a
+# cross-writer invariant: a provider returning a frozen last quote for the whole universe must
+# never become a stock_ohlcv session merely because the Python writer did not know it was a
+# holiday.
+CLOSED_MARKET_SHARE_FLOOR = 0.95
+
+
+def filter_stock_ohlcv_records(records, conn, grace_days: int = POST_EXIT_GRACE_DAYS) -> tuple[list, dict]:
+    """Refuse records that cannot be a real exchange observation before an OHLCV INSERT.
+
+    Tuple contract: ``(symbol, date, open, high, low, close, volume, ...)``. Extra columns
+    are preserved. Authority-table failures fail open; the data-quality checks remain the
+    backstop rather than turning a metadata outage into a blocked backfill.
+    """
+    records = list(records or [])
+    stats = {"post_exit": 0, "holiday": 0, "closed_session": 0}
+    if not records:
+        return records, stats
+
+    dead = {str(s).strip().upper() for s in post_exit_symbols(conn, grace_days)}
+    if dead:
+        before = len(records)
+        records = [r for r in records if str(r[0]).strip().upper() not in dead]
+        stats["post_exit"] = before - len(records)
+
+    holidays: set[str] = set()
+    try:
+        holidays = {str(r[0])[:10] for r in conn.execute(
+            "SELECT date FROM market_holidays WHERE exchange = ?", ("NSE",)
+        ).fetchall()}
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    if holidays:
+        before = len(records)
+        records = [r for r in records if str(r[1])[:10] not in holidays]
+        stats["holiday"] = before - len(records)
+
+    # Include the already-stored universe in the decision, not only the current writer's batch.
+    # Use an aggregate per candidate date rather than materialising every existing row: the deep
+    # history writer calls this once per symbol, so a broad row fetch here would multiply into a
+    # multi-million-row scan.
+    incoming_by_date: dict[str, dict[str, bool]] = {}
+    for r in records:
+        day = str(r[1])[:10]
+        try:
+            o, h, l, c, v = (float(r[i]) for i in range(2, 7))
+            incoming_by_date.setdefault(day, {})[str(r[0])] = v == 0 and o == h == l == c
+        except (TypeError, ValueError, IndexError):
+            incoming_by_date.setdefault(day, {})[str(r[0])] = False
+
+    fabricated_dates: set[str] = set()
+    for day, incoming in incoming_by_date.items():
+        incoming_flat = sum(incoming.values())
+        # A large incoming batch is sufficient evidence on its own; avoid a query in the common
+        # full-universe backfill path.
+        if len(incoming) > 50 and incoming_flat / len(incoming) >= CLOSED_MARKET_SHARE_FLOOR:
+            fabricated_dates.add(day)
+            continue
+        # A small batch can still be a post-exit carry-forward into an already-fabricated day,
+        # so ask the database for that date's aggregate only when at least one incoming row is flat.
+        if not incoming_flat:
+            continue
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE COALESCE(volume,0)=0 "
+                "AND open=high AND high=low AND low=close) "
+                "FROM stock_ohlcv WHERE date = ?",
+                (day,),
+            ).fetchone()
+            existing_total = int(row[0] or 0)
+            existing_flat = int(row[1] or 0)
+            combined_total = existing_total + len(incoming)
+            combined_flat = existing_flat + incoming_flat
+            if combined_total > 50 and combined_flat / combined_total >= CLOSED_MARKET_SHARE_FLOOR:
+                fabricated_dates.add(day)
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
+    if fabricated_dates:
+        before = len(records)
+        records = [r for r in records if str(r[1])[:10] not in fabricated_dates]
+        stats["closed_session"] = before - len(records)
+    return records, stats
