@@ -57,6 +57,7 @@ def agent_db(pg_conn, monkeypatch):
     db_path = None
     for mod in ("sql_tool", "price_tool", "news_tool", "screener_tool", "market_tool"):
         db_path = patch_tool_connect(monkeypatch, importlib.import_module(f"tools.{mod}"), conn)
+    db_path = patch_tool_connect(monkeypatch, importlib.import_module("semantic_evidence"), conn)
     return db_path
 
 
@@ -97,6 +98,7 @@ def test_agent_stock_detail_intent(agent_db):
 
     assert result["intent"] == "stock_detail"
     assert result["stock_symbol"] == "INFY"
+    assert "ontology:market-semantic-layer" in result["sources"]
     messages = result["messages"]
     assert len(messages) >= 2
     assert isinstance(messages[-1], AIMessage)

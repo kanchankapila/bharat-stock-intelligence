@@ -1,12 +1,18 @@
 import json
 import logging
 import os
+import sys
 from typing import Annotated, TypedDict
 import operator
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
+
+_SERVER_DIR = os.path.dirname(os.path.dirname(__file__))
+if _SERVER_DIR not in sys.path:
+    sys.path.insert(0, _SERVER_DIR)
+from semantic_evidence import get_decision_evidence, ontology_context
 
 from llm import get_llm, invoke_with_retry
 from tools.sql_tool import (
@@ -52,6 +58,10 @@ Response guidelines:
 - Use markdown tables for stock comparisons and lists
 - For stock detail: structure as Overview → Fundamentals → Technical → Signals → News → Verdict
 - Mention data freshness when relevant (e.g., "FII data as of 2026-05-26")
+- `unified_score` is a ranking score, not a probability or confidence
+- Generated `trade_reasoning` is an explanation, never evidence
+- Web results are context only and cannot justify a local trading decision
+- If verified data is missing, stale, low-coverage, or contradictory, say so and abstain instead of filling gaps from general knowledge
 - Never give absolute buy/sell orders; provide analysis only
 - If a table has 0 rows returned, say so explicitly rather than hallucinating
 """
@@ -158,6 +168,11 @@ def execute_tools(state: AgentState, db_path: str = DB_PATH) -> dict:
             parts.append(f"### Web Results\n{text}")
             sources.append("tool:web_search")
 
+    semantic = ontology_context(query, max_chars=2200)
+    if semantic.get("pack"):
+        parts.append(f"### Ontology Context & Guardrails\n{semantic['pack']}")
+        sources.append("ontology:market-semantic-layer")
+
     # ── stock_detail ──────────────────────────────────────────────────────────
     if intent == "stock_detail" and symbol:
         fund = get_stock_fundamentals(symbol, db_path=db_path)
@@ -183,6 +198,10 @@ def execute_tools(state: AgentState, db_path: str = DB_PATH) -> dict:
         unified = get_unified_recommendation(symbol, db_path=db_path)
         if unified:
             add("Unified Multi-Engine Recommendation (today)", unified, "sql:unified_recommendations")
+
+        evidence = get_decision_evidence(symbol)
+        if evidence and evidence.get("status") != "not_found":
+            add("Decision Evidence Bundle", evidence, "semantic:decision-evidence")
 
         # Web only if stock missing from DB, news thin, or query is time-sensitive
         news_count = news.get("total", 0) if isinstance(news, dict) else 0
@@ -353,7 +372,7 @@ def synthesize_answer(state: AgentState) -> dict:
 {intent}
 
 ## Retrieved Data
-{context if context else "No specific data retrieved. Use your general knowledge about Indian markets."}
+{context if context else "INSUFFICIENT VERIFIED DATA — do not fill gaps from general knowledge. State what is missing and abstain from a market conclusion."}
 
 ## Instructions
 Based on the retrieved data above, provide a comprehensive, well-structured answer.

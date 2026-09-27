@@ -7,7 +7,7 @@ Market-level tools for the chatbot — covering live DB tables:
 import json
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Add src/server to import path for db_compat
@@ -58,6 +58,42 @@ def _connect(db_path: str = None):
     return db_connect()
 
 
+def _swallowed(exc: Exception) -> None:
+    """Tools degrade gracefully by dropping a section, but a dropped section must be visible.
+
+    AF-20260925-05: three tools returned empty/partial answers for weeks because SQLite-only SQL
+    failed on Postgres inside a bare `except Exception: pass`. Names the failing function and line
+    on stderr; one short line (a psycopg2 repr embeds the whole statement)."""
+    f = sys._getframe(1)
+    first = (str(exc).splitlines() or [""])[0][:200]
+    print(f"[market_tool] {f.f_code.co_name}:{f.f_lineno} section skipped: "
+          f"{type(exc).__name__}: {first}", file=sys.stderr)
+
+
+# confluence_signals is a hypertable (7-day chunks, compressed after 30 days, 90-day retention)
+# refreshed every ~30 min. A whole-table MAX(computed_at) GROUP BY symbol decompresses every old
+# chunk: measured >290s and unfinished on live data (AF-20260925-05). A symbol with no row in the
+# last few days is not "current" confluence anyway, so bound the lookup to the newest chunks.
+_CONFLUENCE_LATEST_WINDOW_DAYS = 3
+
+
+def _round_rows(rows, digits: dict) -> list[dict]:
+    """dict-ify rows, rounding named columns to plain floats. Postgres ROUND(double, int) does not
+    exist and ROUND(numeric, int) returns Decimal, which the LLM-facing JSON cannot carry."""
+    out = []
+    for r in rows:
+        d = dict(r)
+        for k, n in digits.items():
+            if d.get(k) is not None:
+                d[k] = round(float(d[k]), n)
+        out.append(d)
+    return out
+
+
+def _confluence_cutoff() -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=_CONFLUENCE_LATEST_WINDOW_DAYS)).isoformat()
+
+
 # ─── Market Pulse ─────────────────────────────────────────────────────────────
 
 def get_market_pulse(db_path: str = DB_PATH) -> dict:
@@ -89,8 +125,8 @@ def get_market_pulse(db_path: str = DB_PATH) -> dict:
                 "nifty_5d_return": features.get("nifty_5d_return"),
                 "vix": features.get("vix"),
             }
-    except Exception:
-        pass
+    except Exception as exc:
+        _swallowed(exc)
 
     try:
         row = db.execute(
@@ -116,8 +152,8 @@ def get_market_pulse(db_path: str = DB_PATH) -> dict:
                 "key_themes": themes[:5],
                 "as_of": row["snapshot_at"],
             }
-    except Exception:
-        pass
+    except Exception as exc:
+        _swallowed(exc)
 
     try:
         rows = db.execute(
@@ -126,8 +162,8 @@ def get_market_pulse(db_path: str = DB_PATH) -> dict:
         ).fetchall()
         if rows:
             result["macro"] = [dict(r) for r in rows]
-    except Exception:
-        pass
+    except Exception as exc:
+        _swallowed(exc)
 
     db.close()
     return result
@@ -144,15 +180,20 @@ def get_top_confluence_stocks(
 ) -> list[dict]:
     """
     Top stocks ranked by screener confluence score with full signal context.
-    Source: confluence_signals (updated every 30 min), nse_stocks.
+    Source: confluence_signals, nse_stocks. Recomputed every 30 min in two OFF-HOURS windows
+    (IST 06:00-07:30 and 17:00-23:30, 7 days a week) and deliberately skipped during market hours,
+    so mid-session the newest row is the pre-open run. Only the last few days are considered.
     Includes: entry/target/SL zones, RSI, trade reasoning, screener names.
     """
     db = _connect(db_path)
     rows = []
 
     try:
-        where = ["cs.confluence_score >= ?"]
-        params: list = [min_confluence]
+        # The cutoff bounds BOTH the latest-per-symbol subquery (first `?`) and the outer cs scan:
+        # without the outer bound Timescale still walks every chunk to join on computed_at.
+        where = ["cs.computed_at >= ?", "cs.confluence_score >= ?"]
+        cutoff = _confluence_cutoff()
+        params: list = [cutoff, cutoff, min_confluence]
 
         if conviction:
             where.append("cs.conviction_level = ?")
@@ -194,6 +235,7 @@ def get_top_confluence_stocks(
             JOIN (
                 SELECT symbol, MAX(computed_at) AS max_at
                 FROM confluence_signals
+                WHERE computed_at >= ?
                 GROUP BY symbol
             ) latest ON cs.symbol = latest.symbol AND cs.computed_at = latest.max_at
             LEFT JOIN nse_stocks ns ON cs.symbol = ns.symbol
@@ -209,8 +251,8 @@ def get_top_confluence_stocks(
             except Exception:
                 d["screener_names"] = []
             rows.append(d)
-    except Exception:
-        pass
+    except Exception as exc:
+        _swallowed(exc)
 
     db.close()
     return rows
@@ -284,8 +326,8 @@ def get_stock_signals(symbol: str, days: int = 7, db_path: str = DB_PATH) -> dic
             except Exception:
                 d.pop("screener_names_json", None)
             result["confluence"] = d
-    except Exception:
-        pass
+    except Exception as exc:
+        _swallowed(exc)
 
     db.close()
     return result
@@ -361,7 +403,7 @@ def get_sector_momentum(sector: str | None = None, limit: int = 12, db_path: str
         if sector:
             _, news_pat = _sector_patterns(sector)
             rows = db.execute(
-                "SELECT sentiment, sentiment_score, COUNT(*) cnt "
+                "SELECT sentiment, AVG(sentiment_score) AS sentiment_score, COUNT(*) AS cnt "
                 "FROM news_sentiment_items "
                 "WHERE sector LIKE ? AND published_at >= ? "
                 "GROUP BY sentiment",
@@ -371,18 +413,19 @@ def get_sector_momentum(sector: str | None = None, limit: int = 12, db_path: str
             rows = db.execute(
                 "SELECT sector, "
                 "COUNT(*) AS total_news, "
-                "ROUND(AVG(sentiment_score), 3) AS avg_sentiment, "
+                "AVG(sentiment_score) AS avg_sentiment, "
                 "SUM(CASE WHEN sentiment='BULLISH' THEN 1 ELSE 0 END) AS bullish, "
                 "SUM(CASE WHEN sentiment='BEARISH' THEN 1 ELSE 0 END) AS bearish "
                 "FROM news_sentiment_items "
                 "WHERE published_at >= ? AND sector != '' AND sector IS NOT NULL "
-                "GROUP BY sector HAVING total_news >= 3 "
+                "GROUP BY sector HAVING COUNT(*) >= 3 "
                 "ORDER BY avg_sentiment DESC LIMIT ?",
                 (cutoff, limit),
             ).fetchall()
-        result["sector_news_sentiment"] = [dict(r) for r in rows]
-    except Exception:
-        pass
+        result["sector_news_sentiment"] = _round_rows(
+            rows, {"avg_sentiment": 3, "sentiment_score": 3})
+    except Exception as exc:
+        _swallowed(exc)
 
     # ── Top stocks by confluence within sector ────────────────────────────────
     try:
@@ -395,37 +438,39 @@ def get_sector_momentum(sector: str | None = None, limit: int = 12, db_path: str
                     cs.entry_zone_low, cs.target_1, cs.stop_loss,
                     cs.trade_reasoning
                 FROM confluence_signals cs
-                JOIN (SELECT symbol, MAX(computed_at) AS max_at FROM confluence_signals GROUP BY symbol) m
+                JOIN (SELECT symbol, MAX(computed_at) AS max_at FROM confluence_signals
+                      WHERE computed_at >= ? GROUP BY symbol) m
                     ON cs.symbol = m.symbol AND cs.computed_at = m.max_at
                 LEFT JOIN nse_stocks ns ON cs.symbol = ns.symbol
-                WHERE (cs.sector LIKE ? OR ns.sector LIKE ?)
+                WHERE cs.computed_at >= ? AND (cs.sector LIKE ? OR ns.sector LIKE ?)
                 ORDER BY cs.confluence_score DESC LIMIT ?""",
-                (f"%{conf_pat}%", f"%{conf_pat}%", limit),
+                (_confluence_cutoff(), _confluence_cutoff(), f"%{conf_pat}%", f"%{conf_pat}%", limit),
             ).fetchall()
             result["top_stocks"] = [dict(r) for r in rows]
-    except Exception:
-        pass
+    except Exception as exc:
+        _swallowed(exc)
 
     # ── Quant momentum by sector (known sectors only) ─────────────────────────
     try:
         rows = db.execute(
             """SELECT ns.sector,
                 COUNT(*) AS stock_count,
-                ROUND(AVG(qs.return_1m), 2) AS avg_return_1m,
-                ROUND(AVG(qs.return_3m), 2) AS avg_return_3m,
-                ROUND(AVG(qs.momentum_score), 1) AS avg_momentum_score,
+                AVG(qs.return_1m) AS avg_return_1m,
+                AVG(qs.return_3m) AS avg_return_3m,
+                AVG(qs.momentum_score) AS avg_momentum_score,
                 SUM(CASE WHEN qs.above_sma200=1 THEN 1 ELSE 0 END) AS above_sma200_count
             FROM quant_scores qs
             JOIN nse_stocks ns ON qs.symbol = ns.symbol
             WHERE ns.sector != 'Unknown' AND ns.sector != '' AND ns.sector IS NOT NULL
-            GROUP BY ns.sector HAVING stock_count >= 2
+            GROUP BY ns.sector HAVING COUNT(*) >= 2
             ORDER BY avg_momentum_score DESC LIMIT ?""",
             (limit,),
         ).fetchall()
         if rows:
-            result["quant_momentum_by_sector"] = [dict(r) for r in rows]
-    except Exception:
-        pass
+            result["quant_momentum_by_sector"] = _round_rows(
+                rows, {"avg_return_1m": 2, "avg_return_3m": 2, "avg_momentum_score": 1})
+    except Exception as exc:
+        _swallowed(exc)
 
     db.close()
     return result
@@ -458,8 +503,8 @@ def get_signal_accuracy(db_path: str = DB_PATH) -> dict:
             for r in rows
         }
         result["total_resolved"] = total
-    except Exception:
-        pass
+    except Exception as exc:
+        _swallowed(exc)
 
     # By signal type (top performers)
     try:
@@ -471,8 +516,8 @@ def get_signal_accuracy(db_path: str = DB_PATH) -> dict:
             "ORDER BY win_rate DESC, profit_factor DESC LIMIT 15"
         ).fetchall()
         result["top_strategies"] = [dict(r) for r in rows]
-    except Exception:
-        pass
+    except Exception as exc:
+        _swallowed(exc)
 
     # By market regime
     try:
@@ -487,20 +532,27 @@ def get_signal_accuracy(db_path: str = DB_PATH) -> dict:
             "GROUP BY market_regime ORDER BY avg_win_rate DESC"
         ).fetchall()
         result["by_regime"] = [dict(r) for r in rows]
-    except Exception:
-        pass
+    except Exception as exc:
+        _swallowed(exc)
 
-    # Latest ML model AUC
+    # Latest active model. model_registry's columns are cv_roc_auc / cv_accuracy / trained_at (the
+    # old auc / accuracy / created_at never existed on Postgres, so this section was silently
+    # missing -- AF-20260925-05). These are the training run's OWN cross-validation numbers, not
+    # realized results (measurement.md: never quote them as accuracy), so say so in the payload.
     try:
         row = db.execute(
-            "SELECT model_name, auc, accuracy, created_at "
+            "SELECT model_name, cv_roc_auc, cv_accuracy, trained_at "
             "FROM model_registry WHERE is_active = 1 "
-            "ORDER BY created_at DESC LIMIT 1"
+            "ORDER BY trained_at DESC LIMIT 1"
         ).fetchone()
         if row:
-            result["active_model"] = dict(row)
-    except Exception:
-        pass
+            result["active_model"] = {
+                **dict(row),
+                "note": "self-reported cross-validation metrics, NOT realized accuracy; "
+                        "see 'overall' and 'by_regime' for realized outcomes",
+            }
+    except Exception as exc:
+        _swallowed(exc)
 
     db.close()
     return result

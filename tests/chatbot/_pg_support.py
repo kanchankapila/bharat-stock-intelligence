@@ -35,6 +35,11 @@ _spec.loader.exec_module(_server_conftest)
 pg_available = _server_conftest.pg_available
 pg_schema = _server_conftest.pg_schema
 pg_conn = _server_conftest.pg_conn
+# Full production schema in a throwaway schema, reached through db_compat.connect() itself -- so a
+# tool's own `_connect()` needs no patching. pg_db depends on the session-scoped schema builder.
+_pg_session_schema = _server_conftest._pg_session_schema
+pg_db = _server_conftest.pg_db
+pg_db_conn = _server_conftest.pg_db_conn
 
 
 def patch_tool_connect(monkeypatch, tool_module, conn):

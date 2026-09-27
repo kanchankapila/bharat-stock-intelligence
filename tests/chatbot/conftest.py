@@ -23,4 +23,6 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 # Re-exported so pytest discovers them as fixtures for every test in this directory.
-from _pg_support import pg_conn, pg_schema  # noqa: E402,F401
+from _pg_support import (  # noqa: E402,F401
+    pg_conn, pg_schema, _pg_session_schema, pg_db, pg_db_conn,
+)

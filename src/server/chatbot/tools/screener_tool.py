@@ -73,6 +73,9 @@ def search_screener(query: str, top_k: int = 3, db_path: str = DB_PATH) -> list[
                 "screener_name": r["name"],
                 "source": r["source"],
                 "sentiment": r["inferred_sentiment"],
+                "source_ref": f"screener_master:{r['source']}:{r['scan_id']}",
+                "entity_type": "candidate_generator",
+                "content_kind": "vendor_screener",
                 "stocks": get_screener_stocks(r["scan_id"], db_path),
             }
             for r in screeners
@@ -86,6 +89,9 @@ def search_screener(query: str, top_k: int = 3, db_path: str = DB_PATH) -> list[
             "screener_name": meta.get("name", ""),
             "source": meta.get("source", ""),
             "scan_id": meta.get("scan_id", ""),
+            "source_ref": meta.get("source_ref", f"screener_master:{meta.get('source', '')}:{meta.get('scan_id', '')}"),
+            "entity_type": meta.get("entity_type", "candidate_generator"),
+            "content_kind": meta.get("content_kind", "vendor_screener"),
             "stocks": get_screener_stocks(meta["scan_id"], db_path) if meta.get("scan_id") else [],
         }
         for meta in metadatas

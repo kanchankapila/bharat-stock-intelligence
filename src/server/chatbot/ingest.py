@@ -46,30 +46,41 @@ def ingest_stock_profiles(client: chromadb.ClientAPI, db_path: str = DB_PATH) ->
     try:
         rows = conn.execute("""
             SELECT ns.symbol, ns.name, ns.sector, ns.industry,
-                   cp.description, cp.ai_analysis
+                   cp.description
             FROM nse_stocks ns
             LEFT JOIN company_profiles cp ON ns.symbol = cp.symbol
             WHERE ns.status = 'ACTIVE' OR ns.status IS NULL
             LIMIT 3000
         """).fetchall()
     except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         rows = conn.execute("""
-            SELECT symbol, name, sector, industry, NULL, NULL
+            SELECT symbol, name, sector, industry, NULL
             FROM nse_stocks
             LIMIT 3000
         """).fetchall()
     conn.close()
 
     docs, ids, metas = [], [], []
-    for symbol, name, sector, industry, desc, ai in rows:
+    for symbol, name, sector, industry, desc in rows:
         text = f"{name} ({symbol}). Sector: {sector or 'N/A'}. Industry: {industry or 'N/A'}."
         if desc:
             text += f" {desc}"
-        if ai:
-            text += f" AI Analysis: {ai}"
         docs.append(text)
         ids.append(f"stock_{symbol}")
-        metas.append({"symbol": symbol, "name": name or "", "sector": sector or "", "type": "stock"})
+        metas.append({
+            "symbol": symbol,
+            "name": name or "",
+            "sector": sector or "",
+            "industry": industry or "",
+            "type": "stock",
+            "entity_type": "instrument",
+            "content_kind": "vendor_profile",
+            "source_ref": f"nse_stocks:{symbol}",
+        })
 
     if docs:
         col.upsert(documents=docs, ids=ids, metadatas=metas)
@@ -107,7 +118,15 @@ def ingest_screener_descriptions(client: chromadb.ClientAPI, db_path: str = DB_P
         # (screener_173, screener_520, ...) raised DuplicateIDError and aborted run_full_ingest
         # partway -- after stock_profiles had been written, so news_articles never ran at all.
         ids.append(f"screener_{(source or 'unknown').strip().lower()}_{scan_id}")
-        metas.append({"scan_id": scan_id, "name": name, "source": source or "", "type": "screener"})
+        metas.append({
+            "scan_id": scan_id,
+            "name": name,
+            "source": source or "",
+            "type": "screener",
+            "entity_type": "candidate_generator",
+            "content_kind": "vendor_screener",
+            "source_ref": f"screener_master:{source}:{scan_id}",
+        })
 
     if docs:
         col.upsert(documents=docs, ids=ids, metadatas=metas)
@@ -125,8 +144,8 @@ def ingest_news_articles(client: chromadb.ClientAPI, db_path: str = DB_PATH) -> 
     conn = connect()
     try:
         rows = conn.execute("""
-            SELECT id, title, summary, source, sentiment, sentiment_score,
-                   impact, category, sector, symbols_json
+            SELECT id, title, summary, source, published_at, url,
+                   sentiment, sentiment_score, impact, category, sector, symbols_json
             FROM news_sentiment_items
             WHERE published_at >= datetime('now', '-30 days')
             ORDER BY published_at DESC
@@ -138,7 +157,8 @@ def ingest_news_articles(client: chromadb.ClientAPI, db_path: str = DB_PATH) -> 
 
     docs, ids, metas = [], [], []
     for row in rows:
-        art_id, title, summary, source, sentiment, score, impact, category, sector, symbols_json = row
+        (art_id, title, summary, source, published_at, url, sentiment, score,
+         impact, category, sector, symbols_json) = row
         text = f"{title or ''}. {summary or ''}".strip()
         if not text:
             continue
@@ -146,6 +166,10 @@ def ingest_news_articles(client: chromadb.ClientAPI, db_path: str = DB_PATH) -> 
         ids.append(f"news_{art_id}")
         metas.append({
             "source": source or "",
+            "source_ref": f"news_sentiment_items:{art_id}",
+            "source_uri": url or "",
+            "published_at": str(published_at) if published_at is not None else "",
+            "available_at": str(published_at) if published_at is not None else "",
             "sentiment": sentiment or "Neutral",
             "sentiment_score": float(score) if score is not None else 0.0,
             "impact": impact or "MEDIUM",
@@ -153,6 +177,8 @@ def ingest_news_articles(client: chromadb.ClientAPI, db_path: str = DB_PATH) -> 
             "sector": sector or "",
             "symbols": symbols_json or "",
             "type": "news",
+            "entity_type": "document",
+            "content_kind": "news_article",
         })
 
     if docs:
