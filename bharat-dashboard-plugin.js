@@ -2,11 +2,21 @@
 // Live ingestion dashboard, pipeline health, and quick actions
 // Place at: ~/.hermes/desktop-plugins/bharat-dashboard/plugin.js
 
-import { host, ctx, jsx, useValue, useQuery, queryClient, atom, computed } from '@hermes/plugin-sdk';
+import { host, useValue, useQuery, queryClient, atom, computed } from '@hermes/plugin-sdk';
 import {
-  Button, Card, Badge, StatusDot, Separator, Tabs, TabList, Tab, TabPanel,
+  Button, Badge, StatusDot, Separator, Tabs, TabsList, TabsTrigger,
   ScrollArea, Skeleton, EmptyState, GlyphSpinner, Kbd, cn, icons, Tip, Tooltip
 } from '@hermes/plugin-sdk';
+// A disk plugin loads uncompiled (no JSX, no build) and the only importable specifiers are
+// @hermes/plugin-sdk, react and react/jsx-runtime — jsx/jsxs live in the latter, not the SDK.
+import { jsx as _jsx, jsxs as _jsxs } from 'react/jsx-runtime';
+
+// react/jsx-runtime's jsx(type, props) takes children via props.children, not a 3rd positional
+// arg — this adapter keeps every jsx(type, props, children) call below unchanged.
+function jsx(type, props, children) {
+  const p = children !== undefined ? { ...props, children } : (props || {});
+  return Array.isArray(p.children) ? _jsxs(type, p) : _jsx(type, p);
+}
 
 // ─── State ───
 const focusedSessionId = host.state.focusedSessionId;
@@ -17,6 +27,15 @@ const busy = host.state.busy;
 const healthAtom = atom({ heartbeats: [], dlq: [], dq: [], loading: true, error: null });
 const recommendationsAtom = atom({ data: [], loading: true, error: null });
 const lastRefreshAtom = atom(Date.now());
+const activeTabAtom = atom('health');
+const fetchersTabAtom = atom({ fetchers: [], loading: true, selected: null });
+
+// @hermes/plugin-sdk has no bare `Card` primitive (verified against apps/desktop/src/sdk/index.ts) —
+// this reproduces the app's own card surface (bg-ui-card / ui-stroke-tertiary tokens, used
+// elsewhere in this file) locally instead of relying on an export that doesn't exist.
+function Card({ className, children }) {
+  return jsx('div', { className: cn('rounded-lg border border-ui-stroke-tertiary bg-ui-card', className) }, children);
+}
 
 // ─── Auto-refresh every 30 seconds ───
 setInterval(() => {
@@ -146,7 +165,7 @@ function QuickActions() {
   return (
     jsx(Card, { className: 'p-4' }, [
       jsx('h3', { className: 'font-semibold mb-3 flex items-center gap-2' }, [
-        jsx(icons.zap, { className: 'h-4 w-4' }),
+        jsx(icons.Zap, { className: 'h-4 w-4' }),
         'Quick Actions'
       ]),
       jsx('div', { className: 'grid gap-2 sm:grid-cols-2' }, [
@@ -157,22 +176,22 @@ function QuickActions() {
             arguments: {} 
           }).then(r => host.notify({ kind: 'info', message: `Found ${r.result?.length || 0} fetchers` })),
           className: 'w-full justify-start'
-        }, [jsx(icons.list, { className: 'h-4 w-4 mr-2' }), 'List All Fetchers']),
+        }, [jsx(icons.LayoutDashboard, { className: 'h-4 w-4 mr-2' }), 'List All Fetchers']),
         jsx(Button, { 
           variant: 'outline', 
           onClick: requeueDLQ,
           className: 'w-full justify-start'
-        }, [jsx(icons.refresh_cw, { className: 'h-4 w-4 mr-2' }), 'Requeue DLQ']),
+        }, [jsx(icons.RefreshCw, { className: 'h-4 w-4 mr-2' }), 'Requeue DLQ']),
         jsx(Button, { 
           variant: 'outline', 
           onClick: () => runFetcher('intraday_fetcher'),
           className: 'w-full justify-start'
-        }, [jsx(icons.download, { className: 'h-4 w-4 mr-2' }), 'Run Intraday Fetcher']),
+        }, [jsx(icons.Download, { className: 'h-4 w-4 mr-2' }), 'Run Intraday Fetcher']),
         jsx(Button, { 
           variant: 'outline', 
           onClick: () => runFetcher('nse_bhavcopy_fetcher'),
           className: 'w-full justify-start'
-        }, [jsx(icons.database, { className: 'h-4 w-4 mr-2' }), 'Fetch NSE Bhavcopy']),
+        }, [jsx(icons.Archive, { className: 'h-4 w-4 mr-2' }), 'Fetch NSE Bhavcopy']),
         jsx(Button, { 
           variant: 'outline', 
           onClick: () => host.request('tools/call', { 
@@ -180,7 +199,7 @@ function QuickActions() {
             arguments: {} 
           }),
           className: 'w-full justify-start'
-        }, [jsx(icons.activity, { className: 'h-4 w-4 mr-2' }), 'Fetcher Status']),
+        }, [jsx(icons.Activity, { className: 'h-4 w-4 mr-2' }), 'Fetcher Status']),
         jsx(Button, { 
           variant: 'primary', 
           onClick: () => host.request('tools/call', { 
@@ -188,7 +207,7 @@ function QuickActions() {
             arguments: { limit: 10, min_score: 65 } 
           }),
           className: 'w-full justify-start'
-        }, [jsx(icons.target, { className: 'h-4 w-4 mr-2' }), 'Top 10 Picks (≥65)'])
+        }, [jsx(icons.CheckCircle2, { className: 'h-4 w-4 mr-2' }), 'Top 10 Picks (≥65)'])
       ])
     ])
   );
@@ -235,7 +254,7 @@ function HealthTab() {
       // Failed Jobs
       failedJobs.length > 0 && jsx(Card, { className: 'p-3 border-red-200' }, [
         jsx('h4', { className: 'font-semibold text-red-600 mb-2 flex items-center gap-2' }, [
-          jsx(icons.alert_circle, { className: 'h-4 w-4' }),
+          jsx(icons.AlertCircle, { className: 'h-4 w-4' }),
           `Failed Jobs (${failedJobs.length})`
         ]),
         jsx('div', { className: 'flex flex-wrap gap-2' }, 
@@ -249,7 +268,7 @@ function HealthTab() {
       // DLQ
       health.dlq.length > 0 && jsx(Card, { className: 'p-3 border-red-200' }, [
         jsx('h4', { className: 'font-semibold text-red-600 mb-2 flex items-center gap-2' }, [
-          jsx(icons.trash_2, { className: 'h-4 w-4' }),
+          jsx(icons.Trash2, { className: 'h-4 w-4' }),
           `Dead Letter Queue (${health.dlq.length} fetchers)`
         ]),
         jsx('div', { className: 'flex flex-wrap gap-2' }, 
@@ -260,7 +279,7 @@ function HealthTab() {
       // Data Quality Issues
       health.dq.length > 0 && jsx(Card, { className: 'p-3 border-yellow-200' }, [
         jsx('h4', { className: 'font-semibold text-yellow-600 mb-2 flex items-center gap-2' }, [
-          jsx(icons.alert_triangle, { className: 'h-4 w-4' }),
+          jsx(icons.AlertTriangle, { className: 'h-4 w-4' }),
           `Data Quality Issues (${health.dq.length})`
         ]),
         jsx('div', { className: 'space-y-1 max-h-40 overflow-y-auto' },
@@ -278,7 +297,7 @@ function HealthTab() {
       // All Jobs (collapsible)
       jsx(Card, { className: 'p-3' }, [
         jsx('h4', { className: 'font-semibold mb-2 flex items-center gap-2' }, [
-          jsx(icons.list, { className: 'h-4 w-4' }),
+          jsx(icons.LayoutDashboard, { className: 'h-4 w-4' }),
           `All Job Heartbeats (${health.heartbeats.length})`
         ]),
         jsx('div', { className: 'flex flex-wrap gap-2' }, 
@@ -339,28 +358,27 @@ function RecommendationsTab() {
           size: 'sm', 
           variant: 'ghost',
           onClick: refreshRecommendations
-        }, [jsx(icons.refresh_cw, { className: 'h-3 w-3 mr-1' }), 'Refresh'])
+        }, [jsx(icons.RefreshCw, { className: 'h-3 w-3 mr-1' }), 'Refresh'])
       ])
     ])
   );
 }
 
 function FetchersTab() {
-  const [fetchers, setFetchers] = useValue(atom([]));
-  const [loading, setLoading] = useValue(atom(true));
-  const [selected, setSelected] = useValue(atom(null));
-  
+  // useValue (nanostores' useStore) returns the store's CURRENT VALUE, not a [value, setter]
+  // tuple like React's useState — matching how healthAtom/recommendationsAtom are used above.
+  const { fetchers, loading, selected } = useValue(fetchersTabAtom);
+
   // Load fetchers on mount
   if (loading) {
-    host.request('tools/call', { 
-      name: 'mcp_bharat-intelligence_list_fetchers', 
-      arguments: {} 
+    host.request('tools/call', {
+      name: 'mcp_bharat-intelligence_list_fetchers',
+      arguments: {}
     }).then(r => {
-      setFetchers(r.result || []);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+      fetchersTabAtom.set({ ...fetchersTabAtom.get(), fetchers: r.result || [], loading: false });
+    }).catch(() => fetchersTabAtom.set({ ...fetchersTabAtom.get(), loading: false }));
   }
-  
+
   if (loading) return jsx(Skeleton, { className: 'h-64' });
   
   return (
@@ -384,7 +402,7 @@ function FetchersTab() {
               jsx(Button, { 
                 size: 'sm', 
                 variant: selected === f.name ? 'primary' : 'outline',
-                onClick: () => setSelected(f.name),
+                onClick: () => fetchersTabAtom.set({ ...fetchersTabAtom.get(), selected: f.name }),
                 className: 'mr-1'
               }, 'Select'),
               selected === f.name && jsx(Button, { 
@@ -415,23 +433,32 @@ export default {
         dock: { pane: 'workspace', pos: 'bottom' },
         height: '400px'
       },
-      render: () => jsx('div', { className: 'h-full flex flex-col' }, [
-        // Header with tabs
-        jsx('div', { className: 'border-b border-ui-stroke-secondary px-3 py-2' }, [
-          jsx(Tabs, { defaultValue: 'health', className: 'w-full' }, [
-            jsx(TabList, { className: 'grid w-full grid-cols-3' }, [
-              jsx(Tab, { value: 'health' }, [jsx(icons.heart_pulse, { className: 'h-3 w-3 mr-1' }), 'Health']),
-              jsx(Tab, { value: 'recs' }, [jsx(icons.target, { className: 'h-3 w-3 mr-1' }), 'Picks']),
-              jsx(Tab, { value: 'fetchers' }, [jsx(icons.database, { className: 'h-3 w-3 mr-1' }), 'Fetchers'])
-            ]),
-            jsx(TabPanel, { value: 'health' }, jsx(HealthTab, {})),
-            jsx(TabPanel, { value: 'recs' }, jsx(RecommendationsTab, {})),
-            jsx(TabPanel, { value: 'fetchers' }, jsx(FetchersTab, {}))
-          ])
-        ]),
-        // Quick actions bar at bottom
-        jsx(QuickActions, {})
-      ])
+      render: () => {
+        // @hermes/plugin-sdk's Tabs wrapper only exposes Root/List/Trigger (no Content —
+        // see apps/desktop/src/components/ui/tabs.tsx), so panel switching is done by hand
+        // against this atom rather than via a TabPanel component that doesn't exist.
+        const activeTab = useValue(activeTabAtom);
+        return jsx('div', { className: 'h-full flex flex-col' }, [
+          // Header with tabs
+          jsx('div', { className: 'border-b border-ui-stroke-secondary px-3 py-2' }, [
+            jsx(Tabs, { value: activeTab, onValueChange: v => activeTabAtom.set(v), className: 'w-full' }, [
+              jsx(TabsList, { className: 'grid w-full grid-cols-3' }, [
+                jsx(TabsTrigger, { value: 'health' }, [jsx(icons.Activity, { className: 'h-3 w-3 mr-1' }), 'Health']),
+                jsx(TabsTrigger, { value: 'recs' }, [jsx(icons.CheckCircle2, { className: 'h-3 w-3 mr-1' }), 'Picks']),
+                jsx(TabsTrigger, { value: 'fetchers' }, [jsx(icons.Archive, { className: 'h-3 w-3 mr-1' }), 'Fetchers'])
+              ])
+            ])
+          ]),
+          // Active tab's content
+          jsx('div', { className: 'flex-1 overflow-y-auto' }, [
+            activeTab === 'health' && jsx(HealthTab, {}),
+            activeTab === 'recs' && jsx(RecommendationsTab, {}),
+            activeTab === 'fetchers' && jsx(FetchersTab, {})
+          ]),
+          // Quick actions bar at bottom
+          jsx(QuickActions, {})
+        ]);
+      }
     });
     
     // Status bar chip - pipeline health summary
@@ -458,7 +485,7 @@ export default {
             variant: 'ghost', 
             className: 'h-5 px-1 ml-1',
             onClick: () => host.navigate('/plugins/bharat-dashboard')
-          }, [jsx(icons.chevron_right, { className: 'h-3 w-3' })])
+          }, [jsx(icons.ChevronRight, { className: 'h-3 w-3' })])
         ]);
       }
     });
