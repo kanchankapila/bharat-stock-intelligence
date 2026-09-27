@@ -17,7 +17,7 @@ whether it's actually referenced from the frontend (`grep -rF "<procedureName>" 
 — an orphaned procedure under review is lower priority than one actively serving a dashboard;
 flag it either way per `/canonical-read-audit`.
 
-## 2. SQL dialect checks (`recurring-bugs.md`'s "SQL dialect" table)
+## 2. SQL dialect checks (`bugs-data-layer.md`'s "SQL dialect" table)
 
 - Raw `%s` placeholders in a Postgres branch instead of `?` through `translate()`.
 - Multi-word casts (`::double precision`) — use `::float8`; `stripPgCasts` only matches
@@ -36,7 +36,7 @@ flag it either way per `/canonical-read-audit`.
 discarded" — it did not; the branch was `sqlite-decommission` and is merged here. Verify against
 the files rather than trusting any revision of this note.
 
-## 3. NaN/null checks (`recurring-bugs.md`'s "NaN & null" table)
+## 3. NaN/null checks (`bugs-data-layer.md`'s "NaN & null" table)
 
 - `float(x or 0)`/`int(x or 0)` on any model-output or aggregate column — `nan or 0` is `nan`, not
   `0`; should be `math.isfinite` + skip, not coerce.

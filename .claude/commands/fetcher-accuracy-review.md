@@ -4,7 +4,7 @@ description: Audit a fetcher against the mandatory data-sources.md checklist and
 
 # Fetcher Accuracy Review
 
-Read `.claude/rules/data-sources.md` and the "Writes & keys" / "Environment & deploy" sections of `.claude/rules/recurring-bugs.md` first. This review exists because `check_recurring_bugs.py` (CI) only catches the mechanical signatures — `date.today()` write-anchors, raw `%s`, a missing `live_datasource` test file. Everything below needs judgment, not a regex, which is why it's a review and not another CI check.
+Read `.claude/rules/data-sources.md`, the "Writes & keys" section of `.claude/rules/bugs-data-layer.md`, and the "Environment & deploy" section of `.claude/rules/bugs-testing-env.md` first. This review exists because `check_recurring_bugs.py` (CI) only catches the mechanical signatures — `date.today()` write-anchors, raw `%s`, a missing `live_datasource` test file. Everything below needs judgment, not a regex, which is why it's a review and not another CI check.
 
 ## Scope
 

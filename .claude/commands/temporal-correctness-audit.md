@@ -4,14 +4,14 @@ description: Sweep every date anchor, staleness calculation, cron mirror and row
 
 # Temporal Correctness Audit
 
-`.claude/rules/recurring-bugs.md`'s "Dates & scheduling" table carries more recorded recurrences
+`.claude/rules/bugs-data-layer.md`'s "Dates & scheduling" table carries more recorded recurrences
 than any other section: 11 files with a `date.today()` write anchor, 10 with a `CASE WHEN date >= x
 ELSE NULL` guard that nulls a column's whole history on a holiday, 4 raw `daysStale()` calls that
 read Friday data as 3 days stale on Monday, 6 cron patterns mirrored into a second registry, 2
 hand-rolled weekday steppers. `scripts/check_recurring_bugs.py` automates only the first two
 signatures, and only on **changed** files in CI — nothing ever looks at a file nobody touched.
-That is what this audit is for. Read the "Dates & scheduling" and "Monitoring blind spots"
-sections of `recurring-bugs.md` first.
+That is what this audit is for. Read the "Dates & scheduling" section of `bugs-data-layer.md` and
+the "Monitoring blind spots" section of `bugs-monitoring.md` first.
 
 Run the static checker over the **whole tree** before anything else — it is faster than you and
 catches the two automated signatures everywhere, not just in the diff:

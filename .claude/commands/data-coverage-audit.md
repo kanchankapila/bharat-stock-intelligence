@@ -4,7 +4,7 @@ description: Whole-repo sweep for fetchers with no live_datasource test, tables 
 
 # Data Coverage Audit
 
-Unlike `/fetcher-accuracy-review` (one fetcher, from a diff) this is the whole-repo version: find what's missing across all of it. Read the "Freshness-check mandate" section of `.claude/rules/data-sources.md` and the "Monitoring blind spots" section of `.claude/rules/recurring-bugs.md` first — this audit exists because manual review has twice found the gap to be much larger than assumed (a 2026-08-03 sweep found freshness checks covered only ~25 of ~140 DB-writing fetchers; a 2026-08-12 sweep found 21 of `ml_ensemble.py`'s 254 declared inputs were 100%-NULL on every recent date while the monitor read 86 pass / 1 fail throughout).
+Unlike `/fetcher-accuracy-review` (one fetcher, from a diff) this is the whole-repo version: find what's missing across all of it. Read the "Freshness-check mandate" section of `.claude/rules/data-sources.md` and the "Monitoring blind spots" section of `.claude/rules/bugs-monitoring.md` first — this audit exists because manual review has twice found the gap to be much larger than assumed (a 2026-08-03 sweep found freshness checks covered only ~25 of ~140 DB-writing fetchers; a 2026-08-12 sweep found 21 of `ml_ensemble.py`'s 254 declared inputs were 100%-NULL on every recent date while the monitor read 86 pass / 1 fail throughout).
 
 ## 1. Enumerate the universe
 

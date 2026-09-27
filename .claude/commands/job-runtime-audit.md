@@ -4,8 +4,9 @@ description: Check BullMQ jobs and cron-scheduled scripts for silent budget-kill
 
 # Job Runtime Audit
 
-Read the "Writes & keys" and "Environment & deploy" sections of `.claude/rules/recurring-bugs.md`
-first. This audit targets a specific bug family already found twice, both times by accident
+Read the "Writes & keys" section of `.claude/rules/bugs-data-layer.md`, the "Signals, writes & job
+runtime" section of `.claude/rules/bugs-jobs-runtime.md`, and the "Environment & deploy" section of
+`.claude/rules/bugs-testing-env.md` first. This audit targets a specific bug family already found twice, both times by accident
 rather than by a repeatable check: `extra_endpoints_fetcher.py` was SIGKILLed at its 30-minute job
 budget every single night for weeks, silently before ever reaching `extra_features_parser.run()`
 (its last statement) — the fetcher's own freshness check passed nightly (it *was* writing fresh

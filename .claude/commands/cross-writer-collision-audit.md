@@ -4,7 +4,7 @@ description: Sweep every multi-writer table for enum-case collisions, provider-m
 
 # Cross-Writer Collision Audit
 
-Read the "Writes & keys" section of `.claude/rules/recurring-bugs.md` and the "Composite
+Read the "Writes & keys" section of `.claude/rules/bugs-data-layer.md` and the "Composite
 primary keys for provider-issued ids" section of `.claude/rules/data-sources.md` in full
 first. Every example below was found by hand, one incident at a time, over several sessions:
 `signal_source` carrying both `technical` and `TECHNICAL` from two producers; `screener_catalog`

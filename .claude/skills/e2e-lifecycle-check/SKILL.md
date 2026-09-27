@@ -18,7 +18,7 @@ Exit 0 = PASS, exit 1 = FAIL. `--json out.json` writes the full report. Use the 
 
 **"It printed Buy/Sell/Hold" is NOT the pass condition, deliberately.** On 2026-08-17 one
 missing advisory table made `unified_ranker.run()` classify the **entire universe as Hold and
-exit 0** (`recurring-bugs.md`, the `except Exception: pass` / aborted-transaction entry). Hold
+exit 0** (`bugs-data-layer.md`, the `except Exception: pass` / aborted-transaction entry). Hold
 is a valid label, so any check that stops at "we got a label" reports green on exactly that
 failure.
 

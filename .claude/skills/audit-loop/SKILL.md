@@ -55,12 +55,12 @@ stopped at N instances when a static check immediately found N+4 more.
      collapsed. Now standing: `ur-engine-dispersion-collapse`, which also reports the genuine
      collapse rate (dl 39%, ml 34%, technical 18% of ranker dates).
 
-  Both entries are in `recurring-bugs.md`. Confirm both checks are PASSing and read their
+  Both entries are in `bugs-monitoring.md`. Confirm both checks are PASSing and read their
   `detail` — a rate that has drifted off its recorded baseline is a finding even while passing.
 - **Jobs** — every BullMQ registration in `queues.ts`/`jobs/*.jobs.ts` and every cron mirror has a
   `job_heartbeat` row with `last_success_at` recent relative to its own cadence, and its skip path
   (if any) does not fall through to the same "completed" handler a real run uses
-  (`recurring-bugs.md`'s skip-as-success class — recurred 6 times, once on the *shared*
+  (`bugs-data-layer.md`'s skip-as-success class — recurred 6 times, once on the *shared*
   `registerJob.ts` handler a per-file static check structurally couldn't see).
 
 - **Pending-work trackers** — "complete pending items" only means something if every existing
@@ -204,7 +204,7 @@ Code compiling and tests passing is not the same claim as the system running. Al
   `bharat-server`, `ml-api`, `chatbot`, `alphaquant-api` all `online`, not `errored`/`stopped`, and
   `pm_uptime` postdates the fix commit — "committed ≠ deployed" from CLAUDE.md, checked mechanically
   rather than assumed.
-- **A log sweep for the failure modes tests can't see.** `recurring-bugs.md`'s swallowed-exception
+- **A log sweep for the failure modes tests can't see.** `bugs-data-layer.md`'s swallowed-exception
   and skip-as-success classes produce no red test — they show up only as `InFailedSqlTransaction`,
   a truncated stderr, or a "finished successfully with warnings" line in pm2/job logs. Grep recent
   logs for these signatures before calling the run clean; a green exit code on its own has missed

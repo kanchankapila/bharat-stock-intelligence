@@ -4,8 +4,10 @@ description: Review a new or pending node-pg-migrate migration against this repo
 
 # Migration Safety Review
 
-Read the "SQL dialect" and "Environment & deploy" sections of `.claude/rules/recurring-bugs.md`
-first. `CLAUDE.md` states the live DB is Postgres/TimescaleDB (`USE_POSTGRES=true`, :5433) and
+Read the "SQL dialect" section of `.claude/rules/bugs-data-layer.md` and the "Environment &
+deploy" section of `.claude/rules/bugs-testing-env.md` first. `CLAUDE.md` states the live DB is
+Postgres/TimescaleDB (:5433, no env var selects it — `usePostgres()`/`use_postgres()` are
+unconditional) and
 that several tables are **compressed hypertables where a predicate-wide `UPDATE`/`ADD CONSTRAINT`
 will fail or destroy compression** — this is a hard constraint specific to this repo's storage
 engine, not a generic Postgres concern, and a migration written against a plain local Postgres
@@ -33,7 +35,7 @@ SELECT * FROM timescaledb_information.compression_settings WHERE hypertable_name
   (metadata-only) in Postgres/Timescale, but do not conflate that with the column being
   *populated*; confirm the migration doesn't assume a default backfill happens implicitly.
 - **`CREATE TABLE IF NOT EXISTS` used where a column is being added to an existing table** — this
-  is a documented no-op in this repo (`recurring-bugs.md`'s SQL-dialect table) if the table already
+  is a documented no-op in this repo (`bugs-data-layer.md`'s SQL-dialect table) if the table already
   exists; needs an explicit `safe_alter` pattern instead.
 
 ## 3. Schema drift against live

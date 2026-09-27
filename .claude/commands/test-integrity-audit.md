@@ -4,7 +4,7 @@ description: Sweep the 258 Python and 106 TypeScript test files for suites that 
 
 # Test Integrity Audit
 
-`.claude/rules/recurring-bugs.md`'s "Testing" section documents six ways a suite here has been
+`.claude/rules/bugs-testing-env.md`'s "Testing" section documents six ways a suite here has been
 **100% green while protecting nothing**, and the CLAUDE.md definition-of-done rule ("negative-control
 your tests") exists because three separate suites were found in that state. `verify-gate.mjs`
 blocks completion on tests-*passed*, which proves the code runs, not that any test would fail if

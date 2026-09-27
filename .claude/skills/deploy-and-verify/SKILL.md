@@ -5,7 +5,7 @@ description: Take a finished code/migration/package change from "committed" to "
 
 # Deploy and Verify
 
-This repo's own history is the reason this skill exists: `.claude/rules/recurring-bugs.md`'s
+This repo's own history is the reason this skill exists: `.claude/rules/bugs-testing-env.md`'s
 "Environment & deploy" section and CLAUDE.md's "Definition of done" both say committed ≠
 deployed ≠ applied, and it still recurs because that's prose someone has to remember, not a
 gate. Follow this end to end before calling anything done — don't stop at a green `tsc --noEmit`

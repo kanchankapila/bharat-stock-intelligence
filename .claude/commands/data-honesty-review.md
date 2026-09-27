@@ -4,7 +4,7 @@ description: Check whether a frontend surface renders missing/stale/NULL backend
 
 # Data Honesty Review
 
-Every incident in `.claude/rules/recurring-bugs.md`'s "Monitoring blind spots" section is the
+Every incident in `.claude/rules/bugs-monitoring.md`'s "Monitoring blind spots" section is the
 same shape: something reports healthy while quietly not delivering what it exists to deliver
 (21 of `ml_ensemble.py`'s 254 inputs 100%-NULL while the monitor read 86 pass/1 fail;
 `entry_price` NULL on 100% of a day's `recommendation_log` rows behind a query that silently
@@ -20,7 +20,7 @@ check each state produces visibly different output:
 - **NULL/undefined field on an otherwise-present row.** Does it render blank, `0`, `N/A`,
   `--`, or does it silently coerce (`{value || 0}`, `{value ?? 0}`) into a real-looking number?
   A coerced `0` presented next to real numeric values is a lie a user can't detect — same failure
-  as `float(x or 0)` in `recurring-bugs.md`, one layer up the stack.
+  as `float(x or 0)` in `bugs-data-layer.md`, one layer up the stack.
 - **Empty result set** (query resolved, zero rows) vs **loading** (query pending). Collapsed into
   the same UI state, a user can't tell "nothing to show" from "still fetching" from "broken."
 - **Stale data.** If the component shows a score, signal, price, or ranking, is there an as-of
