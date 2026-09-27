@@ -16,7 +16,12 @@ import os
 logger = logging.getLogger("worker_service")
 
 sys.path.insert(0, os.path.dirname(__file__))
-from mcp.market_intelligence_mcp import handle_mcp_request, analyze_stock_risk, get_top_conviction_picks
+from mcp.market_intelligence_mcp import (
+    analyze_stock_risk,
+    get_top_conviction_picks,
+    handle_mcp_request,
+    handle_read_only_mcp_request,
+)
 from db_compat import connect, query_one
 
 app = FastAPI(
@@ -59,6 +64,15 @@ def health_check():
 def dispatch_mcp_tool(req: MCPRequest):
     """Executes Model Context Protocol (MCP) tool requests."""
     res = handle_mcp_request(req.tool_name, req.arguments or {})
+    if "error" in res:
+        raise HTTPException(status_code=400, detail=res["error"])
+    return res
+
+
+@app.post("/mcp/decision-tools")
+def dispatch_read_only_mcp_tool(req: MCPRequest):
+    """Read-only decision-agent surface; operational tools are rejected."""
+    res = handle_read_only_mcp_request(req.tool_name, req.arguments or {})
     if "error" in res:
         raise HTTPException(status_code=400, detail=res["error"])
     return res

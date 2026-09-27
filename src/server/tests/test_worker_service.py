@@ -52,6 +52,22 @@ def test_mcp_tools_endpoint():
     assert "result" in data
 
 
+def test_decision_tools_endpoint_is_read_only():
+    response = client.post(
+        "/mcp/decision-tools",
+        json={"tool_name": "get_ontology_context", "arguments": {"question": "market regime"}},
+    )
+    assert response.status_code == 200
+    assert "result" in response.json()
+
+    response = client.post(
+        "/mcp/decision-tools",
+        json={"tool_name": "run_fetcher", "arguments": {"fetcher_name": "nse_bhavcopy_fetcher"}},
+    )
+    assert response.status_code == 400
+    assert "read-only" in response.json()["detail"]
+
+
 def test_risk_summary_endpoint():
     response = client.post("/signals/risk-summary", json={"symbol": "TATAMOTORS"})
     assert response.status_code == 200
