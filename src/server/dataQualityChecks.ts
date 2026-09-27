@@ -1972,8 +1972,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       const gateAucs = usingSlope
         ? slopes
         : nums([row?.min_ready_auc, row?.max_ready_auc, row?.global_auc]);
+      const weightsAll = gateAucs.map(edgeWeight);
       if (gateAucs.length > 0) {
-        const weights = gateAucs.map(edgeWeight);
+        const weights = weightsAll;
         const spread = Math.max(...weights) - Math.min(...weights);
         if (spread === 0) {
           const w = weights[0];
@@ -2019,25 +2020,41 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       // A breach WITH the decay applied is correct, live behaviour -> pass. A breach WITHOUT it
       // is the genuine defect: an unmitigated no-edge regime scoring at full confidence -> fail.
       // HIGH_VOL is still named in the detail, so nothing is hidden -- it just no longer cries wolf.
+      // Report the field that actually drives the weight. Stating "clears the 0.55 trust floor"
+      // once calib_slope is live is true-but-irrelevant — the floor is no longer in the weight
+      // path — and a digest line the reader cannot act on is how a real one gets skipped.
+      const appliedRange = weightsAll.length
+        ? `${Math.min(...weightsAll).toFixed(3)}..${Math.max(...weightsAll).toFixed(3)}`
+        : 'n/a';
       if (breachedCount > 0) {
         const worst = row?.worst_breached_auc != null ? ` (worst AUC ${Number(row.worst_breached_auc).toFixed(3)})` : '';
         if (!row?.adjustment_enabled) {
           return {
             status: 'fail',
-            detail: `${breachedCount} of ${readyCount} regime(s) sit below the 0.55 live-edge trust floor${worst} ` +
+            detail: `${breachedCount} of ${readyCount} regime(s) sit below the 0.55 AUC trust floor${worst} ` +
                     `AND app_settings.edge_adjustment_enabled is not 'true' — their win_probability is being used ` +
-                    `at FULL confidence with no decay toward neutral. This is the unmitigated failure, not the ` +
-                    `expected one: a no-edge regime is actively scoring.`,
+                    `at FULL confidence with no decay toward neutral, whatever the measured weight says. This is ` +
+                    `the unmitigated failure, not the expected one: a no-edge regime is actively scoring.`,
           };
         }
         return {
           status: 'pass',
-          detail: `${breachedCount} of ${readyCount} regime(s) sit below the 0.55 live-edge trust floor${worst}, ` +
-                  `and edge_adjustment_enabled=true is shrinking each toward neutral 0.5 ` +
-                  `(regime_edge_weight = clip((auc-0.5)/0.05, 0, 1)). Mitigation verified live; no action.`,
+          detail: `${breachedCount} of ${readyCount} regime(s) sit below the 0.55 AUC trust floor${worst}, ` +
+                  `and edge_adjustment_enabled=true is shrinking each toward neutral 0.5 — ` +
+                  (usingSlope
+                    ? `weights come from the measured calib_slope, applying ${appliedRange}.`
+                    : `regime_edge_weight = clip((auc-0.5)/0.05, 0, 1).`) +
+                  ` Mitigation verified live; no action.`,
         };
       }
-      return { status: 'pass', detail: `All ${readyCount} regime(s) with sufficient history clear the 0.55 live-edge trust floor.` };
+      return {
+        status: 'pass',
+        detail: usingSlope
+          ? `All ${readyCount} ready regime(s) are being shrunk by their MEASURED calib_slope, ` +
+            `applying weights ${appliedRange} (w<1 = win_probability is over-confident there). ` +
+            `The 0.55 AUC floor is reported for continuity but is no longer in the weight path.`
+          : `All ${readyCount} regime(s) with sufficient history clear the 0.55 live-edge trust floor.`,
+      };
     },
   },
 

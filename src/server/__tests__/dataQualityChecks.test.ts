@@ -320,6 +320,32 @@ describe('individual evaluate() functions', () => {
       }, now);
     expect(r.status).toBe('pass');
     expect(r.detail).not.toMatch(/NO information/);
+    // The verdict must report the field that actually drives the weight. Saying "clears the 0.55
+    // trust floor" once the slope is live is true-but-irrelevant, and an unactionable digest line
+    // is how a real one gets skipped.
+    expect(r.detail).toMatch(/calib_slope/);
+    expect(r.detail).toMatch(/0\.339\.\.0\.812/);
+    expect(r.detail).toMatch(/no longer in the weight path/);
+  });
+
+  it('regime-edge-trust-floor keeps the AUC-formula wording while calib_slope is still NULL', () => {
+    // Continuity: before ml_calibration.py populates the column, the AUC path IS the weight path,
+    // so the verdict must still describe clip((auc-0.5)/0.05) and must NOT mention calib_slope.
+    //
+    // Note which branch this has to use, because it is the finding in miniature: under the AUC
+    // formula, "no breach" means every ready AUC is >= 0.55, which ALL clamp to 1.0 -- so the
+    // all-clear pass is UNREACHABLE by construction once AUC values are supplied, and the only
+    // AUC state that discriminates is one where something sits below the floor. That degeneracy
+    // above the floor is exactly why the weight was moved off AUC (AF-20260927-08).
+    const r = byId('regime-edge-trust-floor').evaluate(
+      {
+        breached_count: 1, ready_count: 3, latest_computed_at: now.toISOString(),
+        adjustment_enabled: true, worst_breached_auc: 0.52,
+        min_ready_auc: 0.52, max_ready_auc: 0.58, global_auc: 0.56,   // weights 0.4 / 1.0 / 1.0
+      }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toMatch(/clip\(\(auc-0\.5\)\/0\.05, 0, 1\)/);
+    expect(r.detail).not.toMatch(/calib_slope/);
   });
 
   it('regime-edge-trust-floor still catches a degenerate slope, and says so in slope terms', () => {
