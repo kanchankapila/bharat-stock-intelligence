@@ -1914,6 +1914,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
             MIN(auc) FILTER (WHERE ready = 1) AS min_ready_auc,
             MAX(auc) FILTER (WHERE ready = 1) AS max_ready_auc,
             MAX(auc) FILTER (WHERE regime = '__GLOBAL__') AS global_auc,
+            MIN(calib_slope) FILTER (WHERE ready = 1) AS min_ready_slope,
+            MAX(calib_slope) FILTER (WHERE ready = 1) AS max_ready_slope,
+            MAX(calib_slope) FILTER (WHERE regime = '__GLOBAL__') AS global_slope,
             MAX(computed_at) AS latest_computed_at,
             (SELECT lower(value) = 'true' FROM app_settings WHERE key = 'edge_adjustment_enabled')
               AS adjustment_enabled
@@ -1954,11 +1957,21 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       // recalibration entry is explicit that after moving a threshold you must confirm the detector
       // DISCRIMINATES rather than merely having stopped firing. Both degenerate directions are
       // caught here: all-1.0 (nothing is ever shrunk) and all-0.0 (everything is always neutralised).
-      const edgeWeight = (auc: number) => Math.max(0, Math.min(1, (auc - 0.50) / (0.55 - 0.50)));
-      const gateAucs = [row?.min_ready_auc, row?.max_ready_auc, row?.global_auc]
-        .filter((v) => v != null)
-        .map(Number)
-        .filter((v) => Number.isFinite(v));
+      // Which field drives the weight changed on 2026-09-27: regime_edge_weight() now prefers the
+      // measured calib_slope and only falls back to the AUC-vs-floor formula when the slope is
+      // NULL. This check has to follow it -- monitoring the AUC path after the gate stopped using
+      // it is the "a check's premise went stale underneath it" class, one level up.
+      const nums = (vals: unknown[]) =>
+        vals.filter((v) => v != null).map(Number).filter((v) => Number.isFinite(v));
+      const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+      const slopes = nums([row?.min_ready_slope, row?.max_ready_slope, row?.global_slope]);
+      const usingSlope = slopes.length > 0;
+      const edgeWeight = usingSlope
+        ? clamp01
+        : (auc: number) => clamp01((auc - 0.50) / (0.55 - 0.50));
+      const gateAucs = usingSlope
+        ? slopes
+        : nums([row?.min_ready_auc, row?.max_ready_auc, row?.global_auc]);
       if (gateAucs.length > 0) {
         const weights = gateAucs.map(edgeWeight);
         const spread = Math.max(...weights) - Math.min(...weights);
@@ -1969,17 +1982,24 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
             status: 'warn',
             detail:
               `regime_edge_weight() carries NO information: every ready regime and the __GLOBAL__ ` +
-              `fallback clip to the same weight ${w.toFixed(2)} (AUC range ${range} against ` +
-              `AUC_RANDOM 0.50 / AUC_TRUST_FLOOR 0.55). ` +
+              `fallback clip to the same weight ${w.toFixed(2)} ` +
+              (usingSlope
+                ? `(calib_slope range ${range} — the measured Brier-optimal shrinkage)`
+                : `(AUC range ${range} against AUC_RANDOM 0.50 / AUC_TRUST_FLOOR 0.55)`) + `. ` +
               (w >= 1
                 ? `win_probability is passed through UNSHRUNK in every regime, so edge_adjustment_enabled ` +
                   `is enabled but has no effect — the trust gate is a no-op.`
                 : `win_probability is shrunk to neutral 0.5 in every regime, so the gate cannot ever ` +
                   `credit a regime that does have edge.`) +
-              ` The floor needs re-deriving against whatever statistic per_regime_auc() now stores ` +
-              `(it moved to horizon-stratified AUC), or the gate needs repointing at realized ` +
-              `forward-return readings (factor_edge_history) per model_promotion.live_edge_verdict()'s ` +
-              `precedent. AF-20260927-08.`,
+              (usingSlope
+                ? ` Every regime measuring the SAME optimal slope is implausible on real data — ` +
+                  `suspect the panel behind per_regime_calibration_slope() (one regime dominating ` +
+                  `it, or a stratum floor dropping everything) before adjusting any constant.`
+                : ` This snapshot predates calib_slope, so the weight still comes from the ` +
+                  `AUC-vs-floor formula, whose floor was calibrated against the older POOLED AUC. ` +
+                  `Run ml_calibration.py to populate calib_slope, which removes the floor from the ` +
+                  `weight path entirely.`) +
+              ` AF-20260927-08.`,
           };
         }
       }

@@ -18,6 +18,7 @@ from ml_calibration import (  # noqa: E402
     edge_adjusted_probability,
     is_edge_adjustment_enabled,
     stratified_auc,
+    stratified_calibration_slope,
     AUC_RANDOM,
     AUC_TRUST_FLOOR,
 )
@@ -508,6 +509,116 @@ def test_regime_edge_weight_linear_between():
     mid_auc = (AUC_RANDOM + AUC_TRUST_FLOOR) / 2
     es = _edge_status(SIDEWAYS={'auc': mid_auc, 'ready': True})
     assert regime_edge_weight('SIDEWAYS', es) == pytest.approx(0.5, abs=1e-6)
+
+
+# ── calib_slope drives the weight (AF-20260927-08) ───────────────────────────────
+# The four tests above all pass AUC-only rows, so they now double as the fallback path's
+# regression coverage -- a snapshot written before calib_slope existed must keep the old
+# behaviour rather than silently jumping to full trust.
+
+def test_slope_drives_the_weight_and_auc_is_ignored_when_both_present():
+    # AUC says "full trust" (0.61 is comfortably over the 0.55 floor); the measured slope says the
+    # probability is over-confident and should be halved. The slope must win -- AUC measures
+    # ordering and cannot see scale, which is the entire reason for this change.
+    es = _edge_status(BEAR={'auc': 0.61, 'calib_slope': 0.47, 'ready': True})
+    assert regime_edge_weight('BEAR', es) == pytest.approx(0.47)
+
+
+def test_slope_clamps_to_unit_interval():
+    # A negative slope means the probability's SCALE is inverted. Clamp to 0 -> p collapses to 0.5,
+    # which every consumer already reads as "no opinion" (bet_size_from_probability(<=0.5) == 0).
+    # Letting it through negative would actively invert the signal.
+    assert regime_edge_weight('X', _edge_status(X={'calib_slope': -0.244, 'ready': True})) == 0.0
+    assert regime_edge_weight('X', _edge_status(X={'calib_slope': 1.8, 'ready': True})) == 1.0
+
+
+def test_slope_falls_back_to_auc_when_absent():
+    # Load-bearing: until ml_calibration.py next runs, every persisted row has calib_slope NULL.
+    es = _edge_status(BEAR={'auc': 0.525, 'calib_slope': None, 'ready': True})
+    assert regime_edge_weight('BEAR', es) == pytest.approx(0.5, abs=1e-6)
+
+
+def test_slope_respects_the_same_ready_and_global_fallback_order():
+    # An un-ready regime must not use its own slope; it collapses to the 3-class key, then
+    # __GLOBAL__ (which is consulted regardless of `ready`, matching the pre-existing AUC path).
+    es = _edge_status(
+        HIGH_VOL={'calib_slope': 0.81, 'ready': False},
+        BEAR={'calib_slope': 0.47, 'ready': True},
+        __GLOBAL__={'calib_slope': 0.55},
+    )
+    assert regime_edge_weight('HIGH_VOL', es) == pytest.approx(0.47)   # collapsed to BEAR
+    assert regime_edge_weight('BULL', es) == pytest.approx(0.55)       # no BULL row -> global
+
+
+def test_the_gate_discriminates_on_the_live_snapshot_instead_of_pinning_every_regime_at_one():
+    """Regression for the actual incident, using the real persisted 2026-09-25 values.
+
+    With AUC alone every regime -- and the __GLOBAL__ fallback -- clipped to exactly 1.0, so
+    regime_edge_weight() was a constant function and edge_adjusted_probability() a platform-wide
+    no-op. The measured slopes from the same panel spread 0.34-0.81. This test is the negative
+    control in situ: the first half reproduces the bug from the same fixture the second half fixes.
+    """
+    live_auc = {'BEAR': 0.5971, 'HIGH_VOL': 0.5700, 'SIDEWAYS': 0.5725, 'CRASH': 0.5938}
+    live_slope = {'BEAR': 0.469, 'HIGH_VOL': 0.812, 'SIDEWAYS': 0.346, 'CRASH': 0.339}
+    regimes = ('BEAR', 'HIGH_VOL', 'SIDEWAYS', 'CRASH')
+
+    auc_only = _edge_status(
+        __GLOBAL__={'auc': 0.6082},
+        **{r: {'auc': live_auc[r], 'ready': True} for r in regimes},
+    )
+    assert {regime_edge_weight(r, auc_only) for r in regimes} == {1.0}, (
+        "the AUC path should still reproduce the incident on these values -- if this ever stops "
+        "holding, this test has stopped being a negative control"
+    )
+
+    with_slope = _edge_status(
+        __GLOBAL__={'auc': 0.6082, 'calib_slope': 0.5547},
+        **{r: {'auc': live_auc[r], 'calib_slope': live_slope[r], 'ready': True} for r in regimes},
+    )
+    weights = {r: regime_edge_weight(r, with_slope) for r in regimes}
+    assert len(set(weights.values())) == len(regimes), f"weights must discriminate, got {weights}"
+    assert max(weights.values()) < 1.0, "every regime measured over-confident; none earns w=1.0"
+
+
+def test_slope_catches_overconfidence_that_auc_structurally_cannot():
+    """The semantic point, in one fixture: PERFECT ordering, still 2x over-confident.
+
+    Winners are scored 0.9 and losers 0.7 on a 50% base rate, so AUC is a flawless 1.0 while the
+    probabilities are inflated. d = 0.4/0.2 gives slope = 0.1/0.2 = 0.5 -- halve it. This is the
+    HIGH_VOL shape that made the AUC-driven gate grant FULL trust to the most over-confident
+    stratum in the live panel (AUC 0.648, mean p 0.790, realized base rate 0.403).
+    """
+    pairs = [(1, 0.9, 1)] * 200 + [(1, 0.7, 0)] * 200
+    res = stratified_calibration_slope(pairs, min_n=50)
+    assert res is not None
+    assert res['slope'] == pytest.approx(0.5, abs=1e-9)
+    assert stratified_auc([(k, p, y) for k, p, y in pairs], min_n=50)['auc'] == pytest.approx(1.0)
+
+
+def test_slope_is_horizon_stratified_not_pooled():
+    """Base rates differ per horizon (38/64/79% live), and a no-intercept slope fitted across
+    pooled horizons absorbs that level difference into the slope -- the same trap that made the
+    pooled AUC read below every one of its own strata. Each stratum here is internally consistent
+    at slope 0.5, so the combined answer must be 0.5, not something the level gap dragged away."""
+    pairs = ([(1, 0.9, 1)] * 300 + [(1, 0.7, 0)] * 300      # h=1, base rate 0.50
+             + [(15, 0.8, 1)] * 540 + [(15, 0.6, 0)] * 60)  # h=15, base rate 0.90
+    res = stratified_calibration_slope(pairs, min_n=50)
+    assert set(res['strata']) == {1, 15}
+    assert res['strata'][1]['slope'] == pytest.approx(0.5, abs=1e-9)
+    # n-weighted mean of the two strata, never a single pooled regression
+    expected = sum(v['n'] * v['slope'] for v in res['strata'].values()) / res['n']
+    assert res['slope'] == pytest.approx(expected, abs=1e-12)
+
+
+def test_slope_drops_tiny_and_single_class_strata():
+    # Same floors as stratified_auc: a 25-row stratum must not swing the n-weighted mean, and a
+    # single-class stratum carries no slope information.
+    pairs = ([(5, 0.9, 1)] * 300 + [(5, 0.7, 0)] * 300
+             + [(2, 0.99, 1)] * 25                      # tiny
+             + [(3, 0.8, 1)] * 400)                     # single class
+    res = stratified_calibration_slope(pairs, min_n=50)
+    assert set(res['strata']) == {5}
+    assert set(res['dropped_strata']) == {2, 3}
 
 
 def test_regime_edge_weight_not_ready_falls_back_to_global():

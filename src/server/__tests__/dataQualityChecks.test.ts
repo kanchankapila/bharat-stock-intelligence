@@ -306,6 +306,43 @@ describe('individual evaluate() functions', () => {
     expect(r.detail).not.toMatch(/NO information/);
   });
 
+  it('regime-edge-trust-floor follows the gate onto calib_slope once it is populated', () => {
+    // regime_edge_weight() prefers the measured slope from 2026-09-27; the check must grade the
+    // field that actually drives the weight. Here the AUCs are the degenerate live 09-25 set
+    // (all clipping to 1.0) while the slopes discriminate -- so a check still looking at AUC
+    // would warn about a path the gate no longer uses.
+    const r = byId('regime-edge-trust-floor').evaluate(
+      {
+        breached_count: 0, ready_count: 4, latest_computed_at: now.toISOString(),
+        adjustment_enabled: true,
+        min_ready_auc: 0.5699789, max_ready_auc: 0.5971017, global_auc: 0.6082106,
+        min_ready_slope: 0.339, max_ready_slope: 0.812, global_slope: 0.5547,
+      }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).not.toMatch(/NO information/);
+  });
+
+  it('regime-edge-trust-floor still catches a degenerate slope, and says so in slope terms', () => {
+    const r = byId('regime-edge-trust-floor').evaluate(
+      {
+        breached_count: 0, ready_count: 4, latest_computed_at: now.toISOString(),
+        adjustment_enabled: true,
+        min_ready_auc: 0.52, max_ready_auc: 0.58, global_auc: 0.56,
+        min_ready_slope: 1.4, max_ready_slope: 2.0, global_slope: 1.6,
+      }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/calib_slope range/);
+    expect(r.detail).toMatch(/UNSHRUNK/);
+    // Must not prescribe the already-completed AUC-floor remedy when the slope is what is broken.
+    expect(r.detail).not.toMatch(/predates calib_slope/);
+  });
+
+  it('regime-edge-trust-floor SQL exposes both the AUC and the calib_slope range', () => {
+    const sql = byId('regime-edge-trust-floor').sql!;
+    expect(sql).toMatch(/min_ready_slope/);
+    expect(sql).toMatch(/global_slope/);
+  });
+
   it('regime-edge-trust-floor SQL exposes the AUC range the discrimination guard needs', () => {
     // The guard is only meaningful if evaluate() is actually fed these columns live -- without
     // them gateAucs is empty and the branch silently never runs (the failure mode this whole
