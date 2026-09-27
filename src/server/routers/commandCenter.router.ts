@@ -324,7 +324,10 @@ export const commandCenterRouter = router({
   runUnifiedRanker: adminProcedure
     .mutation(async () => {
       try {
-        const { stdout } = await runPython('unified_ranker.py', [], 5 * 60_000);
+        // AF-20260927-07: matches queues.ts's scheduled invocation. Healthy runs measure 7-12min,
+        // but the same DB-contention tail latency that budget guards against applies to an
+        // on-demand run too — 5min timeout-killed it before it could ever finish under load.
+        const { stdout } = await runPython('unified_ranker.py', [], 45 * 60_000);
         const parsed = JSON.parse(stdout.trim().split('\n').pop() || '{}');
         return {
           success: true,
