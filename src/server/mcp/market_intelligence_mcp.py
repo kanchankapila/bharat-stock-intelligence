@@ -31,6 +31,16 @@ def _require_identifier(value: Any, what: str) -> Optional[str]:
     return None
 
 from db_compat import connect, query_all, query_one
+from semantic_evidence import get_decision_evidence, get_entity_graph, ontology_context
+from semantic_identity import resolve_identifier
+
+# Import TV Local client
+try:
+    from tv_local_client import TVLocalMCP, analyze_symbol as tv_analyze_symbol
+    TV_LOCAL_AVAILABLE = True
+except ImportError as e:
+    TV_LOCAL_AVAILABLE = False
+    TV_LOCAL_IMPORT_ERROR = str(e)
 
 
 def get_top_conviction_picks(limit: int = 10, min_score: float = 60.0) -> List[Dict[str, Any]]:
@@ -39,9 +49,11 @@ def get_top_conviction_picks(limit: int = 10, min_score: float = 60.0) -> List[D
     try:
         rows = conn.execute(
             """
-            SELECT symbol, unified_score, recommendation_action, conviction_level, target_price, stop_loss, generated_at
+            SELECT symbol, unified_score, classification, conviction_level,
+                   target_1 AS target_price, stop_loss, generated_at
             FROM unified_recommendations
-            WHERE unified_score >= ? AND recommendation_action LIKE 'BUY%'
+            WHERE unified_score >= ?
+              AND POSITION('BUY' IN UPPER(COALESCE(classification, ''))) > 0
             ORDER BY unified_score DESC
             LIMIT ?
             """,
@@ -71,6 +83,16 @@ def analyze_stock_risk(symbol: str) -> Dict[str, Any]:
         }
     finally:
         conn.close()
+
+
+def get_ontology_context(question: str, max_chars: int = 2500) -> Dict[str, Any]:
+    """Return deterministic semantic context and guardrails for an agent."""
+    return ontology_context(question, max_chars=max_chars)
+
+
+def get_semantic_decision_evidence(symbol: str, decision: Optional[str] = None) -> Dict[str, Any]:
+    """Read the append-only decision evidence bundle without executing market code."""
+    return get_decision_evidence(symbol, decision=decision)
 
 
 def inspect_ingestion_health() -> Dict[str, Any]:
@@ -121,7 +143,7 @@ def run_fetcher(fetcher_name: str, symbols: Optional[List[str]] = None, params: 
         env = os.environ.copy()
         env["PYTHONPATH"] = server_dir
         env["PYTHONUNBUFFERED"] = "1"
-        
+
         result = subprocess.run(
             [sys.executable, fetcher_path] + args,
             capture_output=True,
@@ -208,7 +230,12 @@ def query_market_rag(query_text: str, k: int = 5) -> Dict[str, Any]:
     try:
         with urllib.request.urlopen(req, timeout=45) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            return {"response": data.get("response", data), "success": True}
+            return {
+                "response": data.get("response", data),
+                "sources": data.get("sources", []),
+                "retrieval_semantics": "unstructured_context_not_decision_evidence",
+                "success": True,
+            }
     except Exception as e:
         # Fallback to direct DB query on concalls & filings
         conn = connect()
@@ -296,6 +323,29 @@ def run_agent_role(agent_name: str) -> Dict[str, Any]:
 
 def handle_mcp_request(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Dispatches tool execution requests from LLM agents."""
+    if tool_name == "get_ontology_context":
+        return {"result": get_ontology_context(
+            str(arguments.get("question", "market data")),
+            int(arguments.get("max_chars", 2500)),
+        )}
+    if tool_name == "get_decision_evidence":
+        return {"result": get_semantic_decision_evidence(
+            str(arguments.get("symbol", "")),
+            arguments.get("decision"),
+        )}
+    if tool_name == "get_entity_graph":
+        symbol = str(arguments.get("symbol", "")).upper().strip()
+        result = get_entity_graph(
+            symbol,
+            limit=int(arguments.get("limit", 100)),
+            as_of=arguments.get("as_of"),
+        )
+        return {"result": result}
+    if tool_name == "resolve_instrument":
+        return {"result": resolve_identifier(
+            str(arguments.get("identifier", "")),
+            arguments.get("provider"),
+        )}
     if tool_name == "get_top_conviction_picks":
         limit = arguments.get("limit", 10)
         min_score = arguments.get("min_score", 60.0)
@@ -328,12 +378,206 @@ def handle_mcp_request(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, A
     elif tool_name == "run_agent_role":
         agent_name = arguments.get("agent_name", "")
         return {"result": run_agent_role(agent_name)}
+    elif tool_name == "analyze_tv_chart":
+        if not TV_LOCAL_AVAILABLE:
+            return {"error": f"TV Local client not available: {TV_LOCAL_IMPORT_ERROR}"}
+        symbol = arguments.get("symbol", "NSE:RELIANCE")
+        return {"result": tv_analyze_symbol(symbol)}
+    elif tool_name == "tv_health_check":
+        if not TV_LOCAL_AVAILABLE:
+            return {"error": f"TV Local client not available: {TV_LOCAL_IMPORT_ERROR}"}
+        tv = TVLocalMCP()
+        tv.start()
+        try:
+            return {"result": tv.health_check()}
+        finally:
+            tv.close()
     else:
         return {"error": f"Unknown tool: {tool_name}"}
 
 
+DECISION_READ_ONLY_TOOLS = frozenset({
+    "get_ontology_context",
+    "get_decision_evidence",
+    "get_entity_graph",
+    "resolve_instrument",
+    "get_top_conviction_picks",
+    "analyze_stock_risk",
+    "inspect_ingestion_health",
+    "get_fetcher_status",
+    "query_market_rag",
+})
+
+
+def handle_read_only_mcp_request(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Dispatch only bounded, read-only market-intelligence tools.
+
+    Operational tools such as run_fetcher, requeue_dlq, backtests and agent
+    execution intentionally do not belong to the decision-agent trust boundary.
+    """
+    if tool_name not in DECISION_READ_ONLY_TOOLS:
+        return {
+            "error": f"tool {tool_name!r} is not read-only; use the operations MCP surface",
+            "allowed_tools": sorted(DECISION_READ_ONLY_TOOLS),
+        }
+    return handle_mcp_request(tool_name, arguments or {})
+
+
+# name -> (description, inputSchema). Mirrors the elif chain in handle_mcp_request(); every
+# tool_name accepted there must have an entry here, or a client can never discover/call it.
+_TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "get_ontology_context": {
+        "description": "Free-text semantic context lookup over the platform's ontology.",
+        "inputSchema": {"type": "object", "properties": {
+            "question": {"type": "string"}, "max_chars": {"type": "integer"}}},
+    },
+    "get_decision_evidence": {
+        "description": "Evidence backing a specific stock decision/recommendation.",
+        "inputSchema": {"type": "object", "properties": {
+            "symbol": {"type": "string"}, "decision": {"type": "string"}}, "required": ["symbol"]},
+    },
+    "get_entity_graph": {
+        "description": "Entity relationship graph around a symbol (peers, sector, ownership).",
+        "inputSchema": {"type": "object", "properties": {
+            "symbol": {"type": "string"}, "limit": {"type": "integer"}, "as_of": {"type": "string"}},
+            "required": ["symbol"]},
+    },
+    "resolve_instrument": {
+        "description": "Resolve a free-text/provider identifier to the canonical NSE symbol.",
+        "inputSchema": {"type": "object", "properties": {
+            "identifier": {"type": "string"}, "provider": {"type": "string"}}, "required": ["identifier"]},
+    },
+    "get_top_conviction_picks": {
+        "description": "Top BUY-classified stocks from unified_recommendations by unified_score.",
+        "inputSchema": {"type": "object", "properties": {
+            "limit": {"type": "integer"}, "min_score": {"type": "number"}}},
+    },
+    "analyze_stock_risk": {
+        "description": "Risk profile for one symbol.",
+        "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]},
+    },
+    "inspect_ingestion_health": {
+        "description": "Job heartbeats, DLQ depth, and open data-quality issues.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    "run_fetcher": {
+        "description": "Trigger a named data fetcher, optionally scoped to symbols.",
+        "inputSchema": {"type": "object", "properties": {
+            "fetcher_name": {"type": "string"},
+            "symbols": {"type": "array", "items": {"type": "string"}},
+            "params": {"type": "object"}}, "required": ["fetcher_name"]},
+    },
+    "list_fetchers": {
+        "description": "List every registered data fetcher.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    "get_fetcher_status": {
+        "description": "Last-run status for one fetcher, or all fetchers when omitted.",
+        "inputSchema": {"type": "object", "properties": {"fetcher_name": {"type": "string"}}},
+    },
+    "query_market_rag": {
+        "description": "Semantic search over the market-news/research RAG index.",
+        "inputSchema": {"type": "object", "properties": {
+            "query_text": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query_text"]},
+    },
+    "run_alphaquant_backtest": {
+        "description": "Run an AlphaQuant factor backtest.",
+        "inputSchema": {"type": "object", "properties": {
+            "factor": {"type": "string"}, "start_date": {"type": "string"},
+            "top_k": {"type": "integer"}, "purged": {"type": "boolean"}}},
+    },
+    "run_agent_role": {
+        "description": "Invoke a named autonomous agent role.",
+        "inputSchema": {"type": "object", "properties": {"agent_name": {"type": "string"}}, "required": ["agent_name"]},
+    },
+    "analyze_tv_chart": {
+        "description": "TradingView-local technical chart analysis for a symbol.",
+        "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}},
+    },
+    "tv_health_check": {
+        "description": "Health check for the TradingView-local client.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+}
+
+
+def _send_message(message: Dict[str, Any]) -> None:
+    sys.stdout.write(json.dumps(message, default=str) + "\n")
+    sys.stdout.flush()
+
+
+def _dispatch_rpc(method: str, params: Dict[str, Any], *, read_only: bool = False) -> Any:
+    """Returns the JSON-RPC ``result`` payload for one request; raises for an unknown method
+    (caller turns that into a JSON-RPC error response). ``read_only`` selects the dispatcher AND
+    filters ``tools/list``, so a decision-agent client never even sees an operational tool as an
+    option (AF-20260927-02: the read-only boundary must hold at both discovery and dispatch)."""
+    if method == "initialize":
+        return {
+            "protocolVersion": params.get("protocolVersion", "2026-07-28"),
+            "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": {"name": "bharat-intelligence", "version": "1.0.0"},
+        }
+    if method == "tools/list":
+        return {"tools": [
+            {"name": name, "description": schema["description"], "inputSchema": schema["inputSchema"]}
+            for name, schema in _TOOL_SCHEMAS.items()
+            if not read_only or name in DECISION_READ_ONLY_TOOLS
+        ]}
+    if method == "tools/call":
+        tool_name = params.get("name", "")
+        arguments = params.get("arguments") or {}
+        dispatch = handle_read_only_mcp_request if read_only else handle_mcp_request
+        try:
+            result = dispatch(tool_name, arguments)
+        except Exception as exc:  # a tool's own bug must not take the whole server down
+            return {"content": [{"type": "text", "text": f"tool {tool_name!r} raised: {exc}"}], "isError": True}
+        return {"content": [{"type": "text", "text": json.dumps(result, default=str)}],
+                "isError": bool(isinstance(result, dict) and result.get("error"))}
+    raise ValueError(f"Unknown method: {method}")
+
+
+def run_stdio_server(read_only: bool = False) -> None:
+    """Newline-delimited JSON-RPC 2.0 loop over stdin/stdout — the wire format
+    ``mcp.client.stdio.stdio_client`` speaks. No ``mcp`` SDK import here: this file's own
+    package name (``mcp``, so ``-m mcp.market_intelligence_mcp`` can find it) shadows the real
+    SDK package once PYTHONPATH puts src/server ahead of site-packages, so importing
+    ``mcp.server``/``mcp.types`` from inside this module would resolve back to this same
+    package and fail. Hand-rolling the JSON-RPC framing (verified against mcp==2.0.0's own
+    ``mcp.types`` wire shapes) sidesteps that collision entirely.
+
+    ``read_only=True`` is the ONLY entry point a decision agent may be handed (AF-20260927-02):
+    it restricts both ``tools/list`` and ``tools/call`` to ``DECISION_READ_ONLY_TOOLS``. The
+    default (``False``) serves the full operations surface, including ``run_fetcher`` and
+    ``run_agent_role``, and is acceptable only for a locally spawned stdio child whose parent
+    process is itself the trust boundary — never expose it over a network transport."""
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        msg_id = message.get("id")
+        method = message.get("method", "")
+        params = message.get("params") or {}
+        if method in ("notifications/initialized", "notifications/cancelled"):
+            continue  # notifications carry no id and expect no response
+        try:
+            result = _dispatch_rpc(method, params, read_only=read_only)
+        except Exception as exc:
+            if msg_id is not None:
+                _send_message({"jsonrpc": "2.0", "id": msg_id,
+                                "error": {"code": -32601, "message": str(exc)}})
+            continue
+        if msg_id is not None:
+            _send_message({"jsonrpc": "2.0", "id": msg_id, "result": result})
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 1 and sys.argv[1] != "--read-only":
         tool = sys.argv[1]
         args = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
         print(json.dumps(handle_mcp_request(tool, args), indent=2, default=str))
+    else:
+        run_stdio_server(read_only=(len(sys.argv) > 1 and sys.argv[1] == "--read-only"))
