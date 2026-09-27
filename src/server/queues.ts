@@ -1553,9 +1553,13 @@ async function processMlWeeklyData(_job: Job): Promise<{ success: boolean; skipp
   // trendlyne-ratios-monthly queue (rewritten against ET_Stats — see Tasks 5-6).
   // Best-effort: a resolver blip must NOT skip the ml_ensemble --train below (the whole
   // point of the weekly job). Every step here is idempotent and independently catchable.
-  await runPython('outcome_resolver.py', ['--horizon', '5'])
+  // 15min, EXPLICIT — same implicit-default landmine the weekly performance_tracker calls hit
+  // (AF-20260927-12): runPython without a third arg is a 5-min budget. These measured <60s each
+  // on 2026-09-26 (batch-capped at 2,000 pending signals) so they fit today, but a data-size
+  // jump must fail loudly past a real budget, not at an accidental 300s ceiling.
+  await runPython('outcome_resolver.py', ['--horizon', '5'], 15 * 60_000)
     .catch(e => T.fail('weekly outcome_resolver(5)', e));
-  await runPython('outcome_resolver.py', ['--horizon', '15'])
+  await runPython('outcome_resolver.py', ['--horizon', '15'], 15 * 60_000)
     .catch(e => T.fail('weekly outcome_resolver(15)', e));
   // Run exit labeler to resolve excursions. Unlike the daily-ops call (--limit 500), this
   // one is unbounded — it's the weekly catch-up sweep for the full backlog since last
@@ -1638,9 +1642,15 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; sk
   // Keeps app_settings.optimal_* fresh only when out-of-sample Sharpe improves.
   await T.run('backtest-optimizer', () => runPython('backtest_optimizer.py', ['--window', '365'], 60 * 60_000))
     .catch(e => T.fail('backtest_optimizer', e));
-  await runPython('performance_tracker.py', ['--horizon', '5'])
+  // 15min, EXPLICIT -- both calls previously omitted the third arg and inherited runPython's
+  // 5-min default. 2026-09-26 12:37Z the h=15 pass was killed at exactly 300,000ms mid-run
+  // (114k outcome rows) -> 'weekly performance_tracker(15)' failed -> whole job DEGRADED;
+  // the h=5 pass survived at 4m46s only by luck. Same workload the daily chain already gives
+  // 15 * 60_000 (see its performance-tracker step); standalone daily runs measure 3m14s-4m32s,
+  // so 15min ~= 3x measured worst. AF-20260927-12.
+  await runPython('performance_tracker.py', ['--horizon', '5'], 15 * 60_000)
     .catch(e => T.fail('weekly performance_tracker(5)', e));
-  await runPython('performance_tracker.py', ['--horizon', '15'])
+  await runPython('performance_tracker.py', ['--horizon', '15'], 15 * 60_000)
     .catch(e => T.fail('weekly performance_tracker(15)', e));
   // Factor-edge validation: does each candidate vendor/derived score actually predict forward
   // returns? Persists rank IC + cross-sectional AUC per horizon/regime to factor_edge_history so a
