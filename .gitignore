@@ -126,3 +126,8 @@ trade_journal.jsonl
 # committed db.sqlite3 would be actively misleading about which database this platform uses.
 db.sqlite3
 ~$*.xlsx
+
+# scratch artefacts (never commit)
+/tmp_*.txt
+/fix_*.py
+stock-dashboard.html*

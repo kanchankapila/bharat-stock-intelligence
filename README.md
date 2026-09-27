@@ -224,8 +224,8 @@ Local analytics MCP server at `ALPHAQUANT_URL` (default `http://127.0.0.1:8002`)
 ## Setup
 
 ### Prerequisites
-- Node.js 18+
-- Python 3.10+ with pip
+- Node.js 20.19+ (CI runs 22; `@vitejs/plugin-react` 5.x requires `^20.19 || >=22.12`)
+- Python 3.11+ with pip (production runs 3.11, CI runs 3.12; the pinned `numpy`/`scipy`/`scikit-learn` require 3.11)
 - Redis (optional — falls back to in-memory cache + setInterval)
 
 > **No local LLM since 2026-08-20.** `aiService` routes AI stock-signal/profile analysis and the

@@ -44,3 +44,18 @@ sentence-transformers>=3.0.0
 duckduckgo-search>=6.0.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
+# Re-aligned 2026-09-25: these are top-level imports in live code (ml_ensemble.py,
+# python_api.py, chatbot/app.py, backend-python/main.py ...) and CI already pins them in
+# backend-python/requirements.txt, but this quick-start file lacked them, so a README
+# `pip install -r requirements.txt` could not import the ML stack or start the API services.
+fastapi
+uvicorn[standard]
+python-dotenv
+scipy
+lightgbm
+xgboost
+catboost
+optuna
+tradingview-ta
+tradingview-screener
+tqdm

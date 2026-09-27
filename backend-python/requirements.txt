@@ -33,7 +33,6 @@ ta==0.11.0
 SQLAlchemy==2.0.49
 psycopg2-binary==2.9.12
 yfinance==1.3.0
-joblib==1.5.3
 tqdm==4.67.3
 catboost==1.2.10
 lightgbm==4.6.0
@@ -45,9 +44,13 @@ torch>=2.9.1
 transformers==5.10.1
 tradingview-ta==3.3.0
 tradingview-screener==3.2.0
-curl_cffi==0.15.0
+# curl_cffi: 0.16.2 is what production (backend-python/venv) has been RUNNING, and the full
+# 2998-test pytest run of 2026-09-25 passed on it. The previous pin 0.15.0 (dependabot, 2026-09-16)
+# was never the running version, and curl_cffi drives the TLS-fingerprint fetches behind ~20 fetchers
+# (Trendlyne WAF, intraday, macro, deals), where a version change has caused outages before
+# (AF-20260911-10). Aligned the MANIFEST to the venv rather than downgrading production (AF-20260925-01).
+curl_cffi==0.16.2
 nse==3.2.1
-matplotlib==3.10.9
 hmmlearn==0.3.3
 langchain==1.3.9
 langgraph==1.2.5
@@ -58,4 +61,8 @@ sentence-transformers==5.5.1
 duckduckgo-search==8.1.1
 pytest==9.1.0
 pytest-asyncio==1.4.0
+# tabulate: no direct import, but pandas' DataFrame.to_markdown() (reverse_engineering_study.py)
+# imports it lazily and raises ImportError without it. Not removable on a "zero imports" grep.
+# joblib and matplotlib were unpinned 2026-09-25: hard deps of scikit-learn / catboost, so pip
+# still installs them; nothing here imports either directly.
 tabulate==0.10.0
