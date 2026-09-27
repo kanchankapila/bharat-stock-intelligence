@@ -1,74 +1,63 @@
 # Project Context — Bharat Stock Intelligence
 
-## Overview
-Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, ~210 Python modules in `src/server/` (81 fetchers + ML engines/jobs/helpers).
+Domain orientation for agents. `CLAUDE.md` is the operating manual (rules, Definition of done,
+services); this file is the "what is this system" map. Every fact below was checked against the
+code on 2026-09-26 — where a number drifts, this file points at the source of truth instead of
+copying it, because copied inventories are what went stale here before (the previous version
+named 5 fetchers that do not exist and a GPT-4o agent file that never did).
 
-## Core Domain
-- **Universe**: NIFTY 50/500, BSE 500, F&O eligible, SME — mapped via `nse_universe` / `bse_universe` tables
-- **Timeframes**: INTRADAY (5m/15m/60m), SWING, POSITIONAL, LONG_TERM — enum stored upper-case
-- **Signal Surface**: `unified_recommendations` — single authoritative table per timeframe+symbol+date
-- **Scoring**: Multi-engine ensemble (technical, fundamental, flow, ML/DL) → `unified_score` (0-100)
+## What it is
+Indian equity (NSE/BSE) intelligence platform: 82 `*_fetcher.py` (of ~237 Python modules in `src/server/`) pull vendor data into
+Postgres/TimescaleDB, engines score every stock, and `unified_ranker.py` blends them into one
+canonical ranking the React UI, Telegram digests and the chatbot read.
 
-## Data Sources (Canonical)
-| Domain | Primary Provider | Fetcher | Freshness Gate |
-|--------|------------------|---------|----------------|
-| OHLCV (NSE/BSE) | NSE Bhavcopy + NSE API | `nse_bhavcopy_fetcher.py` | Daily 18:30 IST |
-| F&O OI/PCR/Max Pain | NSE Option Chain | `nse_option_chain_fetcher.py` | Daily 18:30 IST |
-| Delivery / FII-DII | NSE | `stock_delivery_fetcher.py` / `fii_dii_fetcher.py` | Daily 19:00 IST |
-| Insider Trades | Moneycontrol | `moneycontrol_fetcher.py` (insider) | Event-driven |
-| Earnings / Board Meetings | Moneycontrol | `mc_earnings_fetcher.py` | Event-driven (90-day forward window) |
-| News / Sentiment | MarketsMojo + custom | `news_fetcher.py` | Intraday |
-| Bulk / Block Deals | NSE + MoneyControl | `bulk_deals_fetcher.py` | Daily |
-| Screener Movers | Trendlyne / NSE | `mover_screener_fetcher.py` | 15m during market hours |
+## Data flow
+```
+vendors (NSE, MoneyControl, Trendlyne, NiftyTrader, MarketsMojo, ET, Yahoo, ...)
+  → *_fetcher.py  (scheduled by BullMQ: src/server/queues.ts + src/server/jobs/*.jobs.ts)
+  → Postgres :5433 (bharat_intel)
+  → feature_engineering.py → feature_store
+  → engines: scoring_engine.py (stock_scores), quant scoring (quant_scores),
+             ml_ensemble.py / dl_engine.py / confluence / technical  (component scores)
+  → unified_ranker.py → unified_recommendations   ← THE canonical ranking
+  → tRPC (src/server/routers/*.ts) → React (src/v1/V1Routes.tsx) / Telegram / chatbot
+```
 
-### Endpoint Discovery Registry & Catalog (3,000+ Endpoints)
-The platform maintains a master discovery registry and URL corpus for onboarding new data sources and finding alternates whenever an existing source fails:
-- **`market_endpoint_registry`** (PostgreSQL `:5433`, 3,408 live working endpoints: 2,864 GET / 544 POST): master verified endpoint inventory with `target_url`, `url_template`, `required_params`, `auth_type`, `use_case`. Key views: `v_working_market_endpoints`, `v_stock_screeners` (2,709 screeners), `v_fno_endpoints` (82), `v_endpoint_discovery_summary`. Audit history: `url_candidates_validation_audit` (4,477 rows).
-- **`url_endpoints`** (PostgreSQL table): 830 consolidated templates carrying `feature_targets_json`. Query via `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server`.
-- **`unique_urls.txt` / `urls_v2.db`**: 3,103 deduplicated verified concrete URLs at repo root.
-- **`DATA_FETCHING_GUIDE.md`**: Master fetching reference for headers, session cookies, POST payload templates, and response matrices.
-**Mandatory Rule:** Always query `market_endpoint_registry` and `url_endpoints` before declaring an endpoint dead, building a scraper from scratch, or asking the user.
+## Sources of truth (read these, don't trust a copy)
+| Question | Where the answer lives |
+|---|---|
+| What jobs run, when (cron is **UTC**) | `src/server/jobRegistry.ts` (72 entries) — mirrors `queues.ts`/`jobs/*.jobs.ts` |
+| Which tables are monitored for freshness | `TABLE_FRESHNESS_CHECKS` + checks in `src/server/dataQualityChecks.ts` |
+| Table schemas | `db/schema.postgres.sql` (regenerated from live; `npm run schema:drift` to diff) |
+| Provider id per stock | `src/data/stocklist.ts` via `src/server/stockMapping.ts` |
+| Which engines feed the ranker, and weights | `REGIME_WEIGHTS` in `src/server/unified_ranker.py` |
+| Does factor/engine X have edge? | `.claude/rules/measurement.md` + `factor_edge_history` table |
+| Open bugs / follow-ups | `docs/audit-findings.md` (the only tracker) |
+| History behind a decision | `docs/session-log.md` (grep, never load whole) |
 
-## Architecture Notes
-- **DB**: TimescaleDB hypertables (`stock_ohlcv`, `feature_store`, `signals`) — compression + retention policies active
-- **Jobs**: BullMQ on Redis — `pythonRunner.ts` enforces per-script memory ceilings (Job Objects on Windows)
-- **ML/DL**: `dl_trainer.py` / `exit_policy.py` / `cs_ranker.py` — promotion gate = holdout MAE + margin
-- **Feature Store**: `feature_engineering.py` — 230+ columns, pipeline order critical (run after upstream writers)
+## Schedules worth knowing (UTC crons; IST = UTC+5:30)
+- `ml-weekly-data` Fri 18:00 → `ml-weekly-retrain` Sat 05:00 → `dl-retrain-weekly` **Sun** 05:00.
+  ML and DL were deliberately day-separated (they jointly exhausted host memory); do not re-merge.
+- Post-close daily chain and intraday jobs: see `jobRegistry.ts`; post-close jobs routinely finish
+  after IST midnight, which is why writes anchor on `as_of.logical_trading_date()`, never `date.today()`.
 
-## Operational Rhythms
-- **Daily (post-market)**: Bhavcopy → OI/PCR → Delivery/FII-DII → Feature Engineering → Signal generation
-- **Intraday (market hours)**: Screener movers every 15m → live recommendations update
-- **Weekly (Sat 06:00)**: ML retrain (`ml-weekly-retrain`) + DL retrain (`dl-retrain-weekly`) — exclusive heavy slot
-- **Monthly**: ECC quality gates, dependency audit, schema drift check
+## Measured state (don't assume edge)
+The ranker reads a small positive rank IC that is still LOW-DATA and has never passed a cost-aware
+backtest; most published factors are null or inverted on this data. Read `measurement.md` before
+proposing any reweighting — it is usually the wrong fix.
 
-## Key Constraints
-- **Python interpreter**: `backend-python/venv/Scripts/python.exe` (3.11) — CI uses 3.12, test locally with prod venv
-- **PostgreSQL only**: SQLite decommissioned 2026-08-19 — `usePostgres()` / `use_postgres()` unconditional
-- **pm2 on Windows**: watches wrapper PID; real process memory via Job Objects (`pyboot/sitecustomize.py`)
-- **Graphify**: Knowledge graph at `graphify-out/` — query before reading source (`graphify query "..."`)
+## Endpoint discovery (before calling a vendor dead or writing a new scraper)
+`market_endpoint_registry` (3,408 endpoints, Postgres) → `url_endpoints` /
+`python -m url_explorer.ingest --find-alternates` (from `src/server`) → `unique_urls.txt` → repo grep →
+only then ask the user, with a per-route breakdown. Caveats and overrides: `.claude/rules/data-sources.md`.
 
-## Token Reduction Discipline
-- `graphify query/path/explain` before raw reads/greps
-- `read_files` with line ranges, not full files
-- `search_codebase` over `list_dir`/`glob`
-- `run_commands` with filtered/tailed output
-- Skills (claude-mem, headroom, codebase) as first-class tools — not view_file/grep_search/run_command
+## Diagnosing against production
+- Read-only SQL: `backend-python/venv/Scripts/python.exe scripts/sql.py "<SQL>"` (server-side
+  timeout, read-only transaction, prints the target DB). Prefer it over a new `scratch_verify/` script.
+- Health sweep: `node .claude/skills/repo-doctor/doctor.mjs`; data quality: `npm run dq:check`.
+- Committed ≠ deployed: `node scripts/check_deploy_drift.mjs` (note: it also stamps a heartbeat row).
 
-## Audit Discipline
-- `docs/audit-findings.md` = single open-items tracker (AF-YYYYMMDD-NN)
-- Findings closed in same pass unless: Evidence lane, Calendar-blocked, User decision, Sequential dependency
-- DoD: `tsc --noEmit` + `vitest run` + `pytest src/server/__tests__/ src/server/tests/ tests/chatbot/` all green
-
-## Issue Tracker (Matt Pocock Config)
-- **Location**: GitHub Issues (`kanchankapila/bharat-stock-intelligence/issues`)
-- **Triage Labels**: See `.claude/skills/setup-matt-pocock-skills/triage-labels.md`
-- **Domain Docs**: `CONTEXT.md` (this file), `AGENTS.md` (agent contracts), `docs/` (deep dives)
-
-## Agent Contracts (Matt Pocock Config)
-- **Default Agent**: `agents/openai.yaml` — GPT-4o, structured output, tool-calling
-- **Specialized Agents**: `trade-desk`, `verify-gate-runner`, `weekend-audit` — defined in `.claude/skills/`
-
-## Handoff Protocol
-- Session handoff → `docs/session-log.md` (dated entries)
-- Skill observations → `~/.claude/skill-observations/observation-log/` (task-observer)
-- Cross-cutting principles → `~/.claude/skill-observations/cross-cutting-principles.md`
+## Issue tracking
+Findings/bugs: `docs/audit-findings.md` (`AF-YYYYMMDD-NN`), **not** GitHub Issues. GitHub
+(`kanchankapila/bharat-stock-intelligence`) via `gh` for PRs. Triage label roles, if the triage skill
+is ever installed: `.claude/skills/setup-matt-pocock-skills/triage-labels.md`.

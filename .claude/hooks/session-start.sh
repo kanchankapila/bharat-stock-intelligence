@@ -54,28 +54,24 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
     problems=$((problems+1))
   fi
 
-  if [ -f .env ]; then
-    if grep -qE '^\s*USE_POSTGRES\s*=\s*true' .env; then
-      say "  ✓ .env sets USE_POSTGRES=true"
-    else
-      say "  ! .env does NOT set USE_POSTGRES=true — db_compat/dbAsync will silently use SQLite,"
-      say "    not production Postgres, and any number you measure will be from the wrong database."
-      problems=$((problems+1))
-    fi
+  # USE_POSTGRES steers nothing since the 2026-08-19 SQLite decommission; the only thing a
+  # missing .env can do now is fail to connect, so check the URL and the socket instead.
+  if [ -f .env ] && grep -qE '^\s*POSTGRES_URL\s*=' .env; then
+    say "  ✓ .env sets POSTGRES_URL"
   else
-    say "  ! no .env — every hand-run script will fall back to SQLite (see recurring-bugs.md)."
+    say "  ! no POSTGRES_URL in .env — hand-run scripts will fall back to db_compat's default credentials."
     problems=$((problems+1))
   fi
 
+  # pg_isready is not installed on this box (the old check silently skipped), so probe the
+  # socket with bash's /dev/tcp, bounded so a black-holed port cannot stall session start.
   pg_port="$(grep -E '^\s*POSTGRES_PORT\s*=' .env 2>/dev/null | head -1 | cut -d= -f2 | tr -d '[:space:]')"
   pg_port="${pg_port:-5433}"
-  if command -v pg_isready >/dev/null 2>&1; then
-    if pg_isready -h 127.0.0.1 -p "$pg_port" -q 2>/dev/null; then
-      say "  ✓ Postgres reachable on 127.0.0.1:$pg_port"
-    else
-      say "  ! Postgres NOT reachable on 127.0.0.1:$pg_port — start it: docker compose up -d timescaledb"
-      problems=$((problems+1))
-    fi
+  if timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/$pg_port" 2>/dev/null; then
+    say "  ✓ Postgres reachable on 127.0.0.1:$pg_port — read-only queries: backend-python/venv/Scripts/python.exe scripts/sql.py \"<SQL>\""
+  else
+    say "  ! Postgres NOT reachable on 127.0.0.1:$pg_port — start it: docker compose up -d timescaledb"
+    problems=$((problems+1))
   fi
 
   # ── token-reduction surfaces (print-only): memory + knowledge-graph freshness ─────────

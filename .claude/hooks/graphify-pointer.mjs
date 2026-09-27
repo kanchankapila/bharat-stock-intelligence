@@ -13,9 +13,20 @@
 //      (.claude/hooks/*.test.mjs); this logic had none, which is why the breakage went
 //      unnoticed. Node is the repo's own runtime, so a node module needs no interpreter hunt.
 
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 
 export const GRAPH_PATH = 'graphify-out/graph.json';
+
+// Once the session has actually run graphify, the reminder has done its job. Before 2026-09-26 it
+// fired on every Read/grep for the whole session (~25x in one audit session), and a reminder that
+// always fires is one everyone learns to skip. Marker per session_id; no session_id -> no dedupe.
+// ponytail: one empty file per session in a gitignored dir, never pruned; prune by age if it ever matters.
+const MARKER_DIR = '.claude/.session-start';
+const markerPath = sessionId => `${MARKER_DIR}/graphify-oriented-${String(sessionId).replace(/[^\w-]/g, '')}`;
+// Command position only (line start, after ; & | (, or `python -m`), so a heredoc or grep that merely
+// mentions "graphify query" does not count as having oriented.
+export const isGraphifyCall = command =>
+  /(^|[;&|(]\s*|-m\s+)graphify\s+(query|explain|path)\b/m.test(String(command ?? ''));
 
 // Kept identical to the extension list the inline hook used: the rule is about exploring this
 // repository, and its prose (CLAUDE.md, .claude/rules/, docs/) is as much a part of the
@@ -68,9 +79,10 @@ function emit(additionalContext) {
  * @param {{graphExists?: boolean}} [deps] injected so tests never touch the real filesystem
  * @returns {object|null} hook JSON to emit, or null to allow silently
  */
-export function decide(toolName, toolInput = {}, { graphExists = existsSync(GRAPH_PATH) } = {}) {
-  if (!graphExists) return null; // nothing to orient against -- do not nag
+export function decide(toolName, toolInput = {}, { graphExists = existsSync(GRAPH_PATH), oriented = false } = {}) {
+  if (!graphExists || oriented) return null; // nothing to orient against, or already oriented -- do not nag
   if (toolName === 'Bash') {
+    if (isGraphifyCall(toolInput.command)) return null;
     return isRawSearch(toolInput.command) ? emit(BASH_REMINDER) : null;
   }
   if (toolName === 'Read' || toolName === 'Glob') {
@@ -91,7 +103,15 @@ function main() {
     } catch {
       process.exit(0); // malformed payload must never block a tool call
     }
-    const out = decide(payload?.tool_name, payload?.tool_input);
+    const sid = payload?.session_id;
+    const marker = sid ? markerPath(sid) : null;
+    if (marker && payload?.tool_name === 'Bash' && isGraphifyCall(payload?.tool_input?.command)) {
+      try { mkdirSync(MARKER_DIR, { recursive: true }); writeFileSync(marker, ''); } catch { /* never block */ }
+    }
+    const out = decide(payload?.tool_name, payload?.tool_input, {
+      graphExists: existsSync(GRAPH_PATH),
+      oriented: !!marker && existsSync(marker),
+    });
     if (out) process.stdout.write(JSON.stringify(out));
   });
 }

@@ -1,3 +1,7 @@
+---
+paths:
+  - "{src,scripts,migrations}/**/*{rank,Rank,scor,Scor,signal,Signal,conviction,Conviction,confluence,Confluence,outcome,Outcome}*"
+---
 # Scoring Authority & Signal Model (canonical)
 
 Read before touching any scoring, ranking, or signal table.

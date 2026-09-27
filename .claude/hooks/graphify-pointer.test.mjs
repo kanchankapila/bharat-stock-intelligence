@@ -6,7 +6,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { decide, isRawSearch, targetsSourceFile } from './graphify-pointer.mjs';
+import { spawnSync } from 'node:child_process';
+import { decide, isGraphifyCall, isRawSearch, targetsSourceFile } from './graphify-pointer.mjs';
 
 const GRAPH = { graphExists: true };
 const NO_GRAPH = { graphExists: false };
@@ -85,4 +86,39 @@ describe('graphify-pointer / decision', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+describe('graphify-pointer / stops nagging once the session has run graphify', () => {
+  it('recognises real graphify calls, including the python -m form CLAUDE.md documents', () => {
+    expect(isGraphifyCall('graphify query "what writes feature_store"')).toBe(true);
+    expect(isGraphifyCall('& $PY -m graphify explain "unified_ranker"')).toBe(true);
+    expect(isGraphifyCall('grep -rn graphify .claude/')).toBe(false);
+    expect(isGraphifyCall('graphify update .')).toBe(false); // updating is not orienting
+    expect(isGraphifyCall('cd repo && graphify path "A" "B"')).toBe(true);
+    // merely mentioning it (heredoc, echo, a test string) is not running it
+    expect(isGraphifyCall(`cat >> t.mjs <<'EOF'\n  expect(isGraphifyCall('graphify query "x"'))\nEOF`)).toBe(false);
+    expect(isGraphifyCall('echo "run graphify query first"')).toBe(false);
+  });
+
+  it('a graphify call is never itself nagged, and oriented sessions are silent', () => {
+    expect(decide('Bash', { command: 'graphify query "x" | grep foo' }, GRAPH)).toBeNull();
+    expect(decide('Read', { file_path: 'src/server/queues.ts' }, { ...GRAPH, oriented: true })).toBeNull();
+    expect(decide('Read', { file_path: 'src/server/queues.ts' }, { ...GRAPH, oriented: false })).not.toBeNull();
+  });
+
+  it('end to end: the real hook process reminds, then goes quiet after a graphify call in the same session', () => {
+    const sid = `test-${process.pid}-${Date.now()}`;
+    const run = payload => spawnSync(process.execPath, ['.claude/hooks/graphify-pointer.mjs'],
+      { input: JSON.stringify({ session_id: sid, ...payload }), encoding: 'utf8' }).stdout;
+    const read = { tool_name: 'Read', tool_input: { file_path: 'src/server/queues.ts' } };
+    try {
+      expect(run(read)).toContain('graphify');
+      expect(run({ tool_name: 'Bash', tool_input: { command: 'graphify query "queues"' } })).toBe('');
+      expect(run(read)).toBe('');
+      // a different session is unaffected
+      expect(spawnSync(process.execPath, ['.claude/hooks/graphify-pointer.mjs'],
+        { input: JSON.stringify({ session_id: `${sid}-other`, ...read }), encoding: 'utf8' }).stdout).toContain('graphify');
+    } finally {
+      rmSync(`.claude/.session-start/graphify-oriented-${sid}`, { force: true });
+    }
+  }, 30_000); // four cold node spawns: ~2.5s each on this box, so the 5s default flakes
 });

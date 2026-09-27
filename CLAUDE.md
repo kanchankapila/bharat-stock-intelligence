@@ -6,12 +6,18 @@ Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC ba
 
 1. **`fable-brain.md`** (project root) — standing reasoning discipline. Applies to every task.
 2. **Memory** — two indexes, both live, and the SessionStart hook reports which it found:
-   - Claude Code's project memory: `C:\Users\amitk\.claude\projects\d--Github-bharat-stock-intelligence\memory\MEMORY.md` (index; detail in 130+ topic files in that directory).
+   - Claude Code's project memory: `C:\Users\amitk\.claude\projects\d--Github-bharat-stock-intelligence\memory\MEMORY.md` (index; ~55 topic files after the 2026-09-19 consolidation).
    - This repo's own: **`.agents/memory/MEMORY.md`** (index) + **`.agents/memory/session_journal.md`** (append a dated section per session).
    Load the entries relevant to your task before exploring files; a finding recorded in either is not re-investigated from scratch.
 3. **The rule file for what you're touching** (below). Don't read all of them.
 
 ## Rules (load on demand)
+
+Each rule file carries `paths:` frontmatter, so Claude Code loads it automatically the first time
+you read a matching file (globs mirror `.claude/hooks/rules-pointer.mjs`). Until 2026-09-26 they had
+none and all five (~308 KB, ~77k tokens) were injected into every session regardless of task.
+**Auto-loading only fires on a file read** — when you *quote or judge* a number without touching a
+matching file, read `measurement.md` yourself.
 
 | Touching… | Read |
 |---|---|
@@ -85,10 +91,10 @@ npm run schema:drift                                # any migration
 Plus, for anything touching signal/scoring/model logic:
 
 - **Negative-control your tests.** Revert the fix, confirm the new test fails, restore. A green suite that never failed against the bug protects nothing.
-- **Run it against live production data and query the result back.** `tsc --noEmit` and a green suite do not tell you a fetcher wrote the right rows. See `.claude/rules/measurement.md`.
+- **Run it against live production data and query the result back.** `tsc --noEmit` and a green suite do not tell you a fetcher wrote the right rows. See `.claude/rules/measurement.md`. For ad-hoc reads use `backend-python/venv/Scripts/python.exe scripts/sql.py "<SQL>"` (read-only transaction, server-side `statement_timeout`, prints the target DB) instead of writing another `scratch_verify/` script.
 - **Committed ≠ deployed.** `.ts` needs `pm2 restart bharat-server`; a migration needs `npm run migrate:up` against the real `POSTGRES_URL`; a package needs `npm install` / the right venv. (`/deploy-and-verify` does this end to end.)
 
-**These are enforced, not advisory.** Four hooks run as `node .claude/hooks/<file>.mjs` (that
+**These are enforced, not advisory.** Five hooks run as `node .claude/hooks/<file>.mjs` (that
 invocation shape matters — see the shell note below):
 `.claude/hooks/verify-gate.mjs` is a `Stop` hook: it blocks the session from finishing if the
 diff touches `.ts`/`.py` and the matching command never ran, and demands backtest evidence for
@@ -236,10 +242,11 @@ three settings; edit them here rather than re-running the skill.
 - **Triage label vocabulary** — the `triage` skill is not installed in this repo, so no label
   section is bound. These are the roles if it is ever added: `needs-triage`, `needs-info`,
   `ready-for-agent`, `ready-for-human`, `wontfix`.
-- **Domain docs: single context.** `CONTEXT.md` (project overview + data sources + ops rhythms)
-  and `AGENTS.md` (agent registry + contracts) created 2026-09-15 at repo root. Downstream
-  matt-pocock skills (`trade-desk`, `verify-gate-runner`, `weekend-audit`, `claude-mem`,
-  `headroom`, `codebase`) read these for context injection. ADRs under `docs/adr/` when needed.
+- **Domain docs: single context.** `CONTEXT.md` (system map + sources of truth) and `AGENTS.md`
+  (real inventory of rules/skills/commands/subagents/hooks, for any coding agent) at repo root —
+  both rewritten from verified facts 2026-09-26 after the 2026-09-15 versions were found to name
+  nonexistent fetchers and a fictional GPT-4o agent registry. Keep them pointing at sources of
+  truth rather than copying inventories. ADRs under `docs/adr/` when needed.
 
 ## graphify
 

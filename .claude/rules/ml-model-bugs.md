@@ -1,3 +1,8 @@
+---
+paths:
+  - "src/server/**/*{ml_,_model,model_,classifier,predictor,ensemble,promotion,drift_,dl_,ranker,backtest,factor_,_edge,ablation,walkforward,calibrat,purged_cv,feature_engineering,exit_policy}*"
+  - "scripts/**/*{backtest,factor_,_model,ablation}*"
+---
 # ML, Model & Measurement-Harness Bug Classes
 
 Split out of `recurring-bugs.md` on 2026-08-27. Everything here has bitten this codebase before,

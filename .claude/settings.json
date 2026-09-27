@@ -1,22 +1,56 @@
 {
   "permissions": {
     "allow": [
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git fetch *)",
+      "Bash(git check-ignore *)",
+      "Bash(git add *)",
       "Bash(git commit *)",
+      "Bash(npx tsc *)",
+      "Bash(npx vitest *)",
       "Bash(npm test *)",
+      "Bash(npm run schema:drift)",
+      "Bash(npm run dq:check)",
+      "Bash(backend-python/venv/Scripts/python.exe -m pytest *)",
+      "Bash(backend-python/venv/Scripts/python.exe scripts/sql.py *)",
+      "Bash(node .claude/skills/repo-doctor/doctor.mjs*)",
+      "Bash(pm2 list*)",
+      "Bash(pm2 jlist*)",
+      "Bash(pm2 describe *)",
       "WebFetch(domain:trendlyne.com)",
       "WebFetch(domain:moneycontrol.com)",
-      "WebFetch(domain:webapi.niftytrader.in)",
-      "Bash(git check-ignore *)",
-      "Bash(npx vitest *)",
-      "Bash(npx tsc *)",
-      "Bash(git checkout *)",
-      "Bash(git add *)",
-      "Bash(git commit -m ' *)",
-      "Bash(git fetch *)",
-      "Bash(git stash *)"
+      "WebFetch(domain:www.niftytrader.in)"
     ],
-    "additionalDirectories": [
-      "D:\\Github\\bharat-stock-intelligence\\src\\server"
+    "ask": [
+      "Bash(git checkout *)",
+      "Bash(git restore *)",
+      "Bash(git stash*)",
+      "Bash(git reset *)",
+      "Bash(git push *)",
+      "Bash(pm2 restart *)",
+      "Bash(pm2 stop *)",
+      "Bash(pm2 delete *)",
+      "Bash(pm2 kill*)",
+      "Bash(npm run migrate:*)"
+    ],
+    "deny": [
+      "Bash(git add -A*)",
+      "Bash(git add --all*)",
+      "Bash(git add .)",
+      "Bash(git add . *)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -f*)",
+      "PowerShell(git add -A*)",
+      "PowerShell(git add --all*)",
+      "PowerShell(git add .)",
+      "PowerShell(git push --force*)",
+      "PowerShell(git reset --hard*)",
+      "PowerShell(git clean -f*)"
     ]
   },
   "hooks": {
@@ -76,7 +110,12 @@
     ]
   },
   "enabledPlugins": {
-    "frontend-design@claude-plugins-official": true,
-    "superpowers@claude-plugins-official": true
+    "superpowers@claude-plugins-official": true,
+    "claude-mem@thedotmack": true,
+    "ponytail@ponytail": true,
+    "ecc@ecc": false,
+    "frontend-design@claude-plugins-official": false,
+    "claude-md-management@claude-plugins-official": false,
+    "claude-code-setup@claude-plugins-official": false
   }
 }

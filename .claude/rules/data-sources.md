@@ -1,3 +1,15 @@
+---
+paths:
+  - "src/server/**/*fetcher*"
+  - "src/server/**/*_client*"
+  - "{src,migrations}/**/*{screener,Screener}*"
+  - "src/server/stockMapping.ts"
+  - "src/server/dataQualityChecks.ts"
+  - "src/data/**"
+  - "scripts/stocklist.json"
+  - "src/server/url_explorer/**"
+  - "DATA_FETCHING_GUIDE.md"
+---
 # Data Sources & Ticker Resolution
 
 Read before adding a fetcher, a provider, or a table keyed on a provider-issued id.
@@ -116,7 +128,7 @@ Indices use a separate `indexData` array in `src/server/stockMapping.ts` with `{
 
 ## Freshness-check mandate
 
-- **Every new live datasource (a fetcher that writes to its own table from an external API) must also get a freshness check in `src/server/dataQualityChecks.ts`.** This is not optional, for the same reason the `live_datasource`-test mandate above isn't: on 2026-08-03, a full sweep of every `runPython()` call site found the file covered only ~25 of the platform's ~140 DB-writing fetchers — most had zero monitoring, and one (`mf_sector_allocation`, `mf_sector_flow_fetcher.py`'s own target table) turned out to be completely empty, indistinguishable from healthy in every existing dashboard. Adding a check is a **one-line config addition**, not a hand-rolled block — push a `{ id, label, category, critical, table, dateColumn, ... }` entry onto the `TABLE_FRESHNESS_CHECKS` array (see the factory + its doc comment in `dataQualityChecks.ts`) and `makeFreshnessCheck()` generates the SQL + evaluate() logic. Use `tradingDayAware: true` (the default) for anything that only updates on NSE trading days — weekends must not false-positive a Monday-morning check (see the same file's `tradingDaysStale()`); set it `false` only for genuinely 24/7-cadence tables (e.g. `confluence_signals`, refreshed every 30 min year-round). Omit `failDays` for a "sparse by nature" datasource (insider filings, IPOs, bulk deals) so it only ever warns, matching `insider-trades-recency`'s existing style — a hand-rolled bespoke check is still fine for anything needing custom logic beyond simple freshness (coverage %, enum/range validation, plausibility bounds), the factory is only for "is this table still getting fresh rows." Only a hand-rolled `evaluate()` (not the factory) is needed for a genuinely internal/derived table (model registries, RL Q-tables, weight-history bookkeeping) — those are ML state, not datasources, and don't belong in this mandate.
+- **Every new live datasource (a fetcher that writes to its own table from an external API) must also get a freshness check in `src/server/dataQualityChecks.ts`.** This is not optional, for the same reason the `live_datasource`-test mandate above isn't: on 2026-08-03, a full sweep of every `runPython()` call site found the file covered only ~25 of the platform's ~140 DB-writing fetchers — most had zero monitoring, and one (`mf_sector_allocation`, `mf_sector_flow_fetcher.py`'s own target table) turned out to be completely empty, indistinguishable from healthy in every existing dashboard. Adding a check is a **one-line config addition**, not a hand-rolled block — push a `{ id, label, category, critical, table, dateColumn, ... }` entry onto the `TABLE_FRESHNESS_CHECKS` array (see the factory + its doc comment in `dataQualityChecks.ts`) and `makeFreshnessCheck()` generates the SQL + evaluate() logic. Use `tradingDayAware: true` (the default) for anything that only updates on NSE trading days — weekends must not false-positive a Monday-morning check (see the same file's `tradingDaysStale()`); set it `false` only for genuinely 24/7-cadence tables (e.g. `confluence_signals`, which runs 7 days a week — CORRECTED 2026-09-25: NOT "every 30 min year-round": `confluence-compute` runs every 30 min only in two off-hours windows, IST 06:00-07:30 and 17:00-23:30, and SKIPS market hours by design (`confluence.jobs.ts`, `jobRegistry.ts:64,126`); measured 13-19 runs/day, largest gap in 14 days 17.5h, so mid-session its newest row is the ~07:31 IST pre-open run and that is not staleness). Omit `failDays` for a "sparse by nature" datasource (insider filings, IPOs, bulk deals) so it only ever warns, matching `insider-trades-recency`'s existing style — a hand-rolled bespoke check is still fine for anything needing custom logic beyond simple freshness (coverage %, enum/range validation, plausibility bounds), the factory is only for "is this table still getting fresh rows." Only a hand-rolled `evaluate()` (not the factory) is needed for a genuinely internal/derived table (model registries, RL Q-tables, weight-history bookkeeping) — those are ML state, not datasources, and don't belong in this mandate.
 
 ## Vendor-onboarding freeze (added 2026-08-30)
 
