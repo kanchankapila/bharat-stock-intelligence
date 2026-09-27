@@ -17,6 +17,7 @@ from ml_calibration import (  # noqa: E402
     regime_edge_weight,
     edge_adjusted_probability,
     is_edge_adjustment_enabled,
+    stratified_auc,
     AUC_RANDOM,
     AUC_TRUST_FLOOR,
 )
@@ -271,6 +272,117 @@ def test_per_regime_auc_ignores_confluence_sourced_outcome_rows():
     # If the confluence rows leaked in, the join would return 2 rows per signal with
     # contradictory outcomes and AUC would collapse toward 0.5, not the clean signal here.
     assert auc['SIDEWAYS']['auc'] > 0.9
+
+
+# ── horizon stratification (2026-09-24 Simpson's-paradox fix) ───────────────────
+
+# (horizon, win_rate, p_low, p_high) -- the live HIGH_VOL shape: the SHORT horizon's signals carry
+# the HIGHEST scores and the LONGEST the lowest, while win rate rises with horizon. Within each
+# horizon the top `win_rate` fraction by p are the WINS, so p is perfectly rankable per stratum.
+# Pooled, "higher confidence" therefore means "shorter horizon" and "more likely to lose".
+_HORIZON_SKEW = ((1, 0.20, 0.80, 0.95),     # high p, low  win rate
+                 (5, 0.65, 0.45, 0.65),     # mid  p, mid  win rate
+                 (15, 0.90, 0.05, 0.25))    # low  p, high win rate
+_HORIZON_SKEW_N = 600
+
+
+def _horizon_skewed_pairs():
+    """A population where every horizon is PERFECTLY rankable, yet pooling them reports a
+    sub-0.5 AUC -- the live 2026-09-24 shape that pinned HIGH_VOL's edge weight at 0.
+    See _HORIZON_SKEW for the construction.
+
+    The construction mirrors the real one: the SHORT horizon's signals carry the HIGHEST scores
+    and the LONGEST carry the lowest, while win rate rises with horizon. Within each horizon p
+    is perfectly rankable (the top `win_rate` fraction by p are the WINS -> per-stratum AUC 1.0).
+    Pooled, "higher confidence" therefore means "shorter horizon" and "more likely to lose", so
+    the pooled ranking measures the horizon rather than the model.
+    """
+    pairs = []
+    for h, win_rate, p_lo, p_hi in _HORIZON_SKEW:
+        n = _HORIZON_SKEW_N
+        wins = int(round(n * win_rate))
+        for i in range(n):
+            p = p_lo + (p_hi - p_lo) * i / (n - 1)   # strictly ascending
+            y = 1 if i >= n - wins else 0             # top `wins` scores win
+            pairs.append((h, p, y))
+    return pairs
+
+
+def test_stratified_auc_cannot_fall_below_all_its_own_strata():
+    """The invariant the pooled metric violated: HIGH_VOL's pooled AUC read 0.467 while its
+    strata read 0.648/0.550/0.552. A weighted mean cannot lie outside the range of its parts, so
+    this assertion is the structural guarantee -- if it ever fails, the aggregation is wrong."""
+    from sklearn.metrics import roc_auc_score
+    pairs = _horizon_skewed_pairs()
+    res = stratified_auc(pairs, min_n=50)
+    assert res is not None
+    lo = min(v['auc'] for v in res['strata'].values())
+    hi = max(v['auc'] for v in res['strata'].values())
+    assert lo <= res['auc'] <= hi, f"stratified AUC {res['auc']} outside [{lo}, {hi}]"
+
+
+def test_stratified_auc_recovers_rankability_pooling_destroyed():
+    """The regression itself. Every stratum is perfectly rankable, so the honest estimate is 1.0;
+    pooling these horizons reports a sub-0.5 AUC that no stratum supports."""
+    from sklearn.metrics import roc_auc_score
+    pairs = _horizon_skewed_pairs()
+    pooled = float(roc_auc_score([y for _, _, y in pairs], [p for _, p, _ in pairs]))
+    res = stratified_auc(pairs, min_n=50)
+    assert res['auc'] > 0.95, f"stratified AUC should recover the real edge, got {res['auc']}"
+    # The artifact being fixed: pooling is not merely worse, it is *anti*-correlated with skill.
+    assert pooled < 0.55, f"fixture no longer reproduces the artifact (pooled={pooled})"
+    assert res['auc'] > pooled
+
+
+def test_per_regime_auc_does_not_pool_horizons():
+    """End-to-end through the SQL join: a regime whose horizons disagree on base rate but agree
+    on ranking must not be reported below the trust floor."""
+    conn = make_db()
+    for h, win_rate, p_lo, p_hi in _HORIZON_SKEW:
+        n = _HORIZON_SKEW_N
+        wins = int(round(n * win_rate))
+        for i in range(n):
+            p = p_lo + (p_hi - p_lo) * i / (n - 1)   # strictly ascending within the horizon
+            y = 'WIN' if i >= n - wins else 'LOSS'    # top `wins` scores win -> rankable
+            day = f"2026-05-{(i % 28) + 1:02d}"
+            conn.execute(
+                "INSERT INTO technical_signals (symbol,date,win_probability,nifty_regime) VALUES (?,?,?,?)",
+                (f"H{h}_{i}", day, p, 'HIGH_VOL'))
+            conn.execute(
+                "INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,?,?)",
+                (f"H{h}_{i}", day, h, y))
+    conn.commit()
+    auc = per_regime_auc(conn, min_n=50)
+    assert auc['HIGH_VOL']['auc'] > AUC_TRUST_FLOOR, (
+        f"HIGH_VOL scored {auc['HIGH_VOL']['auc']:.3f} -- at/below the trust floor despite "
+        "being perfectly rankable within every horizon")
+    # All three horizons must be represented as separate strata.
+    assert set(auc['HIGH_VOL']['strata']) == {1, 5, 15}
+
+
+def test_stratified_auc_drops_single_class_and_tiny_strata():
+    """A stratum that holds one class (or is too small to support an estimate) must be dropped,
+    not scored -- roc_auc_score would raise, and a 25-row AUC would swing the weighted mean."""
+    pairs = ([(1, 0.1 + 0.001 * i, i % 2) for i in range(600)]      # healthy
+             + [(2, 0.5, 1) for i in range(50)]                        # single class
+             + [(3, 0.5, i % 2) for i in range(25)])                   # too small
+    res = stratified_auc(pairs, min_n=50)
+    assert set(res['strata']) == {1}
+    assert set(res['dropped_strata']) == {2, 3}
+
+
+def test_stratified_auc_returns_none_when_nothing_survives():
+    assert stratified_auc([(1, 0.5, 1) for _ in range(300)], min_n=50) is None
+    assert stratified_auc([(1, 0.5, 1) for _ in range(10)], min_n=50) is None
+
+
+def test_stratified_auc_ignores_non_finite_scores():
+    """A stored NaN/inf passes `IS NOT NULL` but roc_auc_score rejects it; isfinite() is the
+    guard (an inf is a real, non-NULL float that would poison the whole stratum)."""
+    pairs = ([(1, 0.1 + 0.001 * i, i % 2) for i in range(600)]
+             + [(1, float('nan'), 1), (1, float('inf'), 0)])
+    res = stratified_auc(pairs, min_n=50)
+    assert res is not None and res['n'] == 600
 
 
 def test_regime_readiness_flags():

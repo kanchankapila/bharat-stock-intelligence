@@ -140,11 +140,82 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
     return {'fit': True, 'n': len(rows), 'updated': updated, 'regimes': regimes_meta}
 
 
-def per_regime_auc(conn: ConnWrapper, min_n: int = 50) -> dict:
-    """Raw win_probability vs WIN/LOSS AUC per regime (≥2 classes, ≥min_n rows)."""
+# ── Horizon-stratified AUC ───────────────────────────────────────────────────
+# signal_outcomes holds one row per (symbol, signal_date, horizon_days), and the WIN rate is a
+# property of the HORIZON, not just the model: measured live 2026-09-24 on the technical-source
+# join -- 1d 8010/20941 = 38.2% WIN, 5d 21563/33625 = 64.1%, 15d 32996/41882 = 78.8%.
+#
+# Pooling those into one WIN/LOSS population and taking a single roc_auc_score measures the
+# HORIZON rather than the model, because a ranking is only meaningful against a fixed base rate.
+# The result is a textbook Simpson's paradox, and it was not subtle: HIGH_VOL's pooled AUC read
+# 0.467 while EVERY one of its own strata read above it (1d 0.648, 5d 0.550, 15d 0.552). An
+# average cannot be below all of its parts; the pooled number was reporting a base-rate artifact
+# as model skill.
+#
+# Consequence: HIGH_VOL's regime_edge_weight was pinned at 0.0, silently discarding the edge the
+# model actually has in that regime, and regime-edge-trust-floor warned on every single run.
+#
+# The fix is the standard one -- hold the base rate constant by scoring WITHIN each stratum and
+# combining afterwards. The reported figure is the sample-size-weighted mean of the per-stratum
+# AUCs, which (a) restores the correct discrimination estimate, (b) cannot fall outside the
+# [min, max] range of its own strata, and (c) keeps larger horizons dominating the estimate.
+AUC_MIN_STRATUM_N = 200   # a stratum smaller than this cannot support an AUC estimate
+                          # (live h=2 n=25 and h=3 n=26 are noise, not signal)
+
+
+def stratified_auc(pairs, min_n: int = 50, min_stratum_n: int = AUC_MIN_STRATUM_N):
+    """Sample-size-weighted mean of the per-stratum AUCs of `pairs`.
+
+    `pairs` is an iterable of (stratum_key, p, y). Strata that hold only one class are always
+    dropped (roc_auc_score is undefined there). The `min_stratum_n` floor is applied ONLY when
+    there is more than one stratum to aggregate -- its sole purpose is to stop a tiny stratum
+    from swinging the sample-weighted mean, and a single-stratum population has no mean to
+    protect: its estimate IS the whole population, governed by `min_n`. Applying it
+    unconditionally silently deleted any single-horizon population below the floor -- including
+    populations the previous pooled code scored -- which erases a regime from
+    regime_edge_status for a data-SHAPE reason rather than a data-QUALITY one.
+
+    Returns None when nothing survives, or when the surviving rows do not reach `min_n`.
+    Otherwise {'n', 'auc', 'strata', 'dropped_strata'}.
+    """
     from sklearn.metrics import roc_auc_score
+    buckets: dict = {}
+    for key, p, y in pairs:
+        p = float(p)
+        if not math.isfinite(p):   # stored float NaN/inf passes IS NOT NULL but roc_auc_score
+            continue               # rejects it ("Input contains NaN"); isfinite also guards inf
+        d = buckets.setdefault(key, {'p': [], 'y': []})
+        d['p'].append(p)
+        d['y'].append(int(y))
+
+    pooled = len(buckets) == 1
+    kept: dict = {}
+    dropped: dict = {}
+    for k, d in buckets.items():
+        n = len(d['p'])
+        if len(set(d['y'])) < 2 or (not pooled and n < min_stratum_n):
+            dropped[k] = n
+            continue
+        kept[k] = (n, float(roc_auc_score(d['y'], d['p'])))
+
+    if not kept:
+        return None
+    total = sum(n for n, _ in kept.values())
+    if total < min_n:
+        return None
+    return {
+        'n': total,
+        'auc': sum(n * a for n, a in kept.values()) / total,
+        'strata': {k: {'n': n, 'auc': a} for k, (n, a) in kept.items()},
+        'dropped_strata': dropped,
+    }
+
+
+def per_regime_auc(conn: ConnWrapper, min_n: int = 50) -> dict:
+    """Horizon-stratified win_probability vs WIN/LOSS AUC per regime. See stratified_auc() for
+    why the horizons are scored separately rather than pooled."""
     rows = conn.execute("""
-        SELECT ts.nifty_regime AS regime, ts.win_probability AS p,
+        SELECT ts.nifty_regime AS regime, so.horizon_days AS horizon, ts.win_probability AS p,
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND so.signal_date = ts.date
@@ -154,17 +225,15 @@ def per_regime_auc(conn: ConnWrapper, min_n: int = 50) -> dict:
     """).fetchall()
     g: dict = {}
     for r in rows:
-        p = float(r['p'])
-        if not math.isfinite(p):   # stored float NaN/inf passes IS NOT NULL but roc_auc_score
-            continue               # rejects it ("Input contains NaN"); isfinite also guards inf
-        d = g.setdefault(r['regime'], {'p': [], 'y': []})
-        d['p'].append(p)
-        d['y'].append(int(r['y']))
+        g.setdefault(r['regime'], []).append((r['horizon'], r['p'], r['y']))
     out: dict = {}
-    for reg, d in g.items():
-        if len(d['p']) >= min_n and len(set(d['y'])) >= 2:
-            out[reg] = {'n': len(d['p']), 'auc': float(roc_auc_score(d['y'], d['p']))}
-            print(f"[Calibration] per-regime AUC {reg}: {out[reg]['auc']:.3f} (n={out[reg]['n']})")
+    for reg, pairs in g.items():
+        res = stratified_auc(pairs, min_n=min_n)
+        if res:
+            out[reg] = res
+            per_h = ' '.join(f"{k}d={v['auc']:.3f}(n={v['n']})" for k, v in sorted(res['strata'].items()))
+            print(f"[Calibration] per-regime AUC {reg}: {res['auc']:.3f} (n={res['n']}) "
+                  f"[{per_h}]")
     return out
 
 
@@ -220,23 +289,24 @@ def ensure_edge_status_table(conn: ConnWrapper) -> None:
 
 
 def _pooled_auc(conn: ConnWrapper, min_n: int = 50):
-    """Same join as per_regime_auc but pooled across ALL regimes -- the fallback trust level
-    regime_edge_weight() uses when a specific regime hasn't cleared the readiness floor."""
-    from sklearn.metrics import roc_auc_score
+    """Same join as per_regime_auc but across ALL regimes -- the fallback trust level
+    regime_edge_weight() uses when a specific regime hasn't cleared the readiness floor.
+
+    Horizon-stratified for the same reason per_regime_auc is (see stratified_auc): pooling the
+    1d/5d/15d populations measures the horizon, not the model. This matters MORE here than for
+    the per-regime rows, because __GLOBAL__ is the fallback every not-ready regime inherits -- a
+    base-rate artifact in the global row silently degrades regimes that never asked for it.
+    """
     rows = conn.execute("""
-        SELECT ts.win_probability AS p,
+        SELECT so.horizon_days AS horizon, ts.win_probability AS p,
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND so.signal_date = ts.date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
     """).fetchall()
-    pairs = [(float(r['p']), int(r['y'])) for r in rows if math.isfinite(float(r['p']))]
-    if len(pairs) < min_n or len({y for _, y in pairs}) < 2:
-        return None
-    p = [x[0] for x in pairs]
-    y = [x[1] for x in pairs]
-    return {'n': len(p), 'auc': float(roc_auc_score(y, p))}
+    return stratified_auc(
+        [(r['horizon'], r['p'], r['y']) for r in rows], min_n=min_n)
 
 
 def _upsert_edge_status_row(conn: ConnWrapper, row: dict) -> None:
