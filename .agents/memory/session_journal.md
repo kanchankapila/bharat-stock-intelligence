@@ -264,3 +264,11 @@ specifically complained about jobs "not supposed to run today" showing as delaye
 - Left uncommitted ON PURPOSE: `gaps_and_opportunities.md` (2026-09-26 point-in-time digest of open AFs) — it duplicates the one-tracker rule (`docs/audit-findings.md`); move it under `docs/` as a dated report or delete it.
 - Tooling lesson for any agent driving git here: arrayed shell commands in this harness run CONCURRENTLY — git add/commit batches MUST be chained with `;` inside ONE command string. Learned the hard way: two commits got merged by racing `git add`/`git commit` calls and had to be `reset --soft` and redone.
 
+## 2026-09-27 (night) — Cline — ml-weekly-retrain DEGRADED fixed + proven with a full green re-run (AF-20260927-12)
+
+- **Root cause:** weekly `performance_tracker.py --horizon 15` call omitted `runPython`'s timeout arg → inherited the 5-min default → killed at exactly 300,000ms Sat 2026-09-26. Explicit `15 * 60_000` pinned on 4 weekly call sites (perf-tracker h5/h15 + outcome_resolver h5/h15 in `ml-weekly-data`). Class signature added to `.claude/rules/bugs-jobs-runtime.md` (never "just leave the default" for a step whose input grows). Full detail: `docs/session-log.md` evening entries.
+- **Proven live, twice:** standalone h15 exit 0 in 550s; then a FULL manual re-run through the real BullMQ path (`q.add('manual-…')`, same as the dashboard trigger) finished **`4 ok, 0 failed`**, `job_run_history` 41836 success, 2h06m — h15 took 7m30s, still fatal under the old default. `strategy_performance` fresh both horizons; Saturday cron slot undisturbed.
+- **Guard that mattered:** manual trigger script refuses while `dl-retrain-weekly` is ACTIVE — an orphan-requeued DL make-up was mid-run (15.4GB peak, RAM down to 0.2GB) when I wanted to fire; waited it out. Tools kept: `scratch_verify/trigger_ml_weekly.cjs` + `scratch_verify/bullmq_state.cjs` (read-only queue state).
+- **New open row AF-20260927-13:** today's `dl-retrain-weekly` FAILED (own load deadline, 1,972/2,179 symbols unloaded; missed its 10:30 IST slot after a morning server restart, then ran 175 min under peak memory pressure). Low urgency — `dl` blend weight is 0.0 — but next Sunday's slot is a week away; needs load-path forensics + a make-up decision.
+
+
