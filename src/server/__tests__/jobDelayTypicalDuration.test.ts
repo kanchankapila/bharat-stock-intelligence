@@ -138,7 +138,15 @@ describe('getLateJobs with typical duration and day-scoped scheduling', () => {
     expect(late.map(l => l.job)).not.toContain('saturday-job');
   });
 
-  it('evaluates delays based on typical duration rather than static grace when duration history exists', async () => {
+  // 2026-09-22 precedence flip: duration history used to REPLACE grace whenever any p95
+  // existed, which false-flagged three healthy jobs in one digest (ml-daily-ops p95 15.7min
+  // vs 270min grace, unified-ranker mid-run at +12min, quant-eod-sync vs 360min grace).
+  // Curated graceMinutes (validated against each job's declared budget by
+  // jobRegistryGraceMinutesConsistency.test.ts) is now the FLOOR; observed history may only
+  // EXTEND a deadline past it, never pull one earlier. Negative controls: reverting to the
+  // old precedence fails the floor test below (fast-job red at 10:20 again); reverting the
+  // max() to a plain duration deadline fails the extension test (news-sentiment red again).
+  it('uses static grace as the floor: duration history alone cannot pull the deadline earlier', async () => {
     mockDbAll.mockImplementation(async (sql: string) => {
       if (sql.includes('stock_ohlcv')) {
         return [{ d: '2026-09-14' }, { d: '2026-09-11' }];
@@ -151,8 +159,9 @@ describe('getLateJobs with typical duration and day-scoped scheduling', () => {
         ];
       }
       if (sql.includes('job_run_history')) {
-        // fast-job usually takes 2 minutes (120,000ms), buffer is 10 min -> deadline ~10:12 UTC
-        // slow-job usually takes 60 minutes (3,600,000ms), buffer is 30 min -> deadline ~11:30 UTC
+        // fast-job usually takes 2 minutes (duration deadline would be ~10:12 UTC), slow-job
+        // 60 minutes (would be ~11:30) -- but their CURATED graces are 60min (11:00) and
+        // 180min (13:00), and grace floors both of those earlier duration deadlines.
         return [
           { job_name: 'fast-job', avg_ms: 120000, p95_ms: 120000, count: 10 },
           { job_name: 'slow-job', avg_ms: 3600000, p95_ms: 3600000, count: 10 },
@@ -161,19 +170,59 @@ describe('getLateJobs with typical duration and day-scoped scheduling', () => {
       return [];
     });
 
-    // Check at 10:20 UTC (20 minutes after 10:00 UTC fire time):
-    // fast-job deadline was 10:12 UTC -> past deadline, so it IS delayed!
-    // slow-job deadline is 11:30 UTC -> still within usual duration, so it is NOT delayed!
+    // 10:20 UTC: fast-job's duration deadline (10:12) has passed but its grace (-> 11:00)
+    // has not -- a still-allowed run must NOT read late. (Under the old precedence this
+    // asserted toContain('fast-job'); that is exactly the false positive being fixed.)
     const lateAt1020 = await getLateJobs(new Date('2026-09-14T10:20:00Z'));
-    expect(lateAt1020.map(l => l.job)).toContain('fast-job');
+    expect(lateAt1020.map(l => l.job)).not.toContain('fast-job');
     expect(lateAt1020.map(l => l.job)).not.toContain('slow-job');
 
-    // Check at 11:45 UTC (105 minutes after 10:00 UTC fire time):
-    // Both deadlines have passed -> now both are delayed
-    __resetJobTypicalDurationsCache();
+    // 11:45 UTC: fast-job is now past its 60min grace -> late; slow-job (13:00) still green.
     const lateAt1145 = await getLateJobs(new Date('2026-09-14T11:45:00Z'));
     expect(lateAt1145.map(l => l.job)).toContain('fast-job');
-    expect(lateAt1145.map(l => l.job)).toContain('slow-job');
+    expect(lateAt1145.map(l => l.job)).not.toContain('slow-job');
+
+    // 13:05 UTC: both grace deadlines have passed -> both delayed.
+    __resetJobTypicalDurationsCache();
+    const lateAt1305 = await getLateJobs(new Date('2026-09-14T13:05:00Z'));
+    expect(lateAt1305.map(l => l.job)).toContain('fast-job');
+    expect(lateAt1305.map(l => l.job)).toContain('slow-job');
+  });
+
+  it('EXTENDS the deadline past grace when observed history proves runs legitimately run longer', async () => {
+    // news-sentiment: everyMs 15min, curated grace 45min, no last success today. With no
+    // duration evidence the grace floor flags it at boundary+45min; with p95 evidence of 2h
+    // runs (allowance = 120min + 60min buffer = 180min > 45min) the deadline stretches past
+    // grace instead of redding a long-but-healthy run every cycle.
+    let durationsOn = false;
+    mockDbAll.mockImplementation(async (sql: string) => {
+      if (sql.includes('stock_ohlcv')) {
+        return [{ d: '2026-09-14' }, { d: '2026-09-11' }];
+      }
+      if (sql.includes('job_heartbeat')) {
+        return [
+          { job_name: 'news-sentiment', last_success_at: new Date('2026-09-13T12:00:00Z').getTime(), last_error: null },
+        ];
+      }
+      if (sql.includes('job_run_history')) {
+        return durationsOn
+          ? [{ job_name: 'news-sentiment', avg_ms: 7200000, p95_ms: 7200000, count: 10 }]
+          : [];
+      }
+      return [];
+    });
+
+    const at = new Date('2026-09-14T12:00:00Z');
+    // Grace floor alone: boundary 11:15 + 45min grace = 12:00 deadline, now == deadline ->
+    // late (last success is from 09-13).
+    const graceOnly = await getLateJobs(at);
+    expect(graceOnly.map(l => l.job)).toContain('news-sentiment');
+
+    // Same clock, duration history present: allowance 180min -> deadline 14:15 -> NOT late.
+    durationsOn = true;
+    __resetJobTypicalDurationsCache();
+    const extended = await getLateJobs(at);
+    expect(extended.map(l => l.job)).not.toContain('news-sentiment');
   });
 
   it('does NOT report a job as late on an NSE trading holiday if it was planned to skip', async () => {

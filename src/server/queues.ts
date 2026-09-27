@@ -1031,7 +1031,19 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // reco_data is NOT chronologically sorted, a single page can mix Apr-2026 and Jul-2026 rows
   // in any order). Fixing that means every run now scans all MAX_PAGES=15 pages regardless of
   // --days, live-measured at ~4.6 min end-to-end.
-  await runPython('mc_broker_reco_fetcher.py', ['--days', '7'], 6 * 60_000)
+  // 6min -> 15min (2026-09-24): that ~4.6min measurement left only 1.3x headroom, and the
+  // budget then failed LIVE -- 2026-09-23 20:23:30 "Timed out after 360000ms", killing the step
+  // mid-[RETRY] on page 1 of api.moneycontrol.com getBrokerResearchReco, so ml-daily-ops
+  // reported DEGRADED (19 ok, 1 failed) and Telegram got the red alert. The kill was vendor
+  // throttling in the evening window, not a workload change: two standalone re-runs off-peak
+  // finished in 189.5s and 233.1s (exit 0, 120 recs, 18 symbols updated). Sized from the
+  // script's own bounds rather than guessed: retry_get is 3 attempts x 30s timeout + 1+2s
+  // backoff (~93s worst case for ONE throttled page) and fetch_recos() pages up to
+  // MAX_PAGES=15, so a throttled night is legitimately several minutes longer than an
+  // off-peak one. 900s = ~3.9x the slower standalone measurement and ~9 throttled pages of
+  // room, the same "size at ~2x measured, then leave headroom" rule as mf_sector_allocation
+  // below; still a rounding error inside this job's 3.5h withJobTimeout.
+  await runPython('mc_broker_reco_fetcher.py', ['--days', '7'], 15 * 60_000)
     .catch(e => T.fail('mc_broker_reco_fetcher', e));
 
   // Economic calendar: upcoming high-impact macro events → eco_calendar + macro_asset_prices.
@@ -1289,7 +1301,16 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
 
   // Intraday feedback loop: paper-trade today's intraday recs vs the day's OHLC, then reverse-
   // engineer which signals preceded the winners → learned blend weights the ranker leans on.
-  await runPython('intraday_outcome_resolver.py', [], 120_000)
+  // 120s -> 300s (2026-09-22): this exact step took the ml-daily-ops run DEGRADED that evening
+  // ("1 steps failed: intraday_outcome_resolver", job_run_history 15:49 UTC) on a timed-out
+  // 120s budget, while a standalone re-run of the same script completed in 25.5s -- the
+  // shortfall was evening-load contention (the runPython timeout clock starts AFTER the python
+  // slot is acquired, so this was pure CPU/DB contention inside the chain, not queue wait), not
+  // a workload change. 300s = 12x the measured standalone runtime, same headroom logic as
+  // regime_detector.py's 2min -> 4min budget raise in processDlRegimeUpdate. Keep the
+  // `.catch -> T.fail` shape: it reaches T.finish()'s verdict so the failure is REPORTED
+  // without aborting the remaining steps (scripts/check_recurring_bugs.py's approved form).
+  await runPython('intraday_outcome_resolver.py', [], 300_000)
     .catch(e => T.fail('intraday_outcome_resolver', e));
   await runPython('intraday_strategy_learner.py', [], 120_000)
     .catch(e => T.fail('intraday_strategy_learner', e));

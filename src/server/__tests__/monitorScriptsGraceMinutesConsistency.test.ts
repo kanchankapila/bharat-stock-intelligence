@@ -122,7 +122,11 @@ describe('MONITOR_SCRIPTS.graceMinutes consistency', () => {
     'regime-detector': [{ jobKey: 'dl-regime-daily', marker: "jobName: 'dl-regime-daily'" }],
     'feature-engineering': [{ jobKey: 'dl-feature-daily', marker: "jobName: 'dl-feature-daily'" }],
     'reward-engine': [{ jobKey: 'ml-daily-ops', marker: 'mlDailyOpsWorker = new Worker' }],
-    'dl-engine-infer': [{ jobKey: 'dl-infer-daily', marker: "jobName: 'dl-infer-daily'" }],
+    // 2026-09-22: repointed from dl-infer-daily (the 16:00 fallback, lockDuration 30min) to
+    // dl-feature-daily -- the primary chain driver the monitor entry's cronPatterns now key
+    // on (see monitorScripts.ts dl-engine-infer). Its lockDuration (60min) is the ceiling
+    // graceMinutes must cover once the fallback is no longer the judged schedule.
+    'dl-engine-infer': [{ jobKey: 'dl-feature-daily', marker: "jobName: 'dl-feature-daily'" }],
     'signal-type-stats': [{ jobKey: 'ml-daily-ops', marker: 'mlDailyOpsWorker = new Worker' }],
     'screener-performance': [{ jobKey: 'screener-performance-daily', marker: "jobName: 'screener-performance-daily'" }],
     'trendlyne-midweek': [{ jobKey: 'trendlyne-midweek-batch', marker: "jobName: 'trendlyne-midweek-batch'" }],

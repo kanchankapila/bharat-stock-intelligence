@@ -39,13 +39,15 @@ async function processJobDigest(): Promise<void> {
  * happened 2026-09-17 (zero 09-17 rows; digest sent anyway at 17:10).
  *
  * Gate: before sending, require that the newest unified_recommendations date is TODAY's
- * logical trading date AND was generated within the last 6 hours (a morning generated_at
- * with today's date, e.g. a closed-day-early run, is also acceptable). Today's date is taken
- * from technical_signals (written by ml-daily-ops and the technical scanner), NOT
+ * logical trading date (or — on an exchange HOLIDAY weekday, when technical_signals never
+ * writes the day — the calendar day the ranking was generated on, bounded by an age check;
+ * session-matching path keeps the original 6h bound). Today's date is taken from
+ * technical_signals (written by ml-daily-ops and the technical scanner), NOT
  * date.today(), so a Friday-evening server in any TZ still matches the platform's own
- * trading-day notion. If the gate fails, the digest records a SKIP (heartbeat 'success' with
- * the reason — there is nothing wrong with the digest; its INPUT is not ready) instead of
- * sending a stale ranking with no marker at all.
+ * trading-day notion. If the gate still fails AFTER the poll-wait in
+ * processRecommendationsDigest below, the digest records a FAILED verdict whose message
+ * names the gate — there is nothing wrong with the digest; its INPUT never became ready —
+ * instead of sending a stale ranking with no marker at all.
  */
 async function unifiedRankingIsFresh(): Promise<boolean> {
   try {
@@ -56,10 +58,20 @@ async function unifiedRankingIsFresh(): Promise<boolean> {
     if (!ur?.d || !ur.generated_at) return false;
     const sig = await dbGet<{ d: string }>(
       `SELECT MAX(date)::text AS d FROM technical_signals`);
-    // Both must agree on the trading date, and the rank must be younger than 6h.
-    if (ur.d !== sig?.d) return false;
     const ageMs = Date.now() - new Date(ur.generated_at.endsWith('Z') ? ur.generated_at : ur.generated_at + 'Z').getTime();
-    return ageMs >= 0 && ageMs < 6 * 60 * 60 * 1000;
+    if (!(ageMs >= 0)) return false;
+    // Calendar-today path (2026-09-22): on a holiday there is no technical_signals row for
+    // the day, so MAX(date) stays at the last session (D-1) while closed-day-early-batch's
+    // morning ranker run legitimately stamps generated_at with calendar day D — judging that
+    // only against sig.d failed the gate on every holiday (and, symmetrically, a weekday
+    // whose technical-scan write was missing failed a genuinely fresh evening rank).
+    // Generated-on-today bounded by <24h is sufficient: nothing but the ranker writes this table.
+    const istToday = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    if (ur.d === istToday) return ageMs < 24 * 60 * 60 * 1000;
+    // Session-match path: the newest rank belongs to the platform's current trading date AND
+    // is recent enough to be this evening's run, not yesterday's (6h, as before).
+    if (ur.d !== sig?.d) return false;
+    return ageMs < 6 * 60 * 60 * 1000;
   } catch (e) {
     // If the gate itself cannot run, do NOT block the digest on it — degrade to the old
     // behaviour and say so in the log. A monitoring outage must not silence the digest.
@@ -69,10 +81,31 @@ async function unifiedRankingIsFresh(): Promise<boolean> {
 }
 
 async function processRecommendationsDigest(): Promise<void> {
-  const fresh = await unifiedRankingIsFresh();
+  // 2026-09-22: the 17:10 UTC cron races unified-ranker's own 17:00 UTC slot BY DESIGN —
+  // measured completions 17:11 / 17:21 / 17:39 / 17:42, and after a failed attempt the
+  // bounded make-up (AF-20260917-20: 45min budget + 15min delay) can land around 18:18.
+  // Failing the gate the instant the input isn't ready produced the recurring reds on 09-18
+  // and 09-22 (the latter: the host woke from Modern Standby at 17:21:04 UTC and the gate
+  // query beat the ranker's commit by seconds). Instead: POLL for freshness until the wait
+  // budget expires. Waiting on the TABLE alone (not the ranker's heartbeat) is safe because
+  // unified_ranker.py persists unified_recommendations in a SINGLE commit at the end of its
+  // persist loop — one run is one generated_at, so a passing gate means a COMPLETE ranking,
+  // never a partial one. Budget stays under this registration's lockDuration (80min) and
+  // under the registry graceMinutes (17:10 + 90 = 18:40 deadline).
+  const RANK_WAIT_MS = 75 * 60_000;
+  const RANK_WAIT_POLL_MS = 60_000;
+  const giveUpAt = Date.now() + RANK_WAIT_MS;
+  let fresh = await unifiedRankingIsFresh();
+  let waited = false;
+  while (!fresh && Date.now() < giveUpAt) {
+    if (!waited) { waited = true; console.log('[QUEUE] recommendations-digest: unified ranking not fresh yet -- waiting for unified-ranker (poll up to 75min)'); }
+    await new Promise((resolve) => setTimeout(resolve, RANK_WAIT_POLL_MS));
+    fresh = await unifiedRankingIsFresh();
+  }
   if (!fresh) {
-    const msg = 'SKIPPED: unified_recommendations does not hold a fresh ranking for the current '
-      + 'trading date (unified-ranker still running or failed — see its heartbeat; AF-20260917-20 gate)';
+    const msg = `SKIPPED: unified_recommendations did not become fresh for the current `
+      + `trading date within ${Math.round(RANK_WAIT_MS / 60_000)}min `
+      + '(unified-ranker still running or failed — see its heartbeat; AF-20260917-20 gate)';
     console.warn('[QUEUE] recommendations-digest', msg);
     // Return the StepTracker-style verdict rather than throwing: registerRepeatableJob's
     // completed handler turns { success:false, failedSteps } into a 'failed' heartbeat whose
@@ -143,7 +176,12 @@ export async function registerDigestJobs(connection: any) {
     processor: processRecommendationsDigest,
     monitorName: 'recommendations-digest',
     concurrency: 1,
-    lockDuration: 5 * 60_000,
+    // 5min -> 80min (2026-09-22): the processor poll-waits up to 75min for the ranker's
+    // freshness gate (see processRecommendationsDigest) -- the repo convention (queues.ts
+    // withJobTimeout docstring) is the self-imposed budget must stay under the Worker's
+    // lockDuration so the timeout fires before stall detection. 80 > 75 and
+    // jobRegistryGraceMinutesConsistency still holds: registry grace 90 >= lock 80.
+    lockDuration: 80 * 60_000,
     onCompleted: () => console.log('[QUEUE] recommendations-digest sent'),
   });
 

@@ -84,13 +84,13 @@ export function getPool(): Pool {
 }
 
 /** True for transient pool/socket errors where the query never reached the server. */
-function isTransientConnError(err: unknown): boolean {
+export function isTransientConnError(err: unknown): boolean {
   const msg = (err as { message?: string })?.message ?? '';
   // 53300 "too many clients already": under load (unit + live vitest projects co-running with
   // the four pm2 services against one Postgres) new connections are briefly refused -- same
   // shape as the connection-terminated case below, safe to retry because SELECTs are
   // idempotent and pgExecute's caller decides for writes.
-  return /connection terminated|connection timeout|ECONNRESET|ETIMEDOUT|Client has encountered a connection error|server closed the connection|too many clients already/i.test(
+  return /connection terminated|connection timeout|timeout exceeded when trying to connect|timeout exceeded|ECONNRESET|ETIMEDOUT|Client has encountered a connection error|server closed the connection|too many clients already/i.test(
     msg,
   );
 }
@@ -140,7 +140,23 @@ export async function pgExecute(text: string, params: unknown[] = []) {
 
 /** Acquire a client for an explicit transaction; caller MUST release. */
 export async function pgClient(): Promise<PoolClient> {
-  return getPool().connect();
+  // Pool checkout has the same transient failure modes as pool.query(). Keep acquisition
+  // bounded and retryable too; otherwise a transaction can fail before its first statement
+  // while the read-only path rides out the same outage.
+  const delays = [100, 400, 1200];
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await getPool().connect();
+    } catch (err) {
+      if (!isTransientConnError(err)) throw err;
+      lastErr = err;
+      if (attempt < delays.length) {
+        await new Promise((r) => setTimeout(r, delays[attempt]));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 /**
@@ -148,7 +164,7 @@ export async function pgClient(): Promise<PoolClient> {
  * Prefer this over the raw `pgClient()` export for all explicit transactions.
  */
 export async function withClient<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await getPool().connect();
+  const client = await pgClient();
   try {
     return await fn(client);
   } finally {
@@ -406,7 +422,7 @@ export async function pgEnsureColumns(): Promise<void> {
        PRIMARY KEY (symbol, date)
      )`,
   ];
-  const client = await getPool().connect();
+  const client = await pgClient();
   try {
   for (const sql of creates) {
     try { await client.query(sql); } catch { /* ignore */ }

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { dbGet, dbRun } from './dbAsync';
+import { dbGet, dbRun, dbExec } from './dbAsync';
 
 /**
  * Telegram's legacy Markdown parser aborts the whole message on an unbalanced entity, so any
@@ -15,6 +15,45 @@ export function sanitizeMarkdown(text: string | null | undefined): string {
 
 export class TelegramNotificationService {
   private _settingsCache: { botToken: string; chatId: string; enabled: boolean } | null = null;
+
+  // Every report that leaves this service is persisted — user request 2026-09-21 ("make sure
+  // it's recorded in database for everyday") after the ml-daily-ops DEGRADED alert existed only
+  // as a fire-and-forget Telegram message + a log line, with no queryable daily record. One row
+  // per LOGICAL message (a sendMarkdownMessage call), not per 4096-char chunk, so the day's
+  // digests/alerts read back exactly as they were composed. Created lazily here — same
+  // memoized-CREATE convention as jobHeartbeat.ts (job_heartbeat is likewise absent from the
+  // generated PG schema-of-record); this table is pure send-log, no freshness consumer.
+  private static REPORT_DDL = `CREATE TABLE IF NOT EXISTS telegram_report_log (
+    id          SERIAL PRIMARY KEY,
+    sent_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ok          BOOLEAN NOT NULL,
+    chunk_count INTEGER NOT NULL,
+    chars       INTEGER NOT NULL,
+    text        TEXT NOT NULL
+  )`;
+  private static _tableReady: Promise<void> | null = null;
+  private ensureReportTable(): Promise<void> {
+    if (!TelegramNotificationService._tableReady) {
+      TelegramNotificationService._tableReady = dbExec(TelegramNotificationService.REPORT_DDL)
+        .catch(() => { /* already exists / DB not ready */ });
+    }
+    return TelegramNotificationService._tableReady;
+  }
+
+  private async logReport(text: string, ok: boolean, chunkCount: number): Promise<void> {
+    try {
+      await this.ensureReportTable();
+      await dbRun(
+        'INSERT INTO telegram_report_log (ok, chunk_count, chars, text) VALUES (?, ?, ?, ?)',
+        [ok ? 'true' : 'false', chunkCount, text.length, text],
+      );
+    } catch (err) {
+      // The send already happened (or failed) — a log-write failure must never turn into a
+      // second error signal on top of the report's own delivery result.
+      console.error('[TelegramService] Failed to persist report to telegram_report_log:', (err as Error).message);
+    }
+  }
+
 
   private async getSettings(): Promise<{ botToken: string; chatId: string; enabled: boolean }> {
     if (this._settingsCache) return this._settingsCache;
@@ -136,6 +175,7 @@ export class TelegramNotificationService {
         allSuccess = false;
       }
     }
+    await this.logReport(text, allSuccess, chunks.length);
     return allSuccess;
   }
 

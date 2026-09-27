@@ -255,7 +255,14 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // MONITOR_SCRIPTS nor DATA_QUALITY_CHECKS -- so an unregistered live job emits a permanent
   // false STALE alert every day. graceMinutes 180 because the capture legitimately stops at the
   // 15:30 IST close while the coarse '*/15 3-10' cron keeps firing until 16:15 IST.
-  { jobName: 'nt-live-filter-capture', label: 'NiftyTrader Live Filter Capture', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 180, critical: false },
+  // lateDeadlineCronPatterns (2026-09-22, same fix as live-screener-collect above): without
+  // them the deadline was judged against the raw cron's 10:45 UTC tail while the last real
+  // capture lands at 10:00:29 UTC (verified live), so grace could never rescue it -- 10:45 +
+  // 180min grace = 13:45 UTC, still hours before the evening digest that reported this job
+  // "~6.6h late" every day. Pinning the deadline to the last slot that does real work (10:00)
+  // makes last_success_at >= expectedAt, i.e. never late after a normal close.
+  { jobName: 'nt-live-filter-capture', label: 'NiftyTrader Live Filter Capture', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 180, critical: false,
+    lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
 
   // job-digest (queues.ts '20 17 * * *', runs all 7 days)
   { jobName: 'job-digest', label: 'Daily Job Digest (Telegram)', cronPattern: '20 17 * * *', graceMinutes: 60, critical: false },
@@ -269,6 +276,11 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // reads the freshly-built ranking. Critical: this is the user-facing output of the whole
   // pipeline, and its predecessor (the websocketService confidence>=85 alert) went silent for
   // ~2 weeks without anything noticing, which is exactly what a heartbeat entry prevents.
+  // graceMinutes 90 (2026-09-22): the processor now POLL-WAITS up to 75min for the ranker's
+  // freshness gate instead of racing its 17:10 fire (measured ranker completions 17:11-17:42
+  // plus a 15-min make-up leg after a failed attempt -> ~18:18 worst case, all inside 17:10
+  // + 90 = 18:40). The cron itself is deliberately unchanged -- a later fixed slot would just
+  // re-create the race whenever the ranker runs long or the host wakes late.
   { jobName: 'recommendations-digest', label: 'Daily Stock Recommendations (Telegram)', cronPattern: '10 17 * * 1-5', graceMinutes: 90, critical: true },
 
   // Formal daily wrapper around dataQualityChecks.ts's 25-check suite (2026-08-01).

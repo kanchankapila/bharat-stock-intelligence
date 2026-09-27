@@ -14,7 +14,7 @@ vi.mock('pg', () => ({
   },
 }));
 
-const { withClient, alterMigrationName } = await import('../pgClient');
+const { withClient, alterMigrationName, isTransientConnError } = await import('../pgClient');
 
 describe('pgClient', () => {
   beforeEach(() => {
@@ -38,6 +38,20 @@ describe('pgClient', () => {
       }),
     ).rejects.toThrow('boom');
     expect(mockRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a transient pool checkout before returning a client', async () => {
+    mockConnect
+      .mockRejectedValueOnce(new Error('timeout exceeded when trying to connect'))
+      .mockResolvedValueOnce(mockClient);
+    const result = await withClient(async () => 'after-retry');
+    expect(result).toBe('after-retry');
+    expect(mockConnect).toHaveBeenCalledTimes(2);
+    expect(mockRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('classifies the exact pg-pool checkout timeout as transient', () => {
+    expect(isTransientConnError(new Error('timeout exceeded when trying to connect'))).toBe(true);
   });
 
   it('parses naive TIMESTAMP columns as UTC, not host local time', () => {

@@ -486,7 +486,16 @@ export function __resetJobTypicalDurationsCache(): void {
 
 /**
  * Retrieves typical execution duration (avg and p95 ms) from job_run_history over the
- * past 14 days of successful runs, cached for 15 minutes.
+ * past 14 days, cached for 15 minutes.
+ *
+ * Deliberately NOT filtered to status='success' (changed 2026-09-22): a success-only p95
+ * carries survivorship bias against exactly the jobs whose long runs are the ones that
+ * fail or hit their withJobTimeout budget. Measured live: ml-daily-ops p95 was 15.7min
+ * over success-only rows vs 99.7min over ALL rows (13 samples incl. a 210min budget kill),
+ * against a 270min curated grace and ~4h real runs -- the success-conditioned number made
+ * a healthy, still-running job read "late" every single day. getLateJobs() uses these
+ * durations only as a FLOOR-EXTENDING signal (never to shrink graceMinutes), so including
+ * failed runs can only widen a deadline when history proves the job legitimately runs long.
  */
 export async function getJobTypicalDurations(now: Date = new Date()): Promise<Map<string, JobTypicalDuration>> {
   if (_durationsCache && now.getTime() - _durationsCache.at < SESSIONS_CACHE_TTL_MS) {
@@ -505,7 +514,7 @@ export async function getJobTypicalDurations(now: Date = new Date()): Promise<Ma
               round(percentile_cont(0.95) within group (order by duration_ms)) as p95_ms,
               count(*) as count
        FROM job_run_history
-       WHERE status = 'success' AND duration_ms IS NOT NULL AND ran_at > now() - interval '14 days'
+       WHERE duration_ms IS NOT NULL AND ran_at > now() - interval '14 days'
        GROUP BY job_name`
     );
     for (const r of (rows ?? [])) {
@@ -634,25 +643,41 @@ export async function getLateJobs(now: Date = new Date()): Promise<Array<{
       if (sessions && !HOLIDAY_ACTIVE_JOB_NAMES?.has?.(entry.jobName)
           && patternsAreWeekdayOnly([entry.cronPattern ?? '']) && isDeliberatelyIdleOccurrence(expectedAt, sessions)) continue;
 
-      // 2. Delay check based on time it usually takes:
-      // If duration history exists, use typical runtime (p95 or avg) plus a jitter buffer (at least 10m).
-      // Fallback to entry.graceMinutes if no duration history exists.
+      // 2. Delay check. entry.graceMinutes is the FLOOR: jobRegistryGraceMinutesConsistency
+      // validates it against the job's own declared runtime budget (lockDuration /
+      // withJobTimeout), i.e. it is the curated answer to "how long may this job legitimately
+      // run before the heartbeat may call it late". Observed history may only EXTEND the
+      // deadline beyond that floor -- never pull it earlier.
+      //
+      // 2026-09-22: the previous precedence (duration REPLACED grace whenever any p95 existed)
+      // false-flagged three healthy jobs in a single digest -- ml-daily-ops (~3.8h "late" on a
+      // p95 of 15.7min vs its 270min grace), unified-ranker ("12m late" while it was still
+      // running, grace 75min) and quant-eod-sync (grace 360min) -- because success-conditioned
+      // (and, for ml, simply short) history understates the true completion tail. Duration
+      // history still matters the other way round: when it proves runs legitimately take
+      // LONGER than the curated grace (p95 + buffer > grace), flagging at grace itself would
+      // redding a job mid-run every time, so the deadline stretches to the evidence.
       const durationInfo = typicalDurations.get(entry.jobName);
       const hasDurationHistory = durationInfo && durationInfo.count >= 2;
+      const graceAllowanceMs = entry.graceMinutes * 60_000;
       const usualDurationMs = hasDurationHistory
         ? (durationInfo.p95Ms || durationInfo.avgMs)
-        : (entry.graceMinutes * 60_000);
+        : 0;
+      const durationAllowanceMs = hasDurationHistory
+        ? usualDurationMs + Math.max(10 * 60_000, Math.round(usualDurationMs * 0.5))
+        : 0;
+      const durationExtendsGrace = durationAllowanceMs > graceAllowanceMs;
+      const deadlineMs = expectedAt.getTime() + Math.max(graceAllowanceMs, durationAllowanceMs);
 
-      const deadlineMs = hasDurationHistory
-        ? (expectedAt.getTime() + usualDurationMs + Math.max(10 * 60_000, Math.round(usualDurationMs * 0.5)))
-        : (expectedAt.getTime() + entry.graceMinutes * 60_000);
-
-      // Still within the typical execution window + buffer: not delayed yet
+      // Still within the governing allowance: not delayed yet
       if (now.getTime() < deadlineMs) {
         continue;
       }
 
-      const delayMs = hasDurationHistory
+      // hours-late is displayed from whichever allowance governed the deadline: from the fire
+      // time for a grace-governed job, from expectedAt + typical runtime for one whose observed
+      // history stretched past grace (same formula each branch had before the floor existed).
+      const delayMs = durationExtendsGrace
         ? Math.max(0, now.getTime() - (expectedAt.getTime() + usualDurationMs))
         : Math.max(0, now.getTime() - expectedAt.getTime());
       const hoursLate = Math.round((delayMs / 3_600_000) * 10) / 10;

@@ -276,17 +276,29 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Deep learning model inference — writes win probabilities to deep_learning_predictions.',
-    schedule: 'Chain-triggered after dl-feature-refresh; 5:00 AM IST fallback',
+    schedule: 'Chain-triggered after dl-feature-refresh (17:00 IST); 21:30 IST fallback',
     pyScript: 'dl_engine.py --mode infer',
     queueName: null,
     staleLimitHours: 26,
-    // Dedicated DL Inference queue. 2026-08-06: primary trigger is now dl.jobs.ts's
-    // featureRefresh.worker completion chain (fires the moment feature_store actually has
-    // fresh data, typically hours before the fallback below) -- '0 16' = 9:30 PM IST is a
-    // fallback-only cron for the rare case the chain never fired.
-    // Keep in lockstep with queues.ts.
-    cronPatterns: ['0 16 * * 1-5'],
-    graceMinutes: 45,
+    // cronPatterns was '0 16' -- the FALLBACK-only slot -- until 2026-09-22, which made this
+    // entry stale EVERY weekday evening: computeCronLateness() judges against the most recent
+    // occurrence, so expectedAt was always 16:00 UTC while the real (chain-triggered) run
+    // lands hours earlier (verified live 09-22: predictions written 11:57:10, heartbeat
+    // 11:57:12, yet the 17:26 digest read "stale, last 2026-09-22T11:57" past the 16:45
+    // deadline). The 16:00 job deliberately SKIPS when the chain already fired today
+    // (processDlInference same-day dedup) and a skip must not be stamped success
+    // (registerJobSkipNotSuccess, 6-recurrence rule) -- so nothing ever satisfied the 16:00
+    // slot on a healthy day by design. Keyed instead to the PRIMARY driver, dl-feature-refresh
+    // ('30 11'), whose completion chain dispatches inference; mirror-pinned in
+    // monitorScriptsCronMirror.test.ts to that registration. graceMinutes 45 -> 150: the chain
+    // can legitimately start as late as dl-feature-refresh's own 90min grace allows (13:00
+    // UTC) plus inference runtime, so the deadline for "chain produced today's run" is
+    // 11:30 + 150 = 14:00 UTC -- a real chain miss is flagged EARLIER than the old 16:45
+    // fallback deadline, and a healthy 11:57 run is green all evening. The 16:00 fallback
+    // remains the safety net for a lost chain-dispatch; when it does run it stamps the same
+    // monitor id and also satisfies `lastRun >= expectedAt` from then on.
+    cronPatterns: ['30 11 * * 1-5'],
+    graceMinutes: 150,
   },
   {
     id: 'dl-trainer',
@@ -529,15 +541,23 @@ export const MONITOR_SCRIPTS = [
     schedule: 'Every 30 min, real writes only OUTSIDE weekday market hours (9:15am-3:30pm IST)',
     pyScript: null,
     queueName: 'confluence-compute',
-    // Real worst-case gap between fresh writes is the weekday market-hours window itself
-    // (~6h15m) -- isMarketOpen() is holiday/weekend-aware (queries live BSE/NSE status), so
-    // weekends and holidays get real 30-min writes all day, same as any off-hours weekday
-    // slot; there is no multi-day gap to model here, unlike the market-hours-ONLY jobs this
-    // session already found and fixed (technical-scan, regime-detector). Not expressed as
-    // cronPatterns: "every 30 min except weekday market hours" needs an inverted hour range
-    // combined with a day-of-week exception that doesn't reduce to one clean 5-field cron
-    // pattern -- a flat threshold generously above the real ~6h15m gap is the simpler, more
-    // robust choice here, not a workaround.
+    // Real worst-case gap between fresh writes is NOT the market-hours window (9:15-15:30 =
+    // 6h15m) -- it is the whole out-of-market span the compute window skips. The last real
+    // compute slot is 07:30 IST (jobRegistry's lateDeadlineCronPatterns for confluence-compute
+    // end at UTC 02:00) and the next is 17:00, so the true structural gap is 07:30 -> 17:00 =
+    // 9h30m. This comment previously claimed ~6h15m, which understated it by 3h15m; the 10h
+    // VALUE was still correct, so nothing needed changing here, but the reasoning was wrong and
+    // would have justified a future (incorrect) lowering. Same measurement that moved
+    // dataQualityChecks.ts's confluence-signals-freshness to warnDays 0.42 (AF-20260924-04) --
+    // the two registries must agree on what "stale" means for the same table.
+    //
+    // isMarketOpen() is holiday/weekend-aware (queries live BSE/NSE status), so weekends and
+    // holidays get real 30-min writes all day, same as any off-hours weekday slot; there is no
+    // multi-day gap to model here, unlike the market-hours-ONLY jobs this session already found
+    // and fixed (technical-scan, regime-detector). Not expressed as cronPatterns: "every 30 min
+    // except weekday market hours" needs an inverted hour range combined with a day-of-week
+    // exception that doesn't reduce to one clean 5-field cron pattern -- a flat threshold above
+    // the real 9h30m gap is the simpler, more robust choice here, not a workaround.
     staleLimitHours: 10,
   },
   {

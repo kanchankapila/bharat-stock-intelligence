@@ -178,7 +178,7 @@ describe('MONITOR_SCRIPTS cronPatterns mirror consistency', () => {
     { id: 'feature-engineering', marker: "jobName: 'dl-feature-daily'", label: 'dl-feature-daily (dl.jobs.ts)' },
     { id: 'trendlyne-midweek', marker: "jobName: 'trendlyne-midweek-batch'", label: 'trendlyne-midweek-batch (trendlyneWeekly.jobs.ts)' },
     { id: 'regime-detector', marker: "jobName: 'dl-regime-daily'", label: 'dl-regime-daily (dl.jobs.ts)' },
-    { id: 'dl-engine-infer', marker: "jobName: 'dl-infer-daily'", label: 'dl-infer-daily (dl.jobs.ts)' },
+    { id: 'dl-engine-infer', marker: "jobName: 'dl-feature-daily'", label: 'dl-feature-daily chain driver (dl.jobs.ts; 2026-09-22 repointed off the fallback dl-infer-daily slot -- see monitorScripts.ts)' },
     { id: 'screener-performance', marker: "jobName: 'screener-performance-daily'", label: 'screener-performance-daily (sync.jobs.ts)' },
   ];
 
