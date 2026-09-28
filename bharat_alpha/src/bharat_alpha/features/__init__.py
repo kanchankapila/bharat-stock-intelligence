@@ -524,12 +524,13 @@ def ownership_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataF
 
 YOY_GAP_DAYS = (350, 380)         # the same quarter one year earlier, not a neighbouring one
 RESULTS_MAX_STALE = 130
+SUE_MIN_PRIOR = 4                 # quarters of surprise history before a dispersion is meaningful
 
 
 def results_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
-    """Year-on-year change in reported quarterly EPS scaled by price (a standardised-surprise
-    proxy: the seasonal random-walk expectation) and revenue growth, as of each quarter's
-    knowable_at (see ingest.sources.nse_results)."""
+    """Reported-results surprises, as of each quarter's knowable_at (see ingest.sources.nse_results):
+    the year-on-year change in quarterly EPS scaled by price, revenue growth, and SUE — that same
+    change divided by the dispersion of the stock's own earlier surprises."""
     from bharat_alpha.ingest.sources.nse_results import SOURCE
 
     df = read_df(conn, "SELECT instrument_id, field, period_end, value, knowable_at FROM alpha.fundamental "
@@ -537,7 +538,8 @@ def results_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFra
     if df.empty:
         return {}
     df["period_end"] = pd.to_datetime(df["period_end"])
-    rows = []
+    rows: list[tuple] = []
+    surprises: dict[int, list[tuple]] = {}
     for (iid, field), g in df.sort_values("period_end").groupby(["instrument_id", "field"]):
         by_pe = g.set_index("period_end")
         for pe, r in by_pe.iterrows():
@@ -547,8 +549,21 @@ def results_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFra
             base = prior["value"].iloc[-1]
             if field == "res_eps":
                 rows.append((iid, "eps_yoy", r["value"] - base, r["knowable_at"]))
+                surprises.setdefault(iid, []).append((r["knowable_at"], r["value"] - base))
             elif base > 0:
                 rows.append((iid, "res_revenue_yoy", r["value"] / base - 1, r["knowable_at"]))
+    # Standardised unexpected earnings: the seasonal-random-walk surprise divided by the dispersion
+    # of the stock's OWN earlier surprises. The raw change is not comparable across stocks — the
+    # same rupee jump is routine for a volatile earner and a shock for a steady one. Only surprises
+    # already known at the time enter the dispersion, so the value never changes afterwards.
+    for iid, seq in surprises.items():
+        seq.sort(key=lambda x: x[0])
+        for i, (known_at, d) in enumerate(seq):
+            if i < SUE_MIN_PRIOR:
+                continue
+            sd = float(np.std([x[1] for x in seq[:i]], ddof=1))
+            if sd > 0:
+                rows.append((iid, "eps_sue", d / sd, known_at))
     if not rows:
         return {}
     ch = pd.DataFrame(rows, columns=["instrument_id", "field", "value", "knowable_at"])
@@ -560,6 +575,9 @@ def results_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFra
     rev = _asof_panel(ch, p, "res_revenue_yoy", RESULTS_MAX_STALE)
     if rev is not None:
         out["res_revenue_yoy"] = rev.clip(-1, 5)
+    sue = _asof_panel(ch, p, "eps_sue", RESULTS_MAX_STALE)
+    if sue is not None:
+        out["res_eps_sue"] = sue.clip(-10, 10)
     return out
 
 

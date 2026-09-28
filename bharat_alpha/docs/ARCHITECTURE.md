@@ -229,6 +229,17 @@ stores reported quarterly EPS, total income and net profit in `alpha.fundamental
 
   A neighbouring quarter is never used as the base.
 
+
+**Standardised unexpected earnings (`res_eps_sue`).** The year-on-year EPS change is the
+surprise, but its SIZE means nothing on its own: the same rupee jump is routine for a volatile
+earner and a shock for a steady one, so a cross-sectional ranking on the raw change mostly ranks
+earnings volatility. SUE divides the surprise by the standard deviation of the stock's OWN
+earlier surprises (at least `SUE_MIN_PRIOR` = 4 of them, so a young history yields no value).
+
+Only surprises already knowable enter the dispersion, so a quarter's SUE is fixed the moment it
+is published and a later blow-out cannot rewrite it. This needs no new data source: the reported
+EPS comes from `nse_results` (the exchange), which is why the backlog's `mc_earnings` family —
+listed for "reported EPS, the input a standardised surprise needs" — is superseded.
 ## Contract lot sizes, and open interest in shares
 
 `OpnIntrst` in the F&O bhavcopy counts **contracts**, not shares. NSE revises a stock's lot to
