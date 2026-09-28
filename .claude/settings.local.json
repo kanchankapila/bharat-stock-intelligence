@@ -36,7 +36,9 @@
       "Bash(awk -F'|' '{print $2, $3, $5}')",
       "Bash(node .claude/skills/repo-doctor/doctor.mjs)",
       "Bash(node -e ' *)",
-      "Bash(npx skills *)"
+      "Bash(npx skills *)",
+      "mcp__Claude_Code_Remote__read_documentation",
+      "Bash(git commit *)"
     ]
   },
   "skillOverrides": {
