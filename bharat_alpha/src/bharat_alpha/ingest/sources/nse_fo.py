@@ -4,8 +4,10 @@ Futures land in alpha.fo_daily; options are summarised per (stock, date, expiry)
 alpha.option_daily (ATM IV, skew, put/call OI and volume — see bharat_alpha.options), from the
 same download.
 
-Gives open interest, OI change, futures close/settle and the underlying price, from which
-basis and rollover are derived. Legacy's strongest F&O lead was 1-day basis (IC +0.139 on a
+Gives open interest, OI change, futures close/settle, the underlying price and the contract
+lot (`NewBrdLotQty`), from which basis, rollover and rupee/share exposure are derived. OI is a
+count of CONTRACTS: without the lot it is not comparable across stocks, and an NSE lot revision
+moves it with no change in real exposure. Legacy's strongest F&O lead was 1-day basis (IC +0.139 on a
 17-date LOW-DATA panel) — a lead, not a result; this connector makes it measurable back to
 the UDiFF start (~mid-2024) instead of from forward collection only.
 Column names match the legacy fno_rollover_fetcher.py, which parsed these files live.
@@ -59,6 +61,7 @@ def parse_fo_csv(text: str) -> list[dict]:
             "close": _f(r.get("ClsPric")), "settle": _f(r.get("SttlmPric")),
             "underlying": _f(r.get("UndrlygPric")), "open_interest": _f(r.get("OpnIntrst")),
             "chg_oi": _f(r.get("ChngInOpnIntrst")), "volume": _f(r.get("TtlTradgVol")),
+            "lot_size": _f(r.get("NewBrdLotQty")),
         })
     return rows
 

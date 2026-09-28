@@ -218,7 +218,7 @@ def ban_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
 def fo_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
     idx = p.close.index
     fo = read_df(conn, """
-        SELECT instrument_id, trade_date, expiry, close, underlying, open_interest FROM alpha.fo_daily
+        SELECT instrument_id, trade_date, expiry, close, underlying, open_interest, lot_size FROM alpha.fo_daily
         WHERE trade_date BETWEEN %s AND %s""", (idx.min().date(), idx.max().date()))
     if fo.empty:
         return {}
@@ -227,13 +227,22 @@ def fo_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
     fo = fo.sort_values(["instrument_id", "trade_date", "expiry"])
     near = fo.groupby(["instrument_id", "trade_date"]).first().reset_index()
     tot_oi = fo.groupby(["instrument_id", "trade_date"])["open_interest"].sum()
+    # OpnIntrst counts CONTRACTS, so a change over time is only real in SHARES: NSE revises the
+    # lot to keep contract value in its band, and a revision moves the count on its own. Where the
+    # lot is unknown the exposure is unknown (NaN), never contracts silently compared to shares.
+    fo["oi_shares"] = fo["open_interest"] * fo["lot_size"]
+    tot_shares = fo.groupby(["instrument_id", "trade_date"])["oi_shares"].sum(min_count=1)
     days = (near["expiry"] - near["trade_date"]).dt.days.clip(lower=1)
     near["basis_ann"] = (near["close"] / near["underlying"] - 1) * 365 / days
     basis = near.pivot(index="trade_date", columns="instrument_id", values="basis_ann").reindex(idx)
     oi = tot_oi.unstack("instrument_id").reindex(idx)
+    shares = tot_shares.unstack("instrument_id").reindex(idx).reindex(columns=oi.columns)
+    adt_shares = _rolling_mean(p.volume, 20).reindex(columns=shares.columns)
     return {
         "fo_basis_ann": basis,
-        "fo_oi_chg_5": oi / oi.shift(5) - 1,
+        "fo_oi_chg_5": shares / shares.shift(5) - 1,
+        # open interest as days of average traded volume: comparable across stocks, unlike a contract count
+        "fo_oi_days_adt": np.log1p(shares / adt_shares.where(adt_shares > 0)),
         "fo_listed": oi.notna().astype(float).where(p.traded),
     }
 

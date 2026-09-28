@@ -229,6 +229,25 @@ stores reported quarterly EPS, total income and net profit in `alpha.fundamental
 
   A neighbouring quarter is never used as the base.
 
+## Contract lot sizes, and open interest in shares
+
+`OpnIntrst` in the F&O bhavcopy counts **contracts**, not shares. NSE revises a stock's lot to
+keep the contract value inside its band, and a revision changes the contract count with no
+change in exposure — halving the lot doubles it. Comparing contract counts over time therefore
+invents an OI change on every revision date, and comparing them across stocks compares
+different units.
+
+The lot is published in the same file, as `NewBrdLotQty`, so it is dated and has history. It is
+stored on `alpha.fo_daily` (migration 0009) and open interest is converted to shares before use:
+
+- `fo_oi_chg_5` is the 5-session change in OI **shares**, so a lot revision reads as 0.
+- `fo_oi_days_adt` is log1p(OI shares / 20-day average traded shares) — open interest as days of
+  average volume, which is comparable across stocks as a contract count is not.
+- Where the exchange published no lot, exposure is **unknown** (NaN), never silently the contract
+  count. `fo_listed` still reads 1: the stock has futures, only its size is unknown.
+
+Rows ingested before migration 0009 carry no lot until their day is re-ingested.
+
 ## Global overnight cues (`fred_macro`)
 
 FRED's keyless `fredgraph.csv` supplies seven daily series, stored in `alpha.macro_series`: the
