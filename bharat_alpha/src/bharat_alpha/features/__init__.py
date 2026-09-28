@@ -395,6 +395,47 @@ def ownership_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataF
             if (w := _asof_panel(both, p, f, OWNERSHIP_MAX_STALE)) is not None}
 
 
+YOY_GAP_DAYS = (350, 380)         # the same quarter one year earlier, not a neighbouring one
+RESULTS_MAX_STALE = 130
+
+
+def results_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
+    """Year-on-year change in reported quarterly EPS scaled by price (a standardised-surprise
+    proxy: the seasonal random-walk expectation) and revenue growth, as of each quarter's
+    knowable_at (see ingest.sources.nse_results)."""
+    from bharat_alpha.ingest.sources.nse_results import SOURCE
+
+    df = read_df(conn, "SELECT instrument_id, field, period_end, value, knowable_at FROM alpha.fundamental "
+                       "WHERE source = %s AND field IN ('res_eps', 'res_revenue_lakh')", (SOURCE,))
+    if df.empty:
+        return {}
+    df["period_end"] = pd.to_datetime(df["period_end"])
+    rows = []
+    for (iid, field), g in df.sort_values("period_end").groupby(["instrument_id", "field"]):
+        by_pe = g.set_index("period_end")
+        for pe, r in by_pe.iterrows():
+            prior = by_pe[(pe - by_pe.index).days.to_series(index=by_pe.index).between(*YOY_GAP_DAYS)]
+            if prior.empty:
+                continue
+            base = prior["value"].iloc[-1]
+            if field == "res_eps":
+                rows.append((iid, "eps_yoy", r["value"] - base, r["knowable_at"]))
+            elif base > 0:
+                rows.append((iid, "res_revenue_yoy", r["value"] / base - 1, r["knowable_at"]))
+    if not rows:
+        return {}
+    ch = pd.DataFrame(rows, columns=["instrument_id", "field", "value", "knowable_at"])
+    ch["known"] = _known_date(ch["knowable_at"])
+    out = {}
+    eps = _asof_panel(ch, p, "eps_yoy", RESULTS_MAX_STALE)
+    if eps is not None:
+        out["res_eps_yoy_px"] = eps / p.raw_close.where(p.raw_close > 0)    # EPS is in unadjusted rupees
+    rev = _asof_panel(ch, p, "res_revenue_yoy", RESULTS_MAX_STALE)
+    if rev is not None:
+        out["res_revenue_yoy"] = rev.clip(-1, 5)
+    return out
+
+
 def universe_mask(p: Panel) -> pd.DataFrame:
     s = get_settings()
     adt20 = p.turnover.rolling(20, min_periods=15).mean()
@@ -436,6 +477,7 @@ def build_features(conn: psycopg.Connection, p: Panel, dates: pd.DatetimeIndex |
     raw.update(fundamental_features(conn, p))
     raw.update(estimate_features(conn, p))
     raw.update(ownership_features(conn, p))
+    raw.update(results_features(conn, p))
     from bharat_alpha.legacy.screen import external_panels   # legacy columns that passed the evidence screen
 
     raw.update(external_panels(conn, p, only_admitted=True))

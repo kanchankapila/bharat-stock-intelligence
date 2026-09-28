@@ -125,7 +125,8 @@ families:
     path: "corporates-financial-results|results-comparision|financial-results"
     category: reported quarterly results (revenue, PAT, EPS) with filing broadcast time
     pit: true
-    verdict: backlog-high
+    verdict: integrated
+    connector: nse_results
     rationale: >-
       the reported numbers a standardised earnings surprise (SUE) needs, from the exchange itself;
       each filing's broadcast timestamp makes it point-in-time. Fills the gap mc_earnings was listed
