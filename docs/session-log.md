@@ -9842,10 +9842,72 @@ Collision: a concurrent session (b453b177) landed the same SECTOR_LABEL fix with
 - **TRACKER corrected (AF-20260927-16).** **Three pairs of different findings shared one ID** — `AF-20260917-20` (ranker-timeout vs temporal-test), `AF-20260829-45` (`dl-retrain-weekly` status vs `strategy-optimizer` budget), `AF-20260831-02` (`insider_trades` staleness vs screener-catalog divergence) — each second occurrence renamed (`-25`, `-46`, `-05`) with an in-row note, and `.claude/rules/bugs-data-layer.md` followed the temporal-test rename. The other 17 repeated IDs were checked and are benign closure-block restatements. The digest's summaries also mis-mapped 5 IDs (`install-pm2-autostart` is **-26** not -27; the mover race is **AF-20260909-02** not -12; `-01`, `-06`, `-05-25` likewise) and carried numbers live data contradicts: **474 → 8,789 suspect bars** (8,499 from one later rule), **ET cashflow 30 → 11,700**, `regime_edge_status` "never written" → **6 rows**, "intraday grading unbuilt" → **13,859 rows since 2026-07-17**.
 - **RULES FILE corrected (AF-20260927-17).** `measurement.md`: `basis` 1d 17-date "lead, not a result" → **`USABLE`, rank_IC +0.1355, 22 dates, eff 22.0** (run 2026-09-26T12:45); post-reclass `screener_momentum_score` 14 → **19 dates, clears with the next session (09-28)**; new **"The ranker, cost-aware (2026-09-27)"** section with both readings, the power-gate rule and the `computed_at`/`generated_at` distinction; "no cost-aware pass has ever been run on `unified_score`" struck through with a pointer.
 - **DIGEST corrected in place**, not only annotated: §1 heading + all four status tables, §2's "#1 unbuilt feature" (now ✅ BUILT — `intraday_outcome_resolver.py` has graded 15m-bar paper trades since 2026-07-17), §2 dead-table list, §2 monitoring list (`regime_edge_status` writer and the pytest schema reaper are both **BUILT**), §3 opportunity rows, §4 scorecard / Top-5 / IMPORTANT — plus a dated live-verification section appended.
-- **Left open, and why:** (1) **venv sync** — needs your service-stop window; exact steps in AF-20260927-15; runtime impact nil today. (2) **`recommendations-digest` resequencing** — fires 22:40 IST, ten minutes into a 45-minute ranker run, so a slow night serves yesterday's ranking; the one-line cron move exists but a schedule change needs a `bharat-server` restart, which the repo reserves for your go-ahead (AF-20260917-20). (3) **`screener_momentum_score` re-grade** — calendar-blocked until 09-28 (19/20 dates). (4) **`signal_registry` view / a writer for `market_data_watermark` / a `data_ingestion_dlq` writer** — genuine feature builds, not one-pass fixes; the DLQ still has no writer anywhere in the codebase. (5) **A ranker verdict is impossible before ~2027-08** — `unified_recommendations` starts 2026-08-10, so no panel can span a year yet; do not act on the t-statistics in the interim.
+- **Left open, and why:** (1) **venv sync** — needs your service-stop window; exact steps in AF-20260927-15; runtime impact nil today. (2) ~~`recommendations-digest` resequencing~~ — **CORRECTED 2026-09-28: this claim was wrong; there is nothing to do and no restart is needed.** The race was closed on 2026-09-22 by a poll-wait freshness gate in `digests.jobs.ts` — `unifiedRankingIsFresh()` polls `MAX(unified_recommendations.generated_at)` every 60s for up to 75 min, and on give-up files a `success: false` step naming the gate. Live proof from `job_run_history`: 09-23 waited 3s, 09-25 waited 367s, and **09-24 waited 4,401s** — through the ranker's 17:45 timeout-killed run and its make-up leg — then sent. `jobRegistry.ts` graceMinutes 90 covers the worst case and its comment rejects a later fixed cron slot because it "would just re-create the race". Proposed the cron move anyway for one session without reading that file; caught it by reading the code before touching it. (3) **`screener_momentum_score` re-grade** — calendar-blocked until 09-28 (19/20 dates). (4) **`signal_registry` view / a writer for `market_data_watermark` / a `data_ingestion_dlq` writer** — genuine feature builds, not one-pass fixes; the DLQ still has no writer anywhere in the codebase. (5) **A ranker verdict is impossible before ~2027-08** — `unified_recommendations` starts 2026-08-10, so no panel can span a year yet; do not act on the t-statistics in the interim.
 - **Nothing committed.** Working tree at hand-off: `M src/server/factor_backtest.py`, `M .claude/rules/measurement.md`, `M .claude/rules/bugs-data-layer.md`, `M backend-python/requirements.txt`, `M docs/session-log.md`, plus untracked `gaps_and_opportunities.md` and the new test file `src/server/__tests__/test_factor_backtest_external_scores.py`. (`docs/audit-findings.md` shows clean because a concurrent session committed it at 16:44 — **my five rows and three renames are inside commit `1437805d`**, re-verified present, and every one of my rows has exactly 9 pipes, matching the table's 8-cell schema.) Say the word and I will commit the rest by explicit path.
 - **Full-suite result (the promised CI-identical run):** `pytest src/server/__tests__/ src/server/tests/ tests/chatbot/ -q` → **1 failed, 3106 passed, 254 skipped in 37:56**. The one failure is `test_semantic_evidence.py::test_available_at_is_immutable_across_refreshes` — **not this session's code** (it does not import `factor_backtest`) and **not a regression**: the whole file passes standalone (**9 passed, 189s**). Mechanism identified: that test and the guard it asserts were both introduced by commit `1437805d` at **16:44:14**, i.e. **twenty minutes into this session's 16:24→17:02 suite run** — pytest imported the pre-commit implementation at collection and then executed the post-commit expectation. A concurrent-session race on a shared working tree, the exact hazard rule #5 exists for; no action needed beyond not reading that one line as a signal.
 
 
 
+
+
+## 2026-09-28 (early morning, ~07:00–08:45 IST) — Cline — maintenance window: one plan cancelled, four repair targets corrected (AF-20260917-20, AF-20260927-15)
+
+- **The cron re-sequencing was CANCELLED before it was applied — it would have introduced the bug it
+  claimed to fix.** I proposed moving `recommendations-digest` from 22:40 to ≥23:30 IST on the strength
+  of a `gaps_and_opportunities.md` line, then read `src/server/jobs/digests.jobs.ts` before touching it:
+  a freshness gate shipped 2026-09-22, where `unifiedRankingIsFresh()` polls
+  `MAX(unified_recommendations.generated_at)` every 60s for up to 75 min and on expiry files a
+  `success: false` step naming the gate. `jobRegistry.ts` sets `graceMinutes: 90` and its comment
+  rejects a later fixed slot because it "would just re-create the race whenever the ranker runs long or
+  the host wakes late". Live `job_run_history` confirms the gate works: the digest waited 3s on 09-23,
+  367s on 09-25, and **4,401s on 09-24** — through the ranker's 17:45 timeout-killed run and its make-up
+  leg — and still sent. **No cron change, no `bharat-server` restart, nothing deployed.** The whole
+  premise for rushing a maintenance window before market open evaporated with it.
+- **Venv, executed safely without downtime:** deleted the 4 orphaned `~*` dirs (`~ebsockets`,
+  `~ebsockets-16.0.dist-info`, `~url_cffi`, `~yarrow`) after confirming no locked file was inside.
+  Measured effect: `pip list` now emits **zero** "Ignoring invalid distribution" lines (was 4).
+- **Venv, deliberately NOT executed:** the binary repair. At 07:2x the `.pyd` holders were live (two
+  Hermes MCP servers resident since Friday + pytest 15160/22264); by 08:31 the pytests had exited but the
+  08:00 pre-market chain and 08:15 digest had already fired and the market opens 09:15. Rewriting a
+  production venv 40 minutes before the open trades a defect with **nil measured runtime impact** for a
+  possible outage. Deferred to after the 15:30 close; full ordered runbook is in the AF-20260927-15 row.
+- **The defect is worse than recorded, and the cheap fix is refused.** New tool
+  `scripts/verify_wheel_record.py` recomputes every RECORD hash of an official wheel against the live
+  tree: `checked=52 ok=44 line-endings-only=0 mismatch=8 missing=0`, exit 1. The 8 mismatched files
+  differ in **real code** (`max_size: int | None` vs 16.0's tuple form; `cur_size` vs `current_size`;
+  `BytesLike` inline vs imported from `.typing`) and match 15.0.1 only 29/51 — a mixed-state tree. So
+  copying a wheel's `dist-info` in would write a RECORD that **lies about 8 files**; that is fabricated
+  evidence and was not done. Only `--force-reinstall` repairs it.
+- **Four repair targets in the old plan were wrong; all corrected from measurement, not memory:**
+  (1) **websockets 16.0 → 15.0.1.** 16.0 violates `langgraph-sdk 0.4.2` (`<16,>=14`), so reinstalling
+  16.0 keeps `pip check` red *and* `requirements.txt` re-broke the venv on every future install — the
+  manifest itself was the bug. Grading PyPI's release list against all four consumers (google-genai
+  `<17.0,>=13.0.0`; langgraph-sdk `<16,>=14`; langsmith `>=15.0`; yfinance `>=13.0`): 16.x/17.x fail
+  langgraph-sdk, 14.2 fails langsmith, so **15.0.1 is the newest release satisfying all**. Note
+  langgraph-sdk/langsmith are in no manifest — the Hermes/MCP stack shares this venv, which is why their
+  constraints bind invisibly. (2) **protobuf pinned `==6.33.6`** where the file previously argued for no
+  pin at all; only `opentelemetry-proto` (`>=5.0,<7.0`) objects to 7.35.0, and 6.33.6/5.29.6 satisfy all
+  four consumers while 4.25.8 fails. (3) **transformers sync target is the declared 5.10.1**, not the
+  5.14.1 in my draft step (that would have moved the venv *further* from the manifest); sole consumer
+  sentence-transformers 5.5.1 wants `<6.0.0,>=4.41.0`. (4) A precheck I nearly wrote queried
+  `model_versions.runtime_constraints` — **that table does not exist**; the real ones are `model_registry`
+  and `dl_model_performance`, and `model_registry` has no dependency column and **zero `.onnx` rows**
+  (352 ensemble / 312 exit_policy are joblib `.pkl`; 344 / 331 have NULL `model_path`), so a protobuf
+  downgrade cannot corrupt a stored model — and verification must therefore LOAD a model, not just import.
+- **Severity honestly re-checked rather than escalated:** no library in the venv resolves `websockets`
+  through `importlib.metadata` (grepped google_genai / langsmith / langgraph_sdk / yfinance — the only
+  `metadata.version` call is langsmith's for `urllib3`), which is why the destroyed metadata has caused no
+  runtime failure. `pip check` being unable to verify a production venv is still the real cost.
+- **Files:** `backend-python/requirements.txt` (two pins + their evidence), `scripts/verify_wheel_record.py`
+  (new), `docs/audit-findings.md` (in-row addenda on AF-20260917-20 and AF-20260927-15; `git numstat` 2/2,
+  table shape re-verified at 9 pipes per row), `docs/session-log.md`, and the open-items tracker — which a
+  **concurrent session moved mid-edit** from `gaps_and_opportunities.md` to `docs/gaps-and-opportunities-2026-09-26.md`
+  (08:24). Both corrections were verified present at the new path (L43 row and L187 item), but that file is
+  **untracked**, so my edit there is on disk and NOT in my commit — the session that renamed it owns the
+  commit. `outcome_resolver.py`, `test_outcome_resolver.py` and `vite.config.ts` in the working tree also
+  belong to concurrent sessions and were excluded. No `.ts`/`.py` runtime source touched by me, so
+  `tsc`/`vitest` were not the applicable check; the new tool was executed against the live venv.
+- **Left open:** the evening venv window (runbook in AF-20260927-15), `screener_momentum_score` re-grade
+  (calendar-blocked to 09-28), and the `signal_registry` view / `market_data_watermark` writer /
+  `data_ingestion_dlq` writer feature builds. Nothing about the digest race remains open.
 

@@ -36,13 +36,33 @@ yfinance==1.3.0
 # websockets: required by yfinance (and google-genai / langgraph-sdk / langsmith) and it was
 # declared NOWHERE until 2026-09-27 -- which is why the production venv's `pip check` reported
 # "websockets is not installed" against four installed packages with no manifest to diff
-# against (AF-20260925-01). The pin matches what the venv ACTUALLY RUNS (16.0), same rule as
-# curl_cffi below. MEASURED 2026-09-27: the import works (`import websockets` -> 16.0); what is
-# broken is only the METADATA, destroyed by a failed uninstall that pip could not complete
-# because `websockets/speedups.cp311-win_amd64.pyd` is held open by a running service -- so
-# `pip show` says "not found" while the library is present. Repairable only once that process
-# stops, hence the maintenance window in the AF row; runtime impact today is nil.
-websockets==16.0
+# against (AF-20260925-01). MEASURED 2026-09-27: the import works; what a failed uninstall
+# destroyed is the METADATA -- pip could not finish because
+# `websockets/speedups.cp311-win_amd64.pyd` is held open by a running service, so `pip show`
+# says "not found" while the library is present. Nothing in the stack reads it through
+# importlib.metadata either (grepped google_genai / langsmith / langgraph_sdk / yfinance: the
+# only metadata.version call is langsmith's for urllib3), which is why runtime has not failed.
+# TWO CORRECTIONS 2026-09-28, both from recomputing the official wheel's RECORD hashes against
+# the live tree with scripts/verify_wheel_record.py (checked=52 ok=44 line-endings-only=0
+# mismatch=8 missing=0, exit 1). (1) It is NOT metadata-only: client.py, http11.py, protocol.py,
+# server.py, frames.py, exceptions.py, datastructures.py and speedups.c differ in REAL code, not
+# line endings -- live client.py declares `max_size: int | None` where 16.0 has the tuple form,
+# live exceptions.py says `cur_size` where 16.0 says `current_size`, live frames.py defines
+# BytesLike inline where 16.0 imports it from .typing -- and they do not match 15.0.1 either
+# (29/51 there). The tree is a MIXED-STATE install, so copying a wheel's dist-info in would write
+# a RECORD that lies about 8 files; refused, and the verifier exists to refuse it again. Only a
+# real --force-reinstall repairs it, once the .pyd lock is released (4 pm2 services AND the two
+# Hermes-owned MCP servers that import it AND any running pytest). (2) THE PIN ITSELF WAS WRONG:
+# 16.0 violates langgraph-sdk 0.4.2, which wants <16,>=14 -- so force-reinstalling 16.0 leaves
+# `pip check` red AND this line re-breaks the venv on the next install. Grading every release
+# against all four consumers (google-genai <17.0,>=13.0.0; langgraph-sdk <16,>=14; langsmith
+# >=15.0; yfinance >=13.0): 16.x/17.x rejected by langgraph-sdk, 14.2 rejected by langsmith, so
+# 15.0.1 is the newest release satisfying all four, and that is what the repair installs. Note
+# langgraph-sdk and langsmith appear NOWHERE in this manifest -- they belong to the Hermes/MCP
+# stack sharing the venv, which is why their constraints bind invisibly. The 4 orphaned ~* dirs
+# (~ebsockets, ~ebsockets-16.0.dist-info, ~url_cffi, ~yarrow) were deleted 2026-09-28, so pip no
+# longer prints "Ignoring invalid distribution".
+websockets==15.0.1
 tqdm==4.67.3
 catboost==1.2.10
 lightgbm==4.6.0
@@ -56,12 +76,27 @@ torch>=2.9.1
 # "fixed" by editing this pin to match: the venv is the thing that has to move, and a
 # `pip install` into the production venv needs its services stopped first because a locked
 # .pyd from a running process aborts the install. See the AF row for the exact command.
+# CHECKED 2026-09-28 before writing tonight's steps: the ONLY consumer is sentence-transformers
+# 5.5.1 (`transformers <6.0.0,>=4.41.0`), which accepts 5.9.0 / 5.10.1 / 5.14.1 alike. So the
+# sync target stays the declared 5.10.1 -- a draft repair step naming 5.14.1 was wrong (it would
+# have moved the venv further from the manifest, not closer) and is withdrawn here.
 transformers==5.10.1
-# protobuf: NOT pinned on purpose, and it is the OTHER remaining difference. The venv holds
-# 7.35.0 while opentelemetry-proto 1.42.1 (pulled in by the langchain/OTel stack) requires
-# <7, so `pip check` reports one broken requirement. Resolving it either way rewrites
-# protobuf's compiled extension, which running services hold open -- same maintenance window.
-# Nothing here imports protobuf directly, hence no pin to point at.
+# protobuf: PINNED from 2026-09-28, where before it was deliberately unpinned ("nothing imports
+# protobuf directly, hence no pin to point at" -- true, and it is exactly why 7.35.0 crept in with
+# nothing to stop it). The venv holds 7.35.0 while opentelemetry-proto 1.42.1 (langchain/OTel
+# stack) requires <7, so `pip check` reports one broken requirement. Enumerated every marker-free
+# consumer in the venv 2026-09-28: googleapis-common-protos 1.75.0 (>=4.25.8,<8.0.0), onnxruntime
+# 1.27.0 (>=4.25.8), opentelemetry-proto 1.42.1 (>=5.0,<7.0), yfinance 1.3.0 (>=3.19.0). Graded
+# candidates: 6.33.6 and 5.29.6 satisfy all four, 4.25.8 fails opentelemetry-proto -- so 6.33.6 is
+# pinned as the target. Downgrading cannot corrupt a stored model: `model_registry` has NO
+# dependency/constraint column and ZERO .onnx rows (active ids 352 ensemble + 312 exit_policy are
+# joblib .pkl; 344 confluence_ml and 331 BiLSTM carry NULL model_path), so nothing persisted is
+# protobuf-encoded and the residual risk is code-level only -- post-repair verification must load
+# an active model, not merely import protobuf. This pin makes the manifest drift in the other
+# direction until the venv moves; that is the point (manifest = target, same rule as transformers).
+# Rewriting protobuf's compiled extension needs the services stopped -- same window. Acceptance
+# test for that window is a SILENT `pip check`, which needs BOTH this and websockets==15.0.1.
+protobuf==6.33.6
 tradingview-ta==3.3.0
 tradingview-screener==3.2.0
 # curl_cffi: 0.16.2 is what production (backend-python/venv) has been RUNNING, and the full
