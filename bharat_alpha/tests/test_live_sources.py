@@ -63,3 +63,10 @@ def test_nse_results_live(conn, client, session):
     assert status == "success" and n >= 9, read_df(conn, "SELECT detail FROM alpha.ingest_run ORDER BY run_id DESC LIMIT 1")
     eps = read_df(conn, "SELECT value FROM alpha.fundamental WHERE source='nse_results' AND field='res_eps'")
     assert eps.value.abs().between(0.01, 10_000).all()
+
+
+def test_fred_live(conn, client, session):
+    from bharat_alpha.ingest.sources.fred import FredSeries
+
+    status, n = run_connector(conn, FredSeries(series=("SP500", "VIXCLS"), start="2026-01-01"), session, client=client)
+    assert status == "success" and n >= 100, read_df(conn, "SELECT detail FROM alpha.ingest_run ORDER BY run_id DESC LIMIT 1")

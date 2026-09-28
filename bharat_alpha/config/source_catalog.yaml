@@ -466,7 +466,8 @@ families:
     path: "."
     category: global macro (US yields, dollar index, credit spreads, oil)
     pit: true
-    verdict: backlog-medium
+    verdict: integrated
+    connector: fred_macro
     rationale: >-
       free with an API key and vintage-dated (ALFRED) so it can be point-in-time; overnight US moves
       are the largest known driver of the NSE opening gap (the next-session engine's input)
