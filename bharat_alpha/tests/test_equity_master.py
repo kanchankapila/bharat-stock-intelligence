@@ -12,6 +12,13 @@ def master(rows: list[tuple[str, str, str]]) -> str:
     return HEADER + "".join(f"{s},{n},EQ,05-JAN-2010,10,1,{i},10\n" for s, n, i in rows)
 
 
+def _isins(conn) -> dict[int, str | None]:
+    # read through a cursor: pandas renders a NULL in a text column as None or nan depending on version
+    with conn.cursor() as cur:
+        cur.execute("SELECT instrument_id, isin FROM alpha.instrument")
+        return dict(cur.fetchall())
+
+
 def _iid(conn, sym):
     from bharat_alpha.db import read_df
     return int(read_df(conn, "SELECT instrument_id FROM alpha.symbol_history WHERE symbol=%s", (sym,)).iloc[0, 0])
@@ -61,7 +68,7 @@ def test_master_attaches_isins_and_merges_a_rename_the_symbol_change_file_missed
     # day 1: OLDCO still listed under its old symbol -> ISINs attach, nothing merges
     assert run_connector(conn, NseEquityMaster(), D1 - dt.timedelta(days=1),
                          raw=master([("OLDCO", "Old Co", "INE111A01011"), ("LIVE1", "Live One", "INE222A01011")]))[0] == "success"
-    assert read_df(conn, "SELECT isin FROM alpha.instrument WHERE instrument_id=%s", (_iid(conn, "OLDCO"),))["isin"][0] == "INE111A01011"
+    assert _isins(conn)[_iid(conn, "OLDCO")] == "INE111A01011"
     # later: the same ISIN now listed as NEWCO -> the two ids are one company, merged into the older
     st = run_connector(conn, NseEquityMaster(), D2,
                        raw=master([("NEWCO", "New Co", "INE111A01011"), ("LIVE1", "Live One", "INE222A01011"),
@@ -74,7 +81,7 @@ def test_master_attaches_isins_and_merges_a_rename_the_symbol_change_file_missed
     assert hist.symbol.tolist() == ["OLDCO", "NEWCO"] and hist.valid_to[0] == D1 - dt.timedelta(days=1)
     # an ISIN claimed by two instruments that traded at the SAME time is a conflict: nothing is merged or moved
     assert _iid(conn, "LIVE1") != _iid(conn, "LIVE2")
-    assert read_df(conn, "SELECT isin FROM alpha.instrument WHERE instrument_id=%s", (_iid(conn, "LIVE2"),))["isin"][0] is None
+    assert _isins(conn)[_iid(conn, "LIVE2")] is None
 
 
 def test_constituents_never_steals_an_isin_another_instrument_holds(conn):
@@ -90,6 +97,5 @@ def test_constituents_never_steals_an_isin_another_instrument_holds(conn):
     csv = "Company Name,Industry,Symbol,Series,ISIN Code\nB Ltd,Banks,BBB,EQ,INE333A01011\n"
     st = run_connector(conn, NseConstituents(), D0, raw=csv)
     assert st[0] == "success", read_df(conn, "SELECT detail FROM alpha.ingest_run ORDER BY run_id DESC LIMIT 1").detail[0]
-    isins = read_df(conn, "SELECT instrument_id, isin, sector FROM alpha.instrument ORDER BY instrument_id")
-    assert isins.set_index("instrument_id")["isin"].to_dict() == {a: "INE333A01011", b: None}
-    assert isins.set_index("instrument_id").sector[b] == "Banks"
+    assert _isins(conn) == {a: "INE333A01011", b: None}
+    assert read_df(conn, "SELECT sector FROM alpha.instrument WHERE instrument_id=%s", (b,)).sector[0] == "Banks"
