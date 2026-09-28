@@ -38,7 +38,11 @@
       "Bash(node -e ' *)",
       "Bash(npx skills *)",
       "mcp__Claude_Code_Remote__read_documentation",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(timeout 100 git add docs/session-log.md docs/audit-findings.md .claude/rules/measurement.md src/server/tests/test_screener_tenure_winsorize.py)",
+      "Bash(git -c core.editor=true commit -q --no-edit)",
+      "Bash(timeout 100 git add .claude/settings.local.json)",
+      "Bash(git commit -q -m 'chore: session permission allowlist entry *)"
     ]
   },
   "skillOverrides": {
