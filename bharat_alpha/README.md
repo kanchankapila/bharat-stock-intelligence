@@ -41,6 +41,9 @@ bqa prepare                                    # suspect flags + corporate-actio
 
 bqa import-provider-ids "$LEGACY_DSN"          # MoneyControl scIds (ambiguous codes dropped)
 bqa import-estimates "$LEGACY_DSN"             # analyst-estimate history, point in time
+bqa legacy-map generate                        # ontology -> config/legacy_feature_map.yaml (review it)
+bqa legacy-map import "$LEGACY_DSN"            # enabled columns -> alpha.external_fact, point in time
+bqa legacy-map screen 2021-01-01               # admit only fields with measured IC before the test folds
 bqa train --horizon 21                         # walk-forward, cost-aware report, gate
 bqa train --horizon 5
 bqa session measure                            # re-measure the capitulation rule, day-level, net of costs

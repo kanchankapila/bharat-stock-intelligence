@@ -171,6 +171,49 @@ def session_train(end: str = typer.Option(None), years: int = 6, promote: bool =
         _print(out)
 
 
+legacy_app = typer.Typer(help="ontology-driven bridge from the legacy platform's tables")
+app.add_typer(legacy_app, name="legacy-map")
+
+
+@legacy_app.command("generate")
+def legacy_generate(ontology_root: Path = typer.Option(None)):
+    """Regenerate config/legacy_feature_map.yaml from the legacy ontology."""
+    from collections import Counter
+
+    from bharat_alpha.legacy import DEFAULT_ONTOLOGY_ROOT, generate_map, load_ontology, write_map
+
+    entries = generate_map(load_ontology(ontology_root or DEFAULT_ONTOLOGY_ROOT))
+    write_map(entries)
+    _print({"entries": len(entries), "by_status": dict(Counter(f"{e.status}/{'on' if e.enabled else 'off'}" for e in entries)),
+            "enabled_by_table": dict(Counter(e.table for e in entries if e.enabled))})
+
+
+@legacy_app.command("import")
+def legacy_import(legacy_dsn: str, since: str = typer.Option(None), allow_history: bool = False):
+    """Import enabled mapped columns point-in-time (eod_plus tables forward-only unless --allow-history)."""
+    import psycopg
+
+    from bharat_alpha.db import connect
+    from bharat_alpha.legacy import read_map
+    from bharat_alpha.legacy.importer import import_entries
+
+    with connect() as conn, psycopg.connect(legacy_dsn) as legacy:
+        _print(import_entries(conn, legacy, read_map(), _date(since), allow_history))
+
+
+@legacy_app.command("screen")
+def legacy_screen(start: str, cutoff: str = typer.Option(None), horizon: int = 21):
+    """Admit imported columns on evidence from data before the first walk-forward test block."""
+    from bharat_alpha.db import connect
+    from bharat_alpha.legacy.screen import default_cutoff, screen
+
+    with connect() as conn:
+        c = _date(cutoff) or default_cutoff(conn, _date(start))
+        df = screen(conn, _date(start), c, horizon)
+        _print({"cutoff": c, "admitted": df[df.admitted][["source", "field", "mean_ic", "t_nw"]].to_dict("records"),
+                "rejected": int((~df.admitted).sum()) if len(df) else 0})
+
+
 @app.command()
 def portfolio(date: str = typer.Option(None), horizon: int = 21, capital: float = typer.Option(..., help="₹ capital")):
     """Build sized, constrained portfolio targets from a published recommendation list."""
