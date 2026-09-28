@@ -165,6 +165,27 @@ imports it into `alpha.fundamental` (source `legacy_shareholding`).
 - **Features.** Each category's level, plus its change from the immediately preceding quarter
   (a gap of 80–100 days; a skipped quarter gives no change). Values go stale after 130 sessions.
 
+## Earnings reactions (`earnings_features`)
+
+The engine stores no quarterly reported EPS, so a standardised surprise (SUE) can't be
+computed. The price-based measure can: the **earnings-announcement return** (EAR), which
+research links to the drift that follows a results surprise.
+
+- **Reaction window.** Day 0 is the first session on or after the results date from NSE
+  board-meeting intimations. Day +1 follows it. The window covers results released during
+  the session and after it.
+- **EAR.** The stock's return over days 0 and +1, minus the cross-sectional median return.
+- **Volume shock.** Log of the day 0/+1 volume over the volume in sessions −25 to −6.
+- **When usable.** Both values become usable at the close of day +1, never on day 0, and are
+  carried for 63 sessions. `earn_age` counts sessions since the reaction.
+- **Rescheduled meetings.** If two intimations for one stock fall within 30 days of each
+  other, the later-announced one is taken as the meeting that happened.
+
+**Prior evidence.** The legacy harness measured post-earnings drift as underpowered (3 periods,
+t = −1.79), and its `pead_score` showed no edge over 37 dates. These features are therefore
+candidates, not assumptions, and they earn weight only if the gate finds evidence on this
+engine's larger point-in-time panel.
+
 ## Next-session engine (`session/`)
 
 This is a second decision clock. The decision is made at day d's close, and optionally refined
