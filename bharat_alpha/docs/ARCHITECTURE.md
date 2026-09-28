@@ -149,6 +149,22 @@ computed from it per (stock, date, expiry) into `alpha.option_daily`:
 Tests price chains from a known smile, with poisoned ITM closes and a stale untraded strike.
 Each filter (volume, OTM, the expiry roll, the futures forward) is negative-controlled.
 
+## Ownership (`ingest/sources/ownership.py`)
+
+The legacy platform already collects each stock's quarterly shareholding pattern: promoter,
+FII, MF, insurance and other DII holding %, plus promoter pledge %. `bqa import-shareholding`
+imports it into `alpha.fundamental` (source `legacy_shareholding`).
+
+- **Dating.** The legacy table has no filing date. SEBI requires the pattern within 21 days of
+  quarter end, so a quarter is dated to EOD of that deadline, or to its fetch date if that was
+  earlier.
+- **Known risk.** A company that files late is dated before its data was public. This is
+  stated in the module, not hidden.
+- **Re-imports.** The first import of a (stock, field, quarter) wins, so later fetches never
+  restamp history.
+- **Features.** Each category's level, plus its change from the immediately preceding quarter
+  (a gap of 80–100 days; a skipped quarter gives no change). Values go stale after 130 sessions.
+
 ## Next-session engine (`session/`)
 
 This is a second decision clock. The decision is made at day d's close, and optionally refined

@@ -283,6 +283,29 @@ def estimate_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFr
     return out
 
 
+OWNERSHIP_MAX_STALE = 130        # a quarter's pattern is superseded ~91 days later; 2 quarters stale = unknown
+QUARTER_GAP_DAYS = (80, 100)     # a QoQ change needs the IMMEDIATELY preceding quarter, not a gap
+
+
+def ownership_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
+    """Quarterly shareholding levels and quarter-on-quarter changes, as of each filing's
+    knowable_at (see ingest.sources.ownership for how that is bounded)."""
+    from bharat_alpha.ingest.sources.ownership import SOURCE
+
+    df = read_df(conn, "SELECT instrument_id, field, period_end, value, knowable_at FROM alpha.fundamental "
+                       "WHERE source = %s", (SOURCE,))
+    if df.empty:
+        return {}
+    df = df.sort_values(["instrument_id", "field", "period_end"])
+    prev = df.groupby(["instrument_id", "field"])[["period_end", "value"]].shift(1)
+    gap = (pd.to_datetime(df["period_end"]) - pd.to_datetime(prev["period_end"])).dt.days
+    chg = (df["value"] - prev["value"]).where(gap.between(*QUARTER_GAP_DAYS))
+    df["known"] = _known_date(df["knowable_at"])
+    both = pd.concat([df, df.assign(field=df["field"] + "_qoq", value=chg).dropna(subset=["value"])])
+    return {f: w for f in both["field"].unique()
+            if (w := _asof_panel(both, p, f, OWNERSHIP_MAX_STALE)) is not None}
+
+
 def universe_mask(p: Panel) -> pd.DataFrame:
     s = get_settings()
     adt20 = p.turnover.rolling(20, min_periods=15).mean()
@@ -322,6 +345,7 @@ def build_features(conn: psycopg.Connection, p: Panel, dates: pd.DatetimeIndex |
     raw.update(event_features(conn, p))
     raw.update(fundamental_features(conn, p))
     raw.update(estimate_features(conn, p))
+    raw.update(ownership_features(conn, p))
     from bharat_alpha.legacy.screen import external_panels   # legacy columns that passed the evidence screen
 
     raw.update(external_panels(conn, p, only_admitted=True))
