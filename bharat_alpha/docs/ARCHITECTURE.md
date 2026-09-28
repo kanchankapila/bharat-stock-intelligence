@@ -222,6 +222,23 @@ stores reported quarterly EPS, total income and net profit in `alpha.fundamental
 
   A neighbouring quarter is never used as the base.
 
+## Global overnight cues (`fred_macro`)
+
+FRED's keyless `fredgraph.csv` supplies seven daily series, stored in `alpha.macro_series`: the
+S&P 500, the Nasdaq Composite, VIX, the US 10-year yield, the broad dollar index, Brent, and
+USD/INR.
+
+- **Timing.** An observation dated D is the US close of D (16:00 New York), so it's knowable at
+  01:30–02:30 IST on D+1. An NSE session therefore uses the previous US session, and a Friday
+  US move reaches Monday's session.
+- **How features are built.** Returns and changes are computed on each series' own calendar
+  first, then placed on NSE sessions.
+- **Market-context features:**
+  - `us_spx_ret_1` / `_5` and `us_ndx_ret_1` / `_5`: US equity returns over 1 and 5 sessions;
+  - `us_vix` and `us_vix_chg_5`: US volatility level and its 5-day change;
+  - `us_10y_chg_5`: the 10-year yield's 5-day change;
+  - `usd_broad_ret_5`, `brent_ret_5`, `usdinr_ret_5`: 5-day moves in the dollar, oil and the rupee.
+
 ## Next-session engine (`session/`)
 
 This is a second decision clock. The decision is made at day d's close, and optionally refined

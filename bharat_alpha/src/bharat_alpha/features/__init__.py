@@ -126,7 +126,37 @@ def market_context(conn: psycopg.Connection, p: Panel) -> pd.DataFrame:
                 ctx[f"{cat.lower()}_net_5"] = w[cat].rolling(5, min_periods=3).sum()
                 ctx[f"{cat.lower()}_net_21"] = w[cat].rolling(21, min_periods=15).sum()
     ctx = ctx.join(participant_positioning(conn, idx))
+    ctx = ctx.join(global_cues(conn, idx))
     return ctx
+
+
+def global_cues(conn: psycopg.Connection, idx: pd.DatetimeIndex) -> pd.DataFrame:
+    """Overnight global moves, computed on each series' own calendar, then placed on the NSE
+    session their knowable_at allows (the US close of D -> the NSE session after D)."""
+    ms = read_df(conn, "SELECT series, obs_date, value, knowable_at FROM alpha.macro_series WHERE obs_date BETWEEN %s AND %s",
+                 (idx.min().date() - dt.timedelta(days=30), idx.max().date()))
+    out = pd.DataFrame(index=idx)
+    if ms.empty:
+        return out
+    metrics: dict[str, pd.Series] = {}
+    for s, g in ms.sort_values("obs_date").groupby("series"):
+        v = g.set_index(_known_date(g["knowable_at"]).to_numpy())["value"]
+        v = v[~v.index.duplicated(keep="last")]
+        if s in ("SP500", "NASDAQCOM"):
+            name = "us_spx" if s == "SP500" else "us_ndx"
+            metrics[f"{name}_ret_1"] = np.log(v).diff()
+            metrics[f"{name}_ret_5"] = np.log(v).diff(5)
+        elif s == "VIXCLS":
+            metrics["us_vix"] = v
+            metrics["us_vix_chg_5"] = v / v.shift(5) - 1
+        elif s == "DGS10":
+            metrics["us_10y_chg_5"] = v.diff(5)
+        elif s in ("DTWEXBGS", "DCOILBRENTEU", "DEXINUS"):
+            metrics[{"DTWEXBGS": "usd_broad_ret_5", "DCOILBRENTEU": "brent_ret_5", "DEXINUS": "usdinr_ret_5"}[s]] = \
+                np.log(v).diff(5)
+    for name, m in metrics.items():
+        out[name] = m.reindex(m.index.union(idx)).sort_index().ffill(limit=5).reindex(idx)
+    return out
 
 
 def participant_positioning(conn: psycopg.Connection, idx: pd.DatetimeIndex) -> pd.DataFrame:

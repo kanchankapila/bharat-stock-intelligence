@@ -16,7 +16,7 @@ MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "migrations"
 
 EXPECTED_TABLES = {
     "instrument", "symbol_history", "provider_id", "trading_day", "daily_bar", "adjustment",
-    "fo_daily", "option_daily", "participant_oi", "index_daily", "market_flow", "corporate_event", "deal", "fundamental",
+    "fo_daily", "option_daily", "participant_oi", "macro_series", "index_daily", "market_flow", "corporate_event", "deal", "fundamental",
     "ingest_run", "job_run", "dq_result", "system_status", "model", "prediction", "outcome",
     "realized_eval", "ensemble_weight", "conformal_state", "recommendation",
     "preopen_snapshot", "session_pick", "session_outcome", "portfolio_run", "portfolio_target",

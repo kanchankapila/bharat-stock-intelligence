@@ -88,7 +88,7 @@ come first because they have dated history and the bhavcopy's trust level:
 | medium | `nse_fo_secban` | `…/content/fo/fo_secban_DDMMYYYY.csv` | Dated F&O ban list. Supersedes the vendor ban-list routes, with history. |
 | medium | `nse_security_lists` | `…/content/equities/delisted.csv`, `namechange.csv`, `fo_mktlots.csv` | Delisting dates and reasons, for survivorship; lot sizes, for rupee exposure. |
 | medium | `nse_pr_bundle` | `…/archives/equities/bhavcopy/pr/PRddmmyy.zip` (Bc, Hl, Pd files) | The exchange's own corporate-action file: an independent check on factors derived from `PREV_CLOSE`. |
-| medium | `macro_fred` | FRED / ALFRED API (free key) | US yields, the dollar and oil, vintage-dated so they can be point in time. These are the overnight drivers of the NSE opening gap. |
+| ~~medium~~ integrated | `macro_fred` | FRED / ALFRED API (free key) | US yields, the dollar and oil, vintage-dated so they can be point in time. These are the overnight drivers of the NSE opening gap. |
 | low | `macro_rbi` | RBI DBIE | Policy rate and reserves; slow-moving. |
 
 Also looked at and not adopted:
