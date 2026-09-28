@@ -307,6 +307,19 @@ def catalog(urls: Path = Path("../urls.txt")):
             "unmatched": unmatched})
 
 
+@app.command()
+def ablate(horizon: int = 21, end: str = typer.Option(None), years: int = 6):
+    """Retrain without each feature group; report which data sources add, hurt, or show no evidence."""
+    from bharat_alpha.db import connect, read_df
+    from bharat_alpha.modeling.ablation import ablate as run_ablation
+    from bharat_alpha.modeling.dataset import build_dataset
+
+    with connect() as conn:
+        end_d = _date(end) or read_df(conn, "SELECT max(trade_date) d FROM alpha.trading_day").d[0]
+        ds = build_dataset(conn, end_d - dt.timedelta(days=365 * years), end_d, horizon)
+        _print(run_ablation(ds).to_dict(orient="records"))
+
+
 @app.command("sources-audit")
 def sources_audit(repo: Path = Path("..")):
     """Scan the URL corpus AND every URL in the legacy codebase: data hosts with no catalog verdict,

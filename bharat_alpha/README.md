@@ -48,6 +48,7 @@ bqa legacy-map import "$LEGACY_DSN"            # enabled columns -> alpha.extern
 bqa legacy-map screen 2021-01-01               # admit only fields with measured IC before the test folds
 bqa train --horizon 21                         # walk-forward, cost-aware report, gate
 bqa train --horizon 5
+bqa ablate --horizon 21                        # which feature groups (data sources) add / hurt / show no evidence
 bqa session measure                            # re-measure the capitulation rule, day-level, net of costs
 bqa session train                              # next-session (open->close) model vs the rule, gated
 bqa portfolio --capital 10000000               # sized, constrained targets (or set BQA_PORTFOLIO_CAPITAL_INR)
