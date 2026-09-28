@@ -82,10 +82,28 @@ class TestAgainstTheRealSchema:
         assert live >= 200, "the throwaway schema looks empty — introspect fixture problem"
 
     def test_every_documented_table_exists(self, pg_db_conn):
-        """The ontology claims 49 tables; the schema must contain every one."""
+        """The ontology's documented tables must all exist in the schema snapshot.
+
+        AF-20260928-06: the two endpoint-DISCOVERY tables are EXEMPT —
+        `checkSchemaDrift.ts`'s SKIP_LIVE_TABLES (AF-20260917-18) deliberately keeps
+        `market_endpoint_registry` / `url_candidates_validation_audit` out of
+        db/schema.postgres.sql because they are populated entirely outside this repo
+        (urls-explorer's build_pg_registry.py; zero readers/writers here — "excluded
+        rather than absorbed"), so the pg_db copy this test runs against can never
+        contain them. Until 2026-09-28 this test passed by ACCIDENT:
+        pg_test_support's pooled URL carried `,public`, so `to_regclass` resolved the
+        exemption candidates against the PRODUCTION tables through the isolation leak
+        (AF-20260928-05). Keep this set in sync with SKIP_LIVE_TABLES.
+        """
+        external_by_design = {
+            "market_endpoint_registry",
+            "url_candidates_validation_audit",
+        }
         names = [c.table for c in onto_metrics_onto().cards]
         missing = []
         for name in names:
+            if name in external_by_design:
+                continue
             row = pg_db_conn.execute(
                 "SELECT to_regclass(?) AS t", (name,)
             ).fetchall()[0]["t"]

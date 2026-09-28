@@ -542,3 +542,66 @@ def test_prefetch_failure_is_loud_not_silent(capsys, fn_name, arg, empty):
     err = capsys.readouterr().err
     assert fn_name in err and "RuntimeError" in err and "boom" in err
     assert "second line" not in err
+
+
+def make_db_native_date_outcomes():
+    """Same tables as make_db(), but signal_outcomes.signal_date is NATIVE DATE — the live
+    production type (information_schema + db/schema.postgres.sql, converted by the 2026-09-03
+    date-cols-to-date migration batch). The shared make_db() fixture still models the
+    pre-conversion TEXT column, which is why the suite stayed green while production's
+    _prefetch_resolved_keys warned `date = text` on every run (2026-09-28)."""
+    conn = pg_memory_conn()
+    conn.executescript("""
+        CREATE TABLE technical_signals (
+            symbol TEXT, date TEXT, cmp REAL, signal_score INTEGER,
+            signals_json TEXT, stop_loss TEXT, time_horizon TEXT,
+            PRIMARY KEY (symbol, date)
+        );
+        CREATE TABLE stock_ohlcv (
+            symbol TEXT, date DATE, open REAL, high REAL,
+            low REAL, close REAL, volume INTEGER, is_suspect INTEGER DEFAULT 0,
+            PRIMARY KEY (symbol, date)
+        );
+        CREATE TABLE signal_outcomes (
+            symbol TEXT, signal_date DATE, horizon_days INTEGER,
+            entry_price REAL, check_date DATE, exit_price REAL,
+            return_pct REAL, outcome TEXT, signal_score INTEGER,
+            signals_json TEXT, computed_at TIMESTAMPTZ DEFAULT now(),
+            label_definition TEXT, signal_source TEXT NOT NULL DEFAULT 'unknown',
+            PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
+        );
+    """)
+    return conn
+
+
+def test_prefetch_resolved_keys_matches_native_date_column():
+    """AF-20260928: _prefetch_resolved_keys must CAST its signal_date binds to DATE.
+    With plain text binds the VALUES column inferred TEXT, `so.signal_date = p.signal_date`
+    became `date = text` (ProgrammingError), every chunk was skipped, and the function
+    silently returned an empty set — degrading every run to the per-row guard. This test
+    fails (empty set) against the pre-fix text-bind form and passes only with the cast."""
+    from outcome_resolver import _prefetch_resolved_keys
+    conn = make_db_native_date_outcomes()
+    conn.execute(
+        "INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, entry_price, outcome, signal_source) "
+        "VALUES ('ABX', ?, 1, 100.0, 'WIN', 'technical')",
+        (SIGNAL_DATE,),
+    )
+    # PENDING at the same key shape must NOT count as resolved (pins the outcome <> 'PENDING'
+    # predicate surviving the type change), and a confluence-sourced row must not either
+    # (pins the signal_source = 'technical' predicate).
+    conn.execute(
+        "INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, entry_price, outcome, signal_source) "
+        "VALUES ('ABX', ?, 5, 100.0, 'PENDING', 'technical')",
+        (SIGNAL_DATE,),
+    )
+    conn.execute(
+        "INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, entry_price, outcome, signal_source) "
+        "VALUES ('ABX', ?, 15, 100.0, 'WIN', 'confluence')",
+        (SIGNAL_DATE,),
+    )
+    conn.commit()
+    got = _prefetch_resolved_keys(conn, [("ABX", SIGNAL_DATE, 1), ("ABX", SIGNAL_DATE, 5), ("ABX", SIGNAL_DATE, 15)])
+    assert ("ABX", SIGNAL_DATE, 1) in got, "resolved technical WIN row not prefetched — date = text regression"
+    assert ("ABX", SIGNAL_DATE, 5) not in got, "PENDING row must not count as resolved"
+    assert ("ABX", SIGNAL_DATE, 15) not in got, "confluence-sourced row must not count as resolved"
