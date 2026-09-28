@@ -73,7 +73,7 @@ options is now **superseded** by `alpha.option_daily`.
 | medium | `trendlyne_options` (198) | options analytics beyond the bhavcopy (e.g. build-up classification) | forward-only |
 | ~~medium~~ superseded | `mc_earnings` (92) | reported EPS now comes from the exchange (`nse_results`); `res_eps_sue` is the standardised surprise | — |
 | medium | `mc_global` (12) | global cues (US/Asia close, GIFT Nifty) for the overnight gap | forward-only |
-| medium | `shareholding` (11) | forward ownership collection (history now via the legacy table) | forward-only |
+| ~~medium~~ integrated (`mojo_shareholding`) | `shareholding` (11) | forward ownership collection — without it every `own_*` fact freezes at the legacy table's last quarter | forward-only |
 | medium | `niftytrader_banlist` (5) | F&O ban events | forward-only |
 | ~~medium~~ integrated (`nse_equity_master`) | `nse_archives_equity_master` (1) | ISIN for every mainboard name; merges renames `symbolchange.csv` missed | snapshot |
 

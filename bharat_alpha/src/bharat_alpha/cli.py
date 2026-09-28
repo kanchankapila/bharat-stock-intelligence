@@ -70,14 +70,17 @@ def import_legacy(legacy_dsn: str, start: str, end: str):
 
 @app.command("import-provider-ids")
 def import_provider_ids(legacy_dsn: str):
-    """Import MoneyControl scIds from the legacy nse_stocks master (ambiguous codes dropped)."""
+    """Import MoneyControl scIds and MarketsMojo sids from the legacy nse_stocks master
+    (ambiguous ids dropped and reported, never resolved by whichever row came last)."""
     import psycopg
 
     from bharat_alpha.db import connect
+    from bharat_alpha.ingest.sources.mojo_shareholding import import_legacy_mojo_ids
     from bharat_alpha.reference.provider_ids import import_legacy_mc_ids
 
     with connect() as conn, psycopg.connect(legacy_dsn) as legacy:
-        _print(import_legacy_mc_ids(conn, legacy))
+        _print({"moneycontrol": import_legacy_mc_ids(conn, legacy),
+                "marketsmojo": import_legacy_mojo_ids(conn, legacy)})
 
 
 @app.command("import-estimates")
