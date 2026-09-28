@@ -71,7 +71,7 @@ options is now **superseded** by `alpha.option_daily`.
 | high | `sensibull` (2) | NIFTY/BANKNIFTY IV history (regime) | yes |
 | ~~high~~ integrated | `nse_rss_results` (1) | exact results-filing time, which pins the earnings reaction day | forward-only |
 | medium | `trendlyne_options` (198) | options analytics beyond the bhavcopy (e.g. build-up classification) | forward-only |
-| medium | `mc_earnings` (92) | **reported EPS**, the input a standardised surprise (SUE) needs | forward-only |
+| ~~medium~~ superseded | `mc_earnings` (92) | reported EPS now comes from the exchange (`nse_results`); `res_eps_sue` is the standardised surprise | — |
 | medium | `mc_global` (12) | global cues (US/Asia close, GIFT Nifty) for the overnight gap | forward-only |
 | medium | `shareholding` (11) | forward ownership collection (history now via the legacy table) | forward-only |
 | medium | `niftytrader_banlist` (5) | F&O ban events | forward-only |
@@ -86,7 +86,7 @@ come first because they have dated history and the bhavcopy's trust level:
 | ~~high~~ integrated | `nse_participant_oi` | `nsearchives…/content/nsccl/fao_participant_oi_DDMMYYYY.csv` (and `_vol_`) | FII / DII / Pro / Client long-short in index and stock futures and options, a dated daily archive with years of history. A market-regime block the engine lacks. |
 | ~~high~~ integrated | `nse_api_results` | `nseindia.com/api/corporates-financial-results`, `/api/results-comparision?symbol=` | Reported revenue, PAT and EPS, plus each filing's broadcast time. This is the standardised earnings surprise (SUE) input, from the exchange rather than `mc_earnings`. |
 | ~~medium~~ integrated | `nse_fo_secban` | `…/content/fo/fo_secban_DDMMYYYY.csv` | Dated F&O ban list. Supersedes the vendor ban-list routes, with history. |
-| medium | `nse_security_lists` | `…/content/equities/delisted.csv`, `namechange.csv`, `fo_mktlots.csv` | Delisting dates and reasons, for survivorship; lot sizes, for rupee exposure. |
+| medium (narrowed) | `nse_security_lists` | `…/content/equities/delisted.csv`, `namechange.csv` | Delisting dates and reasons. `fo_mktlots.csv` is superseded: the lot is in the F&O bhavcopy as `NewBrdLotQty`, dated and with history. Survivorship itself is already handled — a stock that stops trading exits at its last close. |
 | ~~medium~~ integrated (`nse_pr_bc`) | `nse_pr_bundle` | `…/archives/equities/bhavcopy/pr/PRddmmyy.zip` (Bc, Hl, Pd files) | The exchange's own corporate-action file: an independent check on factors derived from `PREV_CLOSE`. |
 | ~~medium~~ integrated | `macro_fred` | FRED / ALFRED API (free key) | US yields, the dollar and oil, vintage-dated so they can be point in time. These are the overnight drivers of the NSE opening gap. |
 | low | `macro_rbi` | RBI DBIE | Policy rate and reserves; slow-moving. |

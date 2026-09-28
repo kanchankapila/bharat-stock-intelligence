@@ -180,11 +180,12 @@ families:
     path: "/earnings/|result-calendar"
     category: earnings results/surprise
     pit: forward-only
-    verdict: backlog-medium
+    verdict: superseded
     rationale: >-
       PEAD underpowered in legacy (3 periods, t=-1.79; pead_score no edge on 37 dates). Results
-      DATES are already covered by nse_board_meetings and the price reaction by earn_ear; REPORTED
-      EPS (for a standardised surprise) is the gap this family would fill, forward-only
+      DATES are covered by nse_board_meetings, the price reaction by earn_ear, and REPORTED EPS —
+      the gap this family was kept for — by nse_results from the exchange, with res_eps_sue the
+      standardised surprise built on it (2026-09-28)
   - id: mc_deals
     host: "api\\.moneycontrol\\.com"
     path: "/deals/"
