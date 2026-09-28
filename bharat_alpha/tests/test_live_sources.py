@@ -37,7 +37,8 @@ def test_bhavcopy_live(conn, client, session):
     assert len(sym) == 1
 
 
-@pytest.mark.parametrize("name", ["nse_fo_bhavcopy", "nse_index_close", "nse_fii_dii", "nse_board_meetings",
+@pytest.mark.parametrize("name", ["nse_fo_bhavcopy", "nse_index_close", "nse_fii_dii", "nse_participant_oi",
+                                  "nse_board_meetings",
                                   "nse_insider_pit", "nse_symbol_change"])
 def test_connector_live(conn, client, session, name):
     assert run_connector(conn, CONNECTORS["nse_bhavcopy"](), session, client=client)[0] == "success"

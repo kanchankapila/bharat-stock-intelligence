@@ -125,7 +125,36 @@ def market_context(conn: psycopg.Connection, p: Panel) -> pd.DataFrame:
             if cat in w:
                 ctx[f"{cat.lower()}_net_5"] = w[cat].rolling(5, min_periods=3).sum()
                 ctx[f"{cat.lower()}_net_21"] = w[cat].rolling(21, min_periods=15).sum()
+    ctx = ctx.join(participant_positioning(conn, idx))
     return ctx
+
+
+def participant_positioning(conn: psycopg.Connection, idx: pd.DatetimeIndex) -> pd.DataFrame:
+    """Who is net long index futures, and how FIIs lean in index options, as of each session.
+    Rows are placed on the session their knowable_at allows (the evening file -> next session)."""
+    po = read_df(conn, "SELECT participant, instrument, long_oi, short_oi, knowable_at FROM alpha.participant_oi "
+                       "WHERE trade_date BETWEEN %s AND %s", (idx.min().date() - dt.timedelta(days=10), idx.max().date()))
+    out = pd.DataFrame(index=idx)
+    if po.empty:
+        return out
+    po["known"] = _known_date(po["knowable_at"])
+
+    def series(who: str, inst: str, side: str) -> pd.Series:
+        s = po[(po.participant == who) & (po.instrument == inst)].set_index("known")[side]
+        return s[~s.index.duplicated(keep="last")].reindex(s.index.union(idx)).sort_index().ffill(limit=3).reindex(idx)
+
+    def net(who: str, inst: str) -> pd.Series:
+        lo, sh = series(who, inst, "long_oi"), series(who, inst, "short_oi")
+        return (lo - sh) / (lo + sh).replace(0, np.nan)
+
+    for who in ("FII", "PRO", "CLIENT"):
+        out[f"{who.lower()}_idxfut_net"] = net(who, "fut_idx")
+    out["fii_idxfut_net_chg_5"] = out["fii_idxfut_net"] - out["fii_idxfut_net"].shift(5)
+    call = series("FII", "opt_idx_call", "long_oi") - series("FII", "opt_idx_call", "short_oi")
+    put = series("FII", "opt_idx_put", "long_oi") - series("FII", "opt_idx_put", "short_oi")
+    gross = sum(series("FII", i, s) for i in ("opt_idx_call", "opt_idx_put") for s in ("long_oi", "short_oi"))
+    out["fii_idxopt_bias"] = (call - put) / gross.replace(0, np.nan)      # >0: long calls / short puts
+    return out
 
 
 def fo_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:

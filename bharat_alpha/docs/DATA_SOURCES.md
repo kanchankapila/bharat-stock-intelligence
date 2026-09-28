@@ -83,7 +83,7 @@ come first because they have dated history and the bhavcopy's trust level:
 
 | Priority | Family | Source | Why |
 |---|---|---|---|
-| high | `nse_participant_oi` | `nsearchives…/content/nsccl/fao_participant_oi_DDMMYYYY.csv` (and `_vol_`) | FII / DII / Pro / Client long-short in index and stock futures and options, a dated daily archive with years of history. A market-regime block the engine lacks. |
+| ~~high~~ integrated | `nse_participant_oi` | `nsearchives…/content/nsccl/fao_participant_oi_DDMMYYYY.csv` (and `_vol_`) | FII / DII / Pro / Client long-short in index and stock futures and options, a dated daily archive with years of history. A market-regime block the engine lacks. |
 | high | `nse_api_results` | `nseindia.com/api/corporates-financial-results`, `/api/results-comparision?symbol=` | Reported revenue, PAT and EPS, plus each filing's broadcast time. This is the standardised earnings surprise (SUE) input, from the exchange rather than `mc_earnings`. |
 | medium | `nse_fo_secban` | `…/content/fo/fo_secban_DDMMYYYY.csv` | Dated F&O ban list. Supersedes the vendor ban-list routes, with history. |
 | medium | `nse_security_lists` | `…/content/equities/delisted.csv`, `namechange.csv`, `fo_mktlots.csv` | Delisting dates and reasons, for survivorship; lot sizes, for rupee exposure. |

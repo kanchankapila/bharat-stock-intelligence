@@ -186,6 +186,21 @@ t = −1.79), and its `pead_score` showed no edge over 37 dates. These features 
 candidates, not assumptions, and they earn weight only if the gate finds evidence on this
 engine's larger point-in-time panel.
 
+## Participant positioning (`nse_participant_oi`)
+
+NSE's dated daily file `content/nsccl/fao_participant_oi_DDMMYYYY.csv` gives long and short
+open interest for each participant type: FII, DII, proprietary traders (Pro) and retail
+clients. It's split by index/stock futures and calls/puts, and stored in `alpha.participant_oi`.
+
+- **Timing.** The file is published in the evening, so rows are stamped knowable at 20:00 IST,
+  after the 19:00 same-day cutoff. A session's positioning is first used at the next session.
+- **Parsing.** The header row is found by name after the title line, and columns are matched on
+  normalised names. A file missing a column is rejected rather than half-parsed.
+- **Market-context features:**
+  - net index-futures positioning, `(long − short) / (long + short)`, for FIIs, Pro and Clients;
+  - the FII figure's 5-day change;
+  - FII index-option bias: net calls minus net puts, over gross.
+
 ## Next-session engine (`session/`)
 
 This is a second decision clock. The decision is made at day d's close, and optionally refined

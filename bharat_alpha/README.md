@@ -37,6 +37,7 @@ bqa import-legacy "$LEGACY_DSN" 2021-01-01 2026-09-25
 bqa ingest nse_bhavcopy --start 2021-01-01
 bqa ingest nse_index_close --start 2021-01-01
 bqa ingest nse_fo_bhavcopy --start 2024-07-01
+bqa ingest nse_participant_oi --start 2021-01-01   # FII/DII/Pro/Client F&O positioning (dated archive)
 bqa prepare                                    # suspect flags + corporate-action factors
 
 bqa import-provider-ids "$LEGACY_DSN"          # MoneyControl scIds (ambiguous codes dropped)

@@ -31,7 +31,8 @@ families:
     path: "fao_participant_(oi|vol)_"
     category: participant-wise F&O open interest / volume (FII, DII, Pro, Client)
     pit: true
-    verdict: backlog-high
+    verdict: integrated
+    connector: nse_participant_oi
     rationale: >-
       dated daily archive (fao_participant_oi_DDMMYYYY.csv) of who is long/short index and stock
       futures and options; FII index-futures positioning is a standard regime input and, unlike the
