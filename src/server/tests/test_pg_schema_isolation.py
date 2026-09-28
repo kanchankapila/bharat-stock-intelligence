@@ -128,3 +128,49 @@ def test_the_scan_above_is_not_vacuous():
         "the DDL-application exemption marker vanished -- either it was removed (good: drop "
         "this assertion) or the scan is now silently exempting nothing it should"
     )
+
+
+# --- pg_memory_conn: the URL the pooled engine is built from (AF-20260928-05) ---------------
+# The 2026-09-17 fixes covered pg_schema and pg_conn, both of which pin the path with an
+# explicit SET on THE connection they hand out. pg_memory_conn instead builds a POOLED
+# SQLAlchemy engine whose URL carried `-c search_path=<schema>,public`: the first checked-out
+# connection got the schema-only `SET search_path`, but every connection the pool created
+# afterwards carried the URL option -- schema first, public behind it -- and so resolved
+# production tables. Invisible while `regime_edge_status` was empty; the writer built
+# 2026-09-27 gave it rows and test_ml_calibration's missing-table test read them. The source
+# scan above did not catch it because it greps `SET ... search_path` LINES, and the leak was a
+# URL OPTION -- which is why this file pins both the URL string and the pooled behavior.
+
+
+def test_pg_memory_conn_url_excludes_public():
+    from pg_test_support import _sa_url
+    url = _sa_url("t_probe")
+    assert "public" not in url, (
+        f"_sa_url still puts public on the pooled-engine path: {url!r} -- every pooled "
+        f"connection after the first resolves throwaway-schema misses against PRODUCTION"
+    )
+
+
+def test_pg_memory_conn_second_pooled_connection_cannot_reach_production_only_table():
+    """Behavioral half, on a connection that is NOT the one the schema-only SET ran on."""
+    import pg_test_support as pts
+    from sqlalchemy import text
+    pts.pg_memory_conn()
+    engine = pts._MEM_OPEN[-1][1]
+    raw = engine.connect()
+    try:
+        path = raw.execute(text("SHOW search_path")).scalar()
+        assert "public" not in path, (
+            f"a pooled pg_memory_conn connection carries search_path={path!r} -- an unqualified "
+            f"name for a table the throwaway schema lacks resolves to the PRODUCTION table"
+        )
+        try:
+            rows = raw.execute(
+                text("SELECT regime, auc FROM regime_edge_status LIMIT 1")).fetchall()
+        except Exception:
+            return  # correct: a production-only table does not resolve at all
+        assert not rows, (
+            f"a pooled pg_memory_conn connection reached production regime_edge_status: {rows!r}"
+        )
+    finally:
+        raw.close()

@@ -1,4 +1,4 @@
-"""screener_tenure_mover_analysis.winsorize must actually clip a lone outlier (AF-20260928-01).
+"""screener_tenure_mover_analysis.winsorize must actually clip a lone outlier (AF-20260928-09).
 
 The reversed form -- quantile(pct, 'lower') / quantile(1-pct, 'higher') -- returns the outlier
 itself as the cutoff and clips nothing (ml-model-bugs.md, "Quantile-based winsorization...").

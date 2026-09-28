@@ -84,6 +84,41 @@ cover classes that stayed in `recurring-bugs.md`.
 
 - **`.iloc[-N:]` on a long `(symbol, date)` panel slices the last N ROWS, not the last N DATES — and it is silently wrong every time a table has more than one row per date.** `drift_detector.py`'s `check_feature_drift()` took `df.iloc[-30:]` meaning "last 30 days" (its own docstring says so), but `feature_store` has ~2,400 rows per date, so it sliced the last 30 *symbols of a single date*. Any market-wide column broadcast identically to every symbol on a date (`fii_10d_net`, `dxy`, `nifty_vix`, …) then had near-zero variance in that single-date sample against a real multi-date baseline, pinning PSI far above the critical threshold on every run regardless of actual drift — found 2026-08-14 via routine log review: `EMERGENCY_RETRAIN` had fired every single day since at least 2026-08-01, `max_psi` stuck at ~12.4-12.9 (real drift moves; this didn't). Not cosmetic: `scoring_engine.py` reads the same `drift_score` and applied a real 0.85x haircut to every stock's `win_probability` whenever it exceeded `PSI_CRIT` — this was very likely permanently active for weeks. Fixed by slicing on `df["date"].isin(...)` against the sorted distinct dates instead of row position. **Tell:** any `.iloc[-N:]`/`.head(N)`/`.tail(N)` on a dataframe read from a table that isn't one-row-per-date — check `information_schema` or just `df['some_key'].value_counts()` before trusting a row-based window means what its comment says. Same family as measurement.md's "judge a datasource by dates PER SYMBOL, never by raw row count" panel-shape rule, in monitoring-script form rather than a backtest.
 
+- **Fixing an aggregation bug RE-DERIVES the statistic, which silently invalidates every threshold
+  calibrated on the old one — so a correct fix can convert a live gate into a constant function.**
+  Third instance of the threshold-vs-scale family below, and the nastiest, because here the
+  threshold was *right* and its input moved underneath it. 2026-09-27 (AF-20260927-08):
+  `ml_calibration.per_regime_auc()` switched from a pooled `win_probability` AUC to a
+  horizon-STRATIFIED one — a genuine Simpson's-paradox fix (HIGH_VOL's pooled 0.4732 sat below
+  **every one of its own strata**: 1d 0.648 / 5d 0.553 / 15d 0.562, and an average cannot be below
+  all of its parts). But `AUC_TRUST_FLOOR = 0.55` and its recorded reference points ("BEAR ~0.61
+  trust, BULL/SIDEWAYS ~0.50 no edge") were derived on the POOLED statistic, and stratifying
+  shifted the whole distribution up: measured live, every regime landed 0.57–0.62 where the
+  calibration expected 0.47–0.62. `clip((auc-0.50)/0.05, 0, 1)` therefore returned **exactly 1.0
+  for every regime AND for the `__GLOBAL__` fallback** — `regime_edge_weight()` became a constant,
+  `edge_adjusted_probability()` a platform-wide pass-through, for 2 days, while
+  `edge_adjustment_enabled=true` advertised a live mitigation. HIGH_VOL specifically went 0.0
+  (fully shrunk) → 1.0 (fully trusted) in one step.
+  **Tell, and it is one query:** after changing how any consumed statistic is computed, apply the
+  consumer's own formula to every stored value and check the OUTPUT still varies. Identical output
+  for every input is the signature, in both directions (all-pass and all-fail carry equally little
+  information — see the drift_detector entry above).
+  **Two rules fall out.** (1) **Re-derive the threshold in the same change as the statistic**, and
+  re-measure the null as `drift_detector`'s recalibration did — never ship the new statistic against
+  the old constant. (2) **Grep for what consumes a statistic before changing how it is computed**;
+  the blast radius is the consumers, not the function (sibling of bugs-jobs-runtime.md's "widening a
+  SHARED query helper silently invalidates every caller's budget").
+  **Also worth carrying:** the AUC feeding this gate is measured against `signal_outcomes`
+  `path_barrier` WIN/LOSS, which `measurement.md` already records as scoring high for predicting
+  **volatility, not profit** — so HIGH_VOL, definitionally the highest-volatility regime, is
+  exactly where that artifact is strongest and where the corrected number granted the most trust.
+  Measured the same day against realized forward returns (`factor_edge.py --by-regime --entry
+  open`), HIGH_VOL's only well-powered horizon (1d, eff 32 dates) reads **rank_IC +0.026 / AUC
+  0.502 — "no edge"**, against 0.648 on the outcome label. **That 0.648-vs-0.502 gap on one
+  signal, one regime, one horizon IS the artifact, quantified** — a useful way to size how much of
+  any barrier-label AUC is real. Monitored since by `regime-edge-trust-floor`'s
+  all-weights-identical guard.
+
 - **A dispersion/variance threshold is calibrated for ONE scale and is silently meaningless on another.** `ZERO_DISPERSION_MIN_SD = 5.0` in `unified_ranker.py` is written for 0–100 engine scores. Applied to raw model outputs — `win_probability` is 0–1 with sd ≈ 0.07 — *every* engine reads as collapsed. A 2026-08-22 ablation did exactly that, dropped `ml` on 33 of 43 dates and `technical` on 33, and flipped its own equal-weight arm negative, producing a confident wrong result that looked like a finding about the ranker. Same family as this file's "the same constant thresholding two quantities that aren't the same statistic" entry (`drift_detector`'s `PSI_CRIT` against both a per-feature and a mean-across-features statistic), and as measurement.md's flat-cost-per-rebalance reordering. **Tell:** any comparison of a raw model output against a constant whose sibling usages read a normalized/percentile column — check what the constant's *other* call sites are measuring before reusing it. Note the real-scale reading is a genuine finding in its own right and is now monitored (`ur-engine-dispersion-collapse`): on the correct 0–100 scale `dl` collapses on 39% of ranker dates, `ml` 34%, `technical` 18% — intended behaviour for an honestly-flat engine, but nothing was reporting the rate.
 
 - **A "D-1" / lagged feature built by joining a table to itself on a `prev_date` key silently

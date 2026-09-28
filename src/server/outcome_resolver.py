@@ -538,11 +538,16 @@ def _prefetch_resolved_keys(conn, triples) -> set:
     out = set()
     for i in range(0, len(uniq), _BULK_CHUNK):
         chunk = uniq[i:i + _BULK_CHUNK]
-        # AF-20260901: plain binds, NO date cast — signal_outcomes.signal_date is TEXT in
-        # the live schema (information_schema), so text-to-text equality is correct here;
-        # a `?::date` cast would both break SQLAlchemy bind parsing (:pN::date) and
-        # compare date = text, which Postgres rejects.
-        values_sql = ", ".join("(?, ?, ?)" for _ in chunk)
+        # AF-20260928: CAST(? AS date) — signal_outcomes.signal_date is a NATIVE DATE in the
+        # live schema (information_schema + db/schema.postgres.sql "signal_date" DATE NOT NULL;
+        # converted by the 2026-09-03 date-cols-to-date migration batch). The AF-20260901 note
+        # below predates that conversion: with plain binds the VALUES column inferred TEXT, so
+        # `so.signal_date = p.signal_date` became date = text, Postgres rejected it, and EVERY
+        # chunk was skipped (stderr "chunk of 400 keys skipped", 2026-09-28 09:30 IST run) —
+        # the prefetch silently degraded to the per-row guard. Same bind-adjacency +
+        # native-DATE pattern as _prefetch_bar_windows below. Pinned by
+        # test_prefetch_resolved_keys_matches_native_date_column.
+        values_sql = ", ".join("(?, CAST(? AS date), ?)" for _ in chunk)
         params = []
         for s, d, h in chunk:
             params.extend([s, d, h])

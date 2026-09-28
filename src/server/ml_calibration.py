@@ -18,7 +18,7 @@ calibrated column.
 import datetime as _dt
 import math
 
-from db_compat import connect, ConnWrapper, executemany_batched
+from db_compat import connect, ConnWrapper, executemany_batched, safe_alter
 
 
 def count_episodes(days, gap_days: int = 5) -> int:
@@ -211,6 +211,108 @@ def stratified_auc(pairs, min_n: int = 50, min_stratum_n: int = AUC_MIN_STRATUM_
     }
 
 
+def stratified_calibration_slope(pairs, min_n: int = 50,
+                                 min_stratum_n: int = AUC_MIN_STRATUM_N):
+    """Sample-size-weighted mean of the per-stratum Brier-OPTIMAL shrinkage slopes.
+
+    AUC answers "does this probability ORDER outcomes correctly". It cannot answer "is this
+    probability the right SIZE", and the size is what edge_adjusted_probability() actually
+    changes. Those come apart badly here -- measured live 2026-09-27, HIGH_VOL at h=1 has AUC
+    0.648 (good ordering) while its probabilities average 0.790 against a realized 0.403 base
+    rate, i.e. wildly over-confident. An AUC-driven weight reads that regime as trustworthy and
+    leaves the over-confidence untouched (AF-20260927-08).
+
+    So this measures the quantity the gate can actually fix. With d = p - 0.5, the gate applies
+    p' = 0.5 + w*d, and the Brier score mean((0.5 + w*d - y)^2) is minimised in closed form at
+
+        w* = sum(d * (y - 0.5)) / sum(d * d)
+
+    -- the no-intercept OLS slope of outcome on (p - 0.5). Read it as: w* ~ 1 the probability is
+    correctly scaled; w* < 1 over-confident, shrink; w* ~ 0 no usable information; w* < 0 the
+    scale is INVERTED. Because it IS the optimum, no threshold constant is involved, which
+    removes the failure mode that produced this finding (a floor calibrated against one statistic
+    silently consumed by another -- see ml-model-bugs.md).
+
+    Stratified per horizon and combined n-weighted, for exactly the reason stratified_auc() is:
+    the WIN base rate is a property of the horizon (38%/64%/79% at 1/5/15d), so a no-intercept
+    slope fitted across pooled horizons absorbs that level difference into the slope.
+
+    Returns None when nothing survives, else {'n', 'slope', 'strata', 'dropped_strata'}.
+    """
+    buckets: dict = {}
+    for key, p, y in pairs:
+        p = float(p)
+        if not math.isfinite(p):
+            continue
+        d = buckets.setdefault(key, {'d': [], 'y': []})
+        d['d'].append(p - 0.5)
+        d['y'].append(int(y))
+
+    pooled = len(buckets) == 1
+    kept: dict = {}
+    dropped: dict = {}
+    for k, d in buckets.items():
+        n = len(d['d'])
+        den = sum(x * x for x in d['d'])
+        if len(set(d['y'])) < 2 or (not pooled and n < min_stratum_n) or den <= 0:
+            dropped[k] = n
+            continue
+        num = sum(x * (y - 0.5) for x, y in zip(d['d'], d['y']))
+        kept[k] = (n, num / den)
+
+    if not kept:
+        return None
+    total = sum(n for n, _ in kept.values())
+    if total < min_n:
+        return None
+    return {
+        'n': total,
+        'slope': sum(n * s for n, s in kept.values()) / total,
+        'strata': {k: {'n': n, 'slope': s} for k, (n, s) in kept.items()},
+        'dropped_strata': dropped,
+    }
+
+
+def per_regime_calibration_slope(conn: ConnWrapper, min_n: int = 50) -> dict:
+    """Horizon-stratified Brier-optimal shrinkage slope per regime (see
+    stratified_calibration_slope). Same join as per_regime_auc, so the two are comparable."""
+    rows = conn.execute("""
+        SELECT ts.nifty_regime AS regime, so.horizon_days AS horizon, ts.win_probability AS p,
+               CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
+        FROM signal_outcomes so JOIN technical_signals ts
+          ON ts.symbol = so.symbol AND so.signal_date = ts.date
+        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+          AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
+    """).fetchall()
+    g: dict = {}
+    for r in rows:
+        g.setdefault(r['regime'], []).append((r['horizon'], r['p'], r['y']))
+    out: dict = {}
+    for reg, pairs in g.items():
+        res = stratified_calibration_slope(pairs, min_n=min_n)
+        if res:
+            out[reg] = res
+            per_h = ' '.join(f"{k}d={v['slope']:+.3f}(n={v['n']})"
+                             for k, v in sorted(res['strata'].items()))
+            print(f"[Calibration] per-regime shrinkage slope {reg}: {res['slope']:+.3f} "
+                  f"(n={res['n']}) [{per_h}]")
+    return out
+
+
+def _pooled_calibration_slope(conn: ConnWrapper, min_n: int = 50):
+    """The __GLOBAL__ fallback slope, horizon-stratified across all regimes."""
+    rows = conn.execute("""
+        SELECT so.horizon_days AS horizon, ts.win_probability AS p,
+               CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
+        FROM signal_outcomes so JOIN technical_signals ts
+          ON ts.symbol = so.symbol AND so.signal_date = ts.date
+        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+          AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
+    """).fetchall()
+    return stratified_calibration_slope(
+        [(r['horizon'], r['p'], r['y']) for r in rows], min_n=min_n)
+
+
 def per_regime_auc(conn: ConnWrapper, min_n: int = 50) -> dict:
     """Horizon-stratified win_probability vs WIN/LOSS AUC per regime. See stratified_auc() for
     why the horizons are scored separately rather than pooled."""
@@ -278,13 +380,25 @@ CREATE TABLE IF NOT EXISTS regime_edge_status (
     ready          INTEGER NOT NULL DEFAULT 0,
     first_day      TEXT,
     last_day       TEXT,
-    computed_at    TEXT NOT NULL
+    computed_at    TEXT NOT NULL,
+    calib_slope    REAL,
+    calib_slope_n  INTEGER
 )
 """
 
 
 def ensure_edge_status_table(conn: ConnWrapper) -> None:
     conn.execute(_EDGE_STATUS_DDL)
+    # CREATE TABLE IF NOT EXISTS no-ops on an existing table, so columns added after the table
+    # first shipped need an explicit ALTER or they silently never appear (bugs-data-layer.md's
+    # stale-inline-DDL class). safe_alter is passed `conn` on purpose: these run in the same
+    # still-open transaction as the CREATE above, and a private connection cannot see an
+    # uncommitted table (AF-20260917-19).
+    for ddl in (
+        "ALTER TABLE regime_edge_status ADD COLUMN IF NOT EXISTS calib_slope REAL",
+        "ALTER TABLE regime_edge_status ADD COLUMN IF NOT EXISTS calib_slope_n INTEGER",
+    ):
+        safe_alter(conn, ddl)
     conn.commit()
 
 
@@ -312,18 +426,21 @@ def _pooled_auc(conn: ConnWrapper, min_n: int = 50):
 def _upsert_edge_status_row(conn: ConnWrapper, row: dict) -> None:
     conn.execute("""
         INSERT INTO regime_edge_status
-            (regime, auc, auc_n, distinct_days, episodes, ready, first_day, last_day, computed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (regime, auc, auc_n, distinct_days, episodes, ready, first_day, last_day, computed_at,
+             calib_slope, calib_slope_n)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(regime) DO UPDATE SET
             auc = excluded.auc, auc_n = excluded.auc_n,
             distinct_days = excluded.distinct_days, episodes = excluded.episodes,
             ready = excluded.ready, first_day = excluded.first_day,
-            last_day = excluded.last_day, computed_at = excluded.computed_at
+            last_day = excluded.last_day, computed_at = excluded.computed_at,
+            calib_slope = excluded.calib_slope, calib_slope_n = excluded.calib_slope_n
     """, (
         row['regime'], row.get('auc'), row.get('auc_n'),
         row.get('distinct_days'), row.get('episodes'),
         1 if row.get('ready') else 0,
         row.get('first_day'), row.get('last_day'), row['computed_at'],
+        row.get('calib_slope'), row.get('calib_slope_n'),
     ))
 
 
@@ -337,24 +454,32 @@ def persist_regime_edge_status(conn: ConnWrapper, min_n: int = 50,
     auc = per_regime_auc(conn, min_n=min_n)
     readiness = regime_readiness(conn, min_regime_days, min_regime_episodes)
     pooled = _pooled_auc(conn, min_n=min_n)
+    # The weight regime_edge_weight() actually applies. AUC is still persisted beside it because
+    # regime-edge-trust-floor and the digests report it, but it no longer drives the weight.
+    slope = per_regime_calibration_slope(conn, min_n=min_n)
+    pooled_slope = _pooled_calibration_slope(conn, min_n=min_n)
     now = _dt.datetime.utcnow().isoformat()
 
     out: dict = {}
-    for reg in (set(auc) | set(readiness)):
+    for reg in (set(auc) | set(readiness) | set(slope)):
         key = reg if reg is not None else 'UNKNOWN'
         a = auc.get(reg, {})
         r = readiness.get(reg, {})
+        s = slope.get(reg, {})
         row = dict(regime=key, auc=a.get('auc'), auc_n=a.get('n'),
                    distinct_days=r.get('distinct_days'), episodes=r.get('episodes'),
                    ready=bool(r.get('ready', False)), first_day=r.get('first_day'),
-                   last_day=r.get('last_day'), computed_at=now)
+                   last_day=r.get('last_day'), computed_at=now,
+                   calib_slope=s.get('slope'), calib_slope_n=s.get('n'))
         _upsert_edge_status_row(conn, row)
         out[key] = row
 
     if pooled is not None:
         row = dict(regime='__GLOBAL__', auc=pooled['auc'], auc_n=pooled['n'],
                    distinct_days=None, episodes=None, ready=True,
-                   first_day=None, last_day=None, computed_at=now)
+                   first_day=None, last_day=None, computed_at=now,
+                   calib_slope=(pooled_slope or {}).get('slope'),
+                   calib_slope_n=(pooled_slope or {}).get('n'))
         _upsert_edge_status_row(conn, row)
         out['__GLOBAL__'] = row
 
@@ -367,13 +492,29 @@ def load_regime_edge_status(conn: ConnWrapper) -> dict:
     """Read the last persisted per-regime edge snapshot. Returns {} if the table doesn't exist
     yet or is empty -- callers must treat that as 'no data', which regime_edge_weight() already
     treats as full trust (weight=1.0, no-op) rather than assuming no edge."""
+    _LEGACY = ("SELECT regime, auc, auc_n, distinct_days, episodes, ready, first_day, last_day, "
+               "computed_at FROM regime_edge_status")
+    has_slope = True
     try:
-        rows = conn.execute(
-            "SELECT regime, auc, auc_n, distinct_days, episodes, ready, first_day, last_day, computed_at "
-            "FROM regime_edge_status"
-        ).fetchall()
+        rows = conn.execute(_LEGACY.replace(
+            "computed_at FROM", "computed_at, calib_slope, calib_slope_n FROM")).fetchall()
     except Exception:
-        return {}
+        # Deploy-order safety net (AF-20260927-08): if this code is live before migration
+        # 20260927160000 has been applied, the two new columns do not exist yet. Letting that fall
+        # through to the outer `return {}` would be the WORST outcome -- an empty snapshot is the
+        # "no data" branch, which regime_edge_weight() deliberately treats as FULL trust, so a
+        # missing column would silently disable the gate AND lose the AUC fallback with it. Retry
+        # on the legacy column set instead: the AUC path still applies, and the gate degrades to
+        # its previous behaviour rather than to no behaviour.
+        has_slope = False
+        try:
+            conn.rollback()   # the failed SELECT aborted the transaction on Postgres
+        except Exception:
+            pass
+        try:
+            rows = conn.execute(_LEGACY).fetchall()
+        except Exception:
+            return {}   # table genuinely absent -- the documented "no data" case
     out = {}
     for r in rows:
         out[r['regime']] = {
@@ -381,6 +522,8 @@ def load_regime_edge_status(conn: ConnWrapper) -> dict:
             'distinct_days': r['distinct_days'], 'episodes': r['episodes'],
             'ready': bool(r['ready']), 'first_day': r['first_day'],
             'last_day': r['last_day'], 'computed_at': r['computed_at'],
+            'calib_slope': r['calib_slope'] if has_slope else None,
+            'calib_slope_n': r['calib_slope_n'] if has_slope else None,
         }
     return out
 
@@ -427,10 +570,25 @@ def collapse_regime5(regime):
 
 def regime_edge_weight(regime, edge_status: dict,
                         auc_random: float = AUC_RANDOM, auc_trust_floor: float = AUC_TRUST_FLOOR) -> float:
-    """0..1 confidence weight for how much live discriminative edge win_probability carries in
-    `regime` today, per a persisted regime_edge_status snapshot (see load_regime_edge_status).
+    """0..1 confidence weight for how much win_probability can be trusted in `regime` today, per
+    a persisted regime_edge_status snapshot (see load_regime_edge_status).
 
-    Source of the AUC used (most to least trusted):
+    **Driven by `calib_slope` since 2026-09-27 (AF-20260927-08), not by AUC.** The gate applies
+    p' = 0.5 + w*(p-0.5), so w is a SCALE on the probability -- and AUC cannot measure scale, only
+    ordering. Measured live, the two disagree sharply: HIGH_VOL read AUC 0.648 at h=1 (ordering
+    fine) while its probabilities averaged 0.790 against a realized 0.403 base rate (badly
+    over-confident), so the AUC-driven weight granted FULL trust to the most over-confident
+    stratum in the panel. The measured Brier-optimal slope reads < 1 in every regime
+    (BEAR 0.43 / CRASH 0.32 / HIGH_VOL 0.75 / SIDEWAYS 0.36), and in 10 of 14 regime x horizon
+    strata the old w=1.0 scored WORSE by Brier than switching the regime off entirely.
+
+    Using the optimum directly also removes the bug class that produced this finding: there is no
+    threshold between the measurement and the weight, so re-deriving the statistic can no longer
+    silently invalidate a constant (AUC_TRUST_FLOOR had been calibrated against the POOLED AUC and
+    was never re-derived when per_regime_auc switched to a stratified one, which made this gate a
+    constant 1.0 for every regime -- see ml-model-bugs.md).
+
+    Fallback order for whichever field drives the weight (most to least trusted):
       1. the regime's OWN auc, only if edge_status[regime]['ready'] is True (clears the
          distinct-days/episode floor) -- an un-ready regime's AUC may be one autocorrelated
          episode (the same concurrency problem recalibrate_win_probabilities already guards
@@ -451,19 +609,37 @@ def regime_edge_weight(regime, edge_status: dict,
 
     weight = clip((auc_used - auc_random) / (auc_trust_floor - auc_random), 0, 1)
     """
-    def _ready_auc(key):
+    def _ready_field(key, field):
         row = edge_status.get(key)
-        return row['auc'] if (row and row.get('ready') and row.get('auc') is not None) else None
+        return row[field] if (row and row.get('ready') and row.get(field) is not None) else None
 
-    raw_key = regime if regime is not None else 'UNKNOWN'
-    auc_used = _ready_auc(raw_key)
-    if auc_used is None:
-        reg3 = collapse_regime5(regime)
-        key = reg3 if reg3 is not None else 'UNKNOWN'
-        auc_used = _ready_auc(key)
-    if auc_used is None:
-        g = edge_status.get('__GLOBAL__')
-        auc_used = g['auc'] if (g and g.get('auc') is not None) else None
+    def _resolve(field):
+        """Same 3-tier trust order for whichever field drives the weight."""
+        raw_key = regime if regime is not None else 'UNKNOWN'
+        v = _ready_field(raw_key, field)
+        if v is None:
+            reg3 = collapse_regime5(regime)
+            v = _ready_field(reg3 if reg3 is not None else 'UNKNOWN', field)
+        if v is None:
+            g = edge_status.get('__GLOBAL__')
+            v = g[field] if (g and g.get(field) is not None) else None
+        return v
+
+    # PREFERRED (AF-20260927-08): the measured Brier-optimal shrinkage slope. It IS the weight
+    # that minimises probabilistic error, so no threshold constant sits between the measurement
+    # and the weight -- which is what went wrong with the AUC path below. A negative slope means
+    # the probability's scale is inverted; clamping to 0 collapses it to 0.5 ("no opinion",
+    # bet_size 0) rather than letting an inverted signal through at negative weight.
+    slope = _resolve('calib_slope')
+    if slope is not None:
+        return max(0.0, min(1.0, float(slope)))
+
+    # FALLBACK, kept deliberately: a snapshot written before calib_slope existed (or a regime
+    # whose slope did not clear its sample floor) still gets the old AUC-vs-floor behaviour
+    # rather than silently jumping to full trust. Do NOT treat this path as equivalent -- AUC
+    # measures ORDERING and cannot see over-confidence, which is why HIGH_VOL read AUC 0.648
+    # while averaging p=0.790 against a 0.403 base rate.
+    auc_used = _resolve('auc')
     if auc_used is None:
         return 1.0
     return max(0.0, min(1.0, (auc_used - auc_random) / (auc_trust_floor - auc_random)))

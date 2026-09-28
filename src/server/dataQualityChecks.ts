@@ -1914,6 +1914,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
             MIN(auc) FILTER (WHERE ready = 1) AS min_ready_auc,
             MAX(auc) FILTER (WHERE ready = 1) AS max_ready_auc,
             MAX(auc) FILTER (WHERE regime = '__GLOBAL__') AS global_auc,
+            MIN(calib_slope) FILTER (WHERE ready = 1) AS min_ready_slope,
+            MAX(calib_slope) FILTER (WHERE ready = 1) AS max_ready_slope,
+            MAX(calib_slope) FILTER (WHERE regime = '__GLOBAL__') AS global_slope,
             MAX(computed_at) AS latest_computed_at,
             (SELECT lower(value) = 'true' FROM app_settings WHERE key = 'edge_adjustment_enabled')
               AS adjustment_enabled
@@ -1954,13 +1957,24 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       // recalibration entry is explicit that after moving a threshold you must confirm the detector
       // DISCRIMINATES rather than merely having stopped firing. Both degenerate directions are
       // caught here: all-1.0 (nothing is ever shrunk) and all-0.0 (everything is always neutralised).
-      const edgeWeight = (auc: number) => Math.max(0, Math.min(1, (auc - 0.50) / (0.55 - 0.50)));
-      const gateAucs = [row?.min_ready_auc, row?.max_ready_auc, row?.global_auc]
-        .filter((v) => v != null)
-        .map(Number)
-        .filter((v) => Number.isFinite(v));
+      // Which field drives the weight changed on 2026-09-27: regime_edge_weight() now prefers the
+      // measured calib_slope and only falls back to the AUC-vs-floor formula when the slope is
+      // NULL. This check has to follow it -- monitoring the AUC path after the gate stopped using
+      // it is the "a check's premise went stale underneath it" class, one level up.
+      const nums = (vals: unknown[]) =>
+        vals.filter((v) => v != null).map(Number).filter((v) => Number.isFinite(v));
+      const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+      const slopes = nums([row?.min_ready_slope, row?.max_ready_slope, row?.global_slope]);
+      const usingSlope = slopes.length > 0;
+      const edgeWeight = usingSlope
+        ? clamp01
+        : (auc: number) => clamp01((auc - 0.50) / (0.55 - 0.50));
+      const gateAucs = usingSlope
+        ? slopes
+        : nums([row?.min_ready_auc, row?.max_ready_auc, row?.global_auc]);
+      const weightsAll = gateAucs.map(edgeWeight);
       if (gateAucs.length > 0) {
-        const weights = gateAucs.map(edgeWeight);
+        const weights = weightsAll;
         const spread = Math.max(...weights) - Math.min(...weights);
         if (spread === 0) {
           const w = weights[0];
@@ -1969,17 +1983,24 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
             status: 'warn',
             detail:
               `regime_edge_weight() carries NO information: every ready regime and the __GLOBAL__ ` +
-              `fallback clip to the same weight ${w.toFixed(2)} (AUC range ${range} against ` +
-              `AUC_RANDOM 0.50 / AUC_TRUST_FLOOR 0.55). ` +
+              `fallback clip to the same weight ${w.toFixed(2)} ` +
+              (usingSlope
+                ? `(calib_slope range ${range} — the measured Brier-optimal shrinkage)`
+                : `(AUC range ${range} against AUC_RANDOM 0.50 / AUC_TRUST_FLOOR 0.55)`) + `. ` +
               (w >= 1
                 ? `win_probability is passed through UNSHRUNK in every regime, so edge_adjustment_enabled ` +
                   `is enabled but has no effect — the trust gate is a no-op.`
                 : `win_probability is shrunk to neutral 0.5 in every regime, so the gate cannot ever ` +
                   `credit a regime that does have edge.`) +
-              ` The floor needs re-deriving against whatever statistic per_regime_auc() now stores ` +
-              `(it moved to horizon-stratified AUC), or the gate needs repointing at realized ` +
-              `forward-return readings (factor_edge_history) per model_promotion.live_edge_verdict()'s ` +
-              `precedent. AF-20260927-08.`,
+              (usingSlope
+                ? ` Every regime measuring the SAME optimal slope is implausible on real data — ` +
+                  `suspect the panel behind per_regime_calibration_slope() (one regime dominating ` +
+                  `it, or a stratum floor dropping everything) before adjusting any constant.`
+                : ` This snapshot predates calib_slope, so the weight still comes from the ` +
+                  `AUC-vs-floor formula, whose floor was calibrated against the older POOLED AUC. ` +
+                  `Run ml_calibration.py to populate calib_slope, which removes the floor from the ` +
+                  `weight path entirely.`) +
+              ` AF-20260927-08.`,
           };
         }
       }
@@ -1999,25 +2020,41 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       // A breach WITH the decay applied is correct, live behaviour -> pass. A breach WITHOUT it
       // is the genuine defect: an unmitigated no-edge regime scoring at full confidence -> fail.
       // HIGH_VOL is still named in the detail, so nothing is hidden -- it just no longer cries wolf.
+      // Report the field that actually drives the weight. Stating "clears the 0.55 trust floor"
+      // once calib_slope is live is true-but-irrelevant — the floor is no longer in the weight
+      // path — and a digest line the reader cannot act on is how a real one gets skipped.
+      const appliedRange = weightsAll.length
+        ? `${Math.min(...weightsAll).toFixed(3)}..${Math.max(...weightsAll).toFixed(3)}`
+        : 'n/a';
       if (breachedCount > 0) {
         const worst = row?.worst_breached_auc != null ? ` (worst AUC ${Number(row.worst_breached_auc).toFixed(3)})` : '';
         if (!row?.adjustment_enabled) {
           return {
             status: 'fail',
-            detail: `${breachedCount} of ${readyCount} regime(s) sit below the 0.55 live-edge trust floor${worst} ` +
+            detail: `${breachedCount} of ${readyCount} regime(s) sit below the 0.55 AUC trust floor${worst} ` +
                     `AND app_settings.edge_adjustment_enabled is not 'true' — their win_probability is being used ` +
-                    `at FULL confidence with no decay toward neutral. This is the unmitigated failure, not the ` +
-                    `expected one: a no-edge regime is actively scoring.`,
+                    `at FULL confidence with no decay toward neutral, whatever the measured weight says. This is ` +
+                    `the unmitigated failure, not the expected one: a no-edge regime is actively scoring.`,
           };
         }
         return {
           status: 'pass',
-          detail: `${breachedCount} of ${readyCount} regime(s) sit below the 0.55 live-edge trust floor${worst}, ` +
-                  `and edge_adjustment_enabled=true is shrinking each toward neutral 0.5 ` +
-                  `(regime_edge_weight = clip((auc-0.5)/0.05, 0, 1)). Mitigation verified live; no action.`,
+          detail: `${breachedCount} of ${readyCount} regime(s) sit below the 0.55 AUC trust floor${worst}, ` +
+                  `and edge_adjustment_enabled=true is shrinking each toward neutral 0.5 — ` +
+                  (usingSlope
+                    ? `weights come from the measured calib_slope, applying ${appliedRange}.`
+                    : `regime_edge_weight = clip((auc-0.5)/0.05, 0, 1).`) +
+                  ` Mitigation verified live; no action.`,
         };
       }
-      return { status: 'pass', detail: `All ${readyCount} regime(s) with sufficient history clear the 0.55 live-edge trust floor.` };
+      return {
+        status: 'pass',
+        detail: usingSlope
+          ? `All ${readyCount} ready regime(s) are being shrunk by their MEASURED calib_slope, ` +
+            `applying weights ${appliedRange} (w<1 = win_probability is over-confident there). ` +
+            `The 0.55 AUC floor is reported for continuity but is no longer in the weight path.`
+          : `All ${readyCount} regime(s) with sufficient history clear the 0.55 live-edge trust floor.`,
+      };
     },
   },
 

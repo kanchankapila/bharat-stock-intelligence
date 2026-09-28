@@ -249,3 +249,122 @@ def test_isin_checksum_rejects_sentinel_or_malformed_value():
     assert _valid_isin("ZZZ555Z55555") is None
     assert _valid_isin("INE000A01017") is None
 
+
+# ── available_at is first-write-wins (AF-20260927-10) ────────────────────────────────────────
+# available_at records when a fact became KNOWABLE to this platform. Every writer here used to
+# list it in ON CONFLICT DO UPDATE SET, so an ordinary refresh moved it -- which silently
+# destroys the only column that makes a bitemporal `as_of` read meaningful, and does so in a way
+# no freshness or NULL check can see (the column stays 100% populated). It is not repairable
+# after the fact: you cannot reconstruct when you first knew something once it is overwritten.
+#
+# Both halves of each assertion matter. Checking only that available_at held still would pass
+# vacuously if the second write were a no-op, so every case also asserts that a MUTABLE column
+# really did change -- proving the upsert executed and that available_at survived it specifically.
+def test_available_at_is_immutable_across_refreshes(pg_db_conn):
+    conn = pg_db_conn
+    conn.execute("DELETE FROM market_claim_evidence")
+    conn.execute("DELETE FROM market_claim")
+    conn.execute("DELETE FROM market_evidence")
+    conn.execute("DELETE FROM market_graph_edge")
+    conn.execute("DELETE FROM market_graph_node")
+
+    first, second = "2026-09-25T09:00:00Z", "2026-09-26T15:30:00Z"
+
+    def write(available_at: str, marker: str) -> None:
+        """One full round of every writer that carries available_at, at the same keys."""
+        record_market_evidence(
+            conn,
+            evidence_key="news:reliance:immutability",
+            source_type="news",
+            source_ref=f"news_sentiment_items:{marker}",
+            content={"headline": marker},
+            available_at=available_at,
+            extraction_method="fixture",
+            quality_status=marker,
+        )
+        record_market_fact(
+            conn,
+            assertion_key="fact:reliance:immutability",
+            from_node={
+                "node_key": "INE002A01018:RELIANCE",
+                "node_type": "instrument",
+                "label": marker,
+                "canonical_symbol": "RELIANCE",
+            },
+            predicate="has_earnings_observation",
+            object_value={"status": marker},
+            source="news_sentiment_items",
+            source_ref=f"news_sentiment_items:{marker}",
+            available_at=available_at,
+        )
+        record_market_claim(
+            conn,
+            claim_key="claim:reliance:immutability",
+            subject_node={
+                "node_key": "INE002A01018:RELIANCE",
+                "node_type": "instrument",
+                "label": marker,
+                "canonical_symbol": "RELIANCE",
+            },
+            predicate="earnings_direction",
+            object_value={"direction": marker},
+            method=marker,
+            stance="bullish",
+            claim_status=marker,
+            available_at=available_at,
+            source="news_sentiment_items",
+        )
+
+    write(first, "original")
+    write(second, "refreshed")
+    conn.commit()
+
+    cases = (
+        ("market_evidence", "evidence_key", "news:reliance:immutability", "quality_status"),
+        ("market_graph_node", "node_key", "INE002A01018:RELIANCE", "label"),
+        ("market_graph_edge", "assertion_key", "fact:reliance:immutability", "source_ref"),
+        ("market_claim", "claim_key", "claim:reliance:immutability", "method"),
+    )
+    for table, key_col, key_val, mutable_col in cases:
+        row = conn.execute(
+            f"SELECT available_at, {mutable_col} FROM {table} WHERE {key_col} = ?", (key_val,)
+        ).fetchone()
+        assert row is not None, f"{table} row missing -- the fixture never wrote it"
+        # The refresh landed (non-vacuity): without this, a no-op second write would pass.
+        # Substring, not equality -- some of these columns are prefixed (source_ref is
+        # "news_sentiment_items:<marker>"), and what matters is that the marker moved.
+        assert "refreshed" in str(row[mutable_col]), (
+            f"{table}.{mutable_col} is {row[mutable_col]!r}, still the original write -- this case "
+            f"proves nothing about available_at because the upsert did not run"
+        )
+        # ...and available_at did NOT move with it.
+        assert row["available_at"].day == 25, (
+            f"{table}.available_at moved to day {row['available_at'].day} on refresh -- it must be "
+            f"first-write-wins, or every bitemporal as_of read over this table is unsound"
+        )
+
+
+def test_no_writer_puts_available_at_back_into_a_do_update_set(pg_db_conn):
+    """Source-derived guard: the behavioural test above can only cover writers it calls.
+
+    This one covers every writer in both modules, including ones added later -- the identity
+    upserts (market_issuer/instrument/listing/identifier) are only reachable through a full
+    sync_identity() run, so a source scan is the cheaper and more complete guard for them.
+    Derived from the source, never a hand-listed allowlist.
+    """
+    root = Path(__file__).resolve().parents[1]
+    scanned = 0
+    for name in ("semantic_evidence.py", "semantic_identity.py"):
+        text = (root / name).read_text(encoding="utf-8")
+        # Non-vacuity: these modules must actually contain upserts, or the scan proves nothing.
+        blocks = re.findall(r"DO UPDATE SET(.*?)(?:\"\"\"|RETURNING)", text, re.DOTALL)
+        assert blocks, f"{name}: found no DO UPDATE SET blocks -- the scan is vacuous"
+        scanned += len(blocks)
+        for block in blocks:
+            assert "available_at" not in block, (
+                f"{name}: a writer lists available_at in ON CONFLICT DO UPDATE SET. That makes the "
+                f"provenance column a last-seen timestamp and breaks bitemporal reads "
+                f"(AF-20260927-10). Leave it out of the update list -- first write wins."
+            )
+    assert scanned >= 8, f"expected to scan the known upserts, only found {scanned}"
+

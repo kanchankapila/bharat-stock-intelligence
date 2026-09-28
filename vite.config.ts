@@ -103,6 +103,11 @@ export default defineConfig(({mode}) => {
           // unhandledRejection in the server log (2026-09-09 00:00:08, .audit-files.txt).
           // Nothing in the app imports them, so watching them is pure crash-surface.
           '**/.audit-files.txt',
+          // AF-20260928: scratch_wsdl/ holds an extracted vendor SDK rebuilt in place by
+          // maintenance scripts; watching it produced `unhandledRejection: EBUSY: resource
+          // busy or locked, watch '...\scratch_wsdl\extracted\websockets\__init__.py'`
+          // in pm2-err.log (2026-09-27). Same class as .audit-files.txt above.
+          '**/scratch_wsdl/**',
         ],
       },
     },

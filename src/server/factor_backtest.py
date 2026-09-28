@@ -111,6 +111,8 @@ USAGE
     python factor_backtest.py --factor all --rebalance 21 --cost-bps 25
     python factor_backtest.py --factor momentum_12_1 --picks --top-k 25
     python factor_backtest.py --factor momentum_12_1 --cost-bps 40 --no-survivorship-fill
+    python factor_backtest.py --factor external_score --rebalance 5 --start 2026-09-01 \
+        --scores-table unified_recommendations --scores-col unified_score
 """
 from __future__ import annotations
 
@@ -118,6 +120,7 @@ import argparse
 import datetime
 import json
 import math
+import re
 
 import numpy as np
 import pandas as pd
@@ -167,6 +170,16 @@ PROVISIONAL_FACTORS = frozenset({
 VALIDATED_MIN_TOP_K = 50
 THIN_LIQUIDITY_WARN = 50_000_000     # Rs 5cr ADT: below this, 25bps/side is optimistic
 FACTOR_PICKS_PREFIX = 'factor_picks_'
+# The floor below which _print REFUSES to state a VERDICT. Deliberately the same
+# 20-observation bar measurement.md applies to every other reading on this platform, for the
+# same reason: a t-statistic computed on a handful of periods is noise wearing a decimal point.
+# Measured 2026-09-27 (the first cost-aware read of the ranker): 3 periods over 0.06 years
+# returned +1.315%/period net excess, t=4.49, and this file printed "positive and significant
+# net of costs -- worth a live paper test". Nothing about that arithmetic was wrong; the
+# verdict line was. min_years matters separately because 20 overlapping periods inside one
+# quarter still cannot distinguish an edge from a single regime.
+MIN_PERIODS_FOR_VERDICT = 20
+MIN_YEARS_FOR_VERDICT = 1.0
 # The two factors with positive, cost-adjusted, survivorship-free evidence (see RESULTS in the
 # module docstring). value_book_to_price is listed first because it is the STRONGER of the two
 # on every axis measured -- t 2.67 vs 2.08, Sharpe 1.47 vs 1.10, turnover 0.28 vs 0.35 (1.65%
@@ -370,6 +383,19 @@ FACTORS = {
     # (only ~2.5 months of screener_appearances history -- treat 21d-rebalance results here as
     # low-power; 5d is the primary read).
     'screener_breadth': lambda d: d['screener_breadth'],
+
+    # -- The live scoring surface itself (2026-09-27) ----------------------------
+    # `unified_score` -- the ranker's blended output, i.e. the ONE score this platform
+    # actually serves -- merged off `unified_recommendations` by _add_external_scores.
+    # It is registered here because run_backtest() only accepts a factor that lives in this
+    # dict, and the point is to run the live scoring surface through the SAME
+    # cost/turnover/survivorship/next-open machinery as every research factor instead of
+    # through the throwaway scripts that produced the old "IC 0.0001" figure (see this
+    # module's docstring). measurement.md carried "no cost-aware factor_backtest.py pass has
+    # ever been run on unified_score" for 17 days; this is what makes that one command real.
+    # NaN for every row unless --scores-col was passed, so a bare panel fails loudly
+    # (KeyError from the lambda) rather than silently scoring all-NaN and printing a number.
+    'external_score': lambda d: d['external_score'],
 }
 
 
@@ -987,6 +1013,77 @@ def _add_win_probability(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame
     return px
 
 
+def _merge_external_scores(px: pd.DataFrame, sc: pd.DataFrame,
+                           ts_col: str = '_score_ts') -> pd.DataFrame:
+    """Pure merge half of _add_external_scores -- split out so the temporal convention is
+    unit-testable with no DB (test_factor_backtest_external_scores.py).
+
+    `sc` must carry (symbol, <ts_col>, external_score). The timestamp is reduced to its UTC
+    DATE, and a duplicate (symbol, date) keeps the LATEST stamp -- the honest "what did the
+    platform know by the end of that session" answer, and the reason two intraday re-runs of
+    a producer cannot silently swap rankings by landing in an arbitrary order. There is NO
+    forward-fill: a session the producer never stamped stays NaN and is dropped at
+    portfolio-formation time, exactly like every other sparse input in this harness.
+    """
+    sc = sc.copy()
+    sc['symbol'] = sc['symbol'].astype(str)
+    sc['date'] = pd.to_datetime(sc[ts_col], format='mixed', errors='coerce',
+                                utc=True).dt.strftime('%Y-%m-%d')
+    sc = sc.dropna(subset=['date', 'external_score'])
+    sc = sc.sort_values(ts_col).drop_duplicates(['symbol', 'date'], keep='last')
+    return px.merge(sc[['symbol', 'date', 'external_score']], on=['symbol', 'date'], how='left')
+
+
+def _add_external_scores(px: pd.DataFrame, table: str, score_col: str,
+                         ts_col: str = 'generated_at') -> pd.DataFrame:
+    """Merge a score produced by ANOTHER system in this platform onto the panel as
+    `external_score`, so `--factor external_score` can cost-test it.
+
+    THE TEMPORAL TRAP THIS EXISTS TO PREVENT (measured live 2026-09-27)
+    ------------------------------------------------------------------
+    `unified_recommendations` carries two time columns and only one is safe here:
+
+      * `computed_at` is the session the ranking is FOR -- the ENTRY session -- not the date
+        it was computed. Verified live: the batch stamped `computed_at='2026-09-28'` (a
+        Monday, still in the future at verification time) was written at
+        `generated_at='2026-09-25 17:00:01Z'` (Friday's close). Same shape every date:
+        09-25 <- 09-24 17:46Z, 09-21 <- 09-18 17:00Z, 09-11 <- 09-10 17:00Z.
+      * `generated_at` is when the run actually produced the numbers.
+
+    This harness buys the NEXT session's open after the date a factor is scored on. Merging
+    on `computed_at` would therefore buy the open AFTER the session the platform trades -- a
+    silent one-session lag -- and would additionally score a post-close re-run against its
+    own day, the exact shape measurement-history.md flags for this table. Merging on
+    `generated_at`'s UTC date is point-in-time safe under both real cadences:
+      * evening runs (17:00Z = 22:30 IST, after the 15:30 IST close) land on the session
+        whose close they used, so the next open IS the session `computed_at` names -- the
+        trade the platform actually makes; and
+      * the pre-open make-up run (09-18 01:41Z = 07:11 IST, before the 09:15 IST open) lands
+        on the entry session itself, so entry is one session later -- conservative, never
+        look-ahead.
+    """
+    for name, value in (('table', table), ('score column', score_col), ('timestamp column', ts_col)):
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', value or ''):
+            raise ValueError(f'{name} must be a plain SQL identifier, got {value!r}')
+
+    sc = read_df(
+        f"SELECT symbol, {ts_col} AS _score_ts, {score_col} AS external_score "
+        f"FROM {table} WHERE {score_col} IS NOT NULL",
+    )
+    merged = _merge_external_scores(px, sc)
+    stamp = merged.loc[merged['external_score'].notna(), 'date']
+    scored_dates = stamp.nunique()
+    print(f"[FactorBacktest] external_score <- {table}.{score_col} dated by {ts_col}: "
+          f"{len(sc):,} rows -> {int(merged['external_score'].notna().sum()):,} panel rows over "
+          f"{scored_dates} scored sessions ({stamp.min()}..{stamp.max()})")
+    if scored_dates < 63:
+        print(f"[FactorBacktest] WARNING: {scored_dates} scored sessions. run_backtest needs "
+              f">= 3x the rebalance cadence in eligible sessions, so a 21-session cadence is "
+              f"IMPOSSIBLE on this panel and any shorter cadence is LOW-DATA. Report the "
+              f"period count with every number.", file=sys.stderr)
+    return merged
+
+
 def _add_beta_and_idio_vol(px: pd.DataFrame) -> pd.DataFrame:
     """Rolling market beta and idiosyncratic vol vs NIFTY50.
 
@@ -1380,6 +1477,24 @@ def _print(r: dict) -> None:
               f"{r['missing_exit_pct']}%.")
         return
 
+    # POWER GATE -- the reader-facing line above is the part people quote, so it must refuse to
+    # exist when the sample cannot support one. Same reasoning as the benchmark check above:
+    # printing an authoritative-looking verdict beside an uninterpretable statistic is how a
+    # -99.9%-over-5.5-years universe went unchallenged for a day (2026-08-11), and how a
+    # 3-period run earned a paper-trade recommendation (2026-09-27).
+    if r['periods'] < MIN_PERIODS_FOR_VERDICT or r['years'] < MIN_YEARS_FOR_VERDICT:
+        print(f"\n  INSUFFICIENT POWER -- {r['periods']} period(s) over {r['years']} year(s). "
+              f"A verdict needs >={MIN_PERIODS_FOR_VERDICT} periods spanning "
+              f">={MIN_YEARS_FOR_VERDICT:g} year.\n"
+              f"     The t-statistic is NOT interpretable at this sample size and must not be "
+              f"quoted.\n"
+              f"     What IS readable here: average one-way turnover "
+              f"({r['avg_oneway_turnover']}) and the cost drag it implies "
+              f"({r['annual_cost_drag_pct']}%/yr) are mechanical properties of the holdings, "
+              f"not return estimates.\n"
+              f"     Widen the window, shorten --rebalance, or wait for a longer panel.")
+        return
+
     t = r['excess_t_stat']
     if not (isinstance(t, float) and math.isnan(t)) and abs(t) < 2.0:
         print(f"\n  VERDICT: NOT significant (|t|={abs(t):.2f} < 2). Do not trade this.")
@@ -1548,7 +1663,21 @@ def main() -> None:
     p.add_argument('--allow-provisional', action='store_true',
                    help=f'permit persisting a PROVISIONAL_FACTORS screen ({sorted(PROVISIONAL_FACTORS)}) '
                         'whose vendor history is a backfill rather than point-in-time')
+    p.add_argument('--scores-table',
+                   help='table holding a score column produced by another system in this '
+                        'platform (e.g. unified_recommendations); needs --scores-col')
+    p.add_argument('--scores-col',
+                   help='score column to merge onto the panel as `external_score` '
+                        '(e.g. unified_score); use with --factor external_score')
+    p.add_argument('--scores-ts-col', default='generated_at',
+                   help='timestamp column to date that score by (default generated_at -- see '
+                        '_add_external_scores for why computed_at is NOT point-in-time safe here)')
     a = p.parse_args()
+
+    if a.factor == 'external_score' and not a.scores_col:
+        p.error('--factor external_score needs --scores-table and --scores-col')
+    if a.scores_col and not a.scores_table:
+        p.error('--scores-col needs --scores-table')
 
     if a.persist_picks and a.factor in PROVISIONAL_FACTORS and not a.allow_provisional:
         p.error(f"{a.factor} is built on backfilled vendor value history, which may embed "
@@ -1556,6 +1685,9 @@ def main() -> None:
                 "sensitivity, or pass --allow-provisional to persist it anyway.")
 
     panel = load_price_panel(a.start, a.end, a.min_adt, not a.no_survivorship_fill)
+
+    if a.scores_col:
+        panel = _add_external_scores(panel, a.scores_table, a.scores_col, a.scores_ts_col)
 
     if a.picks or a.persist_picks:
         if a.factor == 'all':

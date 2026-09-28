@@ -2924,7 +2924,9 @@ CREATE TABLE IF NOT EXISTS "regime_edge_status" (
   "ready" INTEGER NOT NULL DEFAULT 0,
   "first_day" TEXT,
   "last_day" TEXT,
-  "computed_at" TEXT NOT NULL
+  "computed_at" TEXT NOT NULL,
+  "calib_slope" REAL,
+  "calib_slope_n" INTEGER
 );
 
 -- ── screener_appearances ─────────────────────────────────────────────

@@ -104,7 +104,14 @@ class _StepTimer:
         duration = time.monotonic() - self.t0
         finished_at = _utc_now_iso()
         status = "error" if exc_type else "ok"
-        print(f"[TRAINER] step {status}: {self.name} at {finished_at} (UTC), took {duration:.1f}s")
+        # Error-status step lines go to STDERR, not stdout: pythonRunner's non-zero-exit error
+        # row (job_run_history.error / the log's stderrSnippet) carries only stderr, so a
+        # step-level failure reason printed to stdout is invisible post-mortem. Observed live
+        # 2026-09-27 (AF-20260927-20): train_lstm errored after 170min and the job's recorded
+        # error was nothing but benign torch warnings -- the actual exception text (printed
+        # here and in retrain_models()'s handler, both to stdout) was unrecoverable.
+        print(f"[TRAINER] step {status}: {self.name} at {finished_at} (UTC), took {duration:.1f}s",
+              file=sys.stderr if exc_type else None)
         self.log._record(self.name, self.started_at, finished_at, duration, status)
         return False  # never swallow the exception
 
@@ -283,7 +290,30 @@ def retrain_models(trigger: str = "scheduled") -> dict:
             dl = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(dl)
 
-            metrics = dl.train_lstm(version=new_version)
+            try:
+                metrics = dl.train_lstm(version=new_version)
+            except RuntimeError as e:
+                # CUDA-OOM net ABOVE the chunk-level guard (AF-20260927-20): the 2026-09-28 02:19
+                # IST failure escaped train_lstm from a site the per-chunk retry/skip never
+                # covered (no "[DL] CUDA OOM on chunk" line in its stderr). On WDDM, VRAM is
+                # shared with the desktop and allocations can fail with cudaErrorMemoryAllocation
+                # at arbitrary async surface points, so retry the WHOLE train once with caches
+                # emptied. Bounded: 2 attempts x ~2.75h fits the 24h BullMQ lock with room; the
+                # lock is still held throughout, so no concurrent trainer can start.
+                if "out of memory" not in str(e).lower():
+                    raise
+                print("[TRAINER] CUDA OOM escaped train_lstm; emptying caches and retrying "
+                      "the whole train ONCE", file=sys.stderr)
+                try:
+                    if getattr(dl, "torch", None) is not None and dl.DEVICE is not None \
+                            and dl.DEVICE.type == "cuda":
+                        dl.torch.cuda.empty_cache()
+                except Exception as ce:
+                    print(f"[TRAINER] empty_cache before retry failed (non-fatal): {ce}",
+                          file=sys.stderr)
+                import gc as _gc
+                _gc.collect()
+                metrics = dl.train_lstm(version=new_version)
         result["metrics"] = metrics
 
         acc = metrics.get("directional_accuracy")
@@ -336,7 +366,16 @@ def retrain_models(trigger: str = "scheduled") -> dict:
         except Exception as lock_err:
             print(f"[TRAINER] Failed to clear lock (non-fatal): {lock_err}")
         result["error"] = str(e)
-        print(f"[TRAINER] ERROR: {e}")
+        # STDERR, not stdout: this is the only trace of WHY the run failed -- pythonRunner's
+        # rejection message (-> job_run_history.error) carries stderr only. Lost to stdout once
+        # already (AF-20260927-20: the 2026-09-27 train_lstm failure's exception text is
+        # unrecoverable because this print went to stdout). The TRACEBACK too: str(e) alone
+        # names the error but not the LINE -- the 2026-09-28 CUDA-OOM recurrence escaped
+        # train_lstm from a site the chunk-level guard never covered and without a traceback
+        # could only be guessed at.
+        import traceback
+        print(f"[TRAINER] ERROR: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
 
     result["step_log"] = steps.steps
     total_sec = sum(s["duration_sec"] for s in steps.steps)

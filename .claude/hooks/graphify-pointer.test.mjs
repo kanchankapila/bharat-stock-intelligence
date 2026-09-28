@@ -106,19 +106,29 @@ describe('graphify-pointer / stops nagging once the session has run graphify', (
   });
 
   it('end to end: the real hook process reminds, then goes quiet after a graphify call in the same session', () => {
+    // Hermetic: the hook reads `graphify-out/graph.json` relative to its CWD, and that file is
+    // a gitignored artifact that exists only in checkouts which have run `graphify update` —
+    // a fresh clone or CI has none, the hook (correctly) stays silent, and CI logged that as
+    // `AssertionError: expected '' to contain 'graphify'` (2026-09-27). So the spawned hook
+    // gets its own temp cwd containing a minimal graph; the per-session marker files land in
+    // that same temp dir and vanish with it. The repo's real tree is never touched.
     const sid = `test-${process.pid}-${Date.now()}`;
-    const run = payload => spawnSync(process.execPath, ['.claude/hooks/graphify-pointer.mjs'],
-      { input: JSON.stringify({ session_id: sid, ...payload }), encoding: 'utf8' }).stdout;
-    const read = { tool_name: 'Read', tool_input: { file_path: 'src/server/queues.ts' } };
+    const hookPath = join(process.cwd(), '.claude', 'hooks', 'graphify-pointer.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'graphify-pointer-e2e-'));
     try {
+      mkdirSync(join(dir, 'graphify-out'), { recursive: true });
+      writeFileSync(join(dir, 'graphify-out', 'graph.json'), '{}');
+      const run = payload => spawnSync(process.execPath, [hookPath],
+        { input: JSON.stringify({ session_id: sid, ...payload }), encoding: 'utf8', cwd: dir }).stdout;
+      const read = { tool_name: 'Read', tool_input: { file_path: 'src/server/queues.ts' } };
       expect(run(read)).toContain('graphify');
       expect(run({ tool_name: 'Bash', tool_input: { command: 'graphify query "queues"' } })).toBe('');
       expect(run(read)).toBe('');
       // a different session is unaffected
-      expect(spawnSync(process.execPath, ['.claude/hooks/graphify-pointer.mjs'],
-        { input: JSON.stringify({ session_id: `${sid}-other`, ...read }), encoding: 'utf8' }).stdout).toContain('graphify');
+      expect(spawnSync(process.execPath, [hookPath],
+        { input: JSON.stringify({ session_id: `${sid}-other`, ...read }), encoding: 'utf8', cwd: dir }).stdout).toContain('graphify');
     } finally {
-      rmSync(`.claude/.session-start/graphify-oriented-${sid}`, { force: true });
+      rmSync(dir, { recursive: true, force: true });
     }
   }, 30_000); // four cold node spawns: ~2.5s each on this box, so the 5s default flakes
 });

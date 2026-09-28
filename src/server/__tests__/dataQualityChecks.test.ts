@@ -255,6 +255,130 @@ describe('individual evaluate() functions', () => {
     expect(r.detail).toMatch(/clear the 0\.55 live-edge trust floor/);
   });
 
+  // AF-20260927-08: the branches above can only see a BREACH. They are structurally blind to the
+  // gate going inert, and "every ready regime clears the floor" (the pass directly above) is the
+  // exact row that hides it -- it is indistinguishable from "nothing is ever shrunk anywhere".
+  // These four cases pin both degenerate directions and, critically, that a discriminating
+  // snapshot still passes (a guard that fired on every snapshot would carry no information either).
+  it('regime-edge-trust-floor warns when every regime clips to weight 1.0 (the gate is a no-op)', () => {
+    // The live 2026-09-25 snapshot, verbatim: per_regime_auc() moved to a horizon-stratified AUC,
+    // every regime landed 0.57-0.62, and clip((auc-0.5)/0.05,0,1) returns 1.0 for all of them AND
+    // for the __GLOBAL__ fallback -- so edge_adjusted_probability() passes win_probability through
+    // unshrunk platform-wide while edge_adjustment_enabled=true advertises a live mitigation.
+    const r = byId('regime-edge-trust-floor').evaluate(
+      {
+        breached_count: 0, ready_count: 4, latest_computed_at: now.toISOString(),
+        adjustment_enabled: true,
+        min_ready_auc: 0.5699789, max_ready_auc: 0.5971017, global_auc: 0.6082106,
+      }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/NO information/);
+    expect(r.detail).toMatch(/UNSHRUNK/);
+    // The numbers have to survive into the detail, or the reader cannot act on it.
+    expect(r.detail).toMatch(/0\.5700\.\.0\.6082/);
+    expect(r.detail).toMatch(/AF-20260927-08/);
+  });
+
+  it('regime-edge-trust-floor warns when every regime clips to weight 0.0 (the inverted no-op)', () => {
+    // The mirror failure: a floor so far above the data that no regime can ever be credited.
+    // Silence reads as health in both directions, so both must be caught.
+    const r = byId('regime-edge-trust-floor').evaluate(
+      {
+        breached_count: 3, ready_count: 3, latest_computed_at: now.toISOString(),
+        adjustment_enabled: true, worst_breached_auc: 0.41,
+        min_ready_auc: 0.41, max_ready_auc: 0.4903, global_auc: 0.48,
+      }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/NO information/);
+    expect(r.detail).toMatch(/cannot ever credit/);
+  });
+
+  it('regime-edge-trust-floor does NOT warn when the weights actually discriminate', () => {
+    // Non-vacuity control: one regime partially trusted (0.52 -> 0.4), another fully (0.58 -> 1.0).
+    // The gate is doing its job, so this must fall through to the ordinary mechanism grade.
+    const r = byId('regime-edge-trust-floor').evaluate(
+      {
+        breached_count: 1, ready_count: 3, latest_computed_at: now.toISOString(),
+        adjustment_enabled: true, worst_breached_auc: 0.52,
+        min_ready_auc: 0.52, max_ready_auc: 0.58, global_auc: 0.56,
+      }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).not.toMatch(/NO information/);
+  });
+
+  it('regime-edge-trust-floor follows the gate onto calib_slope once it is populated', () => {
+    // regime_edge_weight() prefers the measured slope from 2026-09-27; the check must grade the
+    // field that actually drives the weight. Here the AUCs are the degenerate live 09-25 set
+    // (all clipping to 1.0) while the slopes discriminate -- so a check still looking at AUC
+    // would warn about a path the gate no longer uses.
+    const r = byId('regime-edge-trust-floor').evaluate(
+      {
+        breached_count: 0, ready_count: 4, latest_computed_at: now.toISOString(),
+        adjustment_enabled: true,
+        min_ready_auc: 0.5699789, max_ready_auc: 0.5971017, global_auc: 0.6082106,
+        min_ready_slope: 0.339, max_ready_slope: 0.812, global_slope: 0.5547,
+      }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).not.toMatch(/NO information/);
+    // The verdict must report the field that actually drives the weight. Saying "clears the 0.55
+    // trust floor" once the slope is live is true-but-irrelevant, and an unactionable digest line
+    // is how a real one gets skipped.
+    expect(r.detail).toMatch(/calib_slope/);
+    expect(r.detail).toMatch(/0\.339\.\.0\.812/);
+    expect(r.detail).toMatch(/no longer in the weight path/);
+  });
+
+  it('regime-edge-trust-floor keeps the AUC-formula wording while calib_slope is still NULL', () => {
+    // Continuity: before ml_calibration.py populates the column, the AUC path IS the weight path,
+    // so the verdict must still describe clip((auc-0.5)/0.05) and must NOT mention calib_slope.
+    //
+    // Note which branch this has to use, because it is the finding in miniature: under the AUC
+    // formula, "no breach" means every ready AUC is >= 0.55, which ALL clamp to 1.0 -- so the
+    // all-clear pass is UNREACHABLE by construction once AUC values are supplied, and the only
+    // AUC state that discriminates is one where something sits below the floor. That degeneracy
+    // above the floor is exactly why the weight was moved off AUC (AF-20260927-08).
+    const r = byId('regime-edge-trust-floor').evaluate(
+      {
+        breached_count: 1, ready_count: 3, latest_computed_at: now.toISOString(),
+        adjustment_enabled: true, worst_breached_auc: 0.52,
+        min_ready_auc: 0.52, max_ready_auc: 0.58, global_auc: 0.56,   // weights 0.4 / 1.0 / 1.0
+      }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toMatch(/clip\(\(auc-0\.5\)\/0\.05, 0, 1\)/);
+    expect(r.detail).not.toMatch(/calib_slope/);
+  });
+
+  it('regime-edge-trust-floor still catches a degenerate slope, and says so in slope terms', () => {
+    const r = byId('regime-edge-trust-floor').evaluate(
+      {
+        breached_count: 0, ready_count: 4, latest_computed_at: now.toISOString(),
+        adjustment_enabled: true,
+        min_ready_auc: 0.52, max_ready_auc: 0.58, global_auc: 0.56,
+        min_ready_slope: 1.4, max_ready_slope: 2.0, global_slope: 1.6,
+      }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/calib_slope range/);
+    expect(r.detail).toMatch(/UNSHRUNK/);
+    // Must not prescribe the already-completed AUC-floor remedy when the slope is what is broken.
+    expect(r.detail).not.toMatch(/predates calib_slope/);
+  });
+
+  it('regime-edge-trust-floor SQL exposes both the AUC and the calib_slope range', () => {
+    const sql = byId('regime-edge-trust-floor').sql!;
+    expect(sql).toMatch(/min_ready_slope/);
+    expect(sql).toMatch(/global_slope/);
+  });
+
+  it('regime-edge-trust-floor SQL exposes the AUC range the discrimination guard needs', () => {
+    // The guard is only meaningful if evaluate() is actually fed these columns live -- without
+    // them gateAucs is empty and the branch silently never runs (the failure mode this whole
+    // finding is about, one layer down).
+    const sql = byId('regime-edge-trust-floor').sql!;
+    expect(sql).toMatch(/min_ready_auc/);
+    expect(sql).toMatch(/max_ready_auc/);
+    expect(sql).toMatch(/global_auc/);
+  });
+
   it('regime-edge-trust-floor warns if its own snapshot has gone stale, even with no breach', () => {
     const fourDaysLater = new Date(now.getTime() + 4 * 86_400_000);
     const r = byId('regime-edge-trust-floor').evaluate(

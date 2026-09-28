@@ -61,11 +61,21 @@ def _sa_url(schema: str | None = None) -> str:
     path on the CONNECTION, so every unqualified name in production code -- not just in the test
     -- resolves inside the throwaway schema. No fetcher or engine needs to know it is under test.
     Exactly what pgClient.getPool() does on the TypeScript side.
+
+    AF-20260928: the path is the THROWAWAY SCHEMA ONLY -- no trailing `,public`. The public
+    entry contradicted this module's own rule (see pg_memory_conn's "NO `public` on the path"
+    block and conftest.pg_schema's 2026-09-17 measured incident): SQLAlchemy pools connections,
+    and only the FIRST one got the `SET search_path TO "<schema>"` executed below -- every
+    connection the pool created LATER carried the URL option, schema-first-then-public, so an
+    unqualified name the throwaway schema does not have resolved straight through to PRODUCTION.
+    Harmless while `regime_edge_status` was empty; the writer built 2026-09-27 gave it rows and
+    test_load_regime_edge_status_missing_table_returns_empty_dict started reading them. Guarded
+    by that test plus tests/test_pg_schema_isolation.py's URL pin.
     """
     d = _pg_dsn()
     url = f"postgresql+psycopg2://{d['user']}:{quote_plus(d['password'])}@{d['host']}:{d['port']}/{d['dbname']}"
     if schema:
-        url += "?options=" + quote_plus(f"-c search_path={schema},public")
+        url += "?options=" + quote_plus(f"-c search_path={schema}")
     return url
 
 
