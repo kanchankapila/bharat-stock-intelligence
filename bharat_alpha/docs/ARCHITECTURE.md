@@ -389,6 +389,22 @@ drop it. InvestSights (FMP consensus) returns one row per **fiscal year**, store
 
 Like every other group (`estimates` in the ablation), these earn weight only through the gate.
 
+## Index membership and index-change events (`nse_constituents`)
+
+The NIFTY 500 constituent file is a snapshot with no history. Each run diffs the fetched roster
+against the open intervals in `alpha.index_membership` (migration 0010), so a join or exit is
+dated to the session it was first SEEN — never to when NSE decided it, which we cannot know.
+
+- **Why it matters.** An index fund must buy an inclusion and sell an exclusion, so the demand is
+  known in advance. `idx_days_since_join` / `idx_days_since_exit` count sessions since the change,
+  capped at `INDEX_EVENT_WINDOW` (21). They sit in the `events` ablation group.
+- **A short file is not a mass exit.** A truncated or partial download would otherwise retire the
+  whole index in one run. The diff is skipped when the fetched roster is under
+  `MIN_ROSTER_FRACTION` (80%) of the current one, and the skip is logged; sector and ISIN still
+  update, since those are per-row and a short file's rows are still valid.
+- Membership is point-in-time; the sector label from the same file is not, and stays a
+  risk-bucket constraint only.
+
 ## Next-session engine (`session/`)
 
 This is a second decision clock. The decision is made at day d's close, and optionally refined

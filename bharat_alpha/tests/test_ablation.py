@@ -8,7 +8,7 @@ def test_every_feature_prefix_maps_to_its_group():
     cases = {"deliv_z_60": "delivery", "opt_iv_atm": "options", "fo_basis_ann": "futures", "fo_ban_days": "fo_ban",
              "earn_ear": "earnings_reaction", "res_eps_yoy_px": "reported_results", "est_eps_rev": "estimates",
              "fund_book_yield": "fundamentals", "own_promoter_holding_pct_qoq": "ownership",
-             "days_to_results": "events", "x_technical_signals__rsi_14": "legacy_bridge",
+             "days_to_results": "events", "idx_days_since_join": "events", "x_technical_signals__rsi_14": "legacy_bridge",
              "fii_idxfut_net": "participant_oi", "fii_net_5": "cash_flows", "us_spx_ret_1": "global_cues",
              "vix_chg_5": "market_context", "mom_12_1": "price", "vol_21": "price"}
     assert {c: group_of(c) for c in cases} == cases

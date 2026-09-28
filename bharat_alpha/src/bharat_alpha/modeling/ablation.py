@@ -34,7 +34,7 @@ GROUP_PREFIXES = (
     ("estimates", ("est_",)),
     ("fundamentals", ("fund_",)),
     ("ownership", ("own_",)),
-    ("events", ("days_to_results", "insider_")),
+    ("events", ("days_to_results", "insider_", "idx_days_since")),
     ("legacy_bridge", ("x_",)),
     ("participant_oi", ("fii_idx", "pro_idx", "client_idx")),
     ("cash_flows", ("fii_net", "dii_net")),
