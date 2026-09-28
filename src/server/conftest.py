@@ -213,6 +213,37 @@ def _apply_schema(cur, schema: str) -> None:
         r"|^ALTER TABLE \w+ SET \(timescaledb\..*?\);\s*$",
         "", ddl, flags=re.MULTILINE,
     )
+    # Extension pre-flight. `CREATE EXTENSION` is DB-GLOBAL state while everything else here is
+    # schema-local: `IF NOT EXISTS` no-ops when the extension is installed ANYWHERE, and a
+    # relocatable extension (pg_trgm) created by an earlier apply landed in THAT apply's
+    # throwaway schema — the first search_path entry at its creation time — not in `public`.
+    # tests/chatbot re-execs this conftest through _pg_support.py, so pytest builds a SECOND
+    # session-scoped _pg_session_schema instance and the full DDL is applied twice per run; the
+    # second apply then died with `operator class "gin_trgm_ops" does not exist for access
+    # method "gin"` — ERROR at setup of every pg_db test there (17x in
+    # tests/chatbot/test_market_tool.py, CI 2026-09-27; reproduced by pointing PGTEST_DB at a
+    # fresh database). So: create any MISSING extension while `public` is the creation schema
+    # (a schema every apply can see), and put the homes of the already-installed ones on the
+    # apply path below. The DDL's own CREATE EXTENSION lines then no-op safely.
+    # search-path-public-exempt: DDL APPLICATION ONLY -- this bare-public path exists only to
+    # give the CREATE EXTENSION statements a creation schema every apply can see; the
+    # schema-first DDL path is re-pinned immediately below, before any DDL runs, and this
+    # connection executes nothing else. The test-body connections are untouched.
+    cur.execute("SET search_path TO public")
+    ext_names = sorted(set(re.findall(r"CREATE EXTENSION IF NOT EXISTS (\w+)", ddl)))
+    ext_schemas = set()
+    for ext in ext_names:
+        cur.execute(
+            "SELECT n.nspname FROM pg_extension e "
+            "JOIN pg_namespace n ON n.oid = e.extnamespace WHERE e.extname = %s",
+            (ext,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            cur.execute(f'CREATE EXTENSION IF NOT EXISTS "{ext}"')
+            ext_schemas.add("public")
+        else:
+            ext_schemas.add(row[0])
     # search-path-public-exempt: DDL APPLICATION ONLY -- the schema creates GIN trigram
     # indexes and `gin_trgm_ops` is the pg_trgm extension's operator class, which lives in
     # `public`; without it every apply dies with `operator class "gin_trgm_ops" does not exist`
@@ -220,7 +251,11 @@ def _apply_schema(cur, schema: str) -> None:
     # hazard the other two fixtures had: nothing but the CREATE/ALTER/INDEX statements runs on
     # this connection, the throwaway schema is first so every CREATE lands there, and the test
     # BODY path already excludes public (asserted by test_current_schema_is_never_public).
-    cur.execute(f'SET search_path TO "{schema}", public')
+    # The extra entries are for an extension installed somewhere else entirely (another live
+    # apply's throwaway schema, a non-default image layout): its opclasses must be on the path
+    # or every CREATE INDEX ... gin_trgm_ops above fails.
+    path = [f'"{schema}"', '"public"'] + sorted(f'"{s}"' for s in ext_schemas - {"public"})
+    cur.execute(f'SET search_path TO {", ".join(path)}')
     cur.execute(ddl)
 
 
