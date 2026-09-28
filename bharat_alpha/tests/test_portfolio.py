@@ -62,6 +62,25 @@ def test_costs_suppress_pointless_trades_but_allow_real_ones():
     assert flipped.turnover > 0.3                                            # a real change of view does trade
 
 
+def test_warm_start_at_current_book_does_not_stall():
+    # SLSQP started at the held book stopped there, reporting success, on ~1 in 7 float-noise
+    # jitters of the same problem (the CI runner that turned this red was one of them)
+    from bharat_alpha.portfolio import RiskModel
+
+    risk, _ = _risk()
+    names, E = risk.names, pd.Series(dtype=object)
+    cfg = PortfolioConfig(sector_cap=1.0, max_weight=0.5, target_vol_annual=1.0, min_weight=0.0)
+    free = CostModel(stt=0, stamp_buy=0, exchange=0, sebi=0, slippage=0)
+    liq = pd.Series(1.0, index=names)
+    mu = pd.Series(np.linspace(0.03, -0.01, len(names)), index=names)
+    small = mu + np.random.default_rng(1).normal(0, 2e-3, len(names))
+    for k in range(20):
+        jit = np.random.default_rng(100 + k).standard_normal(risk.cov_daily.shape)
+        r = RiskModel(names, risk.cov_daily * (1 + 1e-12 * jit), risk.beta)
+        held = optimise(mu, r, 21, E, liq, None, cfg, free).weights
+        assert optimise(small, r, 21, E, liq, held, cfg, free).turnover > 0.05, k
+
+
 def test_short_history_names_get_median_risk_not_dropped():
     _, r = _risk(n=10)
     r.iloc[:-20, 0] = np.nan                                                  # new listing: 20 days of history

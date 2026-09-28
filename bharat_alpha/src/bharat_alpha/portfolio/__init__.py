@@ -112,11 +112,17 @@ def optimise(mu: pd.Series, risk: RiskModel, horizon: int, sector: pd.Series, li
         cons.append({"type": "ineq", "fun": lambda x, mask=mask: cfg.sector_cap - mask @ x[:n],
                      "jac": lambda x, mask=mask: np.concatenate([-mask, np.zeros(2 * n)])})
     bounds = [(0.0, float(u)) for u in ub] + [(0.0, None)] * (2 * n)
-    x0 = np.concatenate([np.minimum(prev_w, ub), np.zeros(2 * n)])
-    x0[n:2 * n] = np.clip(x0[:n] - prev_w, 0, None)
-    x0[2 * n:] = np.clip(prev_w - x0[:n], 0, None)
-    res = minimize(f, x0, jac=g, bounds=bounds, constraints=cons, method="SLSQP",
-                   options={"maxiter": 500, "ftol": 1e-10})
+    def start(w0):
+        return np.concatenate([w0, np.clip(w0 - prev_w, 0, None), np.clip(prev_w - w0, 0, None)])
+
+    # SLSQP warm-started AT the current book sometimes stops there and reports success (measured:
+    # 4 of 30 float-noise jitters of one problem, objective short of the true optimum). The problem
+    # is convex, so solve from the book and from cash and keep the lower objective.
+    runs = [minimize(f, start(w0), jac=g, bounds=bounds, constraints=cons, method="SLSQP",
+                     options={"maxiter": 500, "ftol": 1e-10})
+            for w0 in (np.minimum(prev_w, ub), np.zeros(n))]
+    feasible = [r for r in runs if r.success] or runs
+    res = min(feasible, key=lambda r: r.fun)
     w = np.clip(res.x[:n], 0.0, None)
     w[w < cfg.min_weight] = 0.0
     weights = pd.Series(w, index=names)
