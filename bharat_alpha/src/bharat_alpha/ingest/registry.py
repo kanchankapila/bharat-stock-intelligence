@@ -8,13 +8,14 @@ from bharat_alpha.ingest.sources.nse_bhavcopy import NseBhavcopy
 from bharat_alpha.ingest.sources.nse_corporate import NseBoardMeetings, NseInsiderPit, NseSymbolChange
 from bharat_alpha.ingest.sources.nse_fo import NseFoBhavcopy
 from bharat_alpha.ingest.sources.nse_market import NseFiiDii, NseIndexClose
+from bharat_alpha.ingest.sources.nse_preopen import NsePreopen
 
 # Order matters: cash bars create instruments that every other source resolves against.
 CONNECTORS: dict[str, type[Connector]] = {
     c.name: c
     for c in (
         NseBhavcopy, NseSymbolChange, NseFoBhavcopy, NseIndexClose, NseFiiDii,
-        NseBoardMeetings, NseInsiderPit, InvestsightsFundamentals, McEstimates,
+        NseBoardMeetings, NseInsiderPit, InvestsightsFundamentals, McEstimates, NsePreopen,
     )
 }
 

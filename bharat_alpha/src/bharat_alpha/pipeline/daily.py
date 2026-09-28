@@ -146,6 +146,25 @@ def step_predict_and_publish(conn: psycopg.Connection, as_of: dt.date, horizon: 
     return {"model_id": model["model_id"], "edge_status": edge_status, "n": n}
 
 
+RULE_REMEASURE_SESSIONS = 21
+
+
+def step_session(conn: psycopg.Connection, as_of: dt.date) -> dict:
+    """Next-session engine: grade yesterday's picks, re-measure the rule on a cadence, publish
+    picks for the next session."""
+    from bharat_alpha.db import get_status
+    from bharat_alpha.session.publish import RULE_STATUS_KEY, measure_rule, publish_session, resolve_session
+
+    out = {"graded": resolve_session(conn, as_of)}
+    last = (get_status(conn, RULE_STATUS_KEY) or {}).get("window", [None, None])[1]
+    stale = last is None or len(read_df(conn, "SELECT 1 FROM alpha.trading_day WHERE trade_date > %s AND trade_date <= %s",
+                                        (last, as_of))) >= RULE_REMEASURE_SESSIONS
+    if stale:
+        out["rule"] = measure_rule(conn, as_of)
+    out["published"] = publish_session(conn, as_of)
+    return out
+
+
 def run_daily(conn: psycopg.Connection, as_of: dt.date, ingest: bool = True, client: HttpClient | None = None,
               force: bool = False) -> dict:
     s = get_settings()
@@ -159,6 +178,7 @@ def run_daily(conn: psycopg.Connection, as_of: dt.date, ingest: bool = True, cli
     for h in s.horizons:
         out[f"monitor_h{h}"] = run_step(conn, f"monitor_h{h}", as_of, lambda h=h: step_monitor_and_retrain(conn, as_of, h), force)
         out[f"publish_h{h}"] = run_step(conn, f"publish_h{h}", as_of, lambda h=h: step_predict_and_publish(conn, as_of, h), force)
+    out["session"] = run_step(conn, "session", as_of, lambda: step_session(conn, as_of), force)
     if ingest:
         out["vendor"] = run_step(conn, "vendor", as_of, lambda: step_vendor(conn, as_of, client), force)
     checks = run_checks(conn, as_of, s.horizons)

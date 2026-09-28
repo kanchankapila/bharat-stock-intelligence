@@ -43,8 +43,10 @@ bqa import-provider-ids "$LEGACY_DSN"          # MoneyControl scIds (ambiguous c
 bqa import-estimates "$LEGACY_DSN"             # analyst-estimate history, point in time
 bqa train --horizon 21                         # walk-forward, cost-aware report, gate
 bqa train --horizon 5
-bqa daily                                      # one session end to end
-bqa scheduler &                                # every evening from 19:00 IST, with catch-up
+bqa session measure                            # re-measure the capitulation rule, day-level, net of costs
+bqa session train                              # next-session (open->close) model vs the rule, gated
+bqa daily                                      # one session end to end (incl. next-session picks)
+bqa scheduler &                                # 09:08-09:14 pre-open capture; evenings from 19:00 IST, with catch-up
 bqa serve --host 0.0.0.0                       # /recommendations /stock/{sym} /models /health
 ```
 

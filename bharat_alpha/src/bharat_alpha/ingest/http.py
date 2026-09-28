@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
@@ -28,6 +29,12 @@ BROWSER_UA = (
 WARMUP = {
     "www.nseindia.com": "https://www.nseindia.com/",
 }
+# Hosts whose WAF fingerprints the TLS handshake (JA3): plain `requests` gets 403 no matter
+# the headers (legacy preopen_fetcher.py, AF-20260911-10). Served through curl_cffi's browser
+# impersonation when installed; otherwise a warning is logged once, because every call to
+# these hosts is then expected to fail and "no data" must not look like "no market".
+IMPERSONATE = {"www.nseindia.com"}
+log = logging.getLogger("bharat_alpha.http")
 
 
 class FetchError(RuntimeError):
@@ -41,9 +48,24 @@ class HttpClient:
     _last: dict[str, float] = field(default_factory=dict)
     _warmed: set[str] = field(default_factory=set)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _impersonated: object | None = None
 
     def __post_init__(self) -> None:
         self.session.headers.update({"User-Agent": BROWSER_UA, "Accept-Language": "en-US,en;q=0.9"})
+
+    def _session_for(self, host: str):
+        if host not in IMPERSONATE:
+            return self.session
+        if self._impersonated is None:
+            try:
+                from curl_cffi import requests as cffi
+
+                self._impersonated = cffi.Session(impersonate="chrome")
+                self._impersonated.headers.update({"Accept-Language": "en-US,en;q=0.9"})
+            except ImportError:
+                log.warning("curl_cffi not installed: requests to %s will likely be refused (TLS fingerprint)", host)
+                self._impersonated = self.session
+        return self._impersonated
 
     def _throttle(self, host: str) -> None:
         with self._lock:
@@ -55,7 +77,9 @@ class HttpClient:
     def _warm(self, host: str) -> None:
         if host in WARMUP and host not in self._warmed:
             try:
-                self.session.get(WARMUP[host], timeout=get_settings().http_timeout_s)
+                self._session_for(host).get(WARMUP[host], timeout=get_settings().http_timeout_s)
+            except Exception as e:                    # the real call below will surface the failure
+                log.warning("cookie warm-up for %s failed: %s", host, e)
             finally:
                 self._warmed.add(host)
 
@@ -71,8 +95,8 @@ class HttpClient:
         for attempt in range(s.http_max_retries + 1):
             self._throttle(host)
             try:
-                resp = self.session.request(method, url, timeout=s.http_timeout_s, **kw)
-            except requests.RequestException as e:
+                resp = self._session_for(host).request(method, url, timeout=s.http_timeout_s, **kw)
+            except Exception as e:                    # requests and curl_cffi raise different types
                 last_exc = e
             else:
                 if resp.status_code == 429 or resp.status_code >= 500:

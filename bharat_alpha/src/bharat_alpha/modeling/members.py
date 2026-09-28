@@ -13,8 +13,14 @@ from bharat_alpha.modeling.cv import inner_split
 
 LGB_BASE = dict(
     learning_rate=0.03, num_leaves=31, max_depth=-1, min_child_samples=200, subsample=0.7, subsample_freq=1,
-    colsample_bytree=0.7, reg_lambda=5.0, n_estimators=600, verbose=-1, n_jobs=4,
+    colsample_bytree=0.7, reg_lambda=5.0, n_estimators=600, verbose=-1,
 )
+
+
+def _lgb(**kw) -> dict:
+    from bharat_alpha.config import get_settings
+
+    return {**LGB_BASE, "n_jobs": get_settings().model_threads, **kw}
 
 
 def _dates(X: pd.DataFrame) -> pd.Index:
@@ -43,13 +49,13 @@ class LgbmRegressorMember:
         tr, va = _dates(X).isin(tr_d), _dates(X).isin(va_d)
         self.models = []
         for s in self.seeds:
-            m = lgb.LGBMRegressor(**{**LGB_BASE, **self.params, "random_state": s})
+            m = lgb.LGBMRegressor(**_lgb(**self.params, random_state=s))
             w = recency_weights(X)
             m.fit(X[tr], y[tr], sample_weight=w[np.asarray(tr)], eval_set=[(X[va], y[va])],
                   callbacks=[lgb.early_stopping(50, verbose=False)])
             # refit on the full window at the chosen size so the most recent data is used
             best = max(int(m.best_iteration_ or LGB_BASE["n_estimators"]), 20)
-            full = lgb.LGBMRegressor(**{**LGB_BASE, **self.params, "random_state": s, "n_estimators": best})
+            full = lgb.LGBMRegressor(**_lgb(**{**self.params, "random_state": s, "n_estimators": best}))
             full.fit(X, y, sample_weight=w)
             self.models.append(full)
         return self
@@ -84,8 +90,8 @@ class LgbmRankerMember:
         grades = self._grades(X, y)
         self.models = []
         for s in self.seeds:
-            kw = {**LGB_BASE, **self.params, "random_state": s, "objective": "lambdarank",
-                  "lambdarank_truncation_level": 30}
+            kw = _lgb(**{**self.params, "random_state": s, "objective": "lambdarank",
+                         "lambdarank_truncation_level": 30})
             m = lgb.LGBMRanker(**kw)
             m.fit(X[tr], grades[tr], group=self._groups(X[tr]), eval_set=[(X[va], grades[va])],
                   eval_group=[self._groups(X[va])], eval_at=[20],

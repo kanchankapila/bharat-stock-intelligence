@@ -35,3 +35,24 @@ class CostModel:
 
 
 DEFAULT_COSTS = CostModel()
+
+
+@dataclass(frozen=True)
+class IntradayCostModel:
+    """Intraday (MIS) equity, per side. ASSUMPTION, same caveat as above: STT 0.025% on the
+    sell side only, stamp 0.003% on buys, exchange/SEBI/GST as for delivery, 5 bps slippage a
+    side. Round trip ~0.14%; legacy's day-level verdicts used a flat 0.15%."""
+    stt_sell: float = 0.00025
+    stamp_buy: float = 0.00003
+    exchange: float = 0.0000297
+    sebi: float = 0.000001
+    gst: float = 0.18
+    brokerage: float = 0.0
+    slippage: float = 0.0005
+
+    def round_trip(self) -> float:
+        fees = 2 * (self.brokerage + self.exchange + self.sebi) * (1 + self.gst)
+        return self.stt_sell + self.stamp_buy + fees + 2 * self.slippage
+
+
+INTRADAY_COSTS = IntradayCostModel()

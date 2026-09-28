@@ -19,7 +19,7 @@ from bharat_alpha.timeutil import IST, is_probable_session, ist_now, latest_comp
 log = logging.getLogger("bharat_alpha.scheduler")
 START_AFTER = dt.time(19, 0)
 MAX_CATCHUP_SESSIONS = 5
-POLL_SECONDS = 300
+POLL_SECONDS = 120          # must fit at least twice into the 6-minute pre-open window
 
 
 def pending_sessions(conn, today_session: dt.date, horizons: tuple[int, ...]) -> list[dt.date]:
@@ -35,12 +35,38 @@ def pending_sessions(conn, today_session: dt.date, horizons: tuple[int, ...]) ->
     return sorted(out)
 
 
+PREOPEN_WINDOW = (dt.time(9, 8), dt.time(9, 14))
+
+
+def capture_preopen(conn, now: dt.datetime) -> dict | None:
+    """One pre-open capture per session, inside the 09:08-09:14 IST window (after the auction
+    closes, before the market opens)."""
+    from bharat_alpha.ingest.base import run_connector
+    from bharat_alpha.ingest.sources.nse_preopen import NsePreopen
+    from bharat_alpha.pipeline.daily import run_step
+
+    d = now.date()
+    if not (is_probable_session(d) and PREOPEN_WINDOW[0] <= now.time() <= PREOPEN_WINDOW[1]):
+        return None
+
+    def go():
+        status, n = run_connector(conn, NsePreopen(), d)
+        if status not in ("success",):
+            raise RuntimeError(f"pre-open capture {status} ({n} rows)")
+        return {"rows": n}
+
+    return run_step(conn, "preopen", d, go)
+
+
 def tick(now: dt.datetime | None = None) -> list[dict]:
     from bharat_alpha.config import get_settings
 
     now = (now or ist_now()).astimezone(IST)
     results = []
     with connect() as conn:
+        po = capture_preopen(conn, now)
+        if po is not None:
+            results.append({"preopen": po})
         todo = pending_sessions(conn, latest_completed_session(now), get_settings().horizons)
         # today's files are not reliably out before the cutoff; earlier sessions are caught up any time
         todo = [d for d in todo if d < now.date() or now.time() >= START_AFTER]

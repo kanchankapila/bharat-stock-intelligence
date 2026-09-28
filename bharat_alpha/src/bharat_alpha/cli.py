@@ -138,6 +138,51 @@ def train(horizon: int = 21, end: str = typer.Option(None), years: int = 6, prom
         _print(out)
 
 
+session_app = typer.Typer(help="next-session (open->close) engine")
+app.add_typer(session_app, name="session")
+
+
+@session_app.command("measure")
+def session_measure(end: str = typer.Option(None), sessions: int = 1500):
+    """Re-measure the capitulation rule on this system's data (day-level, net of intraday costs)."""
+    from bharat_alpha.db import connect, read_df
+    from bharat_alpha.session.publish import measure_rule
+
+    with connect() as conn:
+        e = _date(end) or read_df(conn, "SELECT max(trade_date) d FROM alpha.trading_day").d[0]
+        _print(measure_rule(conn, e, sessions))
+
+
+@session_app.command("train")
+def session_train(end: str = typer.Option(None), years: int = 6, promote: bool = True):
+    """Walk-forward train the next-session model; gate it against the rule as a book."""
+    from bharat_alpha.db import connect, read_df
+    from bharat_alpha.modeling.registry import decide
+    from bharat_alpha.session.model import build_session_dataset, train_session_model
+
+    with connect() as conn:
+        e = _date(end) or read_df(conn, "SELECT max(trade_date) d FROM alpha.trading_day").d[0]
+        ds = build_session_dataset(conn, e - dt.timedelta(days=365 * years), e)
+        model_id, report, _, _ = train_session_model(conn, ds)
+        out = {"model_id": model_id, "ensemble": report["ensemble"], "day_level": report["backtest"],
+               "rule": report["benchmark"]["day_level"]}
+        if promote:
+            out["gate"] = decide(conn, model_id).as_dict()
+        _print(out)
+
+
+@app.command()
+def preopen():
+    """Capture today's NSE pre-open auction now (use between 09:08 and 09:14 IST)."""
+    from bharat_alpha.db import connect
+    from bharat_alpha.ingest.base import run_connector
+    from bharat_alpha.ingest.sources.nse_preopen import NsePreopen
+    from bharat_alpha.timeutil import ist_now
+
+    with connect() as conn:
+        _print(run_connector(conn, NsePreopen(), ist_now().date()))
+
+
 @app.command()
 def daily(date: str = typer.Option(None), no_ingest: bool = False, force: bool = False):
     """Run the daily DAG for one session (default: latest completed session)."""

@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     cv_folds: int = 5
     seeds: tuple[int, ...] = (11, 23, 47)
     recency_halflife_days: int = 500
+    # LightGBM threads. Keep <= physical cores and never run two trainings at once on a small
+    # box: OpenMP threads spin-wait, so oversubscription slows both by far more than 2x.
+    model_threads: int = 4
 
     # Self-learning
     hedge_eta: float = 2.0

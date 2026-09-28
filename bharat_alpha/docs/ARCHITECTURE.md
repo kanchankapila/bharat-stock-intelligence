@@ -130,15 +130,39 @@ the complexity budget. A new member can be added by implementing `fit/predict` i
   and volatility, breadth above SMA50, cross-sectional dispersion, INDIA VIX level and change,
   NIFTY 500 63-day return, FII/DII 5- and 21-day net flows.
 
+## Next-session engine (`session/`)
+
+This is a second decision clock. The decision is made at day d's close, and optionally refined
+by day d+1's 09:08 pre-open auction. The trade is d+1's open to d+1's close. It lives beside
+the multi-day engine and shares its ensemble, CV and gate, and it has its own ledger
+(`session_pick` → `session_outcome`).
+
+| Piece | What it does |
+|---|---|
+| `day_flags` + `capitulation` | The legacy's only validated edge, re-implemented on this system's data. On day d: gap down ≥ 2%, open within 0.1% of the day's low with a range of at least 0.5%, and in the bottom 5% of the day within the tradeable universe (≥ ₹5 cr ADT, price ≥ ₹20). |
+| `day_level` | One row per session: basket open→close, minus a 0.135% round-trip intraday cost (assumption, see `costs.py`), minus that session's equal-weight universe. Returns are winsorised per session (inward cutoffs); t-stats are across sessions, never pooled rows. Capacity (2% of ADT) is reported beside every return. |
+| `session.model` | The same LightGBM + LambdaRank + ridge ensemble. Inputs are day-d state (gap, open/close location, range, turnover shock, delivery, trend), the flags as 0/1, and the pre-open auction's gap and imbalance for d+1 when a capture exists before 09:15. |
+| Gate | The model's top-10 book must beat the rule **as a book** on every out-of-fold session: the rule's net spread when it fires, cash when it doesn't. A diluted model that only matches the rule on its days fails. |
+| `nse_preopen` | Captured once per session between 09:08 and 09:14 by the scheduler, with browser TLS impersonation. The first capture of the morning is kept, and anything seen after 09:15 is never used as a pre-open input. |
+| `measure_rule` | Re-measures the rule on a trailing window every 21 sessions. Rule picks are published as `validated` only while this system's own measurement says so (t ≥ 2 over ≥ 20 signal-days). |
+
+Checked on the synthetic market, where a capitulation effect is planted or absent:
+
+- flags recover more than 80% of the planted events;
+- the day-level rule is significant when the effect exists and not when it doesn't;
+- the model learns the capitulation features;
+- a published pick is graded exactly against the raw bar.
+
+A test also caught a fat-finger print dominating a day's universe mean before winsorising was
+added.
+
 ## What was deliberately left out
+
 
 - **Screener-membership features** (1,331 of the URLs in `urls.txt`). The legacy platform
   measured all 1,563 screeners: none survive FDR, and concept tags lift winners and losers
   equally. They detect volatility, not direction.
 - **Vendor composite scores** (MarketsMojo, MoneyControl insights, Tickertape scorecards): no
   edge was measured.
-- **Intraday / opening-range model.** The legacy's single validated edge (the capitulation
-  triple) lives at the open, is capacity-constrained (≈ ₹0.46 cr per signal-day), and needs
-  pre-open data. It is the highest-value next module (catalog family `nse_api_preopen`).
 - **A frontend.** The API is the product surface. The legacy React app can read it, and a
   dashboard should be built only once a validated edge exists to display.
