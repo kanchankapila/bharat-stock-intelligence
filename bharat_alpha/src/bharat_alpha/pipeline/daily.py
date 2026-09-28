@@ -178,6 +178,11 @@ def run_daily(conn: psycopg.Connection, as_of: dt.date, ingest: bool = True, cli
     for h in s.horizons:
         out[f"monitor_h{h}"] = run_step(conn, f"monitor_h{h}", as_of, lambda h=h: step_monitor_and_retrain(conn, as_of, h), force)
         out[f"publish_h{h}"] = run_step(conn, f"publish_h{h}", as_of, lambda h=h: step_predict_and_publish(conn, as_of, h), force)
+    if s.portfolio_capital_inr > 0 and s.portfolio_horizon in s.horizons:
+        from bharat_alpha.portfolio.run import build_targets
+
+        out["portfolio"] = run_step(conn, f"portfolio_h{s.portfolio_horizon}", as_of,
+                                    lambda: build_targets(conn, as_of, s.portfolio_horizon, s.portfolio_capital_inr), force)
     out["session"] = run_step(conn, "session", as_of, lambda: step_session(conn, as_of), force)
     if ingest:
         out["vendor"] = run_step(conn, "vendor", as_of, lambda: step_vendor(conn, as_of, client), force)

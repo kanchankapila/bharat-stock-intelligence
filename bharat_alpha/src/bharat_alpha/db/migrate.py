@@ -19,7 +19,7 @@ EXPECTED_TABLES = {
     "fo_daily", "index_daily", "market_flow", "corporate_event", "deal", "fundamental",
     "ingest_run", "job_run", "dq_result", "system_status", "model", "prediction", "outcome",
     "realized_eval", "ensemble_weight", "conformal_state", "recommendation",
-    "preopen_snapshot", "session_pick", "session_outcome",
+    "preopen_snapshot", "session_pick", "session_outcome", "portfolio_run", "portfolio_target",
 }
 
 

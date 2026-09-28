@@ -156,6 +156,33 @@ Checked on the synthetic market, where a capitulation effect is planted or absen
 A test also caught a fat-finger print dominating a day's universe mean before winsorising was
 added.
 
+## Portfolio construction (`portfolio/`)
+
+This turns the canonical ranking into sized positions. It is off until
+`BQA_PORTFOLIO_CAPITAL_INR` is set, and then it runs in the daily job graph after publishing.
+Output goes to `portfolio_run` (the audit trail) and `portfolio_target`, and is served at
+`/portfolio`.
+
+| Piece | What it does |
+|---|---|
+| Objective | Maximise the calibrated expected excess (the ledger's `pred_excess`), minus a risk penalty, minus the actual cost of every trade. Solved with SLSQP over the top 3×k names plus current holdings. |
+| Risk model | Ledoit–Wolf shrunk covariance of 126 sessions of daily returns, scaled to the horizon. Names with less than 60 days of history get the median variance rather than being dropped. Beta is measured against the equal-weight universe. |
+| Limits | A per-stock weight cap; a sector cap, where NIFTY 500 industry labels come from `nse_constituents` and an unknown sector is its own capped bucket; a liquidity cap of 2% of ADT relative to capital; gross exposure ≤ 1. Then the book is scaled down to the volatility target, with the rest held as cash. |
+| Turnover | The cost term is the real per-side cost from `costs.py`, so a change of view smaller than the round trip does not trade. Tested: a 0.2% view change gives zero turnover with real costs and 3.4% with zero costs. |
+| Honesty | Every run records which constraints bound and the ex-ante volatility, beta, turnover and estimated cost. `edge_status` passes through from the recommendations, so an unvalidated ranking yields a book marked unvalidated. |
+
+On the synthetic market (planted edge, heterogeneous volatility, same scores and rebalance
+dates):
+
+| | Equal-weight top-15 | Optimised |
+|---|---|---|
+| Annual volatility | 20.5% | 12.5% |
+| Sharpe | 3.29 | 3.91 |
+| t of excess return | 6.4 | 8.4 |
+| Turnover per rebalance | 31% | 7.8% |
+
+Absolute levels reflect the planted edge; only the comparison is evidence.
+
 ## What was deliberately left out
 
 
