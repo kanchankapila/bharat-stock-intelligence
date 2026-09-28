@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
+import re
 import zipfile
 
 import psycopg
@@ -24,9 +25,12 @@ from bharat_alpha.ingest.base import Connector, Health, NotPublished
 from bharat_alpha.ingest.http import HttpClient
 from bharat_alpha.options import summarise
 from bharat_alpha.reference import SymbolResolver
-from bharat_alpha.timeutil import eod_knowable_at
+from bharat_alpha.timeutil import IST, eod_knowable_at
 
 URL = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{yyyymmdd}_F_0000.csv.zip"
+BAN_URL = "https://nsearchives.nseindia.com/content/fo/fo_secban_{ddmmyyyy}.csv"
+BAN_HEADER = re.compile(r"ban\s+for\s+trade\s+date\s+(\d{1,2}-[A-Za-z]{3}-\d{4})", re.I)
+BAN_KNOWABLE = dt.time(9, 0)             # the list for trade date T is certainly out by T's open
 
 
 def _f(v: str | None) -> float | None:
@@ -107,3 +111,52 @@ class NseFoBhavcopy(Connector):
         key = ("instrument_id", "trade_date", "expiry")
         return (upsert(conn, "alpha.fo_daily", out["future"], key=key)
                 + upsert(conn, "alpha.option_daily", out["option"], key=key))
+
+
+def parse_fo_ban(text: str) -> tuple[dt.date, list[str]]:
+    """(trade date, banned symbols). The date comes from the file's own header line
+    ('Securities in Ban For Trade Date 26-SEP-2026:'), never from the URL; a file without that
+    header is rejected. Symbols are the last field of each numbered line; 'NIL' means none."""
+    m = BAN_HEADER.search(text)
+    if not m:
+        raise ValueError(f"F&O ban file has no trade-date header: {text[:80]!r}")
+    td = dt.datetime.strptime(m.group(1).title(), "%d-%b-%Y").date()
+    syms = []
+    for line in text[m.end():].splitlines():
+        cells = [c.strip().strip('"') for c in line.split(",") if c.strip()]
+        if len(cells) >= 2 and cells[0].isdigit() and re.fullmatch(r"[A-Z0-9&\-]+", cells[-1].upper()):
+            syms.append(cells[-1].upper())
+    return td, syms
+
+
+class NseFoBan(Connector):
+    name = "nse_fo_secban"
+    description = "NSE F&O ban list: securities whose OI exceeded 95% of the market-wide position limit"
+    health = Health(table="alpha.fo_ban_day", date_column="trade_date", warn_after_sessions=1, fail_after_sessions=3,
+                    fill_rates={"n_banned": 1.0})
+
+    def fetch(self, client: HttpClient, on: dt.date) -> str:
+        resp = client.get(BAN_URL.format(ddmmyyyy=on.strftime("%d%m%Y")), headers={"Referer": "https://www.nseindia.com/"})
+        if resp.status_code == 404:
+            raise NotPublished(f"no F&O ban file for {on}")
+        resp.raise_for_status()
+        return resp.text
+
+    def parse(self, raw: str, on: dt.date) -> list[dict]:
+        td, syms = parse_fo_ban(raw)
+        return [{"trade_date": td, "symbols": syms}]
+
+    def write(self, conn: psycopg.Connection, rows: list[dict], on: dt.date) -> int:
+        resolver = SymbolResolver(conn)
+        n = 0
+        for r in rows:
+            td = r["trade_date"]
+            iids = sorted({i for s in r["symbols"] if (i := resolver.lookup(s, td)) is not None})
+            k = dt.datetime.combine(td, BAN_KNOWABLE, tzinfo=IST)
+            n += upsert(conn, "alpha.fo_ban_day", [{"trade_date": td, "n_banned": len(iids), "source": self.name,
+                                                    "knowable_at": k}], key=("trade_date",))
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM alpha.fo_ban WHERE trade_date = %s", (td,))
+            n += upsert(conn, "alpha.fo_ban", [{"trade_date": td, "instrument_id": i} for i in iids],
+                        key=("trade_date", "instrument_id"), update=())
+        return n

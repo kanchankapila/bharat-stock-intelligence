@@ -239,6 +239,25 @@ USD/INR.
   - `us_10y_chg_5`: the 10-year yield's 5-day change;
   - `usd_broad_ret_5`, `brent_ret_5`, `usdinr_ret_5`: 5-day moves in the dollar, oil and the rupee.
 
+## F&O ban list (`nse_fo_secban`)
+
+NSE publishes a dated daily file, `content/fo/fo_secban_DDMMYYYY.csv`, listing stocks whose
+open interest exceeds 95% of the market-wide position limit. For those stocks only
+position-reducing trades are allowed.
+
+- **Parsing.** The trade date comes from the file's own header ("Securities in Ban For Trade
+  Date …"), not the URL. A file without that header is rejected.
+- **Storage.** Every processed day gets an `alpha.fo_ban_day` row, so a day with no bans is data
+  rather than an empty run, and a day never processed stays unknown. A re-published list
+  replaces that day's names in `alpha.fo_ban`.
+- **Timing.** A ban for trade date T is stamped knowable at 09:00 IST on T.
+- **Features:**
+  - `fo_ban`: the stock is in the ban period;
+  - `fo_ban_days`: consecutive sessions in ban;
+  - `fo_ban_exit`: the first session after the ban ends.
+
+  These are NaN on days no file was processed.
+
 ## Next-session engine (`session/`)
 
 This is a second decision clock. The decision is made at day d's close, and optionally refined

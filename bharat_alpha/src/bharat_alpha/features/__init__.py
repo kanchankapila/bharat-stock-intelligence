@@ -187,6 +187,34 @@ def participant_positioning(conn: psycopg.Connection, idx: pd.DatetimeIndex) -> 
     return out
 
 
+def ban_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
+    """F&O ban status as of each session. A date with no processed ban file is unknown (NaN),
+    not 'not banned'; a date with a file marks every other name 0."""
+    idx = p.close.index
+    days = read_df(conn, "SELECT trade_date, knowable_at FROM alpha.fo_ban_day WHERE trade_date BETWEEN %s AND %s",
+                   (idx.min().date(), idx.max().date()))
+    if days.empty:
+        return {}
+    bans = read_df(conn, "SELECT trade_date, instrument_id FROM alpha.fo_ban WHERE trade_date BETWEEN %s AND %s",
+                   (idx.min().date(), idx.max().date()))
+    known = pd.DatetimeIndex(_known_date(days["knowable_at"]))
+    covered = pd.Series(True, index=known).reindex(idx, fill_value=False)
+    flag = pd.DataFrame(0.0, index=idx, columns=p.close.columns)
+    if not bans.empty:
+        bans["known"] = _known_date(days.set_index("trade_date").loc[bans["trade_date"], "knowable_at"]).to_numpy()
+        hit = bans[bans["known"].isin(idx) & bans["instrument_id"].isin(flag.columns)]
+        for d, i in zip(hit["known"], hit["instrument_id"]):
+            flag.at[d, i] = 1.0
+    flag = flag.where(covered, axis=0)
+    f = flag.fillna(0)
+    run = f.apply(lambda s: s.groupby((s != s.shift()).cumsum()).cumsum())    # consecutive sessions in ban
+    return {
+        "fo_ban": flag,
+        "fo_ban_days": run.where(flag.notna()),
+        "fo_ban_exit": ((flag == 0) & (flag.shift(1) == 1)).astype(float).where(flag.notna()),
+    }
+
+
 def fo_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
     idx = p.close.index
     fo = read_df(conn, """
@@ -501,6 +529,7 @@ def build_features(conn: psycopg.Connection, p: Panel, dates: pd.DatetimeIndex |
     raw: dict[str, pd.DataFrame] = {}
     raw.update(price_features(p))
     raw.update(fo_features(conn, p))
+    raw.update(ban_features(conn, p))
     raw.update(option_features(conn, p))
     raw.update(event_features(conn, p))
     raw.update(earnings_features(conn, p))
