@@ -44,7 +44,9 @@ def test_vol_target_scales_the_book_to_cash():
 def test_costs_suppress_pointless_trades_but_allow_real_ones():
     risk, _ = _risk()
     names = risk.names
-    cfg = PortfolioConfig(sector_cap=1.0, max_weight=0.1, target_vol_annual=1.0, min_weight=0.0)
+    # caps loose enough that the optimum is interior: with weights pinned at max_weight, a
+    # perturbation cannot move them even at zero cost and the control arm proves nothing
+    cfg = PortfolioConfig(sector_cap=1.0, max_weight=0.5, target_vol_annual=1.0, min_weight=0.0)
     liq = pd.Series(1.0, index=names)
     mu = pd.Series(np.linspace(0.03, -0.01, len(names)), index=names)
     first = optimise(mu, risk, 21, pd.Series(dtype=object), liq, None, cfg).weights
