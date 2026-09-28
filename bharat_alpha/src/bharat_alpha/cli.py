@@ -92,6 +92,18 @@ def import_estimates(legacy_dsn: str):
         _print({"rows_written": import_legacy_estimates(conn, legacy)})
 
 
+@app.command("import-shareholding")
+def import_shareholding(legacy_dsn: str):
+    """Import legacy quarterly shareholding patterns, knowable by the SEBI filing deadline."""
+    import psycopg
+
+    from bharat_alpha.db import connect
+    from bharat_alpha.ingest.sources.ownership import import_legacy_shareholding
+
+    with connect() as conn, psycopg.connect(legacy_dsn) as legacy:
+        _print(import_legacy_shareholding(conn, legacy))
+
+
 @app.command("compare-legacy")
 def compare_legacy(legacy_dsn: str, start: str, end: str, horizon: int = 21, timeframe: str = typer.Option(None)):
     """Grade legacy unified_recommendations and this system's published ranking on the same dates."""

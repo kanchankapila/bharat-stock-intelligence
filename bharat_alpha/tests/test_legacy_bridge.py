@@ -1,9 +1,7 @@
 """Ontology-driven legacy bridge: map safety, point-in-time import, evidence screen."""
 import datetime as dt
-import uuid
 
 import numpy as np
-import psycopg
 import pytest
 
 from bharat_alpha.legacy import DEFAULT_ONTOLOGY_ROOT, SUPERSEDED, MapEntry, generate_map, load_ontology
@@ -31,18 +29,6 @@ def test_map_never_enables_labels_leaks_or_model_outputs():
             assert e.knowable.split(":")[0] in ("capture", "timestamp", "eod_plus")
 
 
-@pytest.fixture()
-def legacy_db(db_dsn):
-    name = f"bqa_legacy_{uuid.uuid4().hex[:8]}"
-    base = db_dsn.split("?", 1)[0].rsplit("/", 1)[0]
-    q = ("?" + db_dsn.split("?", 1)[1]) if "?" in db_dsn else ""
-    with psycopg.connect(base + "/postgres" + q, autocommit=True) as c:
-        c.execute(f'CREATE DATABASE "{name}"')
-    conn = psycopg.connect(base + f"/{name}" + q)
-    yield conn
-    conn.close()
-    with psycopg.connect(base + "/postgres" + q, autocommit=True) as c:
-        c.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
 
 
 

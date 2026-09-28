@@ -41,6 +41,7 @@ bqa prepare                                    # suspect flags + corporate-actio
 
 bqa import-provider-ids "$LEGACY_DSN"          # MoneyControl scIds (ambiguous codes dropped)
 bqa import-estimates "$LEGACY_DSN"             # analyst-estimate history, point in time
+bqa import-shareholding "$LEGACY_DSN"          # quarterly ownership, dated by the SEBI filing deadline
 bqa legacy-map generate                        # ontology -> config/legacy_feature_map.yaml (review it)
 bqa legacy-map import "$LEGACY_DSN"            # enabled columns -> alpha.external_fact, point in time
 bqa legacy-map screen 2021-01-01               # admit only fields with measured IC before the test folds

@@ -59,8 +59,16 @@ connector. The least certain field names are in `nse_board_meetings` (`bm_*`).
    India VIX (`nse_index_close`) covers the market level.
 3. **NSE pre-open**. This is a prerequisite for the opening-range intraday module, where the
    legacy's only validated edge lives.
-4. **Shareholding changes**: quarterly, knowable at the filing date, and needs about 8 quarters
-   before it can be graded.
+4. ~~Shareholding changes~~ — history imported 2026-09-28 from the legacy
+   `marketsmojo_shareholding_history` (`bqa import-shareholding`), dated by the SEBI LODR
+   Reg. 31 deadline (quarter end + 21 days) or the fetch date if earlier. Features are levels and
+   quarter-on-quarter changes; grading needs about 8 quarters. **Forward source:** the URL
+   corpus has two more per-stock shareholding routes (both in the `shareholding` family), and
+   `stocks.sapphirebroking.com/api/market/NSE/{symbol}/shareholdings` is preferred because it
+   is keyed by the NSE symbol itself (no provider id to map). It needs the session-cookie
+   handshake in `DATA_FETCHING_GUIDE.md` §3.4, and one live payload capture before a parser is
+   written. The build container can't reach any of the three hosts. The same Sapphire family also
+   has the F&O ban list (`/api/market/ban-list`, backlog-medium).
 
 Each new connector implements `fetch / parse / write`, declares `Health`, joins `CONNECTORS`,
 gets a live test in `tests/test_live_sources.py`, and moves its catalog family to

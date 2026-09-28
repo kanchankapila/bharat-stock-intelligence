@@ -75,3 +75,18 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "live_datasource" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture()
+def legacy_db(db_dsn):
+    """A second, empty database standing in for the legacy platform's Postgres."""
+    name = f"bqa_legacy_{uuid.uuid4().hex[:8]}"
+    base = db_dsn.split("?", 1)[0].rsplit("/", 1)[0]
+    q = ("?" + db_dsn.split("?", 1)[1]) if "?" in db_dsn else ""
+    with psycopg.connect(base + "/postgres" + q, autocommit=True) as c:
+        c.execute(f'CREATE DATABASE "{name}"')
+    conn = psycopg.connect(base + f"/{name}" + q)
+    yield conn
+    conn.close()
+    with psycopg.connect(base + "/postgres" + q, autocommit=True) as c:
+        c.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
