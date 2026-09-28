@@ -172,6 +172,18 @@ def session_train(end: str = typer.Option(None), years: int = 6, promote: bool =
 
 
 @app.command()
+def portfolio(date: str = typer.Option(None), horizon: int = 21, capital: float = typer.Option(..., help="₹ capital")):
+    """Build sized, constrained portfolio targets from a published recommendation list."""
+    from bharat_alpha.db import connect, read_df
+    from bharat_alpha.portfolio.run import build_targets
+
+    with connect() as conn:
+        d = _date(date) or read_df(conn, "SELECT max(as_of_date) d FROM alpha.recommendation WHERE horizon=%s",
+                                   (horizon,)).d[0]
+        _print(build_targets(conn, d, horizon, capital))
+
+
+@app.command()
 def preopen():
     """Capture today's NSE pre-open auction now (use between 09:08 and 09:14 IST)."""
     from bharat_alpha.db import connect

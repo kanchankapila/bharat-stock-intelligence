@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # box: OpenMP threads spin-wait, so oversubscription slows both by far more than 2x.
     model_threads: int = 4
 
+    # Portfolio construction. 0 = do not build sized targets (rankings are still published).
+    portfolio_capital_inr: float = 0.0
+    portfolio_horizon: int = 21
+
     # Self-learning
     hedge_eta: float = 2.0
     hedge_shrink: float = 0.10

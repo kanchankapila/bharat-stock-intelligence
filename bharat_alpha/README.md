@@ -45,9 +45,10 @@ bqa train --horizon 21                         # walk-forward, cost-aware report
 bqa train --horizon 5
 bqa session measure                            # re-measure the capitulation rule, day-level, net of costs
 bqa session train                              # next-session (open->close) model vs the rule, gated
+bqa portfolio --capital 10000000               # sized, constrained targets (or set BQA_PORTFOLIO_CAPITAL_INR)
 bqa daily                                      # one session end to end (incl. next-session picks)
 bqa scheduler &                                # 09:08-09:14 pre-open capture; evenings from 19:00 IST, with catch-up
-bqa serve --host 0.0.0.0                       # /recommendations /stock/{sym} /models /health
+bqa serve --host 0.0.0.0                       # /recommendations /portfolio /stock/{sym} /models /health
 ```
 
 To run everything offline on the synthetic market (this wipes schema `alpha`): `bqa demo`.

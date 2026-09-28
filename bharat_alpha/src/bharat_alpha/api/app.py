@@ -71,6 +71,20 @@ def stock(symbol: str, horizon: int = 21, days: int = Query(60, le=500)):
     return jsonable({"symbol": symbol.upper(), "horizon": horizon, "history": hist.to_dict("records")})
 
 
+@app.get("/portfolio")
+def portfolio(horizon: int = 21, as_of: dt.date | None = None):
+    with connect() as conn:
+        run = read_df(conn, """SELECT * FROM alpha.portfolio_run WHERE horizon=%s AND (%s::date IS NULL OR as_of_date=%s)
+                               ORDER BY as_of_date DESC LIMIT 1""", (horizon, as_of, as_of))
+        if run.empty:
+            raise HTTPException(404, "no portfolio built yet (set BQA_PORTFOLIO_CAPITAL_INR)")
+        r = run.iloc[0].to_dict()
+        pos = read_df(conn, """SELECT s.symbol, t.weight, t.value_inr, t.shares, t.cap_reason FROM alpha.portfolio_target t
+                               JOIN alpha.symbol_history s ON s.instrument_id=t.instrument_id AND s.valid_to IS NULL
+                               WHERE t.run_id=%s ORDER BY t.weight DESC""", (int(r["run_id"]),))
+    return jsonable({"run": r, "positions": pos.to_dict("records")})
+
+
 @app.get("/models")
 def models():
     with connect() as conn:
