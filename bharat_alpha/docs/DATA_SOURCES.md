@@ -75,7 +75,7 @@ options is now **superseded** by `alpha.option_daily`.
 | medium | `mc_global` (12) | global cues (US/Asia close, GIFT Nifty) for the overnight gap | forward-only |
 | medium | `shareholding` (11) | forward ownership collection (history now via the legacy table) | forward-only |
 | medium | `niftytrader_banlist` (5) | F&O ban events | forward-only |
-| medium | `nse_archives_equity_master` (1) | ISIN and listing date for every name | snapshot |
+| ~~medium~~ integrated (`nse_equity_master`) | `nse_archives_equity_master` (1) | ISIN for every mainboard name; merges renames `symbolchange.csv` missed | snapshot |
 
 **Free sources found by web research (2026-09-28).** None of these appeared anywhere in the
 repo. They are cataloged so the audit classifies them when they are wired in. Exchange files

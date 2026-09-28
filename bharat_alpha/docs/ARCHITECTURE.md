@@ -304,6 +304,27 @@ corporate actions, and it is used to check those factors.
   - `adjustments:unexplained` **warns** on a derived factor with no exchange record.
   - With no exchange data in the 45-day window, the check reports "warn", never "pass".
 
+## Instrument identity from the listing master (`nse_equity_master`)
+
+Bhavcopy has no ISIN, so an instrument is known by its symbol. A rename that `symbolchange.csv`
+never recorded therefore splits one company into two instruments, and its history in two.
+NSE's `EQUITY_L.csv` lists every mainboard equity with its ISIN, and the ISIN is the security.
+
+- **ISINs.** Each listed symbol's instrument gets its current ISIN and company name. SME names
+  (SM/ST series) are not in the file.
+- **Missed renames.** When the file lists symbol S with an ISIN that already belongs to another
+  instrument, and that instrument stopped trading before S's instrument started, the two are
+  one company. They are merged exactly as a recorded rename is (`apply_symbol_change`).
+- **Conflicts.** If the two instruments traded at the same time, nothing is merged or moved;
+  the pair is logged.
+- **Merging.** A merge repoints every table with a foreign key to `alpha.instrument`. The list of
+  tables is read from Postgres's catalog, not kept by hand. The hand-kept list covered 6 of 16
+  tables, so a merge failed once any later table (`external_fact`, `option_daily`, `fo_ban`, ...)
+  held a row for the duplicate.
+
+The file is a snapshot with no history. The connector runs in the EOD sequence right after
+`nse_symbol_change`, before other sources resolve symbols.
+
 ## Next-session engine (`session/`)
 
 This is a second decision clock. The decision is made at day d's close, and optionally refined
