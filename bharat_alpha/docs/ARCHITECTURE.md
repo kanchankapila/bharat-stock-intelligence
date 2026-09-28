@@ -181,6 +181,13 @@ research links to the drift that follows a results surprise.
 - **Rescheduled meetings.** If two intimations for one stock fall within 30 days of each
   other, the later-announced one is taken as the meeting that happened.
 
+**Filing times.** The `nse_results_rss` connector collects NSE's financial-results filing feed.
+NSE names each filing attachment `SYMBOL_DDMMYYYYHHMMSS_….pdf`, so the link carries both the
+symbol and the exact submission time. That time pins day 0: a filing before 15:30 IST reacts the
+same day, and one after reacts the next. A filing supersedes any board-meeting intimation for
+that stock within 30 days. The feed keeps only recent items, so this is forward-only
+collection; older results still use the intimation dates.
+
 **Prior evidence.** The legacy harness measured post-earnings drift as underpowered (3 periods,
 t = −1.79), and its `pead_score` showed no edge over 37 dates. These features are therefore
 candidates, not assumptions, and they earn weight only if the gate finds evidence on this

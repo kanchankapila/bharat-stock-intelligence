@@ -313,21 +313,40 @@ EAR_BASE = (25, 5)               # abnormal-volume baseline: sessions -25..-6 be
 RESCHEDULE_DAYS = 30             # two intimations this close for one stock = one meeting, rescheduled
 
 
+MARKET_CLOSE_IST = dt.time(15, 30)
+
+
 def _results_dates(ev: pd.DataFrame) -> pd.DataFrame:
-    """One results date per meeting: when intimations for one stock fall within RESCHEDULE_DAYS
-    of each other, the later-ANNOUNCED one is the meeting that happened."""
-    ev = ev.sort_values(["instrument_id", "event_date"])
-    keep = []
-    for _, g in ev.groupby("instrument_id"):
+    """One reaction date per results announcement.
+
+    An exchange FILING ('results_filed', exact time) wins: filed before the close, the reaction
+    starts that day; filed after, the next day. Otherwise board-meeting intimations are used, and
+    when several for one stock fall within RESCHEDULE_DAYS the later-ANNOUNCED one is the meeting
+    that happened. A filing supersedes every intimation within RESCHEDULE_DAYS of it."""
+    if "event_type" not in ev:
+        ev = ev.assign(event_type="results")
+    filed = ev[ev["event_type"] == "results_filed"].copy()
+    local = pd.to_datetime(filed["knowable_at"], utc=True).dt.tz_convert("Asia/Kolkata")
+    after = local.dt.time >= MARKET_CLOSE_IST
+    filed["event_date"] = local.dt.tz_localize(None).dt.normalize() + pd.to_timedelta(after.astype(int), unit="D")
+    keep = [(int(i), d) for i, d in zip(filed["instrument_id"], filed["event_date"])]
+    pinned: dict[int, list] = {}
+    for i, d in keep:
+        pinned.setdefault(i, []).append(d)
+    ev = ev[ev["event_type"] == "results"].sort_values(["instrument_id", "event_date"])
+    for iid, g in ev.groupby("instrument_id"):
+        near = pinned.get(int(iid), [])
         cluster: list = []
         for r in g.itertuples():
+            if any(abs((r.event_date - d).days) <= RESCHEDULE_DAYS for d in near):
+                continue
             if cluster and (r.event_date - cluster[0].event_date).days > RESCHEDULE_DAYS:
-                keep.append(max(cluster, key=lambda x: x.knowable_at))
+                keep.append((int(iid), max(cluster, key=lambda x: x.knowable_at).event_date))
                 cluster = []
             cluster.append(r)
         if cluster:
-            keep.append(max(cluster, key=lambda x: x.knowable_at))
-    return pd.DataFrame(keep)[["instrument_id", "event_date"]] if keep else ev.iloc[:0]
+            keep.append((int(iid), max(cluster, key=lambda x: x.knowable_at).event_date))
+    return pd.DataFrame(keep, columns=["instrument_id", "event_date"])
 
 
 def earnings_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
@@ -335,8 +354,8 @@ def earnings_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFr
     reaction day (first session on/after the results date) and the next, minus the cross-sectional
     median; it is first usable at the close of day +1 and carried EAR_HOLD sessions. The drift
     that follows a surprise is what it is meant to capture; the gate decides whether it does here."""
-    ev = read_df(conn, "SELECT instrument_id, event_date, knowable_at FROM alpha.corporate_event "
-                       "WHERE event_type = 'results'")
+    ev = read_df(conn, "SELECT instrument_id, event_type, event_date, knowable_at FROM alpha.corporate_event "
+                       "WHERE event_type IN ('results', 'results_filed')")
     if ev.empty:
         return {}
     ev["event_date"] = pd.to_datetime(ev["event_date"])

@@ -69,7 +69,7 @@ options is now **superseded** by `alpha.option_daily`.
 |---|---|---|---|
 | high | `investsights_estimates` (3) | a second analyst-estimate source | forward-only |
 | high | `sensibull` (2) | NIFTY/BANKNIFTY IV history (regime) | yes |
-| high | `nse_rss_results` (1) | exact results-filing time, which pins the earnings reaction day | forward-only |
+| ~~high~~ integrated | `nse_rss_results` (1) | exact results-filing time, which pins the earnings reaction day | forward-only |
 | medium | `trendlyne_options` (198) | options analytics beyond the bhavcopy (e.g. build-up classification) | forward-only |
 | medium | `mc_earnings` (92) | **reported EPS**, the input a standardised surprise (SUE) needs | forward-only |
 | medium | `mc_global` (12) | global cues (US/Asia close, GIFT Nifty) for the overnight gap | forward-only |

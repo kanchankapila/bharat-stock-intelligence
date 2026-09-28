@@ -94,7 +94,8 @@ families:
     path: "RSS/Financial_Results"
     category: results filing timestamps
     pit: forward-only
-    verdict: backlog-high
+    verdict: integrated
+    connector: nse_results_rss
     rationale: >-
       the exact time each results filing was published: pins the earnings reaction day (intraday vs
       after the close) that earn_ear currently brackets with a two-day window; RSS keeps only recent

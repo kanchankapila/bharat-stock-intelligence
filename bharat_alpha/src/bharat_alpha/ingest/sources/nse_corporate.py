@@ -14,6 +14,8 @@ import csv
 import datetime as dt
 import hashlib
 import io
+import re
+import xml.etree.ElementTree as ET
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -27,6 +29,10 @@ from bharat_alpha.timeutil import IST
 SYMBOL_CHANGE_URL = "https://nsearchives.nseindia.com/content/equities/symbolchange.csv"
 BOARD_MEETINGS_URL = "https://www.nseindia.com/api/corporate-board-meetings"
 PIT_URL = "https://www.nseindia.com/api/corporates-pit"
+RESULTS_RSS_URL = "https://nsearchives.nseindia.com/content/RSS/Financial_Results.xml"
+# NSE names filing attachments SYMBOL_DDMMYYYYHHMMSS_<anything>.pdf (seen across the URL corpus):
+# the stamp is the submission time, which is what pins when results became public.
+FILING_LINK = re.compile(r"/corporate/([A-Z0-9&\-]+)_(\d{14})_", re.I)
 _JSON = {"Accept": "application/json, text/plain, */*"}
 
 
@@ -184,3 +190,59 @@ class NseInsiderPit(Connector):
                             "quantity": r["quantity"], "price": r["price"], "party": r["party"],
                             "knowable_at": r["knowable_at"]})
         return upsert(conn, "alpha.deal", out, key=("source", "deal_id"), update=())
+
+
+def parse_results_rss(xml_text: str) -> list[dict]:
+    """One row per results filing: symbol and filing time from the attachment link. Items whose
+    link does not carry the SYMBOL_DDMMYYYYHHMMSS stamp are skipped (their time is unprovable);
+    a document that is not an RSS channel raises."""
+    root = ET.fromstring(xml_text.lstrip("\ufeff"))
+    items = root.findall("./channel/item")
+    if root.tag != "rss" or root.find("channel") is None:
+        raise ValueError(f"not an RSS channel (root <{root.tag}>)")
+    out = []
+    for it in items:
+        link = (it.findtext("link") or "").strip()
+        m = FILING_LINK.search(link)
+        if not m:
+            continue
+        try:
+            filed = dt.datetime.strptime(m.group(2), "%d%m%Y%H%M%S").replace(tzinfo=IST)
+        except ValueError:
+            continue
+        out.append({"symbol": m.group(1).upper(), "filed_at": filed, "link": link,
+                    "title": (it.findtext("title") or "").strip()[:200]})
+    return out
+
+
+class NseResultsRss(Connector):
+    """Forward-only: the feed carries recent filings only, so run it every session."""
+    name = "nse_results_rss"
+    description = "NSE financial-results filing feed: exact filing time per results announcement"
+    per_date = False
+    dedupes_unchanged = True
+    health = Health(table="alpha.corporate_event", date_column="knowable_at", sparse=True,
+                    scope_sql="source = 'nse_results_rss'", warn_after_sessions=5)
+
+    def fetch(self, client: HttpClient, on: dt.date) -> str:
+        resp = client.get(RESULTS_RSS_URL, headers={"Referer": "https://www.nseindia.com/"})
+        resp.raise_for_status()
+        return resp.text
+
+    def parse(self, raw: str, on: dt.date) -> list[dict]:
+        return parse_results_rss(raw)
+
+    def write(self, conn: psycopg.Connection, rows: list[dict], on: dt.date) -> int:
+        res = SymbolResolver(conn)
+        out = {}
+        for r in rows:
+            iid = res.lookup(r["symbol"], r["filed_at"].date())
+            if iid is None:
+                continue
+            key = (iid, r["filed_at"].date())
+            if key not in out or r["filed_at"] < out[key]["knowable_at"]:       # earliest filing that day
+                out[key] = {"source": self.name, "instrument_id": iid, "event_type": "results_filed",
+                            "event_date": r["filed_at"].date(), "knowable_at": r["filed_at"],
+                            "detail": Jsonb({"link": r["link"], "title": r["title"]})}
+        return upsert(conn, "alpha.corporate_event", list(out.values()),
+                      key=("source", "instrument_id", "event_type", "event_date"), update=())
