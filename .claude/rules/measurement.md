@@ -204,7 +204,7 @@ rather than assume. Full narrative for anything here: `docs/measurement-history.
 - **`unified_score` (close-entry, 09-19 run): 5d +0.048/0.522 (n=49,339, 24 dates) · 10d
   +0.068/0.537 (39,461, 19) · 21d +0.049/0.522 (17,263, 8). All LOW-DATA.** Consistent with the
   2026-09-10 open-entry read below (+0.050/+0.064/+0.066 at 18/13/2 dates). The ranker still
-  reads, is still LOW-DATA, and still has no cost-aware backtest.
+  reads, is still LOW-DATA, and had no cost-aware backtest until 2026-09-27 (see below).
 - **Engine grades, close-entry 09-19 (replaces the 09-10 table further down; same conclusion —
   `confluence` carries the ranker):**
 
@@ -218,8 +218,10 @@ rather than assume. Full narrative for anything here: `docs/measurement-history.
   the highest-weighted — no reweighting conclusion. The 21d column is still 8 dates: anecdote only.
 - **Populations that moved:** `confluence_signals` post-reclassification panel is now **23 dates**
   (2026-08-29..09-20, counted live) — **it has cleared the 20-date floor at 5d**; the next
-  open-entry re-grade will be well-powered. `screener_momentum_score` post-reclass: **14 dates**
-  (WAS -> 8) — still under the floor, clears ~2026-09-29/10-06. `stock_futures_oi_history`:
+  open-entry re-grade will be well-powered. `screener_momentum_score` post-reclass: **19 dates**
+  (WAS -> 14; 14 -> 19 live 2026-09-27, counted 2026-08-31..09-25) — ONE session short of the
+  floor, so it clears with the next session, **2026-09-28** (the old ~09-29/10-06 estimate is now
+  pessimistic). `stock_futures_oi_history`:
   **21 dates** (WAS -> 14), 2026-08-21..09-18. `ext_t80_tech_score` since 2026-08-01: **34 dates**
   (WAS -> 17 total at its grading) — **the 20-date floor is now cleared**; an open-entry re-grade
   is warranted (the lead reading was 21d +0.185/0.574 on 17 dates). **Re-grade done 2026-09-11
@@ -229,10 +231,14 @@ rather than assume. Full narrative for anything here: `docs/measurement-history.
 - **`movement_probability` is now GRADED — no edge.** Open-entry 2026-09-11 run on 33/28 dates
   (WAS -> "15 dates, neither gradeable yet"): 5d rank_IC **-0.0116** ("no edge"), 10d **-0.0109**
   ("no edge"), 21d -0.0149 (LOW-DATA, 17 dates). Closed; do not re-run as "highest-value".
-- **`stock_futures_oi_history` graded 2026-09-19 (close-entry, LOW-DATA 13-17 dates):**
-  `basis` 1d **+0.139 / AUC 0.565** (17 dates — the strongest single reading in this table),
-  `basis` 5d +0.036; `oi_change` 5d +0.078/0.532 (13); `oi_pcr` ~0; `rollover_pct` negative at
-  both horizons. All LOW-DATA: basis-1d is a **lead**, not a result.
+- **`stock_futures_oi_history` graded 2026-09-19 (close-entry, LOW-DATA 13-17 dates), RE-GRADED
+  2026-09-26:** `basis` 1d now reads **rank_IC +0.1355, AUC —, 22 dates, eff 22.0 → verdict
+  `USABLE`** (`factor_edge_history`, run 2026-09-26T12:45; the panel is 26 dates, 2026-08-21..09-25).
+  **WAS -> +0.139 / AUC 0.565 on 17 dates, labelled "a lead, not a result".** `basis` 5d +0.0596 (18
+  dates, eff 3.6, LOW-DATA); `oi_change` 5d +0.078/0.532 (13); `oi_pcr` ~0; `rollover_pct` negative
+  at both horizons. The 1d column is the platform's only non-capacity-constrained reading above
+  0.10 with 20+ independent dates — quote it as `USABLE`, not as a lead. Every other column in this
+  table remains LOW-DATA.
 - **`win_probability` re-graded 2026-09-19: 1d +0.025 (73 dates, "no edge") · 5d +0.053 (69,
   LOW-DATA) · 21d +0.070 (53, LOW-DATA).** (WAS -> 0.053/0.056/0.071 on 64/59/48 dates,
   2026-09-13.) Same shape: real 5d/21d IC, verdict unchanged — still fails at 83.4% turnover.
@@ -336,12 +342,44 @@ post-reclass 8→14) plus one NEW finding: most `job_heartbeat` rows are registe
   USABLE; (2) **the panel is MIXED-WEIGHT** — `unified_recommendations` spans 2026-08-10..09-10
   (24 dates, re-counted live 2026-09-10) but the cs/smart_money zeroing landed 2026-08-31, so only
   **8** of those dates were generated under today's weights; a clean post-change panel needs ~12
-  more sessions (**~2026-09-26/29**); (3) **no cost-aware `factor_backtest.py` pass has ever been
-  run on `unified_score`.** An IC of 0.05 is not money — `win_probability` had a real IC too and
+  more sessions (**19 of them now exist — live count 2026-09-27, so the clean post-change panel
+  completes 2026-09-28**); (3) ~~no cost-aware `factor_backtest.py` pass has ever been run on
+  `unified_score`.~~ **FIRST PASS TAKEN 2026-09-27 — see "The ranker, cost-aware" below.**
+  An IC of 0.05 is not money — `win_probability` had a real IC too and
   still failed at 83.4% turnover.
 - **`REGIME_WEIGHTS` re-read live 2026-09-10:** `screener`, `cs` and `smart_money` are **0.0 in all
   five regimes** (BULL / BEAR / HIGH_VOL / CRASH / SIDEWAYS). Nobody has silently reverted the
   shrinks.
+
+### The ranker, cost-aware (2026-09-27)
+
+**The first cost-aware readings ever taken of `unified_score`**, both through `factor_backtest.py`'s
+new `external_score` path (AF-20260927-13 — a table-scored factor was previously unreachable
+because `run_backtest()` only accepts factors computed from the `stock_ohlcv` panel):
+
+| cadence | panel | periods | gross / cost / net per period | universe | net excess | t | one-way turnover | cost drag |
+|---|---|---|---|---|---|---|---|---|
+| 5-session | 2026-08-10..09-25 | **3** (0.06y) | +1.6201 / −0.3367 / +1.2835 | −0.0316 | **+1.315** | (4.49) | 0.673 | **16.97%/yr** |
+| 1-session | 2026-08-01..09-25 | **24** (0.1y) | +0.3283 / −0.1996 / +0.1287 | +0.0536 → +14.44%/yr (`benchmark_sane` true) | **+0.0752** | (0.73) | 0.399 | **50.3%/yr** |
+
+- **Neither run reaches the verdict floor**, and that is the headline. `MIN_PERIODS_FOR_VERDICT = 20`
+  AND `MIN_YEARS_FOR_VERDICT = 1.0` (AF-20260927-14) both apply, so the harness prints
+  `INSUFFICIENT POWER` and refuses a verdict. The 5-session t=4.49 is **three overlapping periods —
+  do not quote it**; the 1-session t=0.73 over 24 periods is the more honest read and says nothing
+  distinguishable from zero net of costs. The verdict floor for this factor is a **full year of
+  ranked sessions**: `unified_recommendations` starts 2026-08-10, so a 5-session-cadence verdict
+  cannot exist before ~**2027-08**. Until then only the turnover/cost-drag figures below are
+  reportable.
+- **What IS readable now: turnover is the binding constraint.** 0.673 one-way per 5 sessions →
+  **16.97%/yr**; 0.399 per session → **50.3%/yr**, at 25bps/side. Before any IC converts to money the
+  ranker must clear a 17–50%/yr cost hurdle, and this is a mechanical property of the holdings, not a
+  return estimate — hence it survives the power gate.
+- **Date the score by `generated_at`, never `computed_at`** (the trap this pass found):
+  `computed_at` is the session the ranking is **for** (the entry session — verified, the batch
+  stamped 2026-09-28 was written 2026-09-25 17:00:01Z), `generated_at` is when the run produced it.
+  Merging on `computed_at` lags every period by one session and re-scores a post-close re-run
+  against its own day.
+
 
 ### Models
 - **`dl` weight PAUSED to 0.0 in all five regimes, 2026-09-13 (user decision, AF-20260913-05).**

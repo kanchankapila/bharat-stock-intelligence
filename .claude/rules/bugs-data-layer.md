@@ -28,7 +28,7 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 
 - **A test that computes its fixture from `date.today()` at MODULE IMPORT and asserts on a
   `date.today()`-dependent result at RUN time fails only when the suite crosses midnight.** Found
-  2026-09-17 (AF-20260917-20): `test_market_regime_fetcher.py` set
+  2026-09-17 (AF-20260917-25 — filed as -20, renumbered 2026-09-27 because the ranker-timeout row also carried -20): `test_market_regime_fetcher.py` set
   `_FUTURE_EXPIRY = date.today() + timedelta(days=10)` at module level; `_fetch_basis_from_nt()`
   annualizes by `365 / (expiry - date.today()).days` and the test hardcodes the 10-day answer
   (`21.973`). The full suite imported at 22:33 and reached that test at **00:12 the next day**, so

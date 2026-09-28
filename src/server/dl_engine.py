@@ -6,6 +6,7 @@ Reads from feature_store, writes to deep_learning_predictions.
 import os
 import sys
 import time
+import gc
 
 # Must be set before torch/cuBLAS initialises
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
@@ -751,9 +752,38 @@ def train_lstm(version: int = 1) -> Dict:
     # We do a single pass through all symbols; for production you can add outer epochs.
     chunk_X, chunk_y5, chunk_y15, chunk_yr5 = [], [], [], []
     total_seqs = 0
+    chunks_skipped_oom = 0
+
+    # CUDA-OOM resilience (AF-20260927-13). This box trains on an 8GB GeForce in WDDM mode,
+    # where the Windows desktop shares VRAM -- mid-run, a kernel can fail with
+    # cudaErrorMemoryAllocation even though the same chunk trained fine an hour earlier
+    # (observed live 2026-09-27 23:09: killed a 2.7h run that had already trained every chunk).
+    # Same trade load_sequences_bounded already makes per symbol: empty the allocator cache and
+    # retry once; a second OOM skips the CHUNK with a loud stderr line instead of aborting a
+    # multi-hour retrain. Non-OOM RuntimeErrors still raise.
+    def _is_cuda_oom(e: Exception) -> bool:
+        return (torch is not None and hasattr(torch.cuda, "OutOfMemoryError")
+                and isinstance(e, torch.cuda.OutOfMemoryError)) \
+            or "out of memory" in str(e).lower()
+
+    def _fit_chunk(X_c, y5_c, y15_c, yr5_c):
+        for attempt in (1, 2):
+            try:
+                _train_one_fold(model, X_c, y5_c, yr5_c, epochs=30, y15=y15_c, scaler=amp_scaler)
+                if DEVICE is not None and DEVICE.type == "cuda":
+                    torch.cuda.empty_cache()  # hand cached blocks back to the WDDM-shared GPU
+                return
+            except RuntimeError as e:
+                if not _is_cuda_oom(e) or attempt == 2:
+                    raise
+                print(f"[DL] CUDA OOM on chunk (attempt {attempt}/2); empty_cache + gc + retry",
+                      file=sys.stderr)
+                if DEVICE is not None and DEVICE.type == "cuda":
+                    torch.cuda.empty_cache()
+                gc.collect()
 
     def _flush_chunk():
-        nonlocal total_seqs
+        nonlocal total_seqs, chunks_skipped_oom
         if not chunk_X:
             return
         X_c   = np.concatenate(chunk_X)
@@ -762,7 +792,18 @@ def train_lstm(version: int = 1) -> Dict:
         yr5_c = np.concatenate(chunk_yr5)
         total_seqs += len(X_c)
         print(f"[DL]   chunk: {len(X_c)} seqs, {X_c.nbytes // 1024 // 1024} MB")
-        _train_one_fold(model, X_c, y5_c, yr5_c, epochs=30, y15=y15_c, scaler=amp_scaler)
+        try:
+            _fit_chunk(X_c, y5_c, y15_c, yr5_c)
+        except RuntimeError as e:
+            if not _is_cuda_oom(e):
+                raise
+            chunks_skipped_oom += 1
+            print(f"[DL] CUDA OOM twice on one chunk -- SKIPPING {len(X_c)} seqs "
+                  f"({chunks_skipped_oom} chunk(s) skipped so far); run continues on the rest",
+                  file=sys.stderr)
+            if DEVICE is not None and DEVICE.type == "cuda":
+                torch.cuda.empty_cache()
+            gc.collect()
         chunk_X.clear(); chunk_y5.clear(); chunk_y15.clear(); chunk_yr5.clear()
 
     # Parallel + time-bounded. Serial per-symbol loading is what made dl-retrain-weekly run
@@ -797,6 +838,10 @@ def train_lstm(version: int = 1) -> Dict:
         return {"error": "no training data"}
 
     print(f"[DL] Total sequences trained: {total_seqs}")
+    if chunks_skipped_oom:
+        print(f"[DL] WARNING: {chunks_skipped_oom} chunk(s) were skipped after repeated CUDA OOM "
+              f"-- the model trained on a reduced universe; the quality gate should judge the "
+              f"candidate accordingly.", file=sys.stderr)
 
     # Walk-forward validation panel. The held-out dimension is TIME, not symbols: these 50
     # names were also in the training universe above, so a symbol split would prove nothing.
