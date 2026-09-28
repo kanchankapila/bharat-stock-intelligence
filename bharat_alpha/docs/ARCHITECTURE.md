@@ -201,6 +201,27 @@ clients. It's split by index/stock futures and calls/puts, and stored in `alpha.
   - the FII figure's 5-day change;
   - FII index-option bias: net calls minus net puts, over gross.
 
+## Reported results (`nse_results`)
+
+A per-stock sweep of NSE's `api/results-comparision` (NIFTY 500 names, in the vendor stage)
+stores reported quarterly EPS, total income and net profit in `alpha.fundamental` under source
+`nse_results`.
+
+- **Strict parsing.** No field name could be verified from the build container (AF-20260928-10),
+  so a payload without `resCmpData`, or a row missing its period end, income, profit or a known
+  EPS key, fails the run instead of writing something half-understood.
+- **Dating.** A quarter is knowable at this engine's own board-meeting results date for that
+  quarter, stamped 23:00 IST because results often come out after hours, so they're used the next
+  session. If there's no such event, it's the SEBI deadline (45 days after quarter end, 60 for
+  March) or the fetch time if earlier.
+- **Re-imports.** The first import of a quarter wins, so later fetches never restamp history.
+- **Features:**
+  - `res_eps_yoy_px`: EPS minus the same quarter a year earlier, over price. This is the
+    seasonal-random-walk surprise.
+  - `res_revenue_yoy`: year-on-year revenue growth.
+
+  A neighbouring quarter is never used as the base.
+
 ## Next-session engine (`session/`)
 
 This is a second decision clock. The decision is made at day d's close, and optionally refined
