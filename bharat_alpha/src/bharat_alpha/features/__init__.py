@@ -188,8 +188,8 @@ def event_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame
 
 def fundamental_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
     fields = ("return_on_equity", "debt_to_equity", "price_to_book", "pe_ratio", "piotroski_score", "revenue_growth")
-    df = read_df(conn, "SELECT instrument_id, field, value, knowable_at FROM alpha.fundamental WHERE field = ANY(%s)",
-                 (list(fields),))
+    df = read_df(conn, "SELECT instrument_id, field, value, knowable_at FROM alpha.fundamental WHERE field = ANY(%s) "
+                       "AND source = 'investsights_fundamentals'", (list(fields),))
     if df.empty:
         return {}
     df["known"] = _known_date(df["knowable_at"])
@@ -203,6 +203,48 @@ def fundamental_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.Dat
         out["fund_earnings_yield"] = 1 / out.pop("fund_pe_ratio").where(lambda x: x > 0)
     if "fund_price_to_book" in out:
         out["fund_book_yield"] = 1 / out.pop("fund_price_to_book").where(lambda x: x > 0)
+    return out
+
+
+REVISION_WINDOW = 63
+
+
+def _asof_panel(df: pd.DataFrame, p: Panel, field: str, max_stale: int = 260) -> pd.DataFrame | None:
+    g = df[df["field"] == field]
+    if g.empty:
+        return None
+    w = g.pivot_table(index="known", columns="instrument_id", values="value", aggfunc="last")
+    w = w.reindex(w.index.union(p.close.index)).sort_index().ffill(limit=max_stale).reindex(p.close.index)
+    return w.reindex(columns=p.close.columns)
+
+
+def estimate_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
+    """Analyst-estimate levels and REVISIONS, point in time (value as known on t vs as known
+    REVISION_WINDOW sessions earlier)."""
+    df = read_df(conn, "SELECT instrument_id, field, value, knowable_at FROM alpha.fundamental "
+                       "WHERE source='mc_estimates'")
+    if df.empty:
+        return {}
+    df["known"] = _known_date(df["knowable_at"])
+    out: dict[str, pd.DataFrame] = {}
+    buy = _asof_panel(df, p, "est_buy_pct")
+    if buy is not None:
+        out["est_buy_pct"] = buy
+        out["est_buy_pct_chg"] = buy - buy.shift(REVISION_WINDOW)
+    n = _asof_panel(df, p, "est_n_analysts")
+    if n is not None:
+        out["est_log_n_analysts"] = np.log1p(n)
+    tgt = _asof_panel(df, p, "est_target_mean")
+    if tgt is not None:
+        out["est_target_upside"] = tgt / p.raw_close - 1       # vendor targets are in unadjusted rupees
+        out["est_target_rev"] = tgt / tgt.shift(REVISION_WINDOW) - 1
+    eps = _asof_panel(df, p, "est_eps_next")
+    if eps is not None:
+        rev = eps / eps.shift(REVISION_WINDOW) - 1
+        # "next period" rolls forward when a period reports; a sign flip or a >100% jump is far
+        # more likely a rollover or a restated base than a revision, so it is unknown, not huge
+        same_sign = np.sign(eps) == np.sign(eps.shift(REVISION_WINDOW))
+        out["est_eps_rev"] = rev.where(same_sign & (rev.abs() <= 1.0))
     return out
 
 
@@ -243,6 +285,7 @@ def build_features(conn: psycopg.Connection, p: Panel, dates: pd.DatetimeIndex |
     raw.update(fo_features(conn, p))
     raw.update(event_features(conn, p))
     raw.update(fundamental_features(conn, p))
+    raw.update(estimate_features(conn, p))
     sel = dates if dates is not None else p.close.index
     m = mask.loc[sel]
     stacked = {}

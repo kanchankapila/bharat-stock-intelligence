@@ -16,7 +16,7 @@ import datetime as dt
 
 import psycopg
 
-from bharat_alpha.db import upsert
+from bharat_alpha.db import read_df, upsert
 from bharat_alpha.ingest.base import Connector, Health
 from bharat_alpha.ingest.http import FetchError, HttpClient
 from bharat_alpha.reference import current_symbols
@@ -75,6 +75,16 @@ class InvestsightsFundamentals(Connector):
 
     def __init__(self, symbols: list[str] | None = None):
         self.symbols = symbols
+
+    def prepare(self, conn: psycopg.Connection, on: dt.date) -> None:
+        if self.symbols is None:
+            # default: every instrument that traded in the last 5 sessions (bare NSE symbols
+            # are InvestSights' native key — live-verified by the legacy fetcher)
+            df = read_df(conn, """SELECT DISTINCT s.symbol FROM alpha.daily_bar b
+                                  JOIN alpha.symbol_history s ON s.instrument_id=b.instrument_id AND s.valid_to IS NULL
+                                  WHERE b.trade_date >= (SELECT min(trade_date) FROM (SELECT trade_date FROM alpha.trading_day
+                                        WHERE trade_date <= %s ORDER BY 1 DESC LIMIT 5) x)""", (on,))
+            self.symbols = sorted(df.symbol)
 
     def fetch(self, client: HttpClient, on: dt.date) -> dict[str, tuple]:
         out = {}

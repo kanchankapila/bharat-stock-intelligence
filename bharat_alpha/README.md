@@ -39,6 +39,8 @@ bqa ingest nse_index_close --start 2021-01-01
 bqa ingest nse_fo_bhavcopy --start 2024-07-01
 bqa prepare                                    # suspect flags + corporate-action factors
 
+bqa import-provider-ids "$LEGACY_DSN"          # MoneyControl scIds (ambiguous codes dropped)
+bqa import-estimates "$LEGACY_DSN"             # analyst-estimate history, point in time
 bqa train --horizon 21                         # walk-forward, cost-aware report, gate
 bqa train --horizon 5
 bqa daily                                      # one session end to end
@@ -63,10 +65,11 @@ RUN_LIVE_DATASOURCE_TESTS=1 pytest tests/test_live_sources.py   # hits NSE / Inv
    `alpha`.
 2. `bqa import-legacy` for history, then `bqa train` for both horizons, then start the
    scheduler.
-3. Let the ledger accumulate at least 20 effective dates (about 100 sessions at h=5). Then
-   compare its realised track record (`/models`, `/recommendations` → `realized_track_record`)
-   with the legacy `unified_recommendations` over the same dates, using the panel spec in
-   `.claude/rules/measurement.md`.
+3. Let the ledger accumulate at least 20 effective dates (about 100 sessions at h=5), then run
+   `bqa compare-legacy "$LEGACY_DSN" <start> <end> --horizon 5`. It grades the legacy
+   `unified_recommendations` and this system's published ranking on the same dates with one
+   harness (open entry, liquidity floor, overlap-corrected IC, cost-aware backtest on a shared
+   calendar, paired test) and prints a verdict, or LOW-DATA if it can't yet tell them apart.
 4. Only then point consumers at `/recommendations`. Two earlier rebuilds (`greenfield/`,
    `bharatquant/`) were never wired in, so a rebuild is not finished until it is running and
    graded in production.

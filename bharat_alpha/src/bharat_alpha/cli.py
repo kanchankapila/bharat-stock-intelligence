@@ -68,6 +68,44 @@ def import_legacy(legacy_dsn: str, start: str, end: str):
         _print(stats)
 
 
+@app.command("import-provider-ids")
+def import_provider_ids(legacy_dsn: str):
+    """Import MoneyControl scIds from the legacy nse_stocks master (ambiguous codes dropped)."""
+    import psycopg
+
+    from bharat_alpha.db import connect
+    from bharat_alpha.reference.provider_ids import import_legacy_mc_ids
+
+    with connect() as conn, psycopg.connect(legacy_dsn) as legacy:
+        _print(import_legacy_mc_ids(conn, legacy))
+
+
+@app.command("import-estimates")
+def import_estimates(legacy_dsn: str):
+    """Import legacy analyst_estimates_history as point-in-time estimate snapshots."""
+    import psycopg
+
+    from bharat_alpha.db import connect
+    from bharat_alpha.ingest.sources.mc_estimates import import_legacy_estimates
+
+    with connect() as conn, psycopg.connect(legacy_dsn) as legacy:
+        _print({"rows_written": import_legacy_estimates(conn, legacy)})
+
+
+@app.command("compare-legacy")
+def compare_legacy(legacy_dsn: str, start: str, end: str, horizon: int = 21, timeframe: str = typer.Option(None)):
+    """Grade legacy unified_recommendations and this system's published ranking on the same dates."""
+    from bharat_alpha.db import connect
+    from bharat_alpha.evaluation.compare import compare, ledger_scores, load_legacy_ranker
+
+    a = load_legacy_ranker(legacy_dsn, _date(start), _date(end), timeframe)
+    with connect() as conn:
+        b = ledger_scores(conn, horizon, _date(start), _date(end))
+        if b.empty:
+            raise typer.BadParameter("no bharat_alpha recommendations in that window yet")
+        _print(compare(conn, a, b, horizon))
+
+
 @app.command()
 def prepare(since: str = typer.Option(None)):
     """Re-flag suspect bars and re-derive corporate-action factors."""

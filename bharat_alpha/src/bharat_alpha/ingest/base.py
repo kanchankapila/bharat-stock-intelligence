@@ -44,6 +44,9 @@ class Connector:
     # "parsed rows, wrote none" means "nothing changed" rather than "write failed".
     dedupes_unchanged: ClassVar[bool] = False
 
+    def prepare(self, conn: psycopg.Connection, on: dt.date) -> None:
+        """Look up whatever fetch needs from the DB (symbol lists, provider ids). Default: nothing."""
+
     def fetch(self, client: HttpClient, on: dt.date) -> Any:
         raise NotImplementedError
 
@@ -78,6 +81,7 @@ def run_connector(
     status, n, detail = "failed", 0, None
     try:
         if raw is None:
+            connector.prepare(conn, on)
             raw = connector.fetch(client or HttpClient(), on)
         rows = connector.parse(raw, on)
         n = connector.write(conn, rows, on) if rows else 0

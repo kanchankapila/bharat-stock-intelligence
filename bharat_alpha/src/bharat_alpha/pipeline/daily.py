@@ -18,7 +18,7 @@ from bharat_alpha.config import get_settings
 from bharat_alpha.db import jsonable, read_df, upsert
 from bharat_alpha.ingest.base import run_connector
 from bharat_alpha.ingest.http import HttpClient
-from bharat_alpha.ingest.registry import CONNECTORS, EOD_SEQUENCE
+from bharat_alpha.ingest.registry import CONNECTORS, EOD_SEQUENCE, VENDOR_SEQUENCE
 from bharat_alpha.learning.adapt import update_adaptive_state
 from bharat_alpha.learning.ledger import predict_and_record
 from bharat_alpha.learning.monitor import (
@@ -67,6 +67,14 @@ def step_ingest(conn: psycopg.Connection, as_of: dt.date, client: HttpClient | N
     if res["nse_bhavcopy"]["status"] not in ("success",):
         raise RuntimeError(f"bhavcopy not ingested for {as_of}: {res['nse_bhavcopy']}")
     return res
+
+
+def step_vendor(conn: psycopg.Connection, as_of: dt.date, client: HttpClient | None = None) -> dict:
+    """Per-stock vendor sweeps. Anything they write after the 19:00 IST cutoff is usable from the
+    NEXT decision date (features._known_date), in backtests and live alike."""
+    client = client or HttpClient()
+    return {name: dict(zip(("status", "rows"), run_connector(conn, CONNECTORS[name](), as_of, client=client)))
+            for name in VENDOR_SEQUENCE}
 
 
 def step_quality(conn: psycopg.Connection, as_of: dt.date) -> dict:
@@ -151,6 +159,8 @@ def run_daily(conn: psycopg.Connection, as_of: dt.date, ingest: bool = True, cli
     for h in s.horizons:
         out[f"monitor_h{h}"] = run_step(conn, f"monitor_h{h}", as_of, lambda h=h: step_monitor_and_retrain(conn, as_of, h), force)
         out[f"publish_h{h}"] = run_step(conn, f"publish_h{h}", as_of, lambda h=h: step_predict_and_publish(conn, as_of, h), force)
+    if ingest:
+        out["vendor"] = run_step(conn, "vendor", as_of, lambda: step_vendor(conn, as_of, client), force)
     checks = run_checks(conn, as_of, s.horizons)
     out["dq"] = {"fail": [c.check_id for c in checks if c.status == "fail"],
                  "warn": [c.check_id for c in checks if c.status == "warn"]}

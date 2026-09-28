@@ -80,12 +80,14 @@ families:
     host: "api\\.moneycontrol\\.com"
     path: "stock/estimates|quarterly-earning/estimates|earnings/estimate-performance|getBrokerResearchReco"
     category: analyst estimates/revisions
-    pit: forward-only
-    verdict: backlog-high
+    pit: forward-only (legacy analyst_estimates_history importable)
+    verdict: integrated
+    connector: mc_estimates
     rationale: >-
-      estimate REVISIONS are the best-documented public-equity signal family and are ungraded here
-      (legacy analyst trio calendar-blocked until ~mid-Oct 2026). Forward-collect daily with
-      knowable_at; grade only after ≥20 effective dates
+      estimate REVISIONS are the best-documented public-equity signal family and were ungraded in
+      legacy. Integrated 2026-09-28 (analyst-rating, price-forecast, earning-forecast); the other
+      URLs in this family (consensus, hits-misses, valuation, broker reco) remain backlog. Grade
+      only after ≥20 effective dates
   - id: mc_earnings
     host: "api\\.moneycontrol\\.com"
     path: "/earnings/|result-calendar"

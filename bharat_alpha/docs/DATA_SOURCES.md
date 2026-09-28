@@ -19,6 +19,7 @@ Two artefacts are the source of truth. Rerun `bqa catalog --urls ../urls.txt` fo
 | `nse_board_meetings` | NSE `/api/corporate-board-meetings` | broadcast timestamp | days to results |
 | `nse_insider_pit` | NSE `/api/corporates-pit` | disclosure timestamp | insider net buying |
 | `investsights_fundamentals` | InvestSights fmp-ratios + growth-metrics | forward-only (stored only when a value changes) | ROE, D/E, E/P, B/P, Piotroski, growth |
+| `mc_estimates` | MoneyControl analyst-rating, price-forecast, earning-forecast (scId from `alpha.provider_id`; ambiguous legacy codes dropped) | forward-only (stored only when a value changes); legacy `analyst_estimates_history` importable via `bqa import-estimates` | buy share and its change, log coverage, target upside, 63-session target and EPS revisions |
 | `legacy_bhavcopy` (bridge) | legacy `nse_universe_history` + `fii_dii_flow` | the same exchange files | a ~5-year bootstrap on day one |
 
 ⚠ **Not live-verified in this build.** The build container's network policy blocked every
@@ -40,17 +41,16 @@ connector. The least certain field names are in `nse_board_meetings` (`bm_*`).
 |---|---|---|
 | rejected | 1,376 | Trendlyne and MoneyControl screener membership (1,331), vendor composite scores, MarketsMojo |
 | superseded | 291 | prices, technicals, sector and OI data that the exchange files already give with full history |
-| backlog-high | 59 | analyst estimates and revisions (MoneyControl, InvestSights), per-stock implied vol and options OI (NiftyTrader), index IV history (Sensibull), NSE pre-open |
+| backlog-high | 33 | per-stock implied vol and options OI (NiftyTrader), index IV history (Sensibull), NSE pre-open, InvestSights estimates |
 | backlog-medium | 73 | earnings surprise, global cues, Trendlyne options analytics, shareholding, F&O ban list |
 | backlog-low | 193 | news text, deals, vendor forecasts, LLM summaries, misc |
-| integrated | 3 | NSE archives (these are mostly absent from urls.txt, which was a vendor capture) |
+| integrated | 29 | MoneyControl estimates (26), NSE archives and InvestSights ratios (3) |
 
 ## Onboarding the backlog, in order
 
-1. **Analyst estimate revisions** (`mc_estimates`, `investsights_estimates`). This is the
-   best-documented public-equity signal family, and it is ungraded here. Forward-collect daily
-   into `alpha.fundamental`-style long rows with `knowable_at`, and add features such as
-   30- and 90-day revisions to EPS and targets. Grade only once there are ≥20 effective dates.
+1. ~~Analyst estimate revisions~~ — integrated 2026-09-28 as `mc_estimates`. The remaining
+   step is grading: once ≥20 effective dates of revisions exist (legacy history helps), the
+   next scheduled retrain decides through the gate whether they earn weight.
 2. **Options implied volatility per stock** (`niftytrader_options`, `trendlyne_options`) and
    **index IV history** (`sensibull`). These cover risk and regime; start collecting early,
    because only forward history exists.
