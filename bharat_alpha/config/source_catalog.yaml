@@ -1,0 +1,316 @@
+# Endpoint-family catalog for every URL in the repo's urls.txt (1,995 lines).
+#
+# `bqa catalog` assigns each URL to the FIRST family whose host + path regex match, and a test
+# (tests/test_catalog.py) fails if any URL in urls.txt is left unassigned — so a new URL added
+# there cannot silently skip triage.
+#
+# verdict:
+#   integrated   — a connector exists in bharat_alpha.ingest.registry
+#   superseded   — the same information arrives from an integrated, more primary source
+#   backlog-high / backlog-medium / backlog-low — worth a connector, ranked by expected value
+#   rejected     — measured (by the legacy platform, with the evidence cited) to add nothing
+#
+# pit: can the endpoint return values AS OF a past date? `forward-only` means history starts the
+#      day collection starts (knowable_at = fetch time), which is honest but slow to accrue.
+#
+# Evidence citations refer to the legacy repo's .claude/rules/measurement.md (dates in brackets).
+
+families:
+  # ── NSE: the primary source for everything it publishes ─────────────────────
+  - id: nse_archives_bhavcopy
+    host: "(nsearchives|archives)\\.nseindia\\.com"
+    path: "sec_bhavdata_full|BhavCopy_NSE_CM"
+    category: prices/volume/delivery
+    pit: true
+    verdict: integrated
+    connector: nse_bhavcopy
+    rationale: exchange record; survivorship-free universe; adjusted prev_close gives corporate-action factors
+  - id: nse_archives_fo
+    host: "(nsearchives|archives)\\.nseindia\\.com"
+    path: "/content/fo/"
+    category: derivatives
+    pit: true
+    verdict: integrated
+    connector: nse_fo_bhavcopy
+    rationale: OI, basis, rollover per expiry; legacy 1d basis lead IC +0.139 (LOW-DATA, 2026-09-19)
+  - id: nse_archives_indices
+    host: "(nsearchives|archives)\\.nseindia\\.com"
+    path: "/content/indices/"
+    category: indices/regime
+    pit: true
+    verdict: integrated
+    connector: nse_index_close
+    rationale: all index closes incl. INDIA VIX and index P/E; constituent lists give industry labels
+  - id: nse_api_fii_dii
+    host: "www\\.nseindia\\.com"
+    path: "fiidiiTradeReact|fii-dii"
+    category: flows
+    pit: forward-only
+    verdict: integrated
+    connector: nse_fii_dii
+    rationale: market-level FII/DII net; legacy history importable via the legacy bridge
+  - id: nse_api_preopen
+    host: "www\\.nseindia\\.com"
+    path: "pre-?open|preOpen"
+    category: intraday/opening
+    pit: forward-only
+    verdict: backlog-high
+    rationale: >-
+      needed for an opening-range intraday model; legacy's only validated edge (capitulation triple:
+      gap_down AND open_eq_low AND top_loser, t=+3.48) lives at the open, capacity ≈ ₹0.46cr/signal-day
+  - id: nse_api_other
+    host: "www\\.nseindia\\.com"
+    path: "."
+    category: misc (market status, CMS, next-api, event notifications)
+    pit: forward-only
+    verdict: backlog-low
+    rationale: operational/status endpoints; event notifications overlap board-meeting connector
+
+  # ── MoneyControl ────────────────────────────────────────────────────────────
+  - id: mc_scanners
+    host: "api\\.moneycontrol\\.com"
+    path: "proscanner|techscanner|technical-trends|technicalpicks|stockscans"
+    category: screener membership
+    pit: forward-only
+    verdict: rejected
+    rationale: >-
+      screener membership = volatility detector: 0 of 1,563 screeners survive FDR; concept tags lift
+      winners AND losers equally (both-tails collapse, 2026-09-04)
+  - id: mc_estimates
+    host: "api\\.moneycontrol\\.com"
+    path: "stock/estimates|quarterly-earning/estimates|earnings/estimate-performance|getBrokerResearchReco"
+    category: analyst estimates/revisions
+    pit: forward-only
+    verdict: backlog-high
+    rationale: >-
+      estimate REVISIONS are the best-documented public-equity signal family and are ungraded here
+      (legacy analyst trio calendar-blocked until ~mid-Oct 2026). Forward-collect daily with
+      knowable_at; grade only after ≥20 effective dates
+  - id: mc_earnings
+    host: "api\\.moneycontrol\\.com"
+    path: "/earnings/|result-calendar"
+    category: earnings results/surprise
+    pit: forward-only
+    verdict: backlog-medium
+    rationale: >-
+      PEAD underpowered in legacy (3 periods, t=-1.79; pead_score no edge on 37 dates). Results
+      DATES are already covered by nse_board_meetings; surprise magnitude needs forward collection
+  - id: mc_deals
+    host: "api\\.moneycontrol\\.com"
+    path: "/deals/"
+    category: bulk/block deals
+    pit: true
+    verdict: backlog-low
+    rationale: alternate for NSE's retired bulk-deals route; legacy smart_money composite no edge (2026-09-06)
+  - id: mc_fno
+    host: "(api|priceapi)\\.moneycontrol\\.com"
+    path: "fno|oiData"
+    category: derivatives
+    pit: forward-only
+    verdict: superseded
+    rationale: nse_fo_bhavcopy carries the same OI/futures data from the exchange with full history
+  - id: mc_global
+    host: "api\\.moneycontrol\\.com"
+    path: "premarket/get-global-marketdata|us-markets"
+    category: global cues
+    pit: forward-only
+    verdict: backlog-medium
+    rationale: overnight global moves (GIFT Nifty, US close) matter for the open, i.e. for an intraday model
+  - id: mc_stockvitals
+    host: "(api|www)\\.moneycontrol\\.com"
+    path: "stockvitals|financial-historical|mcfinancials"
+    category: fundamentals history
+    pit: false
+    verdict: backlog-low
+    rationale: vendor history can be restated retroactively (look-ahead risk); investsights forward collection preferred
+  - id: mc_corporate
+    host: "api\\.moneycontrol\\.com"
+    path: "corporate-action|ecalendar"
+    category: corporate actions/calendar
+    pit: forward-only
+    verdict: superseded
+    rationale: splits/bonus come from bhavcopy prev_close; results dates from nse_board_meetings
+  - id: mc_vendor_composites
+    host: "(api|www)\\.moneycontrol\\.com"
+    path: "mc-insights|mc-essentials|swot|historicalrating|mcinsider|insightPro|ratingPro"
+    category: vendor composite scores
+    pit: forward-only
+    verdict: rejected
+    rationale: vendor composite calls tested no better than own signals (mojo_indigraph t=-0.15..-1.26)
+  - id: mc_news
+    host: "(api|www)\\.moneycontrol\\.com"
+    path: "news|premarket/article"
+    category: news text
+    pit: forward-only
+    verdict: backlog-low
+    rationale: news sentiment IC +0.13 same-day, -0.03 next-day — move is over before an EOD entry
+  - id: mc_derivable
+    host: "(api|www|priceapi|appfeeds)\\.moneycontrol\\.com"
+    path: "."
+    category: prices/technicals/sector/indices/seasonality (derivable)
+    pit: mixed
+    verdict: superseded
+    rationale: every technical/price/sector/seasonality number here is computable from the bhavcopy panel
+
+  # ── Trendlyne ───────────────────────────────────────────────────────────────
+  - id: trendlyne_screeners
+    host: "(kayal\\.)?trendlyne\\.com"
+    path: "screener"
+    category: screener membership
+    pit: forward-only
+    verdict: rejected
+    rationale: 1,054 kayal screener URLs + json-screeners — same both-tails evidence as mc_scanners
+  - id: trendlyne_options
+    host: "smartoptions\\.trendlyne\\.com"
+    path: "."
+    category: options analytics
+    pit: forward-only
+    verdict: backlog-medium
+    rationale: option-chain derived OI/IV per stock; implied vol & skew not derivable from bhavcopy prices
+  - id: trendlyne_other
+    host: "trendlyne\\.com"
+    path: "."
+    category: charts/MF/misc
+    pit: mixed
+    verdict: backlog-low
+    rationale: price charts derivable; MF holdings quarterly (see shareholding family)
+
+  # ── Options / volatility specialists ────────────────────────────────────────
+  - id: niftytrader_options
+    host: "(webapi|api)\\.niftytrader\\.in|www\\.niftytrader\\.in"
+    path: "[Oo]ption|iv-data|max-pain|pcr"
+    category: options OI/PCR/IV
+    pit: forward-only
+    verdict: backlog-high
+    rationale: >-
+      per-stock implied volatility and index PCR/IV are regime/risk features the price panel cannot
+      produce; only forward-collectable, so start collecting early
+  - id: niftytrader_banlist
+    host: "(webapi|api)\\.niftytrader\\.in"
+    path: "ban-list"
+    category: F&O ban events
+    pit: forward-only
+    verdict: backlog-medium
+    rationale: F&O ban entry/exit is a known liquidity event; cheap to collect
+  - id: niftytrader_other
+    host: "(webapi|api)\\.niftytrader\\.in|www\\.niftytrader\\.in"
+    path: "."
+    category: prices/screeners/news (derivable)
+    pit: mixed
+    verdict: superseded
+    rationale: gaps, high-low, OHLC, gainers are all computable from exchange files
+  - id: sensibull
+    host: "oxide\\.sensibull\\.com"
+    path: "iv_chart"
+    category: index implied volatility history
+    pit: true
+    verdict: backlog-high
+    rationale: NIFTY/BANKNIFTY IV history complements INDIA VIX for the regime block
+  - id: sensibull_other
+    host: "oxide\\.sensibull\\.com"
+    path: "."
+    category: flows/instrument meta
+    pit: forward-only
+    verdict: superseded
+    rationale: FII/DII cash is integrated from NSE
+
+  # ── Fundamentals / ownership ────────────────────────────────────────────────
+  - id: investsights_fundamentals
+    host: "investsights\\.in"
+    path: "/fundamentals/[^/]+/(fmp-ratios|growth-metrics|ttm)"
+    category: fundamentals
+    pit: forward-only
+    verdict: integrated
+    connector: investsights_fundamentals
+    rationale: ROE matched Yahoo at Pearson 0.96 when Yahoo's ROE decayed to 6% fill (legacy AF-20260917-07)
+  - id: investsights_estimates
+    host: "investsights\\.in"
+    path: "analyst-estimates|price-target"
+    category: analyst estimates
+    pit: forward-only
+    verdict: backlog-high
+    rationale: second source for estimate revisions (cross-check mc_estimates)
+  - id: investsights_other
+    host: "investsights\\.in"
+    path: "."
+    category: concalls/announcements/sector/market pulse/scores
+    pit: mixed
+    verdict: backlog-low
+    rationale: LLM summaries and vendor scores; sector rotation derivable; fiidii superseded
+  - id: shareholding
+    host: "marketservices\\.indiatimes\\.com|frapi\\.marketsmojo\\.com|stocks\\.sapphirebroking\\.com"
+    path: "shareholding|shareholdings"
+    category: ownership (promoter/FII/DII/pledge)
+    pit: forward-only
+    verdict: backlog-medium
+    rationale: quarterly promoter/FII holding changes; knowable at filing date, needs ≥8 quarters to grade
+  - id: marketsmojo
+    host: "(frapi|www)\\.marketsmojo\\.com"
+    path: "."
+    category: vendor scores/movers
+    pit: forward-only
+    verdict: rejected
+    rationale: mojo_indigraph -0.08..-0.14%/period, no edge
+  - id: trading80
+    host: "(frapi|www)\\.trading80\\.com"
+    path: "."
+    category: vendor technical calls
+    pit: forward-only
+    verdict: backlog-low
+    rationale: ext_t80_tech_score 21d IC +0.176 on 21 dates — a LOW-DATA lead worth re-grading, not a result
+  - id: tickertape
+    host: "(api|analyze\\.api|quotes-api|www)\\.tickertape\\.in"
+    path: "."
+    category: scorecards/estimates/MMI/quotes
+    pit: mixed
+    verdict: backlog-low
+    rationale: estimates/history duplicates mc_estimates; MMI is a sentiment index (regime candidate); scorecards are vendor composites
+  - id: tapetide
+    host: "(api|ai-chat|screener-api)\\.tapetide\\.com"
+    path: "."
+    category: forecasts/scores/quotes
+    pit: forward-only
+    verdict: backlog-low
+    rationale: forecasts overlap estimate families; scores are vendor composites
+  - id: stockedge
+    host: "api\\.stockedge\\.com"
+    path: "."
+    category: delivery/technicals/alerts
+    pit: forward-only
+    verdict: superseded
+    rationale: high-delivery lists come straight from the bhavcopy DELIV_PER column
+  - id: finology
+    host: "ticker\\.finology\\.in"
+    path: "."
+    category: fundamentals/valuation/peers
+    pit: forward-only
+    verdict: superseded
+    rationale: overlaps investsights; peers list superseded by NSE index Industry labels
+  - id: sapphire
+    host: "stocks\\.sapphirebroking\\.com"
+    path: "."
+    category: financials/forensics/breadth
+    pit: forward-only
+    verdict: backlog-low
+    rationale: '"forensics" (accounting red flags) is novel but untested; breadth derivable'
+  - id: indiatimes
+    host: "\\.indiatimes\\.com"
+    path: "."
+    category: ET quotes/screeners/technicals/news
+    pit: forward-only
+    verdict: superseded
+    rationale: prices/technicals derivable, ET screeners fall under the screener-membership rejection
+  - id: ndtvprofit
+    host: "www\\.ndtvprofit\\.com"
+    path: "."
+    category: prices/OI/news/movers
+    pit: forward-only
+    verdict: superseded
+    rationale: F&O basis/OI superseded by nse_fo_bhavcopy; rest derivable or news
+  - id: misc
+    host: "mseindia\\.com|bloombergquint\\.com"
+    path: "."
+    category: other exchange/news
+    pit: forward-only
+    verdict: backlog-low
+    rationale: MSE ticker is illiquid; BloombergQuint route data is page config

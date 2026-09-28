@@ -1179,3 +1179,10 @@ at the "awaiting user decision" point without ever writing them down, which is e
 CLAUDE.md's "Resolve findings, don't just log them" section exists to catch. Logged here before any
 fix work, per the user's explicit instruction this session.
 
+
+## 2026-09-28 — bharat_alpha rewrite session
+
+| ID | Found | Class | Finding | Lane | Status | Immunized | Closed |
+|---|---|---|---|---|---|---|---|
+| AF-20260928-01 | 2026-09-28 | measurement | **`src/server/screener_tenure_mover_analysis.py:148-149` winsorises with the interpolation directions reversed** (`quantile(pct, "lower")` / `quantile(1-pct, "higher")`), so a lone extreme value is NOT clipped. This is the exact class `ml-model-bugs.md` documents; `trade_journal.py:88-89` has the correct form. Found while building `bharat_alpha/labels.py`, whose own negative-controlled test caught the same reversal there first. `measurement.md`'s 2026-09-26 refresh also says "`interpolation='lower'/'higher'`", which may mean the same inversion. | FIX (+ EVIDENCE for any re-grade) | **OPEN — depends on a separate session.** Queued as a suggested task ("Fix inverted winsorization in tenure mover analysis"). Out of scope for a session limited to the new `bharat_alpha/` tree, and the fix requires re-running the gradings it fed, which this container cannot do (no production DB). Unblock: run the queued task against production. | — | — |
+| AF-20260928-02 | 2026-09-28 | data-sources | **`bharat_alpha` connectors are fixture-tested only, not live-verified.** The build container's network policy denied every market-data host (nseindia.com, moneycontrol.com, yahoo, niftytrader: CONNECT 403), so the parsers follow NSE's published formats and the field names the legacy fetchers parsed live. The least certain are `nse_board_meetings` (`bm_*`). | VERIFY | **OPEN — environment-blocked.** Unblock: on a networked host, `RUN_LIVE_DATASOURCE_TESTS=1 pytest bharat_alpha/tests/test_live_sources.py`, then `bqa import-legacy` + `bqa train` against production and record the out-of-fold report here. | — | — |

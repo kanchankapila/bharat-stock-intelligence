@@ -1,0 +1,41 @@
+# Two processes + one database. That's the whole production footprint.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: alpha
+      POSTGRES_PASSWORD: ${BQA_DB_PASSWORD:?set BQA_DB_PASSWORD}
+      POSTGRES_DB: alpha
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "alpha"]
+      interval: 5s
+      retries: 20
+
+  migrate:
+    build: .
+    command: ["bqa", "init-db"]
+    environment: &env
+      BQA_DATABASE_URL: postgresql://alpha:${BQA_DB_PASSWORD}@db:5432/alpha
+    depends_on: {db: {condition: service_healthy}}
+
+  scheduler:
+    build: .
+    command: ["bqa", "scheduler"]
+    environment: *env
+    volumes: [artifacts:/data]
+    depends_on: {migrate: {condition: service_completed_successfully}}
+    restart: unless-stopped
+
+  api:
+    build: .
+    command: ["bqa", "serve", "--host", "0.0.0.0", "--port", "8010"]
+    environment: *env
+    volumes: [artifacts:/data]
+    ports: ["8010:8010"]
+    depends_on: {migrate: {condition: service_completed_successfully}}
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  artifacts:

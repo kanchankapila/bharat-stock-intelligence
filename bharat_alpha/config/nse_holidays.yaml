@@ -1,0 +1,23 @@
+# NSE equity-segment trading holidays, used ONLY to schedule future jobs.
+# Past trading days come from alpha.trading_day (bhavcopy existence), never from this file.
+#
+# ASSUMPTION: the 2026 list below was not re-verified against NSE's holiday circular in this
+# session (nseindia.com was unreachable from the build container). If a date is wrong the
+# only consequence is one job run that records status 'not_published' — no bad data.
+# Refresh each December from https://www.nseindia.com/resources/exchange-communication-holidays
+"2026":
+  - 2026-01-26
+  - 2026-03-03
+  - 2026-03-26
+  - 2026-03-31
+  - 2026-04-03
+  - 2026-04-14
+  - 2026-05-01
+  - 2026-05-28
+  - 2026-06-26
+  - 2026-09-14
+  - 2026-10-02
+  - 2026-10-20
+  - 2026-11-10
+  - 2026-11-24
+  - 2026-12-25
