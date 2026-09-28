@@ -85,7 +85,8 @@ families:
     path: "EQUITY_L\\.csv"
     category: listing master (ISIN, listing date, face value, series)
     pit: forward-only
-    verdict: backlog-medium
+    verdict: integrated
+    connector: nse_equity_master
     rationale: >-
       one file maps every listed equity to its ISIN and listing date; the instrument master derives
       listings from bhavcopy appearance and ISIN only for NIFTY 500 names (nse_constituents), so this

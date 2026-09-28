@@ -11,8 +11,13 @@ import datetime as dt
 
 import psycopg
 
-# Tables holding instrument_id foreign keys; merged when two ids turn out to be one company.
-_FK_TABLES = ("daily_bar", "adjustment", "fo_daily", "corporate_event", "deal", "fundamental")
+
+def _referencing_tables(cur: psycopg.Cursor) -> list[str]:
+    """Every table with a foreign key to alpha.instrument, read from the catalog: a hand-kept list
+    went stale as tables were added, and the merge's DELETE then failed on the forgotten ones."""
+    cur.execute("""SELECT DISTINCT conrelid::regclass::text FROM pg_constraint
+                   WHERE contype = 'f' AND confrelid = 'alpha.instrument'::regclass""")
+    return sorted(r[0] for r in cur.fetchall())
 
 
 class SymbolResolver:
@@ -112,10 +117,12 @@ def apply_symbol_change(conn: psycopg.Connection, old: str, new: str, effective:
         dup = cur.fetchall()
         for other, vf in dup:
             if other != keep:
-                for t in _FK_TABLES:
-                    cur.execute(f"UPDATE alpha.{t} SET instrument_id=%s WHERE instrument_id=%s", (keep, other))
-                cur.execute("UPDATE alpha.symbol_history SET instrument_id=%s WHERE instrument_id=%s", (keep, other))
-                cur.execute("UPDATE alpha.provider_id SET instrument_id=%s WHERE instrument_id=%s", (keep, other))
+                # one provider key per instrument: the surviving id's mapping wins
+                cur.execute("""DELETE FROM alpha.provider_id p WHERE instrument_id = %s AND EXISTS (
+                                   SELECT 1 FROM alpha.provider_id q WHERE q.instrument_id = %s AND q.provider = p.provider)""",
+                            (other, keep))
+                for t in _referencing_tables(cur):
+                    cur.execute(f"UPDATE {t} SET instrument_id=%s WHERE instrument_id=%s", (keep, other))
                 cur.execute(
                     "UPDATE alpha.instrument i SET first_seen = LEAST(i.first_seen, o.first_seen), "
                     "last_seen = GREATEST(i.last_seen, o.last_seen) FROM alpha.instrument o "

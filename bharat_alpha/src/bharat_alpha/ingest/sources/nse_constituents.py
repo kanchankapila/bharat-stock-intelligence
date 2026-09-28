@@ -70,10 +70,16 @@ class NseConstituents(Connector):
                 iid = res.lookup(r["symbol"], on)
                 if iid is None:
                     continue
+                # an ISIN another instrument already holds is left alone (nse_equity_master reconciles those)
+                isin = r["isin"]
+                if isin:
+                    cur.execute("SELECT 1 FROM alpha.instrument WHERE isin = %s AND instrument_id <> %s", (isin, iid))
+                    if cur.fetchone():
+                        isin = None
                 cur.execute("""UPDATE alpha.instrument SET sector = COALESCE(%s, sector),
-                                   isin = COALESCE(isin, %s)
+                                   isin = COALESCE(isin, %s::text)
                                WHERE instrument_id = %s
-                                 AND (sector IS DISTINCT FROM COALESCE(%s, sector) OR (isin IS NULL AND %s IS NOT NULL))""",
-                            (r["industry"], r["isin"], iid, r["industry"], r["isin"]))
+                                 AND (sector IS DISTINCT FROM COALESCE(%s, sector) OR (isin IS NULL AND %s::text IS NOT NULL))""",
+                            (r["industry"], isin, iid, r["industry"], isin))
                 n += cur.rowcount
         return n
