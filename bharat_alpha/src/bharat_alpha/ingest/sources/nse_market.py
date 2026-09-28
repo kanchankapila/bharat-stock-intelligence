@@ -1,4 +1,5 @@
-"""Market-level NSE sources: index closes (incl. INDIA VIX, index P/E), FII/DII cash flows."""
+"""Market-level NSE sources: index closes (incl. INDIA VIX, index P/E), FII/DII cash flows,
+participant-wise F&O open interest (FII / DII / Pro / Client long-short by instrument)."""
 from __future__ import annotations
 
 import csv
@@ -10,10 +11,24 @@ import psycopg
 from bharat_alpha.db import upsert
 from bharat_alpha.ingest.base import Connector, Health, NotPublished
 from bharat_alpha.ingest.http import HttpClient
-from bharat_alpha.timeutil import eod_knowable_at
+from bharat_alpha.timeutil import IST, eod_knowable_at
 
 INDEX_URL = "https://nsearchives.nseindia.com/content/indices/ind_close_all_{ddmmyyyy}.csv"
 FII_DII_URL = "https://www.nseindia.com/api/fiidiiTradeReact"
+PARTICIPANT_OI_URL = "https://nsearchives.nseindia.com/content/nsccl/fao_participant_oi_{ddmmyyyy}.csv"
+# Published in the evening, typically after the EOD bhavcopies. Stamped past the 19:00 same-day
+# cutoff, so a session's positioning is first used at the NEXT session: late-evening publication
+# can never leak into the same evening's decisions.
+PARTICIPANT_OI_KNOWABLE = dt.time(20, 0)
+PARTICIPANT_COLS = {                     # normalised header -> (instrument, side)
+    "future index long": ("fut_idx", "long_oi"), "future index short": ("fut_idx", "short_oi"),
+    "future stock long": ("fut_stk", "long_oi"), "future stock short": ("fut_stk", "short_oi"),
+    "option index call long": ("opt_idx_call", "long_oi"), "option index call short": ("opt_idx_call", "short_oi"),
+    "option index put long": ("opt_idx_put", "long_oi"), "option index put short": ("opt_idx_put", "short_oi"),
+    "option stock call long": ("opt_stk_call", "long_oi"), "option stock call short": ("opt_stk_call", "short_oi"),
+    "option stock put long": ("opt_stk_put", "long_oi"), "option stock put short": ("opt_stk_put", "short_oi"),
+}
+PARTICIPANTS = ("CLIENT", "DII", "FII", "PRO")
 
 
 def _f(v):
@@ -108,3 +123,52 @@ class NseFiiDii(Connector):
         out = [{**r, "source": self.name, "knowable_at": eod_knowable_at(r["trade_date"])} for r in rows]
         return upsert(conn, "alpha.market_flow", out, key=("source", "trade_date", "category"),
                       update=("buy_cr", "sell_cr", "net_cr"))
+
+
+def parse_participant_oi(text: str, on: dt.date) -> list[dict]:
+    """The file opens with a title line; the header is the row whose first cell is 'Client Type'.
+    Headers carry stray tabs/spaces in the wild, so columns are matched on a normalised name,
+    and a file missing any expected column is rejected rather than half-parsed."""
+    lines = text.lstrip("\ufeff").splitlines()
+    start = next((i for i, ln in enumerate(lines) if ln.strip().strip('"').lower().startswith("client type")), None)
+    if start is None:
+        raise ValueError("participant OI file has no 'Client Type' header row")
+    reader = csv.reader(io.StringIO("\n".join(lines[start:])))
+    header = [" ".join((h or "").split()).lower() for h in next(reader)]
+    missing = set(PARTICIPANT_COLS) - set(header)
+    if missing:
+        raise ValueError(f"participant OI file lacks columns {sorted(missing)}")
+    out: dict[tuple, dict] = {}
+    for row in reader:
+        if not row:
+            continue
+        who = row[0].strip().upper()
+        if who not in PARTICIPANTS:
+            continue                                      # TOTAL and trailing notes
+        for col, (inst, side) in PARTICIPANT_COLS.items():
+            rec = out.setdefault((who, inst), {"trade_date": on, "participant": who, "instrument": inst})
+            rec[side] = _f(row[header.index(col)])
+    return list(out.values())
+
+
+class NseParticipantOi(Connector):
+    name = "nse_participant_oi"
+    description = "NSE participant-wise F&O open interest: FII/DII/Pro/Client long & short by instrument (dated archive)"
+    health = Health(table="alpha.participant_oi", date_column="trade_date", warn_after_sessions=1,
+                    fail_after_sessions=3, fill_rates={"long_oi": 0.99, "short_oi": 0.99})
+
+    def fetch(self, client: HttpClient, on: dt.date) -> str:
+        resp = client.get(PARTICIPANT_OI_URL.format(ddmmyyyy=on.strftime("%d%m%Y")),
+                          headers={"Referer": "https://www.nseindia.com/"})
+        if resp.status_code == 404:
+            raise NotPublished(f"no participant OI file for {on}")
+        resp.raise_for_status()
+        return resp.text
+
+    def parse(self, raw: str, on: dt.date) -> list[dict]:
+        return parse_participant_oi(raw, on)
+
+    def write(self, conn: psycopg.Connection, rows: list[dict], on: dt.date) -> int:
+        k = dt.datetime.combine(on, PARTICIPANT_OI_KNOWABLE, tzinfo=IST)
+        return upsert(conn, "alpha.participant_oi", [{**r, "source": self.name, "knowable_at": k} for r in rows],
+                      key=("trade_date", "participant", "instrument"))
