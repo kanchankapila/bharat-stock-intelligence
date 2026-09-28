@@ -42,7 +42,8 @@ families:
     path: "fo_secban"
     category: F&O ban list (security in ban period, OI > 95% MWPL)
     pit: true
-    verdict: backlog-medium
+    verdict: integrated
+    connector: nse_fo_secban
     rationale: dated daily file; supersedes niftytrader/sapphire ban-list routes with history
   - id: nse_security_lists
     host: "(nsearchives|archives|www)\\.nseindia\\.com"
