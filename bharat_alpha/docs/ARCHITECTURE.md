@@ -165,6 +165,21 @@ imports it into `alpha.fundamental` (source `legacy_shareholding`).
 - **Features.** Each category's level, plus its change from the immediately preceding quarter
   (a gap of 80–100 days; a skipped quarter gives no change). Values go stale after 130 sessions.
 
+
+**Forward collection (`mojo_shareholding`).** `ownership.py` is an IMPORTER, not a connector, so
+on its own every `own_*` fact freezes at the legacy table's last quarter. `mojo_shareholding`
+fetches the same MarketsMojo endpoint that produced that table, per stock, keyed on the
+provider's sid from `alpha.provider_id` (ambiguous ids dropped).
+
+- **One series, two sources.** `ownership_features` reads both, and the **first sighting of a
+  (stock, field, quarter) wins across both**: a quarter the legacy import already holds keeps its
+  original `knowable_at`, so a re-run adds quarters and never restamps history.
+- **Same point-in-time rule** as the importer: the SEBI Reg. 31(1)(b) deadline, or the fetch time
+  if earlier.
+- **Response shape** (live-verified by the legacy fetcher, 2026-08-11): the Promoter block nests
+  two series — holding % then pledged % — while every other block's data is a flat list of
+  points. An unexpected extra series is skipped, not guessed at, and a value outside 0-100 is not
+  a holding percentage and is dropped.
 ## Earnings reactions (`earnings_features`)
 
 The engine stores no quarterly reported EPS, so a standardised surprise (SUE) can't be

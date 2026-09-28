@@ -337,8 +337,12 @@ families:
     path: "shareholding|shareholdings"
     category: ownership (promoter/FII/DII/pledge)
     pit: forward-only
-    verdict: backlog-medium
-    rationale: quarterly promoter/FII holding changes; knowable at filing date, needs ≥8 quarters to grade
+    verdict: integrated
+    connector: mojo_shareholding
+    rationale: >-
+      quarterly promoter/FII holding changes, knowable at the SEBI Reg. 31 deadline. The legacy
+      import supplies history; mojo_shareholding carries it forward (first sighting wins across
+      both), which is what stops ownership freezing at the legacy table's last quarter
   - id: marketsmojo
     host: "(frapi|www)\\.marketsmojo\\.com"
     path: "."

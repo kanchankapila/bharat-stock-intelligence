@@ -65,6 +65,21 @@ def test_investsights_estimates_live(conn, client, session):
     eps = read_df(conn, "SELECT value FROM alpha.fundamental WHERE source='investsights_estimates' AND field LIKE 'est_is_eps_fy%%'")
     assert len(eps) >= 3 and eps.value.abs().between(0.01, 10_000).all()
 
+def test_mojo_shareholding_live(conn, client, session):
+    """Settles that the endpoint still answers unauthenticated and still nests the pledge series."""
+    from bharat_alpha.ingest.sources.mojo_shareholding import MojoShareholding
+
+    assert run_connector(conn, CONNECTORS["nse_bhavcopy"](), session, client=client)[0] == "success"
+    with conn.cursor() as cur:            # Neuland Labs: the sid the legacy fetcher verified live
+        cur.execute("""INSERT INTO alpha.provider_id(provider, provider_key, instrument_id, resolution)
+                       SELECT 'marketsmojo', '229993', instrument_id, 'manual' FROM alpha.symbol_history
+                       WHERE symbol = 'NEULANDLAB' LIMIT 1""")
+    status, n = run_connector(conn, MojoShareholding(), session, client=client)
+    assert status == "success" and n >= 5, read_df(conn, "SELECT detail FROM alpha.ingest_run ORDER BY run_id DESC LIMIT 1")
+    held = read_df(conn, """SELECT value FROM alpha.fundamental WHERE source = 'mojo_shareholding'
+                            AND field = 'own_promoter_holding_pct'""")
+    assert len(held) >= 2 and held.value.between(0, 100).all()
+
 def test_nse_results_live(conn, client, session):
     """Settles the results-comparison field names nse_results.parse_results is strict about."""
     from bharat_alpha.ingest.sources.nse_results import NseResults

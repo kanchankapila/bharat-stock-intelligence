@@ -505,11 +505,16 @@ QUARTER_GAP_DAYS = (80, 100)     # a QoQ change needs the IMMEDIATELY preceding 
 
 def ownership_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
     """Quarterly shareholding levels and quarter-on-quarter changes, as of each filing's
-    knowable_at (see ingest.sources.ownership for how that is bounded)."""
+    knowable_at (see ingest.sources.ownership for how that is bounded).
+
+    Both ownership sources feed one series: the legacy import supplies history, mojo_shareholding
+    carries it forward. A (stock, field, quarter) is written by whichever saw it first, so the two
+    never produce competing rows for the same quarter."""
+    from bharat_alpha.ingest.sources.mojo_shareholding import SOURCE as FORWARD
     from bharat_alpha.ingest.sources.ownership import SOURCE
 
     df = read_df(conn, "SELECT instrument_id, field, period_end, value, knowable_at FROM alpha.fundamental "
-                       "WHERE source = %s", (SOURCE,))
+                       "WHERE source IN (%s, %s)", (SOURCE, FORWARD))
     if df.empty:
         return {}
     df = df.sort_values(["instrument_id", "field", "period_end"])
