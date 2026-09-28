@@ -9925,3 +9925,38 @@ Collision: a concurrent session (b453b177) landed the same SECTOR_LABEL fix with
 - **Commits (by explicit path)**: `6e3c91ef` fix(outcome-resolver) — note: also carries the pg_test_support/isolation/ontology files because they were found pre-staged in the index, so AF-20260928-05/06's code lives there while its canonical record is the ledger; `66b28483` fix(vite); `bfa09450` docs(ledger) + moved reports.
 - **Left open, and why**: (1) chatbot restart + WSL/Postgres relocation + host RAM — user decision/window (AF-20260928-03). (2) `bharat-dashboard-plugin.js` working-tree modification is another session's, untouched. (3) `bharat_stock_intelligence_audit_prompt.md` untracked at root — not this session's file, left alone. (4) The outcome_resolver fix is live for future runs without restart (Python spawn-per-run); the next 09:30 IST cron run is the final in-vivo confirmation.
 
+
+## 2026-09-28 (midday) — Cline — traced the intraday scan's impossible-looking log line to a real defect (AF-20260928-07)
+
+Follow-up on the `Scanned: 84 · High-Scoring Stocks: 845 · New Signals: 698` observation raised at the end
+of the morning window. Reviewed at the user's request; **cause proven, one row filed, no code changed.**
+
+- **The line is not a counting bug — it is three denominators in one sentence.** `screenersScanned`
+  (trendlyneScreener.ts:1418) counts *screeners*; `highScoringStocksFound` (L1467) counts
+  *stock-screener pairs* with no cross-screener dedupe. 845 over 84 was never a contradiction. The label is
+  what's wrong, and it misled a reader immediately — which is the actual harm.
+- **The real defect is underneath it: the scan flips its own signals and buries them.** Direction comes from
+  the *screener's* sentiment (L1471, `bearish ? SELL : BUY`), never from the stock, and nothing orders either
+  the screener list (L1384) or the dedupe lookup (L1478) — so for a stock present in both an oversold and a
+  bearish-MACD screener, the platform's stated direction is decided by Postgres row order. Live today:
+  **756 screener rows → 630 `INVALIDATED_CONFLICT` vs 126 `ACTIVE`; 426 symbols touched, 330 (77%) with both
+  a BUY and a SELL the same day; 332 direction flips, 160 of them within 5 minutes** — and with cycles 15 min
+  apart and runs 220–370 s long, a sub-5-minute flip can only be the same pass destroying its own output
+  (ABDL: BUY 04:00:40 UTC from CCI-Oversold, SELL 04:01:46 from MACD-below-signal, both dead).
+- **The tombstone is write-only.** `INVALIDATED_CONFLICT` has exactly one writer and **zero readers**
+  repo-wide: `updateSignalAccuracy` is ACTIVE-only (signals.ts:240) so the 630 rows never resolve, and the
+  30 s sweep (server.ts:270, `LIMIT 50`, no ORDER BY) can only see 126. The displayed count overstates
+  standing output ~5.5x (698 written vs 126 alive at 12:03).
+- **And none of it was ever accountable:** `signal_outcomes` contains only `technical` and `confluence` —
+  **no `signal_source='screener'` rows exist** — so ~750 intraday screener signals/day are emitted, flipped
+  and discarded with zero realized-return evidence. That is consistent with the tracker's own open item
+  "build intraday outcome grading"; worth noting this surface is not just ungraded, it is self-cancelling.
+- **Fix split stated in the ledger rather than applied:** (a) relabel the counters — mechanically safe;
+  (b) direction arbitration — one direction per symbol per day under a stated rule, evaluated *after* the
+  screener loop, and stop invalidating same-pass rows. (b) changes live signal output mid-session and moves
+  any number quoted from this surface, so it needs an owner's call; silently patching it would have been
+  worse than the defect. Immunization proposed (opposite-sentiment fixture + a >20%-invalidated-day monitor),
+  not yet written.
+- **Method note:** every number here is a read-only `scripts/sql.py` query against production plus the
+  emitting source; nothing was restarted, written, or deployed, and the market was open throughout.
+
