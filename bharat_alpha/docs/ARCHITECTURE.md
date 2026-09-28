@@ -287,6 +287,23 @@ question.
   credited as adding and an injected noise column is not. The test fails if the group isn't
   actually dropped, or if the difference is reversed.
 
+## Corporate-action cross-check (`nse_pr_bc`)
+
+Price factors are derived from the exchange's adjusted `PREV_CLOSE`
+(`marketdata.derive_adjustments`). The daily PR bundle's `Bc` file is NSE's own record of
+corporate actions, and it is used to check those factors.
+
+- **Storage.** Each action is stored as a `corporate_event` row: split, bonus, consolidation,
+  dividend, rights or other, with its ex-date and purpose text.
+- **Implied factors.** A factor is computed only when the ratio is unambiguous. BONUS a:b gives
+  b/(a+b), a split from Rs x to Rs y gives y/x, and a consolidation likewise. Anything else is
+  kept as text and never guessed.
+- **Quality checks.**
+  - `adjustments:vs_exchange` **fails** when a recorded split, bonus or consolidation whose
+    ex-date has traded has no derived factor, or one more than 2% off.
+  - `adjustments:unexplained` **warns** on a derived factor with no exchange record.
+  - With no exchange data in the 45-day window, the check reports "warn", never "pass".
+
 ## Next-session engine (`session/`)
 
 This is a second decision clock. The decision is made at day d's close, and optionally refined

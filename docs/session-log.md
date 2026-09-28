@@ -10039,3 +10039,8 @@ of the morning window. Reviewed at the user's request; **cause proven, one row f
 
 - PR #111 (ablation) merged green.
 - **`nse_results_rss`**: NSE `content/RSS/Financial_Results.xml`; symbol and exact submission time from the attachment name `SYMBOL_DDMMYYYYHHMMSS_…pdf` (the pattern seen across the URL corpus), stored as `corporate_event` type `results_filed` (knowable = filing time). `earnings_features` now pins the reaction day to the filing (before 15:30 → same day, after → next) and a filing supersedes board-meeting intimations within 30 days. Forward-only (feed keeps recent items). Negative-controlled (no after-hours shift, no supersede, date-only stamp). Two test-authoring slips caught by the first run: EAR sums daily returns (not compounds), and an unescaped `&` in the XML fixture.
+
+## 2026-09-28 (night, 8) — Claude Code — bharat_alpha: corporate-action cross-check (PR bundle Bc)
+
+- PR #112 (results RSS) merged green.
+- **`nse_pr_bc`**: NSE `archives/equities/bhavcopy/pr/PRddmmyy.zip` → the `Bc*.csv` corporate-action file → `corporate_event` (kind from PURPOSE; implied factor only for unambiguous BONUS a:b, face-value split, consolidation). **`quality.checks.check_adjustments`**: fails when an exchange-recorded split/bonus/consolidation that has traded has no derived factor or one >2% off; warns on derived factors with no exchange record; "warn" (never pass) with no exchange data — first version used "skip", which dq_result's CHECK constraint rejects; only the e2e test (which persists results) caught it. Negative-controlled (missing factor unflagged, inverted bonus ratio, orphans unflagged). Not live-verified (network).
