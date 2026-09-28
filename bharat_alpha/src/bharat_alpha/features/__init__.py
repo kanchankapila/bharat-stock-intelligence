@@ -221,6 +221,66 @@ def event_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame
     return out
 
 
+EAR_HOLD = 63                    # post-announcement drift horizon in the literature: about one quarter
+EAR_BASE = (25, 5)               # abnormal-volume baseline: sessions -25..-6 before the reaction day
+RESCHEDULE_DAYS = 30             # two intimations this close for one stock = one meeting, rescheduled
+
+
+def _results_dates(ev: pd.DataFrame) -> pd.DataFrame:
+    """One results date per meeting: when intimations for one stock fall within RESCHEDULE_DAYS
+    of each other, the later-ANNOUNCED one is the meeting that happened."""
+    ev = ev.sort_values(["instrument_id", "event_date"])
+    keep = []
+    for _, g in ev.groupby("instrument_id"):
+        cluster: list = []
+        for r in g.itertuples():
+            if cluster and (r.event_date - cluster[0].event_date).days > RESCHEDULE_DAYS:
+                keep.append(max(cluster, key=lambda x: x.knowable_at))
+                cluster = []
+            cluster.append(r)
+        if cluster:
+            keep.append(max(cluster, key=lambda x: x.knowable_at))
+    return pd.DataFrame(keep)[["instrument_id", "event_date"]] if keep else ev.iloc[:0]
+
+
+def earnings_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
+    """Earnings-announcement return (EAR) and volume shock. EAR = the stock's return over the
+    reaction day (first session on/after the results date) and the next, minus the cross-sectional
+    median; it is first usable at the close of day +1 and carried EAR_HOLD sessions. The drift
+    that follows a surprise is what it is meant to capture; the gate decides whether it does here."""
+    ev = read_df(conn, "SELECT instrument_id, event_date, knowable_at FROM alpha.corporate_event "
+                       "WHERE event_type = 'results'")
+    if ev.empty:
+        return {}
+    ev["event_date"] = pd.to_datetime(ev["event_date"])
+    ev = _results_dates(ev)
+    idx, cols = p.close.index, p.close.columns
+    ret = p.close / p.close.shift(1) - 1
+    ar = ret.sub(ret.median(axis=1), axis=0).to_numpy()
+    vol = p.volume.where(p.traded).to_numpy(dtype=float)
+    ear = np.full(ar.shape, np.nan)
+    shock = np.full(ar.shape, np.nan)
+    age = np.full(ar.shape, np.nan)
+    pos = {c: j for j, c in enumerate(cols)}
+    for r in ev.sort_values("event_date").itertuples():
+        j = pos.get(r.instrument_id)
+        s0 = int(np.searchsorted(idx.to_numpy(), np.datetime64(r.event_date)))
+        if j is None or s0 < EAR_BASE[0] or s0 + 1 >= len(idx):
+            continue
+        e = ar[s0, j] + ar[s0 + 1, j]
+        if not np.isfinite(e):
+            continue
+        base = np.nanmean(vol[s0 - EAR_BASE[0]:s0 - EAR_BASE[1], j])
+        end = min(s0 + 1 + EAR_HOLD, len(idx))
+        ear[s0 + 1:end, j] = e                       # a later announcement overwrites from its own day +1
+        with np.errstate(divide="ignore", invalid="ignore"):
+            shock[s0 + 1:end, j] = np.log(np.nanmean(vol[s0:s0 + 2, j]) / base)
+        age[s0 + 1:end, j] = np.arange(end - s0 - 1)
+    frame = lambda a: pd.DataFrame(a, index=idx, columns=cols)  # noqa: E731
+    return {"earn_ear": frame(ear), "earn_vol_shock": frame(np.where(np.isfinite(shock), shock, np.nan)),
+            "earn_age": frame(age)}
+
+
 def fundamental_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
     fields = ("return_on_equity", "debt_to_equity", "price_to_book", "pe_ratio", "piotroski_score", "revenue_growth")
     df = read_df(conn, "SELECT instrument_id, field, value, knowable_at FROM alpha.fundamental WHERE field = ANY(%s) "
@@ -343,6 +403,7 @@ def build_features(conn: psycopg.Connection, p: Panel, dates: pd.DatetimeIndex |
     raw.update(fo_features(conn, p))
     raw.update(option_features(conn, p))
     raw.update(event_features(conn, p))
+    raw.update(earnings_features(conn, p))
     raw.update(fundamental_features(conn, p))
     raw.update(estimate_features(conn, p))
     raw.update(ownership_features(conn, p))

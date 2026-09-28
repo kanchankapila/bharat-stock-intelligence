@@ -25,6 +25,42 @@ families:
     verdict: integrated
     connector: nse_bhavcopy
     rationale: exchange record; survivorship-free universe; adjusted prev_close gives corporate-action factors
+  # ── Found by web research 2026-09-28 (free, exchange-published) ─────────────
+  - id: nse_participant_oi
+    host: "(nsearchives|archives)\\.nseindia\\.com"
+    path: "fao_participant_(oi|vol)_"
+    category: participant-wise F&O open interest / volume (FII, DII, Pro, Client)
+    pit: true
+    verdict: backlog-high
+    rationale: >-
+      dated daily archive (fao_participant_oi_DDMMYYYY.csv) of who is long/short index and stock
+      futures and options; FII index-futures positioning is a standard regime input and, unlike the
+      vendor copies, this has years of history, knowable at EOD
+  - id: nse_fo_secban
+    host: "(nsearchives|archives)\\.nseindia\\.com"
+    path: "fo_secban"
+    category: F&O ban list (security in ban period, OI > 95% MWPL)
+    pit: true
+    verdict: backlog-medium
+    rationale: dated daily file; supersedes niftytrader/sapphire ban-list routes with history
+  - id: nse_security_lists
+    host: "(nsearchives|archives|www)\\.nseindia\\.com"
+    path: "delisted\\.csv|namechange\\.csv|symbolchange\\.csv|sec_list\\.csv|fo_mktlots\\.csv"
+    category: delisted / name-change / symbol-change lists, F&O lot sizes
+    pit: forward-only
+    verdict: backlog-medium
+    rationale: >-
+      delisting dates and reasons close the survivorship gap the bhavcopy-appearance rule can only
+      infer; lot sizes turn F&O contracts into rupee exposure
+  - id: nse_pr_bundle
+    host: "(nsearchives|archives|www)\\.nseindia\\.com"
+    path: "/bhavcopy/pr/|/PR\\d{6}\\.zip"
+    category: daily PR bundle (Bc corporate actions, Hl 52-week high/low, Pd price data)
+    pit: true
+    verdict: backlog-medium
+    rationale: >-
+      the exchange's own dated corporate-action file: an independent check on the factors derived
+      from PREV_CLOSE (marketdata.derive_adjustments)
   - id: nse_archives_fo
     host: "(nsearchives|archives)\\.nseindia\\.com"
     path: "/content/fo/"
@@ -41,6 +77,40 @@ families:
     verdict: integrated
     connector: nse_index_close
     rationale: all index closes incl. INDIA VIX and index P/E; constituent lists give industry labels
+  - id: nse_archives_equity_master
+    host: "(nsearchives|archives)\\.nseindia\\.com"
+    path: "EQUITY_L\\.csv"
+    category: listing master (ISIN, listing date, face value, series)
+    pit: forward-only
+    verdict: backlog-medium
+    rationale: >-
+      one file maps every listed equity to its ISIN and listing date; the instrument master derives
+      listings from bhavcopy appearance and ISIN only for NIFTY 500 names (nse_constituents), so this
+      would give every name an ISIN and flag listing-day bars
+  - id: nse_rss_results
+    host: "(nsearchives|archives)\\.nseindia\\.com"
+    path: "RSS/Financial_Results"
+    category: results filing timestamps
+    pit: forward-only
+    verdict: backlog-high
+    rationale: >-
+      the exact time each results filing was published: pins the earnings reaction day (intraday vs
+      after the close) that earn_ear currently brackets with a two-day window; RSS keeps only recent
+      items, so collect from now
+  - id: nse_rss_other
+    host: "(nsearchives|archives)\\.nseindia\\.com"
+    path: "RSS/|/corporate/|/web/|^/$"
+    category: announcements feed and filing PDFs
+    pit: forward-only
+    verdict: backlog-low
+    rationale: filing text; structured facts (results dates, insider trades, actions) already come from NSE APIs
+  - id: nse_archives_mto
+    host: "(nsearchives|archives)\\.nseindia\\.com"
+    path: "/mto/|MTO_"
+    category: security-wise delivery position
+    pit: true
+    verdict: superseded
+    rationale: delivery quantity and % are in the full bhavcopy (nse_archives_bhavcopy)
   - id: nse_api_fii_dii
     host: "www\\.nseindia\\.com"
     path: "fiidiiTradeReact|fii-dii"
@@ -49,17 +119,28 @@ families:
     verdict: integrated
     connector: nse_fii_dii
     rationale: market-level FII/DII net; legacy history importable via the legacy bridge
+  - id: nse_api_results
+    host: "^(www\\.)?nseindia\\.com"
+    path: "corporates-financial-results|results-comparision|financial-results"
+    category: reported quarterly results (revenue, PAT, EPS) with filing broadcast time
+    pit: true
+    verdict: backlog-high
+    rationale: >-
+      the reported numbers a standardised earnings surprise (SUE) needs, from the exchange itself;
+      each filing's broadcast timestamp makes it point-in-time. Fills the gap mc_earnings was listed
+      for, without a vendor
   - id: nse_api_preopen
     host: "www\\.nseindia\\.com"
     path: "pre-?open|preOpen"
     category: intraday/opening
     pit: forward-only
-    verdict: backlog-high
+    verdict: integrated
+    connector: nse_preopen
     rationale: >-
-      needed for an opening-range intraday model; legacy's only validated edge (capitulation triple:
+      captured 09:08-09:14 IST by the scheduler; needed for an opening-range intraday model; legacy's only validated edge (capitulation triple:
       gap_down AND open_eq_low AND top_loser, t=+3.48) lives at the open, capacity ≈ ₹0.46cr/signal-day
   - id: nse_api_other
-    host: "www\\.nseindia\\.com"
+    host: "^(www\\.)?nseindia\\.com"
     path: "."
     category: misc (market status, CMS, next-api, event notifications)
     pit: forward-only
@@ -96,7 +177,8 @@ families:
     verdict: backlog-medium
     rationale: >-
       PEAD underpowered in legacy (3 periods, t=-1.79; pead_score no edge on 37 dates). Results
-      DATES are already covered by nse_board_meetings; surprise magnitude needs forward collection
+      DATES are already covered by nse_board_meetings and the price reaction by earn_ear; REPORTED
+      EPS (for a standardised surprise) is the gap this family would fill, forward-only
   - id: mc_deals
     host: "api\\.moneycontrol\\.com"
     path: "/deals/"
@@ -147,7 +229,7 @@ families:
     verdict: backlog-low
     rationale: news sentiment IC +0.13 same-day, -0.03 next-day — move is over before an EOD entry
   - id: mc_derivable
-    host: "(api|www|priceapi|appfeeds)\\.moneycontrol\\.com"
+    host: "^((api|www|priceapi|appfeeds)\\.)?moneycontrol\\.com"
     path: "."
     category: prices/technicals/sector/indices/seasonality (derivable)
     pit: mixed
@@ -183,10 +265,11 @@ families:
     path: "[Oo]ption|iv-data|max-pain|pcr"
     category: options OI/PCR/IV
     pit: forward-only
-    verdict: backlog-high
+    verdict: superseded
     rationale: >-
-      per-stock implied volatility and index PCR/IV are regime/risk features the price panel cannot
-      produce; only forward-collectable, so start collecting early
+      per-stock IV, skew, term structure and put/call OI/volume are computed from the exchange's own
+      F&O bhavcopy (nse_fo_bhavcopy -> alpha.option_daily) with full history, which this vendor
+      route cannot give
   - id: niftytrader_banlist
     host: "(webapi|api)\\.niftytrader\\.in"
     path: "ban-list"
@@ -254,7 +337,7 @@ families:
     verdict: rejected
     rationale: mojo_indigraph -0.08..-0.14%/period, no edge
   - id: trading80
-    host: "(frapi|www)\\.trading80\\.com"
+    host: "trading80\\.com"
     path: "."
     category: vendor technical calls
     pit: forward-only
@@ -316,3 +399,79 @@ families:
     pit: forward-only
     verdict: backlog-low
     rationale: MSE ticker is illiquid; BloombergQuint route data is page config
+
+  # ── Found by `bqa sources audit` in the codebase (not in urls.txt) ──────────
+  - id: bse
+    host: "bseindia\\.com"
+    path: "."
+    category: BSE filings / announcements
+    pit: forward-only
+    verdict: backlog-low
+    rationale: filings duplicate NSE's for dual-listed names; BSE-only names are outside the NSE universe
+  - id: tradebrains
+    host: "tradebrains\\.in"
+    path: "."
+    category: FII/DII flows, 'superstar' investor portfolios, blog feed
+    pit: forward-only
+    verdict: backlog-low
+    rationale: FII/DII flows come from NSE (nse_fii_dii); superstar holdings are a small, self-selected sample
+  - id: amfi
+    host: "amfiindia\\.com"
+    path: "."
+    category: mutual-fund scheme master / NAV
+    pit: true
+    verdict: backlog-low
+    rationale: stock-level MF holdings arrive via the legacy bridge (stock_mf_holdings); scheme NAVs are not stock features
+  - id: sensibull_events
+    host: "api\\.sensibull\\.com"
+    path: "."
+    category: market event calendar
+    pit: forward-only
+    verdict: backlog-low
+    rationale: macro/event dates (policy, expiry) are a regime-context candidate, not a stock feature
+  - id: yahoo
+    host: "(^|\\.)yahoo\\.com|finnhub\\.io"
+    path: "."
+    category: prices
+    pit: true
+    verdict: superseded
+    rationale: exchange bhavcopies are the primary source for NSE prices (Yahoo, Finnhub quotes)
+  - id: economictimes
+    host: "economictimes\\.com"
+    path: "."
+    category: index lists / quotes
+    pit: forward-only
+    verdict: superseded
+    rationale: index constituents come from NSE (nse_constituents); quotes from bhavcopies
+  - id: news_feeds
+    host: "news\\.google\\.com|cnbctv18\\.com|livemint\\.com|zeebiz\\.com|thehindubusinessline\\.com|investing\\.com|dowjones\\.io|ft\\.com|gnews\\.io|gdeltproject\\.org"
+    path: "."
+    category: news text / RSS
+    pit: forward-only
+    verdict: backlog-low
+    rationale: >-
+      headline text needs an NLP model and a forward-collected, timestamped archive before it can be
+      graded; lowest expected value per effort
+  - id: vendor_misc
+    host: "dalalos\\.in|stockedge\\.com|finology\\.in|niftytrader\\.in"
+    path: "."
+    category: vendor profiles / web front-ends / login
+    pit: forward-only
+    verdict: superseded
+    rationale: company profiles and web pages carry nothing the exchange files and integrated sources lack
+  - id: macro_fred
+    host: "(api\\.|fred\\.)?stlouisfed\\.org"
+    path: "."
+    category: global macro (US yields, dollar index, credit spreads, oil)
+    pit: true
+    verdict: backlog-medium
+    rationale: >-
+      free with an API key and vintage-dated (ALFRED) so it can be point-in-time; overnight US moves
+      are the largest known driver of the NSE opening gap (the next-session engine's input)
+  - id: macro_rbi
+    host: "rbi\\.org\\.in|dbie\\.rbi\\.org\\.in"
+    path: "."
+    category: Indian macro (policy rate, forex reserves, FX reference rates)
+    pit: true
+    verdict: backlog-low
+    rationale: monthly/weekly regime context; slow-moving, few independent observations per year

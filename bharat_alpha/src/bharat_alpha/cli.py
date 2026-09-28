@@ -307,6 +307,22 @@ def catalog(urls: Path = Path("../urls.txt")):
             "unmatched": unmatched})
 
 
+@app.command("sources-audit")
+def sources_audit(repo: Path = Path("..")):
+    """Scan the URL corpus AND every URL in the legacy codebase: data hosts with no catalog verdict,
+    and the data still missing (backlog families, ranked)."""
+    from bharat_alpha.ingest.catalog import audit, load_catalog
+
+    fams = load_catalog()
+    res = audit(repo.resolve(), fams)
+    rank = {"backlog-high": 0, "backlog-medium": 1, "backlog-low": 2}
+    missing = sorted((f for f in fams if f.verdict in rank and res["by_family"].get(f.id)),
+                     key=lambda f: (rank[f.verdict], -res["by_family"][f.id]))
+    _print({"urls": res["urls"], "by_verdict": res["by_verdict"], "unevaluated_hosts": res["unevaluated"],
+            "missing_data": [{"id": f.id, "verdict": f.verdict, "urls": res["by_family"][f.id], "category": f.category,
+                              "pit": f.pit, "why": f.rationale} for f in missing]})
+
+
 @app.command()
 def demo(days: int = 520, stocks: int = 120, signal: float = 1.0, horizon: int = 5):
     """Run the full pipeline on a synthetic market in the configured database (wipes schema alpha)."""
