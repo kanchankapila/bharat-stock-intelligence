@@ -33,6 +33,16 @@ ta==0.11.0
 SQLAlchemy==2.0.49
 psycopg2-binary==2.9.12
 yfinance==1.3.0
+# websockets: required by yfinance (and google-genai / langgraph-sdk / langsmith) and it was
+# declared NOWHERE until 2026-09-27 -- which is why the production venv's `pip check` reported
+# "websockets is not installed" against four installed packages with no manifest to diff
+# against (AF-20260925-01). The pin matches what the venv ACTUALLY RUNS (16.0), same rule as
+# curl_cffi below. MEASURED 2026-09-27: the import works (`import websockets` -> 16.0); what is
+# broken is only the METADATA, destroyed by a failed uninstall that pip could not complete
+# because `websockets/speedups.cp311-win_amd64.pyd` is held open by a running service -- so
+# `pip show` says "not found" while the library is present. Repairable only once that process
+# stops, hence the maintenance window in the AF row; runtime impact today is nil.
+websockets==16.0
 tqdm==4.67.3
 catboost==1.2.10
 lightgbm==4.6.0
@@ -41,7 +51,17 @@ optuna==4.9.0
 # Install CUDA build (CPU build is default on PyPI):
 # python -m pip install "torch==2.9.1+cu128" torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 torch>=2.9.1
+# transformers: DECLARED 5.10.1, INSTALLED 5.9.0 -- one of exactly two remaining
+# manifest-vs-venv differences (AF-20260925-01, re-verified 2026-09-27). Deliberately not
+# "fixed" by editing this pin to match: the venv is the thing that has to move, and a
+# `pip install` into the production venv needs its services stopped first because a locked
+# .pyd from a running process aborts the install. See the AF row for the exact command.
 transformers==5.10.1
+# protobuf: NOT pinned on purpose, and it is the OTHER remaining difference. The venv holds
+# 7.35.0 while opentelemetry-proto 1.42.1 (pulled in by the langchain/OTel stack) requires
+# <7, so `pip check` reports one broken requirement. Resolving it either way rewrites
+# protobuf's compiled extension, which running services hold open -- same maintenance window.
+# Nothing here imports protobuf directly, hence no pin to point at.
 tradingview-ta==3.3.0
 tradingview-screener==3.2.0
 # curl_cffi: 0.16.2 is what production (backend-python/venv) has been RUNNING, and the full
