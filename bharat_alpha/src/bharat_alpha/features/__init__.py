@@ -449,6 +449,47 @@ def estimate_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFr
     return out
 
 
+def _bounded_rev(level: pd.DataFrame) -> pd.DataFrame:
+    rev = level / level.shift(REVISION_WINDOW) - 1
+    return rev.where((np.sign(level) == np.sign(level.shift(REVISION_WINDOW))) & (rev.abs() <= 1.0))
+
+
+def fy_estimate_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
+    """Same-fiscal-year estimate revisions (investsights_estimates). On each date the stock's FY1
+    is the nearest fiscal year whose end is still ahead and that has an estimate; its revision
+    compares THAT year's estimate now with the same year's estimate REVISION_WINDOW sessions
+    earlier, so a year reporting never masquerades as a revision."""
+    from bharat_alpha.ingest.sources.investsights_estimates import SOURCE
+    df = read_df(conn, "SELECT instrument_id, field, period_end, value, knowable_at FROM alpha.fundamental "
+                       "WHERE source = %s AND period_end IS NOT NULL", (SOURCE,))
+    if df.empty:
+        return {}
+    df["known"] = _known_date(df["knowable_at"])
+    df["metric"] = df["field"].str.extract(r"^est_is_(\w+?)_fy\d{4}$", expand=False)
+    dates = p.close.index.to_numpy()
+    out: dict[str, pd.DataFrame] = {}
+    for metric in ("eps", "revenue"):
+        g = df[df["metric"] == metric]
+        if g.empty:
+            continue
+        chosen = pd.DataFrame(False, index=p.close.index, columns=p.close.columns)
+        rev1 = pd.DataFrame(np.nan, index=p.close.index, columns=p.close.columns)
+        lvl1 = rev1.copy()
+        for field in sorted(g["field"].unique(), key=lambda f: f[-4:]):
+            level = _asof_panel(g, p, field)
+            ends = g[g["field"] == field].groupby("instrument_id")["period_end"].max()
+            end = pd.to_datetime(ends.reindex(p.close.columns)).to_numpy()
+            ahead = pd.DataFrame(dates[:, None] < end[None, :], index=p.close.index, columns=p.close.columns)
+            sel = level.notna() & ahead & ~chosen
+            rev1 = rev1.mask(sel, _bounded_rev(level))
+            lvl1 = lvl1.mask(sel, level)
+            chosen |= sel
+        out[f"est_is_{metric}_rev_fy1"] = rev1
+        if metric == "eps":
+            out["est_is_fwd_ey_fy1"] = lvl1 / p.raw_close          # vendor EPS is in current, unadjusted rupees
+    return out
+
+
 OWNERSHIP_MAX_STALE = 130        # a quarter's pattern is superseded ~91 days later; 2 quarters stale = unknown
 QUARTER_GAP_DAYS = (80, 100)     # a QoQ change needs the IMMEDIATELY preceding quarter, not a gap
 
@@ -554,6 +595,7 @@ def build_features(conn: psycopg.Connection, p: Panel, dates: pd.DatetimeIndex |
     raw.update(earnings_features(conn, p))
     raw.update(fundamental_features(conn, p))
     raw.update(estimate_features(conn, p))
+    raw.update(fy_estimate_features(conn, p))
     raw.update(ownership_features(conn, p))
     raw.update(results_features(conn, p))
     from bharat_alpha.legacy.screen import external_panels   # legacy columns that passed the evidence screen

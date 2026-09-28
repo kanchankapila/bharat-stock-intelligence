@@ -67,7 +67,7 @@ options is now **superseded** by `alpha.option_daily`.
 
 | Priority | Family | What it would add | History |
 |---|---|---|---|
-| high | `investsights_estimates` (3) | a second analyst-estimate source | forward-only |
+| ~~high~~ integrated | `investsights_estimates` (3) | a second analyst-estimate source; same-fiscal-year revisions | forward-only |
 | high | `sensibull` (2) | NIFTY/BANKNIFTY IV history (regime) | yes |
 | ~~high~~ integrated | `nse_rss_results` (1) | exact results-filing time, which pins the earnings reaction day | forward-only |
 | medium | `trendlyne_options` (198) | options analytics beyond the bhavcopy (e.g. build-up classification) | forward-only |
