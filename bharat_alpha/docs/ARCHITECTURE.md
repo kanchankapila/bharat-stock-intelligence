@@ -130,6 +130,25 @@ the complexity budget. A new member can be added by implementing `fit/predict` i
   and volatility, breadth above SMA50, cross-sectional dispersion, INDIA VIX level and change,
   NIFTY 500 63-day return, FII/DII 5- and 21-day net flows.
 
+## Options analytics (`options.py`)
+
+Vendor IV feeds only have forward history. The NSE F&O bhavcopy, which `nse_fo_bhavcopy`
+already downloads for futures, also lists every stock option's close, OI and volume, so IV is
+computed from it per (stock, date, expiry) into `alpha.option_daily`:
+
+- **Black-76 on the same-expiry future's settle.** The future is the market's forward, so no
+  dividend or borrow assumption is needed.
+- **Only options that traded that day, on the out-of-the-money side.** An untraded strike's
+  close is stale, and an ITM close is mostly intrinsic value. ATM IV is interpolated in strike
+  to the forward.
+- **Features** (`opt_*`) use the first expiry at least 7 days out, because expiry-week IV is
+  pin and gamma noise: ATM IV, IV minus 21-day realised vol, term slope, 5-day IV change, skew,
+  and log put/call OI and volume ratios. Like every feature, they earn weight only through the
+  gate.
+
+Tests price chains from a known smile, with poisoned ITM closes and a stale untraded strike.
+Each filter (volume, OTM, the expiry roll, the futures forward) is negative-controlled.
+
 ## Next-session engine (`session/`)
 
 This is a second decision clock. The decision is made at day d's close, and optionally refined
@@ -168,7 +187,7 @@ Output goes to `portfolio_run` (the audit trail) and `portfolio_target`, and is 
 | Objective | Maximise the calibrated expected excess (the ledger's `pred_excess`), minus a risk penalty, minus the actual cost of every trade. Solved with SLSQP over the top 3×k names plus current holdings. |
 | Risk model | Ledoit–Wolf shrunk covariance of 126 sessions of daily returns, scaled to the horizon. Names with less than 60 days of history get the median variance rather than being dropped. Beta is measured against the equal-weight universe. |
 | Limits | A per-stock weight cap; a sector cap, where NIFTY 500 industry labels come from `nse_constituents` and an unknown sector is its own capped bucket; a liquidity cap of 2% of ADT relative to capital; gross exposure ≤ 1. Then the book is scaled down to the volatility target, with the rest held as cash. |
-| Turnover | The cost term is the real per-side cost from `costs.py`, so a change of view smaller than the round trip does not trade. Tested: a 0.2% view change gives zero turnover with real costs and 3.4% with zero costs. |
+| Turnover | The cost term is the real per-side cost from `costs.py`, so a change of view smaller than the round trip does not trade. Tested: a 0.2% view change gives 0.15% turnover with real costs and 7.2% with zero costs. |
 | Honesty | Every run records which constraints bound and the ex-ante volatility, beta, turnover and estimated cost. `edge_status` passes through from the recommendations, so an unvalidated ranking yields a book marked unvalidated. |
 
 On the synthetic market (planted edge, heterogeneous volatility, same scores and rebalance
@@ -182,6 +201,27 @@ dates):
 | Turnover per rebalance | 31% | 7.8% |
 
 Absolute levels reflect the planted edge; only the comparison is evidence.
+
+## Legacy data bridge (`legacy/`)
+
+The legacy platform collects far more than this engine ingests first-hand (fundamentals
+history, F&O rollover, MF holdings, ~20 indicator columns in `technical_signals`, and more).
+It also already has the semantic map needed to reuse it: `src/server/ontology/` binds 729
+(table, column) pairs to properties that say whether a column is a feature, a label, a
+probability, a vendor opinion or a leak, and gives each of its 65 tables a card (grain,
+freshness column, publication lag, training verdict). The legacy models don't use any of it:
+`ml_ensemble.py` hand-lists its columns.
+
+The bridge makes that ontology the source of truth, in three steps.
+
+| Step | What it does |
+|---|---|
+| `bqa legacy-map generate` | Writes `config/legacy_feature_map.yaml` from the ontology. It takes only columns the ontology calls trainable (never a label, a probability, text, or a high/target leak), and only from tables whose verdict is `allowed` or `caution`. Each entry says how it becomes point in time: the capture timestamp if the table has one, the row's own timestamp for event tables, or close + the card's publication lag. Tables that aren't one row per (symbol, date) are marked `needs_spec` rather than flattened silently. Legacy model outputs and tables this engine already sources first-hand are listed but disabled. The current map has 197 entries, 38 of them enabled: `technical_signals` 22, `fundamentals_history` 8, `fno_rollover` 7, `stock_mf_holdings` 1. |
+| `bqa legacy-map import <dsn>` | Copies enabled columns into `alpha.external_fact` point in time and change-only, resolving symbols through `symbol_history`. Tables with no capture time are **forward-only** by default: legacy fetchers UPDATE past dates in place, so their history can't prove what was known when. `--allow-history` overrides this, and every fact imported that way is optimistic. |
+| `bqa legacy-map screen <start>` | Grades each imported field with the standard harness: rank IC against forward returns, overlap-corrected, using only labels realised by the cutoff. The cutoff defaults to the start of the first walk-forward test fold, so feature selection never sees the evaluation period. A field is admitted only with coverage of at least 30%, enough effective dates, and a Newey–West |t| at or above the promotion bar. Verdicts go to `alpha.external_screen`. |
+
+`build_features` adds only admitted fields, as `x_<table>__<column>`. A field with no evidence
+never reaches a model, whatever the ontology calls it.
 
 ## What was deliberately left out
 

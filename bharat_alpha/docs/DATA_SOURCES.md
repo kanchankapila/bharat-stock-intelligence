@@ -51,9 +51,12 @@ connector. The least certain field names are in `nse_board_meetings` (`bm_*`).
 1. ~~Analyst estimate revisions~~ — integrated 2026-09-28 as `mc_estimates`. The remaining
    step is grading: once ≥20 effective dates of revisions exist (legacy history helps), the
    next scheduled retrain decides through the gate whether they earn weight.
-2. **Options implied volatility per stock** (`niftytrader_options`, `trendlyne_options`) and
-   **index IV history** (`sensibull`). These cover risk and regime; start collecting early,
-   because only forward history exists.
+2. ~~Options implied volatility per stock~~ — computed 2026-09-28 from the exchange's own F&O
+   bhavcopy (`nse_fo_bhavcopy`'s stock-option rows → `alpha.option_daily`): ATM IV, 95/105
+   skew, term structure, put/call OI and volume, with history back to the UDiFF start. That
+   makes `niftytrader_options` / `trendlyne_options` redundant for IV; they stay in the backlog
+   only for fields the exchange file lacks. **Index IV history** (`sensibull`) is still open —
+   India VIX (`nse_index_close`) covers the market level.
 3. **NSE pre-open**. This is a prerequisite for the opening-range intraday module, where the
    legacy's only validated edge lives.
 4. **Shareholding changes**: quarterly, knowable at the filing date, and needs about 8 quarters

@@ -151,6 +151,41 @@ def fo_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
     }
 
 
+FRONT_MIN_DAYS = 7          # expiry-week IV is dominated by gamma and pin noise: roll to the next
+
+
+def option_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
+    idx = p.close.index
+    od = read_df(conn, """
+        SELECT instrument_id, trade_date, expiry, atm_iv, skew, call_oi, put_oi, call_vol, put_vol
+        FROM alpha.option_daily WHERE trade_date BETWEEN %s AND %s""", (idx.min().date(), idx.max().date()))
+    if od.empty:
+        return {}
+    od["trade_date"] = pd.to_datetime(od["trade_date"])
+    od["expiry"] = pd.to_datetime(od["expiry"])
+    od = od.sort_values(["instrument_id", "trade_date", "expiry"])
+    live = od[(od["expiry"] - od["trade_date"]).dt.days >= FRONT_MIN_DAYS]
+    g = live.groupby(["instrument_id", "trade_date"])
+    front, nxt = g.nth(0).set_index(["instrument_id", "trade_date"]), g.nth(1).set_index(["instrument_id", "trade_date"])
+    tot = od.groupby(["instrument_id", "trade_date"])[["call_oi", "put_oi", "call_vol", "put_vol"]].sum()
+
+    def wide(s: pd.Series) -> pd.DataFrame:
+        return s.unstack("instrument_id").reindex(index=idx)
+
+    iv = wide(front["atm_iv"])
+    rv = _rolling_std(np.log1p(p.close / p.close.shift(1) - 1), 21) * np.sqrt(252)   # same as vol_21, annualised
+    ratio = lambda a, b: np.log(wide(tot[a]).replace(0, np.nan) / wide(tot[b]).replace(0, np.nan))  # noqa: E731
+    return {
+        "opt_iv_atm": iv,
+        "opt_iv_rv": iv - rv.reindex(columns=iv.columns),
+        "opt_iv_term": wide(nxt["atm_iv"]).reindex(columns=iv.columns) - iv,
+        "opt_iv_chg_5": iv - iv.shift(5),
+        "opt_skew": wide(front["skew"]),
+        "opt_pcr_oi": ratio("put_oi", "call_oi"),
+        "opt_pcr_vol": ratio("put_vol", "call_vol"),
+    }
+
+
 def event_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
     """Days to the next announced results date, using only announcements knowable by t."""
     idx = p.close.index
@@ -283,9 +318,13 @@ def build_features(conn: psycopg.Connection, p: Panel, dates: pd.DatetimeIndex |
     raw: dict[str, pd.DataFrame] = {}
     raw.update(price_features(p))
     raw.update(fo_features(conn, p))
+    raw.update(option_features(conn, p))
     raw.update(event_features(conn, p))
     raw.update(fundamental_features(conn, p))
     raw.update(estimate_features(conn, p))
+    from bharat_alpha.legacy.screen import external_panels   # legacy columns that passed the evidence screen
+
+    raw.update(external_panels(conn, p, only_admitted=True))
     sel = dates if dates is not None else p.close.index
     m = mask.loc[sel]
     stacked = {}
