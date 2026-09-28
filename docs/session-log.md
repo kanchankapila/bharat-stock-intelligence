@@ -10029,3 +10029,8 @@ of the morning window. Reviewed at the user's request; **cause proven, one row f
 
 - PR #109 (FRED global cues) merged green. NSE/FRED still CONNECT 403 from this container.
 - **`nse_fo_secban`**: dated `content/fo/fo_secban_DDMMYYYY.csv` → `alpha.fo_ban_day` (every processed day, n_banned) + `alpha.fo_ban` (migration 0008). Trade date from the file header, not the URL; no-ban days recorded as data; unprocessed days stay NaN; a re-published list replaces the day. Knowable 09:00 IST on the trade date. Features `fo_ban`, `fo_ban_days`, `fo_ban_exit`. Negative-controlled (URL date, unprocessed=0, no replace on re-run — the first attempt at the last control broke syntax instead of testing, redone).
+
+## 2026-09-28 (night, 6) — Claude Code — bharat_alpha: feature-group ablation
+
+- Checked whether NSE `delisted.csv` was needed for survivorship: no — `labels.forward_returns` already exits names that stop trading at the last traded close (and a name that cannot be entered never is). Left in the backlog.
+- **`modeling/ablation.py` + `bqa ablate`**: re-runs the walk-forward OOF training without each feature group (prefix-mapped: delivery, options, futures, fo_ban, earnings_reaction, reported_results, estimates, fundamentals, ownership, events, legacy_bridge, participant_oi, cash_flows, global_cues, market_context, price) and reports the paired per-date IC delta with a Newey–West t → adds / hurts / no evidence. With nine new source groups landing, this is how each earns (or loses) its place instead of riding along inside a passing gate. Test: on the synthetic market the delivery group (where the planted alpha lives) is credited, an injected noise column is not; negative-controlled (group not actually dropped; reversed difference).

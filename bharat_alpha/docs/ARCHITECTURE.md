@@ -258,6 +258,28 @@ position-reducing trades are allowed.
 
   These are NaN on days no file was processed.
 
+## Feature-group ablation (`bqa ablate`)
+
+The promotion gate judges the whole model, so a data source that adds nothing, or quietly
+hurts, rides along with the ones that work. `modeling/ablation.py` answers the per-source
+question.
+
+- **Groups.** Every feature column is assigned to a group by prefix: delivery, options,
+  futures, F&O ban, earnings reaction, reported results, estimates, fundamentals, ownership,
+  events, legacy bridge, participant OI, cash flows, global cues, market context, and price
+  (everything else).
+- **Method.** The walk-forward out-of-fold training is rerun without each group. The per-date
+  rank IC of the full model is compared with the ablated model on the same dates, using a
+  Newey–West t with lag h − 1.
+- **Verdicts.** A group **adds** when the IC gain has t ≥ the promotion bar, **hurts** when the
+  loss has t ≤ −the bar, and otherwise shows **no evidence**. No evidence is the expected verdict
+  for a source that has only just started accruing history.
+- **Caveat.** Ablation measures marginal value given the other groups. Two groups carrying the
+  same information can each show no evidence, while removing both would hurt.
+- **Test.** On the synthetic market, the group carrying the planted signal (delivery %) is
+  credited as adding and an injected noise column is not. The test fails if the group isn't
+  actually dropped, or if the difference is reversed.
+
 ## Next-session engine (`session/`)
 
 This is a second decision clock. The decision is made at day d's close, and optionally refined
