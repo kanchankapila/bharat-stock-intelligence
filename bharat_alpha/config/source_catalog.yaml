@@ -59,7 +59,8 @@ families:
     path: "/bhavcopy/pr/|/PR\\d{6}\\.zip"
     category: daily PR bundle (Bc corporate actions, Hl 52-week high/low, Pd price data)
     pit: true
-    verdict: backlog-medium
+    verdict: integrated
+    connector: nse_pr_bc
     rationale: >-
       the exchange's own dated corporate-action file: an independent check on the factors derived
       from PREV_CLOSE (marketdata.derive_adjustments)

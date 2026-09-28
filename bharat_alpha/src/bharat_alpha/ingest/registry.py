@@ -10,6 +10,7 @@ from bharat_alpha.ingest.sources.nse_constituents import NseConstituents
 from bharat_alpha.ingest.sources.nse_corporate import NseBoardMeetings, NseInsiderPit, NseResultsRss, NseSymbolChange
 from bharat_alpha.ingest.sources.nse_fo import NseFoBan, NseFoBhavcopy
 from bharat_alpha.ingest.sources.nse_market import NseFiiDii, NseIndexClose, NseParticipantOi
+from bharat_alpha.ingest.sources.nse_pr import NsePrBundle
 from bharat_alpha.ingest.sources.nse_preopen import NsePreopen
 from bharat_alpha.ingest.sources.nse_results import NseResults
 
@@ -17,13 +18,14 @@ from bharat_alpha.ingest.sources.nse_results import NseResults
 CONNECTORS: dict[str, type[Connector]] = {
     c.name: c
     for c in (
-        NseBhavcopy, NseSymbolChange, NseFoBhavcopy, NseIndexClose, NseFiiDii, NseParticipantOi, NseFoBan,
+        NseBhavcopy, NseSymbolChange, NseFoBhavcopy, NseIndexClose, NseFiiDii, NseParticipantOi, NseFoBan, NsePrBundle,
         NseBoardMeetings, NseInsiderPit, NseResultsRss, InvestsightsFundamentals, McEstimates, NsePreopen, NseConstituents, NseResults, FredSeries,
     )
 }
 
 EOD_SEQUENCE = ("nse_bhavcopy", "nse_symbol_change", "nse_fo_bhavcopy", "nse_index_close",
-                "nse_fii_dii", "nse_participant_oi", "nse_fo_secban", "nse_board_meetings", "nse_insider_pit", "nse_results_rss")
+                "nse_fii_dii", "nse_participant_oi", "nse_fo_secban", "nse_pr_bc", "nse_board_meetings", "nse_insider_pit",
+                "nse_results_rss")
 # Per-stock vendor sweeps (~2 requests x ~2,000 names): run as their own step after EOD so a
 # slow vendor cannot delay publication. Failures here never block the DAG.
 VENDOR_SEQUENCE = ("mc_estimates", "investsights_fundamentals", "nse_constituents", "nse_results", "fred_macro")

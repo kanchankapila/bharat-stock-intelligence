@@ -38,7 +38,7 @@ def test_bhavcopy_live(conn, client, session):
 
 
 @pytest.mark.parametrize("name", ["nse_fo_bhavcopy", "nse_index_close", "nse_fii_dii", "nse_participant_oi",
-                                  "nse_fo_secban", "nse_results_rss",
+                                  "nse_fo_secban", "nse_results_rss", "nse_pr_bc",
                                   "nse_board_meetings",
                                   "nse_insider_pit", "nse_symbol_change"])
 def test_connector_live(conn, client, session, name):
