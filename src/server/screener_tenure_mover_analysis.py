@@ -140,13 +140,15 @@ def load_memberships() -> pd.DataFrame:
 
 
 def winsorize(s: pd.Series, pct: float = 0.01) -> pd.Series:
-    """interpolation='higher'/'lower' -- the linear default does NOT clip a lone outlier
+    """quantile(pct, 'higher') / quantile(1-pct, 'lower') -- the linear default does NOT clip a lone outlier
     (logged in ml-model-bugs.md: it clips to ~1% of the way toward it and the mean still
     blows out)."""
     if s.empty:
         return s
-    lo = s.quantile(pct, interpolation="lower")
-    hi = s.quantile(1 - pct, interpolation="higher")
+    # cutoffs are OBSERVED values moved INWARD: 'higher' for the low tail, 'lower' for the
+    # high tail. The reverse returns the outlier itself as the cutoff and clips nothing.
+    lo = s.quantile(pct, interpolation="higher")
+    hi = s.quantile(1 - pct, interpolation="lower")
     return s.clip(lo, hi)
 
 
@@ -195,8 +197,10 @@ def analyse(top_n: int, min_adt_cr: float) -> None:
         if len(day) < top_n * 5:          # need a real cross-section, not a stub day
             continue
         day["ret_w"] = winsorize(day["ret"])
-        top = set(day.nlargest(top_n, "ret_w")["symbol"])
-        bot = set(day.nsmallest(top_n, "ret_w")["symbol"])
+        # winsorising ties the top/bottom ~1% at the cutoff; once that exceeds top_n, nlargest
+        # would pick among the tie by row order, so break ties on the raw return
+        top = set(day.nlargest(top_n, ["ret_w", "ret"])["symbol"])
+        bot = set(day.nsmallest(top_n, ["ret_w", "ret"])["symbol"])
         universe = set(day["symbol"])
 
         # Screener state STRICTLY as of the latest snapshot BEFORE d (no same-day leakage).
