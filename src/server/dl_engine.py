@@ -754,7 +754,7 @@ def train_lstm(version: int = 1) -> Dict:
     total_seqs = 0
     chunks_skipped_oom = 0
 
-    # CUDA-OOM resilience (AF-20260927-13). This box trains on an 8GB GeForce in WDDM mode,
+    # CUDA-OOM resilience (AF-20260927-20). This box trains on an 8GB GeForce in WDDM mode,
     # where the Windows desktop shares VRAM -- mid-run, a kernel can fail with
     # cudaErrorMemoryAllocation even though the same chunk trained fine an hour earlier
     # (observed live 2026-09-27 23:09: killed a 2.7h run that had already trained every chunk).

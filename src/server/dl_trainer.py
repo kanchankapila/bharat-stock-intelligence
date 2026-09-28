@@ -107,7 +107,7 @@ class _StepTimer:
         # Error-status step lines go to STDERR, not stdout: pythonRunner's non-zero-exit error
         # row (job_run_history.error / the log's stderrSnippet) carries only stderr, so a
         # step-level failure reason printed to stdout is invisible post-mortem. Observed live
-        # 2026-09-27 (AF-20260927-13): train_lstm errored after 170min and the job's recorded
+        # 2026-09-27 (AF-20260927-20): train_lstm errored after 170min and the job's recorded
         # error was nothing but benign torch warnings -- the actual exception text (printed
         # here and in retrain_models()'s handler, both to stdout) was unrecoverable.
         print(f"[TRAINER] step {status}: {self.name} at {finished_at} (UTC), took {duration:.1f}s",
@@ -293,7 +293,7 @@ def retrain_models(trigger: str = "scheduled") -> dict:
             try:
                 metrics = dl.train_lstm(version=new_version)
             except RuntimeError as e:
-                # CUDA-OOM net ABOVE the chunk-level guard (AF-20260927-13): the 2026-09-28 02:19
+                # CUDA-OOM net ABOVE the chunk-level guard (AF-20260927-20): the 2026-09-28 02:19
                 # IST failure escaped train_lstm from a site the per-chunk retry/skip never
                 # covered (no "[DL] CUDA OOM on chunk" line in its stderr). On WDDM, VRAM is
                 # shared with the desktop and allocations can fail with cudaErrorMemoryAllocation
@@ -368,7 +368,7 @@ def retrain_models(trigger: str = "scheduled") -> dict:
         result["error"] = str(e)
         # STDERR, not stdout: this is the only trace of WHY the run failed -- pythonRunner's
         # rejection message (-> job_run_history.error) carries stderr only. Lost to stdout once
-        # already (AF-20260927-13: the 2026-09-27 train_lstm failure's exception text is
+        # already (AF-20260927-20: the 2026-09-27 train_lstm failure's exception text is
         # unrecoverable because this print went to stdout). The TRACEBACK too: str(e) alone
         # names the error but not the LINE -- the 2026-09-28 CUDA-OOM recurrence escaped
         # train_lstm from a site the chunk-level guard never covered and without a traceback

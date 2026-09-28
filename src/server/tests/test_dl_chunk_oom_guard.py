@@ -1,4 +1,4 @@
-"""AF-20260927-13: CUDA-OOM resilience in train_lstm's chunk loop.
+"""AF-20260927-20: CUDA-OOM resilience in train_lstm's chunk loop.
 
 This platform trains on an 8GB GeForce in WDDM mode, where the Windows desktop shares VRAM,
 so a chunk fold can die with cudaErrorMemoryAllocation even when the same chunk trained fine
