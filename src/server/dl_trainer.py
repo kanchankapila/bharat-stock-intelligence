@@ -185,7 +185,13 @@ def _run(cmd: str, timeout_sec: int = 1800) -> int:
         # restart happened to kill it — masking weeks of "job succeeded" heartbeats while
         # model_registry never got a new row. A bounded timeout turns that into a real,
         # loud failure that clears the lock via the except block in retrain_models().
-        print(f"[TRAINER] Command timed out after {timeout_sec}s, killing: {cmd_resolved}")
+        #
+        # STDERR, not stdout (2026-09-29): this is the ONLY trace of why the step died, and
+        # pythonRunner's job_run_history.error carries stderr only. Lost to stdout twice --
+        # first the exception text (AF-20260927-20), then this line on the 2026-09-28 make-up
+        # whose recorded stdout held nothing but "step ok: feature_engineering ... 1804.8s".
+        print(f"[TRAINER] Command timed out after {timeout_sec}s, killing: {cmd_resolved}",
+              file=sys.stderr)
         return 1
 
 
@@ -269,11 +275,23 @@ def retrain_models(trigger: str = "scheduled") -> dict:
     steps = _StepLog()
 
     try:
-        # Step 1: Refresh today's features only (fast mode)
+        # Step 1: Refresh today's features only (fast mode).
+        # 30min -> 60min budget (2026-09-29, AF-20260929-01): the 1800s _run default killed
+        # this step on the 2026-09-28 23:30 IST make-up after 1804.8s (app_settings
+        # dl_retrain_step_log), failing the whole retrain before training even started.
+        # Measured on this box: 540s on the 2026-09-27 runs; >1804.8s under the 09-28
+        # post-close cluster (screener-performance + unified-ranker co-running, RAM 94-96%);
+        # the same script's full-universe sibling (dl-feature-refresh) measures 24-103min here.
+        # 3600s is ~6.7x the measured quiet runtime, bounded far inside the 24h BullMQ lock,
+        # and its write is an idempotent upsert on (symbol, date, timeframe).
         with steps.step("feature_engineering"):
-            rc = _run("python feature_engineering.py --date today")
-        if rc != 0:
-            raise RuntimeError("feature_engineering.py failed")
+            rc = _run("python feature_engineering.py --date today", timeout_sec=3600)
+            # Raised INSIDE the `with` so the step is recorded 'error'. Until 2026-09-29 this
+            # check sat AFTER it, which recorded a timed-out subprocess as status 'ok' with its
+            # full 1804.8s duration -- precisely the misleading progress record STEP_LOG_KEY
+            # exists to prevent, and what made the make-up's failure read as the training step.
+            if rc != 0:
+                raise RuntimeError("feature_engineering.py failed")
 
         # Step 2: Determine new version
         MODEL_DIR.mkdir(parents=True, exist_ok=True)

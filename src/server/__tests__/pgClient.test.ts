@@ -14,7 +14,7 @@ vi.mock('pg', () => ({
   },
 }));
 
-const { withClient, alterMigrationName, isTransientConnError } = await import('../pgClient');
+const { withClient, withTransientRetry, alterMigrationName, isTransientConnError } = await import('../pgClient');
 
 describe('pgClient', () => {
   beforeEach(() => {
@@ -52,6 +52,41 @@ describe('pgClient', () => {
 
   it('classifies the exact pg-pool checkout timeout as transient', () => {
     expect(isTransientConnError(new Error('timeout exceeded when trying to connect'))).toBe(true);
+  });
+
+  // AF-20260929-02: pgQuery/pgClient() each hand-rolled this loop; it was extracted so callers
+  // with a longer tolerance for pool starvation (the data-quality sweep, the monitor's
+  // getLastRunAt probes) can pass a wider schedule instead of duplicating it. These pin the
+  // semantics those callers now depend on.
+  describe('withTransientRetry', () => {
+    it('retries a transient error and returns the eventual value', async () => {
+      let calls = 0;
+      const result = await withTransientRetry(async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('timeout exceeded when trying to connect');
+        return 'after-retry';
+      }, [0, 0]);
+      expect(result).toBe('after-retry');
+      expect(calls).toBe(2);
+    });
+
+    it('does NOT retry a non-transient error (a real bug must surface immediately)', async () => {
+      let calls = 0;
+      await expect(withTransientRetry(async () => {
+        calls += 1;
+        throw new Error('column "foo" does not exist');
+      }, [0, 0])).rejects.toThrow('does not exist');
+      expect(calls).toBe(1);
+    });
+
+    it('exhausts the budget then rethrows the LAST transient error', async () => {
+      let calls = 0;
+      await expect(withTransientRetry(async () => {
+        calls += 1;
+        throw new Error(`timeout exceeded when trying to connect (attempt ${calls})`);
+      }, [0, 0])).rejects.toThrow('attempt 3'); // delays.length + 1 attempts
+      expect(calls).toBe(3);
+    });
   });
 
   it('parses naive TIMESTAMP columns as UTC, not host local time', () => {

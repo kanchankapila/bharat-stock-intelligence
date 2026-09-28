@@ -2,6 +2,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
+import { withTransientRetry } from '../pgClient';
 import { router, publicProcedure, adminProcedure } from "../trpc";
 import { runPython } from '../pythonRunner';
 import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetchEODMarketScreener } from '../marketIntelService';
@@ -118,108 +119,125 @@ function nextCronTimeIso(cronPatterns: readonly string[] | undefined, now: Date)
   return minNext ? minNext.toISOString() : null;
 }
 
+/** Backoff budget for the monitor's evidential probes (AF-20260929-02; see getLastRunAt). */
+const MONITOR_PROBE_RETRY_DELAYS_MS = [2_000, 8_000];
+
 async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
   try {
-    let row: any;
-    switch (scriptId) {
-      case 'technical-scan':
-        row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals");
-        break;
-      case 'confluence-compute':
-        row = await dbGet("SELECT MAX(computed_at) as t FROM confluence_signals");
-        break;
-      case 'news-sentiment':
-        row = await dbGet("SELECT MAX(fetched_at) as t FROM news_sentiment_items");
-        break;
-      case 'outcome-resolver-5d':
-        // computed_at is stamped on every upsert regardless of outcome (see outcome_resolver.py's
-        // ON CONFLICT ... computed_at=excluded.computed_at), so filtering out PENDING rows here
-        // under-counted freshness: on a day where every eligible signal at this horizon is still
-        // within its holding period, the resolver runs fine but touches only PENDING rows, and
-        // this query kept reporting the last *resolved* outcome (which can be days older) as "last
-        // run" — false-flagging the job stale even though it executed on schedule.
-        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=5 AND signal_source='technical'");
-        break;
-      case 'outcome-resolver-15d':
-        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=15 AND signal_source='technical'");
-        break;
-      case 'performance-tracker':
-        row = await dbGet("SELECT MAX(last_computed) as t FROM strategy_performance");
-        break;
-      case 'fii-dii-fetcher':
-        row = await dbGet("SELECT MAX(fetched_at) as t FROM fii_dii_flow");
-        break;
-      case 'finbert-scorer':
-        row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals WHERE news_sentiment_score IS NOT NULL");
-        break;
-      case 'ml-ensemble-score':
-        row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals WHERE win_probability IS NOT NULL");
-        break;
-      case 'ml-ensemble-train':
-        row = await dbGet("SELECT MAX(trained_at) as t FROM model_registry WHERE model_name='ensemble'");
-        break;
-      case 'strategy-optimizer':
-        row = await dbGet("SELECT MAX(snapshot_at) as t FROM screener_weight_history");
-        break;
-      case 'ohlcv-backfill':
-        row = await dbGet("SELECT MAX(date) as t FROM stock_ohlcv");
-        break;
-      case 'regime-detector':
-        row = await dbGet("SELECT MAX(computed_at) as t FROM market_regimes");
-        break;
-      case 'feature-engineering':
-        row = await dbGet("SELECT MAX(computed_at) as t FROM feature_store");
-        break;
-      case 'reward-engine':
-        row = await dbGet("SELECT MAX(last_updated) as t FROM signal_type_weights");
-        break;
-      case 'dl-engine-infer':
-        row = await dbGet("SELECT MAX(created_at) as t FROM deep_learning_predictions");
-        break;
-      case 'dl-trainer':
-        row = await dbGet("SELECT MAX(trained_at) as t FROM model_registry WHERE model_name='BiLSTM'");
-        break;
-      case 'signal-type-stats':
-        row = await dbGet("SELECT MAX(last_computed) as t FROM signal_type_stats");
-        break;
-      case 'screener-performance':
-        row = await dbGet("SELECT MAX(last_computed) as t FROM screener_performance_v2");
-        break;
-      case 'company-profiles-sync':
-        row = await dbGet("SELECT MAX(last_updated) as t FROM company_profiles");
-        break;
-      case 'trendlyne-fundamentals':
-        row = await dbGet("SELECT MAX(date) as t FROM trendlyne_dvm_scores");
-        break;
-      case 'trendlyne-midweek':
-        row = await dbGet(`
-          SELECT MIN(t) as t FROM (
-            SELECT MAX(date) as t FROM trendlyne_adv_tech_daily
-            UNION ALL
-            SELECT MAX(date) as t FROM trendlyne_price_analysis
-          ) combined
-        `);
-        break;
-      case 'financial-ratios':
-        row = await dbGet("SELECT MAX(as_of_date) as t FROM tl_financial_quality");
-        break;
-      case 'working-capital':
-        row = await dbGet("SELECT MAX(fetched_at) as t FROM working_capital_history");
-        break;
-      case 'tickertape-scorecard':
-        row = await dbGet("SELECT MAX(date) as t FROM proprietary_scores_history WHERE source = 'tickertape'");
-        break;
-      case 'intraday-breadth-capture':
-        row = await dbGet("SELECT MAX(snapshot_at) as t FROM intraday_breadth_snapshots");
-        break;
-      default:
-        return null;
-    }
-    return (row as any)?.t ?? null;
+    // AF-20260929-02: retry each probe on TRANSIENT connect errors with a wider budget than
+    // pgQuery's built-in ~4.3s. Under the 2026-09-28 post-close cluster the shared pool was
+    // starved past its 15s checkout timeout, so these probes returned null and the daily digest
+    // reported Feature Engineering "stale, last: 2026-07-05" (its old manual-trigger stamp) and
+    // Working Capital Cycle "failed, last: never" -- while both tables were actually fresh (the
+    // probes pass again the moment the cluster ends). [2s, 8s] rides out those short bursts; a
+    // genuinely unreachable DB still degrades to the same stale/never verdict after ~10s.
+    return await withTransientRetry(() => probeLastRunAt(scriptId), MONITOR_PROBE_RETRY_DELAYS_MS);
   } catch (err: unknown) {
     console.warn('[MONITOR] getLastRunAt failed:', (err as Error).message);
     return null;
   }
+}
+
+/** One pass of the evidential probe behind getLastRunAt(). Split out so the retry wrapper
+ *  above can re-run the whole probe; it must THROW on a connection failure (not swallow it
+ *  into null) or there would be nothing for withTransientRetry to retry. */
+async function probeLastRunAt(scriptId: ScriptId): Promise<string | null> {
+  let row: any;
+  switch (scriptId) {
+    case 'technical-scan':
+      row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals");
+      break;
+    case 'confluence-compute':
+      row = await dbGet("SELECT MAX(computed_at) as t FROM confluence_signals");
+      break;
+    case 'news-sentiment':
+      row = await dbGet("SELECT MAX(fetched_at) as t FROM news_sentiment_items");
+      break;
+    case 'outcome-resolver-5d':
+      // computed_at is stamped on every upsert regardless of outcome (see outcome_resolver.py's
+      // ON CONFLICT ... computed_at=excluded.computed_at), so filtering out PENDING rows here
+      // under-counted freshness: on a day where every eligible signal at this horizon is still
+      // within its holding period, the resolver runs fine but touches only PENDING rows, and
+      // this query kept reporting the last *resolved* outcome (which can be days older) as "last
+      // run" — false-flagging the job stale even though it executed on schedule.
+      row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=5 AND signal_source='technical'");
+      break;
+    case 'outcome-resolver-15d':
+      row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=15 AND signal_source='technical'");
+      break;
+    case 'performance-tracker':
+      row = await dbGet("SELECT MAX(last_computed) as t FROM strategy_performance");
+      break;
+    case 'fii-dii-fetcher':
+      row = await dbGet("SELECT MAX(fetched_at) as t FROM fii_dii_flow");
+      break;
+    case 'finbert-scorer':
+      row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals WHERE news_sentiment_score IS NOT NULL");
+      break;
+    case 'ml-ensemble-score':
+      row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals WHERE win_probability IS NOT NULL");
+      break;
+    case 'ml-ensemble-train':
+      row = await dbGet("SELECT MAX(trained_at) as t FROM model_registry WHERE model_name='ensemble'");
+      break;
+    case 'strategy-optimizer':
+      row = await dbGet("SELECT MAX(snapshot_at) as t FROM screener_weight_history");
+      break;
+    case 'ohlcv-backfill':
+      row = await dbGet("SELECT MAX(date) as t FROM stock_ohlcv");
+      break;
+    case 'regime-detector':
+      row = await dbGet("SELECT MAX(computed_at) as t FROM market_regimes");
+      break;
+    case 'feature-engineering':
+      row = await dbGet("SELECT MAX(computed_at) as t FROM feature_store");
+      break;
+    case 'reward-engine':
+      row = await dbGet("SELECT MAX(last_updated) as t FROM signal_type_weights");
+      break;
+    case 'dl-engine-infer':
+      row = await dbGet("SELECT MAX(created_at) as t FROM deep_learning_predictions");
+      break;
+    case 'dl-trainer':
+      row = await dbGet("SELECT MAX(trained_at) as t FROM model_registry WHERE model_name='BiLSTM'");
+      break;
+    case 'signal-type-stats':
+      row = await dbGet("SELECT MAX(last_computed) as t FROM signal_type_stats");
+      break;
+    case 'screener-performance':
+      row = await dbGet("SELECT MAX(last_computed) as t FROM screener_performance_v2");
+      break;
+    case 'company-profiles-sync':
+      row = await dbGet("SELECT MAX(last_updated) as t FROM company_profiles");
+      break;
+    case 'trendlyne-fundamentals':
+      row = await dbGet("SELECT MAX(date) as t FROM trendlyne_dvm_scores");
+      break;
+    case 'trendlyne-midweek':
+      row = await dbGet(`
+        SELECT MIN(t) as t FROM (
+          SELECT MAX(date) as t FROM trendlyne_adv_tech_daily
+          UNION ALL
+          SELECT MAX(date) as t FROM trendlyne_price_analysis
+        ) combined
+      `);
+      break;
+    case 'financial-ratios':
+      row = await dbGet("SELECT MAX(as_of_date) as t FROM tl_financial_quality");
+      break;
+    case 'working-capital':
+      row = await dbGet("SELECT MAX(fetched_at) as t FROM working_capital_history");
+      break;
+    case 'tickertape-scorecard':
+      row = await dbGet("SELECT MAX(date) as t FROM proprietary_scores_history WHERE source = 'tickertape'");
+      break;
+    case 'intraday-breadth-capture':
+      row = await dbGet("SELECT MAX(snapshot_at) as t FROM intraday_breadth_snapshots");
+      break;
+    default:
+      return null;
+  }
+  return (row as any)?.t ?? null;
 }
 
 async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number | string | null>> {

@@ -182,3 +182,46 @@ class TestStepLog:
         with log.step("still-works"):
             pass
         assert log.steps[0]["status"] == "ok"
+
+
+class TestFeatureEngineeringStepFailureProvenance:
+    """AF-20260929-01. The 2026-09-28 23:30 IST make-up died when feature_engineering.py hit
+    _run's 1800s timeout, but the step log recorded that step as status 'ok' -- the rc check
+    sat OUTSIDE the step's `with` -- so the one artifact whose whole job is answering "how did
+    each step go" (STEP_LOG_KEY, added 2026-08-29 for exactly this kind of investigation)
+    claimed the fatal step had succeeded. Live trace: stdout held "step ok: feature_engineering
+    ... 1804.8s" and nothing about the timeout; stderr carried only the generic
+    "feature_engineering.py failed"."""
+
+    class _ClosableFakeConn(_FakeConn):
+        def close(self):
+            pass
+
+    def _retrain_with_rc(self, monkeypatch, rc):
+        monkeypatch.setattr(dlt, "connect", lambda: self._ClosableFakeConn())
+        calls = []
+
+        def _fake_run(cmd, timeout_sec=1800):
+            calls.append((cmd, timeout_sec))
+            return rc
+
+        monkeypatch.setattr(dlt, "_run", _fake_run)
+        return dlt.retrain_models("scheduled"), calls
+
+    def test_nonzero_rc_is_recorded_as_error_and_fails_the_run(self, monkeypatch):
+        result, _ = self._retrain_with_rc(monkeypatch, 1)
+        assert "feature_engineering.py failed" in (result.get("error") or "")
+        steps = [s for s in result["step_log"] if s["step"] == "feature_engineering"]
+        assert steps, "the failed step must still appear in the step log"
+        assert steps[0]["status"] == "error", (
+            "a step whose subprocess was killed (non-zero rc) must be recorded 'error', not 'ok'"
+        )
+
+    def test_feature_step_budget_is_wider_than_the_timeout_that_killed_the_make_up(self, monkeypatch):
+        _, calls = self._retrain_with_rc(monkeypatch, 1)
+        assert calls and calls[0][0].startswith("python feature_engineering.py")
+        assert calls[0][1] > 1800, (
+            "the 2026-09-28 make-up was killed by the 1800s _run default after 1804.8s; the "
+            "budget must exceed it (3600s = ~6.7x the measured 540s quiet runtime, and the same "
+            "box runs the script's full-universe sibling in 24-103min)"
+        )

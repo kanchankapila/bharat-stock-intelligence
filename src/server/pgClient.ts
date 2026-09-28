@@ -103,18 +103,30 @@ export function isTransientConnError(err: unknown): boolean {
  * refuse a new connection, surfacing as "Connection terminated". Retry once on those
  * transient errors only — safe here because SELECTs are idempotent.
  */
-export async function pgQuery<T extends QueryResultRow = QueryResultRow>(
-  text: string,
-  params: unknown[] = [],
-): Promise<T[]> {
-  // Retry up to 3 times on transient connection errors (PG restart, ECONNRESET, pool timeout).
-  // Backoff: 300ms → 1s → 3s — gives PG container ~4s to come back after an OOM restart.
-  const delays = [300, 1000, 3000];
+/**
+ * Bounded retry over an idempotent operation for TRANSIENT connection errors only
+ * (isTransientConnError), with an explicit backoff schedule. `delays` = the sleeps BETWEEN
+ * attempts, so the total attempts = delays.length + 1; a non-transient error is rethrown
+ * immediately, and the LAST transient error is rethrown once the budget is spent.
+ *
+ * Extracted 2026-09-29 (AF-20260929-02) from pgQuery/pgClient(), which each hand-rolled this
+ * loop. Callers whose tolerance for pool starvation is longer than pgQuery's built-in
+ * ~4.3s budget pass a wider schedule rather than duplicating the loop: on 2026-09-28 ~23:55
+ * IST the post-close cluster (screener-performance + unified-ranker) held every shared-pool
+ * slot past even a 15s checkout timeout, so 5 data-quality checks recorded "timeout exceeded
+ * when trying to connect" and paged Telegram, and the digest's monitor probes (getLastRunAt)
+ * failed the same way -- reporting Feature Engineering "stale, last: 2026-07-05" and Working
+ * Capital Cycle "failed, last: never" -- although each probe's own table was fresh and the
+ * very next 15-minute sweep passed everything.
+ */
+export async function withTransientRetry<T>(
+  fn: () => Promise<T>,
+  delays: number[] = [300, 1000, 3000],
+): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= delays.length; attempt++) {
     try {
-      const res = await getPool().query<T>(text, params as any[]);
-      return res.rows;
+      return await fn();
     } catch (err) {
       if (!isTransientConnError(err)) throw err;
       lastErr = err;
@@ -124,6 +136,16 @@ export async function pgQuery<T extends QueryResultRow = QueryResultRow>(
     }
   }
   throw lastErr;
+}
+
+export async function pgQuery<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params: unknown[] = [],
+): Promise<T[]> {
+  // Retry up to 3 times on transient connection errors (PG restart, ECONNRESET, pool timeout).
+  // Backoff: 300ms → 1s → 3s — gives PG container ~4s to come back after an OOM restart.
+  const res = await withTransientRetry(() => getPool().query<T>(text, params as any[]));
+  return res.rows;
 }
 
 /** Run a query and return the raw result (for rowCount / RETURNING handling). */
@@ -143,20 +165,7 @@ export async function pgClient(): Promise<PoolClient> {
   // Pool checkout has the same transient failure modes as pool.query(). Keep acquisition
   // bounded and retryable too; otherwise a transaction can fail before its first statement
   // while the read-only path rides out the same outage.
-  const delays = [100, 400, 1200];
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= delays.length; attempt++) {
-    try {
-      return await getPool().connect();
-    } catch (err) {
-      if (!isTransientConnError(err)) throw err;
-      lastErr = err;
-      if (attempt < delays.length) {
-        await new Promise((r) => setTimeout(r, delays[attempt]));
-      }
-    }
-  }
-  throw lastErr;
+  return withTransientRetry(() => getPool().connect(), [100, 400, 1200]);
 }
 
 /**

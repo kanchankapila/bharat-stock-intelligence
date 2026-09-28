@@ -10,6 +10,21 @@ vi.mock('../dbAsync', () => ({
   dbExec: vi.fn(async () => {}),
 }));
 
+// AF-20260929-02: the sweep's reads now go through withTransientRetry with a wider budget than
+// pgQuery's ~4.3s (pool starvation during the post-close cluster produced false 'error' pages).
+// Mocked as a transparent passthrough so every existing orchestration test keeps its exact
+// behaviour (no delays); the retry semantics themselves are unit-tested in pgClient.test.ts,
+// and the wiring test below pins the budget this file hands over.
+// importOriginal, not a stub-only factory: vitest.setup.ts's afterAll imports this module for
+// closePool(), so replacing the whole module fails the file at teardown.
+const { withTransientRetryMock } = vi.hoisted(() => ({
+  withTransientRetryMock: vi.fn((fn: () => Promise<any>) => fn()),
+}));
+vi.mock('../pgClient', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../pgClient')>();
+  return { ...actual, withTransientRetry: withTransientRetryMock };
+});
+
 import {
   DATA_QUALITY_CHECKS, daysStale, tradingDaysStale, safeRatio, runDataQualityChecks,
   getLatestDataQualityResults, DQ_CHECK_CONCURRENCY,
@@ -876,6 +891,19 @@ describe('runDataQualityChecks (orchestration)', () => {
     const purgeAt = dbRunCalls.findIndex(c => /DELETE FROM data_quality_results/i.test(c.sql));
     const snapshots = dbRunCalls.slice(0, purgeAt).filter(c => /INSERT INTO data_quality_results/i.test(c.sql));
     expect(snapshots.length).toBe(DATA_QUALITY_CHECKS.length);
+  });
+
+  // AF-20260929-02: on 2026-09-28 ~23:55 IST every shared-pool slot was held by the post-close
+  // cluster past the 15s checkout timeout, so five checks recorded "timeout exceeded when trying
+  // to connect" and paged Telegram -- while the very next sweep 20 minutes later passed all of
+  // them. Each check's read now goes through withTransientRetry with a budget deliberately wider
+  // than pgQuery's built-in ~4.3s; this pins the wiring (the retry semantics are covered in
+  // pgClient.test.ts's withTransientRetry cases).
+  it('reads every check through the wider transient-retry budget', async () => {
+    withTransientRetryMock.mockClear();
+    await runDataQualityChecks(new Date('2026-07-19T12:00:00Z'));
+    expect(withTransientRetryMock).toHaveBeenCalledTimes(DATA_QUALITY_CHECKS.length);
+    expect(withTransientRetryMock).toHaveBeenCalledWith(expect.any(Function), [5_000, 20_000]);
   });
 
   // 2026-09-20 re-verification: job_heartbeat held one row per check id (markAlerted()'s

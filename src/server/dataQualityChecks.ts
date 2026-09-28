@@ -19,6 +19,7 @@
  */
 import { dbGet, dbAll, dbRun, dbExec } from './dbAsync';
 import { mapWithConcurrency } from './lib/async';
+import { withTransientRetry } from './pgClient';
 
 export type DataQualityStatus = 'pass' | 'warn' | 'fail' | 'error';
 
@@ -3373,6 +3374,15 @@ async function persistCheckHeartbeat(checkId: string, status: DataQualityStatus,
  *  the heavier Python fan-out; two keeps the sweep bounded without starving other workers. */
 export const DQ_CHECK_CONCURRENCY = 2;
 
+/** Backoff budget for each check's read on TRANSIENT connect errors (AF-20260929-02).
+ *  Checks are idempotent SELECTs and pgQuery's own pool retry only spans ~4.3s; on 2026-09-28
+ *  ~23:55 IST the post-close cluster held every shared-pool slot past even the 15s checkout
+ *  timeout, so five checks recorded "timeout exceeded when trying to connect" and paged
+ *  Telegram, although the very next 15-minute sweep passed every one. Two sleeps (5s, 20s) ride
+ *  out that contention; a sweep extends by <=25s on the rare retry, far cheaper than a false
+ *  page. A REAL outage still surfaces unchanged: after both retries the check keeps 'error'. */
+export const DQ_TRANSIENT_RETRY_DELAYS_MS = [5_000, 20_000];
+
 /** Runs every registered check and persists the latest result per check_id. Each check is
  *  isolated — a query error becomes an 'error' status for that one check, not a thrown
  *  exception that skips the rest. */
@@ -3381,7 +3391,10 @@ export async function runDataQualityChecks(now: Date = new Date()): Promise<Data
   const results = await mapWithConcurrency(DATA_QUALITY_CHECKS, DQ_CHECK_CONCURRENCY, async (check) => {
     let outcome: { status: DataQualityStatus; detail: string };
     try {
-      const row = await dbGet<Record<string, any>>(check.sql, check.params ?? []);
+      const row = await withTransientRetry(
+        () => dbGet<Record<string, any>>(check.sql, check.params ?? []),
+        DQ_TRANSIENT_RETRY_DELAYS_MS,
+      );
       outcome = check.evaluate(row, now);
     } catch (err) {
       outcome = { status: 'error', detail: (err as Error).message.slice(0, 300) };
