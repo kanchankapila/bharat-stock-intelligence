@@ -325,6 +325,25 @@ NSE's `EQUITY_L.csv` lists every mainboard equity with its ISIN, and the ISIN is
 The file is a snapshot with no history. The connector runs in the EOD sequence right after
 `nse_symbol_change`, before other sources resolve symbols.
 
+## Same-year estimate revisions (`investsights_estimates`)
+
+MoneyControl's estimates are for "the next period", and that period rolls forward when a year
+reports. So `est_eps_rev` has to treat a sign flip or a >100% jump as a probable rollover and
+drop it. InvestSights (FMP consensus) returns one row per **fiscal year**, stored as
+`est_is_<metric>_fy<YYYY>`, so a revision can compare the same year with itself.
+
+- **FY1.** On each date, a stock's FY1 is the nearest fiscal year whose end is still ahead and
+  that has an estimate. Once that year ends, the next year becomes FY1, with its own history.
+- **Features.**
+  - `est_is_eps_rev_fy1` and `est_is_revenue_rev_fy1`: FY1's estimate now against the same
+    year's estimate 63 sessions earlier, bounded like the MoneyControl revision.
+  - `est_is_fwd_ey_fy1`: FY1 EPS over the unadjusted close (forward earnings yield).
+- **Point in time.** Forward-only: knowable when fetched, and stored only when the value changes.
+  Rows whose vendor symbol is not the requested one are dropped. The price-target route answers
+  "not available" for NSE names, so it is not used.
+
+Like every other group (`estimates` in the ablation), these earn weight only through the gate.
+
 ## Next-session engine (`session/`)
 
 This is a second decision clock. The decision is made at day d's close, and optionally refined

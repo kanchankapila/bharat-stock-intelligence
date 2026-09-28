@@ -55,6 +55,16 @@ def test_investsights_live(conn, client, session):
     assert len(f) >= 2 and f.value.abs().max() < 5            # a fraction, not a percent
 
 
+def test_investsights_estimates_live(conn, client, session):
+    """Settles whether FMP still covers large NSE names and that EPS is per share, not per lakh."""
+    from bharat_alpha.ingest.sources.investsights_estimates import InvestsightsEstimates
+
+    assert run_connector(conn, CONNECTORS["nse_bhavcopy"](), session, client=client)[0] == "success"
+    status, n = run_connector(conn, InvestsightsEstimates(["RELIANCE", "INFY", "HDFCBANK"]), session, client=client)
+    assert status == "success" and n >= 6, read_df(conn, "SELECT detail FROM alpha.ingest_run ORDER BY run_id DESC LIMIT 1")
+    eps = read_df(conn, "SELECT value FROM alpha.fundamental WHERE source='investsights_estimates' AND field LIKE 'est_is_eps_fy%%'")
+    assert len(eps) >= 3 and eps.value.abs().between(0.01, 10_000).all()
+
 def test_nse_results_live(conn, client, session):
     """Settles the results-comparison field names nse_results.parse_results is strict about."""
     from bharat_alpha.ingest.sources.nse_results import NseResults

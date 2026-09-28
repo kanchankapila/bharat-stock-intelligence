@@ -319,8 +319,11 @@ families:
     path: "analyst-estimates|price-target"
     category: analyst estimates
     pit: forward-only
-    verdict: backlog-high
-    rationale: second source for estimate revisions (cross-check mc_estimates)
+    verdict: integrated
+    connector: investsights_estimates
+    rationale: >-
+      second estimate source; per-fiscal-year rows give same-year revisions (no rollover
+      guessing). price-target answers "not available" for NSE names (FMP coverage gap)
   - id: investsights_other
     host: "investsights\\.in"
     path: "."
