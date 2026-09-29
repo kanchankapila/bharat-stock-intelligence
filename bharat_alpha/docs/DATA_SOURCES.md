@@ -70,11 +70,11 @@ options is now **superseded** by `alpha.option_daily`.
 | ~~high~~ integrated | `investsights_estimates` (3) | a second analyst-estimate source; same-fiscal-year revisions | forward-only |
 | high | `sensibull` (2) | NIFTY/BANKNIFTY IV history (regime) | yes |
 | ~~high~~ integrated | `nse_rss_results` (1) | exact results-filing time, which pins the earnings reaction day | forward-only |
-| medium | `trendlyne_options` (198) | options analytics beyond the bhavcopy (e.g. build-up classification) | forward-only |
+| ~~medium~~ superseded | `trendlyne_options` (198) | its premise was that IV/skew are not derivable from bhavcopy prices — they are, and `options.summarise` derives them into `option_daily` | — |
 | ~~medium~~ superseded | `mc_earnings` (92) | reported EPS now comes from the exchange (`nse_results`); `res_eps_sue` is the standardised surprise | — |
-| medium | `mc_global` (12) | global cues (US/Asia close, GIFT Nifty) for the overnight gap | forward-only |
+| ~~medium~~ integrated (`mc_global`) | `mc_global` (12) | GIFT Nifty only — the market's own estimate of the NSE open; the rest of the board is FRED's | forward-only |
 | ~~medium~~ integrated (`mojo_shareholding`) | `shareholding` (11) | forward ownership collection — without it every `own_*` fact freezes at the legacy table's last quarter | forward-only |
-| medium | `niftytrader_banlist` (5) | F&O ban events | forward-only |
+| ~~medium~~ superseded | `niftytrader_banlist` (5) | the exchange's own dated ban file (`nse_fo_secban`) is integrated, with history | — |
 | ~~medium~~ integrated (`nse_equity_master`) | `nse_archives_equity_master` (1) | ISIN for every mainboard name; merges renames `symbolchange.csv` missed | snapshot |
 
 **Free sources found by web research (2026-09-28).** None of these appeared anywhere in the
