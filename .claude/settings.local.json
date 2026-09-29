@@ -36,7 +36,21 @@
       "Bash(awk -F'|' '{print $2, $3, $5}')",
       "Bash(node .claude/skills/repo-doctor/doctor.mjs)",
       "Bash(node -e ' *)",
-      "Bash(npx skills *)"
+      "Bash(npx skills *)",
+      "mcp__Claude_Code_Remote__read_documentation",
+      "Bash(git commit *)",
+      "Bash(timeout 100 git add docs/session-log.md docs/audit-findings.md .claude/rules/measurement.md src/server/tests/test_screener_tenure_winsorize.py)",
+      "Bash(git -c core.editor=true commit -q --no-edit)",
+      "Bash(timeout 100 git add .claude/settings.local.json)",
+      "Bash(git commit -q -m 'chore: session permission allowlist entry *)",
+      "Bash(timeout 60 git fetch -q origin main)",
+      "Bash(python -c \"import cvxpy\")",
+      "Bash(git commit -q -m 'chore: session permission allowlist entries *)",
+      "Bash(ruff check *)",
+      "Bash(python3 -m pytest tests -q -rs --co)",
+      "Bash(python3 -m pytest tests/test_portfolio.py -q)",
+      "Bash(python3 -m pytest tests/test_portfolio.py -q -k stall)",
+      "Bash(git commit -q -m 'bharat_alpha: quarterly ownership features from legacy shareholding history *)"
     ]
   },
   "skillOverrides": {

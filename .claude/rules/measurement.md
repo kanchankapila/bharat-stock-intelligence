@@ -118,7 +118,17 @@ rather than assume. Full narrative for anything here: `docs/measurement-history.
   no liquidity floor. Re-graded 2026-09-26 with the panel spec actually applied (open entry,
   >=Rs 1cr trailing-20d ADT computed with no look-ahead, forward returns winsorised 1/99 with
   `interpolation='lower'/'higher'`, 2024-01-01+, 1.00M rows, 654-675 dates, 2,189 symbols —
-  eff 130 at h=5, 30 at h=21, i.e. FAR better powered than anything in the ranker sections):
+  eff 130 at h=5, 30 at h=21, i.e. FAR better powered than anything in the ranker sections).
+  **Checked 2026-09-28 (AF-20260928-09): the numbers below do NOT depend on the winsorisation
+  direction.** "`'lower'/'higher'`", read as low-cutoff/high-cutoff, is the REVERSED form that
+  clips nothing (the correct form is `quantile(pct,'higher')` / `quantile(1-pct,'lower')`), and
+  the script that produced these readings was never committed, so its direction can't be
+  confirmed. It doesn't matter here: every reading below is a rank IC or rank AUC, and clipping
+  the forward return is monotone, so it can only change ranks through ties at the cutoff.
+  Measured on a 660-date x 1,500-name t(3) panel with a lone +1,279x bar and IC ~0.04: correct,
+  inverted and un-winsorised all give IC 0.03999 / AUC 0.51952; the largest per-date IC gap is
+  0.00005. No re-grade is owed. A MEAN-based statistic (e.g. `top50_exc`) WOULD be affected, so
+  never reuse the reversed form there. The readings:
 
       column            h=5      h=10     h=21      | full-universe reading this file quotes @5d
       ret_5d          -0.040   -0.026   -0.012      | -0.051

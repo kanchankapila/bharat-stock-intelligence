@@ -1,0 +1,37 @@
+name: bharat_alpha
+
+on:
+  push:
+    branches: ['**']
+    paths: ['bharat_alpha/**', 'urls.txt', '.github/workflows/bharat-alpha.yml']
+  pull_request:
+    branches: [main]
+    paths: ['bharat_alpha/**', 'urls.txt', '.github/workflows/bharat-alpha.yml']
+
+# Real Postgres, empty database per test session (tests create and drop their own DB).
+# Live-datasource tests are skipped here by design (RUN_LIVE_DATASOURCE_TESTS unset).
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: bharat_alpha
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e '.[dev]'
+      - run: python -m pytest -q
+        env:
+          BQA_TEST_ADMIN_DSN: postgresql://postgres:postgres@localhost:5432/postgres
