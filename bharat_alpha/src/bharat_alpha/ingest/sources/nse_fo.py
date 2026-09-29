@@ -30,7 +30,10 @@ from bharat_alpha.reference import SymbolResolver
 from bharat_alpha.timeutil import IST, eod_knowable_at
 
 URL = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{yyyymmdd}_F_0000.csv.zip"
-BAN_URL = "https://nsearchives.nseindia.com/content/fo/fo_secban_{ddmmyyyy}.csv"
+# Moved from /content/fo/ to /archives/fo/sec_ban/ -- the old path 404s on EVERY date,
+# not just unpublished ones (verified 2026-09-22..29, all 404), so the connector's
+# "not published yet" branch was silently absorbing a permanently dead URL.
+BAN_URL = "https://nsearchives.nseindia.com/archives/fo/sec_ban/fo_secban_{ddmmyyyy}.csv"
 BAN_HEADER = re.compile(r"ban\s+for\s+trade\s+date\s+(\d{1,2}-[A-Za-z]{3}-\d{4})", re.I)
 BAN_KNOWABLE = dt.time(9, 0)             # the list for trade date T is certainly out by T's open
 

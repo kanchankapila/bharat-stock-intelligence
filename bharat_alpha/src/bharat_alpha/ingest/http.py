@@ -7,7 +7,8 @@
   handles that per host.
 * Minimum-header discipline: connectors declare the headers they need. Legacy found that
   adding credentials or a wrong `sec-fetch-site` can LOWER access, so nothing is added
-  implicitly beyond a browser User-Agent.
+  implicitly beyond a browser User-Agent -- and for hosts in `NO_BROWSER_UA` not even that,
+  because the implicit UA is itself an added header and one host hangs on it.
 """
 from __future__ import annotations
 
@@ -34,6 +35,12 @@ WARMUP = {
 # impersonation when installed; otherwise a warning is logged once, because every call to
 # these hosts is then expected to fail and "no data" must not look like "no market".
 IMPERSONATE = {"www.nseindia.com"}
+# The mirror image of IMPERSONATE, and the same lesson: a browser User-Agent is not free. FRED
+# serves fredgraph.csv in 0.1s to a bare request and BLACK-HOLES the identical request carrying
+# `User-Agent: Mozilla/5.0 ... Chrome/126` — it never responds, so the client burns its full
+# retry budget (5 x 30s + backoff, ~3min) and the connector reports "empty" rather than a
+# failure. Measured 2026-09-29: no headers -> 200 in 0.1s; UA -> ReadTimeout at 15s, repeatably.
+NO_BROWSER_UA = {"fred.stlouisfed.org"}
 log = logging.getLogger("bharat_alpha.http")
 
 
@@ -89,6 +96,9 @@ class HttpClient:
     def request(self, method: str, url: str, **kw) -> requests.Response:
         s = get_settings()
         host = urlparse(url).netloc
+        if host in NO_BROWSER_UA:
+            # requests drops a header whose per-request value is None.
+            kw["headers"] = {**(kw.get("headers") or {}), "User-Agent": None, "Accept-Language": None}
         self._warm(host)
         delay = 2.0
         last_exc: Exception | None = None

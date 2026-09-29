@@ -112,15 +112,22 @@ class NseBoardMeetings(Connector):
                     scope_sql="source = 'nse_board_meetings'", warn_after_sessions=3)
 
     def fetch(self, client: HttpClient, on: dt.date) -> list[dict]:
-        p = {"index": "equities", "from_date": (on - dt.timedelta(days=7)).strftime("%d-%m-%Y"),
-             "to_date": on.strftime("%d-%m-%Y")}
-        resp = client.get(BOARD_MEETINGS_URL, params=p, headers={**_JSON, "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-board-meetings"})
+        # NO date filter, deliberately. NSE's from_date/to_date filter `bm_date` -- the date the
+        # meeting is HELD -- while what we want is the intimations BROADCAST recently, and those
+        # are for meetings in the FUTURE. Asking for bm_date in [on-7d, on] is therefore empty by
+        # construction: measured 2026-09-29, the filtered call returned 0 rows while the
+        # unfiltered one returned 20, every bm_date among them in Oct/Nov. The unfiltered endpoint
+        # is the recent-intimation feed; `parse` applies the point-in-time cut on bm_timestamp.
+        resp = client.get(BOARD_MEETINGS_URL, params={"index": "equities"},
+                          headers={**_JSON, "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-board-meetings"})
         resp.raise_for_status()
         body = resp.json()
         return body.get("data", body) if isinstance(body, dict) else body
 
     def parse(self, raw: list[dict], on: dt.date) -> list[dict]:
-        return parse_board_meetings(raw)
+        # Drop anything broadcast after `on`: the unfiltered feed is always "as of now", so a
+        # backfill of an older date would otherwise import knowledge that session did not have.
+        return [r for r in parse_board_meetings(raw) if r["knowable_at"].date() <= on]
 
     def write(self, conn: psycopg.Connection, rows: list[dict], on: dt.date) -> int:
         res = SymbolResolver(conn)
