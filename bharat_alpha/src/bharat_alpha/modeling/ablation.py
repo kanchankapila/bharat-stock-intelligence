@@ -39,7 +39,7 @@ GROUP_PREFIXES = (
     ("participant_oi", ("fii_idx", "pro_idx", "client_idx")),
     ("cash_flows", ("fii_net", "dii_net")),
     ("global_cues", ("us_", "usd_", "brent_", "usdinr_")),
-    ("market_context", ("mkt_", "breadth_", "xs_", "vix", "n500_")),
+    ("market_context", ("mkt_", "breadth_", "xs_", "vix", "n500_", "gift_")),
 )
 
 

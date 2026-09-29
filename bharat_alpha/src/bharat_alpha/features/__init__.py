@@ -113,7 +113,7 @@ def market_context(conn: psycopg.Connection, p: Panel) -> pd.DataFrame:
     ctx["xs_dispersion_21"] = (c / c.shift(21) - 1).std(axis=1)
     start, end = idx.min().date(), idx.max().date()
     ix = read_df(conn, "SELECT index_name, trade_date, close, pe FROM alpha.index_daily WHERE trade_date BETWEEN %s AND %s "
-                       "AND index_name IN ('INDIA VIX', 'NIFTY 500')", (start, end))
+                       "AND index_name IN ('INDIA VIX', 'NIFTY 500', 'NIFTY 50')", (start, end))
     if not ix.empty:
         ix["trade_date"] = pd.to_datetime(ix["trade_date"])
         w = ix.pivot(index="trade_date", columns="index_name", values="close").reindex(idx)
@@ -129,6 +129,19 @@ def market_context(conn: psycopg.Connection, p: Panel) -> pd.DataFrame:
         pe = pe.where(pe > 0)
         if pe.notna().sum() >= PE_MIN_OBS:
             ctx["n500_pe_pctile"] = pe.rolling(PE_MIN_HISTORY, min_periods=PE_MIN_OBS).rank(pct=True)
+        # GIFT Nifty trades overnight, so a quote read before the open IS the market's own estimate
+        # of where NIFTY starts. The gap is against the PREVIOUS session's close; _known_date puts a
+        # morning read on that session and an evening one on the next, so it is never read early.
+        gift = read_df(conn, """SELECT value, knowable_at FROM alpha.macro_series
+                                WHERE series = 'GIFT_NIFTY' AND obs_date BETWEEN %s AND %s""", (start, end))
+        if not gift.empty and "NIFTY 50" in w:
+            g = gift.copy()
+            g["known"] = _known_date(g["knowable_at"])
+            s = g.sort_values("knowable_at").set_index("known")["value"]
+            s = s[~s.index.duplicated(keep="last")].reindex(idx)
+            prev_close = w["NIFTY 50"].shift(1)
+            ctx["gift_gap"] = (s / prev_close.where(prev_close > 0) - 1).clip(-0.15, 0.15)
+
     fl = read_df(conn, """
         SELECT DISTINCT ON (trade_date, category) trade_date, category, net_cr FROM alpha.market_flow
         WHERE trade_date BETWEEN %s AND %s ORDER BY trade_date, category, source""", (start, end))
