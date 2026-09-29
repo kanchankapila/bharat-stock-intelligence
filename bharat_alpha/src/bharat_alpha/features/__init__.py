@@ -92,6 +92,13 @@ def price_features(p: Panel) -> dict[str, pd.DataFrame]:
     return f
 
 
+# A valuation percentile needs at least a year to mean anything, and the window must be FIXED:
+# an expanding rank depends on how much history the panel happens to carry, so training (full
+# history) and serving (a 300-session window) would disagree on the same date.
+PE_MIN_HISTORY = 252
+PE_MIN_OBS = 240                 # NSE occasionally prints no P/E; a few gaps must not void the year
+
+
 def market_context(conn: psycopg.Connection, p: Panel) -> pd.DataFrame:
     """Per-date market features (same value for every instrument on a date)."""
     idx = p.close.index
@@ -105,7 +112,7 @@ def market_context(conn: psycopg.Connection, p: Panel) -> pd.DataFrame:
     ctx["breadth_sma50"] = (c > sma50).sum(axis=1) / sma50.notna().sum(axis=1).replace(0, np.nan)
     ctx["xs_dispersion_21"] = (c / c.shift(21) - 1).std(axis=1)
     start, end = idx.min().date(), idx.max().date()
-    ix = read_df(conn, "SELECT index_name, trade_date, close FROM alpha.index_daily WHERE trade_date BETWEEN %s AND %s "
+    ix = read_df(conn, "SELECT index_name, trade_date, close, pe FROM alpha.index_daily WHERE trade_date BETWEEN %s AND %s "
                        "AND index_name IN ('INDIA VIX', 'NIFTY 500')", (start, end))
     if not ix.empty:
         ix["trade_date"] = pd.to_datetime(ix["trade_date"])
@@ -115,6 +122,13 @@ def market_context(conn: psycopg.Connection, p: Panel) -> pd.DataFrame:
             ctx["vix_chg_5"] = w["INDIA VIX"] / w["INDIA VIX"].shift(5) - 1
         if "NIFTY 500" in w:
             ctx["n500_ret_63"] = w["NIFTY 500"] / w["NIFTY 500"].shift(63) - 1
+        # NSE publishes the index P/E in the same file, and it was stored but never read. Its LEVEL
+        # is not comparable across regimes, so use its own trailing percentile: where today's
+        # valuation sits within the LAST PE_MIN_HISTORY sessions, never the whole sample.
+        pe = ix[ix["index_name"] == "NIFTY 500"].set_index("trade_date")["pe"].reindex(idx)
+        pe = pe.where(pe > 0)
+        if pe.notna().sum() >= PE_MIN_OBS:
+            ctx["n500_pe_pctile"] = pe.rolling(PE_MIN_HISTORY, min_periods=PE_MIN_OBS).rank(pct=True)
     fl = read_df(conn, """
         SELECT DISTINCT ON (trade_date, category) trade_date, category, net_cr FROM alpha.market_flow
         WHERE trade_date BETWEEN %s AND %s ORDER BY trade_date, category, source""", (start, end))
