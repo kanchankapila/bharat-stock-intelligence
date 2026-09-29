@@ -95,3 +95,46 @@ def test_sector_and_isin_still_update_when_the_roster_diff_is_skipped(conn):
     sector = read_df(conn, "SELECT sector FROM alpha.instrument WHERE instrument_id=%s", (iid,)).sector[0]
     assert sector == "Pharma"                                     # updated despite the skipped diff
     assert len(read_df(conn, "SELECT 1 FROM alpha.corporate_event WHERE event_type='index_exit'")) == 0
+
+
+def test_features_never_write_into_a_numpy_view(conn, monkeypatch):
+    """pandas 3 returns a READ-ONLY array from Series.to_numpy(), so any feature that writes into
+    one raises there and passes on 2.x — exactly how this reached CI. Forcing read-only arrays
+    makes the difference reproducible on any version."""
+    import numpy as np
+    import pandas as pd
+
+    from bharat_alpha.features import event_features, index_event_features
+    from bharat_alpha.ingest.base import run_connector
+    from bharat_alpha.ingest.sources.nse_bhavcopy import NseBhavcopy
+    from bharat_alpha.ingest.sources.nse_constituents import NseConstituents
+    from bharat_alpha.marketdata import load_panel
+    from bharat_alpha.sim import simulate
+
+    real = pd.Series.to_numpy
+
+    def read_only(self, *a, **kw):
+        arr = real(self, *a, **kw)
+        if not kw.get("copy"):
+            arr = arr.view()
+            arr.flags.writeable = False
+        return arr
+
+    sim = simulate(n_stocks=8, n_days=40, seed=43)
+    for d in sim.dates:
+        run_connector(conn, NseBhavcopy(), d, raw=sim.bhavcopies[d])
+    run_connector(conn, NseConstituents(), sim.dates[10], raw=roster(["SIM003", "SIM005"]))
+    # event_features only walks its loop when a results event exists, which is why nothing
+    # exercised the identical pattern sitting three lines from the one that broke CI
+    with conn.cursor() as cur:
+        cur.execute("""INSERT INTO alpha.corporate_event(source, instrument_id, event_type, event_date, knowable_at)
+                       SELECT 'test', instrument_id, 'results', %s, %s FROM alpha.symbol_history
+                       WHERE symbol = 'SIM003' LIMIT 1""",
+                    (sim.dates[30], dt.datetime.combine(sim.dates[12], dt.time(18, 0),
+                                                        tzinfo=dt.timezone(dt.timedelta(hours=5, minutes=30)))))
+    conn.commit()
+    p = load_panel(conn, sim.dates[0], sim.dates[-1])
+    monkeypatch.setattr(pd.Series, "to_numpy", read_only)
+    f = index_event_features(conn, p)                      # raises without copy=True
+    assert f["idx_days_since_join"].notna().to_numpy().any()
+    assert event_features(conn, p)["days_to_results"].notna().to_numpy().any()   # same pattern, 3 lines away

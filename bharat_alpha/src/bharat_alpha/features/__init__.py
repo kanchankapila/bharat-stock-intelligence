@@ -309,7 +309,9 @@ def index_event_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.Dat
             hi = min(lo + INDEX_EVENT_WINDOW, len(tvals))
             if hi <= lo:
                 continue
-            col = f[r.instrument_id].to_numpy()
+            # copy=True: to_numpy() hands back a READ-ONLY view on pandas 3, so writing into it
+            # raises there while passing on 2.x — a version difference CI finds and a dev box does not
+            col = f[r.instrument_id].to_numpy(copy=True)
             col[lo:hi] = np.minimum(np.nan_to_num(col[lo:hi], nan=np.inf), np.arange(hi - lo, dtype=float))
             f[r.instrument_id] = col
         out[name] = f
@@ -336,7 +338,7 @@ def event_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame
             if hi <= lo:
                 continue
             days = (np.datetime64(r.event_date) - tvals[lo:hi]).astype("timedelta64[D]").astype(float)
-            col = d2r[r.instrument_id].to_numpy()
+            col = d2r[r.instrument_id].to_numpy(copy=True)          # read-only view on pandas 3, as above
             col[lo:hi] = np.minimum(col[lo:hi], days)
             d2r[r.instrument_id] = col
         out["days_to_results"] = d2r.replace(np.inf, np.nan).clip(upper=60)
