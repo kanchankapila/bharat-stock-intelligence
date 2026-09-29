@@ -21,6 +21,15 @@ const VENV_PY = isWin
   ? path.resolve(__dirname, 'backend-python', 'venv', 'Scripts', 'python.exe')
   : path.resolve(__dirname, 'backend-python', 'venv', 'bin', 'python');
 
+// bharat_alpha has its OWN venv on purpose. Installing it into backend-python/venv would pull
+// numpy/pandas/lightgbm upgrades into the interpreter the four production Python services run
+// on, and on Windows pip cannot replace a .pyd a running service holds open (the [WinError 5]
+// half-upgrade in bugs-testing-env.md). Separate venv = zero interaction with production.
+const BQA_DIR = path.resolve(__dirname, 'bharat_alpha');
+const BQA_PY = isWin
+  ? path.resolve(BQA_DIR, '.venv', 'Scripts', 'python.exe')
+  : path.resolve(BQA_DIR, '.venv', 'bin', 'python');
+
 // Inject .env into EVERY service. The Node app loads dotenv itself, but the Python services
 // (AlphaQuant, ml-api, chatbot) only see what we hand them — without POSTGRES_URL they cannot
 // connect at all (SQLite has been fully decommissioned since 2026-08-17; the split-brain
@@ -172,7 +181,68 @@ module.exports = {
       interpreter: VENV_PY,
       script: path.resolve(__dirname, 'scripts', 'backup_pg.py'),
       args: '',
-      env: { ...dotenvVars, PYTHONUNBUFFERED: '1' },
+      env: {
+        ...dotenvVars,
+        PYTHONUNBUFFERED: '1',
+        // Was the one Python app with no ceiling -- invisible while the guard test used a
+        // hand-kept list of four service names (found 2026-09-29 when that list was replaced
+        // by an interpreter-derived one). A -Fc dump is subprocess-bound and memory-light, so
+        // this is a backstop rather than a bound anyone expects to bite; sitecustomize fails
+        // open, so it cannot stop a backup from running.
+        PYTHONPATH: [path.resolve(__dirname, 'src', 'server', 'pyboot'), dotenvVars.PYTHONPATH]
+          .filter(Boolean).join(path.delimiter),
+        BHARAT_PY_MEM_LIMIT_MB: '4096',
+      },
+    },
+
+    // bharat_alpha's daily cycle: ingest -> features -> inference -> publish -> self-grade.
+    //
+    // 06:00 IST, chosen from measured occupancy over 21 days of job_run_history rather than a
+    // guess. Overlap-aware concurrency (a 210-min job started at 01:05 is still resident at
+    // 04:00, which run-COUNTS hide) bottoms out overnight, and the heavy jobs bound the gap:
+    // screener-performance 22:48->01:58, ml-daily-ops 01:05->04:35 (210 min), dl-trainer
+    // make-ups 02:45/05:09 up to 195 min, then the pre-market chain from 07:30. That leaves
+    // 04:35-07:30, and hour 06 has the SHORTEST maximum resident job of any hour (4.9 min),
+    // so nothing long normally lives there. Market opens 09:15.
+    //
+    // It reads the previous session: features enforce a 19:00 IST knowability cutoff, so a
+    // 06:00 run publishes for the session about to open, with ~3h of slack.
+    //
+    // ⚠ kill_timeout is 3h and is NOT a measured steady-state budget. The only full run so far
+    // (2026-09-29) took >3.5h, but that was a COLD START: investsights_estimates 94 min and
+    // investsights_fundamentals 83 min were backfilling full history (33,836 + 36,617 rows).
+    // Those are now loaded, so incremental runs should be far shorter. CHECK THE FIRST
+    // SCHEDULED RUN's duration and re-cut this budget against it -- a budget with no headroom
+    // over its real runtime is AF-20260929-04's exact failure (killed at the cap, reported as
+    // a slow job).
+    {
+      ...gfCron,
+      name: 'bqa-daily',
+      cron_restart: '0 6 * * *',
+      kill_timeout: 10_800_000,          // 3h; see the warning above before trusting it
+      interpreter: BQA_PY,
+      script: path.resolve(BQA_DIR, 'src', 'bharat_alpha', 'cli.py'),
+      args: 'daily',
+      cwd: BQA_DIR,
+      env: {
+        ...dotenvVars,
+        PYTHONUNBUFFERED: '1',
+        // Explicit rather than relying on bharat_alpha/.env, which is gitignored: the schedule
+        // must be reproducible from this file alone. Same instance, its own database, so
+        // nothing it does can touch bharat_intel.
+        BQA_DATABASE_URL: (dotenvVars.POSTGRES_URL || '').replace(/\/bharat_intel(\?|$)/, '/bharat_alpha$1'),
+        // Same kernel-enforced ceiling as every other Python process here, and for the same
+        // measured reason: pm2's max_memory_restart watches the redirector, not the real
+        // interpreter (1MB reported vs 2.0-2.6GB held, 2026-09-11). This job does a full
+        // feature build over 3.4M bars plus LightGBM inference, which is exactly the shape
+        // that put dl_trainer at 38-52.7GB of commit on a 24GB host. sitecustomize is stdlib +
+        // ctypes and fails open, so it works from bharat_alpha's own venv unchanged.
+        PYTHONPATH: [path.resolve(__dirname, 'src', 'server', 'pyboot'), dotenvVars.PYTHONPATH]
+          .filter(Boolean).join(path.delimiter),
+        BHARAT_PY_MEM_LIMIT_MB: '8192',   // observe-first; re-cut once a scheduled run's peak is known
+      },
+      out_file: path.resolve(__dirname, 'logs', 'bqa-daily-out.log'),
+      error_file: path.resolve(__dirname, 'logs', 'bqa-daily-err.log'),
     },
 
   ],

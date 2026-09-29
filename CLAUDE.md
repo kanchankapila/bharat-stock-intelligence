@@ -48,7 +48,12 @@ the row itself:
 - **Needs a user decision** — a tradeoff only the user can make (e.g. which of two designs, or
   whether to accept a known bounded risk). Ask, don't leave it silently open. **"Needs a user
   decision" is not a lane you may enter until you have exhausted what you can determine
-  yourself.** For a vendor/endpoint that stopped returning data, or when onboarding a new data source, that means:
+  yourself.** **If the gap is MISSING DATA, exhausting it means `data-sources.md`'s RULE
+  ZERO — an `information_schema` sweep for the column across every table, plus a `graphify query`
+  for an existing backfill script — not three plausible tables.** (2026-09-29: a sector gap was
+  escalated with three options after checking `stock_master`, `stocklist.ts` and
+  `nse_constituents`; `nse_stocks.sector` was 100% populated and `backfill_sectors.py` already
+  maintained it.) For a vendor/endpoint that stopped returning data, or when onboarding a new data source, that means:
   1. **Query the 3,000+ discovery registry FIRST**: `market_endpoint_registry` in Postgres (`bharat_intel` on `:5433`, 3,408 live endpoints: 2,864 GET / 544 POST; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`) — see `data-sources.md` §"Endpoint discovery registry" and `DATA_FETCHING_GUIDE.md`.
   2. **Check the consolidated catalog `url_endpoints`**: 830 templates; run `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server`.
   3. **Inspect the raw 3,103 URL corpus**: `unique_urls.txt` and `urls_v2.db` in repo root.

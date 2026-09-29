@@ -14,6 +14,40 @@ paths:
 
 Read before adding a fetcher, a provider, or a table keyed on a provider-issued id.
 
+## RULE ZERO — never conclude data is unavailable until you have searched for it here (2026-09-29)
+
+**Before writing "no source covers this", "this field isn't available", or escalating a data gap
+to the user, search the places below. All of them. In order.** This is not the dead-vendor flow
+(that is its own section further down) — it applies whenever you need a field, a label, a
+history, or a mapping you do not currently have, including when the missing data is the reason a
+feature, a constraint or a model is underperforming.
+
+1. **The database tables themselves** — `information_schema.columns WHERE column_name ILIKE
+   '%<thing>%'`, then COUNT the non-nulls per candidate table. A column existing is not a column
+   populated, and a column being empty in one table says nothing about its twin.
+2. **The scripts** — `graphify query "<thing> backfill"`, or grep for `backfill_*`, `*_sync`,
+   `*_fetcher`. This repo has ~210 Python modules; somebody has usually already solved it.
+3. **`market_endpoint_registry`** (3,408 live endpoints), the `url_endpoints` catalog (830
+   templates), `unique_urls.txt` / `urls_v2.db` (3,103 URLs) — see the discovery-registry section.
+4. **The vendor APIs already wired in** — MoneyControl, Trendlyne, NiftyTrader, MarketsMojo,
+   InvestSights all expose far more than the fields currently consumed.
+
+**Worked failure, 2026-09-29 — this rule exists because of it.** `bqa portfolio`'s sector cap was
+binding on `__unknown__` because `alpha.instrument.sector` was 11.7% populated. Three sources were
+checked — `nse_constituents` (NIFTY 500 only, and its Health *declares* `fill_rates={"sector":
+0.2}`), legacy `stock_master.sector` (2,001 rows, **0** non-null), `src/data/stocklist.ts` (no
+sector field) — and the gap was filed as needing a user decision between widening ingestion,
+changing the cap, or accepting a restricted book. **All three options were unnecessary.**
+`nse_stocks.sector` is **2,366 rows, 100% populated, 14 sectors**, and
+`src/server/backfill_sectors.py` already exists to maintain it. One `information_schema` query
+across every table with a `sector` column would have found it in seconds; stopping at three
+plausible tables did not.
+
+The asymmetry that makes this worth a rule: searching costs minutes, while a wrong "unavailable"
+conclusion produces a filed finding, a user decision request, and sometimes a workaround built
+around data you already own. **"I checked the obvious places" is not the bar. The bar is the
+`information_schema` sweep plus a graphify query.**
+
 ### Canonical Identifier
 
 The **NSE symbol** (e.g., `HDFCBANK`, `INFY`, `BAJAJ-AUTO`) is the single source of truth across the entire platform. All provider-specific IDs are derived from it, never the reverse.

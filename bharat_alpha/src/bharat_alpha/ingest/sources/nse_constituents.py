@@ -47,6 +47,9 @@ def _col(fields: list[str], *needles: str) -> str | None:
     return None
 
 
+from bharat_alpha.reference.provider_ids import normalise_sector
+
+
 def parse_constituents(text: str) -> list[dict]:
     reader = csv.DictReader(io.StringIO(text.lstrip("﻿")))
     fields = reader.fieldnames or []
@@ -57,7 +60,12 @@ def parse_constituents(text: str) -> list[dict]:
     for r in reader:
         s = (r.get(sym) or "").strip().upper()
         if s:
-            out.append({"symbol": s, "industry": (r.get(ind) or "").strip() or None,
+            # Normalised to ONE taxonomy. NSE's index files use their own industry names
+            # ("Financial Services", "Capital Goods") while the legacy master uses GICS-style
+            # ones ("Financials", "Industrials"); both write this column, and unmapped the
+            # portfolio's sector cap treats the two names for one sector as two sectors --
+            # two 25% caps over one real exposure (AF-20260929-10).
+            out.append({"symbol": s, "industry": normalise_sector(r.get(ind)),
                         "isin": ((r.get(isin) or "").strip() or None) if isin else None})
     return out
 

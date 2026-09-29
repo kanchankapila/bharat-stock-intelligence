@@ -83,6 +83,23 @@ def import_provider_ids(legacy_dsn: str):
                 "marketsmojo": import_legacy_mojo_ids(conn, legacy)})
 
 
+@app.command("import-sectors")
+def import_sectors(legacy_dsn: str):
+    """Fill missing instrument sectors from the legacy nse_stocks master (100% populated).
+
+    nse_constituents only covers the NIFTY 500, so without this the portfolio's sector cap binds
+    on an `__unknown__` bucket holding most of the universe (AF-20260929-10). Existing labels are
+    never overwritten -- NSE's own industry classification wins where it exists.
+    """
+    import psycopg
+
+    from bharat_alpha.db import connect
+    from bharat_alpha.reference.provider_ids import import_legacy_sectors
+
+    with connect() as conn, psycopg.connect(legacy_dsn) as legacy:
+        _print(import_legacy_sectors(conn, legacy))
+
+
 @app.command("import-estimates")
 def import_estimates(legacy_dsn: str):
     """Import legacy analyst_estimates_history as point-in-time estimate snapshots."""
