@@ -274,6 +274,28 @@ stored on `alpha.fo_daily` (migration 0009) and open interest is converted to sh
 
 Rows ingested before migration 0009 carry no lot until their day is re-ingested.
 
+## Index valuation regime (`n500_pe*`)
+
+NSE publishes the NIFTY 500 P/E and P/B in the same daily file the index close comes from, and
+`nse_index_close` has always stored them — nothing read them. They were the only columns in the
+schema that no code touched.
+
+- **A P/E level is not comparable across regimes**, so the single feature is `n500_pe_pctile`:
+  where today's valuation sits within the **last `PE_MIN_HISTORY` (252) sessions**. The raw level
+  and its 63-session change were tried and dropped — the level contradicts that same reasoning,
+  the change duplicates `n500_ret_63`, and together they cost the planted-edge gate its
+  significance in `test_gate_finds_planted_edge_and_rejects_noise`.
+- **The window is fixed, not expanding.** An expanding rank depends on how much history the panel
+  happens to carry, so training (full history) and serving (a 300-session window) would disagree
+  on the same date — which `test_features_have_train_serve_parity` catches, and did.
+- At least `PE_MIN_OBS` (240) observations inside that window are required, so a year is needed
+  before any percentile and a few missing prints do not void it.
+- NSE prints `-` for an index with no P/E, and a zero would rank as the cheapest market on
+  record, so non-positive values are unknown rather than valuations.
+
+These sit in the `market_context` group (the `n500_` prefix), and like every other feature earn
+weight only through the gate.
+
 ## Global overnight cues (`fred_macro`)
 
 FRED's keyless `fredgraph.csv` supplies seven daily series, stored in `alpha.macro_series`: the
