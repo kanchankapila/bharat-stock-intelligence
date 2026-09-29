@@ -49,7 +49,7 @@ async function refreshHealth() {
   healthAtom.set({ ...healthAtom.get(), loading: true });
   try {
     const result = await host.request('tools/call', {
-      name: 'mcp_bharat-intelligence_inspect_ingestion_health',
+      name: 'mcp__bharat_intelligence__inspect_ingestion_health',
       arguments: {}
     });
     healthAtom.set({
@@ -68,7 +68,7 @@ async function refreshRecommendations() {
   recommendationsAtom.set({ ...recommendationsAtom.get(), loading: true });
   try {
     const result = await host.request('tools/call', {
-      name: 'mcp_bharat-intelligence_get_top_conviction_picks',
+      name: 'mcp__bharat_intelligence__get_top_conviction_picks',
       arguments: { limit: 20, min_score: 60 }
     });
     recommendationsAtom.set({ data: result.result || [], loading: false, error: null });
@@ -80,7 +80,7 @@ async function refreshRecommendations() {
 async function runFetcher(fetcherName, symbols = null) {
   try {
     const result = await host.request('tools/call', {
-      name: 'mcp_bharat-intelligence_run_fetcher',
+      name: 'mcp__bharat_intelligence__run_fetcher',
       arguments: { fetcher_name: fetcherName, symbols }
     });
     host.notify({ kind: 'success', message: `Fetcher ${fetcherName} completed` });
@@ -93,7 +93,7 @@ async function runFetcher(fetcherName, symbols = null) {
 async function requeueDLQ() {
   try {
     await host.request('tools/call', {
-      name: 'mcp_bharat-intelligence_requeue_dlq',
+      name: 'mcp__bharat_intelligence__requeue_dlq',
       arguments: {}
     });
     host.notify({ kind: 'success', message: 'DLQ requeued' });
@@ -172,7 +172,7 @@ function QuickActions() {
         jsx(Button, { 
           variant: 'outline', 
           onClick: () => host.request('tools/call', { 
-            name: 'mcp_bharat-intelligence_list_fetchers', 
+            name: 'mcp__bharat_intelligence__list_fetchers', 
             arguments: {} 
           }).then(r => host.notify({ kind: 'info', message: `Found ${r.result?.length || 0} fetchers` })),
           className: 'w-full justify-start'
@@ -195,7 +195,7 @@ function QuickActions() {
         jsx(Button, { 
           variant: 'outline', 
           onClick: () => host.request('tools/call', { 
-            name: 'mcp_bharat-intelligence_get_fetcher_status', 
+            name: 'mcp__bharat_intelligence__get_fetcher_status', 
             arguments: {} 
           }),
           className: 'w-full justify-start'
@@ -203,7 +203,7 @@ function QuickActions() {
         jsx(Button, { 
           variant: 'primary', 
           onClick: () => host.request('tools/call', { 
-            name: 'mcp_bharat-intelligence_get_top_conviction_picks', 
+            name: 'mcp__bharat_intelligence__get_top_conviction_picks', 
             arguments: { limit: 10, min_score: 65 } 
           }),
           className: 'w-full justify-start'
@@ -328,7 +328,7 @@ function RecommendationsTab() {
       title: 'No recommendations', 
       description: 'No BUY signals above threshold',
       action: { label: 'Lower Threshold', onClick: () => host.request('tools/call', { 
-        name: 'mcp_bharat-intelligence_get_top_conviction_picks', 
+        name: 'mcp__bharat_intelligence__get_top_conviction_picks', 
         arguments: { limit: 20, min_score: 50 } 
       }).then(r => recommendationsAtom.set({ ...recs, data: r.result })) }
     });
@@ -372,7 +372,7 @@ function FetchersTab() {
   // Load fetchers on mount
   if (loading) {
     host.request('tools/call', {
-      name: 'mcp_bharat-intelligence_list_fetchers',
+      name: 'mcp__bharat_intelligence__list_fetchers',
       arguments: {}
     }).then(r => {
       fetchersTabAtom.set({ ...fetchersTabAtom.get(), fetchers: r.result || [], loading: false });
@@ -498,7 +498,7 @@ export default {
         label: 'Bharat: Top Conviction Picks',
         description: 'Show top 10 BUY recommendations',
         action: () => host.request('tools/call', { 
-          name: 'mcp_bharat-intelligence_get_top_conviction_picks', 
+          name: 'mcp__bharat_intelligence__get_top_conviction_picks', 
           arguments: { limit: 10, min_score: 60 } 
         }).then(r => host.notify({ kind: 'info', message: JSON.stringify(r.result, null, 2) }))
       }
@@ -512,7 +512,7 @@ export default {
         description: 'Trigger a specific fetcher by name',
         action: async () => {
           const fetcher = await host.request('tools/call', { 
-            name: 'mcp_bharat-intelligence_list_fetchers', 
+            name: 'mcp__bharat_intelligence__list_fetchers', 
             arguments: {} 
           });
           // Would need a proper input dialog - simplified for now
