@@ -278,5 +278,27 @@ specifically complained about jobs "not supposed to run today" showing as delaye
 - **Make-up:** BullMQ job 712, native delay → fires **tonight (Mon) 23:30 IST** — after quant-eod-sync (22:00 IST, ends ~23:10); Monday daytime was deliberately avoided (market-hours contention is the failure condition). Regular Sunday slot Oct 4 untouched. Full detail: `docs/session-log.md` morning entry + ledger row.
 - **BiLSTM cadence fact (for the next person asked):** BiLSTM = the DL model itself. Training weekly Sun 10:30 IST; inference daily 21:30 IST Mon-Fri; features daily 17:00 IST. Weekly is hardware-bound (3h+, 13-16GB peak, 8GB shared GPU) — do not "just" move it into a weekday; find a quiet slot instead.
 
+## 2026-09-28/29 — bharat_alpha: eleven PRs (#112-#122), data-source backlog closed out
 
+Modules landed: results-filing times (RSS), corporate-action cross-check (PR bundle Bc), listing
+master + instrument-merge fix, same-fiscal-year estimate revisions (InvestSights), F&O lot sizes
+(OI in shares), standardised unexpected earnings (SUE), forward ownership collection, index
+membership + index-change events, index valuation regime (stored-but-unused P/E), the pandas
+view-write guard, and the GIFT Nifty opening gap.
+
+Bugs found in existing code, not just new features: the instrument merge repointed 6 of 16
+tables (any newer table's row broke it); `fo_oi_chg_5` was computed on contract counts, so every
+NSE lot revision invented an OI change; ownership was import-only and would have frozen silently
+behind a 130-day forward-fill; `nse_constituents` threw away the roster it fetched daily;
+`event_features` wrote into a numpy view and was latently broken on pandas 3 with no test
+reaching it.
+
+Three mistakes of mine worth remembering: an EXPANDING percentile broke train/serve parity (the
+panel's history length changes the value) — use a fixed window; adding three market-wide
+features cost the planted-edge gate its significance, so measure before shipping more than one;
+and a `git stash pop` reported success while silently not applying the edits — read the file
+back.
+
+Everything is fixture-tested only. All six market-data hosts are blocked by the environment's
+network policy (AF-20260928-10), so no connector in this batch has seen a live response.
 
