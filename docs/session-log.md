@@ -10080,3 +10080,10 @@ of the morning window. Reviewed at the user's request; **cause proven, one row f
 - **`mojo_shareholding`**: MarketsMojo `Stocks_Shareholding/get_results` (the same endpoint behind the legacy table; shape live-verified by `src/server/marketsmojo_shareholding_fetcher.py` 2026-08-11, including the quirk that the Promoter block nests holding% + pledged% as two series while other blocks are flat). Keyed on the provider sid from `alpha.provider_id`; `import-provider-ids` now imports MarketsMojo sids alongside MoneyControl scIds, dropping ambiguous ids.
 - **First sighting wins across BOTH sources**: a quarter the legacy import already holds is never rewritten or restamped, so a re-run only adds quarters. `ownership_features` now reads both sources as one series.
 - Negative-controlled: legacy quarters not treated as known, pledge series mislabelled, non-percentage values accepted, and features reading only the legacy source — each fails the new test. Not live-verified (network).
+
+## 2026-09-28 (night, 14) — Claude Code — bharat_alpha: index membership + index-change events
+
+- PR #118 (forward ownership collection) merged green.
+- **`nse_constituents` fetched the NIFTY 500 list daily and stored no history**, so index joins/exits — demand an index fund is forced to trade — were invisible. Migration 0010 adds `alpha.index_membership` (intervals); each run diffs the roster against the open intervals and records `index_join` / `index_exit` corporate events knowable the session the change was SEEN (the file is a snapshot; when NSE decided is unknowable).
+- **`idx_days_since_join` / `idx_days_since_exit`** (capped at 21 sessions) in the `events` ablation group.
+- **Guard: a short file is not a mass exit.** A truncated download would retire the whole index in one run; the diff is skipped below 80% of the current roster and logged, while sector/ISIN still update (per-row and still valid). Negative-controlled: guard removed, exits not closing their interval, feature visible before the event, and window never closing — each fails the new test.

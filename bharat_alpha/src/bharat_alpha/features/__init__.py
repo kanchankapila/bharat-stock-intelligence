@@ -282,6 +282,41 @@ def option_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFram
     }
 
 
+INDEX_EVENT_WINDOW = 21          # sessions an index fund has to complete its trade
+
+
+def index_event_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
+    """Sessions since a stock joined or left the index, capped at INDEX_EVENT_WINDOW. Index funds
+    must buy an inclusion and sell an exclusion, which is demand that is known in advance — the
+    event is dated to the session the change was first SEEN, never to when NSE decided it."""
+    ev = read_df(conn, """SELECT instrument_id, event_type, knowable_at FROM alpha.corporate_event
+                          WHERE event_type IN ('index_join', 'index_exit')""")
+    if ev.empty:
+        return {}
+    ev["known"] = _known_date(ev["knowable_at"])
+    idx = p.close.index
+    tvals = idx.to_numpy()
+    out = {}
+    for kind, name in (("index_join", "idx_days_since_join"), ("index_exit", "idx_days_since_exit")):
+        g = ev[ev["event_type"] == kind]
+        if g.empty:
+            continue
+        f = pd.DataFrame(np.nan, index=idx, columns=p.close.columns)
+        for r in g.itertuples():
+            if r.instrument_id not in f.columns:
+                continue
+            lo = int(np.searchsorted(tvals, np.datetime64(r.known)))
+            hi = min(lo + INDEX_EVENT_WINDOW, len(tvals))
+            if hi <= lo:
+                continue
+            # copy=True: to_numpy() hands back a READ-ONLY view on pandas 3, so writing into it
+            # raises there while passing on 2.x — a version difference CI finds and a dev box does not
+            col = f[r.instrument_id].to_numpy(copy=True)
+            col[lo:hi] = np.minimum(np.nan_to_num(col[lo:hi], nan=np.inf), np.arange(hi - lo, dtype=float))
+            f[r.instrument_id] = col
+        out[name] = f
+    return out
+
 def event_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame]:
     """Days to the next announced results date, using only announcements knowable by t."""
     idx = p.close.index
@@ -303,7 +338,7 @@ def event_features(conn: psycopg.Connection, p: Panel) -> dict[str, pd.DataFrame
             if hi <= lo:
                 continue
             days = (np.datetime64(r.event_date) - tvals[lo:hi]).astype("timedelta64[D]").astype(float)
-            col = d2r[r.instrument_id].to_numpy()
+            col = d2r[r.instrument_id].to_numpy(copy=True)          # read-only view on pandas 3, as above
             col[lo:hi] = np.minimum(col[lo:hi], days)
             d2r[r.instrument_id] = col
         out["days_to_results"] = d2r.replace(np.inf, np.nan).clip(upper=60)
@@ -624,6 +659,7 @@ def build_features(conn: psycopg.Connection, p: Panel, dates: pd.DatetimeIndex |
     raw.update(ban_features(conn, p))
     raw.update(option_features(conn, p))
     raw.update(event_features(conn, p))
+    raw.update(index_event_features(conn, p))
     raw.update(earnings_features(conn, p))
     raw.update(fundamental_features(conn, p))
     raw.update(estimate_features(conn, p))
