@@ -296,3 +296,37 @@ templates/templates-docs may be EMPTY with a "copy from repo .env" pointer, neve
 the Hermes integration batch (AF-20260914-04); the same class as "Registered != running" — a
 successful registration is not evidence of a working delivery path.
 
+
+## "Not measured" reported as "measured and found nothing" (2026-09-29, two sites in one session)
+
+A verdict function that grades a thing must distinguish **"I measured it and it did not help"**
+from **"I could not measure it"**. Collapsing them produces a result that reads like evidence and
+is not, and the two demand opposite actions: drop the feature, versus go and get more history.
+
+Both instances were the same shape — a data source whose history does not span the evaluation
+window — and neither was visible from the output:
+
+- `legacy/screen.py` reported `"admitted": [], "rejected": 38`. Every reason was
+  `coverage 0% < 30%`: the screen evaluates the earliest 250 sessions so feature selection never
+  sees the test folds (2021-01-01 → cutoff 2022-01-04), while the imported legacy history begins
+  **2026-05-16**. Zero overlap, so all 1,078,510 imported facts were structurally unadmittable.
+  The cutoff is CORRECT and was not changed — moving it to meet the data is the look-ahead bug it
+  exists to prevent.
+- `modeling/ablation.py`, found an hour later by the very data meant to exercise it.
+  `mc_estimates` spans 38 distinct days of a 6-year window, so removing the group cannot move the
+  ensemble: `delta_ic` came out **exactly 0.0** with a **NaN t**, printed as `no evidence` beside
+  `options` (t=−0.61) and `global_cues` (t=−0.09), which genuinely had been measured.
+
+**The tell is an exact zero with a null/NaN test statistic.** A real neutral result is a small
+number with a real t; `0.0` and `NaN t` together mean the comparison never happened. Treat that
+pair as "not evaluable" and say so in the output.
+
+**The check, when you write any grader:** before trusting a per-item verdict, count how many
+periods that item actually *has data on* and report it beside the verdict (`dates_with_data`,
+`coverage`). A verdict with no denominator beside it cannot be audited. Guard it with a test
+whose fixture has a field present on only the last N dates of the window and assert it classifies
+as not-evaluable — negative-control it, because the failing assertion is the whole point: without
+the fix it reads `no evidence`.
+
+Fixed and immunized in AF-20260929-09; `bharat_alpha/tests/test_legacy_bridge.py` and
+`tests/test_ablation.py` carry the guards.

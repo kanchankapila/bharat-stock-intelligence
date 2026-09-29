@@ -41,5 +41,6 @@ This file used to hold every class (~127 KB) and loaded on the first `.py`/`.ts`
 | Environment & deploy | `bugs-testing-env.md` |
 | Placeholder credential in an executable alert path = registered-but-never-delivered monitoring (2026-09-14) | `bugs-monitoring.md` |
 | Testing | `bugs-testing-env.md` |
+| "Not measured" reported as "measured and found nothing" (2026-09-29) | `bugs-monitoring.md` |
 
 When you add a class, put it in the area file whose `paths:` cover the code it bites, and add its row here.
