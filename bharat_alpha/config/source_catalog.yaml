@@ -205,8 +205,12 @@ families:
     path: "premarket/get-global-marketdata|us-markets"
     category: global cues
     pit: forward-only
-    verdict: backlog-medium
-    rationale: overnight global moves (GIFT Nifty, US close) matter for the open, i.e. for an intraday model
+    verdict: integrated
+    connector: mc_global
+    rationale: >-
+      GIFT Nifty only — it trades overnight, so a quote read before the open is the market's own
+      estimate of where NIFTY starts, which FRED's dated closes cannot give. The rest of the
+      board (US indices, VIX, 10y, dollar, Brent) is FRED's and is deliberately not stored twice
   - id: mc_stockvitals
     host: "(api|www)\\.moneycontrol\\.com"
     path: "stockvitals|financial-historical|mcfinancials"
@@ -256,8 +260,12 @@ families:
     path: "."
     category: options analytics
     pit: forward-only
-    verdict: backlog-medium
-    rationale: option-chain derived OI/IV per stock; implied vol & skew not derivable from bhavcopy prices
+    verdict: superseded
+    rationale: >-
+      the premise was that IV and skew are not derivable from bhavcopy prices; they are, and we
+      derive them — options.summarise computes atm_iv and skew per (stock, date, expiry) into
+      alpha.option_daily from the F&O bhavcopy's own STO rows, plus put/call OI and volume
+      (2026-09-29)
   - id: trendlyne_other
     host: "trendlyne\\.com"
     path: "."
@@ -282,8 +290,11 @@ families:
     path: "ban-list"
     category: F&O ban events
     pit: forward-only
-    verdict: backlog-medium
-    rationale: F&O ban entry/exit is a known liquidity event; cheap to collect
+    verdict: superseded
+    rationale: >-
+      F&O ban entry/exit is a known liquidity event, and nse_fo_secban (integrated) is the
+      exchange's own dated file with history and a trade date read from the file's own header —
+      a vendor mirror of the same list adds nothing (2026-09-29)
   - id: niftytrader_other
     host: "(webapi|api)\\.niftytrader\\.in|www\\.niftytrader\\.in"
     path: "."

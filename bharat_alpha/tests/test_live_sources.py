@@ -80,6 +80,15 @@ def test_mojo_shareholding_live(conn, client, session):
                             AND field = 'own_promoter_holding_pct'""")
     assert len(held) >= 2 and held.value.between(0, 100).all()
 
+def test_mc_global_live(conn, client, session):
+    """Settles that the board still answers and still names the row 'GIFT Nifty'."""
+    from bharat_alpha.ingest.sources.mc_global import McGlobal
+
+    status, n = run_connector(conn, McGlobal(), session, client=client)
+    assert status == "success" and n == 1, read_df(conn, "SELECT detail FROM alpha.ingest_run ORDER BY run_id DESC LIMIT 1")
+    v = read_df(conn, "SELECT value FROM alpha.macro_series WHERE series = 'GIFT_NIFTY'")
+    assert v.value.between(5_000, 100_000).all()          # an index level, not a change or a percent
+
 def test_nse_results_live(conn, client, session):
     """Settles the results-comparison field names nse_results.parse_results is strict about."""
     from bharat_alpha.ingest.sources.nse_results import NseResults

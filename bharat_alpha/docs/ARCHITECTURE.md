@@ -296,6 +296,22 @@ schema that no code touched.
 These sit in the `market_context` group (the `n500_` prefix), and like every other feature earn
 weight only through the gate.
 
+## The expected opening gap (`mc_global`, GIFT Nifty)
+
+GIFT Nifty trades roughly 21 hours, so a quote read before the NSE open **is** the market's own
+estimate of where NIFTY will start — the one overnight fact FRED's dated closes cannot give.
+`gift_gap` is that level against the PREVIOUS session's NIFTY 50 close, clipped to ±15%.
+
+- **Only GIFT Nifty is stored.** The same board carries US indices, VIX, 10y yields, the dollar
+  and Brent; FRED is the vintage-dated source for all of those and two writers for one fact is
+  how provenance gets confused.
+- **The endpoint is a snapshot** with no history and no observation date of its own, so
+  `knowable_at` is the fetch time and the vendor's `updatedDate` display string is never used as
+  one. A morning read lands on that session (the 19:00 IST cutoff), an evening read on the next.
+  The series starts when collection starts.
+- Rows are keyed by the run's IST date, so a second run the same day refreshes the quote rather
+  than inventing an observation.
+
 ## Global overnight cues (`fred_macro`)
 
 FRED's keyless `fredgraph.csv` supplies seven daily series, stored in `alpha.macro_series`: the
