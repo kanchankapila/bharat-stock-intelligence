@@ -160,6 +160,26 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 - **An unqualified `information_schema.columns`/`information_schema.tables` query can silently read a leaked throwaway test schema as a second copy of a real table**, producing duplicate column names that break downstream code with an error naming no table or schema. 🤖 Automated — `check_information_schema_missing_table_schema`. Fix: `AND table_schema = current_schema()`, not a hardcoded `'public'` (which breaks inside test fixtures that deliberately scope into their own schema).
 - **A throwaway-schema fixture that keeps `public` on the `search_path` reaches PRODUCTION for every name the fixture forgot to create — and on a busy table the ACCESS EXCLUSIVE LOCK, not the DDL, is the damage.** Caught live 2026-09-17 (AF-20260917-11): `conftest.py`'s `pg_schema` used `SET search_path TO "<throwaway>", public` under a comment asserting "the throwaway schema is FIRST, so an unqualified name can only ever shadow a production table, never write to one." **"First" only protects a name the schema HAS.** A test whose schema held 2 tables ran `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS …` against `public.technical_signals`; the column already existed so the DDL was a no-op, but the queued ACCESS EXCLUSIVE lock — stuck behind the nightly `pg_dump` — blocked **every subsequent reader** of the platform's main feature table for minutes. An `IF NOT EXISTS` that changes nothing still takes the lock. **Two tells, both cheap:** (1) `SHOW search_path` in the fixture — if `public` is on it, the isolation is partial by construction; (2) in `pg_stat_activity`, a DDL statement whose backend has a `t_`/`pytest_` search_path but whose target table is not in that schema. **The meta-lesson is the one this file already states in the comments-vs-guards entry**: the sibling fixture `pg_test_support.pg_memory_conn()` omitted `public` and documented exactly this hazard, and `CLAUDE.md` said `pg_conn` "puts `public` on the search_path, so a table the fixture forgot silently resolves to the real one" — three sources, two of them right, and the wrong one was the one sitting next to the code. When two places describe the same guard incompatibly, believe neither until you run the probe. Immunized by `src/server/tests/test_pg_schema_isolation.py`, whose negative control is that `SELECT 1 FROM technical_signals` **does not raise** against the unfixed fixture.
 
+- **CI and this repo's dev boxes can run DIFFERENT MAJOR pandas versions, and the gap is a
+  behaviour difference, not a warning — it fails only on CI, after you have pushed.** Measured
+  2026-09-28/29 in `bharat_alpha`: CI resolves pandas 3.x (`pyproject` says `pandas>=2.2`), the
+  container here had 2.3.3, and the same afternoon produced two separate CI-only failures:
+  (1) a NULL in a mixed text column reads back as `nan` on 3 and `None` on 2, so a dict
+  comparison in a test passed locally and failed on CI; (2) **`Series.to_numpy()` returns a
+  READ-ONLY array on pandas 3**, so `col = s.to_numpy(); col[a:b] = ...` raises
+  `ValueError: assignment destination is read-only` there and passes here.
+  The second one also sat, unnoticed, in code already on main (`features.event_features`) —
+  invisible because no test created the event that reaches its loop, which is the
+  "a `live_datasource`-gated test rots silently" class in a different costume: an unexercised
+  branch is an untested branch whatever gates it.
+  **Two rules.** (1) Never write into the array `to_numpy()` returns — pass `copy=True`, or
+  assign through pandas. Guarded by `bharat_alpha/tests/test_no_numpy_view_writes.py`, an AST
+  scan derived from the source tree (with its own emptiness self-test, per the entry below).
+  (2) For any assertion about a MISSING value, read it through a cursor, not a DataFrame: what
+  a null becomes in pandas is version-dependent and is not what you are trying to test.
+  **Tell:** a test that passes locally and fails on CI with a dtype-, null- or writeability-shaped
+  error. Check `pandas.__version__` on both sides before theorising about anything else.
+
 - **Negative-control every new test**: revert the fix, confirm the test fails, restore. Suites here have been 100% green while protecting nothing.
 - **A test that reimplements the logic under test** (hand-copies the resolution logic into the test file instead of importing it) passes against the unfixed source, because the mirror never sees the fix or the bug. Call the real function.
 - **A test that derives its expectation from the constant it is testing** passes vacuously (`all([])` is `True`).
