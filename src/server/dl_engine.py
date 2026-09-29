@@ -730,6 +730,27 @@ def _predict_batch(model: BiLSTMModel, X: np.ndarray, bs: int = 256) -> Dict[str
 _CHUNK_SIZE = 100  # symbols per gradient-update chunk — bounds peak RAM
 
 
+def _count_nonfinite_params(state_dict) -> int:
+    """Count NaN/Inf entries among floating-point parameters — computed on CPU COPIES.
+
+    AF-20260929-01 (measured 2026-09-29 05:08 IST): this reduction used to run directly on the
+    GPU tensors, i.e. at the END of a multi-hour run on a shared 8GB WDDM card, when VRAM is at
+    its most fragmented — and it raised `cudaErrorMemoryAllocation` itself (dl_engine.py:904),
+    aborting the retrain ~60 seconds before torch.save() and discarding a COMPLETED training.
+    state_dict tensors total a few MB; the CPU reduction is bit-identical and cannot fail for a
+    capacity reason. Non-floating tensors are skipped, matching the original filter.
+    """
+    if torch is None:
+        raise RuntimeError("torch unavailable; cannot check model parameters")
+    total = 0
+    for v in state_dict.values():
+        if not v.is_floating_point():
+            continue
+        t = v.detach().to("cpu")
+        total += int(torch.isnan(t).sum()) + int(torch.isinf(t).sum())
+    return total
+
+
 def train_lstm(version: int = 1) -> Dict:
     """Train BiLSTM on all symbols with >= 252 days, streaming in chunks to bound RAM."""
     con = connect()
@@ -901,8 +922,9 @@ def train_lstm(version: int = 1) -> Dict:
     # cannot catch this: all-NaN weights make walk_forward_validate raise, which the handler
     # above deliberately swallows as non-fatal, leaving NaN metrics behind. lstm_v3..v18 were
     # all saved with 100% NaN parameters this way and v18 became the active model.
-    nan_params = sum(int(torch.isnan(t).sum()) + int(torch.isinf(t).sum())
-                     for t in model.state_dict().values() if t.is_floating_point())
+    # On CPU copies (AF-20260929-01): the GPU-side version OOM'd here on 2026-09-29 05:08 IST,
+    # aborting a completed training seconds before torch.save().
+    nan_params = _count_nonfinite_params(model.state_dict())
     if nan_params:
         metrics["error"] = f"training diverged: {nan_params} non-finite parameters"
         print(f"[DL] REFUSED to save v{version}: training diverged "

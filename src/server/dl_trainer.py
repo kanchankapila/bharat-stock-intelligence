@@ -247,6 +247,35 @@ def lock_is_stale(lock_time_str, owner_pid=None, now=None, pid_alive=_pid_alive,
     return (now - lock_time).total_seconds() > stale_seconds
 
 
+def _train_with_oom_retry(train_fn, release_fn):
+    """Run train_fn(); on a CUDA-OOM RuntimeError, RELEASE attempt-1's memory BEFORE one retry.
+
+    AF-20260929-01 (measured 2026-09-29 05:08 IST, job 716): attempt 1 died AFTER training had
+    completed (the GPU-side divergence check, fixed separately in dl_engine) and the whole-train
+    retry — added 2026-09-28 — fired, but attempt 2 died at `BiLSTMModel().to(DEVICE)` allocating
+    a few MB. Cause: the old retry ran INSIDE the except block, where the caught exception's
+    traceback still referenced attempt 1's frames — model, chunk tensors, validation state, all
+    resident on the shared WDDM GPU — so gc.collect()/empty_cache() had almost nothing to free.
+    Retrying from OUTSIDE the except block lets the interpreter drop the exception (frames
+    included) first; release_fn() then collects them and hands the VRAM back. Bounded: one
+    retry (2 attempts x ~2.75h fits the 24h BullMQ lock; the lock is held throughout).
+    Non-OOM RuntimeErrors re-raise immediately, unchanged.
+    """
+    try:
+        return train_fn()
+    except RuntimeError as e:
+        if "out of memory" not in str(e).lower():
+            raise
+        print("[TRAINER] CUDA OOM escaped train_lstm; releasing attempt-1 memory and "
+              "retrying the whole train ONCE", file=sys.stderr)
+    # Above the except block EXITED NORMALLY: the interpreter has cleared the active exception,
+    # so once nothing else references it, its traceback -> attempt-1 frames -> GPU tensors are
+    # collectable. Doing the release while still INSIDE the except block — the old shape — is
+    # exactly what made the 2026-09-29 retry die at .to(DEVICE).
+    release_fn()
+    return train_fn()
+
+
 def retrain_models(trigger: str = "scheduled") -> dict:
     con = connect()
 
@@ -308,20 +337,15 @@ def retrain_models(trigger: str = "scheduled") -> dict:
             dl = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(dl)
 
-            try:
-                metrics = dl.train_lstm(version=new_version)
-            except RuntimeError as e:
-                # CUDA-OOM net ABOVE the chunk-level guard (AF-20260927-20): the 2026-09-28 02:19
-                # IST failure escaped train_lstm from a site the per-chunk retry/skip never
-                # covered (no "[DL] CUDA OOM on chunk" line in its stderr). On WDDM, VRAM is
-                # shared with the desktop and allocations can fail with cudaErrorMemoryAllocation
-                # at arbitrary async surface points, so retry the WHOLE train once with caches
-                # emptied. Bounded: 2 attempts x ~2.75h fits the 24h BullMQ lock with room; the
-                # lock is still held throughout, so no concurrent trainer can start.
-                if "out of memory" not in str(e).lower():
-                    raise
-                print("[TRAINER] CUDA OOM escaped train_lstm; emptying caches and retrying "
-                      "the whole train ONCE", file=sys.stderr)
+            # Whole-train OOM net ABOVE the chunk-level guard (AF-20260927-20, AF-20260929-01):
+            # attempt 1 can OOM from a site the per-chunk retry/skip never covered (measured
+            # 2026-09-29: the post-training divergence check at dl_engine.py:904). Retry once —
+            # but only after _train_with_oom_retry has DROPPED attempt 1's exception/frames and
+            # run release_fn (gc + empty_cache), or the retry starts with attempt-1's VRAM still
+            # live and dies at model.to(DEVICE) on a few MB (the 2026-09-29 observed failure).
+            def _release_attempt1():
+                import gc as _gc
+                _gc.collect()
                 try:
                     if getattr(dl, "torch", None) is not None and dl.DEVICE is not None \
                             and dl.DEVICE.type == "cuda":
@@ -329,9 +353,9 @@ def retrain_models(trigger: str = "scheduled") -> dict:
                 except Exception as ce:
                     print(f"[TRAINER] empty_cache before retry failed (non-fatal): {ce}",
                           file=sys.stderr)
-                import gc as _gc
-                _gc.collect()
-                metrics = dl.train_lstm(version=new_version)
+
+            metrics = _train_with_oom_retry(
+                lambda: dl.train_lstm(version=new_version), _release_attempt1)
         result["metrics"] = metrics
 
         acc = metrics.get("directional_accuracy")

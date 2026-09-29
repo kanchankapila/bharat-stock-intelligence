@@ -17,6 +17,9 @@ bug class (Finding #17: unconditional promotion, never-deactivated prior row).
 """
 import os
 import sys
+import weakref
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import dl_trainer as dlt
@@ -225,3 +228,102 @@ class TestFeatureEngineeringStepFailureProvenance:
             "budget must exceed it (3600s = ~6.7x the measured 540s quiet runtime, and the same "
             "box runs the script's full-universe sibling in 24-103min)"
         )
+
+
+class TestTrainWithOomRetry:
+    """AF-20260929-01, job 716 (2026-09-29 05:08 IST): attempt 1 of the whole-train OOM retry
+    raised from INSIDE its own except block, where the caught exception's traceback still
+    references attempt 1's frames -- model, chunk tensors, validation state, all resident on the
+    shared 8GB WDDM GPU -- so attempt 2 died allocating `BiLSTMModel().to(DEVICE)` (a few MB).
+    The retry must start only AFTER the exception has been dropped, with release_fn() run first."""
+
+    class _Probe:
+        pass
+
+    def _train_with_probe(self, calls, probe_ref):
+        """train_fn that raises OOM once, leaving a probe object in attempt 1's frame."""
+        def train_fn():
+            if not calls:
+                calls.append("first")
+                probe = TestTrainWithOomRetry._Probe()
+                probe_ref["r"] = weakref.ref(probe)
+                raise RuntimeError("CUDA error: out of memory (cudaErrorMemoryAllocation)")
+            calls.append("second")
+            return {"roc_auc": 0.51}
+        return train_fn
+
+    def test_oom_releases_attempt1_frames_before_the_retry(self):
+        calls, probe_ref = [], {}
+        released = []
+
+        def checking_train_fn():
+            result = self._train_with_probe(calls, probe_ref)()
+            if result is not None and len(calls) == 2:
+                assert probe_ref["r"]() is None, (
+                    "attempt 1's frame (holding the model/chunk tensors) must be garbage BEFORE "
+                    "the retry starts -- the 2026-09-29 retry ran while it was still alive and "
+                    "died at model.to(DEVICE)")
+            return result
+
+        out = dlt._train_with_oom_retry(checking_train_fn, lambda: released.append(1))
+        assert out == {"roc_auc": 0.51}
+        assert calls == ["first", "second"]
+        assert released == [1], "release_fn (gc + empty_cache) must run before the retry"
+
+    def test_discriminates_the_old_inside_except_shape(self):
+        """Negative control for the test above: under the PRE-AF-20260929-01 shape (retry from
+        inside the except block), the probe is STILL alive at retry time -- proof that the
+        assertion in the test above actually distinguishes the fix from the bug."""
+        calls, probe_ref = [], {}
+
+        def old_shape(train_fn, release_fn):
+            try:
+                return train_fn()
+            except RuntimeError as e:
+                if "out of memory" not in str(e).lower():
+                    raise
+                release_fn()
+                return train_fn()  # <-- the old bug: still inside the except block
+
+        alive_at_retry = []
+
+        def train_fn():
+            if not calls:
+                calls.append("first")
+                probe = self._Probe()
+                probe_ref["r"] = weakref.ref(probe)
+                raise RuntimeError("CUDA error: out of memory")
+            alive_at_retry.append(probe_ref["r"]() is not None)
+            return "ok"
+
+        assert old_shape(train_fn, lambda: None) == "ok"
+        assert alive_at_retry == [True], (
+            "the inside-except shape must keep attempt 1's frames alive -- if it does not, the "
+            "guard test above can no longer discriminate")
+
+    def test_non_oom_runtimeerror_is_not_retried(self):
+        calls = []
+
+        def train_fn():
+            calls.append(1)
+            raise RuntimeError("cudnn not compiled with CUDA")
+
+        with pytest.raises(RuntimeError, match="cudnn"):
+            dlt._train_with_oom_retry(train_fn, lambda: None)
+        assert len(calls) == 1, "a real bug must surface on the first attempt"
+
+    def test_a_second_oom_propagates(self):
+        calls = []
+
+        def train_fn():
+            calls.append(1)
+            raise RuntimeError("CUDA error: out of memory")
+
+        with pytest.raises(RuntimeError, match="out of memory"):
+            dlt._train_with_oom_retry(train_fn, lambda: None)
+        assert len(calls) == 2, "the retry must be bounded to ONE extra attempt"
+
+    def test_success_needs_no_release(self):
+        released = []
+        assert dlt._train_with_oom_retry(lambda: "ok", lambda: released.append(1)) == "ok"
+        assert released == [], "release_fn must only run on the OOM path"

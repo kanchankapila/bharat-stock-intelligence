@@ -110,3 +110,42 @@ class TestChunkOomGuard:
 
         with pytest.raises(RuntimeError, match="shape mismatch"):
             _run_train_lstm(monkeypatch, tmp_path, fold)
+
+
+class TestCountNonfiniteParamsCpu:
+    """AF-20260929-01 (job 716, 2026-09-29 05:08 IST): the post-training divergence check ran
+    its NaN/Inf reduction directly on the GPU state_dict at the END of a multi-hour run on the
+    shared 8GB WDDM card -- and the reduction itself raised cudaErrorMemoryAllocation,
+    aborting the retrain ~60 seconds before torch.save() and discarding a COMPLETED training.
+    The count must be computed on CPU copies, where it is bit-identical and capacity-safe."""
+
+    def test_counts_nan_and_inf_among_float_tensors_only(self):
+        import torch
+        sd = {
+            "w": torch.tensor([float("nan"), 1.0, float("inf"), -float("inf")]),
+            "b": torch.tensor([1.0, 2.0]),
+            "n_steps": torch.tensor([7], dtype=torch.int64),  # non-float: skipped
+        }
+        assert dl_engine._count_nonfinite_params(sd) == 3
+
+    def test_zero_for_finite_params(self):
+        import torch
+        assert dl_engine._count_nonfinite_params({"w": torch.zeros(4, 2)}) == 0
+
+    def test_reads_a_cuda_state_dict_without_reducing_on_the_gpu(self):
+        """Live path: given GPU tensors, the helper must still answer -- it copies to CPU first
+        (the GPU-side reduction is what failed at dl_engine.py:904)."""
+        import torch
+        if not torch.cuda.is_available():
+            pytest.skip("no CUDA device")
+        sd = {"w": torch.tensor([1.0, float("nan"), float("inf")]).cuda()}
+        assert dl_engine._count_nonfinite_params(sd) == 2
+
+    def test_source_pins_the_cpu_copy(self):
+        """Mutation guard: without `.to("cpu")` this would be the GPU-side reduction that killed
+        job 716 -- asserted explicitly because the CPU move is the entire fix."""
+        import inspect
+        src = inspect.getsource(dl_engine._count_nonfinite_params)
+        assert '.to("cpu")' in src, (
+            "the divergence check must reduce CPU copies: running it on WDDM-shared VRAM is "
+            "what aborted the 2026-09-29 retrain seconds before torch.save()")
