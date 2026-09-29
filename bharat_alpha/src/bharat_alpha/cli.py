@@ -323,6 +323,24 @@ def ablate(horizon: int = 21, end: str = typer.Option(None), years: int = 6):
         _print(run_ablation(ds).to_dict(orient="records"))
 
 
+@app.command()
+def movers(horizon: int = 5, k: int = 20, end: str = typer.Option(None), years: int = 6):
+    """Why did the movers move? Ranks each feature among the top-k AND bottom-k forward movers.
+
+    Reports `separation` (directional) beside `t_winners_only` (what selecting on the winners
+    alone would have told you). A feature with a huge winners-only t and ~0 separation is a
+    volatility detector: it predicts movement, not direction.
+    """
+    from bharat_alpha.db import connect, read_df
+    from bharat_alpha.evaluation.movers import mover_separation
+    from bharat_alpha.modeling.dataset import build_dataset
+
+    with connect() as conn:
+        end_d = _date(end) or read_df(conn, "SELECT max(trade_date) d FROM alpha.trading_day").d[0]
+        ds = build_dataset(conn, end_d - dt.timedelta(days=365 * years), end_d, horizon)
+        _print(mover_separation(ds, k=k).to_dict(orient="records"))
+
+
 @app.command("sources-audit")
 def sources_audit(repo: Path = Path("..")):
     """Scan the URL corpus AND every URL in the legacy codebase: data hosts with no catalog verdict,
