@@ -102,7 +102,29 @@ many assertions it has.
 
 Do this for real, on a throwaway edit. Do not reason about whether it *would* fail.
 
-## 8. Report
+## 8. "Known flake" labels that absorb real defects
+
+Where the project documents an intermittent-failure class, record its signature as a
+**conjunction** and require *every* clause to match before applying the label — typically:
+failure mode (timeout vs assertion vs error), which files fail, and isolation behaviour. A
+failure matching only some clauses is unclassified and gets investigated, not absorbed.
+
+Triage order matters: sort intermittent failures by **mode** first and handle assertion failures
+separately from timeouts, before checking isolation at all. "Passes in isolation" only shows
+timing sensitivity — it is not proof of flakiness, and it is the clause most likely to be doing
+double duty.
+
+The danger is asymmetric: mislabelling a real defect as a known flake removes it from every
+future queue silently, while the reverse costs one investigation. Put the burden of proof on
+*applying* the label. (Observed: a failure filed under a documented flake was an assertion
+failure — `expected 0 to be >= 15` — which the documented signature explicitly excluded. It was a
+real defect: durations measured with a wall clock coarser than the assertion's threshold recorded
+every short step as zero, corrupting the telemetry the audit itself was built on.)
+
+Re-verify the mechanism a documented diagnosis claims, rather than inheriting its explanation — a
+previously-written root cause ages, and the condition it names may since have been fixed.
+
+## 9. Report
 
 Per finding: file:line, which of the six signatures, and what the test would fail to catch. Rank
 by blast radius of the unguarded logic, not by count. Then state which signatures were swept

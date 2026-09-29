@@ -28,6 +28,33 @@ a job bug.
 
 ## 2. Check for budget-kill truncation
 
+**Before judging any single job's budget, rule out a shared cause.** When several jobs fail in
+the same window, correlate their exact `ran_at`/`finished_at` timestamps *before* reading any
+individual error text. Identical seconds across unrelated queues is a process-kill signature — a
+kill, OOM, restart or connection-pool exhaustion — and every per-job error is then a symptom, not
+a diagnosis. BullMQ `concurrency: 1` serializes per queue and **not at all across queues**, so
+cross-queue resource ceilings (the Postgres connection limit, host RAM) need their own accounting.
+
+```sql
+-- shared-cause discriminator: exact-second clustering across unrelated jobs
+SELECT date_trunc('second', finished_at) AS t, count(*), array_agg(DISTINCT job_name)
+FROM job_runs WHERE finished_at > now() - interval '7 days'
+GROUP BY 1 HAVING count(DISTINCT job_name) > 1 ORDER BY 2 DESC LIMIT 20;
+```
+
+Sequence the fix as contention-removal first, then re-derive budgets from clean-night
+measurements: a budget validated under contention proves nothing about the clean-state
+requirement, and each failed raise spends down the credibility the next genuine raise will need.
+
+**Read the configured budget from the source, never from a failure message.** A stored
+`Timed out after 5400000ms` string records the budget *as it was at the moment of that failure* —
+which is precisely the value someone may have since raised. Every column in a
+configured-vs-measured table needs its own provenance: print the `file:line` the configured value
+came from, and treat a value with no `file:line` as inferred, not measured. (Observed: two jobs
+looked badly under-provisioned from their own failure text; the source showed both budgets had
+already been raised to 2x and 3x those values. Filing them would have re-applied an existing fix
+and reported it as new work.)
+
 For every `runPython()`/long-running step: what is its configured timeout, and does its own
 recent log history show `Timed out after Nms (killed by timeout)` (or an equivalent kill signal)
 on a **recurring** basis, not a one-off? A step that hits its budget occasionally under load is

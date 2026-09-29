@@ -68,7 +68,18 @@ If the first call fails (403/429/timeout), that's data too: note it. Many provid
 platform need a warmed-up session/cookie first (see `_nse_session()` in
 `index_membership_fetcher.py` for the pattern), a specific `Referer`/`User-Agent`, or are
 simply geo/IP-blocked from this environment — confirm which before concluding the source is
-broken (`curl` a known-good comparison domain first if reachability itself is in doubt).
+broken.
+
+**Re-probe with the real client before calling anything unreachable.** A failure from `curl`,
+`requests`, `socket` or `ssl` is evidence about *that* transport, not about the host, and a
+known-good comparison domain does not discriminate — it only shows the stand-in works somewhere.
+Construct the fetcher's own client the way production constructs it and retry the exact URL; where
+that client needs config to build (a DSN, a key), point it at a deliberately invalid value rather
+than reaching for a simpler transport. (Observed: a bare `ssl` sweep reported `frapi.marketsmojo.com`
+as `CERTIFICATE_VERIFY_FAILED: self signed certificate in certificate chain`. The host was fine —
+it sends an incomplete chain that browsers and `curl_cffi` recover from via AIA chasing and bare
+`ssl` does not. The project's own client got `200`. Retiring it on the generic probe would have
+dropped a live source, and nothing downstream re-checks a source once it is marked dead.)
 
 ## Phase 2 — Understand what's actually in it
 
