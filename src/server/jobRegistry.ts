@@ -140,7 +140,10 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // (covering the raised 45-min runPython budget), and jobRegistryGraceMinutesConsistency
   // asserts grace >= lock — 45 vs 55 would fail it. Real runs measure 7-12 min; the grace
   // is judged against a hung-under-load run, not a typical one.
-  { jobName: 'unified-ranker', label: 'Unified Daily Ranker', cronPattern: '0 17 * * 1-5', graceMinutes: 75, critical: true },
+  // graceMinutes 75 -> 95 (2026-09-29, AF-20260929-04): runPython 45 -> 75 and
+  // lockDuration 55 -> 85 (both queues.ts, same finding — post-close-cluster runs were
+  // being cut at exactly the 45-min cap); the grace >= lock assertion needs 95.
+  { jobName: 'unified-ranker', label: 'Unified Daily Ranker', cronPattern: '0 17 * * 1-5', graceMinutes: 95, critical: true },
   { jobName: 'live-screener-collect', label: 'Live Screener Poller', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 30, critical: false,
     lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
   // graceMinutes 45 -> 360: the processor's own comment says "5.5h backstop... the last

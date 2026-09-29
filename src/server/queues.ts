@@ -3272,7 +3272,13 @@ export async function initQueues(): Promise<boolean> {
         // this budget is headroom against DB-contention tail latency, not a growing workload.
         // The run itself scans 2,352 candidates through a 90d recommendation_log RL-gate
         // map plus 700k-row confluence window scans (its own stderr).
-        await runPython('unified_ranker.py', [], 45 * 60_000);
+        //
+        // 45min -> 75min (2026-09-29, AF-20260929-04): this block's own protocol says raise
+        // only when successful runs actually moved -- they have: 436s (09-23) -> 37min (09-24)
+        // measured success, and BOTH 09-28 failures died at exactly 2,700,000ms (cut at the
+        // cap, not hung). 37min vs a 45min cap = the 1.2x-headroom class, during the
+        // post-close cluster + nightly memory squeeze (AF-20260928-03). 75min ~ 2x worst success.
+        await runPython('unified_ranker.py', [], 75 * 60_000);
 
         // Push today's highest-conviction canonical picks over WebSocket (2026-08-05 fix --
         // see unifiedSignalBroadcast.ts's header for the gap this closes). Best-effort: the
@@ -3293,7 +3299,9 @@ export async function initQueues(): Promise<boolean> {
       // (AF-20260917-20): the lock must cover the runPython budget, now 45 min; a lock
       // shorter than the budget is the exact lock-vs-budget undercount recurring-bugs.md
       // records (AF-20260912-16's nse-sync lesson).
-      { connection, concurrency: 1, lockDuration: 55 * 60_000 },
+      // 55 -> 85 min (2026-09-29, AF-20260929-04): runPython is now 75 min; a 55-min lock
+      // would stall-redeliver a legitimate 56-75 min run. Same +10 buffer as the bump above.
+      { connection, concurrency: 1, lockDuration: 85 * 60_000 },
     );
     unifiedRankerWorker = unifiedRankerWorkerInstance;
 
