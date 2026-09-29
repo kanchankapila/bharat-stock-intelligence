@@ -127,3 +127,46 @@ def test_screen_admits_evidence_and_only_admitted_reach_features(conn, legacy_db
     assert "x_fake_signal__val" in ff.stock_features and "x_fake_noise__val" not in ff.stock_features
     get_settings.cache_clear()
 
+
+
+def test_screen_separates_never_measurable_from_measured_and_failed(conn):
+    """A field absent from the whole screen window must NOT be reported as 'no evidence'.
+
+    AF-20260929-09: all 38 imported legacy fields were rejected at `coverage 0% < 30%` because
+    their history began 4.5 years AFTER the screen cutoff. `admitted=False` alone made that
+    look like a merit verdict. The cutoff itself is correct -- moving it to meet the data would
+    let feature selection see the test folds -- so the fix is in how the outcome is reported.
+    """
+    import datetime as dt
+
+    from bharat_alpha.db import read_df
+    from bharat_alpha.legacy.screen import screen
+    from bharat_alpha.sim import simulate
+
+    sim = simulate(n_stocks=8, n_days=40, seed=5)
+    _ingest(conn, sim)
+    dates = sim.dates
+
+    iids = read_df(conn, "SELECT instrument_id FROM alpha.instrument ORDER BY 1").instrument_id.tolist()
+
+    # One field present ONLY in the last two sessions -- i.e. after any sane screen window.
+    with conn.cursor() as cur:
+        for d in dates[-2:]:
+            for i in iids:
+                cur.execute(
+                    "INSERT INTO alpha.external_fact (source, instrument_id, field, value, observed_date, knowable_at)"
+                    " VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                    ("legacy:late_table", i, "late_field", 1.0, d,
+                     dt.datetime.combine(d, dt.time(20, 30), tzinfo=IST)))
+    conn.commit()
+
+    df = screen(conn, dates[0], dates[len(dates) // 2], horizon=5)
+    late = df[df.field == "late_field"]
+    assert len(late) == 1, df.field.tolist()
+    row = late.iloc[0]
+    assert not row.admitted
+    assert row.verdict == "not_evaluable", (row.verdict, row.reason)
+    assert row.verdict != "no_evidence"
+    # Either not-evaluable branch is fine (no coverage, or no realised labels); what must never
+    # happen is the wording that implies the field was measured and came up short.
+    assert "no evidence" not in row.reason, row.reason

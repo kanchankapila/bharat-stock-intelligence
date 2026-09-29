@@ -225,8 +225,15 @@ def legacy_screen(start: str, cutoff: str = typer.Option(None), horizon: int = 2
     with connect() as conn:
         c = _date(cutoff) or default_cutoff(conn, _date(start))
         df = screen(conn, _date(start), c, horizon)
-        _print({"cutoff": c, "admitted": df[df.admitted][["source", "field", "mean_ic", "t_nw"]].to_dict("records"),
-                "rejected": int((~df.admitted).sum()) if len(df) else 0})
+        # Split deliberately: "measured and failed" and "never measurable" are different facts,
+        # and a single `rejected` count reads as a merit verdict for both (AF-20260929-09).
+        v = df.verdict if len(df) else None
+        _print({"cutoff": c,
+                "admitted": df[df.admitted][["source", "field", "mean_ic", "t_nw"]].to_dict("records"),
+                "no_evidence": int((v == "no_evidence").sum()) if len(df) else 0,
+                "not_evaluable": int((v == "not_evaluable").sum()) if len(df) else 0,
+                "not_evaluable_detail": (df[v == "not_evaluable"].groupby("source").size().to_dict()
+                                         if len(df) else {})})
 
 
 @app.command()

@@ -71,17 +71,25 @@ def screen(conn: psycopg.Connection, start: dt.date, cutoff: dt.date, horizon: i
         ic = per_date_ic(z, lab.fwd_w.where(uni))
         summ = summarize_ic(ic, horizon, s.min_effective_dates)
         t = summ.t_nw if summ.t_nw == summ.t_nw else 0.0
+        # `verdict` exists because "measured and failed" and "never measurable" are different
+        # facts that a bare admitted=False collapses into one. A source whose history starts
+        # AFTER this screen window scores coverage 0% and is reported as rejected, which reads
+        # as a merit verdict and is not one (AF-20260929-09: all 38 legacy fields, 1.08M facts,
+        # rejected at coverage 0% because their history began 4.5 years after the cutoff).
         if cov < MIN_COVERAGE:
-            ok, why = False, f"coverage {cov:.0%} < {MIN_COVERAGE:.0%}"
+            ok, verdict = False, "not_evaluable"
+            why = f"coverage {cov:.0%} < {MIN_COVERAGE:.0%} across the screen window — NOT a verdict on the field"
         elif not summ.reliable:
-            ok, why = False, f"LOW-DATA: {summ.eff_dates} effective dates"
+            ok, verdict, why = False, "not_evaluable", f"LOW-DATA: {summ.eff_dates} effective dates"
         elif abs(t) < s.promotion_min_t:
-            ok, why = False, f"no evidence: |t|={abs(t):.2f}"
+            ok, verdict, why = False, "no_evidence", f"no evidence: |t|={abs(t):.2f}"
         else:
-            ok, why = True, f"IC {summ.mean_ic:+.4f}, t={t:.2f} on {summ.eff_dates} effective dates"
+            ok, verdict = True, "admitted"
+            why = f"IC {summ.mean_ic:+.4f}, t={t:.2f} on {summ.eff_dates} effective dates"
         rows.append({"source": f"legacy:{table}", "field": field, "cutoff": cutoff, "horizon": horizon,
                      "n_dates": summ.n_dates, "eff_dates": summ.eff_dates, "coverage": cov,
-                     "mean_ic": summ.mean_ic, "t_nw": t, "admitted": ok, "reason": why})
-    upsert(conn, "alpha.external_screen", rows, key=("source", "field", "cutoff", "horizon"))
+                     "mean_ic": summ.mean_ic, "t_nw": t, "admitted": ok, "verdict": verdict, "reason": why})
+    upsert(conn, "alpha.external_screen", [{k: v for k, v in r.items() if k != "verdict"} for r in rows],
+           key=("source", "field", "cutoff", "horizon"))
     conn.commit()
     return pd.DataFrame(rows)
