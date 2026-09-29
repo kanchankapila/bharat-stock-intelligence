@@ -77,13 +77,23 @@ def ablate(ds: Dataset, members_factory=None, groups: dict[str, list[str]] | Non
         diff = (full - without).dropna()
         delta = float(diff.mean()) if len(diff) else float("nan")
         t = newey_west_t(diff, lags)
-        if t == t and delta > 0 and t >= s.promotion_min_t:
+        # How many dates does this group actually HAVE a value on? A source whose history
+        # covers a sliver of the window cannot move the ensemble, so it scores delta 0.0 and a
+        # NaN t -- which is "never evaluated", not "measured and found neutral". Reporting the
+        # two identically is AF-20260929-09's shape (mc_estimates spans 38 days of a 6-year
+        # window and read `no evidence`, beside `options` at t=-0.61 which genuinely was tested).
+        covered = int(ds.X[cols].notna().any(axis=1).groupby(level="date").any().sum())
+        if covered < s.train_min_dates:
+            verdict = "not evaluable"
+        elif t == t and delta > 0 and t >= s.promotion_min_t:
             verdict = "adds"
         elif t == t and delta < 0 and t <= -s.promotion_min_t:
             verdict = "hurts"
+        elif t != t:
+            verdict = "not evaluable"
         else:
             verdict = "no evidence"
         rows.append({"group": g, "n_features": len(cols), "ic_full": float(full.mean()),
                      "ic_without": float(without.mean()), "delta_ic": delta, "t_nw": t,
-                     "n_dates": int(len(diff)), "verdict": verdict})
+                     "n_dates": int(len(diff)), "dates_with_data": covered, "verdict": verdict})
     return pd.DataFrame(rows).sort_values("delta_ic", ascending=False).reset_index(drop=True)
