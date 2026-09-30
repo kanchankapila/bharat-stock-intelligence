@@ -62,6 +62,7 @@ from datetime import datetime
 import requests
 
 from db_compat import connect, ConnWrapper, query_all
+from fetch_utils import retry_get
 
 API = "https://trendlyne.com/equity/api/market-insight/"
 SOURCE = "trendlyne"
@@ -77,8 +78,7 @@ HEADERS = {
 
 def fetch_insights() -> list:
     """The ONLY fetch path -- tests call this, never a reimplementation."""
-    r = requests.get(API, headers=HEADERS, timeout=20)
-    r.raise_for_status()
+    r = retry_get(requests, API, headers=HEADERS, timeout=20)
     payload = r.json()
     if not isinstance(payload, dict):
         raise ValueError(f"unexpected envelope: {str(payload)[:200]}")

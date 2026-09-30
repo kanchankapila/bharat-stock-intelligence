@@ -1402,12 +1402,20 @@ class TestApplyCorrelationCap:
 
 
 class TestGetRecentReturns:
+    # Dates are anchored to today: _get_recent_returns keeps only the last
+    # RETURN_LOOKBACK_DAYS*2 calendar days, so fixed dates (2026-06-xx until 2026-09-30) age out
+    # of the window and turn this into a calendar time-bomb.
+    @staticmethod
+    def _day(n):
+        from datetime import date, timedelta
+        return (date.today() - timedelta(days=10) + timedelta(days=n - 1)).isoformat()
+
     def _seed_ohlcv(self, conn, symbol, closes, start_day=1, suspect_days=()):
         for i, c in enumerate(closes):
             day = start_day + i
             conn.execute(
                 "INSERT INTO stock_ohlcv (symbol, date, close, is_suspect) VALUES (?, ?, ?, ?)",
-                (symbol, f"2026-06-{day:02d}", c, 1 if day in suspect_days else 0),
+                (symbol, self._day(day), c, 1 if day in suspect_days else 0),
             )
         conn.commit()
 
@@ -1417,10 +1425,11 @@ class TestGetRecentReturns:
         self._seed_ohlcv(conn, 'A', [100.0, 110.0, 99.0])
         ranker = UnifiedRanker(conn=conn)
         out = ranker._get_recent_returns(['A'])
-        assert out['A']['2026-06-02'] == pytest.approx(0.10)
-        assert out['A']['2026-06-03'] == pytest.approx((99.0 - 110.0) / 110.0)
+        assert set(out['A']) == {self._day(2), self._day(3)}
+        assert out['A'][self._day(2)] == pytest.approx(0.10)
+        assert out['A'][self._day(3)] == pytest.approx((99.0 - 110.0) / 110.0)
         # first day has no prior close, so it never appears as a return date
-        assert '2026-06-01' not in out['A']
+        assert self._day(1) not in out['A']
 
     def test_excludes_suspect_bars(self):
         """A flagged impossible-move bar (2026-07-30/31 bad-bar-quarantine convention) must
@@ -1431,12 +1440,13 @@ class TestGetRecentReturns:
         self._seed_ohlcv(conn, 'A', [100.0, 100.0, 5000.0, 101.0], suspect_days=[3])
         ranker = UnifiedRanker(conn=conn)
         out = ranker._get_recent_returns(['A'])
-        # the suspect day (2026-06-03, close=5000.0) never appears as a return date at all --
+        # the suspect day (day 3, close=5000.0) never appears as a return date at all --
         # a naive impl would report a fabricated +4900% move into it.
-        assert '2026-06-03' not in out['A']
+        assert set(out['A']) == {self._day(2), self._day(4)}
+        assert self._day(3) not in out['A']
         # the next good bar's return is computed against the last known-GOOD close (day 2,
         # 100.0), not against the excluded suspect close -- (101-100)/100, not (101-5000)/5000.
-        assert out['A']['2026-06-04'] == pytest.approx(0.01)
+        assert out['A'][self._day(4)] == pytest.approx(0.01)
 
     def test_missing_symbol_returns_empty_dict(self):
         from unified_ranker import UnifiedRanker

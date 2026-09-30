@@ -4,6 +4,42 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-09-29 — Doc-inventory sweep: every stale count re-derived, plus a check that stops them recurring
+
+- **Agent**: Cline. **Trigger**: "update all files with latest data, it should not have stale data creating confusion" (follow-up to the architecture review).
+- **Measured first, edited second.** Every number below was re-derived, not recalled: filesystem counts via `Get-ChildItem` (excluding `__pycache__`/`__tests__`/`tests/`/`test_*`/`conftest`), and DB counts via the repo's own read-only `scripts/sql.py` against live `bharat_intel` @ :5433.
+- **Corrected (all stale):** `CLAUDE.md` "~210 Python modules" → **290** non-test (678 `.py` incl. tests) and "81 fetchers" → **82**; `CONTEXT.md` "~237 Python modules" → **290**; `url_endpoints` "830 templates" → **834** rows/templates across **45** hosts (live); project memory "~55 topic files" → **60**; `logger.ts` + `server.ts` "~140 server files / 611 raw call sites" → **~90 files / 709 call sites** (the 611 figure was itself a stale 2026-08-05 audit number).
+- **Deliberately NOT changed — verified correct:** `market_endpoint_registry` **3,408 (2,864 GET / 544 POST)**, `unique_urls.txt` **3,103**, `JOB_REGISTRY` **72 entries**, fetchers **82**. The method column is `http_method`, not `method` (an initial query failed on exactly that), and `url_endpoints` is a view whose template column is `template` — its 834 rows are 834 *distinct* templates. The rules-section "five / ~308 KB" was left in place as an explicitly-labelled **pre-split historical** figure, with the current size (9 files / ~325 KB) given alongside rather than overwriting the history.
+- **The actual fix — `scripts/docNumbers.mjs` (new, `npm run doc:numbers` / `doc:numbers:check`).** Correcting numbers alone just resets the clock; the same counts drift again. The script re-derives all 15 figures (FS + `information_schema`) and `--check` exits non-zero when a doc quotes a different value, so drift is now a **failing check** rather than something a reader has to notice. DB figures degrade to `unavailable (no DB)` instead of guessing. Wired into the Definition of done in `CLAUDE.md` and as non-negotiable #7 in `AGENTS.md` ("never hand-write a count into a doc").
+- **Negative control (the repo's own rule — a check that cannot fail is not a check):** injecting `290` → `999` into `CLAUDE.md` made `--check` exit 1 naming the exact stale figure; restoring it returned exit 0. The first draft of the checker produced **two false positives** (it looked for `709` in `CLAUDE.md`, where the count actually lives in `logger.ts`, and for a bare `2864 GET` where the doc writes `2,864 GET` with thousands separators) — both fixed to match where the numbers really are, rather than loosening the assertion.
+- **Evidence**: `npx tsc --noEmit` exit 0. `npm run doc:numbers:check` exit 0. Full `npx vitest run` after the `logger.ts`/`server.ts` comment edits = **1538 passed / 1 failed** (173 files). The 4 doc/DB-related files that were red in the previous entry (`corporateActionsRouter`, `commandCenter`, `scoringService`, `unifiedSignalBroadcast`) were **green this run**, so those 5 were load-dependent flakes, not stable failures — worth knowing, because it means "5 pre-existing failures" was a statement about one run, not a property of the suite. The single failure here, `.claude/hooks/settings-hooks.replay.test.mjs`, **passes 7/7 in isolation** (re-run 130s, exit 0) — same flakiness class, under parallel load. No failure is attributable to this change.
+- **Still open, unchanged by this pass**: the `stripPgCasts` dead code and the `queues.ts` monolith. **Correction to the previous entry's "5 pre-existing failures":** those 5 (`corporateActionsRouter` ×2, `commandCenter`, `scoringService`, `unifiedSignalBroadcast`) were **green** on a later full run with no code change, so they are load-dependent flakes rather than stable breakage. The stashed-baseline comparison below still stands as evidence that *this change* did not cause them — it just does not establish that they are real failures at all. Separately, the deeper cause of doc drift is not solved: hand-maintained inventories outside the files `docNumbers.mjs` checks (e.g. `docs/BHARAT_INTEL_QUANT_MASTER_REPORT.md`'s "234 public tables / 499 relations"), and the figures inside `docs/session-log.md` / `docs/audit-findings.md`, which are **historical records and must not be rewritten** — a finding's numbers describe the day it was measured.
+- **Deploy note**: docs + comments + one new script only. No runtime `.ts` behavior change, so no `pm2 restart` is owed. No migration.
+
+## 2026-09-29 — Architecture review: double-encoded UTF-8 in `queues.ts` repaired; docs claims re-verified
+
+- **Agent**: Cline. **Trigger**: "reverse-engineer the architecture, identify bad decisions / duplicate logic / bottlenecks / scalability risks, upgrade code quality without changing functionality, and correct anything wrongly defined in measurement.md / rules / CLAUDE.md."
+- **Found (fixed)**: `src/server/queues.ts` was **double-encoded UTF-8** — UTF-8 bytes decoded as CP1252 and re-encoded, then decoded and re-encoded again. **2,258 mojibake characters** across the file, including **2 inside string literals** (the `NIFTY50 missing from stock_ohlcv` and `BullMQ unavailable` log lines) and the `Mon─Fri` comment. `liveStockData.ts` had 1 more. Every section-divider comment in the 3,741-line file rendered as `├â╞Æ├é┬ó…`, which is why the file's structure was unreadable on sight. **Repo-wide sweep found exactly 2 affected files** (`src/` = 2 of 1,216; `scripts/` = 0 of 88) — `CLAUDE.md` is clean UTF-8 (66 em-dashes, 0 mojibake), so this was localized, not systemic.
+- **The trap (why this needed care)**: the obvious one-liner `Buffer.from(s,'latin1').toString('utf8')` **corrupts these files**. Node's `latin1` is strictly ISO-8859-1, so it maps U+20AC → 0xAC and U+0161 → 0x61 (`'a'`) instead of their real CP1252 bytes 0x80/0x9A, producing **U+FFFD replacement characters** in the output. Verified, not assumed: a whole-file re-encode was rejected on that basis. The fix uses an explicit CP1252 high-window reverse map, repairs one **maximal non-ASCII run at a time**, and repeats until stable (needed — the corruption is multiply-encoded, so a single pass leaves mojibake behind).
+- **Safety proof, not assertion**: each run is kept only if the CP1252 bytes are valid UTF-8, decode to no U+FFFD, and strictly shrink. The whole file is then guarded by an **ASCII-skeleton comparison** — this repo's code is ASCII, so an unchanged skeleton proves no executable code moved. Result: moji 2258 → 0, **ASCII skeleton byte-identical**, 0 U+FFFD, and `git diff --stat` = **63 insertions / 63 deletions** (a 1:1 line replacement, the signature of comment-only). Every non-comment line in the diff is a mojibake run replaced by its correct character (— / –).
+- **Evidence**: `npx tsc --noEmit` clean. Targeted suites green (`sqlTranslate` 27, `postgresOnly` 4, `ecosystemPythonMemoryCeiling` 7). Full `npx vitest run` = **1534 passed / 5 failed**. Those 5 (`corporateActionsRouter` ×2, `commandCenter`, `scoringService`, `unifiedSignalBroadcast`) were proven **pre-existing, not regressions**: stashing only the two changed files and re-running the same four files on the clean baseline reproduces the identical 5 failures (2 failed files / 5 failed tests). None of them import `queues.ts` or `liveStockData.ts`.
+- **Docs reviewed, NOT changed**: verified `CONTEXT.md`'s "72 entries" for `JOB_REGISTRY` (counted exactly 72) and its "82 `*_fetcher.py`" (82 non-test; the other 42 of 124 are `test_*` fixtures) — both correct. `scoring-authority.md`, `measurement.md` and `recurring-bugs.md` were read and are accurate and unusually well-sourced (each claim carries its measured date and derivation). Left as-is deliberately: this is a logging/encoding defect, and the repo's own rule is that a review must not restate numbers it did not re-derive.
+- **Open / not done, and why**: `stripPgCasts` (`sqlTranslate.ts`) is **dead code** — SQLite-only, with zero production callers (its only references are its own unit test), left behind by the 2026-08-17 SQLite decommission. Not removed this pass because deleting an exported function plus its tests is a functional-surface decision that deserves its own reviewed change, not a drive-by in an encoding fix. Also unaddressed: the `queues.ts` monolith itself (3,741 lines, ~40 module-level queue handles) and the 2 mis-sized module inventories in `CLAUDE.md`/`CONTEXT.md` — both flagged below for a scoped follow-up.
+- **Deploy note**: no `.ts` behavior changed, so no `pm2 restart` is owed for correctness; the repaired log strings are cosmetic. No migration.
+
+## 2026-09-29 — bharat-signal-engine: Timescale-only DB test suite + vol-regime percentile fix
+
+- **Agent**: Cline. **Trigger**: "establish a robust DB-backed test suite and fix the volatility-regime / signal-generation logic bugs" in the sibling repo `d:\Github\bharat-signal-engine` (no file in this repo was touched).
+- **Found**: `vol_regime` ranked each session's realized vol against an **expanding** window, so `pctl_window` was decorative — one crash stays in every later denominator forever, which silently mis-sizes the book in exactly the months the legacy audit flagged (nearly every validated signal flipped sign in high-vol). Separately, `vol_regime` accepted **duplicate `trade_date`** rows and rated them, doubling a session inside its own percentile window.
+- **Fixed**: true rolling percentile (`rolling(pctl_window, min_periods=min(120, pctl_window))` over the NaN-dropped rv subsequence, so early sessions read `neutral` instead of a rank over a handful of days), plus a `ValueError` on duplicate `trade_date` in the regime input.
+- **Test infrastructure** (`tests/conftest.py`): session-scoped `db` (drops/recreates `engine_test`, applies the same DDL as prod), function-scoped `clean`, module-scoped `demo` (48 symbols x 620 sessions — a floor, not a preference: `metrics.daily_ic` drops dates under `MIN_CS=30`, so a narrower seed yields `n_dates=0` and a green suite that measured nothing). **No SQLite fallback and no auto-skip** — `SIGNAL_ENGINE_ALLOW_DB_SKIP=1` is the only bypass, because the legacy repo's runtime Postgres->SQLite translation is what shipped broken SQL. Fixture hygiene that cost real debugging time: `TRUNCATE a, b, … CASCADE` in ONE statement (FK `outcome -> prediction`), `db.rollback()` at the fixture boundary (a failed query in a negative test aborts the shared session transaction), and truncate on **teardown as well as setup** — rows left behind make later modules depend on file order, and file order is not a test invariant.
+- **New tests**: `test_db.py` (hypertables, rowcount truth, idempotency, security), `test_pit.py` (as-of reads, revisions, anti-backfill), `test_registry.py` (promotion/demotion gates), `test_pipeline.py` (freshness veto, gate-patched sizing math, purged walk-forward replay, `n_dates`->`dates` column mapping, no self-promotion), `test_regime.py` (rolling-not-expanding locality, independent loop oracle for the rank, no look-ahead when the future arrives, input order, min_periods warm-up, gate defaults).
+- **Evidence**: `pytest -q` **67 passed** (35-110s depending on cache), three consecutive full runs green, plus `pytest tests/test_registry.py tests/test_pipeline.py tests/test_pit.py tests/test_db.py` green to prove order-independence; `ruff check .` clean. The discriminating power of the new regime test was measured, not asserted: re-running the same comparison against the old expanding implementation mismatches on **260/260 rows (100%)** of the shared tail. `signals --top-k 3` on the dev schema still returns 6 gate-checked signals (`stop < entry < target`, `size_inr` = 10% capital cap, `risk_inr` = 1%).
+- **No market claim**: the seeded market is synthetic and the dev `engine` schema still holds `DEMO*` bars, so every number produced this session is a plumbing check, not evidence about edge.
+- **Left open, why**: the engine repo has **zero commits** — the whole tree is untracked; making the first commit is the user's call, not a side effect of a test session. `hmm_regime` still has no test beyond the pipeline path (it needs `hmmlearn` and its own look-ahead harness).
+- **Deploy note**: nothing here touches `bharat-stock-intelligence` runtime code — no `.ts`, no migration, nothing to `pm2 restart` or `migrate:up`.
+
+
 ## 2026-09-28 — CI-unred pass: hermetic graphify-pointer e2e + schema-apply extension pre-flight; 20 commits landed on main; dependabot disposition (AF-20260928-08)
 
 - **Agent**: Cline. **Trigger**: "Review and correct changes already pushed to github, why are they failing, correct it and then merge with main."
@@ -10140,3 +10176,46 @@ of the morning window. Reviewed at the user's request; **cause proven, one row f
 - Negative-controlled: gap against the same session's close (look-ahead), cutoff ignored, thousands separator not stripped, zero accepted as a quote — each fails. Gate and train/serve parity both re-run and pass (the last market-wide feature cost the gate its significance, so this is checked now, not assumed).
 - **Backlog re-verified, two stale verdicts corrected with evidence**: `niftytrader_banlist` → superseded (`nse_fo_secban`, the exchange's own dated file with history, is integrated); `trendlyne_options` → superseded (its premise — "implied vol & skew not derivable from bhavcopy prices" — is false: `options.summarise` computes both into `alpha.option_daily`). With `mc_global` integrated, the medium/high backlog is down to two: `nse_security_lists` (survivorship already handled; renames covered by `nse_symbol_change` + the EQUITY_L ISIN merge) and `sensibull` (403 on every endpoint).
 - A `git stash pop` reported success but silently did NOT apply these catalog edits (it kept the stash). Verified the verdicts by reading the YAML back rather than trusting the pop — worth doing whenever stashed work is restored.
+
+## 2026-09-30 — critical-doc staleness sweep (CLAUDE.md, rules, ledger, both memory indexes)
+
+Method: a throwaway vetter extracted every backticked path, `table.column`, snake_case identifier,
+`npm run` script and memory link from 14 critical docs and checked each against `git ls-files`,
+live `information_schema` and a code identifier index; `npm run doc:numbers:check` for counts.
+What was wrong, and fixed:
+- **Project memory index was broken by the 2026-09-19 consolidation**: 17 of its links pointed at
+  files that pass had moved into `.archive/`, while 29 live files were unindexed. Restored the 17,
+  archived 2 provably-false files (`prod_readiness_program` "Postgres migration pending",
+  `ml_data_gaps` 2026-06-22), indexed the other 27. Re-run: 0 dead links, 0 unindexed.
+- `measurement.md`: "No honest DL number exists yet" was 20 days stale — four purged-CV retrains
+  registered 0.5057/0.5177(active)/0.5119/0.5208; replaced with the live numbers and the
+  3 failed `dl-trainer` runs since. `dl` weight re-verified 0.0 in all 5 regimes.
+- `recurring-bugs.md`: said "9 automated checks"; `check_recurring_bugs.py` has 12, all wired.
+- `CLAUDE.md`: two "retired stubs" are actually in `docs/.archive/`; SQLite plan path; Layout said
+  81 fetchers (82); worktree count; memory file count.
+- `docs/audit-findings.md` structure: a data row sat between the first table's header and its
+  separator (whole table unrendered); a literal vertical-tab (`backend-python\venv` written through
+  an escape-processing string) split AF-20260925-01; 6 rows had unescaped `|` breaking columns.
+New finding **AF-20260930-01**: 8 `dl_model_performance` rows (ids 77,79,85,98,126,148,164,186;
+2026-08-24..09-09) still carry the test sentinel 0.58/0.55 — the AF-20260910-10 cleanup deleted by
+`model_version='lstm_v99'`, but the daily drift upsert had already relabelled them `current`.
+The data repair was blocked by the auto-mode classifier (production write) and is left for the
+user; rule added to `bugs-data-layer.md` (Writes & keys). Ledger edits after the first structural
+pass were also classifier-blocked — see the session's closing message for the pending rows.
+
+### 2026-09-30 (cont.) — "fix all remaining items"
+- **AF-20260930-02 fixed:** `ml-daily-ops` 2026-09-29 failure was one transient Trendlyne 405 on
+  `trendlyne_market_insight_fetcher`'s single un-retried GET (405s were scattered singly all day).
+  Now `fetch_utils.retry_get`; test-first (`TestFetchRetriesTransient405` red→green), live test 3/3.
+- **Six open rows past their own unblock date re-checked live and closed in place** (AF-20260927-01,
+  -20260920-02, -20260909-12, -20260905-12, -20260905-10, -20260902-09/-20260817-28). Notable:
+  `confluence-signals-freshness`'s weekend fails were true positives (platform down both mornings);
+  FACTOR_CROWDING measured null on 33 dates (only 4 non-overlapping 5d windows) → ACCEPT 0.70/x0.90,
+  re-measure ~March 2027.
+- **Ledger rendering:** 12 more headerless row runs and 4 stray-pipe rows repaired.
+- **Still blocked by the auto-mode classifier (user must run or permit):** the AF-20260930-01
+  8-row UPDATE, and the AF-20260823-79..-82 block repair (`ledger_fix.py`).
+- **AF-20260930-05 fixed:** full pytest went 1 red with no code change — `TestGetRecentReturns`
+  seeded 2026-06-0x against a today-relative 120-day window and aged out today (recurrence of the
+  AF-20260917-25 fixed-date-fixture class). Fixture now anchored to `date.today()`, exact key-set
+  asserted, negative-controlled. `ml-model-bugs.md`'s stale "9 checks" also corrected to 12.

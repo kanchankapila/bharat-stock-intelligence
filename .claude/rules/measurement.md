@@ -420,10 +420,16 @@ because `run_backtest()` only accepts factors computed from the `stock_ohlcv` pa
 - **Every DL BiLSTM `roc_auc` recorded before 2026-09-10 is INFLATED and must not be quoted**
   (AF-20260910-08). `walk_forward_validate` sliced a symbol-major concatenated panel by ROW
   POSITION, so folds 1-27 carried 99.9-100% train/test DATE overlap. Fixed 2026-09-10 with
-  date-grouped `purged_cv` folds. **No honest DL number exists yet** — the first arrives from the
-  next `dl-retrain-weekly`, and until then the correct statement is "ungraded", not any figure in
-  `dl_model_config.json`. The active BiLSTM registration is dated 2026-08-10 and its `cv_roc_auc`
-  is NULL (live 2026-09-10).
+  date-grouped `purged_cv` folds. **The purged-CV numbers now exist, and they are chance-level**
+  (re-verified live 2026-09-30, `model_registry` `model_type='deep_learning'`, 15d horizon):
+  `cv_roc_auc` 0.5057 (09-12 10:32), **0.5177 (09-12 20:59, the `is_active=1` row)**, 0.5119
+  (09-13), 0.5208 (09-20); the held-out series in `dl_model_performance` (lstm_v4/v6) matches.
+  Nothing has registered since 09-20: `dl-trainer` failed 3× on 2026-09-28/29 (AF-20260927-20,
+  AF-20260929-01). Quote DL as "~0.51-0.52 purged-CV AUC, i.e. no demonstrated edge" — never
+  any pre-09-10 figure in `dl_model_config.json`, and never a CV AUC as forward-return evidence
+  (`ml-model-bugs.md`). `dl` ranker weight stays PAUSED at 0.0 (AF-20260913-05).
+  ⚠ 8 `dl_model_performance` rows (ids 77..186, 2026-08-24..09-09, `model_version='current'`)
+  still carry the test sentinel `roc_auc=0.58 / directional_accuracy=0.55` — AF-20260930-01.
 - **Engine dispersion now PASSES at 0% collapse — the "ml 80%, WARN" story is retired.**
   `dq:check`'s `ur-engine-dispersion-collapse` reads live: *"ml 0%, dl 0%, technical 0% of last 10
   dates (baseline 2026-08-22: dl 39%, ml 34%, technical 18%)"*, status **pass**.

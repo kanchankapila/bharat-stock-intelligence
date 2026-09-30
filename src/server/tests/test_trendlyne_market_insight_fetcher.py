@@ -107,3 +107,34 @@ class TestSchemaAndStorage:
         con = pg_memory_conn()
         tmi.ensure_schema(con)
         assert tmi.store(con, []) == 0
+
+
+class TestFetchRetriesTransient405:
+    """2026-09-29 ml-daily-ops failed because one intermittent Trendlyne 405 on this fetcher's
+    single un-retried GET killed the step; the same endpoint answered 200 minutes later."""
+
+    def test_one_transient_405_is_retried_not_fatal(self, monkeypatch):
+        import requests
+
+        class Resp:
+            def __init__(self, status, payload=None):
+                self.status_code, self._payload, self.headers = status, payload, {}
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    raise requests.exceptions.HTTPError(f"{self.status_code} Client Error", response=self)
+
+            def json(self):
+                return self._payload
+
+        calls = []
+        replies = [Resp(405), Resp(200, {"body": {"marketInsights": [REAL_ROW]}})]
+
+        def fake_get(url, **kwargs):
+            calls.append(url)
+            return replies.pop(0)
+
+        monkeypatch.setattr(tmi.requests, "get", fake_get)
+        monkeypatch.setattr("fetch_utils.time.sleep", lambda s: None)
+        assert tmi.fetch_insights() == [REAL_ROW]
+        assert len(calls) == 2

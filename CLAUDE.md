@@ -1,12 +1,17 @@
 # Bharat Stock Intelligence — Claude Instructions
 
-Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, ~210 Python modules in `src/server/` (81 fetchers + ML engines/jobs/helpers).
+Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, 290 non-test Python modules in `src/server/` (82 `*_fetcher.py` + ML engines/jobs/helpers; 678 `.py` files including tests — counts measured 2026-09-29).
+
+> **Counts drift, so treat the numbers above as a dated snapshot, not a fact to quote.** The
+> authoritative live inventory is filesystem + `information_schema`, and each figure below names
+> how to re-derive it. `scripts/docNumbers.mjs` re-derives every one of them in one shot; run it
+> after adding or deleting modules, routers or rules files.
 
 ## Read first
 
 1. **`fable-brain.md`** (project root) — standing reasoning discipline. Applies to every task.
 2. **Memory** — two indexes, both live, and the SessionStart hook reports which it found:
-   - Claude Code's project memory: `C:\Users\amitk\.claude\projects\d--Github-bharat-stock-intelligence\memory\MEMORY.md` (index; ~55 topic files after the 2026-09-19 consolidation).
+   - Claude Code's project memory: `C:\Users\amitk\.claude\projects\d--Github-bharat-stock-intelligence\memory\MEMORY.md` (index; 73 topic files as of 2026-09-30 — the 2026-09-19 consolidation had archived 17 files the index still linked and left 29 unindexed; repaired 2026-09-30, every link now resolves).
    - This repo's own: **`.agents/memory/MEMORY.md`** (index) + **`.agents/memory/session_journal.md`** (append a dated section per session).
    Load the entries relevant to your task before exploring files; a finding recorded in either is not re-investigated from scratch.
 3. **The rule file for what you're touching** (below). Don't read all of them.
@@ -16,6 +21,9 @@ Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC ba
 Each rule file carries `paths:` frontmatter, so Claude Code loads it automatically the first time
 you read a matching file (globs mirror `.claude/hooks/rules-pointer.mjs`). Until 2026-09-26 they had
 none and all five (~308 KB, ~77k tokens) were injected into every session regardless of task.
+(The rules directory has since grown to 9 files / ~325 KB across the four area splits — the "five"
+and "~308 KB" here describe the pre-split state, and are kept as history, not as the current size.
+For today's size run `node scripts/docNumbers.mjs`.)
 **Auto-loading only fires on a file read** — when you *quote or judge* a number without touching a
 matching file, read `measurement.md` yourself.
 
@@ -55,7 +63,7 @@ the row itself:
   `nse_constituents`; `nse_stocks.sector` was 100% populated and `backfill_sectors.py` already
   maintained it.) For a vendor/endpoint that stopped returning data, or when onboarding a new data source, that means:
   1. **Query the 3,000+ discovery registry FIRST**: `market_endpoint_registry` in Postgres (`bharat_intel` on `:5433`, 3,408 live endpoints: 2,864 GET / 544 POST; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`) — see `data-sources.md` §"Endpoint discovery registry" and `DATA_FETCHING_GUIDE.md`.
-  2. **Check the consolidated catalog `url_endpoints`**: 830 templates; run `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server`.
+  2. **Check the consolidated catalog `url_endpoints`**: 834 rows/templates across 45 hosts (measured live 2026-09-29; it was quoted as "830 templates" until then, which is how a count drifts — re-derive with `node scripts/docNumbers.mjs`); run `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server`.
   3. **Inspect the raw 3,103 URL corpus**: `unique_urls.txt` and `urls_v2.db` in repo root.
   4. **Grep the repo for sibling endpoints** and probe route by route, isolating the MINIMUM headers/credentials needed (adding a token can LOWER access — see `recurring-bugs.md`).
   5. **Only then ask the user**, with the per-route breakdown and the alternates already ruled in or out — never with "this vendor is dead." (Reinforced by the user 2026-09-12 after a sweep reported three "dead vendors": two were already covered by endpoints sitting in this repo — MoneyControl `deals/list` for NSE bulk deals, MarketsMojo movers for ET gainers — and NSE's own `/api/block-deal` was still returning 200; only one route had actually retired).
@@ -78,7 +86,8 @@ isn't closed in the same pass (for one of the reasons above) gets a row there (s
 create a new markdown file for "things to do later" — this repo already did that three times
 (`ACTION_ITEMS.md`, `docs/FETCHER_HEALTH_TRACKER.md`, `docs/DATA_GAP_MANIFEST.md`) and the
 trackers drifted out of sync with each other and with the code, which is exactly what caused a
-2026-09-02 consolidation pass to be needed. All three are now retired stubs pointing here.
+2026-09-02 consolidation pass to be needed. `ACTION_ITEMS.md` is a retired stub pointing here;
+the other two were moved to `docs/.archive/` (not stubs — they no longer exist at the old path).
 
 ## Definition of done
 
@@ -89,7 +98,17 @@ npx tsc --noEmit                                    # any .ts change
 npx vitest run                                      # any .ts logic change
 python -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/  # any .py change (identical to CI)
 npm run schema:drift                                # any migration
+npm run doc:numbers:check                           # any doc/comment that quotes a repo inventory count
 ```
+
+**Inventory counts in docs and comments go stale silently** — a file-count assertion nobody
+re-runs is just a wrong number waiting to mislead someone. After adding or deleting Python
+modules, tRPC routers, rule files, or rewriting a `console.*` shim comment, run
+`npm run doc:numbers:check`; it re-derives every quoted figure from the filesystem and (when
+Postgres is up) `information_schema`, and exits non-zero on drift. Update the doc to the printed
+value. **Never hand-edit a count into a doc without re-deriving it first** — the stale numbers this
+replaced ("~210 Python modules", "81 fetchers", "830 templates", "~140 server files / 611 console
+sites") had each been correct once and outlived the code.
 
 `/verify-gate-runner` runs the first three in sequence.
 
@@ -175,7 +194,7 @@ src/server/
   jobs/*.jobs.ts     decomposed job registrations
   cacheService.ts    Redis → in-memory fallback
   dataQualityChecks.ts   freshness/coverage checks (factory-generated + hand-rolled), daily cron + Telegram
-  *.py               81 `*_fetcher.py` + ML engines/backfills — canonical ranker is unified_ranker.py
+  *.py               82 `*_fetcher.py` (2026-09-29; `npm run doc:numbers`) + ML engines/backfills — canonical ranker is unified_ranker.py
 ```
 
 Component/procedure/table inventories are deliberately **not** listed here — they rot. Grep the source.
@@ -206,7 +225,7 @@ check for shell-parity against; a fix now either lands in v1 or it doesn't ship.
 - **NSE symbol is the only canonical identifier.** Every provider id derives from it, never the reverse, and is never constructed by convention.
 - **Postgres/TimescaleDB (:5433) is the ONLY database. There is no second dialect to reason about.** `usePostgres()` / `use_postgres()` take no environment variable for any real process — a missing `.env` can no longer reroute anything, it can only fail to connect, loudly. Several tables are compressed hypertables where a predicate-wide `UPDATE`/`ADD CONSTRAINT` will fail or destroy compression.
   - **TypeScript is fully migrated.** `npx vitest run`'s `unit` project runs against a private throwaway Postgres schema built from `db/schema.postgres.sql` (`vitest.globalSetup.ts`); its `live` project talks to real production on purpose. There is no SQLite path left in any `.ts`.
-  - **Python runs on Postgres too, and the shim is GONE (2026-08-17).** There is no `SQLITE_SHIM_POSTGRES` flag and no monkeypatch of `sqlite3.connect` any more: 93 fixture files were converted to an explicit **`pg_memory_conn()`** (`src/server/pg_test_support.py`), which is the 1:1 replacement for a raw `sqlite3.connect(':memory:')`. `conftest.py` now lives at **`src/server/conftest.py`**, not `src/server/tests/` — it was moved up because `src/server/__tests__/` had no conftest at all, so its Python files were invisible to the old shim's own counter. Use `pg_memory_conn()`, `pg_conn` (empty schema, bring your own DDL) or `pg_db_conn` (full production schema); never add a `sqlite3.connect`. **Phase 3 Python is DONE too (2026-08-19)** — the 6 files that blocked it were converted/deleted and `sql_translate.py`'s pytest carve-out (`_in_pytest()`) was removed as dead code, so `use_postgres()` now returns True unconditionally *including inside pytest* (`docs/SQLITE_DECOMMISSION_PLAN.md`). ⚠ Do not verify this with a bare `grep -r "sqlite3.connect(':memory:')"`: it matches 8 *comments/docstrings* naming the retired pattern, and from the repo root it also descends into `.claude/worktrees/` (gitignored, 12 stale copies) and returns dozens. The verified check is the assignment form — `grep -rnE "=\s*sqlite3\.connect\(':memory:'\)" --include=*.py src/ tests/` → 0, and 21 against a stale worktree, so it is not vacuous.
+  - **Python runs on Postgres too, and the shim is GONE (2026-08-17).** There is no `SQLITE_SHIM_POSTGRES` flag and no monkeypatch of `sqlite3.connect` any more: 93 fixture files were converted to an explicit **`pg_memory_conn()`** (`src/server/pg_test_support.py`), which is the 1:1 replacement for a raw `sqlite3.connect(':memory:')`. `conftest.py` now lives at **`src/server/conftest.py`**, not `src/server/tests/` — it was moved up because `src/server/__tests__/` had no conftest at all, so its Python files were invisible to the old shim's own counter. Use `pg_memory_conn()`, `pg_conn` (empty schema, bring your own DDL) or `pg_db_conn` (full production schema); never add a `sqlite3.connect`. **Phase 3 Python is DONE too (2026-08-19)** — the 6 files that blocked it were converted/deleted and `sql_translate.py`'s pytest carve-out (`_in_pytest()`) was removed as dead code, so `use_postgres()` now returns True unconditionally *including inside pytest* (`docs/.archive/SQLITE_DECOMMISSION_PLAN.md`). ⚠ Do not verify this with a bare `grep -r "sqlite3.connect(':memory:')"`: it matches 8 *comments/docstrings* naming the retired pattern, and from the repo root it also descends into `.claude/worktrees/` (gitignored stale copies — 12 when this was written, 2 on 2026-09-30) and returns more. The verified check is the assignment form — `grep -rnE "=\s*sqlite3\.connect\(':memory:'\)" --include=*.py src/ tests/` → 0, and 21 against a stale worktree, so it is not vacuous.
   - **Test against an EMPTY database before believing a test passes.** A developer's Postgres IS production, and `pg_conn` puts `public` on the search_path, so a table the fixture forgot silently resolves to the real one. Three separate suites were green that way and red in CI. `PGTEST_DB=<empty db> pytest ...` is the check.
 - **Measured state of the edge**: the ranker has no demonstrated forward-return edge, and most factors tested are null-to-negative. Read `.claude/rules/measurement.md` before proposing a reweighting — it is very likely the wrong fix.
 - **Restart-orphaned jobs are auto-requeued (AF-20260909-06).** `reclaimStaleActiveJobs` now calls `requeueOrphanedJob`: a job left `active` by a worker that died mid-restart is failed **and** a guarded make-up is re-queued under the same name (skipped if the job's regular slot fires within 90min, or a same-name make-up is already pending; >48h-old orphans are alert-only). On boot, look for `orphanRequeue: true` / `isCatchup: true` in job data (or `REQUEUED make-up` / `reclaimed orphaned job` in the log) rather than assuming a long `active` job is a loss. A reclaimed orphan's fresh `finishedOn` previously masked it from the missed-slot detector — that self-masking is exactly what this fix targets.

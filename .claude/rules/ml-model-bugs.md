@@ -19,7 +19,7 @@ Pair it with `.claude/rules/measurement.md`, which holds the *verdicts*; this fi
 *failure modes*. `recurring-bugs.md` keeps every class that can bite ordinary Python/SQL work.
 
 **🤖 = enforced by a static check.** The `verify-gate.mjs` Stop hook enforces the first entry
-below (backtest evidence for signal-surface diffs); `scripts/check_recurring_bugs.py`'s 9 checks
+below (backtest evidence for signal-surface diffs); `scripts/check_recurring_bugs.py`'s 12 checks (re-counted 2026-09-30)
 cover classes that stayed in `recurring-bugs.md`.
 
 > **The rule that governs this whole file:** a number a model reports about itself is never
