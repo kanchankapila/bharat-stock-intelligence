@@ -90,9 +90,16 @@ def test_short_history_names_get_median_risk_not_dropped():
 
 
 def test_parse_constituents_requires_industry_column():
+    """Industry is mandatory, and is NORMALISED here rather than stored as NSE writes it.
+
+    NSE index files say "Oil Gas & Consumable Fuels"; the legacy master, which populates the
+    same column for the rest of the universe, says "Energy". Storing both put 32 labels in a
+    column with ~11 real sectors and gave one real sector two independent 25% portfolio caps
+    (AF-20260929-10). The mapping itself is covered in tests/test_sector_taxonomy.py.
+    """
     rows = parse_constituents("Company Name,Industry,Symbol,Series,ISIN Code\n"
                               "Reliance Industries Ltd.,Oil Gas & Consumable Fuels,RELIANCE,EQ,INE002A01018\n")
-    assert rows == [{"symbol": "RELIANCE", "industry": "Oil Gas & Consumable Fuels", "isin": "INE002A01018"}]
+    assert rows == [{"symbol": "RELIANCE", "industry": "Energy", "isin": "INE002A01018"}]
     with pytest.raises(ValueError):
         parse_constituents("Company Name,Symbol\nX,Y\n")
 
