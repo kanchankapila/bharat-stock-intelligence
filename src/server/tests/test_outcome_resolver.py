@@ -112,7 +112,8 @@ def test_neutral_outcome():
 def test_pending_when_no_ohlcv():
     conn = make_db()
     seed_flat_history(conn, 'WIPRO')
-    add_signal(conn, 'WIPRO')  # no exit bar
+    add_signal(conn, 'WIPRO')  # no exit bar for WIPRO...
+    add_exit_bar(conn, 'OTHER')  # ...but the session exists, so the signal is gradeable (AF-20260930-27)
     conn.commit()
     assert resolve(conn)['resolved'] == 0
     assert get_row(conn, 'WIPRO')[0] == 'PENDING'
@@ -374,6 +375,8 @@ def test_unified_resolution_excludes_suspect_bars():
     # a suspect 0.00 bad print inside the window — its low would trip the stop if not excluded
     conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume,is_suspect) VALUES ('ZED2',?,0,0,0,0,100000,1)",
                  ((base + datetime.timedelta(days=3)).isoformat(),))
+    conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('ZED2',?,100,101,99,100,100000)",
+                 ((base + datetime.timedelta(days=5)).isoformat(),))
     conn.commit()
 
     resolve_unified_outcomes(conn, horizon_days=5, dry_run=False)
@@ -520,6 +523,54 @@ def test_resolve_unified_outcomes_produces_all_horizons_independently():
     assert 1 in horizons_resolved, "h1 outcome missing"
     assert 5 in horizons_resolved, "h5 outcome missing — Bug 2: COMPLETED flag starved h5"
     assert 15 in horizons_resolved, "h15 outcome missing — Bug 2: COMPLETED flag starved h15"
+
+
+@pytest.mark.parametrize("fn_name, table, insert", [
+    ("resolve_outcomes", "technical_signals",
+     "INSERT INTO technical_signals (symbol,date,cmp,signal_score,signals_json,stop_loss,time_horizon) "
+     "VALUES (?,?,100.0,6,'[]',NULL,NULL)"),
+    ("resolve_unified_outcomes", "unified_signals",
+     "INSERT INTO unified_signals (symbol,signal_date,entry_price,target_price,stop_loss,signal_source,confidence_score) "
+     "VALUES (?,?,100.0,110.0,90.0,'AI',75)"),
+])
+def test_ungradeable_signals_do_not_take_batch_slots(fn_name, table, insert):
+    """AF-20260930-27: the cutoff was today - h, so at the 09:30 IST run every signal from
+    the last session (whose exit bar does not exist yet) was selected, came back PENDING,
+    and -- at ~3,350 unified signals/day vs LIMIT 2000 -- starved every older gradeable row
+    (0/2000 resolved, 1,400 rows of 2026-09-28 stranded). The cutoff must be anchored to the
+    last session actually in stock_ohlcv."""
+    import outcome_resolver
+    conn = make_multi_horizon_db()
+    last_session = datetime.date.today() - datetime.timedelta(days=30)
+    old_sig = (last_session - datetime.timedelta(days=5)).isoformat()
+    _seed_ohlcv(conn, 'OLDSIG', old_sig, n_post=5)          # bars up to last_session
+    _seed_ohlcv(conn, 'NEWSIG', last_session.isoformat(), n_post=0)
+    conn.execute(insert, ('OLDSIG', old_sig))
+    conn.execute(insert, ('NEWSIG', last_session.isoformat()))
+    conn.commit()
+
+    result = getattr(outcome_resolver, fn_name)(conn, horizon_days=1)
+    assert result == {'processed': 1, 'resolved': 1}
+
+
+def test_signal_time_horizon_does_not_override_pass_horizon():
+    """AF-20260930-28: the h5 pass selected by horizon_days=5 but wrote the row under
+    parse_horizon(time_horizon) -- 'Positional (2-4W)' parsed to 2 DAYS -- so no horizon-5 row
+    was ever written and every pass re-selected the signal forever."""
+    from outcome_resolver import resolve_outcomes
+    conn = make_multi_horizon_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
+    conn.execute(
+        "INSERT INTO technical_signals (symbol,date,cmp,signal_score,signals_json,stop_loss,time_horizon) "
+        "VALUES ('POSN',?,100.0,6,'[]',NULL,'Positional (2-4W)')", (sig_date,))
+    _seed_ohlcv(conn, 'POSN', sig_date, n_post=20)
+    conn.commit()
+
+    resolve_outcomes(conn, horizon_days=5)
+    horizons = [r[0] for r in conn.execute(
+        "SELECT horizon_days FROM signal_outcomes WHERE symbol='POSN'").fetchall()]
+    assert horizons == [5]
+    assert resolve_outcomes(conn, horizon_days=5)['processed'] == 0
 
 
 class _FailingConn:

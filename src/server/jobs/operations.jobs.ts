@@ -45,6 +45,11 @@ export async function resolveOutcomesResilient(horizon: number): Promise<void> {
   try {
     await pythonApi.resolveOutcomes(horizon);
   } catch (e) {
+    // A client timeout leaves the server-side run going; a fallback would be a second resolver
+    // on the same rows (AF-20260930-29). Only an unreachable/erroring ml-api gets the fallback.
+    if ((e as { code?: string }).code === 'ECONNABORTED') {
+      throw new Error(`resolve-outcomes(${horizon}) timed out client-side; still running in ml-api, not duplicated`);
+    }
     console.warn(`[API] resolve-outcomes(${horizon}) failed, falling back to runPython:`, (e as Error).message);
     await runPython('outcome_resolver.py', ['--horizon', String(horizon)], 180_000);
   }

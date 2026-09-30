@@ -10330,3 +10330,24 @@ on its first run it failed on `pg-backup-nightly`, which had been running with n
 Gates: pytest 145 passed/18 skipped; `vitest --project unit` 1,551 passed (the `live` project was
 NOT run — market hours); `tsc --noEmit` 0. Open: AF-20260929-08 (two dead vendor endpoints),
 -09 (legacy bridge calendar-blocked to ~mid-2027), -10 (sector cap semantics at 46% unlabelled).
+
+## 2026-09-30 (evening) — outcome-resolver-1d timeout + missed recommendations digest; horizon review
+
+**Alerts:** `outcome-resolver-1d` late/failed; `recommendations-digest` (09-29) skipped by its freshness gate.
+
+**Digest:** the 09-29 22:30 IST unified-ranker was killed at its 75-min budget; the make-up finished
+00:35 IST, after the digest's 75-min poll gave up. Root cause (6GB/run confluence_signals decompression)
+was already fixed in `b62694dc` (AF-20260930-11) and is live because the ranker is spawned fresh per run;
+tonight's 22:30 run is the verification. Re-sending was wrong: those picks were for the 09-30 session,
+already closed — a manual trigger was queued and correctly refused by the gate.
+
+**Resolver (AF-20260930-27/-28/-29, all fixed with negative-controlled tests):**
+- Cutoff anchored to `date.today() - h` filled every `LIMIT 2000` batch with not-yet-gradeable rows
+  (0/2000 at 09:30; ~3,350 unified/day > 2000 made it self-sustaining at h1/h5/h15). Now
+  `logical_write_floor() - h`. Production re-runs drained ~6.9k h1, ~6.9k h5, ~3.2k h15 rows.
+- `time_horizon` strings overrode the pass horizon ('Positional (2-4W)' -> 2 days); removed.
+- ml-api client timeout triggered a duplicate fallback resolver while the server run continued.
+
+**Open, needs user decision:** AF-20260930-30 — horizons are calendar days: "5d" = 3 sessions for
+Wed-Fri signals, 5 for Mon; "15d" ~11 sessions. AF-20260930-16 gained signal-side evidence: 81
+alias/renamed screener symbols (ZOMATO, GET&D, ...) generate unified signals with no OHLCV at all.

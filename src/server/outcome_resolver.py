@@ -9,9 +9,10 @@ Run:  python outcome_resolver.py
       python outcome_resolver.py --dry-run
 """
 
-import datetime, argparse, math, re, sys
+import datetime, argparse, math, sys
 
 from db_compat import connect, ConnWrapper, query_all, query_one
+from as_of import logical_write_floor
 
 
 # ---------------------------------------------------------------------------
@@ -31,18 +32,6 @@ from db_compat import connect, ConnWrapper, query_all, query_one
 # predate this block); the pure helpers below deliberately bind to the
 # split-aware _clean_daily_returns defined near get_volatility_threshold.
 # ---------------------------------------------------------------------------
-def parse_horizon(time_horizon_str, default_days: int) -> int:
-    """Parse '5 days', '15 days', 'intraday' etc. to integer days."""
-    if not time_horizon_str:
-        return default_days
-    s = str(time_horizon_str).lower().strip()
-    if 'intraday' in s or s == '1 day':
-        return 1
-    m = re.search(r'(\d+)', s)
-    if m:
-        return max(1, min(30, int(m.group(1))))
-    return default_days
-
 WIN_THRESHOLD  =  1.0   # Fallback thresholds
 LOSS_THRESHOLD = -1.0
 
@@ -690,6 +679,15 @@ def get_volatility_threshold(conn: ConnWrapper, symbol: str, signal_date: str, h
     return threshold
 
 
+def _gradeable_cutoff(conn: ConnWrapper, horizon_days: int) -> str:
+    """Latest signal_date whose exit bar (signal_date + h) can exist: anchored to the last
+    session in stock_ohlcv, not today. With a today-anchored cutoff the 09:30 IST run selected
+    the whole last session (exit bar not yet written), resolved 0 of its LIMIT 2000 batch and
+    starved every older gradeable row (AF-20260930-27)."""
+    floor = logical_write_floor(conn, fallback=datetime.date.today().isoformat())
+    return (datetime.date.fromisoformat(floor) - datetime.timedelta(days=horizon_days)).isoformat()
+
+
 def resolve_outcomes(
     conn: ConnWrapper,
     horizon_days: int = 1,
@@ -701,9 +699,7 @@ def resolve_outcomes(
     - SL checked on intraday (low) before target (high)
     - Horizon exit checked at close on exit_date
     """
-    today     = datetime.date.today()
-    # Use a wider cutoff (30 days) to catch signals of any horizon
-    cutoff    = (today - datetime.timedelta(days=horizon_days)).isoformat()
+    cutoff = _gradeable_cutoff(conn, horizon_days)
 
     # Signals old enough that horizon has passed, not yet resolved at THIS horizon.
     # Scoped to horizon_days so each horizon is selected independently — without this
@@ -766,7 +762,9 @@ def resolve_outcomes(
     # Stage-2 batches (SL scan / nothing here yet) anchor on RESOLVED next
     # trading days, preserving the original data dependency between queries.
     for _r in rows:
-        _r['_h'] = parse_horizon(_r.get('time_horizon'), horizon_days)
+        # The pass horizon, never the signal's own time_horizon: selection is per horizon_days,
+        # so writing under another horizon left the row unresolved at every pass (AF-20260930-28).
+        _r['_h'] = horizon_days
     _resolved_keys = _prefetch_resolved_keys(
         conn, [(r['symbol'], str(r['signal_date'])[:10], r['_h']) for r in rows])
     _np_map = _prefetch_next_price(
@@ -915,8 +913,7 @@ def resolve_unified_outcomes(
     """
     Resolve outcomes for all signal sources (AI, Quant, Technical) from unified_signals.
     """
-    today = datetime.date.today()
-    cutoff = (today - datetime.timedelta(days=horizon_days)).isoformat()
+    cutoff = _gradeable_cutoff(conn, horizon_days)
 
     # NOTE: the dedup intentionally excludes only rows already RESOLVED at this horizon.
     # Rows previously written as PENDING (horizon not yet elapsed / OHLCV missing at the
