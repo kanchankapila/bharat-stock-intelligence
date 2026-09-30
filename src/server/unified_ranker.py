@@ -1871,6 +1871,7 @@ class UnifiedRanker:
                        COALESCE(
                            (SELECT cs.atr FROM confluence_signals cs
                             WHERE cs.symbol = ts.symbol AND cs.atr IS NOT NULL
+                              AND cs.computed_at >= NOW() - INTERVAL '30 days'
                             ORDER BY cs.computed_at DESC LIMIT 1),
                            ts.cmp * 0.02
                        ) AS atr
@@ -2252,10 +2253,14 @@ class UnifiedRanker:
         return False
 
     def _get_confluence_latest_map(self):
-        # Same symbol-shape guard as _get_confluence_scores (see comment there) — this
-        # map has no freshness cutoff at all, so without the guard a URL-shaped "symbol"
-        # would surface forever (it can never receive a real update since it isn't a
-        # real ticker any fetcher will ever write again).
+        # Same symbol-shape guard as _get_confluence_scores (see comment there).
+        # 30-day bound (2026-09-30): confluence_signals is a ~6GB / 8M-row hypertable whose
+        # chunks compress after 30 days (policy_compression). Unbounded, this ROW_NUMBER()
+        # decompressed every chunk on every run -- measured 7m42s+ and still running, IO-bound,
+        # in the 22:30-00:00 IST window where unified-ranker and screener-performance then timed
+        # out. confluence-compute rewrites every active symbol ~15x/day, so inside the
+        # uncompressed window the latest row per live symbol is unchanged; a symbol silent for
+        # 30+ days falls through to the rec_log/unified_signals tiers of _get_entry_targets.
         try:
             rows = self.conn.execute("""
                 SELECT * FROM (
@@ -2265,6 +2270,7 @@ class UnifiedRanker:
                            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY computed_at DESC) AS rn
                     FROM confluence_signals
                     WHERE symbol NOT LIKE '%://%' AND LENGTH(symbol) <= 20
+                      AND computed_at >= NOW() - INTERVAL '30 days'
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}

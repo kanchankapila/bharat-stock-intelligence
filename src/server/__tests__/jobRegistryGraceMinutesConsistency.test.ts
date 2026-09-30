@@ -170,6 +170,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'quant-eod-sync': "'sync-quant-eod'",
     'outcome-resolver': "jobName: 'outcome-resolver-daily'",
     'chatbot-reingest': "jobName: 'chatbot-reingest-daily'",
+    'ontology-refresh': "jobName: 'ontology-refresh-daily'",
     'ml-daily-ops': 'mlDailyOpsWorker = new Worker',
     'trendlyne-daily-fetch': 'trendlyneDailyFetchWorker = new Worker',
     'ml-weekly-data': 'mlWeeklyDataWorker = new Worker',

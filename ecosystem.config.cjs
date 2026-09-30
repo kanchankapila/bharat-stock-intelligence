@@ -70,6 +70,12 @@ const pyService = {
     // Observe-first, same as runPython children (pythonRunner.ts): bites only on a runaway until
     // measured peaks justify tightening it (AF-20260911-12).
     BHARAT_PY_MEM_LIMIT_MB: '20480',
+    // No GPU for the long-running services (2026-09-30). ml-api and alphaquant-api import torch
+    // at startup, so each held a CUDA context for its whole life -- host commit plus VRAM on the
+    // 8GB WDDM card dl_trainer trains on -- with no live GPU caller: pythonApi.trainDL/inferDL
+    // have zero call sites; DL train/infer run as runPython subprocesses of bharat-server,
+    // whose env this does not touch.
+    CUDA_VISIBLE_DEVICES: '-1',
   },
 };
 

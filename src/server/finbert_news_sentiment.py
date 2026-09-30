@@ -22,7 +22,14 @@ Usage:
 """
 import base64
 import json
+import os
 import sys
+
+# CPU only, set BEFORE nlp_engine imports torch (CUDA reads this at init). This script runs every
+# ~15 min around the clock; on CUDA each run built a fresh CUDA context on the same 8GB WDDM card
+# dl_trainer trains on. Measured 2026-09-30, 25-item batch, warm: cuda 20.6-33.5s / 3,423MB peak
+# commit vs cpu 21.7s / 2,543MB -- same speed, ~0.9GB less per run, and no GPU at all.
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 from nlp_engine import FinBERTInference
 

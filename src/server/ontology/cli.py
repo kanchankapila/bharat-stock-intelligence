@@ -72,7 +72,7 @@ def cmd_build(onto: Ontology, args: argparse.Namespace) -> int:
     rc = cmd_verify(onto, args)
     if rc != 0:
         return rc
-    rc = cmd_export(onto, args)
+    rc = 0 if getattr(args, "no_export", False) else cmd_export(onto, args)
     if rc != 0 or args.no_store:
         return rc
     rc = cmd_store(onto, args)
@@ -250,6 +250,8 @@ def build_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("build", help="verify, export, and materialize into Postgres")
     b.add_argument("--out", default=DEFAULT_OUT)
     b.add_argument("--no-store", action="store_true", help="skip the database write")
+    b.add_argument("--no-export", action="store_true",
+                   help="skip writing artifacts to disk (the scheduled refresh only needs the DB)")
     b.add_argument("--fresh", action="store_true", help="probe freshness during coverage")
     b.set_defaults(coverage=True)
 

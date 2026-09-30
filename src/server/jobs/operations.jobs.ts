@@ -27,6 +27,7 @@ import { StepTracker } from '../jobSteps';
 export const QUEUE_RESEARCH_PREMARKET = 'research-premarket';
 export const QUEUE_RESEARCH_POSTCLOSE = 'research-postclose';
 export const QUEUE_OUTCOME_RESOLVER   = 'outcome-resolver';
+export const QUEUE_ONTOLOGY_REFRESH   = 'ontology-refresh';
 
 /**
  * Resolve outcomes at the given horizon. Prefer the in-process ml-api HTTP call (:8000),
@@ -90,6 +91,11 @@ async function processOutcomeResolver(job: Job): Promise<{ success: boolean; ski
   // timeout on any real backlog) — give it real headroom.
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
     .catch(err => T.fail('live_screener_resolver', err));
+
+  // Grades market_decision_event (the ranker's decision contracts) into market_decision_outcome.
+  // Had no caller until 2026-09-30. ~2k decisions/day x 3 horizons; a first live run took <1 min.
+  await runPython('decision_outcome_resolver.py', [], 10 * 60_000)
+    .catch(err => T.fail('decision_outcome_resolver', err));
 
   const verdict = T.finish();
   return { success: verdict.ok, failedSteps: verdict.failedSteps };
@@ -226,5 +232,28 @@ export async function registerOperationsJobs(connection: any) {
     },
   });
 
-  return { researchPremarket, researchPostclose, outcomeResolver, chatbotReingest };
+  // The semantic identity/contract layer (market_issuer .. market_graph_edge, kg_*,
+  // market_data_contract, semantic_feature_definition) had writers but no schedule, so its nine
+  // freshness checks sat on "not materialized yet" every day since 2026-09-25. ~2 min, DB only.
+  const ontologyRefresh = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_ONTOLOGY_REFRESH,
+    jobName: 'ontology-refresh-daily',
+    // 21:50 UTC / 03:20 IST — nse_stocks (the identity master) has settled; 21:30 is data-quality-daily.
+    repeat: { pattern: '50 21 * * *' },
+    jobId: 'ontology-refresh-repeatable',
+    removeOnComplete: { age: 86400 },
+    removeOnFail: { age: 604800 },
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 60_000 },
+    processor: async () => {
+      await runPython('ontology_refresh.py', [], 20 * 60_000);
+      return { success: true };
+    },
+    monitorName: 'ontology-refresh',
+    concurrency: 1,
+    lockDuration: 25 * 60 * 1000,
+  });
+
+  return { researchPremarket, researchPostclose, outcomeResolver, chatbotReingest, ontologyRefresh };
 }

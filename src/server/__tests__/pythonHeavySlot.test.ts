@@ -6,6 +6,8 @@ import {
   releaseHeavySlot,
   resetHeavySlot,
   getHeavySlotState,
+  recordObservedPeak,
+  resetLearnedPeaks,
 } from '../pythonRunner';
 
 /**
@@ -32,20 +34,21 @@ describe('pythonRunner exclusive heavy slot (AF-20260912-13)', () => {
   beforeEach(() => {
     delete process.env.PY_HEAVY_THRESHOLD_MB;
     resetHeavySlot();
+    resetLearnedPeaks();
   });
 
   describe('weights are measured, and cover the incident scripts', () => {
     it('carries the measured peak for each known heavy script', () => {
-      // Live Win32_Process PeakPageFileUsage / logged peakMemMb, 2026-09-12.
+      // Live Win32_Process PeakPageFileUsage 2026-09-12 / max logged peakMemMb 2026-09-20..30.
       expect(scriptWeightMb('strategy_optimizer.py')).toBe(16870);
-      expect(scriptWeightMb('dl_trainer.py')).toBe(13820);
+      expect(scriptWeightMb('dl_trainer.py')).toBe(15410);
     });
 
     it('resolves a full path, not just a bare name', () => {
       // runPython passes whatever the caller wrote; queues.ts uses bare names but the DL
       // registrations pass 'dl_trainer.py --trigger scheduled'-shaped strings elsewhere.
-      expect(scriptWeightMb('D:/repo/src/server/dl_trainer.py')).toBe(13820);
-      expect(scriptWeightMb('src\\server\\dl_trainer.py')).toBe(13820);
+      expect(scriptWeightMb('D:/repo/src/server/dl_trainer.py')).toBe(15410);
+      expect(scriptWeightMb('src\\server\\dl_trainer.py')).toBe(15410);
     });
 
     it('gives an unknown script a non-zero default so it cannot weigh nothing', () => {
@@ -64,6 +67,38 @@ describe('pythonRunner exclusive heavy slot (AF-20260912-13)', () => {
       expect(scriptWeightMb('ml_ensemble.py')).toBeLessThan(8192);
       expect(isHeavyScript('ml_ensemble.py')).toBe(false);
       expect(isHeavyScript('mc_pricefeed_fetcher.py')).toBe(false);
+    });
+
+    it('learns a heavy script from its observed peaks, so the table cannot go stale', () => {
+      // 2026-09-28: live_screener_optimizer (9,721MB) and live_screener_ml_ranker (8,570MB) were
+      // absent from the hand-kept table, weighed the 600MB default, ran together in the ranker's
+      // window, and unified-ranker timed out. A measured peak must be enough on its own.
+      expect(isHeavyScript('brand_new_heavy_job.py')).toBe(false);
+      recordObservedPeak('D:/repo/src/server/brand_new_heavy_job.py', 9721);
+      expect(scriptWeightMb('brand_new_heavy_job.py')).toBe(9721);
+      expect(isHeavyScript('brand_new_heavy_job.py')).toBe(true);
+    });
+
+    it('uses the max of the recent window, and forgets a spike once 10 newer runs replace it', () => {
+      recordObservedPeak('spiky.py', 9000);
+      for (let i = 0; i < 9; i++) recordObservedPeak('spiky.py', 1200);
+      expect(scriptWeightMb('spiky.py')).toBe(9000);
+      recordObservedPeak('spiky.py', 1200);
+      expect(scriptWeightMb('spiky.py')).toBe(1200);
+    });
+
+    it('weighs a script per --mode, so a light scorer is not queued behind the trainer', () => {
+      expect(isHeavyScript('live_screener_ml_ranker.py', ['--train'])).toBe(true);
+      expect(isHeavyScript('live_screener_ml_ranker.py', ['--score'])).toBe(false);
+      recordObservedPeak('live_screener_ml_ranker.py', 1500, ['--score']);
+      expect(scriptWeightMb('live_screener_ml_ranker.py', ['--score'])).toBe(1500);
+      // A non-flag first arg (dl_trainer's is '--trigger', a flag) still falls back to the base seed.
+      expect(scriptWeightMb('dl_trainer.py', ['--trigger', 'scheduled'])).toBe(15410);
+    });
+
+    it('never learns a seeded weight DOWN (the table is a floor)', () => {
+      recordObservedPeak('dl_trainer.py', 100);
+      expect(scriptWeightMb('dl_trainer.py')).toBe(15410);
     });
 
     it('honours PY_HEAVY_THRESHOLD_MB=0 as "disabled"', () => {

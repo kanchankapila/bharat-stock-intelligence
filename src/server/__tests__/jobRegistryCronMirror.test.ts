@@ -213,6 +213,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'research-postclose', marker: "jobName: 'research-postclose-daily'", label: 'operations.jobs.ts' },
     { jobName: 'outcome-resolver', marker: "jobName: 'outcome-resolver-daily'", label: 'operations.jobs.ts' },
     { jobName: 'chatbot-reingest', marker: "jobName: 'chatbot-reingest-daily'", label: 'operations.jobs.ts' },
+    { jobName: 'ontology-refresh', marker: "jobName: 'ontology-refresh-daily'", label: 'operations.jobs.ts' },
     { jobName: 'trendlyne-ratios-monthly', marker: "jobName: 'trendlyne-ratios-monthly-check'", label: 'trendlyneWeekly.jobs.ts' },
     { jobName: 'mover-study-weekly', marker: "'mover-study-weekly'", label: 'queues.ts' },
     { jobName: 'nt-live-filter-capture', marker: "'nt-live-filter-slot'", label: 'queues.ts' },

@@ -159,6 +159,8 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // per run, x2 attempts, plus catch-up stagger). Keep cronPattern identical to
   // operations.jobs.ts's `repeat: { pattern }` — a drifted mirror is its own recurring bug.
   { jobName: 'chatbot-reingest', label: 'Chatbot RAG Re-ingest', cronPattern: '0 20 * * *', graceMinutes: 90, critical: false },
+  // Mirror of operations.jobs.ts's ontology-refresh-daily (added 2026-09-30).
+  { jobName: 'ontology-refresh', label: 'Semantic Ontology/Identity Refresh', cronPattern: '50 21 * * *', graceMinutes: 60, critical: false },
   // graceMinutes 60 -> 270: the Worker's own lockDuration is 4h (240min, "covers the full
   // daily ops run" per queues.ts's own comment) and processMlDailyOps is wrapped in
   // withJobTimeout(..., 3.5h) -- 60min grace flagged 'late' (critical: true, real Telegram

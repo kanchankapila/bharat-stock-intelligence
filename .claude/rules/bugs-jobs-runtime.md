@@ -301,3 +301,47 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   change a service's pool size, re-add up the whole budget against `SHOW max_connections`,
   including tests, or the next process to start is the one that gets refused.
 
+
+## Everyday memory contention (2026-09-30)
+
+- **`tensor.pin_memory()` on a WHOLE dataset leaks page-locked host memory for the life of the
+  process.** PyTorch's caching host allocator keeps every freed pinned block (power-of-two sized)
+  and `torch.cuda.empty_cache()` does NOT release it -- only `torch._C._host_emptyCache()` does.
+  Measured on this box: pin-then-free 100..500MB -> private bytes 1,620 -> 2,521MB, back to 1,624
+  only after `_host_emptyCache`; three differently-sized training folds held **2,424MB** after
+  everything was freed. `dl_engine` pinned every 2.4GB chunk and every walk-forward fold, so
+  ~2.8h into each retrain the host could not back any CUDA allocation: even `empty_cache()` raised
+  `CUDA error: out of memory`, and the OOM retry died at `BiLSTMModel().to(DEVICE)` on a few MB
+  (dl-trainer 6/6 failed 09-27..30). **Tell:** a CUDA OOM on a tiny allocation while `nvidia-smi`
+  shows the card mostly free, on a WDDM host near its commit limit. Fix: never pin whole datasets
+  (per-batch pageable copies were FASTER here, 24.5s vs 34.3s); release with
+  `dl_engine.release_cuda_memory()`. Guarded by `test_dl_pinned_host_memory.py`.
+- **An admission gate keyed on a hand-maintained weight table goes stale within weeks.**
+  `pythonRunner.SCRIPT_PEAK_MB` lacked `live_screener_optimizer` (9.8GB) and
+  `live_screener_ml_ranker --train` (8.7GB); both weighed the 600MB default and were never
+  serialised. Weights are now learned from every run's measured `peakMemMb` (max of the last 10,
+  per script + `--mode`, persisted in `logs/py-script-peaks.json`), with the table as a floor.
+  Key by mode, not script: one script can have a 1.4GB scorer and an 8.7GB trainer.
+- **"Latest row per symbol" with no time bound over a compressed hypertable decompresses the
+  whole history on every call.** `unified_ranker._get_confluence_latest_map` ran `ROW_NUMBER()
+  OVER (PARTITION BY symbol ...)` across all of `confluence_signals` (6GB, 8.1M rows, compressed
+  after 30d): measured 937s and still running, IO-bound, in the 22:30-00:00 IST window where the
+  ranker and screener-performance then timed out. It grew with the table, so every timeout bump
+  bought a few weeks. Bound it inside the uncompressed window (`computed_at >= NOW() - 30 days`).
+  **Tell:** a job whose runtime rises steadily with no code change -- profile each loader before
+  raising its budget.
+- **A crawl that aborts on a vendor allowance and restarts in FIXED list order refreshes the
+  same head of the list forever.** Trendlyne TA stopped at ~144 of 1,860 daily; ~810 symbols had
+  not been touched since mid-July. Order such crawls stalest-first by the table's own
+  `last_updated`, so a bounded daily slice converges.
+- **A per-15-min model process on CUDA contends with the trainer for the same WDDM card.**
+  `finbert_news_sentiment.py` (96 runs/day) is pinned to CPU: same speed warm, ~0.9GB less commit.
+- **`pm2 reload`/`restart` of a venv Python service on Windows orphans the real interpreter, and
+  the next instance then crash-loops on `[Errno 10048]` (port in use).** pm2 tracks the
+  `venv\Scripts\python.exe` redirector; killing it leaves the real interpreter (and its child)
+  holding the port, still serving, while pm2 restarts a copy every few seconds (chatbot reached 46
+  restarts, engine-worker 74, on 2026-09-30). `pm2 stop` left 4 such processes alive. Deploy
+  procedure for these services: `pm2 stop <app>` -> kill every remaining `python.exe` whose
+  command line names the script -> `pm2 start <app> --update-env` -> confirm `restart_time` holds
+  steady for a minute. **Tell:** `waiting restart` plus a climbing restart count while the port
+  still answers 200.

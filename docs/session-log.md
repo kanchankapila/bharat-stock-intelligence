@@ -10219,3 +10219,25 @@ pass were also classifier-blocked — see the session's closing message for the 
   seeded 2026-06-0x against a today-relative 120-day window and aged out today (recurrence of the
   AF-20260917-25 fixed-date-fixture class). Fixture now anchored to `date.today()`, exact key-set
   asserted, negative-controlled. `ml-model-bugs.md`'s stale "9 checks" also corrected to 12.
+
+## 2026-09-30 — digest failures + everyday memory contention (AF-20260930-10..15)
+
+Triggered by the 09-29 job-health digest and 09-30 integrity report. Ran alongside another live
+session (it owned AF-20260930-01..05, incl. the Trendlyne market-insight retry, -02); files it had
+uncommitted (`queues.ts`, `liveStockData.ts`, the Trendlyne fetcher) were not touched.
+
+- **DL trainer (-10):** whole-dataset `pin_memory()` accumulated page-locked host memory in
+  torch's caching host allocator; `empty_cache()` never releases it. Removed pinning, added
+  `release_cuda_memory()` (device + host). Measured 2,424MB → 8MB held after 3 folds, and faster.
+- **Ranker timeouts (-11):** unbounded latest-per-symbol over the 6GB compressed
+  `confluence_signals` (937s+). Bounded to the 30-day uncompressed window.
+- **Memory contention (-12, -13):** heavy-job weights now learned from measured peaks (by
+  script + mode); FinBERT batch on CPU; CUDA hidden from the four pm2 Python services.
+  Host was at 960MB free / commit 70.6 of 84GB; WSL (Postgres) already capped at 12GB.
+- **Trendlyne TA (-14):** stalest-first crawl order so the rationed allowance converges.
+- **Semantic checks (-15):** nightly `ontology-refresh`; `decision_outcome_resolver.py` wired into
+  `outcome-resolver`; evidence/claim checks excluded with a producer-expiry guard; range-bounds
+  check reports its population.
+
+Lesson: the heavy-slot fix of 09-12 was right in shape but fed by a hand-kept table — two 9GB
+jobs were weighed at 600MB within two weeks. Admission inputs must come from measurement.

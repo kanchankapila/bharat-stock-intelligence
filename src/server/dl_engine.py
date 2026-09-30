@@ -644,15 +644,14 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
     hub    = nn.HuberLoss(delta=0.02)
     is_cuda = DEVICE.type == "cuda"
 
-    # Convert to CPU tensors once — avoid per-batch numpy→tensor copies
+    # Convert to CPU tensors once — avoid per-batch numpy→tensor copies. NOT pinned: pinning the
+    # whole chunk/fold parked GBs of page-locked memory in torch's caching host allocator for the
+    # rest of the run and exhausted the host ~2.8h in (dl-trainer OOM 2026-09-27..30; see
+    # test_dl_pinned_host_memory.py). A 128-row batch is ~3MB, so pageable copies cost little.
     X_t   = torch.from_numpy(np.ascontiguousarray(X,   dtype=np.float32))
     y5_t  = torch.from_numpy(np.ascontiguousarray(y5,  dtype=np.int64))
     yr5_t = torch.from_numpy(np.ascontiguousarray(yr5, dtype=np.float32))
     y15_t = torch.from_numpy(np.ascontiguousarray(y15, dtype=np.int64)) if y15 is not None else None
-    if is_cuda:
-        X_t = X_t.pin_memory(); y5_t = y5_t.pin_memory(); yr5_t = yr5_t.pin_memory()
-        if y15_t is not None:
-            y15_t = y15_t.pin_memory()
 
     n = len(X_t)
     bs = 128  # smaller batches reduce cuDNN workspace + VRAM pressure
@@ -664,10 +663,10 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
             idx = perm[start:start + bs]
             if len(idx) <= 1:
                 continue
-            xb   = X_t[idx].to(DEVICE, non_blocking=is_cuda)
-            yb   = y5_t[idx].to(DEVICE, non_blocking=is_cuda)
-            rb   = yr5_t[idx].to(DEVICE, non_blocking=is_cuda)
-            yb15 = y15_t[idx].to(DEVICE, non_blocking=is_cuda) if y15_t is not None else None
+            xb   = X_t[idx].to(DEVICE)
+            yb   = y5_t[idx].to(DEVICE)
+            rb   = yr5_t[idx].to(DEVICE)
+            yb15 = y15_t[idx].to(DEVICE) if y15_t is not None else None
             opt.zero_grad()
             with autocast('cuda', enabled=is_cuda):
                 out  = model(xb)
@@ -709,14 +708,12 @@ def _predict_batch(model: BiLSTMModel, X: np.ndarray, bs: int = 256) -> Dict[str
     model = model.to(DEVICE)
     model.eval()
     is_cuda = DEVICE.type == "cuda"
-    X_t = torch.from_numpy(np.ascontiguousarray(X, dtype=np.float32))
-    if is_cuda:
-        X_t = X_t.pin_memory()
+    X_t = torch.from_numpy(np.ascontiguousarray(X, dtype=np.float32))  # not pinned: see _train_one_fold
     _DIR_KEYS = {"dir_1d", "dir_5d", "dir_15d"}
     results = {"dir_1d": [], "dir_5d": [], "dir_15d": [], "ret_5d": [], "ret_15d": []}
     with torch.no_grad():
         for start in range(0, len(X_t), bs):
-            xb = X_t[start:start + bs].to(DEVICE, non_blocking=is_cuda)
+            xb = X_t[start:start + bs].to(DEVICE)
             with autocast('cuda', enabled=is_cuda):
                 out = model(xb)
             for k in results:
@@ -728,6 +725,21 @@ def _predict_batch(model: BiLSTMModel, X: np.ndarray, bs: int = 256) -> Dict[str
 # ── Training Entry Point ─────────────────────────────────────────────────────
 
 _CHUNK_SIZE = 100  # symbols per gradient-update chunk — bounds peak RAM
+
+
+def release_cuda_memory() -> None:
+    """Return cached memory to the OS: the DEVICE cache AND torch's pinned-HOST cache.
+
+    torch.cuda.empty_cache() alone leaves every freed pinned block page-locked in the caching
+    host allocator; on this WDDM box that host memory, not VRAM, is what ran out (2026-09-30).
+    """
+    gc.collect()
+    if torch is None or DEVICE is None or DEVICE.type != "cuda":
+        return
+    torch.cuda.empty_cache()
+    host_empty = getattr(torch._C, "_host_emptyCache", None)
+    if host_empty is not None:
+        host_empty()
 
 
 def _count_nonfinite_params(state_dict) -> int:
@@ -797,11 +809,9 @@ def train_lstm(version: int = 1) -> Dict:
             except RuntimeError as e:
                 if not _is_cuda_oom(e) or attempt == 2:
                     raise
-                print(f"[DL] CUDA OOM on chunk (attempt {attempt}/2); empty_cache + gc + retry",
+                print(f"[DL] CUDA OOM on chunk (attempt {attempt}/2); releasing cached memory + retry",
                       file=sys.stderr)
-                if DEVICE is not None and DEVICE.type == "cuda":
-                    torch.cuda.empty_cache()
-                gc.collect()
+                release_cuda_memory()
 
     def _flush_chunk():
         nonlocal total_seqs, chunks_skipped_oom
@@ -822,9 +832,7 @@ def train_lstm(version: int = 1) -> Dict:
             print(f"[DL] CUDA OOM twice on one chunk -- SKIPPING {len(X_c)} seqs "
                   f"({chunks_skipped_oom} chunk(s) skipped so far); run continues on the rest",
                   file=sys.stderr)
-            if DEVICE is not None and DEVICE.type == "cuda":
-                torch.cuda.empty_cache()
-            gc.collect()
+            release_cuda_memory()
         chunk_X.clear(); chunk_y5.clear(); chunk_y15.clear(); chunk_yr5.clear()
 
     # Parallel + time-bounded. Serial per-symbol loading is what made dl-retrain-weekly run

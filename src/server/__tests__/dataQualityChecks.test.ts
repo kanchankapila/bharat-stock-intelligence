@@ -505,6 +505,13 @@ describe('individual evaluate() functions', () => {
     expect(r.status).toBe('pass');
   });
 
+  it('technical-signals-range-bounds reports the population it checked, so its detail moves', () => {
+    const a = byId('technical-signals-range-bounds').evaluate({ bad: 0, total: 4331, rsi_n: 4331, wp_n: 4331 }, now);
+    const b = byId('technical-signals-range-bounds').evaluate({ bad: 0, total: 0, rsi_n: 0, wp_n: 0 }, now);
+    expect(a.detail).toContain('4331 rows');
+    expect(a.detail).not.toBe(b.detail);
+  });
+
   it('technical-signals-stuck-value fails when every row has the same signal_score', () => {
     const r = byId('technical-signals-stuck-value').evaluate({ distinct_scores: 1, total: 500 }, now);
     expect(r.status).toBe('fail');

@@ -824,12 +824,9 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'semantic-graph-edge-freshness', label: 'market_graph_edge (typed bitemporal assertions)',
     category: 'reference', critical: false, table: 'market_graph_edge', dateColumn: 'recorded_at',
     nativeDateColumn: true, warnDays: 10, emptyDetail: 'instance graph not materialized yet (run `ontology identity`)' },
-  { id: 'semantic-evidence-freshness', label: 'market_evidence (retained source evidence)',
-    category: 'reference', critical: false, table: 'market_evidence', dateColumn: 'available_at',
-    nativeDateColumn: true, warnDays: 10, emptyDetail: 'no unstructured evidence retained yet' },
-  { id: 'semantic-claim-freshness', label: 'market_claim (explicit, status-bearing claims)',
-    category: 'reference', critical: false, table: 'market_claim', dateColumn: 'available_at',
-    nativeDateColumn: true, warnDays: 10, emptyDetail: 'no explicit claim recorded yet' },
+  // market_evidence / market_claim: checks removed 2026-09-30 -- no production code writes them,
+  // so they could only ever warn "empty". Excluded in tableFreshnessCoverage.test.ts, which fails
+  // (and asks for the check back) as soon as record_market_evidence/record_market_claim gets a caller.
   { id: 'semantic-decision-event-freshness', label: 'market_decision_event (append-only decision contracts)',
     category: 'signals', critical: false, table: 'market_decision_event', dateColumn: 'created_at',
     nativeDateColumn: true, warnDays: 3, emptyDetail: 'no decision evidence bundle emitted yet (deploy the semantic migration, then run the ranker)' },
@@ -1096,16 +1093,21 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'signals',
     critical: true,
     // date is a native DATE (2026-08-25 migration): compare it as a date so the index applies.
-    sql: `SELECT COUNT(*) AS bad FROM technical_signals
-          WHERE date >= current_date - 3 AND (
+    // The detail carries the population it checked (2026-09-30): a bare "No bound violations"
+    // was byte-identical every run, so dq-uninformative-checks read it as a frozen input -- and it
+    // could not tell "0 of 4,331 rows bad" from "0 of 0 rows checked".
+    sql: `SELECT COUNT(*) FILTER (WHERE
             (rsi IS NOT NULL AND (rsi < 0 OR rsi > 100)) OR
             (win_probability IS NOT NULL AND (win_probability < 0 OR win_probability > 1)) OR
             (calibrated_win_probability IS NOT NULL AND (calibrated_win_probability < 0 OR calibrated_win_probability > 1))
-          )`,
+          ) AS bad,
+          COUNT(*) AS total, COUNT(rsi) AS rsi_n, COUNT(win_probability) AS wp_n
+          FROM technical_signals WHERE date >= current_date - 3`,
     evaluate: (row) => {
       const bad = Number(row?.bad) || 0;
-      if (bad > 0) return { status: 'fail', detail: `${bad} rows violate RSI/win-probability bounds (last 3d)` };
-      return { status: 'pass', detail: 'No bound violations in the last 3 days' };
+      const scope = `${Number(row?.total) || 0} rows (rsi ${Number(row?.rsi_n) || 0}, win_prob ${Number(row?.wp_n) || 0})`;
+      if (bad > 0) return { status: 'fail', detail: `${bad} of ${scope} violate RSI/win-probability bounds (last 3d)` };
+      return { status: 'pass', detail: `0 of ${scope} violate RSI/win-probability bounds (last 3d)` };
     },
   },
   {

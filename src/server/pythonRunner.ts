@@ -155,27 +155,89 @@ const MAX_PYTHON_CONCURRENT = 5;
 //   grep -ho 'peakMemMb\":[0-9]*' logs/app-*.log   (paired with the \"script\" field)
 // A weight that is too LOW re-opens this bug; too HIGH only costs serialisation. Round up.
 const DEFAULT_SCRIPT_PEAK_MB = 600;
+// A SEED and a FLOOR, not the source of truth: the table went stale within two weeks
+// (2026-09-28: live_screener_optimizer 9,721MB and live_screener_ml_ranker 8,570MB were missing,
+// weighed 600MB, ran together in unified-ranker's window, and the ranker timed out). Every run's
+// measured peak is now learned below, so a script that grows heavy is serialised on its own.
+// Values: max logged peakMemMb 2026-09-20..30 (re-derive: grep '"peakMemMb"' logs/app-*.log).
 const SCRIPT_PEAK_MB: Record<string, number> = {
-  // strategy_optimizer.py has no logged peakMemMb yet (no completed run in the retained window);
-  // 16870 is the live Win32_Process PeakPageFileUsage read taken during the 2026-09-12 incident.
+  // strategy_optimizer.py: live Win32_Process PeakPageFileUsage during the 2026-09-12 incident.
   'strategy_optimizer.py': 16870,
-  'dl_trainer.py': 13820,
-  'ml_ensemble.py': 7088,
+  'dl_trainer.py': 15410,
+  'live_screener_optimizer.py': 9848,
+  // Keyed with its mode flag: --score is ~1.4GB and runs all day; only --train is heavy.
+  'live_screener_ml_ranker.py --train': 8689,
+  'ml_ensemble.py': 8074,
+  'feature_engineering.py': 5347,
+  'factor_backtest.py': 5285,
+  'breakout_classifier.py': 5032,
+  'exit_policy.py': 4469,
   'finstack_cashflow_fetcher.py': 4148,
-  'ohlcv_adjust.py': 4005,
-  'finbert_news_sentiment.py': 3563,
+  'ohlcv_adjust.py': 4015,
+  'avwap_features.py': 3976,
+  'movement_predictor.py': 3640,
   'factor_edge.py': 2413,
-  'extra_endpoints_fetcher.py': 2398,
+  'extra_endpoints_fetcher.py': 3508,
   'mover_screener_fetcher.py': 1452,
   'confluence_ml_engine.py': 1340,
   'performance_tracker.py': 1304,
   'backtester.py': 1169,
 };
 
-/** Expected peak MB for a script path/name. Exported for the guard test. */
-export function scriptWeightMb(script: string): number {
-  const base = script.replace(/\\/g, '/').split('/').pop() ?? script;
-  return SCRIPT_PEAK_MB[base] ?? DEFAULT_SCRIPT_PEAK_MB;
+// Learned peaks: the last LEARNED_WINDOW measured peaks per script, persisted across restarts.
+// Max-of-window, so one spike keeps a script heavy for its next 10 runs and then ages out.
+const LEARNED_WINDOW = 10;
+const _learnedPeaks = new Map<string, number[]>();
+const PEAKS_FILE: string | null = process.env.VITEST
+  ? null
+  : (process.env.PY_PEAKS_FILE ?? path.resolve(REPO_ROOT, 'logs', 'py-script-peaks.json'));
+
+function scriptBase(script: string): string {
+  return script.replace(/\\/g, '/').split('/').pop() ?? script;
+}
+
+/** Weight key: the script, plus its leading --mode flag when it has one (train vs score). */
+function scriptKey(script: string, args: string[] = []): string {
+  const base = scriptBase(script);
+  return args[0]?.startsWith('--') ? `${base} ${args[0]}` : base;
+}
+
+(function loadLearnedPeaks() {
+  if (!PEAKS_FILE) return;
+  try {
+    const raw = JSON.parse(fs.readFileSync(PEAKS_FILE, 'utf8')) as Record<string, number[]>;
+    for (const [k, v] of Object.entries(raw)) {
+      if (Array.isArray(v)) _learnedPeaks.set(k, v.filter(n => Number.isFinite(n)).slice(-LEARNED_WINDOW));
+    }
+  } catch { /* first boot or unreadable: the seed table still applies */ }
+})();
+
+/** Record a run's measured peak so the next admission decision uses it. */
+export function recordObservedPeak(script: string, peakMb: number, args: string[] = []): void {
+  if (!Number.isFinite(peakMb) || peakMb <= 0) return;
+  const key = scriptKey(script, args);
+  const win = [...(_learnedPeaks.get(key) ?? []), Math.round(peakMb)].slice(-LEARNED_WINDOW);
+  _learnedPeaks.set(key, win);
+  if (!PEAKS_FILE) return;
+  try {
+    fs.writeFileSync(PEAKS_FILE, JSON.stringify(Object.fromEntries(_learnedPeaks)));
+  } catch (e) {
+    console.warn(`[PY-HEAVY] could not persist learned peaks to ${PEAKS_FILE}: ${(e as Error).message}`);
+  }
+}
+
+/** Tests only. */
+export function resetLearnedPeaks(): void {
+  _learnedPeaks.clear();
+}
+
+/** Expected peak MB for a script path/name: max(seed floor, max of recent measured peaks). */
+export function scriptWeightMb(script: string, args: string[] = []): number {
+  const key = scriptKey(script, args);
+  const learned = _learnedPeaks.get(key);
+  const seen = learned && learned.length ? Math.max(...learned) : 0;
+  const weight = Math.max(SCRIPT_PEAK_MB[key] ?? SCRIPT_PEAK_MB[scriptBase(script)] ?? 0, seen);
+  return weight > 0 ? weight : DEFAULT_SCRIPT_PEAK_MB;
 }
 
 // A full host-wide byte budget was considered and REJECTED as the admission rule: with strict
@@ -200,9 +262,9 @@ function heavyThresholdMb(): number {
 }
 
 /** True when a script is heavy enough to require the exclusive heavy slot. */
-export function isHeavyScript(script: string): boolean {
+export function isHeavyScript(script: string, args: string[] = []): boolean {
   const t = heavyThresholdMb();
-  return t > 0 && scriptWeightMb(script) >= t;
+  return t > 0 && scriptWeightMb(script, args) >= t;
 }
 
 // The exclusive heavy slot. A heavy job waits here for however long the incumbent heavy job
@@ -440,7 +502,7 @@ export async function runPython(
   // Heavy jobs take the exclusive heavy slot BEFORE the count slot, and in that order on
   // purpose: holding a count slot while waiting for the heavy slot would occupy 1 of only 5
   // count slots for the entire wait (hours), throttling every unrelated fetcher behind it.
-  const heavy = isHeavyScript(script);
+  const heavy = isHeavyScript(script, args);
   if (heavy) await acquireHeavySlot(script);
   try {
     await acquirePythonSlot(script);
@@ -602,6 +664,7 @@ export async function runPython(
     release();
     // The kill paths settle without 'close', so the record may still be on disk.
     if (peakMemMb === undefined) peakMemMb = takePeakMemMb(peakFile);
+    if (peakMemMb !== undefined) recordObservedPeak(script, peakMemMb, args);
     if (stdout) {
       log.info(`[PY] ${script} execution completed`, {
         script,

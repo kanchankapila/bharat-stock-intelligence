@@ -734,3 +734,14 @@ any row: `docs/measurement-history.md`.
 - Of 60 symbol+date tables audited 2026-08-11, only 9 have enough history to test anything at all; the other 35 start ~2026-06-30.
 - **REGIME_WEIGHTS re-check, 2026-08-25**: `blend_walkforward.py` re-run across all 46 available sessions — TILT alternative still fails its pre-declared bar (dIC −0.0003). Weights confirmed unchanged. **Live-reverified again 2026-09-10**: `screener`, `cs` AND `smart_money` are all still 0.0 in every one of the five regimes — a validation, not an improvement, do not cite it as one.
 - **`technical_signals.date` is TEXT→DATE** (migration `20260825120000`, applied via a manual single-statement rerun after node-pg-migrate's sql-file runner silently executed only the file's first statement). Writers unaffected; `db/schema.postgres.sql` updated so new throwaway test schemas get DATE natively. A migration's ledger row proves execution of *a* statement, not necessarily the one you meant — verify the effect via `information_schema`, never the tool's exit code alone.
+
+- **2026-09-30 — `unified_ranker` 30-day bound on `confluence_signals` reads (AF-20260930-11): measured
+  score-neutral on live data.** Cost map (`_compute_cost_map` atr): of 1,840 ranked symbols, 1,716
+  have a non-null atr inside the window; the other 124 have **no non-null atr in any older row
+  either**, so old and new code both fall back to `cmp*0.02` — identical cost for all 1,840, so no
+  `unified_score` moves. Entry-target map: 1,827/1,840 ranked symbols have a row in the window; the 13
+  outside (KOTAK, LARSEN, NESTLE, INDUSIND, VODAFONE, BAJAJINSUR, CENTRALBANK, CHOLAFINSV,
+  JIOFINANCIAL, LTFH, NIFTYBEES, POLICYBAZAAR, SHINDL) now take trade levels from the rec_log /
+  unified_signals tiers instead of >30-day-old confluence levels — geometry only, not score. Also
+  measured: `atr` is ~50% NULL, so an unbounded `atr IS NOT NULL ORDER BY computed_at DESC LIMIT 1`
+  per symbol walked the full compressed history for every always-NULL symbol.

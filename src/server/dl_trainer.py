@@ -344,12 +344,11 @@ def retrain_models(trigger: str = "scheduled") -> dict:
             # run release_fn (gc + empty_cache), or the retry starts with attempt-1's VRAM still
             # live and dies at model.to(DEVICE) on a few MB (the 2026-09-29 observed failure).
             def _release_attempt1():
-                import gc as _gc
-                _gc.collect()
+                # release_cuda_memory also empties torch's pinned-HOST cache; device-only
+                # empty_cache() left that page-locked memory held, so the 2026-09-30 retry died
+                # at model.to(DEVICE) exactly like the 09-29 one.
                 try:
-                    if getattr(dl, "torch", None) is not None and dl.DEVICE is not None \
-                            and dl.DEVICE.type == "cuda":
-                        dl.torch.cuda.empty_cache()
+                    dl.release_cuda_memory()
                 except Exception as ce:
                     print(f"[TRAINER] empty_cache before retry failed (non-fatal): {ce}",
                           file=sys.stderr)

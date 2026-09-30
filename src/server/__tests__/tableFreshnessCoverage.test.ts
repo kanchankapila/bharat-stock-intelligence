@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 /**
  * 2026-09-14 coverage-gate test - automated counterpart of the audit-loop skill's
@@ -138,8 +138,41 @@ const EXCLUDED_TABLES: Record<string, string> = {
   // Semantic layer (2026-09-25): link table has only (claim_key, evidence_key, relation,
   // contribution, note) -- no timestamp for the generic freshness factory to read. Its parent
   // tables (market_claim, market_evidence) carry the monitored timestamps.
-  market_claim_evidence: 'semantic claim->evidence link table; no timestamp column, parents monitored',
+  market_claim_evidence: 'semantic claim->evidence link table; no timestamp column',
+  // 2026-09-30: both had freshness checks that returned the same "empty" warning every day,
+  // because nothing in production calls record_market_evidence()/record_market_claim() -- a
+  // check on a table with no writer cannot pass and so carries no signal. The guard below
+  // fails the moment a producer appears, so the exclusion cannot outlive the gap.
+  market_evidence: 'no producer: record_market_evidence() has no production caller yet',
+  market_claim: 'no producer: record_market_claim() has no production caller yet',
 };
+
+// Tables excluded ONLY because they have no producer. Each maps to the writer function whose
+// first production caller must bring back a freshness check (and remove the exclusion).
+const NO_PRODUCER_EXCLUSIONS: Record<string, string> = {
+  market_evidence: 'record_market_evidence(',
+  market_claim: 'record_market_claim(',
+};
+
+describe('table-coverage gate: no-producer exclusions expire when a producer appears', () => {
+  const serverDir = resolve(__dirname, '..');
+  const pySources = readdirSync(serverDir)
+    .filter(f => f.endsWith('.py') && f !== 'semantic_evidence.py' && !f.startsWith('test_'))
+    .map(f => readFileSync(join(serverDir, f), 'utf8'));
+
+  it('scans a non-trivial set of production modules', () => {
+    expect(pySources.length).toBeGreaterThan(100);
+  });
+
+  for (const [table, writer] of Object.entries(NO_PRODUCER_EXCLUSIONS)) {
+    it(`${table} stays excluded only while nothing calls ${writer}`, () => {
+      const callers = pySources.filter(src => src.includes(writer)).length;
+      expect(callers, `${writer} now has a production caller: remove ${table} from EXCLUDED_TABLES `
+        + `and give it a TABLE_FRESHNESS_CHECKS entry`).toBe(0);
+      expect(EXCLUDED_TABLES[table]).toBeTruthy();
+    });
+  }
+});
 
 describe('table-coverage gate: exclusion map', () => {
   it('every excluded entry names a real public schema table', () => {
@@ -166,6 +199,7 @@ describe('table-coverage gate: every schema table is monitored or documented', (
 
   it('exclusion map covers the expected tail', () => {
     expect(Object.keys(EXCLUDED_TABLES).length).toBeGreaterThan(55);
-    expect(Object.keys(EXCLUDED_TABLES).length).toBeLessThan(90);
+    // 90 -> 95 on 2026-09-30 for market_evidence/market_claim, which carry their own expiry guard.
+    expect(Object.keys(EXCLUDED_TABLES).length).toBeLessThan(95);
   });
 });

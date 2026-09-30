@@ -1,4 +1,4 @@
-import { dbRun } from './dbAsync';
+import { dbAll, dbRun } from './dbAsync';
 import { fetchTrendlyneAdvTechnicalAnalysis } from './trendlyneService';
 import { getTrendlyneTaCircuitState, isTrendlyneTaBlocked } from './trendlyneTechnicalCircuit';
 
@@ -260,8 +260,22 @@ Overall Probability: ${Math.min(100, Math.max(0, scores.composite)).toFixed(0)}%
 
 export async function syncTrendlyneTechnicals() {
   const { getAllStocks } = await import('./stockMapping');
-  const stocks = getAllStocks(); // Sync all symbols
-  console.log(`[TRENDLYNE TECHNICALS] Starting sync for ${stocks.length} symbols...`);
+  // Stalest-first (2026-09-30). A 405 means the cumulative WAF allowance is spent and the run
+  // aborts by design -- but in fixed list order that pinned every run to the same head of the
+  // list: measured 09-29, 144 symbols fresh, 952 last synced 09-24, ~810 untouched since July.
+  // Ordering by last_updated makes each day's allowance cover the names that need it most, so
+  // coverage converges across runs instead of re-fetching the same 144.
+  const lastSynced = new Map<string, number>();
+  try {
+    const rows = await dbAll<{ symbol: string; last_updated: string | Date }>(
+      `SELECT symbol, last_updated FROM trendlyne_technical_snapshots WHERE timeframe = 'D'`);
+    for (const r of rows) lastSynced.set(r.symbol, new Date(r.last_updated).getTime() || 0);
+  } catch (e) {
+    console.warn(`[TRENDLYNE TECHNICALS] could not read sync ages; using list order: ${(e as Error).message}`);
+  }
+  const stocks = [...getAllStocks()].sort(
+    (a, b) => (lastSynced.get(a.symbol) ?? 0) - (lastSynced.get(b.symbol) ?? 0));
+  console.log(`[TRENDLYNE TECHNICALS] Starting sync for ${stocks.length} symbols (stalest first)...`);
   
   const baseDelay = Number(process.env.TRENDLYNE_BASE_DELAY_MS || '500');
   const jitterPercent = Number(process.env.TRENDLYNE_JITTER_PERCENT || '15');
