@@ -7,9 +7,13 @@ copying it, because copied inventories are what went stale here before (the prev
 named 5 fetchers that do not exist and a GPT-4o agent file that never did).
 
 ## What it is
-Indian equity (NSE/BSE) intelligence platform: 82 `*_fetcher.py` (of ~237 Python modules in `src/server/`) pull vendor data into
+Indian equity (NSE/BSE) intelligence platform: 82 `*_fetcher.py` (of 290 non-test Python modules in `src/server/`;
+678 `.py` files including tests — measured 2026-09-29) pull vendor data into
 Postgres/TimescaleDB, engines score every stock, and `unified_ranker.py` blends them into one
 canonical ranking the React UI, Telegram digests and the chatbot read.
+
+Counts in this file are a dated snapshot. Re-derive every one with `node scripts/docNumbers.mjs`
+(`--check` exits non-zero when a doc has drifted from the live filesystem/DB).
 
 ## Data flow
 ```

@@ -80,9 +80,11 @@ const log = {
   debug: (msg: string, ctx?: Record<string, unknown>) => logger.debug(msg, ctx),
 };
 
-// Every `console.log`/`error`/`warn` call across ~140 server files bypasses `log` above
-// entirely (611 raw call sites at last count, 2026-08-05 audit) -- no level, no JSON file
-// persistence, no rotation. Rewriting 611 call sites by hand is its own multi-session project;
+// Every `console.log`/`error`/`warn` call across the ~90 server files that still contain one
+// bypasses `log` above entirely (709 raw call sites, re-measured 2026-09-29; the previously
+// quoted "611 call sites / ~140 files" was a 2026-08-05 audit figure that had itself gone
+// stale — run `node scripts/docNumbers.mjs` to re-derive) -- no level, no JSON file
+// persistence, no rotation. Rewriting 709 call sites by hand is its own multi-session project;
 // this instead routes the *existing* console.* API through the real logger, so every call site
 // gets structured JSON output (logs/app-*.log, logs/error-*.log) and a real level for free,
 // with zero code changes required at any of them. New code should still prefer calling `log`

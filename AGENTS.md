@@ -11,13 +11,16 @@ and the service map. Domain orientation is in `CONTEXT.md`.
 ## Non-negotiables (full text in CLAUDE.md)
 1. **Done = the check ran and passed** — `npx tsc --noEmit`, `npx vitest run`,
    `backend-python/venv/Scripts/python.exe -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/`,
-   `npm run schema:drift` for migrations. Signal/scoring changes also need backtest evidence
+   `npm run schema:drift` for migrations, `npm run doc:numbers:check` after changing any
+   repo-inventory count quoted in a doc or comment. Signal/scoring changes also need backtest evidence
    (enforced by the `verify-gate.mjs` Stop hook).
 2. **Verify against live production, not the code** — `scripts/sql.py` for read-only queries.
 3. **Committed ≠ deployed** — `.ts` needs `pm2 restart bharat-server`; migrations need `npm run migrate:up`.
 4. **One tracker** — findings go to `docs/audit-findings.md`; fix and close in the same pass by default.
 5. **Commit by explicit path**, never `git add -A` — several sessions edit this repo concurrently.
 6. **Never fabricate evidence** — a number a model reports about itself is not evidence; grade against realized returns.
+7. **Never hand-write a count into a doc** — re-derive it (`npm run doc:numbers`) and paste the output. Invented or
+   remembered counts are how "~210 Python modules" outlived a 290-module tree.
 
 ## Rules (auto-scoped by `paths:` frontmatter — Claude Code loads each when you touch a matching file)
 | File | Covers |
