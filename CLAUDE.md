@@ -41,7 +41,15 @@ matching file, read `measurement.md` yourself.
 deliverable — a closed row is. When you find a bug, gap, or follow-up, the default action in the
 same session is: fix it, verify the fix against live production (not just `tsc`/a green suite —
 see `measurement.md`'s reverse-engineering discipline), and close the row with a date and
-evidence, all in one pass. Filing a finding and leaving it **open** is the exception, not a
+evidence, all in one pass. **Report and fix are one act (user, 2026-09-30): an audit or review
+that ends in a list of findings is unfinished — fix each one while reporting it.** And **every fix
+ships with a regression test in the same pass**: written first, shown to FAIL against the unfixed
+code (negative control), passing after — and named in the ledger row's `Immunized` cell. A fix
+with no test is not closed. `npm run findings:check` (`scripts/checkFindingsLedger.mjs`) enforces
+this on every row found from 2026-09-30: a closed FIX row must cite a test/check that exists, an
+open row must state one of the reasons below, and the ledger's tables must parse. The
+`audit-loop`, `weekend-audit` and `session-close` skills run it; a red result means the session
+is not finished. Filing a finding and leaving it **open** is the exception, not a
 routine outcome, and is only legitimate for one of these reasons — state which, explicitly, in
 the row itself:
 
@@ -99,6 +107,7 @@ npx vitest run                                      # any .ts logic change
 python -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/  # any .py change (identical to CI)
 npm run schema:drift                                # any migration
 npm run doc:numbers:check                           # any doc/comment that quotes a repo inventory count
+npm run findings:check                              # any session that touched docs/audit-findings.md
 ```
 
 **Inventory counts in docs and comments go stale silently** — a file-count assertion nobody

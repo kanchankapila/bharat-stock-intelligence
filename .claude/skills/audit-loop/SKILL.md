@@ -158,6 +158,12 @@ For each fixed finding, pick the strongest applicable rung:
 
 Record which rung you took. "Documented it" is rung 5 and should be the exception.
 
+**Every FIX-lane item needs a regression test, not only an immunization rung (user,
+2026-09-30).** Write it first, show it FAILS against the unfixed code, fix, show it passes, and
+name it (file or `TestClass`/`test_fn`/`check_*`) in the row's `Immunized` cell. Rung 1-4 can
+be that test; rung 5 alone never closes a FIX row. `npm run findings:check` rejects a closed FIX
+row whose `Immunized` cell names nothing that exists.
+
 ## 5. Ledger — `docs/audit-findings.md`
 
 One row per finding, carried across runs. Create the file if absent.
@@ -177,6 +183,10 @@ Rules that make the ledger worth keeping:
   lane was wrong. Escalate it in the report rather than letting it roll silently.
 - Reconcile at the start of every run: re-check each open row before hunting new ones. Closing a
   known issue beats discovering a new one.
+- **Validate before finishing: `npm run findings:check` must exit 0** for every row this run
+  added or closed (it also catches a table that no longer renders — a stray `|`, a row outside a
+  table, a control character). Rows another concurrent session is still writing may fail it;
+  leave those to that session, but never your own.
 
 ## 6. Run the core end-to-end, zero errors
 
@@ -189,9 +199,10 @@ npx tsc --noEmit
 npx vitest run
 backend-python/venv/Scripts/python.exe -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/
 npm run schema:drift
+npm run findings:check
 ```
 
-All four must exit **0** — a skipped-Postgres-file warning counts as failure, not a pass
+All five must exit **0** — a skipped-Postgres-file warning counts as failure, not a pass
 (`recurring-bugs.md`'s pytest exit-code fix: a run that skipped every DB-dependent test used to
 print a loud warning and still exit 0; it no longer does, so a nonzero exit here is real). Then
 confirm live, not just green locally, per step 3's third bullet: the affected pm2 process is

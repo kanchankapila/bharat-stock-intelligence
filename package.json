@@ -37,6 +37,7 @@
     "schema:regen": "tsx scripts/generatePgSchemaFromLive.ts",
     "doc:numbers": "node scripts/docNumbers.mjs",
     "doc:numbers:check": "node scripts/docNumbers.mjs --check",
+    "findings:check": "node scripts/checkFindingsLedger.mjs",
     "migrate:up": "node-pg-migrate up -d POSTGRES_URL",
     "migrate:down": "node-pg-migrate down -d POSTGRES_URL",
     "migrate:create": "node-pg-migrate create -j sql -d POSTGRES_URL"

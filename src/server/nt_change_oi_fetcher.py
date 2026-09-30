@@ -9,7 +9,7 @@ money is flowing in vs flowing out, which is the primary indicator for
 support/resistance confirmation.
 
 API: https://www.niftytrader.in/api/niftytrader/Option/change-oi-time-range
-     ?symbol={nt_symbol}&start_time={time}&end_time={time}&expiry=&exchange={exchange}
+     ?symbol={nt_symbol}&start_time=09:15:00&end_time={time}&expiry=&exchange={exchange}
 
 Runs for all indices in index_provider_map (provider nt_index + nt_index_bse).
 
@@ -42,8 +42,11 @@ NT_HEADERS = {
 
 CHANGE_OI_URL = (
     "https://www.niftytrader.in/api/niftytrader/Option/change-oi-time-range"
-    "?symbol={symbol}&start_time={time}&end_time={time}&expiry=&exchange={exchange}"
+    "?symbol={symbol}&start_time={start}&end_time={time}&expiry=&exchange={exchange}"
 )
+# The change is measured over [start_time, end_time]. start == end (the old URL) is a zero-width
+# window: once that time has passed, every strike returns 0 change (AF-20260930-20).
+MARKET_OPEN = "09:15:00"
 
 _EXCHANGE = {"nt_index": "nse", "nt_index_bse": "bse"}
 
@@ -80,7 +83,7 @@ def _sf(v) -> float | None:
 
 
 def fetch_change_oi(nt_symbol: str, snap_time: str, exchange: str) -> list[dict]:
-    url = CHANGE_OI_URL.format(symbol=nt_symbol, time=snap_time, exchange=exchange)
+    url = CHANGE_OI_URL.format(symbol=nt_symbol, start=MARKET_OPEN, time=snap_time, exchange=exchange)
     try:
         r = retry_get(requests, url, headers=NT_HEADERS, timeout=20)
         d = r.json()

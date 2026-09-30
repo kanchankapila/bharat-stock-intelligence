@@ -405,14 +405,14 @@ def run_job(concurrency=5, dry_run=False):
             try:
                 filter_name, rows, error = future.result()
                 if error:
-                    print(f"  [NT_LIVE] {fname}: FAILED ({error})")
+                    print(f"  [NT_LIVE] {fname}: FAILED ({error})", file=sys.stderr)
                     failed_filters.append((fname, error))
                 else:
                     results[filter_name] = rows
                     total_rows += len(rows)
                     print(f"  [NT_LIVE] {fname}: {len(rows)} rows")
             except Exception as e:
-                print(f"  [NT_LIVE] {fname}: EXCEPTION ({e})")
+                print(f"  [NT_LIVE] {fname}: EXCEPTION ({e})", file=sys.stderr)
                 failed_filters.append((fname, str(e)))
 
     # Step 4: Persist results

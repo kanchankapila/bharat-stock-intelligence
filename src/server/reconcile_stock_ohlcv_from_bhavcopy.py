@@ -145,7 +145,7 @@ def reconcile(conn: ConnWrapper, trade_date: str | None = None, overwrite: bool 
         tech_filled = cur.rowcount
         conn.commit()
     except Exception as te:
-        print(f"[RECONCILE] technical_signals delivery_pct backfill skipped: {te}")
+        print(f"[RECONCILE] technical_signals delivery_pct backfill skipped: {te}", file=sys.stderr)
 
     return {
         "trade_date": trade_date,

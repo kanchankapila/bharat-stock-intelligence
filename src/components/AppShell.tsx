@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEscapeKey, SkipLink, MAIN_CONTENT_ID } from '../lib/a11y';
-import { nseStocksData } from '../data/nseStocks';
+import { useNseStocks } from '../data/lazyStockData';
 import type { MarketData } from '../services/marketService';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useWebSocket } from './v2/hooks/useWebSocket';
@@ -272,8 +272,10 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
     return m;
   }, [stocks]);
 
+  const nseStocksData = useNseStocks(searchQuery.length >= 2);
+
   const searchResults = useMemo(() => {
-    if (searchQuery.length < 2) return [];
+    if (searchQuery.length < 2 || !nseStocksData) return [];
     return nseStocksData
       .filter(s =>
         s.symbol?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -285,7 +287,7 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
         name: s.name,
         changePct: stockPriceMap.get(s.symbol) ?? null,
       }));
-  }, [searchQuery, stockPriceMap]);
+  }, [searchQuery, stockPriceMap, nseStocksData]);
 
   const handleNav = (id: string) => {
     setActiveTab(id);

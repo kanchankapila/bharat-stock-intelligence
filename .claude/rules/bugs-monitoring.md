@@ -282,8 +282,11 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   came back with every column listed twice (AF-20260912-12). Stamp each throwaway schema with
   its own `created_at` and reap siblings **by AGE** (not "anything that is not mine" —
   concurrent runs are legitimate and dropping a sibling mid-run fails it with a hundred
-  `relation does not exist` errors). The pytest side (`src/server/conftest.py`) has the same
-  shape and still has no reaper.
+  `relation does not exist` errors). The pytest side has one too (CORRECTED 2026-09-30 — this
+  line said it had none): `pg_test_support.purge_orphan_schemas()` reaps `t_*`/`pytest_*`
+  orphans, widened to `pytest_*` on 2026-08-27 (AF-20260827-07). A `pytest_<12hex>` schema
+  seen live is usually a run in progress — match it to a `pg_stat_activity` backend before
+  calling it a leak.
 
 ## Placeholder credential in an executable alert path = registered-but-never-delivered monitoring (2026-09-14)
 

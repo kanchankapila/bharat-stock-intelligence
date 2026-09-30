@@ -48,6 +48,21 @@ conclusion produces a filed finding, a user decision request, and sometimes a wo
 around data you already own. **"I checked the obvious places" is not the bar. The bar is the
 `information_schema` sweep plus a graphify query.**
 
+**It applies to a missing FIELD, not only a missing source (user, 2026-09-30): "this vendor does
+not send that field, so the column is NULL by design" is not a conclusion until the OTHER sources
+have been checked for the same field.** Worked failure, same day: `index_option_oi.ce_ltp/pe_ltp`
+are 100% NULL, and `mc_index_oi_fetcher.py` documents that MoneyControl's OI-change payload has
+no per-strike LTP. That was reported as "not a bug, expected by design" — correct about
+MoneyControl, and wrong as a conclusion: NiftyTrader `option/option-chain-data` (already used by
+`pcr_fetcher.py`, no auth) returns `calls_ltp`/`puts_ltp` for the same `(strike_price,
+expiry_date)`. Whether to WIRE an alternate is then a separate question (here: no reader of
+`ce_ltp` exists, so it is recorded in the fetcher, not fetched), but the report must say
+"source X lacks it, source Y has it" — never just "unavailable". Checklist for a dead/NULL/frozen
+column: (1) `information_schema` for the column name in every table and COUNT non-nulls;
+(2) the other providers already wired for that data family (MoneyControl / NiftyTrader /
+Trendlyne / NSE / NDTV / Sensibull) — probe their existing endpoints for the field;
+(3) `market_endpoint_registry` full-text on the metric; then decide.
+
 ### Canonical Identifier
 
 The **NSE symbol** (e.g., `HDFCBANK`, `INFY`, `BAJAJ-AUTO`) is the single source of truth across the entire platform. All provider-specific IDs are derived from it, never the reverse.

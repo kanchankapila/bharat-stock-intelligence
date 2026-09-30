@@ -4,7 +4,7 @@ import { X, Bookmark, CheckCircle2, History, TrendingUp, Activity, Award, Shield
 import { useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
-import stockData from '../data/stocklist';
+import { useStockList } from '../data/lazyStockData';
 import { MCStockInfoPanel } from './MCStockInfoPanel';
 import { SignalPortfolioImpact } from './SignalPortfolioImpact';
 
@@ -49,13 +49,15 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
     { enabled: !!symbol }
   );
 
-  // Resolve MC symbol mapping
+  // Resolve MC symbol mapping. The mapping table loads on first open; until it has, mcScId stays
+  // '' so the MC panel waits instead of firing a request with the NSE symbol as a wrong MC id.
+  const stockList = useStockList(isOpen && !!symbol);
   const stockMapping = React.useMemo(() => {
-    if (!symbol) return null;
-    return stockData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
-  }, [symbol]);
+    if (!symbol || !stockList) return null;
+    return stockList.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
+  }, [symbol, stockList]);
 
-  const mcScId = stockMapping?.mcsymbol || symbol || '';
+  const mcScId = stockList ? (stockMapping?.mcsymbol || symbol || '') : '';
 
   if (!isOpen || !symbol) return null;
 

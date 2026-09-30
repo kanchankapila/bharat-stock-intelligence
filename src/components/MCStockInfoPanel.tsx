@@ -1,7 +1,7 @@
 import React from 'react';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
-import stockData from '../data/stocklist';
+import { useStockList } from '../data/lazyStockData';
 import {
   TrendingUp, TrendingDown, Activity, Zap, Info, AlertCircle,
   BarChart3, PieChart, Users, Filter, ArrowUpRight,
@@ -372,7 +372,8 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  const stockMapping = stockData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
+  const stockList = useStockList(true);
+  const stockMapping = stockList?.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
 
   const { data: maxOhlcData, isLoading: loadingOhlc } = trpc.getOHLCData.useQuery(
     { symbol, dur: chartDuration },

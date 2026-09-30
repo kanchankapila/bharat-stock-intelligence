@@ -191,7 +191,10 @@ def _parse_oi_row(item: dict) -> dict | None:
     )
     # ce_ltp/pe_ltp are expected to stay None for this endpoint: live-verified 2026-08-07
     # that MC's oi-change-chart payload carries no per-strike LTP field at all (OI/OI-change
-    # only) -- this is not a parsing bug, per-strike LTP would need a different MC endpoint.
+    # only) -- this is not a parsing bug. Per-strike index LTP IS available elsewhere (verified
+    # live 2026-09-30): NiftyTrader `option/option-chain-data?symbol=nifty&exchange=nse` returns
+    # `calls_ltp`/`puts_ltp` per (strike_price, expiry_date), no auth. Not wired because nothing
+    # reads ce_ltp/pe_ltp today -- wire that source (with its own provenance) when a consumer needs it.
     ce_ltp = _float(
         item.get("callLTP") or item.get("ceLTP") or item.get("ce_ltp")
     )

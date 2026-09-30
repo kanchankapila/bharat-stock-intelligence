@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, CornerDownLeft, ArrowUp, ArrowDown } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { nseStocksData } from '../data/nseStocks';
+import { useNseStocks } from '../data/lazyStockData';
 import type { MarketData } from '../services/marketService';
 
 interface NavItem { icon: React.ElementType; label: string; id: string; }
@@ -55,6 +55,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ navGroups, onNav
     return m;
   }, [stocks]);
 
+  const nseStocksData = useNseStocks(query.trim().length >= 2);
+
   const results: PaletteResult[] = useMemo(() => {
     const q = query.trim().toLowerCase();
     const navResults: PaletteResult[] = navGroups.flatMap(group =>
@@ -63,7 +65,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ navGroups, onNav
         .map(item => ({ kind: 'nav' as const, id: item.id, label: item.label, group: group.label, icon: item.icon })),
     );
 
-    const stockResults: PaletteResult[] = q.length < 2 ? [] : nseStocksData
+    const stockResults: PaletteResult[] = q.length < 2 || !nseStocksData ? [] : nseStocksData
       .filter(s => s.symbol?.toLowerCase().includes(q) || s.name?.toLowerCase().includes(q))
       .slice(0, 6)
       .map(s => ({ kind: 'stock' as const, symbol: s.symbol, name: s.name, changePct: stockPriceMap.get(s.symbol) ?? null }));
@@ -72,7 +74,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ navGroups, onNav
     // to a sane count once a query narrows things down, so the list doesn't dwarf the stock
     // matches when someone's clearly typing a ticker.
     return [...navResults.slice(0, q ? 8 : 40), ...stockResults];
-  }, [query, navGroups, stockPriceMap]);
+  }, [query, navGroups, stockPriceMap, nseStocksData]);
 
   useEffect(() => { setActiveIndex(0); }, [query]);
 

@@ -53,7 +53,15 @@ file's own entries show that pattern (e.g. the skip-path-stamped-as-success clas
 times and lives as one entry, not five). If nothing new surfaced, say so — most sessions won't
 add a rule, and that's fine.
 
+## 3b. Findings ledger — validate, don't just append
+
+If this session added or closed any `docs/audit-findings.md` row, run `npm run findings:check`
+and make it exit 0 for your rows. It fails when a closed FIX row names no regression test/check
+that exists, when an open row states none of the four allowed reasons, and when a table no
+longer parses. Per CLAUDE.md, a finding is reported AND fixed AND tested in the same session; a
+row that only reports is unfinished work, and this is the step that notices.
+
 ## 4. Report
 
-State plainly which of the three were done, which were explicitly skipped and why, and whether
+State plainly which of the four were done, which were explicitly skipped and why, and whether
 `graphify update .` is warranted (significant file/structure changes, not a one-line fix).

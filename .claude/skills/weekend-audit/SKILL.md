@@ -54,6 +54,7 @@ npx tsc --noEmit
 npx vitest run
 backend-python/venv/Scripts/python.exe -m pytest src/server/__tests__/ src/server/tests/ -q
 backend-python/venv/Scripts/python.exe scripts/check_recurring_bugs.py
+npm run findings:check      # ledger: closed FIX rows cite a real test, open rows state a reason, tables parse
 npm run schema:drift
 npm run build
 ```
@@ -235,6 +236,13 @@ FIX / EVIDENCE / INVESTIGATE / ACCEPT, fix the safe ones root-cause-first, negat
 test, verify against live production via `deploy-and-verify`, immunize with a static check in
 `scripts/check_recurring_bugs.py` where possible, and carry every unclosed finding forward in
 `docs/audit-findings.md` with a stable ID.
+
+**Report-only is not an outcome of this skill (user, 2026-09-30).** Lanes 0-7 say "do not fix as
+you go" only so the sweep stays comparable — Lane 8 is not optional and the run is not finished
+until every FIX-lane finding is fixed, has a regression test that failed before the fix, and
+`npm run findings:check` exits 0 for this run's rows. For a dead/NULL/frozen column or an
+"unavailable" field, run `data-sources.md` RULE ZERO (other sources for the SAME field) before
+recording it as by-design.
 
 Do not shortcut it here. The triage gate is what keeps an unmeasured scoring change from riding
 in on a green test suite — the single most repeated failure in this repo's history.
