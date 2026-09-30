@@ -10241,3 +10241,92 @@ uncommitted (`queues.ts`, `liveStockData.ts`, the Trendlyne fetcher) were not to
 
 Lesson: the heavy-slot fix of 09-12 was right in shape but fed by a hand-kept table — two 9GB
 jobs were weighed at 600MB within two weeks. Admission inputs must come from measurement.
+
+## 2026-09-30 (cont. 2) — full-system audit, every finding fixed with a test; "fix + test" made a validated rule
+
+Weekend-audit lanes 0-4 run (services all answering; tsc/schema-drift/build clean; dq:check
+186/188, 0 critical; DB 39/60 conns, no long xacts, compression applying). Fixed, each test-first
+and negative-controlled:
+- **AF-20260930-20** `nt_index_change_oi` change columns 0.0 on 65,574/66,873 rows — the request
+  used a zero-width [15:20,15:20] window. Window now 09:15→snapshot; first unit + live tests.
+- **AF-20260930-21** `ndtv_profit_fetcher` 2 of 4 functions dead since landing (HTML route; wrong
+  `duration` enum) + sentinel zeros. Rewritten against live payloads; unit + live tests.
+- **AF-20260930-22** stock master (~1MB source) in the main JS chunk → lazy on first use;
+  main chunk 418KB→252KB gzip. Import-graph guard test, negative-controlled.
+- **AF-20260930-23** three failure paths printed to stdout (invisible to runPython).
+- **AF-20260930-25** option LTP "by design" NULL: RULE ZERO found NiftyTrader option-chain carries
+  it; not wired (no reader) — recorded. The miss became a rule (data-sources.md).
+- **AF-20260930-24** user rule "fix with reporting, add tests, validate it": CLAUDE.md, audit-loop,
+  weekend-audit, session-close; `scripts/checkFindingsLedger.mjs` / `npm run findings:check`
+  (+ its own test, incl. rejection cases). First run found 18 ledger problems.
+- `bugs-monitoring.md` claimed the pytest side had no schema reaper — it has one since 08-27.
+Open, needs the user: host commit at 91% (AF-20260930-26); the classifier refused both production
+data repairs (`scratch/af_20260930_data_repairs.py`) and the AF-79..82 ledger block repair.
+
+## 2026-09-29/30 — bharat_alpha stood up on real data, scheduled, and three graders corrected
+
+Ran `bharat_alpha` end to end on this box for the first time: DB created on :5433, 10 migrations,
+3.38M bars imported (1,420 sessions, 2021-01-01→2026-09-28), prepare → train → gate → daily →
+portfolio → session → dq → compare-legacy. Registered `bqa-daily` in pm2 at 06:00 IST.
+
+**Connectors.** Three were broken and all three reported it as benign emptiness, which is why
+none had been noticed (AF-20260929-07, `e28b4dbe`). FRED black-holes any request carrying a
+browser User-Agent — measured: no headers → 200 in 0.1s, with Chrome/126 UA → ReadTimeout at 15s
+— and `HttpClient` injected that UA on every host, so each series burned the full retry budget
+and surfaced as "empty"; fixed with a `NO_BROWSER_UA` set. `nse_fo_secban`'s archive path had
+moved and 404'd on EVERY date, so the legitimate "not published today" branch was absorbing a
+dead URL. `nse_board_meetings` filtered on the meeting date when it wanted the broadcast date —
+empty by construction. Two remain dead at source (AF-20260929-08): the results RSS feed carries
+4 items for one company from 24-Aug, and NSE's PIT endpoint returns `{"data": []}` for every
+window including unfiltered. Registry checked first; MoneyControl/Trendlyne insider alternates
+exist but onboarding one is a decision, not a patch.
+
+**"Not measured" reported as "measured and found nothing" — twice** (AF-20260929-09, `4ea2a2c6`
+`603eaadd` `c4336988`). `legacy-map screen` reported `rejected: 38` where every reason was
+`coverage 0% < 30%`: the screen evaluates the earliest 250 sessions so selection never sees the
+test folds, while the legacy history begins 2026-05-16 — zero overlap, all 1.08M facts
+structurally unadmittable. The cutoff is correct and unchanged; the reporting was not. The same
+defect then turned up in `ablation.py`, where `mc_estimates` (38 days of a 6-year window) scored
+`delta_ic` exactly 0.0 with a NaN t and printed `no evidence` beside genuinely-measured groups.
+Both now separate `not_evaluable` from `no_evidence`; the tell (exact zero + NaN t) is recorded
+in `bugs-monitoring.md`.
+
+**Reverse-engineering the movers** (`92c73c81`). New `bqa movers`, graded against BOTH tails. On
+35 features / h=5 / 271 non-overlapping dates: 31 of 35 would clear Bonferroni on winners-only,
+14 of 35 on separation. `atr_pct_14` reads t=+43.7 winners-only and separates the tails by
+−0.015. It also adds the converse the legacy study could not see — selecting on winners HIDES
+the real signal: `close_loc_21`, the strongest directional feature (t=−8.90), reads t=−0.60
+winners-only. Direction is short-term mean reversion, already known un-tradeable here, and the
+h5 gate reproduced that independently (gross 0.257%/period vs 0.272% cost). Exception:
+`deliv_pct`, the one directional separator that is neither a volatility detector nor mean
+reversion, and independently the strongest ablation group (3 features, t=6.53).
+
+**Backfill.** 9 → 17 populated tables: fo_daily 342k, option_daily 337k, index_daily 163k,
+fundamental 98k, participant_oi 34k, macro_series 20k, external_fact 1.08M. Ablation went from 4
+measurable groups to 10; `participant_oi` (t=3.65) and `futures` (t=2.23) both earn their place.
+h21 net excess improved 0.432%→0.830%/period (t 0.82→1.84, bar 2.0) with turnover FALLING
+0.663→0.591 — better conversion, not better prediction. h5 remains non-viable. The next-session
+model `s1-20260928-adf847397a` passed all seven checks and is champion (IC t=34.0, net excess
++0.222%/day net of 0.14% intraday cost t=9.03, beats the capitulation rule paired t=2.90) —
+capacity ₹48L/signal-day and highly sensitive to a cost assumption that has never been measured.
+
+**RULE ZERO** (`dc456506`). `alpha.instrument.sector` was 11.7% populated so the portfolio's
+sector cap bound on `__unknown__`. I filed it as needing a user decision after checking three
+sources. Wrong: `nse_stocks.sector` is 2,366 rows, 100% populated, and `backfill_sectors.py`
+already maintained it. New `bqa import-sectors` → coverage 54.1%, portfolio 18→28 positions,
+gross 0.528→0.862. That import then created a second defect — two taxonomies in one column, 32
+labels for ~11 sectors, giving one real sector two 25% caps — now normalised at both writers.
+`data-sources.md` RULE ZERO: never conclude data is unavailable without an `information_schema`
+sweep plus a graphify query.
+
+**Scheduling.** `bqa-daily` at 06:00 IST, picked from 21 days of job_run_history using
+overlap-aware occupancy (raw counts pointed at 04:00, which sits inside ml-daily-ops 01:05-04:35).
+Registered then stopped deliberately — market was open, 1.59GB free, a trivial SELECT was hitting
+the 60s statement timeout. First real run tomorrow 06:00; its duration must be checked, the 3h
+kill_timeout is not a measured budget. The ceiling guard test used a hand-enumerated list of four
+service names, so the new Python app escaped it; now derived from the config by interpreter — and
+on its first run it failed on `pg-backup-nightly`, which had been running with no ceiling all along.
+
+Gates: pytest 145 passed/18 skipped; `vitest --project unit` 1,551 passed (the `live` project was
+NOT run — market hours); `tsc --noEmit` 0. Open: AF-20260929-08 (two dead vendor endpoints),
+-09 (legacy bridge calendar-blocked to ~mid-2027), -10 (sector cap semantics at 46% unlabelled).
