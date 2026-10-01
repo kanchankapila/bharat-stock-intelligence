@@ -129,7 +129,6 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
 
     'fundamentals-sync': "jobName: 'sync-fundamentals-weekly'",
     'quant-scoring': "jobName: 'quant-score-daily'",
-    'signal-outcomes': "'signal-outcomes-daily'",
     'trendlyne-intraday': "'trendlyne-intraday-scan'",
     // These use the Worker-constructor variable name, not the positional job-name marker
     // used elsewhere: their lockDuration sits far enough past the registration (long comment

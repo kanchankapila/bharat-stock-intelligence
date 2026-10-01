@@ -116,7 +116,9 @@ def test_pending_when_no_ohlcv():
     add_exit_bar(conn, 'OTHER')  # ...but the session exists, so the signal is gradeable (AF-20260930-27)
     conn.commit()
     assert resolve(conn)['resolved'] == 0
-    assert get_row(conn, 'WIPRO')[0] == 'PENDING'
+    # No bar for WIPRO after its signal: not selected at all, so no PENDING row that
+    # expire_stale_pending would later turn into a fabricated NEUTRAL (AF-20260930-16).
+    assert get_row(conn, 'WIPRO') is None
 
 
 def test_resolve_outcomes_excludes_suspect_bars():
@@ -128,9 +130,7 @@ def test_resolve_outcomes_excludes_suspect_bars():
                  "VALUES ('SUSP',?,100,200,100,200,100000,1)", (EXIT_DATE,))
     conn.commit()
     resolve(conn)
-    row = get_row(conn, 'SUSP')
-    assert row is not None
-    assert row[0] == 'PENDING'   # nothing clean to resolve against
+    assert get_row(conn, 'SUSP') is None   # nothing clean to resolve against -> no label at all
 
 
 def test_volatility_threshold_ignores_suspect_bars():
@@ -379,7 +379,8 @@ def test_unified_resolution_excludes_suspect_bars():
                  ((base + datetime.timedelta(days=5)).isoformat(),))
     conn.commit()
 
-    resolve_unified_outcomes(conn, horizon_days=5, dry_run=False)
+    # h3: the 3rd session after the signal is base+5, so the suspect base+3 bar is inside the window
+    resolve_unified_outcomes(conn, horizon_days=3, dry_run=False)
     row = conn.execute("SELECT outcome, return_pct FROM unified_signal_outcomes WHERE symbol='ZED2'").fetchone()
     assert row is not None
     assert row[0] != 'STOP_LOSS'    # the 0.00 print must not trigger the stop
@@ -571,6 +572,150 @@ def test_signal_time_horizon_does_not_override_pass_horizon():
         "SELECT horizon_days FROM signal_outcomes WHERE symbol='POSN'").fetchall()]
     assert horizons == [5]
     assert resolve_outcomes(conn, horizon_days=5)['processed'] == 0
+
+
+def _seed_weekday_bars(conn, symbol, start, end, close=100.0):
+    d = start
+    while d <= end:
+        if d.weekday() < 5:
+            conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) "
+                         "VALUES (?,?,?,?,?,?,100000)", (symbol, d.isoformat(), close, close, close, close))
+        d += datetime.timedelta(days=1)
+
+
+def _a_wednesday_weeks_ago(weeks=6):
+    d = datetime.date.today() - datetime.timedelta(weeks=weeks)
+    return d - datetime.timedelta(days=(d.weekday() - 2) % 7)
+
+
+@pytest.mark.parametrize("fn_name, table_insert, out_table", [
+    ("resolve_outcomes",
+     "INSERT INTO technical_signals (symbol,date,cmp,signal_score,signals_json,stop_loss,time_horizon) "
+     "VALUES (?,?,100.0,6,'[]',NULL,NULL)", "signal_outcomes"),
+    ("resolve_unified_outcomes",
+     "INSERT INTO unified_signals (symbol,signal_date,entry_price,target_price,stop_loss,signal_source,confidence_score) "
+     "VALUES (?,?,100.0,500.0,10.0,'AI',75)", "unified_signal_outcomes"),
+])
+def test_horizon_counts_trading_sessions_not_calendar_days(fn_name, table_insert, out_table):
+    """AF-20260930-30: h5 from a Wednesday exited on calendar-Monday (3 sessions), so the h5
+    win rate was 8.1% for Monday signals vs 22.5% for Wednesday ones. h5 = 5th session."""
+    import outcome_resolver
+    conn = make_multi_horizon_db()
+    wed = _a_wednesday_weeks_ago()
+    _seed_weekday_bars(conn, 'SESS', wed - datetime.timedelta(days=30), wed + datetime.timedelta(days=21))
+    conn.execute(table_insert, ('SESS', wed.isoformat()))
+    conn.commit()
+
+    getattr(outcome_resolver, fn_name)(conn, horizon_days=5)
+    check = conn.execute(f"SELECT check_date FROM {out_table} WHERE symbol='SESS' AND horizon_days=5").fetchone()
+    assert str(check[0])[:10] == (wed + datetime.timedelta(days=7)).isoformat()  # next Wednesday
+
+
+@pytest.mark.parametrize("fn_name, seed_sql, out_table", [
+    ("resolve_outcomes",
+     ["INSERT INTO technical_signals (symbol,date,cmp,signal_score,signals_json,stop_loss,time_horizon) "
+      "VALUES ('RELB',?,100.0,6,'[]',NULL,NULL)",
+      "INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome,check_date,computed_at,signal_source) "
+      "VALUES ('RELB',?,5,'WIN','calendar-era','2026-01-01','technical')"], "signal_outcomes"),
+    ("resolve_unified_outcomes",
+     ["INSERT INTO unified_signals (id,symbol,signal_date,entry_price,target_price,stop_loss,signal_source,confidence_score) "
+      "VALUES (1,'RELB',?,100.0,500.0,10.0,'AI',75)",
+      "INSERT INTO unified_signal_outcomes (unified_signal_id,symbol,signal_date,horizon_days,outcome,check_date,computed_at) "
+      "VALUES (1,'RELB',?,5,'WIN','calendar-era','2026-01-01')"], "unified_signal_outcomes"),
+])
+def test_relabel_before_regrades_only_older_labels(fn_name, seed_sql, out_table):
+    """AF-20260930-30 backfill: rows graded before the cutover are regraded under the session
+    definition; without relabel_before a resolved row is never touched."""
+    import outcome_resolver
+    conn = make_multi_horizon_db()
+    wed = _a_wednesday_weeks_ago()
+    _seed_weekday_bars(conn, 'RELB', wed - datetime.timedelta(days=30), wed + datetime.timedelta(days=21))
+    for sql in seed_sql:
+        conn.execute(sql, (wed.isoformat(),))
+    conn.commit()
+    fn = getattr(outcome_resolver, fn_name)
+
+    assert fn(conn, horizon_days=5)['processed'] == 0
+    fn(conn, horizon_days=5, relabel_before='2026-06-01')
+    check = conn.execute(f"SELECT check_date FROM {out_table} WHERE symbol='RELB' AND horizon_days=5").fetchone()
+    assert str(check[0])[:10] == (wed + datetime.timedelta(days=7)).isoformat()
+
+
+@pytest.mark.parametrize("fn_name, insert", [
+    ("resolve_outcomes",
+     "INSERT INTO technical_signals (symbol,date,cmp,signal_score,signals_json,stop_loss,time_horizon) "
+     "VALUES (?,?,100.0,6,'[]',NULL,NULL)"),
+    ("resolve_unified_outcomes",
+     "INSERT INTO unified_signals (symbol,signal_date,entry_price,target_price,stop_loss,signal_source,confidence_score) "
+     "VALUES (?,?,100.0,110.0,90.0,'AI',75)"),
+])
+def test_symbol_without_daily_bars_after_signal_is_not_graded(fn_name, insert):
+    """AF-20260930-16: 2,379 unified signals on retired/untradeable codes (ZOMATO, INDIAVIX,
+    CIGNITITEC...) with no daily bar after the signal were graded anyway -- 2,587 expired to a
+    fabricated NEUTRAL, 1,543 WIN/LOSS from intraday-only bars. No canonical price, no label."""
+    import outcome_resolver
+    conn = make_multi_horizon_db()
+    sig = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
+    _seed_ohlcv(conn, 'LIVE', sig, n_post=10)
+    _seed_ohlcv(conn, 'GONE', sig, n_post=0)       # history up to the signal, nothing after
+    conn.execute(insert, ('GONE', sig))
+    conn.commit()
+    assert getattr(outcome_resolver, fn_name)(conn, horizon_days=1)['processed'] == 0
+
+
+def test_expire_does_not_fabricate_neutral_for_unpriced_symbol():
+    """AF-20260930-16: 2,587 unified outcomes on retired/untradeable codes were expired to a
+    0.0% NEUTRAL. With no canonical bar after the signal the row stays PENDING (ungraded)."""
+    from outcome_resolver import expire_stale_pending
+    conn = make_multi_horizon_db()
+    sig = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
+    _seed_ohlcv(conn, 'GONE', sig, n_post=0)
+    _seed_ohlcv(conn, 'SUSPD', sig, n_post=2)       # traded after the signal, then stopped
+    conn.execute("CREATE TABLE recommendation_log (id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, "
+                 "signal_date TEXT, horizon_days INTEGER, outcome TEXT, actual_return_pct REAL, "
+                 "status TEXT, resolved_at TIMESTAMPTZ)")
+    for sym in ('GONE', 'SUSPD'):
+        conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome,signal_source) "
+                     "VALUES (?,?,5,'PENDING','technical')", (sym, sig))
+    conn.commit()
+    expire_stale_pending(conn, horizon_days=5)
+    got = dict(conn.execute("SELECT symbol, outcome FROM signal_outcomes").fetchall())
+    assert got == {'GONE': 'PENDING', 'SUSPD': 'NEUTRAL'}
+
+
+def test_conflict_invalidated_signal_is_not_graded():
+    """AF-20260930-33: 31,189 of ~34,400 September screener outcomes graded signals the scan had
+    itself withdrawn as INVALIDATED_CONFLICT (BUY then SELL same day) -- a 3.3% win rate
+    swamping the 3,207 live ones."""
+    from outcome_resolver import resolve_unified_outcomes
+    conn = make_multi_horizon_db()
+    sig = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
+    _seed_ohlcv(conn, 'FLIP', sig, n_post=10)
+    conn.execute("INSERT INTO unified_signals (symbol,signal_date,entry_price,target_price,stop_loss,"
+                 "signal_source,confidence_score,status) VALUES ('FLIP',?,100,105,97,'screener',80,"
+                 "'INVALIDATED_CONFLICT')", (sig,))
+    conn.commit()
+    assert resolve_unified_outcomes(conn, horizon_days=1)['processed'] == 0
+
+
+def test_nth_session_after_edges():
+    from outcome_resolver import _nth_session_after
+    cal = ['2026-09-24', '2026-09-25', '2026-09-28', '2026-09-30']  # 09-29 a holiday
+    assert _nth_session_after(cal, '2026-09-25', 1) == '2026-09-28'   # Fri -> Mon
+    assert _nth_session_after(cal, '2026-09-26', 1) == '2026-09-28'   # Sat -> Mon
+    assert _nth_session_after(cal, '2026-09-24', 3) == '2026-09-30'   # skips the holiday
+    assert _nth_session_after(cal, '2026-09-28', 3) > '2026-09-30'    # not yet traded -> PENDING
+
+
+def test_weekend_dated_signal_is_gradeable_once_next_session_exists():
+    from outcome_resolver import resolve_outcomes
+    conn = make_multi_horizon_db()
+    sat = _a_wednesday_weeks_ago() + datetime.timedelta(days=3)
+    _seed_weekday_bars(conn, 'WKND', sat - datetime.timedelta(days=30), sat + datetime.timedelta(days=2))  # ends Monday
+    conn.execute("INSERT INTO technical_signals (symbol,date,cmp,signal_score,signals_json,stop_loss,time_horizon) "
+                 "VALUES ('WKND',?,100.0,6,'[]',NULL,NULL)", (sat.isoformat(),))
+    conn.commit()
+    assert resolve_outcomes(conn, horizon_days=1)['processed'] == 1
 
 
 class _FailingConn:

@@ -9,7 +9,7 @@ Run:  python outcome_resolver.py
       python outcome_resolver.py --dry-run
 """
 
-import datetime, argparse, math, sys
+import bisect, datetime, argparse, math, sys
 
 from db_compat import connect, ConnWrapper, query_all, query_one
 from as_of import logical_write_floor
@@ -679,19 +679,52 @@ def get_volatility_threshold(conn: ConnWrapper, symbol: str, signal_date: str, h
     return threshold
 
 
+# Horizons are TRADING SESSIONS, not calendar days (AF-20260930-30): "5d" used to mean the first
+# bar on/after signal_date + 5 calendar days, i.e. 3 sessions for a Wed-Fri signal and 5 for a
+# Monday one, so the h5 win rate was 8.1% (Mon) vs 22.5% (Wed) for the same signal family. The
+# session list is the exchange's own record (stock_ohlcv), like as_of.trading_days_back().
+
+# Backfill (AF-20260930-30): a label graded before `relabel_before` counts as ungraded, so repeated
+# runs regrade history newest-first under the session definition and resume where they stopped.
+_RELABEL_SO = "AND so2.computed_at >= ?"
+_RELABEL_USO = "AND uso.computed_at >= ?"
+
+
 def _gradeable_cutoff(conn: ConnWrapper, horizon_days: int) -> str:
-    """Latest signal_date whose exit bar (signal_date + h) can exist: anchored to the last
-    session in stock_ohlcv, not today. With a today-anchored cutoff the 09:30 IST run selected
-    the whole last session (exit bar not yet written), resolved 0 of its LIMIT 2000 batch and
-    starved every older gradeable row (AF-20260930-27)."""
-    floor = logical_write_floor(conn, fallback=datetime.date.today().isoformat())
-    return (datetime.date.fromisoformat(floor) - datetime.timedelta(days=horizon_days)).isoformat()
+    """Latest signal_date with at least `horizon_days` sessions after it in stock_ohlcv.
+    Anchored to the data, not today: a today-anchored cutoff filled the LIMIT 2000 batch with
+    rows whose exit bar did not exist yet and starved every gradeable row (AF-20260930-27)."""
+    recent = [str(r[0])[:10] for r in conn.execute(
+        "SELECT DISTINCT date FROM stock_ohlcv ORDER BY date DESC LIMIT ?", (horizon_days,)).fetchall()]
+    if len(recent) < horizon_days:
+        return '0001-01-01'
+    return (datetime.date.fromisoformat(recent[-1]) - datetime.timedelta(days=1)).isoformat()
+
+
+def _session_calendar(conn: ConnWrapper, rows, date_key: str) -> list:
+    """Sorted market sessions after the earliest signal in the batch."""
+    since = min((str(r[date_key])[:10] for r in rows), default=datetime.date.today().isoformat())
+    return [str(r[0])[:10] for r in conn.execute(
+        "SELECT DISTINCT date FROM stock_ohlcv WHERE date > ? ORDER BY date", (since,)).fetchall()]
+
+
+def _nth_session_after(sessions: list, day: str, n: int) -> str:
+    """The n-th session strictly after `day`. Beyond the last known session it returns a date
+    past it, so no exit bar is found and the row stays PENDING."""
+    i = bisect.bisect_right(sessions, str(day)[:10]) + n - 1
+    if i < len(sessions):
+        return sessions[i]
+    last = sessions[-1] if sessions else str(day)[:10]
+    return (datetime.date.fromisoformat(max(last, str(day)[:10]))
+            + datetime.timedelta(days=i - len(sessions) + 1)).isoformat()
 
 
 def resolve_outcomes(
     conn: ConnWrapper,
     horizon_days: int = 1,
     dry_run: bool = False,
+    relabel_before: str | None = None,
+    limit: int = 2000,
 ) -> dict[str, int]:
     """
     PHASE 1 FIX: Resolve signal outcomes with proper time-of-day validation
@@ -715,6 +748,9 @@ def resolve_outcomes(
                ts.time_horizon
          FROM technical_signals ts
          WHERE ts.date <= ?
+           -- canonical daily bars only: no bar after the signal = untradeable/retired code (AF-20260930-16)
+           AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE o.symbol = ts.symbol
+                       AND o.date > CAST(ts.date AS date) AND COALESCE(o.is_suspect, 0) = 0)
            AND NOT EXISTS (
                SELECT 1 FROM signal_outcomes so2
                WHERE so2.symbol = ts.symbol
@@ -722,10 +758,12 @@ def resolve_outcomes(
                  AND so2.horizon_days = ?
                  AND so2.signal_source = 'technical'
                  AND so2.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
+                 {relabel}
            )
          ORDER BY ts.date DESC
-         LIMIT 2000
-    """, (cutoff, horizon_days)).fetchall()
+         LIMIT ?
+    """.format(relabel=_RELABEL_SO if relabel_before else ''),
+        (cutoff, horizon_days) + ((relabel_before,) if relabel_before else ()) + (limit,)).fetchall()
 
     cols = ['symbol', 'signal_date', 'entry_price', 'signal_score', 'signals_json', 'stop_loss', 'time_horizon']
     rows = [dict(zip(cols, r)) for r in pending]
@@ -761,19 +799,18 @@ def resolve_outcomes(
     # failed chunk query degrades to the old behaviour rather than wrong labels.
     # Stage-2 batches (SL scan / nothing here yet) anchor on RESOLVED next
     # trading days, preserving the original data dependency between queries.
+    _cal = _session_calendar(conn, rows, 'signal_date')
     for _r in rows:
         # The pass horizon, never the signal's own time_horizon: selection is per horizon_days,
         # so writing under another horizon left the row unresolved at every pass (AF-20260930-28).
         _r['_h'] = horizon_days
-    _resolved_keys = _prefetch_resolved_keys(
+        _r['_exit'] = _nth_session_after(_cal, _r['signal_date'], horizon_days)
+    _resolved_keys = set() if relabel_before else _prefetch_resolved_keys(
         conn, [(r['symbol'], str(r['signal_date'])[:10], r['_h']) for r in rows])
     _np_map = _prefetch_next_price(
         conn,
         [(r['symbol'], str(r['signal_date'])[:10], 'AFTER_OPEN') for r in rows] +
-        [(r['symbol'],
-          (datetime.date.fromisoformat(str(r['signal_date'])[:10])
-           + datetime.timedelta(days=r['_h'])).isoformat(),
-          'GEQ_CLOSE') for r in rows],
+        [(r['symbol'], r['_exit'], 'GEQ_CLOSE') for r in rows],
     )
     _sl_quads = []
     for r in rows:
@@ -784,8 +821,7 @@ def resolve_outcomes(
         _hit = _np_map.get((str(r['symbol']), _sd, 'AFTER_OPEN'))
         _ntd = _norm_iso(_hit[0]) if _hit else (
             datetime.date.fromisoformat(_sd) + datetime.timedelta(days=1)).isoformat()
-        _etd = (datetime.date.fromisoformat(_sd)
-                + datetime.timedelta(days=r['_h'])).isoformat()
+        _etd = r['_exit']
         _sl_quads.append((r['symbol'], _ntd, _etd, float(_sl)))
     _sl_map = _prefetch_sl_hits(conn, _sl_quads)
 
@@ -824,7 +860,7 @@ def resolve_outcomes(
         if not entry:
             continue
 
-        exit_target_date = (signal_date_obj + datetime.timedelta(days=sig_horizon)).isoformat()
+        exit_target_date = row['_exit']
 
         outcome      = None
         exit_price   = None
@@ -909,6 +945,8 @@ def resolve_unified_outcomes(
     conn: ConnWrapper,
     horizon_days: int = 1,
     dry_run: bool = False,
+    relabel_before: str | None = None,
+    limit: int = 2000,
 ) -> dict[str, int]:
     """
     Resolve outcomes for all signal sources (AI, Quant, Technical) from unified_signals.
@@ -927,15 +965,22 @@ def resolve_unified_outcomes(
                us.confidence_score, us.target_price
         FROM unified_signals us
         WHERE us.signal_date <= ?
+          -- a signal the generator withdrew is not a trade (AF-20260930-33)
+          AND COALESCE(us.status, 'ACTIVE') <> 'INVALIDATED_CONFLICT'
+          -- canonical daily bars only: no bar after the signal = untradeable/retired code (AF-20260930-16)
+          AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE o.symbol = us.symbol
+                      AND o.date > CAST(us.signal_date AS date) AND COALESCE(o.is_suspect, 0) = 0)
           AND NOT EXISTS (
               SELECT 1 FROM unified_signal_outcomes uso
               WHERE uso.unified_signal_id = us.id
                 AND uso.horizon_days = ?
                 AND uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
+                {relabel}
           )
         ORDER BY us.signal_date DESC
-        LIMIT 2000
-    """, (cutoff, horizon_days)).fetchall()
+        LIMIT ?
+    """.format(relabel=_RELABEL_USO if relabel_before else ''),
+        (cutoff, horizon_days) + ((relabel_before,) if relabel_before else ()) + (limit,)).fetchall()
 
     cols = ['id', 'symbol', 'signal_date', 'entry_price', 'stop_loss', 'signal_source',
             'confidence_score', 'target_price']
@@ -970,12 +1015,12 @@ def resolve_unified_outcomes(
         return (datetime.date.fromisoformat(str(r['signal_date'])[:10])
                 + datetime.timedelta(days=1)).isoformat()
 
+    _cal = _session_calendar(conn, rows, 'signal_date')
+    for r in rows:
+        r['_exit'] = _nth_session_after(_cal, r['signal_date'], int(horizon_days))
     _bars_map_u = _prefetch_bar_windows(
         conn,
-        [(str(r['symbol']), _resolved_ntd(r),
-          (datetime.date.fromisoformat(str(r['signal_date'])[:10])
-           + datetime.timedelta(days=int(horizon_days))).isoformat())
-         for r in rows])
+        [(str(r['symbol']), _resolved_ntd(r), r['_exit']) for r in rows])
 
     # signal_score/intraday_max_return_pct/intraday_min_return_pct/exit_time fix (2026-08-07,
     # dead-column sweep): all 4 had zero writers (confirmed live, 89,713/89,713 rows null).
@@ -1030,7 +1075,7 @@ def resolve_unified_outcomes(
         else:
             next_trading_day = (signal_date_obj + datetime.timedelta(days=1)).isoformat()
             
-        exit_target_date = (signal_date_obj + datetime.timedelta(days=horizon_days)).isoformat()
+        exit_target_date = row['_exit']
 
         # #2 exit policy: replay daily bars through target-capture / scale-out / chandelier
         # trailing / time exit instead of just booking the horizon close.
@@ -1165,8 +1210,6 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
     using realistic next-trading-day entry and horizon-close exit from stock_ohlcv.
     Nothing graded these before, so all rows sat NULL forever.
     """
-    today = datetime.date.today()
-
     def _symbol_vol_threshold(sym: str, as_of: str) -> float:
         """Return a vol-scaled UP/DOWN threshold for a stock.
         Uses 20-day RMS of daily returns; split/bonus days excluded (|ret| > 25%);
@@ -1190,7 +1233,7 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
     _vol_cache: dict[str, float] = {}
 
     def grade_for(col_ret: str, col_out: str, horizon: int) -> int:
-        cutoff = (today - datetime.timedelta(days=horizon)).isoformat()
+        cutoff = _gradeable_cutoff(conn, horizon)
         pending = conn.execute(f"""
             SELECT id, symbol, prediction_date
             FROM deep_learning_predictions
@@ -1201,14 +1244,12 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
         """, (cutoff,)).fetchall()
 
         graded = 0
+        _cal = _session_calendar(conn, [{'d': r[2]} for r in pending], 'd')
         # AF-20260823-80: batch the per-row next-open / horizon-close lookups.
         np_triples, ex_triples = [], []
         for _, sym_p, pd_p in pending:
             pd_s = str(pd_p)[:10]
-            try:
-                ex_d = (datetime.date.fromisoformat(pd_s) + datetime.timedelta(days=horizon)).isoformat()
-            except ValueError:
-                continue
+            ex_d = _nth_session_after(_cal, pd_s, horizon)
             np_triples.append((sym_p, pd_s, 'AFTER_OPEN'))
             ex_triples.append((sym_p, ex_d, 'GEQ_CLOSE'))
         _np_map = _prefetch_next_price(conn, np_triples)
@@ -1222,7 +1263,7 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
                 continue
 
             nphit = _np_map.get((str(sym), pd_str, 'AFTER_OPEN'))
-            exhit = _ex_map.get((str(sym), (pd_obj + datetime.timedelta(days=horizon)).isoformat(), 'GEQ_CLOSE'))
+            exhit = _ex_map.get((str(sym), _nth_session_after(_cal, pd_str, horizon), 'GEQ_CLOSE'))
             if not nphit or nphit[1] is None or not exhit or exhit[1] is None:
                 continue  # leave NULL; will retry next run once OHLCV lands
             entry = float(nphit[1] or 0)
@@ -1257,7 +1298,14 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
 def expire_stale_pending(conn: ConnWrapper, horizon_days: int, dry_run: bool = False) -> int:
     """Mark PENDING outcomes older than 2×horizon as NEUTRAL (stock/data unavailable).
     Covers signal_outcomes, unified_signal_outcomes and recommendation_log so no table
-    accumulates permanently-stuck PENDING rows."""
+    accumulates permanently-stuck PENDING rows.
+
+    Only where the symbol has a canonical daily bar after the signal. A retired/untradeable
+    code (ZOMATO, INDIAVIX, ...) was never priceable, so a 0.0% NEUTRAL would be a fabricated
+    label (2,587 unified rows, AF-20260930-16); it stays PENDING, i.e. ungraded, and the
+    resolver's own EXISTS filter stops re-selecting it."""
+    traded = ("AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE o.symbol = {t}.symbol "
+              "AND o.date > CAST({t}.signal_date AS date))")
     cutoff = (datetime.date.today() - datetime.timedelta(days=horizon_days * 2)).isoformat()
 
     rows = conn.execute("""
@@ -1266,17 +1314,18 @@ def expire_stale_pending(conn: ConnWrapper, horizon_days: int, dry_run: bool = F
         WHERE outcome = 'PENDING'
           AND horizon_days = ?
           AND signal_date < ?
-    """, (horizon_days, cutoff)).fetchall()
+          {traded}
+    """.format(traded=traded.format(t='signal_outcomes')), (horizon_days, cutoff)).fetchall()
 
     # unified + rec_log stale PENDING counts (for logging)
     uni_stale = conn.execute("""
         SELECT COUNT(*) FROM unified_signal_outcomes
-        WHERE outcome = 'PENDING' AND horizon_days = ? AND signal_date < ?
-    """, (horizon_days, cutoff)).fetchone()[0]
+        WHERE outcome = 'PENDING' AND horizon_days = ? AND signal_date < ? {traded}
+    """.format(traded=traded.format(t='unified_signal_outcomes')), (horizon_days, cutoff)).fetchone()[0]
     rec_stale = conn.execute("""
         SELECT COUNT(*) FROM recommendation_log
-        WHERE outcome = 'PENDING' AND COALESCE(horizon_days, 15) = ? AND signal_date < ?
-    """, (horizon_days, cutoff)).fetchone()[0]
+        WHERE outcome = 'PENDING' AND COALESCE(horizon_days, 15) = ? AND signal_date < ? {traded}
+    """.format(traded=traded.format(t='recommendation_log')), (horizon_days, cutoff)).fetchone()[0]
 
     if dry_run:
         print(f"[OutcomeResolver] Would expire {len(rows)} signal_outcomes, "
@@ -1286,19 +1335,19 @@ def expire_stale_pending(conn: ConnWrapper, horizon_days: int, dry_run: bool = F
     conn.execute("""
         UPDATE signal_outcomes
         SET outcome = 'NEUTRAL', return_pct = 0.0, computed_at = CURRENT_TIMESTAMP
-        WHERE outcome = 'PENDING' AND horizon_days = ? AND signal_date < ?
-    """, (horizon_days, cutoff))
+        WHERE outcome = 'PENDING' AND horizon_days = ? AND signal_date < ? {traded}
+    """.format(traded=traded.format(t='signal_outcomes')), (horizon_days, cutoff))
     conn.execute("""
         UPDATE unified_signal_outcomes
         SET outcome = 'NEUTRAL', return_pct = 0.0, computed_at = CURRENT_TIMESTAMP
-        WHERE outcome = 'PENDING' AND horizon_days = ? AND signal_date < ?
-    """, (horizon_days, cutoff))
+        WHERE outcome = 'PENDING' AND horizon_days = ? AND signal_date < ? {traded}
+    """.format(traded=traded.format(t='unified_signal_outcomes')), (horizon_days, cutoff))
     conn.execute("""
         UPDATE recommendation_log
         SET outcome = 'NEUTRAL', actual_return_pct = 0.0,
             status = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP
-        WHERE outcome = 'PENDING' AND COALESCE(horizon_days, 15) = ? AND signal_date < ?
-    """, (horizon_days, cutoff))
+        WHERE outcome = 'PENDING' AND COALESCE(horizon_days, 15) = ? AND signal_date < ? {traded}
+    """.format(traded=traded.format(t='recommendation_log')), (horizon_days, cutoff))
     conn.commit()
     print(f"[OutcomeResolver] Expired stale {horizon_days}D PENDING -> NEUTRAL "
           f"(signal_outcomes={len(rows)}, unified={uni_stale}, rec_log={rec_stale})")
@@ -1309,21 +1358,23 @@ def resolve_recommendation_log(
     conn: ConnWrapper,
     horizon_days: int = 15,
     dry_run: bool = False,
+    relabel_before: str | None = None,
+    limit: int = 2000,
 ) -> dict[str, int]:
     """Resolve recommendation_log.outcome by checking OHLCV data after the signal horizon."""
-    today = datetime.date.today()
-    cutoff = (today - datetime.timedelta(days=horizon_days)).isoformat()
+    cutoff = _gradeable_cutoff(conn, horizon_days)
 
     pending = conn.execute("""
         SELECT id, symbol, signal_date, entry_price, stop_loss, target_1,
                COALESCE(horizon_days, ?) AS rl_horizon
         FROM recommendation_log
-        WHERE (outcome IS NULL OR outcome = 'PENDING')
+        WHERE (outcome IS NULL OR outcome = 'PENDING' {relabel})
           AND entry_price IS NOT NULL
           AND signal_date <= ?
         ORDER BY signal_date DESC
-        LIMIT 2000
-    """, (horizon_days, cutoff)).fetchall()
+        LIMIT ?
+    """.format(relabel="OR resolved_at < ?" if relabel_before else ''),
+        (horizon_days,) + ((relabel_before,) if relabel_before else ()) + (cutoff, limit)).fetchall()
 
     cols = ['id', 'symbol', 'signal_date', 'entry_price', 'stop_loss', 'target_1', 'rl_horizon']
     rows = [dict(zip(cols, r)) for r in pending]
@@ -1334,6 +1385,7 @@ def resolve_recommendation_log(
 
     print(f"[OutcomeResolver] {len(rows)} recommendation_log entries pending resolution.")
     resolved = 0
+    _cal = _session_calendar(conn, rows, 'signal_date')
 
     for row in rows:
         rec_id = row['id']
@@ -1354,7 +1406,7 @@ def resolve_recommendation_log(
             (sym, signal_date_str)
         ).fetchone()
         next_trading_day = next_row[0] if next_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
-        exit_target_date = (signal_date_obj + datetime.timedelta(days=h)).isoformat()
+        exit_target_date = _nth_session_after(_cal, signal_date_str, h)
 
         # #2 exit policy: target-capture / scale-out / chandelier trailing over the bar window
         # (entry stays the recommended price, unlike the next-day-open signal resolvers).
@@ -1478,5 +1530,19 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--horizon',  type=int, default=1)
     parser.add_argument('--dry-run',  action='store_true')
+    parser.add_argument('--relabel-before', help='ISO timestamp: regrade labels computed before it (AF-20260930-30 backfill)')
+    parser.add_argument('--limit', type=int, default=2000)
     args = parser.parse_args()
-    run(horizon_days=args.horizon, dry_run=args.dry_run)
+    if args.relabel_before:
+        conn = connect()
+        try:
+            kw = dict(horizon_days=args.horizon, dry_run=args.dry_run,
+                      relabel_before=args.relabel_before, limit=args.limit)
+            resolve_outcomes(conn, **kw)
+            resolve_unified_outcomes(conn, **kw)
+            if args.horizon == 15:  # per-row 5/15 horizons are all gradeable under the h15 cutoff
+                resolve_recommendation_log(conn, **kw)
+        finally:
+            conn.close()
+    else:
+        run(horizon_days=args.horizon, dry_run=args.dry_run)

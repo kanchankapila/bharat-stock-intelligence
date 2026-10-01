@@ -169,7 +169,6 @@ let fundamentalsSyncWorker:   Worker | null = null;
 let quantScoringWorker:       Worker | null = null;
 let walkForwardOptimizeWorker: Worker | null = null;
 let technicalSignalsWorker:   Worker | null = null;
-let signalOutcomesWorker:     Worker | null = null;
 let newsSentimentWorker:      Worker | null = null;
 let trendlyneIntradayWorker:  Worker | null = null;
 let trendlyneDailyFetchWorker: Worker | null = null;
@@ -2089,47 +2088,15 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] technical-signals error:', err.message);
     });
 
-    // ── Signal outcomes queue (daily, resolves 5D + 15D win rates) ───────────
+    // ── signal-outcomes: RETIRED 2026-09-30 (AF-20260930-31) ─────────────────
+    // signalOutcomesService.computeSignalOutcomes graded the SAME signal_outcomes key as
+    // outcome_resolver.py (technical, h5/h15) with a peak-excursion rule and no costs -- 55.5%
+    // h5 win rate vs the resolver's 6.2% -- and whichever job reached a row first owned it.
+    // Only the stale repeatable is cleared here, so Redis stops firing it.
     signalOutcomesQueue = new Queue(QUEUE_SIGNAL_OUTCOMES, { connection });
-
-    const outRepeatables = await signalOutcomesQueue.getRepeatableJobs();
-    for (const r of outRepeatables) {
+    for (const r of await signalOutcomesQueue.getRepeatableJobs()) {
       await signalOutcomesQueue.removeRepeatableByKey(r.key);
     }
-    await addJobWithCatchup(signalOutcomesQueue, 
-      'signal-outcomes-daily',
-      {},
-      {
-        repeat: { pattern: '30 3 * * 1-5' }, // 9:00 AM IST, Mon–Fri (30 min after signals)
-        jobId: 'signal-outcomes-daily',
-        removeOnComplete: 3,
-        removeOnFail: 3,
-      },
-    );
-
-    signalOutcomesWorker = new Worker(
-      QUEUE_SIGNAL_OUTCOMES,
-      async (_job: Job) => {
-        const { computeSignalOutcomes } = await import('./signalOutcomesService');
-        await computeSignalOutcomes(5);
-        await computeSignalOutcomes(15);
-      },
-      {
-        connection,
-        concurrency: 1,
-        lockDuration: 5 * 60 * 1000,
-        lockRenewTime: 60 * 1000,
-      },
-    );
-
-    signalOutcomesWorker.on('completed', (job) => {
-      console.log('[QUEUE] signal-outcomes completed');
-      recordHeartbeat('signal-outcomes', 'success', undefined, bullJobDurationMs(job));
-    });
-    signalOutcomesWorker.on('failed', (job, err) => {
-      console.error('[QUEUE] signal-outcomes failed:', err.message);
-      recordHeartbeat('signal-outcomes', 'failed', err.message, bullJobDurationMs(job));
-    });
 
     // ── News sentiment queue (every 30 seconds) ──────────────────────────────
     newsSentimentQueue = new Queue(QUEUE_NEWS_SENTIMENT, { connection });
@@ -3567,7 +3534,6 @@ export async function shutdownQueues(): Promise<void> {
     walkForwardOptimizeQueue?.close(),
     technicalSignalsWorker?.close(),
     technicalSignalsQueue?.close(),
-    signalOutcomesWorker?.close(),
     signalOutcomesQueue?.close(),
     newsSentimentWorker?.close(),
     newsSentimentQueue?.close(),

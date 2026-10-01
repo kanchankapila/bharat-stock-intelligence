@@ -40,6 +40,21 @@ def compute_atr_barriers(price, atr, direction,
     return round(price * (1 - target_frac), 2), round(price * (1 + stop_frac), 2)
 
 
+def trade_levels(trend, rsi, price, atr):
+    """(entry, target, stop) whose direction follows the published trend label. RSI extremes
+    only choose a side for a Neutral trend: letting `rsi < 35` override a Bearish label gave
+    28% of Bearish signals long geometry (AF-20260930-32)."""
+    if trend == "Bullish":
+        direction = 'long'
+    elif trend == "Bearish":
+        direction = 'short'
+    else:
+        direction = 'short' if rsi > 65 else 'long'
+    entry = round(price * (1.005 if direction == 'long' else 0.995), 2) if trend != "Neutral" else price
+    target, stop = compute_atr_barriers(price, atr, direction)
+    return entry, target, stop
+
+
 # ── unified_signals row mapping (Cluster B-lite, 2026-08) ────────────────────────
 # technical_analysis_signals folded into unified_signals (signal_source='technical').
 # Column choices preserve queryability for the three readers this replaces:
@@ -150,20 +165,8 @@ class TechnicalAnalysisEngine:
         # Predictions — barriers scaled to the stock's own ATR, not a fixed % everywhere
         latest_atr = float(latest['atr']) if not pd.isna(latest['atr']) else 0.0
 
-        # Bug-fix 5: always compute barriers so entry/target/stop_loss are never 0.
-        # Neutral trend gets symmetric ATR barriers (market-making style); the
-        # entry_price is the current mid to avoid any directional bias.
-        if trend == "Bullish" or latest['rsi'] < 35:
-            entry_price = round(current_price * 1.005, 2)
-            target_price, stop_loss = compute_atr_barriers(current_price, latest_atr, 'long')
-        elif trend == "Bearish" or latest['rsi'] > 65:
-            # For shorting or exit
-            entry_price = round(current_price * 0.995, 2)
-            target_price, stop_loss = compute_atr_barriers(current_price, latest_atr, 'short')
-        else:
-            # Neutral: use current price as entry, compute symmetric long barriers as default
-            entry_price = current_price
-            target_price, stop_loss = compute_atr_barriers(current_price, latest_atr, 'long')
+        entry_price, target_price, stop_loss = trade_levels(
+            trend, float(latest['rsi']), current_price, latest_atr)
 
         return {
             'symbol': symbol,

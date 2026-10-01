@@ -458,7 +458,7 @@ class PerformanceTracker:
         print(f"[PerfTracker] {len(df)} resolved outcomes for horizon={horizon_days}d")
 
         if df.empty:
-            print("[PerfTracker] No data to analyse. Run computeSignalOutcomes first.")
+            print("[PerfTracker] No data to analyse. Run outcome_resolver.py first.")
             return
 
         nifty_rets = self.load_nifty_returns()

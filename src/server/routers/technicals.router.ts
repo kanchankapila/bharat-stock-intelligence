@@ -179,13 +179,6 @@ export const technicalsRouter = router({
       return await getWinRateStats();
     }),
 
-  computeSignalOutcomes: adminProcedure
-    .input(z.object({ horizonDays: z.union([z.literal(5), z.literal(15)]).default(5) }))
-    .mutation(async ({ input }) => {
-      const { computeSignalOutcomes } = await import('../signalOutcomesService');
-      return await computeSignalOutcomes(input.horizonDays);
-    }),
-
   getSignalTypeStats: publicProcedure
     .input(z.object({ horizonDays: z.union([z.literal(5), z.literal(15)]).default(15) }).optional())
     .query(async ({ input }) => {

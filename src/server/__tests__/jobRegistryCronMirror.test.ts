@@ -169,7 +169,6 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     // queue.add('<name>', ...)), verified to precede `repeat:` at every one of these call
     // sites -- unlike jobId, which sits AFTER `repeat:` at several of them.
     { jobName: 'stock-refresh', marker: "'refresh-all-daily'", label: 'stockRefreshQueue' },
-    { jobName: 'signal-outcomes', marker: "'signal-outcomes-daily'", label: 'signalOutcomesQueue' },
     { jobName: 'news-sentiment', marker: "'news-sentiment-refresh'", label: 'newsSentimentQueue (15-min cadence)' },
     { jobName: 'trendlyne-intraday', marker: "'trendlyne-intraday-scan'", label: 'trendlyneIntradayQueue' },
     { jobName: 'intraday-fetcher', marker: "'intraday-fetcher'", label: 'intradayFetcherQueue' },

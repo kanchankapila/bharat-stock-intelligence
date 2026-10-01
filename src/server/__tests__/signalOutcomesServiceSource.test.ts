@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 const { dbExec, dbRun, dbGet, dbAll } = await import('../dbAsync');
-const { computeSignalOutcomes, getWinRateStats } = await import('../signalOutcomesService');
+const { getWinRateStats } = await import('../signalOutcomesService');
 
 beforeEach(async () => {
   for (const table of ['signal_outcomes', 'technical_signals', 'stock_ohlcv']) {
@@ -11,68 +11,16 @@ beforeEach(async () => {
   }
 });
 
-// signalOutcomesService.ts is a genuinely independent, separately-scheduled writer of
-// signal_outcomes ('signal-outcomes-daily', 9 AM IST weekdays) grading technical_signals rows
-// -- the same source bucket as outcome_resolver.py's Python resolver, which runs on its own
-// schedule against the same (symbol, signal_date, horizon_days). Neither writer's dedup guard
-// used to check signal_source, so they collided silently with each other AND with
-// confluence_outcome_tracker.py (2026-08 fix).
-describe('signalOutcomesService.computeSignalOutcomes stamps signal_source', () => {
-  const seedTechnicalSignal = (symbol: string, date: string) =>
-    dbRun(`INSERT INTO technical_signals (symbol, date, cmp, signal_score, signals_json, stop_loss)
-      VALUES (?, ?, 100.0, 6, '[]', NULL)`, [symbol, date]);
-  // `ON CONFLICT DO NOTHING`, not SQLite's `INSERT OR IGNORE` -- this suite runs against real
-  // Postgres since SQLITE_DECOMMISSION_PLAN Phase 2.
-  const seedOhlcv = (symbol: string, date: string, close: number) =>
-    dbRun(`INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume)
-      VALUES (?, ?, ?, ?, ?, ?, 100000) ON CONFLICT DO NOTHING`, [symbol, date, close, close, close, close]);
-
-  it('writes signal_source=technical on a fresh resolution', async () => {
-    const signalDate = '2020-01-01';
-    await seedTechnicalSignal('AAA', signalDate);
-    // Exit bar 5 trading days later, +5% -> WIN under the fixed >2.0% threshold
-    await seedOhlcv('AAA', '2020-01-06', 105.0);
-
-    await computeSignalOutcomes(5);
-
-    const row = await dbGet<any>(`SELECT outcome, signal_source FROM signal_outcomes WHERE symbol='AAA' AND horizon_days=5`) as any;
-    expect(row).toBeDefined();
-    expect(row.signal_source).toBe('technical');
-    expect(row.outcome).toBe('WIN');
-  });
-
-  it('does not create a second orphaned row when a technical-sourced PENDING row already exists at the same key', async () => {
-    const signalDate = '2020-01-01';
-    // Simulate technicalSignalsService.ts's seed: a PENDING row stamped signal_source='technical'
-    // at signal-creation time, matching what computeSignalOutcomes will later resolve.
-    await dbRun(`INSERT INTO signal_outcomes
-      (symbol, signal_date, horizon_days, entry_price, outcome, signal_source)
-      VALUES ('BBB', ?, 5, 100.0, 'PENDING', 'technical')`, [signalDate]);
-    await seedTechnicalSignal('BBB', signalDate);
-    await seedOhlcv('BBB', '2020-01-06', 105.0);
-
-    await computeSignalOutcomes(5);
-
-    const rows = await dbAll<any>(`SELECT outcome, signal_source FROM signal_outcomes WHERE symbol='BBB' AND horizon_days=5`) as any[];
-    // Must UPDATE the existing 'technical' row in place, not INSERT a second row alongside it.
-    expect(rows.length).toBe(1);
-    expect(rows[0].outcome).toBe('WIN');
-  });
-
-  it('coexists with a confluence-sourced row at the identical key instead of colliding', async () => {
-    const signalDate = '2020-01-01';
-    await dbRun(`INSERT INTO signal_outcomes
-      (symbol, signal_date, horizon_days, entry_price, outcome, signal_source)
-      VALUES ('CCC', ?, 5, 100.0, 'LOSS', 'confluence')`, [signalDate]);
-    await seedTechnicalSignal('CCC', signalDate);
-    await seedOhlcv('CCC', '2020-01-06', 105.0);
-
-    await computeSignalOutcomes(5);
-
-    const rows = await dbAll<any>(`SELECT signal_source, outcome FROM signal_outcomes WHERE symbol='CCC' AND horizon_days=5 ORDER BY signal_source`) as any[];
-    expect(rows.map(r => r.signal_source)).toEqual(['confluence', 'technical']);
-    expect(rows.find(r => r.signal_source === 'confluence')?.outcome).toBe('LOSS');
-    expect(rows.find(r => r.signal_source === 'technical')?.outcome).toBe('WIN');
+// AF-20260930-31: this module used to hold a SECOND grader (computeSignalOutcomes, scheduled as
+// 'signal-outcomes-daily') for the same (symbol, signal_date, horizon_days, 'technical') key as
+// outcome_resolver.py, under a peak-excursion rule with no costs: 55.5% h5 win rate vs the
+// resolver's 6.2%, and whichever job reached a row first owned its label. One key, one grader.
+describe('signal_outcomes technical has a single grader', () => {
+  it('signalOutcomesService no longer grades, and nothing schedules it', async () => {
+    const mod = await import('../signalOutcomesService') as Record<string, unknown>;
+    expect(mod.computeSignalOutcomes).toBeUndefined();
+    const { JOB_REGISTRY } = await import('../jobRegistry') as any;
+    expect((JOB_REGISTRY ?? []).map((j: any) => j.jobName)).not.toContain('signal-outcomes');
   });
 });
 
@@ -109,34 +57,4 @@ describe('getWinRateStats scopes to one signal_source AND one label_definition',
     expect(stats.overall.total).toBe(1);
     expect(stats.labelDefinition).toBe('path_barrier');
   });
-
-  // The writer must stamp the label, or the filter above silently drops every row it produces
-  // -- which is exactly the state this service was in before 2026-08-15. Calls the real
-  // function rather than grepping the source, per .claude/rules/recurring-bugs.md's "a test
-  // that reimplements the logic under test passes against the unfixed source".
-  it('computeSignalOutcomes stamps label_definition on the rows it writes', async () => {
-    await dbRun(`INSERT INTO technical_signals (symbol, date, cmp, signal_score, signals_json, stop_loss)
-      VALUES ('HHH', '2020-01-01', 100.0, 6, '[]', NULL)`);
-    await dbRun(`INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume)
-      VALUES ('HHH', '2020-01-06', 105.0, 105.0, 105.0, 105.0, 100000) ON CONFLICT DO NOTHING`);
-
-    await computeSignalOutcomes(5);
-
-    const row = await dbGet<any>(`SELECT label_definition FROM signal_outcomes WHERE symbol='HHH' AND horizon_days=5`) as any;
-    expect(row?.label_definition).toBe('path_barrier');
-  });
-
-  // And the row it writes must actually survive the report's own filter -- the two halves of
-  // this fix are only correct together.
-  it('a row written by computeSignalOutcomes is counted by getWinRateStats', async () => {
-    await dbRun(`INSERT INTO technical_signals (symbol, date, cmp, signal_score, signals_json, stop_loss)
-      VALUES ('III', '2020-01-01', 100.0, 6, '[]', NULL)`);
-    await dbRun(`INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume)
-      VALUES ('III', '2020-01-06', 105.0, 105.0, 105.0, 105.0, 100000) ON CONFLICT DO NOTHING`);
-
-    await computeSignalOutcomes(5);
-    const stats = await getWinRateStats();
-
-    expect(stats.overall.total).toBe(1);
-  }, 15000);
 });

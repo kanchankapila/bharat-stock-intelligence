@@ -97,7 +97,6 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
 
   { jobName: 'fundamentals-sync', label: 'Fundamentals Sync', cronPattern: '0 3 * * 6', graceMinutes: 120, critical: false },
   { jobName: 'quant-scoring', label: 'Quant Score Engine', cronPattern: '20 15 * * 1-5', graceMinutes: 45, critical: true },
-  { jobName: 'signal-outcomes', label: 'Signal Outcome Tracker', cronPattern: '30 3 * * 1-5', graceMinutes: 45, critical: true },
   { jobName: 'news-sentiment', label: 'News Sentiment Refresh', everyMs: 15 * 60 * 1000, graceMinutes: 45, critical: true },
   // Registered with `every: 15min` (24/7) but gated to market hours at runtime, where it returns
   // { skipped: true } — same shape as its intraday-fetcher / market-regime-refresh /

@@ -1366,6 +1366,21 @@ export function getTrendlyneScreenerCategories() {
 /**
  * Scan all Intraday Trendlyne screeners and automatically generate BUY/SELL signals for high-scoring stock constituents.
  */
+/**
+ * The NSE symbol a Trendlyne row should be signalled under, or undefined. Trendlyne's own ticker
+ * lags exchange renames/delistings (ZOMATO -> ETERNAL, GET&D -> GVT&D), and a signal on a code
+ * with no price can never be traded or graded (AF-20260930-16), so a code is kept only if it is
+ * currently priced; otherwise the Trendlyne id/name mapping is tried, under the same rule.
+ */
+export function resolveTradeableSymbol(
+  stock: { symbol?: string; stockId?: string; name?: string },
+  priced: Set<string>,
+): string | undefined {
+  if (stock.symbol && priced.has(stock.symbol)) return stock.symbol;
+  const mapped = getStockMappingByTLId(stock.stockId ?? '') || getStockMappingByName(stock.name ?? '');
+  return mapped && priced.has(mapped.symbol) ? mapped.symbol : undefined;
+}
+
 export async function runIntradayScreenerScan(): Promise<{
   screenersScanned: number;
   highScoringStocksFound: number;
@@ -1414,6 +1429,10 @@ export async function runIntradayScreenerScan(): Promise<{
 
     console.log(`⚡ [INTRADAY SCAN] ${filtered.length}/${allScreeners.length} intraday screeners active (${allScreeners.length - filtered.length} cold-dropped).`);
 
+    const priced = new Set((await dbAll(
+      `SELECT DISTINCT symbol FROM stock_ohlcv WHERE date >= current_date - 14`) as { symbol: string }[]).map(r => r.symbol));
+    let unpricedSkipped = 0;
+
     for (const screener of filtered) {
       screenersScanned++;
       const name = screener.screener_name;
@@ -1433,15 +1452,10 @@ export async function runIntradayScreenerScan(): Promise<{
       console.log(`📊 [INTRADAY SCAN] Processing ${result.data.length} stocks for screener: ${name}`);
 
       for (const stock of result.data) {
-        // Resolve stock symbol if not directly present
-        let symbol = stock.symbol;
+        const symbol = resolveTradeableSymbol(stock, priced);
         if (!symbol) {
-          const mapping = getStockMappingByTLId(stock.stockId) || getStockMappingByName(stock.name);
-          symbol = mapping?.symbol;
-        }
-
-        if (!symbol) {
-          continue; // Skip stocks that cannot be mapped to a clean NSE symbol
+          unpricedSkipped++;
+          continue;
         }
 
         // 3. Lookup stock score from quant_scores or stock_scores fallback
@@ -1538,7 +1552,7 @@ export async function runIntradayScreenerScan(): Promise<{
       }
     }
 
-    console.log(`✅ [INTRADAY SCAN] Scan completed. Scanned: ${screenersScanned} | High-Scoring Stocks: ${highScoringStocksFound} | New Signals: ${newSignalsGenerated}`);
+    console.log(`✅ [INTRADAY SCAN] Scan completed. Scanned: ${screenersScanned} | High-Scoring Stocks: ${highScoringStocksFound} | New Signals: ${newSignalsGenerated} | Unpriced/unmapped skipped: ${unpricedSkipped}`);
   } catch (error) {
     console.error('❌ [INTRADAY SCAN] Fatal error during intraday screener scan:', error);
   }
