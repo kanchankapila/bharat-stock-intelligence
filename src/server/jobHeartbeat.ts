@@ -485,6 +485,20 @@ export function __resetJobTypicalDurationsCache(): void {
 }
 
 /**
+ * When this process started — the earliest point at which its copy of JOB_REGISTRY existed.
+ *
+ * Used by getLateJobs() to refuse to call a job LATE for a cron occurrence that fell before the
+ * job could have been registered (see the comment at that guard). Captured at module load, not
+ * per call, so it is a fixed floor rather than something that drifts as the process runs.
+ *
+ * Overridable for tests only, via __setProcessStartForTests(); nothing in production calls it.
+ */
+let PROCESS_START_MS = Date.now();
+export function __setProcessStartForTests(ms: number | null): void {
+  PROCESS_START_MS = ms ?? Date.now();
+}
+
+/**
  * Retrieves typical execution duration (avg and p95 ms) from job_run_history over the
  * past 14 days, cached for 15 minutes.
  *
@@ -632,6 +646,24 @@ export async function getLateJobs(now: Date = new Date()): Promise<Array<{
       if (expectedAt.getTime() > now.getTime()) continue;
 
       if ((lastSuccess ?? 0) >= expectedAt.getTime()) continue; // already succeeded for this occurrence
+
+      // A job cannot have MISSED a slot that came before this process was watching it. The
+      // occurrence a cron's `prev()` returns is whatever the cron would have fired most recently
+      // -- including one that fell hours BEFORE the job was added to JOB_REGISTRY, on the very day
+      // the entry was added. Measured live 2026-09-30: `ontology-refresh` was added that day
+      // (cron 50 21 * * *), and at the 22:50 IST digest the previous occurrence (09-29 21:50 UTC,
+      // 19.5h earlier) was compared against a heartbeat that could not exist yet -> "Semantic
+      // Ontology/Identity Refresh (~19.5h late)". The job then ran first-thing 03:20 IST and the
+      // next digest reported "recovered", i.e. the whole red/green pair was this artifact.
+      //
+      // Scope is deliberately narrow, because the opposite error is the expensive one (masking a
+      // real miss). Bounded on BOTH sides:
+      //   - only for a job with NO heartbeat row at all (never ran, never failed, never alerted --
+      //     so there is no evidence the job existed before this process);
+      //   - only when the occurrence PREDATES this process's start, so from the next slot onward
+      //     the job is judged exactly as before and a job that never runs still alerts.
+      // A job that has run before, or whose slot came after boot, is unaffected.
+      if (!row && expectedAt.getTime() < PROCESS_START_MS) continue;
 
       // Trading holiday: the job's cron fired on a weekday the exchange never opened, the
       // processor skipped and declined the heartbeat BY DESIGN (registerJob.ts never stamps

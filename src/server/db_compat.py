@@ -407,6 +407,69 @@ def connect() -> ConnWrapper:
     raise last_exc
 
 
+def _is_dead_backend(exc) -> bool:
+    """True when the Postgres backend went away mid-statement, rather than the SQL being wrong.
+
+    The server "closes the connection unexpectedly" when its backend is killed -- the host-OOM
+    squeeze documented in AF-20260928-03 is the recurring cause here, and docker-compose's own
+    6GB WDDM cap comment records the same "server closed the connection" signature. SQLSTATE
+    57P01 (admin_shutdown) and 08006/08003 (connection_failure / connection_does_not_exist) are
+    the psycopg2 classes for it; 57P02/57P03 (crash_shutdown / cannot_connect_now) is the
+    during-restart variant.
+
+    What must NOT be caught: a genuine SQL error (UndefinedTable, syntax, constraint) or a
+    deadlock/serialization failure. Those are deterministic on retry and the caller wants the
+    real error, not a second identical failure. `connect()`'s existing retry is deliberately
+    narrower still -- it only retries errors raised while OPENING a connection -- which is why
+    this helper is needed at all: the live failure was on a pooled connection this script did
+    not open.
+    """
+    sqlstate = getattr(exc, "sqlstate", None) or ""
+    if sqlstate in ("57P01", "57P02", "57P03", "08006", "08003", "08001"):
+        return True
+    # SQLAlchemy wraps the driver error; psycopg2's message is the reliable fallback when the
+    # SQLSTATE did not survive the wrap. Matched on the documented wording, not a substring of
+    # any caller text.
+    msg = str(getattr(exc, "orig", exc) or "").lower()
+    return ("server closed the connection unexpectedly" in msg
+            or "terminating connection" in msg
+            or "the database system is" in msg)
+
+
+def _with_dead_backend_retry(label, fn, attempts: int = 2):
+    """Run `fn()` and retry it once on a dead backend, disposing the pooled connection first.
+
+    Every helper here borrows a connection from the pool, does one statement, and returns it.
+    A backend killed while a pooled connection sat idle is therefore a one-shot event: the next
+    borrow gets a *different* (fresh, pre_ping-validated) connection and the statement succeeds.
+    So a single retry converts a guaranteed step failure into a normal success, and a genuinely
+    down server still raises on the last attempt -- nothing is swallowed.
+
+    The pooled connection that died is invalidated explicitly (`engine.dispose()`), because
+    pool_pre_ping only validates at CHECKOUT; a connection the pool believes is idle-but-good
+    can otherwise be handed straight back out.
+    """
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except (OperationalError, SATimeoutError) as e:
+            if not _is_dead_backend(e):
+                raise
+            last_exc = e
+            if attempt < attempts - 1:
+                # stderr specifically: the subprocess wrappers that run these jobs only inspect
+                # stderr (see recurring-bugs.md), so a stdout notice here would be invisible.
+                print(f"[db_compat] {label}: Postgres backend went away mid-statement "
+                      f"({e.__class__.__name__}); discarding the pooled connection and retrying "
+                      f"(attempt {attempt + 2}/{attempts}).", file=_sys.stderr, flush=True)
+                try:
+                    get_engine().dispose()
+                except Exception:                                   # noqa: BLE001
+                    pass  # disposing is best-effort; the retry below is what actually matters
+    raise last_exc
+
+
 def reconnect(conn):
     """Discard a possibly-dead connection and return a fresh one.
 
@@ -474,9 +537,17 @@ def query_scalar(sql, params=(), default=None):
 
 
 def execute(sql, params=()):
-    """Run a write and commit; returns affected rowcount."""
-    with get_engine().begin() as conn:
-        return conn.execute(text(translate(sql)), build_params(params)).rowcount
+    """Run a write and commit; returns affected rowcount.
+
+    Retried once on a dead backend (see _with_dead_backend_retry). Safe to retry here and ONLY
+    here of the write helpers: `get_engine().begin()` is a single transaction that either commits
+    or rolls back, so a backend that died mid-statement committed nothing -- there is no
+    partially-applied write for the retry to duplicate.
+    """
+    def _run():
+        with get_engine().begin() as conn:
+            return conn.execute(text(translate(sql)), build_params(params)).rowcount
+    return _with_dead_backend_retry(f"execute[{sql.strip().splitlines()[0][:60]}]", _run)
 
 
 def safe_alter(conn_or_none, ddl: str) -> bool:
@@ -634,9 +705,18 @@ def iter_rows(conn, sql, params=(), batch_size=50_000):
 
 
 def read_df(sql, params=()):
-    """pandas.read_sql wrapper using the active engine + translator."""
-    with get_engine().connect() as conn:
-        return pd.read_sql(text(translate(sql)), conn, params=build_params(params))
+    """pandas.read_sql wrapper using the active engine + translator.
+
+    Retried once on a dead backend (see _with_dead_backend_retry). This read is the single
+    biggest consumer in the screener-performance chain -- live_screener_optimizer.py pulls the
+    whole resolved-outcomes panel through here, then spends minutes fitting trees before its
+    write -- so it is exactly where an OOM-killed backend landed first on 2026-09-30
+    ("server closed the connection unexpectedly", killing the step for the run).
+    """
+    def _run():
+        with get_engine().connect() as conn:
+            return pd.read_sql(text(translate(sql)), conn, params=build_params(params))
+    return _with_dead_backend_retry(f"read_df[{sql.strip().splitlines()[0][:60]}]", _run)
 
 
 # â”€â”€â”€ Transactions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -868,6 +868,30 @@ describe('runDataQualityChecks (orchestration)', () => {
     expect(purge!.params).not.toContain('deploy-drift');
   });
 
+  // dq-uninformative-checks grades HISTORY, so it needs the same live-set guard the purge above
+  // provides for the snapshot table. Without it the 30-day window keeps re-reporting checks that
+  // were deleted: AF-20260930-15 removed semantic-claim-freshness / semantic-evidence-freshness on
+  // 2026-09-30 (they had no producer, so their verdict could never vary -- which is precisely what
+  // made them look stuck), and on 2026-10-01 dq-uninformative-checks still named them, reporting
+  // the completed fix as unfixed. Deleting a stuck check could only ever clear the alert 30 days
+  // later, and would re-report every single day in between.
+  it('dq-uninformative-checks only judges check ids that still exist', () => {
+    const check = DATA_QUALITY_CHECKS.find(c => c.id === 'dq-uninformative-checks');
+    expect(check, 'dq-uninformative-checks must remain registered').toBeDefined();
+    expect(check!.sql).toMatch(/check_id\s+IN\s*\(\s*SELECT\s+check_id\s+FROM\s+data_quality_results\s*\)/i);
+  });
+
+  // Regression guard for a self-inflicted break during that fix: the SQL lives in a template
+  // literal, so a backtick-quoted identifier in a comment TERMINATES the string and the whole
+  // module fails to parse (esbuild: Expected "}" but found "data_quality_results").
+  it('every check SQL template is parseable -- no backticks inside a sql literal', () => {
+    const offenders = DATA_QUALITY_CHECKS.filter(c => typeof c.sql === 'string' && c.sql.includes('`'));
+    expect(
+      offenders.map(c => c.id),
+      'a backtick inside a check sql template literal breaks the module at parse time',
+    ).toEqual([]);
+  });
+
   // 169 checks ran strictly one at a time: 45.7s warm / 93.2s cold per sweep (measured
   // 2026-09-11), every 15 minutes. Each check is an independent pool query, so a small fixed
   // number may run at once -- bounded so a sweep never takes a large share of the 22-connection

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockRows: any[] = [];
 vi.mock('../dbAsync', () => ({
@@ -33,7 +33,7 @@ vi.mock('../dataQualityChecks', async () => {
   };
 });
 
-import { getLateJobs, getStaleJobs, bullJobDurationMs, describeCadence } from '../jobHeartbeat';
+import { getLateJobs, getStaleJobs, bullJobDurationMs, describeCadence, __setProcessStartForTests } from '../jobHeartbeat';
 
 describe('getLateJobs', () => {
   beforeEach(() => { mockRows.length = 0; });
@@ -66,6 +66,59 @@ describe('getLateJobs', () => {
     mockRows.push({ job_name: 'event-job', last_success_at: null, last_error: null, last_alert_sent_at: null });
     const late = await getLateJobs(now);
     expect(late.map(l => l.job)).not.toContain('event-job');
+  });
+
+  /**
+   * A brand-new JOB_REGISTRY entry used to be reported LATE on the day it was added.
+   *
+   * Live 2026-09-30: `ontology-refresh` was added to the registry that day (cron 50 21 * * *).
+   * At the 22:50 IST digest the cron branch computed expectedAt = 2026-09-29T21:50Z -- 19.5h
+   * earlier -- and compared it against a heartbeat that could not exist yet, producing
+   * "Semantic Ontology/Identity Refresh (~19.5h late, daily)". The job then ran first-thing
+   * 03:20 IST and the next digest said "recovered": the red/green pair was pure artifact, and a
+   * newly-added job is guaranteed to emit one.
+   *
+   * The guard is narrow on purpose (the opposite error -- masking a real miss -- is worse), so
+   * these four cases pin BOTH sides of it: an occurrence predating process start with no evidence
+   * is pardoned, and every other combination still alerts.
+   */
+  describe('first-occurrence-after-registration (no false "late" on the day a job is added)', () => {
+    // daily-job fires 10:00 UTC weekdays. The digest reads it at 12:00 UTC on a Thursday, which is
+    // 2h past fire+grace -- the same geometry as the live ontology-refresh case.
+    const now = new Date('2026-07-02T12:00:00Z');
+    const occurrenceBeforeBoot = new Date('2026-07-02T10:00:00Z').getTime();
+
+    beforeEach(() => { __setProcessStartForTests(new Date('2026-07-02T11:00:00Z').getTime()); });
+
+    afterEach(() => { __setProcessStartForTests(null); });
+
+    it('does NOT flag a never-run job for an occurrence that predates this process', async () => {
+      // No heartbeat row at all -- the job has no evidence of existing before this process.
+      const late = await getLateJobs(now);
+      expect(late.map(l => l.job)).not.toContain('daily-job');
+    });
+
+    it('DOES still flag it once the occurrence is newer than process start', async () => {
+      // Boot AFTER the cron slot: the job had a real chance to run and did not.
+      __setProcessStartForTests(new Date('2026-07-02T09:00:00Z').getTime());
+      const late = await getLateJobs(now);
+      expect(late.map(l => l.job)).toContain('daily-job');
+    });
+
+    it('DOES still flag a job that has run before (evidence it predates this process)', async () => {
+      mockRows.push({ job_name: 'daily-job', last_success_at: new Date('2026-06-01T10:05:00Z').getTime(), last_error: null, last_alert_sent_at: null });
+      const late = await getLateJobs(now);
+      expect(late.map(l => l.job)).toContain('daily-job');
+    });
+
+    it('DOES still flag a never-run job whose failure predates process start', async () => {
+      // A heartbeat row exists (so the job was known before boot) but it has never succeeded:
+      // the "added to the registry and never wired up" case must keep alerting.
+      mockRows.push({ job_name: 'daily-job', last_success_at: null, last_error: 'boom', last_alert_sent_at: null });
+      const late = await getLateJobs(now);
+      expect(late.map(l => l.job)).toContain('daily-job');
+      expect(occurrenceBeforeBoot).toBeLessThanOrEqual(now.getTime()); // documents the setup
+    });
   });
 
   // 2026-08-13: intraday-fetcher/live-screener-collect were "newly late" in the daily digest

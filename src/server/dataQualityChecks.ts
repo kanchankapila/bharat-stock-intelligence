@@ -2282,12 +2282,34 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // input, and THAT is the one that cannot fail. Measured on this DB: 103 moving vs 3 frozen.
     // So stuck_good now means frozen-detail only, and the verdict-changing half is reported
     // separately as context so a real transition is still visible.
+    //
+    // The data_quality_results join below is deliberate: without it, a check deleted from
+    // DATA_QUALITY_CHECKS keeps being graded off its own historical rows for the whole 30-day
+    // window, so deleting a permanently-red check can only remove the signal AFTER 30 days, and
+    // re-reports it every day until then. Measured live 2026-10-01: semantic-claim-freshness /
+    // semantic-evidence-freshness were removed the day before (AF-20260930-15 -- no producer at
+    // all, which is why their verdict could never vary) and this check still named them, i.e. it
+    // reported a completed fix as unfixed. data_quality_results is the authoritative live set
+    // (the sweep deletes rows for checks that no longer exist) and dq-new-failures below already
+    // joins to it for the same reason.
     sql: `WITH agg AS (
             SELECT check_id, COUNT(*) AS runs, COUNT(DISTINCT status) AS distinct_status,
                    COUNT(DISTINCT detail) AS distinct_detail,
                    MIN(status) AS only_status
               FROM data_quality_history
              WHERE checked_at > (EXTRACT(epoch FROM now()) - 86400 * 30) * 1000
+               -- Only judge checks that STILL EXIST. Without this join, a check deleted from
+               -- DATA_QUALITY_CHECKS keeps being graded off its own historical rows for the full
+               -- 30-day window, so deleting a permanently-red check can only ever remove the
+               -- signal AFTER 30 days -- and re-reports it every single day until then.
+               -- Measured live 2026-10-01: semantic-claim-freshness / semantic-evidence-freshness
+               -- were REMOVED the day before (AF-20260930-15 -- they had no producer at all, which
+               -- is exactly why their verdict could never vary), and this very check still named
+               -- them: a completed fix reported as unfixed by the monitor built to confirm it.
+               -- data_quality_results is the authoritative live set -- the sweep deletes rows for
+               -- checks that no longer exist, and dq-new-failures below already joins to it for
+               -- exactly this reason.
+               AND check_id IN (SELECT check_id FROM data_quality_results)
              GROUP BY check_id
           )
           SELECT COUNT(*) FILTER (WHERE runs >= 10) AS judged,

@@ -102,12 +102,19 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; skippe
   await T.run('screener-performance-compute', () => runPython('screener_performance.py', [], 45 * 60_000));
 
   // 4. Stamp per-stock screener ML features into technical_signals
-  // 30 min (AF-20260917-21, measured not guessed): the 5-min budget timeout-killed this
-  // step on 2026-09-16 AND 2026-09-17 at exactly 300000ms, while completed runs in the
-  // sibling ml-daily-ops chain take 15-16 min (2026-09-16 20:24 IST / 2026-09-17 20:46 IST,
-  // peak ~590MB). A 5-min ceiling over 15+ min of real work is the recurring
-  // budget-sized-once-never-revisited defect class (recurring-bugs.md).
-  await runPython('screener_features_fetcher.py', [], 30 * 60_000)
+  // 45 min (was 30, 2026-10-01). The 30-min budget was itself a measured raise (AF-20260917-21,
+  // off a 15-16 min measurement) and has since been outgrown the same way: the 09-30 run was
+  // killed at EXACTLY 1,800,000 ms -- its own cap, not a hang, since a sibling invocation of the
+  // same script completed 73 min earlier in that same window (22:41 IST vs the 23:54 kill) on an
+  // identical 3,556-symbol input. The per-symbol feature loop also grows with the appearance
+  // table, which is now ~12M rows, so this is recurring-bugs.md's "budget sized once against the
+  // work as it was, never revisited as the work grew" rather than a one-off. 45 min is the
+  // measured 15-16 min baseline plus the 30-min contention headroom the killed run proves it
+  // needs on a loaded evening. NOT taken from the kill itself: the cap is a lower bound on the
+  // real runtime, so the raise is deliberately larger than "just above 30".
+  // Chain sum 258 -> 273 min, so the Worker lockDuration below moves 270 -> 290 to keep the
+  // lock-exceeds-the-sum-of-step-budgets invariant (AF-20260912-16) intact.
+  await runPython('screener_features_fetcher.py', [], 45 * 60_000)
     .catch(e => T.fail('screener_features_fetcher', e));
 
   // 5. Aggregate sector screener rotation signals
@@ -338,8 +345,16 @@ export async function registerSyncJobs(connection: any) {
     // (AF-20260912-16's rule), and the old comment's 145-min sum both undercounted (it
     // omitted live_screener_ml_ranker's 30 min and one backtest 10) and was invalidated by
     // this pass's measured budget raises (features 5->30, rotation 2->10, optimizer 5->25,
-    // backtest-intraday 10->30). 270 covers the 258-min sum.
-    lockDuration: 270 * 60_000,
+    // backtest-intraday 10->30). 270 covered the then-258-min sum.
+    // 270 -> 290 min (2026-10-01): screener_features_fetcher 30 -> 45 (measured: killed at
+    // exactly its own 30-min cap on 09-30 while a sibling run of the same script completed 73
+    // min earlier on identical input), so the sum is now 273 and the lock must still exceed
+    // it. Left at 270 the lock would expire INSIDE the final step on a legitimately long run and
+    // BullMQ would re-deliver a healthy job into a concurrent double execution -- the exact
+    // failure this number exists to prevent. +17 over the sum, matching the prior 270-over-258
+    // margin convention. MONITOR_SCRIPTS' screener-performance graceMinutes is 300, which
+    // still clears the new 290.
+    lockDuration: 290 * 60_000,
     lockRenewTime: 20 * 60_000,
     monitorFn: updateMonitorState,
     suppressLockErrors: true,
