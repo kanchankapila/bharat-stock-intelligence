@@ -93,12 +93,15 @@ def test_recalibrate_writes_compressed_probabilities():
             conn.execute("INSERT INTO technical_signals (symbol,date,win_probability) VALUES (?,?,?)", (sym, day, p))
             conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,5,?)", (sym, day, outcome))
             n += 1
+    # Rows inside the fit window keep their point-in-time value (AF-20261001-45); probe with a
+    # row scored after every fitted outcome.
+    conn.execute("INSERT INTO technical_signals (symbol,date,win_probability) VALUES ('PROBE','2026-02-15',0.8)")
     conn.commit()
 
     res = recalibrate_win_probabilities(conn, min_samples=50)
     assert res['fit'] is True
     # the 0.8 cohort must be recalibrated down toward its true ~0.6
-    cal_hi = conn.execute("SELECT calibrated_win_probability FROM technical_signals WHERE win_probability=0.8 LIMIT 1").fetchone()[0]
+    cal_hi = conn.execute("SELECT calibrated_win_probability FROM technical_signals WHERE symbol='PROBE'").fetchone()[0]
     assert cal_hi == pytest.approx(0.6, abs=0.06)
     assert cal_hi < 0.8
 
@@ -136,7 +139,7 @@ def test_recalibrate_rewrites_only_rows_whose_value_changes():
     res = recalibrate_win_probabilities(conn, min_samples=50)
     after = versions()
     assert {k for k in before if before[k] != after[k]} == {('NEW', '2026-02-02')}
-    assert res['updated'] == 201
+    assert res['updated'] == 1   # only the post-fit row is (re)calibrated (AF-20261001-45)
 
 
 def test_recalibrate_skips_when_insufficient_data():
@@ -191,10 +194,14 @@ def test_qualified_regime_gets_own_calibrator():
     _seed(conn, 'BEAR', 0.8, 4, _spread_days(22))
     # BULL elsewhere with the SAME raw prob winning 80% -> would calibrate 0.8 differently
     _seed(conn, 'BULL', 0.8, 8, _spread_days(22, start="2025-06-01"))
+    for reg in ('BEAR', 'BULL'):   # post-fit probes (AF-20261001-45)
+        conn.execute("INSERT INTO technical_signals (symbol,date,win_probability,nifty_regime) "
+                     "VALUES (?, '2027-01-01', 0.8, ?)", (f"{reg}_PROBE", reg))
+    conn.commit()
     res = recalibrate_win_probabilities(conn, min_samples=50, min_regime_days=20, min_regime_episodes=2)
     assert res['regimes']['BEAR']['used'] == 'regime'
-    bear = conn.execute("SELECT calibrated_win_probability FROM technical_signals WHERE nifty_regime='BEAR' LIMIT 1").fetchone()[0]
-    bull = conn.execute("SELECT calibrated_win_probability FROM technical_signals WHERE nifty_regime='BULL' LIMIT 1").fetchone()[0]
+    bear = conn.execute("SELECT calibrated_win_probability FROM technical_signals WHERE symbol='BEAR_PROBE'").fetchone()[0]
+    bull = conn.execute("SELECT calibrated_win_probability FROM technical_signals WHERE symbol='BULL_PROBE'").fetchone()[0]
     assert bear == pytest.approx(0.4, abs=0.08) and bull == pytest.approx(0.8, abs=0.08)
     assert bear < bull   # same raw 0.8 calibrates lower in BEAR
 

@@ -75,8 +75,8 @@ class TestTemporalSplit:
             )
         """)
         conn.execute("""
-            CREATE TABLE stock_factor_breakdown (
-                symbol TEXT, timeframe TEXT, technical REAL, fundamental REAL,
+            CREATE TABLE stock_factor_breakdown_history (
+                symbol TEXT, timeframe TEXT, snapshot_date TEXT, technical REAL, fundamental REAL,
                 momentum REAL, valuation REAL, delivery REAL, news REAL, other REAL
             )
         """)
@@ -94,10 +94,10 @@ class TestTemporalSplit:
                  row['outcome'], row['return_pct'], int(row['signal_score'])))
             # Insert factor breakdown with all required columns
             conn.execute("""
-                INSERT INTO stock_factor_breakdown
-                (symbol, timeframe, technical, fundamental, momentum, valuation, delivery, news, other)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (row['symbol'], 'medium', rng.uniform(0, 100), rng.uniform(0, 100),
+                INSERT INTO stock_factor_breakdown_history
+                (symbol, timeframe, snapshot_date, technical, fundamental, momentum, valuation, delivery, news, other)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (row['symbol'], 'long_term', row['signal_date'], rng.uniform(0, 100), rng.uniform(0, 100),
                   rng.uniform(0, 100), rng.uniform(0, 100), rng.uniform(0, 100),
                   rng.uniform(0, 100), rng.uniform(0, 100)))
         conn.commit()

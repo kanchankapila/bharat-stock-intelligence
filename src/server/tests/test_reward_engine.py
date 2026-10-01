@@ -48,14 +48,14 @@ def make_db():
         CREATE TABLE unified_signal_outcomes (
             id INTEGER PRIMARY KEY, unified_signal_id INTEGER,
             symbol TEXT, signal_date TEXT, signal_source TEXT,
-            horizon_days INTEGER, return_pct REAL, outcome TEXT
+            horizon_days INTEGER, return_pct REAL, outcome TEXT, exit_price REAL
         );
         -- update_source_weights JOINs outcomes back to their signal row, and writes per-source
         -- weights here. This is where AI/screener outcomes are learned from; update_weights
         -- deliberately reads signal_outcomes only (technical pattern types).
         CREATE TABLE unified_signals (
             id INTEGER PRIMARY KEY, symbol TEXT, signal_date TEXT,
-            signal_source TEXT, signal_type TEXT
+            signal_source TEXT, signal_type TEXT, status TEXT
         );
         CREATE TABLE signal_source_weights (
             signal_source TEXT NOT NULL, regime TEXT NOT NULL,

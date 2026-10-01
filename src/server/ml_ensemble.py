@@ -1644,7 +1644,10 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
             "ON se.symbol = so.symbol AND se.signal_date = so.signal_date "
             "AND se.horizon_days = so.horizon_days"
         )
-        label_where = "se.tb_label IS NOT NULL AND so.signal_source = 'technical'"
+        # so.outcome <> 'PENDING': the resolver leaves a row PENDING until its horizon has
+        # elapsed on canonical bars, so a tb_label on it is one we refuse to grade (AF-20261001-41).
+        label_where = ("se.tb_label IS NOT NULL AND so.signal_source = 'technical' "
+                       "AND so.outcome <> 'PENDING'")
     else:
         label_select = "so.outcome"
         label_join = ""

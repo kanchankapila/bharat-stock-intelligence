@@ -222,6 +222,10 @@ def update_source_weights(
           AND uso.return_pct IS NOT NULL
           AND uso.signal_source IS NOT NULL
           AND us.signal_date >= ?
+          -- AF-20261001-44: withdrawn signals and expiry-fabricated NEUTRALs (no exit price)
+          -- are not outcomes of a trade anyone could take.
+          AND COALESCE(us.status, '') <> 'INVALIDATED_CONFLICT'
+          AND NOT (uso.outcome = 'NEUTRAL' AND uso.exit_price IS NULL)
     """
     rows = conn.execute(query, (cutoff,)).fetchall()
     if not rows:

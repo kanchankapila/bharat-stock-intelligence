@@ -109,15 +109,24 @@ class StrategyOptimizer:
         # that matches signal_outcomes' 5/15-day horizons (vs. same-day 'intraday').
         # screener_master join removed: signal_outcomes are from technical_signals,
         # not screener sources (Trendlyne/MC/ETnow), so source was always NULL.
+        # Point-in-time factors (AF-20261001-42): this joined the CURRENT stock_factor_breakdown
+        # by symbol, so every historical outcome was explained by factor scores computed after
+        # it resolved. stock_factor_breakdown_history is the as-of copy; outcomes older than its
+        # first snapshot have no honest factor row and are dropped (inner join), not zero-filled.
+        # STOP_LOSS is a loss and belongs in the objective.
         q = """
             SELECT so.symbol, so.signal_date, so.horizon_days,
                    so.outcome, so.return_pct, so.signal_score,
                    sfb.technical, sfb.fundamental, sfb.momentum,
                    sfb.valuation, sfb.delivery, sfb.news
             FROM signal_outcomes so
-            LEFT JOIN stock_factor_breakdown sfb
+            JOIN stock_factor_breakdown_history sfb
                    ON sfb.symbol = so.symbol AND sfb.timeframe = 'long_term'
-            WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
+                  AND sfb.snapshot_date = (
+                      SELECT MAX(h.snapshot_date) FROM stock_factor_breakdown_history h
+                      WHERE h.symbol = so.symbol AND h.timeframe = 'long_term'
+                        AND h.snapshot_date <= so.signal_date)
+            WHERE so.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
               AND so.return_pct IS NOT NULL
               AND so.horizon_days = ?
               AND so.signal_source = 'technical'
@@ -239,8 +248,13 @@ class StrategyOptimizer:
             print("[Optimizer] WARNING: optimised weights underperform baseline on held-out "
                   "test data -- likely overfit to the train split. Review before applying.")
 
-        opt_cat = dict(zip(CATEGORIES, result.x[:len(CATEGORIES)]))
-        opt_src = dict(zip(SOURCES,    result.x[len(CATEGORIES):]))
+        # Only categories with a factor column in df move the objective; the rest (sector,
+        # other) and every SOURCE weight are unconstrained, so DE returns noise for them.
+        # Keep their defaults rather than writing that noise to app_settings (AF-20261001-43).
+        fitted = {c for c in CATEGORIES if c in df.columns and df[c].abs().sum() > 0}
+        opt_cat = {c: (v if c in fitted else DEFAULT_CATEGORY_WEIGHTS[c])
+                   for c, v in zip(CATEGORIES, result.x[:len(CATEGORIES)])}
+        opt_src = dict(DEFAULT_SOURCE_WEIGHTS)
 
         # Simulate win rate at optimised weights
         opt_df_score = sum(df[c] * opt_cat.get(c, 1.0) for c in CATEGORIES if c in df.columns)

@@ -69,7 +69,7 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so
         JOIN technical_signals ts ON ts.symbol = so.symbol AND so.signal_date = ts.date
-        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+        WHERE so.outcome IN ('WIN', 'LOSS', 'STOP_LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
     """).fetchall()
     # Postgres allows storing float('nan') in a NOT NULL-satisfying column — filter those
@@ -106,10 +106,17 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
         regimes_meta[reg] = {'n': len(g['p']), 'distinct_days': dd, 'episodes': ep,
                              'used': 'regime' if qualifies else 'global'}
 
+    # Point-in-time (AF-20261001-45): only rows dated after every outcome in the fit are
+    # (re)calibrated. Rewriting older rows nightly stamped each one with a calibrator fit on its
+    # OWN later outcome -- a look-ahead that backtester.py then read as a historical signal.
+    # Each row keeps the value it got from the last fit before its outcomes existed.
+    fit_max = max(str(r['d'])[:10] for r in rows)
     sigs = conn.execute(
         "SELECT symbol, date, nifty_regime, win_probability, calibrated_win_probability "
         "FROM technical_signals "
-        "WHERE win_probability IS NOT NULL AND win_probability <> 0.5"   # skip unscored 0.5 defaults
+        "WHERE win_probability IS NOT NULL AND win_probability <> 0.5 "   # skip unscored 0.5 defaults
+        "AND date > ?",
+        (fit_max,),
     ).fetchall()
     updated = 0
     changes = []
@@ -281,7 +288,7 @@ def per_regime_calibration_slope(conn: ConnWrapper, min_n: int = 50) -> dict:
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND so.signal_date = ts.date
-        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+        WHERE so.outcome IN ('WIN', 'LOSS', 'STOP_LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
     """).fetchall()
     g: dict = {}
@@ -306,7 +313,7 @@ def _pooled_calibration_slope(conn: ConnWrapper, min_n: int = 50):
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND so.signal_date = ts.date
-        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+        WHERE so.outcome IN ('WIN', 'LOSS', 'STOP_LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
     """).fetchall()
     return stratified_calibration_slope(
@@ -321,7 +328,7 @@ def per_regime_auc(conn: ConnWrapper, min_n: int = 50) -> dict:
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND so.signal_date = ts.date
-        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+        WHERE so.outcome IN ('WIN', 'LOSS', 'STOP_LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5          -- exclude unscored 0.5 defaults (see recalibrate)
           AND so.signal_source = 'technical'
     """).fetchall()
@@ -345,7 +352,7 @@ def regime_readiness(conn: ConnWrapper, min_regime_days: int = 20, min_regime_ep
         SELECT ts.nifty_regime AS regime, ts.date AS d
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND so.signal_date = ts.date
-        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+        WHERE so.outcome IN ('WIN', 'LOSS', 'STOP_LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5          -- exclude unscored 0.5 defaults (see recalibrate)
           AND so.signal_source = 'technical'
     """).fetchall()
@@ -416,7 +423,7 @@ def _pooled_auc(conn: ConnWrapper, min_n: int = 50):
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND so.signal_date = ts.date
-        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+        WHERE so.outcome IN ('WIN', 'LOSS', 'STOP_LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
     """).fetchall()
     return stratified_auc(

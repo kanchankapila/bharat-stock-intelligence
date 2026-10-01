@@ -263,7 +263,7 @@ def compute_excursions(entry: float, bars: list, atr: float,
     }
 
 
-def _entries(horizon: int | None, limit: int | None) -> list:
+def _entries(horizon: int | None, limit: int | None, relabel: bool = False) -> list:
     # signal_source='technical' (2026-08): signal_excursions' key (symbol, signal_date,
     # horizon_days) has no source discriminator of its own -- now that signal_outcomes can
     # carry a technical- AND a confluence-sourced row for the same key, scoping here to
@@ -273,13 +273,18 @@ def _entries(horizon: int | None, limit: int | None) -> list:
         "SELECT o.symbol, o.signal_date, o.horizon_days, o.entry_price "
         "FROM signal_outcomes o "
         "WHERE o.entry_price IS NOT NULL AND o.signal_source = 'technical' "
-        "AND NOT EXISTS ( "
-        "  SELECT 1 FROM signal_excursions e "
-        "  WHERE e.symbol = o.symbol "
-        "    AND e.signal_date = o.signal_date "
-        "    AND e.horizon_days = o.horizon_days "
-        ")"
     )
+    # --relabel recomputes keys already written (AF-20261001-40: most were labelled on a
+    # truncated window and the skip-existing clause froze them).
+    if not relabel:
+        sql += (
+            "AND NOT EXISTS ( "
+            "  SELECT 1 FROM signal_excursions e "
+            "  WHERE e.symbol = o.symbol "
+            "    AND e.signal_date = o.signal_date "
+            "    AND e.horizon_days = o.horizon_days "
+            ")"
+        )
     params = []
     if horizon is not None:
         sql += " AND o.horizon_days = ?"
@@ -336,11 +341,11 @@ def _mark_delisted(candidate_symbols: list[str]) -> None:
           f"(no stock_ohlcv update since before {stale_cutoff}): {newly}")
 
 
-def run(horizon: int | None = None, limit: int | None = None) -> int:
+def run(horizon: int | None = None, limit: int | None = None, relabel: bool = False) -> int:
     """Compute excursion labels for signal_outcomes entries and upsert signal_excursions.
     Returns rows written."""
     _ensure_vol_rank_column()
-    entries = _entries(horizon, limit)
+    entries = _entries(horizon, limit, relabel=relabel)
     if not entries:
         print("[EXIT] No entries to label.")
         return 0
@@ -373,6 +378,10 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
                     stale_missing.append(symbol)
             except ValueError:
                 pass
+            continue
+        if len(ohlcv) < int(hd):
+            # Window not complete yet. Labelling now writes a shorter-horizon label that the
+            # skip-existing clause in _entries() then freezes forever (AF-20261001-40).
             continue
         prior = read_df(
             "SELECT high, low, close FROM stock_ohlcv "
@@ -443,5 +452,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Path-based exit labeler")
     parser.add_argument("--horizon", type=int, help="Only label this horizon (e.g. 5, 15)")
     parser.add_argument("--limit", type=int, help="Cap number of entries (newest first)")
+    parser.add_argument("--relabel", action="store_true",
+                        help="Recompute keys already in signal_excursions (repairs truncated-window labels)")
     args = parser.parse_args()
-    run(horizon=args.horizon, limit=args.limit)
+    run(horizon=args.horizon, limit=args.limit, relabel=args.relabel)
