@@ -1,6 +1,7 @@
 import { dbGet, dbAll, dbTransaction } from './dbAsync';
 import { rowGroups, bulkUpsert } from './dbBulk';
 import { runPython } from './pythonRunner';
+import { wilderATR } from './atrBarriers';
 
 // ─── Screener Classification ────────────────────────────────────────────────
 
@@ -204,8 +205,14 @@ function toConvictionLevel(score: number): 'ELITE' | 'STRONG' | 'MODERATE' | 'WE
 
 // ─── Trade Setup from ATR ────────────────────────────────────────────────────
 
-function buildTradeSetup(price: number, atr: number, score: number) {
-  const risk = Math.max(atr * 1.5, price * 0.02);
+// Holding horizon (sessions) per suggested timeframe. The stop is the compute_atr_barriers
+// convention (1.5 x daily ATR) at 5 sessions, scaled by sqrt(sessions/5). Measured 2026-10-01
+// (AF-20261001-21; liquid names, 14 non-overlapping dates, 15,601 obs): a FIXED 1.5-ATR stop is
+// touched by noise 2.3% / 20.6% / 57.9% of the time within 1 / 5 / 20 sessions; 0.67 / 1.5 /
+// 3.0 ATR is touched ~20-24% at each horizon. Median adverse excursion 0.31 / 0.84 / 1.78 ATR.
+export const HOLDING_SESSIONS: Record<string, number> = { INTRADAY: 1, SWING: 5, POSITIONAL: 20 };
+export function buildTradeSetup(price: number, atr: number, score: number, timeframe: string) {
+  const risk = atr * 1.5 * Math.sqrt((HOLDING_SESSIONS[timeframe] ?? 5) / 5);
   const rewardMult = score >= 80 ? 4 : score >= 60 ? 3 : 2;
   return {
     entryLow:   Math.round((price - atr * 0.25) * 100) / 100,
@@ -214,7 +221,8 @@ function buildTradeSetup(price: number, atr: number, score: number) {
     target1:    Math.round((price + risk * rewardMult * 0.5) * 100) / 100,
     target2:    Math.round((price + risk * rewardMult) * 100) / 100,
     target3:    Math.round((price + risk * rewardMult * 1.6) * 100) / 100,
-    riskReward: Math.round((risk * rewardMult) / risk * 10) / 10,
+    // R:R to target_1 -- the first exit a trader is actually told to take (was target_2's).
+    riskReward: Math.round(rewardMult * 0.5 * 10) / 10,
   };
 }
 
@@ -475,6 +483,20 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
     ) as any[]).map((r: any) => [r.symbol, r.volume])
   );
 
+  // True 14-day Wilder ATR per symbol (AF-20261001-20). Was `cmp * bb_width / 100`:
+  // bb_width is a FRACTION and Bollinger width is not ATR, so "atr" read ~0.13% of price vs a
+  // real ~3.7%, and every setup collapsed onto the 2%-of-price stop floor. 45 calendar days
+  // bounds the read to the recent (uncompressed) chunks and still yields >=15 sessions.
+  const barsBySymbol = new Map<string, Array<{ high: number; low: number; close: number }>>();
+  for (const r of await dbAll(
+    `SELECT symbol, date, high, low, close FROM stock_ohlcv
+     WHERE date >= CURRENT_DATE - 45 AND COALESCE(is_suspect, 0) = 0
+     ORDER BY symbol, date`,
+  ) as any[]) {
+    if (!barsBySymbol.has(r.symbol)) barsBySymbol.set(r.symbol, []);
+    barsBySymbol.get(r.symbol)!.push({ high: +r.high, low: +r.low, close: +r.close });
+  }
+
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
@@ -507,7 +529,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
     const scored = scoreStock({ symbol, screenerIds: ids, screenerNames: names, screenerClasses: classes }, tech, quant, fund, nse);
 
     const price = tech?.cmp ?? null;
-    const atr = price && tech?.bb_width && tech.bb_width > 0 ? price * (tech.bb_width / 100) : (price ? price * 0.03 : null);
+    const atr = wilderATR(barsBySymbol.get(symbol) ?? []) || null;
     // buildTradeSetup only ever constructs a LONG setup (entry near CMP, stop below, targets
     // above) -- this platform has no short-side trade construct (cash equity, no retail
     // shorting; see unified_ranker.py's position-sizing comment "longs only"). Attaching it to
@@ -516,7 +538,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
     // pulling through into Sell/Strong-Sell rows via `_get_entry_targets`'s confluence_signals
     // fallback. `netBearish` is the same signed test already used above to distinguish "not
     // flagged" from "actively flagged bearish" -- gate the setup on it too.
-    const setup = price && atr && !scored.netBearish ? buildTradeSetup(price, atr, scored.confluenceScore) : null;
+    const setup = price && atr && !scored.netBearish ? buildTradeSetup(price, atr, scored.confluenceScore, scored.timeframe) : null;
 
     const weightsObj: Record<string, number> = {};
     ids.forEach((id, i) => { weightsObj[id] = classes[i].weight; });

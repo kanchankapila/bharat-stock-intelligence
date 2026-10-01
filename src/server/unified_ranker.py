@@ -2425,8 +2425,8 @@ class UnifiedRanker:
 
         # Fallback 2: recommendation_log
         # rr floor (2026-08-05): unlike fallback 1 (confluence_signals), whose own
-        # buildTradeSetup() can only ever produce risk_reward in {2,3,4} by construction
-        # (reward/risk cancels to the reward multiplier), this reads a genuinely independent
+        # buildTradeSetup() can only ever produce risk_reward in {1,1.5,2} by construction
+        # (R:R to target_1 = half the reward multiplier, since 2026-10-01), this reads a genuinely independent
         # entry/stop/target triple and can legitimately compute rr<1 -- live production had
         # Buy-classified rows presenting e.g. a 0.69 R:R as an actionable long setup. A
         # sub-1 R:R isn't a data-integrity bug in the source row itself, but it's not a trade

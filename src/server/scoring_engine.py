@@ -10,7 +10,13 @@ from typing import Dict, Any, List
 
 from db_compat import get_engine, connect as db_connect, now_utc_iso, safe_alter, use_postgres
 import as_of
-from technical_analysis_engine import compute_atr_barriers
+import math
+from technical_analysis_engine import compute_atr_barriers, STOP_ATR_MULT, TARGET_ATR_MULT
+from exit_labeler import compute_atr
+
+# recommendation_log.horizon_days per scoring timeframe, in trading sessions (the resolver
+# counts sessions). Was a flat 15, so an 'intraday' rec was graded over three weeks.
+REC_LOG_HORIZON_SESSIONS = {'intraday': 1, 'long_term': 15}
 from indian_market_costs import round_trip_cost_bps
 
 
@@ -1273,11 +1279,12 @@ class AlphaQuantScoringEngine:
                 # batched lookup (mirroring how entry_price/ATR were added 2026-07-30) rather
                 # than threaded through this file's internal news_df/screener-composite
                 # pipeline, which is not something to touch casually in this file.
+                # atr is NOT read from confluence_signals any more (AF-20261001-23): that column
+                # was `cmp * bb_width / 100`, ~30x too small, so 97% of rows landed on the
+                # 2%/3% barrier floor. It is computed from stock_ohlcv below.
                 price_rows = conn.execute(text(f"""
                     SELECT ts.symbol, ts.cmp, ts.news_sentiment_score,
-                           (SELECT cs.atr FROM confluence_signals cs
-                            WHERE cs.symbol = ts.symbol AND cs.atr IS NOT NULL
-                            ORDER BY cs.computed_at DESC LIMIT 1) AS atr,
+                           NULL AS atr,
                            (SELECT qs.rank_composite FROM quant_scores qs
                             WHERE qs.symbol = ts.symbol AND qs.rank_composite IS NOT NULL) AS rank_composite
                     FROM technical_signals ts
@@ -1289,16 +1296,45 @@ class AlphaQuantScoringEngine:
         except Exception as e:
             print(f"[ScoringEngine] price/ATR lookup for recommendation_log failed (entry_price will be null): {e}")
 
+        # Entry = latest stock_ohlcv close (technical_signals.cmp only as fallback: it can be
+        # weeks stale, and 1.4% of rows had no technical_signals row at all -> NULL entry),
+        # ATR = 14-session mean true range over the same bars (AF-20261001-23/-24).
+        ohlcv_map: Dict[str, tuple] = {}
+        try:
+            since = (datetime.date.today() - datetime.timedelta(days=45)).isoformat()
+            with self.engine.connect() as conn:
+                bars_by_sym: Dict[str, list] = {}
+                for sym, high, low, close in conn.execute(text(f"""
+                    SELECT symbol, high, low, close FROM stock_ohlcv
+                    WHERE symbol IN ({', '.join(f':s{i}' for i in range(len(symbols)))})
+                      AND date >= :since AND COALESCE(is_suspect, 0) = 0
+                    ORDER BY symbol, date
+                """), {'since': since, **{f's{i}': s for i, s in enumerate(symbols)}}):
+                    bars_by_sym.setdefault(sym, []).append((float(high), float(low), float(close)))
+            for sym, bars in bars_by_sym.items():
+                ohlcv_map[sym] = (bars[-1][2], compute_atr(bars) if len(bars) >= 15 else None)
+        except Exception as e:
+            print(f"[ScoringEngine] stock_ohlcv price/ATR lookup failed (falling back to technical_signals.cmp): {e}")
+
         # Compute transaction costs for each symbol (STT, fees, slippage)
         cost_map = self._compute_cost_map(symbols)
 
         rows = []
         for r in candidates:
-            cmp_val, sentiment_val, atr_val, quant_val = price_atr_map.get(r['symbol'], (None, None, None, None))
-            entry_price = float(cmp_val) if cmp_val else None
+            cmp_val, sentiment_val, _, quant_val = price_atr_map.get(r['symbol'], (None, None, None, None))
+            close_val, atr_val = ohlcv_map.get(r['symbol'], (None, None))
+            entry_price = float(close_val or cmp_val) if (close_val or cmp_val) else None
+            timeframe = r.get('timeframe', 'medium')
+            horizon = REC_LOG_HORIZON_SESSIONS.get(timeframe, 15)
+            # Barriers scale with the holding horizon: compute_atr_barriers' 1.5/2.5 ATR is the
+            # 5-session convention, widened/narrowed by sqrt(h/5) (same rule and measurement as
+            # confluenceEngine.buildTradeSetup's HOLDING_SESSIONS).
+            hscale = math.sqrt(horizon / 5)
             target_1 = target_2 = target_3 = stop_loss = None
             if entry_price and entry_price > 0:
-                target_1, stop_loss = compute_atr_barriers(entry_price, atr_val, 'long')
+                target_1, stop_loss = compute_atr_barriers(
+                    entry_price, atr_val, 'long',
+                    stop_mult=STOP_ATR_MULT * hscale, target_mult=TARGET_ATR_MULT * hscale)
                 # Scaled profit-taking ladder: each further target extends the same excess-
                 # over-entry move again (target_1's own excess, doubled/tripled), not a new
                 # ATR multiplier constant -- avoids inventing a second barrier formula.
@@ -1316,7 +1352,7 @@ class AlphaQuantScoringEngine:
                 'rec_type':       'BUY' if r['classification'] == 'Buy' else 'STRONG_BUY',
                 'signal_date':    today,
                 'generated_at':   now,
-                'timeframe':      r.get('timeframe', 'medium'),
+                'timeframe':      timeframe,
                 'entry_price':    entry_price,
                 'stop_loss':      stop_loss,
                 'target_1':       target_1,
@@ -1331,7 +1367,7 @@ class AlphaQuantScoringEngine:
                 'reasoning':      r.get('reasons', ''),
                 'source':         'scoring_engine',
                 'status':         'ACTIVE',
-                'horizon_days':   15,
+                'horizon_days':   horizon,
             })
 
         try:
