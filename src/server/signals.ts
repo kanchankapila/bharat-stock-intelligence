@@ -1,4 +1,4 @@
-import { dbAll, dbGet, dbRun, dbTransaction } from './dbAsync';
+import { dbGet, dbRun } from './dbAsync';
 
 export const DEFAULT_AI_SIGNAL_MIN_CONFIDENCE = 65;
 // Quant-endorsement floor for the AI path: the scoring engine only writes a win_probability
@@ -236,22 +236,9 @@ export function resolveSignalOutcome(
   return null;
 }
 
-export async function updateSignalAccuracy(symbol: string, currentPrice: number) {
-  const rows = await dbAll<any>('SELECT id, signal_type, target_price, stop_loss, status FROM unified_signals WHERE symbol = ? AND status = ?', [symbol, 'ACTIVE']);
-
-  await dbTransaction(async (tx) => {
-    for (const row of rows) {
-      let newStatus = row.status;
-
-      const resolved = resolveSignalOutcome(currentPrice, row.target_price, row.stop_loss);
-      if (resolved) newStatus = resolved;
-
-      if (newStatus !== "ACTIVE") {
-        await tx.run(`UPDATE unified_signals SET status = ? WHERE id = ?`, [newStatus, row.id]);
-      }
-    }
-  });
-}
+// updateSignalAccuracy (a current-price snapshot closer) was removed 2026-10-01: it never had a
+// caller. unified_signals are closed by signal_lifecycle.py, over each signal's validity window
+// (AF-20261001-37).
 
 export interface UnifiedSignalInput {
   symbol: string;
