@@ -14,7 +14,6 @@ Writes results to strategy_performance and resolves outstanding recommendation_l
 Run:  python performance_tracker.py
       python performance_tracker.py --horizon 15
       python performance_tracker.py --segment signal_type
-      python performance_tracker.py --resolve-recs   # resolve pending recommendation_log rows
 """
 
 import os
@@ -75,9 +74,11 @@ class PerformanceTracker:
             LEFT JOIN technical_signals ts
                    ON ts.symbol = so.symbol AND so.signal_date = ts.date
             LEFT JOIN nse_stocks ns ON ns.symbol = so.symbol
-            WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
+            WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL', 'STOP_LOSS')
               AND so.return_pct IS NOT NULL
+              AND so.exit_price IS NOT NULL
               AND so.signal_source = 'technical'
+              AND so.label_definition = 'path_barrier'
         """
         params = []
         if horizon_days:
@@ -126,7 +127,7 @@ class PerformanceTracker:
             return {}
 
         wins    = outcomes == 'WIN'
-        losses  = outcomes == 'LOSS'
+        losses  = outcomes.isin(['LOSS', 'STOP_LOSS'])
         win_rate = wins.mean()
         win_returns  = returns[wins]
         loss_returns = returns[losses]
@@ -366,53 +367,6 @@ class PerformanceTracker:
         self.conn.commit()
         print(f"[PerfTracker] Saved {len(rows)} segment rows to strategy_performance.")
 
-    def resolve_recommendations(self):
-        """Update recommendation_log rows that have a matching signal_outcomes entry."""
-        cur = self.conn.cursor()
-        # Join on best-matching horizon: prefer exact match, fall back to any resolved outcome
-        cur.execute("""
-            UPDATE recommendation_log
-            SET
-                actual_exit_price = (
-                    SELECT so.exit_price FROM signal_outcomes so
-                    WHERE so.symbol = recommendation_log.symbol
-                      AND so.signal_date = recommendation_log.signal_date
-                      AND so.outcome NOT IN ('PENDING')
-                      AND so.signal_source = 'technical'
-                    ORDER BY so.horizon_days ASC, so.computed_at DESC LIMIT 1
-                ),
-                actual_return_pct = (
-                    SELECT so.return_pct FROM signal_outcomes so
-                    WHERE so.symbol = recommendation_log.symbol
-                      AND so.signal_date = recommendation_log.signal_date
-                      AND so.outcome NOT IN ('PENDING')
-                      AND so.signal_source = 'technical'
-                    ORDER BY so.horizon_days ASC, so.computed_at DESC LIMIT 1
-                ),
-                outcome = (
-                    SELECT so.outcome FROM signal_outcomes so
-                    WHERE so.symbol = recommendation_log.symbol
-                      AND so.signal_date = recommendation_log.signal_date
-                      AND so.outcome NOT IN ('PENDING')
-                      AND so.signal_source = 'technical'
-                    ORDER BY so.horizon_days ASC, so.computed_at DESC LIMIT 1
-                ),
-                status = 'RESOLVED',
-                resolved_at = CURRENT_TIMESTAMP
-            WHERE status = 'ACTIVE'
-              AND EXISTS (
-                SELECT 1 FROM signal_outcomes so
-                WHERE so.symbol = recommendation_log.symbol
-                  AND so.signal_date = recommendation_log.signal_date
-                  AND so.outcome NOT IN ('PENDING')
-                  AND so.signal_source = 'technical'
-              )
-        """)
-        updated = cur.rowcount
-        self.conn.commit()
-        print(f"[PerfTracker] Resolved {updated} recommendation_log rows.")
-        return updated
-
     # ──────────────────────────────────────────────────────────────────────────
     # Summary reporting
     # ──────────────────────────────────────────────────────────────────────────
@@ -447,12 +401,11 @@ class PerformanceTracker:
     # Main run
     # ──────────────────────────────────────────────────────────────────────────
 
-    def run(self, horizon_days: int = 15, segments: list[str] | None = None,
-            resolve_recs: bool = True):
+    # recommendation_log is graded by outcome_resolver.resolve_recommendation_log alone, at each
+    # row's own horizon. A second grader here stamped the h1 technical label onto 15-session
+    # recommendations (AF-20261001-36).
+    def run(self, horizon_days: int = 15, segments: list[str] | None = None):
         print(f"[PerfTracker] Starting at {datetime.datetime.now()}")
-
-        if resolve_recs:
-            self.resolve_recommendations()
 
         df = self.load_outcomes(horizon_days=horizon_days)
         print(f"[PerfTracker] {len(df)} resolved outcomes for horizon={horizon_days}d")
@@ -501,9 +454,6 @@ if __name__ == "__main__":
                         help="Outcome horizon in days (default: 15)")
     parser.add_argument("--segment",      type=str,   default="",
                         help="Comma-separated segments to compute (default: all)")
-    parser.add_argument("--resolve-recs", action="store_true", default=True,
-                        help="Resolve pending recommendation_log entries (default: true)")
-    parser.add_argument("--no-resolve",   dest="resolve_recs", action="store_false")
     args = parser.parse_args()
 
     segs = [s.strip() for s in args.segment.split(",") if s.strip()] if args.segment else None
@@ -513,7 +463,6 @@ if __name__ == "__main__":
         tracker.run(
             horizon_days=args.horizon,
             segments=segs,
-            resolve_recs=args.resolve_recs,
         )
     finally:
         tracker.close()

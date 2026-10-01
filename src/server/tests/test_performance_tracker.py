@@ -102,3 +102,27 @@ class TestProfitFactorZeroLosses:
         metrics = PerformanceTracker.compute_metrics(r, o, horizon_days=5)
         # compute_metrics rounds to 4dp before returning; compare against the same rounding.
         assert metrics['profit_factor'] == pytest.approx(round(8.0 / 3.0, 4))
+
+
+class TestPopulationAndSingleGrader:
+    """AF-20261001-36: (a) load_outcomes kept outcome IN (WIN, LOSS, NEUTRAL), dropping every
+    STOP_LOSS -- the worst losers -- from the win rate; compute_metrics did not count them as
+    losses either. (b) resolve_recommendations was a second recommendation_log grader: it
+    stamped the SHORTEST-horizon technical label (h1) onto 15-session recommendations and marked
+    them RESOLVED -- live 1,081 scoring_engine h15 rows carry exactly the h1 exit/return."""
+
+    def test_stop_loss_counts_as_a_loss(self):
+        r, o = _series([4.0, -3.0, -1.0], ['WIN', 'STOP_LOSS', 'LOSS'])
+        m = PerformanceTracker.compute_metrics(r, o, horizon_days=5)
+        assert m['loss_count'] == 2
+        assert m['false_positive_rate'] == pytest.approx(round(2 / 3, 4))
+
+    def test_load_outcomes_keeps_stop_losses_and_needs_a_real_exit(self):
+        import inspect
+        src = inspect.getsource(PerformanceTracker.load_outcomes)
+        assert "'STOP_LOSS'" in src
+        assert "label_definition = 'path_barrier'" in src
+        assert "exit_price IS NOT NULL" in src
+
+    def test_no_second_recommendation_log_grader(self):
+        assert not hasattr(PerformanceTracker, 'resolve_recommendations')
