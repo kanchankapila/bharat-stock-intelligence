@@ -36,7 +36,10 @@ describe('ml.router resolved populations exclude PENDING and fabricated labels',
   it('getSignalReportCard reports each horizon under its own label', async () => {
     await rec('MLRT4', 'WIN', 4, 104);
     await rec('MLRT5', 'PENDING', null, null);
-    for (const [h, outcome] of [[1, 'LOSS'], [5, 'WIN'], [15, 'WIN']] as const) {
+    // Horizons no sibling test writes (they use 1/5/15): this file shares one throwaway schema
+    // with every other unit test, so a count scoped to a horizon someone else populates is a
+    // flake, not an assertion.
+    for (const [h, outcome] of [[21, 'LOSS'], [63, 'WIN']] as const) {
       await dbRun(`INSERT INTO signal_outcomes
         (symbol, signal_date, horizon_days, entry_price, exit_price, outcome, return_pct,
          signal_source, label_definition)
@@ -45,13 +48,20 @@ describe('ml.router resolved populations exclude PENDING and fabricated labels',
     }
     await dbRun(`INSERT INTO signal_outcomes
       (symbol, signal_date, horizon_days, entry_price, outcome, return_pct, signal_source, label_definition)
-      VALUES ('MLRTP', '2020-01-01', 5, 100, 'PENDING', NULL, 'technical', 'path_barrier')`);
+      VALUES ('MLRTP', '2020-01-01', 126, 100, 'PENDING', NULL, 'technical', 'path_barrier')`);
 
     const res = await caller.getSignalReportCard({ horizonDays: 15 }) as any;
     const rows: any[] = res.outcomeSummary ?? [];
     const tech = rows.filter(r => r.signal_source === 'TECHNICAL');
-    expect(tech.map(r => Number(r.horizon_days)).sort((a, b) => a - b)).toEqual([1, 5, 15]);
-    for (const r of tech) expect(Number(r.total_outcomes)).toBe(1);
+    const horizons = tech.map(r => Number(r.horizon_days));
+    // one row per horizon (the bug stamped a single hardcoded 15 on the pooled population)
+    expect(new Set(horizons).size).toBe(horizons.length);
+    expect(horizons).toContain(21);
+    expect(horizons).toContain(63);
+    expect(horizons).not.toContain(126);          // PENDING is not a closed trade
+    for (const r of tech.filter(x => [21, 63].includes(Number(x.horizon_days)))) {
+      expect(Number(r.total_outcomes)).toBe(1);
+    }
     const recRow = rows.find(r => r.signal_source === 'RECOMMENDATION');
     expect(Number(recRow.total_outcomes)).toBe(1);
   });
