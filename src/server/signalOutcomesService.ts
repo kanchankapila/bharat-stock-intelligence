@@ -1,7 +1,12 @@
 import { dbAll } from './dbAsync';
 
 export type OutcomeResult = 'WIN' | 'LOSS' | 'NEUTRAL' | 'PENDING';
-export type HorizonDays = 5 | 15;
+export type HorizonDays = 1 | 5 | 15;
+
+/** The horizon the headline (`overall`, `byScoreBucket`, `bySignalType`) is computed at. */
+export const HEADLINE_HORIZON: HorizonDays = 5;
+/** Trailing window of signal dates, anchored to the newest graded date (not to today). */
+export const WINDOW_DAYS = 60;
 
 interface OutcomeRow {
   symbol: string;
@@ -17,19 +22,18 @@ interface OutcomeRow {
   signals_json: string | null;
 }
 
+type Bucket = { total: number; wins: number; winRate: number; avgReturn: number };
+
 export interface WinRateStats {
-  overall: {
-    total: number;
-    wins: number;
-    losses: number;
-    winRate: number;
-    avgReturn: number;
-    avgWin: number;
-    avgLoss: number;
-  };
-  bySignalType: Record<string, { total: number; wins: number; winRate: number; avgReturn: number }>;
-  byHorizon: Record<HorizonDays, { total: number; wins: number; winRate: number; avgReturn: number }>;
-  byScoreBucket: Record<string, { total: number; wins: number; winRate: number; avgReturn: number }>;
+  overall: Bucket & { losses: number; avgWin: number; avgLoss: number; signalDates: number };
+  /** `overall` is ONE horizon, never a pool of horizons (AF-20261001-35). */
+  overallHorizonDays: HorizonDays;
+  /** Distinct signal dates behind each number: overlapping h-session windows mean only about
+   *  signalDates / h of them are independent (measurement.md). */
+  windowDays: number;
+  bySignalType: Record<string, Bucket>;
+  byHorizon: Record<HorizonDays, Bucket & { signalDates: number }>;
+  byScoreBucket: Record<string, Bucket>;
   recentOutcomes: OutcomeRow[];
   /** Which labeling convention every number above was computed under. Surfaced so a consumer
    *  can disclose it: `.claude/rules/measurement.md` records path_barrier and terminal_pct2
@@ -41,112 +45,77 @@ export interface WinRateStats {
 // The grader that lived here (computeSignalOutcomes) was retired 2026-09-30 (AF-20260930-31):
 // it wrote the same signal_outcomes key as outcome_resolver.py under a different rule.
 
+// One population for every number: technical source, path_barrier label (signal_source alone
+// is not label-uniform -- 1,722 unlabeled 99.4%-win rows sat inside the path_barrier range,
+// 2026-08-15), a real exit price (an expiry-fabricated NEUTRAL 0.0% has none, AF-20261001-30),
+// and a trailing window of signal DATES anchored to the newest graded date. return_pct is net
+// of round-trip cost (outcome_resolver.net_return_pct).
+//
+// It used to be the newest 2000 rows pooled across horizons. At ~2,170 technical signals/day
+// that was one day of h1 labels (live 2026-10-01: 1,999 h1 rows, all 2026-09-29) presented as
+// the headline win rate, while byHorizon[5]/[15] read empty (AF-20261001-35).
+const BASE = `
+  FROM signal_outcomes so
+  WHERE so.signal_source = 'technical' AND so.label_definition = 'path_barrier'
+    AND so.outcome IN ('WIN', 'LOSS', 'NEUTRAL', 'STOP_LOSS')
+    AND so.exit_price IS NOT NULL AND so.return_pct IS NOT NULL
+    AND so.horizon_days = ?
+    AND so.signal_date >= (
+      SELECT MAX(s2.signal_date) FROM signal_outcomes s2
+      WHERE s2.signal_source = 'technical' AND s2.label_definition = 'path_barrier'
+        AND s2.horizon_days = ? AND s2.exit_price IS NOT NULL) - ${WINDOW_DAYS}`;
+
+const AGG = `COUNT(*)::int AS total,
+  COUNT(*) FILTER (WHERE so.outcome = 'WIN')::int AS wins,
+  COUNT(*) FILTER (WHERE so.outcome IN ('LOSS', 'STOP_LOSS'))::int AS losses,
+  COALESCE(AVG(so.return_pct), 0) AS avg_return,
+  COALESCE(AVG(so.return_pct) FILTER (WHERE so.outcome = 'WIN'), 0) AS avg_win,
+  COALESCE(AVG(so.return_pct) FILTER (WHERE so.outcome IN ('LOSS', 'STOP_LOSS')), 0) AS avg_loss,
+  COUNT(DISTINCT so.signal_date)::int AS signal_dates`;
+
+const bucket = (r: any): Bucket => {
+  const total = Number(r?.total ?? 0);
+  const wins = Number(r?.wins ?? 0);
+  return { total, wins, winRate: total ? (wins / total) * 100 : 0, avgReturn: Number(r?.avg_return ?? 0) };
+};
+
 export async function getWinRateStats(): Promise<WinRateStats> {
-  // signal_source='technical' (2026-08): confluence-sourced rows use an incompatible fixed
-  // +/-2% labeling threshold -- blending both into one win-rate report would mix two different
-  // questions, matching every other signal-accuracy consumer's choice in this codebase.
-  //
-  // label_definition='path_barrier' added 2026-08-15: signal_source alone is NOT a reliable
-  // proxy for the labeling convention, which is what actually has to be uniform here. Measured
-  // live, signal_source='technical' resolves to THREE groups, not one:
-  //     path_barrier   198,723 rows   68.7% win
-  //     (NULL)           1,722 rows   99.4% win   <-- unlabeled, 2026-07-21..2026-08-02
-  //     confluence/terminal_pct2 is the separate 318,292-row family already excluded above
-  // The 1,722 unlabeled rows sit INSIDE path_barrier's own date range (2026-05-16..2026-08-13),
-  // so they are not old data safely below the window -- `ORDER BY signal_date DESC LIMIT 2000`
-  // had no label filter at all, and the only reason they aren't in today's result is that
-  // recent signal volume happens to fill 2,000 rows from 2026-08-13 alone. A few low-volume
-  // days and the window reaches past 2026-08-02 and silently mixes a 99.4%-win-rate slice into
-  // the headline accuracy number, with nothing failing or looking wrong.
-  //
-  // Filter on the thing that must be uniform, not on a proxy for it. Same shape as
-  // `.claude/rules/recurring-bugs.md`'s "enum-ish column with two spellings defeats an IN list"
-  // -- a filter that is correct only by coincidence of the current data distribution.
-  const rows = await dbAll(`
-    SELECT * FROM signal_outcomes
-    WHERE outcome != 'PENDING' AND signal_source = 'technical'
-      AND label_definition = 'path_barrier'
-    ORDER BY signal_date DESC LIMIT 2000
-  `) as OutcomeRow[];
-
-  const empty = { total: 0, wins: 0, winRate: 0, avgReturn: 0 };
-
-  const overall = { total: 0, wins: 0, losses: 0, winRate: 0, avgReturn: 0, avgWin: 0, avgLoss: 0 };
-  const bySignalType: Record<string, { total: number; wins: number; winRate: number; avgReturn: number; _sumRet: number }> = {};
-  const byHorizon: Record<number, { total: number; wins: number; winRate: number; avgReturn: number; _sumRet: number }> = {};
-  const byScoreBucket: Record<string, { total: number; wins: number; winRate: number; avgReturn: number; _sumRet: number }> = {};
-
-  for (const r of rows) {
-    const ret = r.return_pct ?? 0;
-    overall.total++;
-    if (r.outcome === 'WIN') overall.wins++;
-    if (r.outcome === 'LOSS') overall.losses++;
-    overall.avgReturn += ret;
-
-    // By horizon
-    const h = r.horizon_days;
-    if (!byHorizon[h]) byHorizon[h] = { ...empty, _sumRet: 0 } as typeof byHorizon[number];
-    byHorizon[h].total++;
-    if (r.outcome === 'WIN') byHorizon[h].wins++;
-    byHorizon[h]._sumRet += ret;
-
-    // By score bucket
-    const bucket = (r.signal_score ?? 0) >= 7 ? '7-10' : (r.signal_score ?? 0) >= 4 ? '4-6' : '1-3';
-    if (!byScoreBucket[bucket]) byScoreBucket[bucket] = { ...empty, _sumRet: 0 } as typeof byScoreBucket[string];
-    byScoreBucket[bucket].total++;
-    if (r.outcome === 'WIN') byScoreBucket[bucket].wins++;
-    byScoreBucket[bucket]._sumRet += ret;
-
-    // By signal type
-    try {
-      const sigs = JSON.parse(r.signals_json ?? '[]') as { type: string }[];
-      for (const s of sigs) {
-        if (!bySignalType[s.type]) bySignalType[s.type] = { ...empty, _sumRet: 0 } as typeof bySignalType[string];
-        bySignalType[s.type].total++;
-        if (r.outcome === 'WIN') bySignalType[s.type].wins++;
-        bySignalType[s.type]._sumRet += ret;
-      }
-    } catch { /* skip */ }
+  const h = HEADLINE_HORIZON;
+  const byHorizon = {} as WinRateStats['byHorizon'];
+  let overall: WinRateStats['overall'] = { ...bucket(null), losses: 0, avgWin: 0, avgLoss: 0, signalDates: 0 };
+  for (const hz of [1, 5, 15] as HorizonDays[]) {
+    const [r] = await dbAll<any>(`SELECT ${AGG} ${BASE}`, [hz, hz]);
+    byHorizon[hz] = { ...bucket(r), signalDates: Number(r?.signal_dates ?? 0) };
+    if (hz === h) {
+      overall = { ...bucket(r), losses: Number(r?.losses ?? 0), avgWin: Number(r?.avg_win ?? 0),
+        avgLoss: Number(r?.avg_loss ?? 0), signalDates: Number(r?.signal_dates ?? 0) };
+    }
   }
 
-  // Finalise aggregates
-  if (overall.total > 0) {
-    overall.winRate   = (overall.wins / overall.total) * 100;
-    overall.avgReturn = overall.avgReturn / overall.total;
-    const winRows  = rows.filter(r => r.outcome === 'WIN');
-    const lossRows = rows.filter(r => r.outcome === 'LOSS');
-    overall.avgWin  = winRows.length  > 0 ? winRows.reduce( (a, r) => a + (r.return_pct ?? 0), 0) / winRows.length  : 0;
-    overall.avgLoss = lossRows.length > 0 ? lossRows.reduce((a, r) => a + (r.return_pct ?? 0), 0) / lossRows.length : 0;
-  }
-
-  for (const v of Object.values(byHorizon)) {
-    v.winRate  = v.total > 0 ? (v.wins / v.total) * 100 : 0;
-    v.avgReturn = v.total > 0 ? (v as typeof v & { _sumRet: number })._sumRet / v.total : 0;
-  }
-  for (const v of Object.values(byScoreBucket)) {
-    v.winRate  = v.total > 0 ? (v.wins / v.total) * 100 : 0;
-    v.avgReturn = v.total > 0 ? (v as typeof v & { _sumRet: number })._sumRet / v.total : 0;
-  }
-  for (const v of Object.values(bySignalType)) {
-    v.winRate  = v.total > 0 ? (v.wins / v.total) * 100 : 0;
-    v.avgReturn = v.total > 0 ? (v as typeof v & { _sumRet: number })._sumRet / v.total : 0;
-  }
-
-  const recentOutcomes = rows.slice(0, 50);
+  const scoreRows = await dbAll<any>(`
+    SELECT CASE WHEN COALESCE(so.signal_score, 0) >= 7 THEN '7-10'
+                WHEN COALESCE(so.signal_score, 0) >= 4 THEN '4-6' ELSE '1-3' END AS k, ${AGG}
+    ${BASE} GROUP BY 1`, [h, h]);
+  // signals_json is free text: only well-formed arrays of objects are expanded.
+  const typeRows = await dbAll<any>(`
+    SELECT e->>'type' AS k, ${AGG}
+    ${BASE.replace('FROM signal_outcomes so', `FROM signal_outcomes so
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(CASE WHEN pg_input_is_valid(so.signals_json, 'jsonb')
+        THEN CASE WHEN jsonb_typeof(so.signals_json::jsonb) = 'array' THEN so.signals_json::jsonb END END,
+        '[]'::jsonb)) e`)}
+      AND jsonb_typeof(e) = 'object' AND e->>'type' IS NOT NULL
+    GROUP BY 1`, [h, h]);
+  const recentOutcomes = await dbAll<OutcomeRow>(
+    `SELECT so.* ${BASE} ORDER BY so.signal_date DESC, so.symbol LIMIT 50`, [h, h]);
 
   return {
     labelDefinition: 'path_barrier',
+    overallHorizonDays: h,
+    windowDays: WINDOW_DAYS,
     overall,
-    bySignalType: Object.fromEntries(
-      Object.entries(bySignalType).map(([k, v]) => [k, { total: v.total, wins: v.wins, winRate: v.winRate, avgReturn: v.avgReturn }])
-    ),
-    byHorizon: {
-      5:  byHorizon[5]  ? { total: byHorizon[5].total,  wins: byHorizon[5].wins,  winRate: byHorizon[5].winRate,  avgReturn: byHorizon[5].avgReturn }  : { ...empty },
-      15: byHorizon[15] ? { total: byHorizon[15].total, wins: byHorizon[15].wins, winRate: byHorizon[15].winRate, avgReturn: byHorizon[15].avgReturn } : { ...empty },
-    },
-    byScoreBucket: Object.fromEntries(
-      Object.entries(byScoreBucket).map(([k, v]) => [k, { total: v.total, wins: v.wins, winRate: v.winRate, avgReturn: v.avgReturn }])
-    ),
+    bySignalType: Object.fromEntries(typeRows.map(r => [r.k, bucket(r)])),
+    byHorizon,
+    byScoreBucket: Object.fromEntries(scoreRows.map(r => [r.k, bucket(r)])),
     recentOutcomes,
   };
 }
