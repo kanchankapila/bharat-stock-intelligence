@@ -7,7 +7,7 @@ from confluence_outcome_tracker import track_outcomes, recompute_screener_reliab
 SIGNAL_DATE = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
 
 
-def make_db():
+def make_db(market_every_day=True):
     conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
@@ -47,6 +47,13 @@ def make_db():
         -- prior behavior, so existing tests that don't seed this table are unaffected.
         CREATE TABLE screener_master (scan_id TEXT, source TEXT, inferred_sentiment TEXT);
     """)
+    # The market's session calendar: a session every calendar day, so "h sessions after" lands
+    # on signal+h days exactly as these fixtures were written. Weekday-only tests seed their own.
+    if market_every_day:
+        d0 = datetime.date.fromisoformat(SIGNAL_DATE)
+        for i in range(-5, 41):
+            conn.execute("INSERT INTO stock_ohlcv (symbol, date, close) VALUES ('MKT', ?, 1.0)",
+                         ((d0 + datetime.timedelta(days=i)).isoformat(),))
     return conn
 
 
@@ -288,3 +295,58 @@ def test_recompute_screener_reliability_defaults_to_bullish_when_sentiment_unmat
 
     row = conn.execute("SELECT avg_return_30d FROM screener_reliability WHERE scan_id='unk-1'").fetchone()
     assert row['avg_return_30d'] == 6.0
+
+
+# ─── 2026-10-01: one entry per signal-day, horizons in trading sessions ─────────────
+
+def test_one_entry_per_signal_day_and_return_matches_stored_entry():
+    """AF-20261001-32: confluence_signals is re-snapshotted every 30 min, so DISTINCT (symbol,
+    day, current_price) fed several entries for one key; the upsert kept the first entry_price
+    but the last return. Live: 92,491 of 187,523 h1 rows (49%) carry a return_pct that does not
+    follow from their own entry/exit. The signal is the day's FIRST snapshot."""
+    conn = make_db()
+    d = datetime.date.fromisoformat(SIGNAL_DATE)
+    for hhmm, px in (('14:15', 110.0), ('09:45', 100.0)):
+        conn.execute("INSERT INTO confluence_signals (symbol, computed_at, current_price, screener_ids_json) "
+                     "VALUES ('SNAP', ?, ?, '[]')", (f"{d.isoformat()} {hhmm}:00", px))
+    _seed_close(conn, 'SNAP', 1, 105.0)
+    conn.commit()
+    track_outcomes(conn)
+    r = conn.execute("SELECT entry_price, return_pct FROM signal_outcomes "
+                     "WHERE symbol='SNAP' AND horizon_days=1").fetchone()
+    assert r['entry_price'] == 100.0 and abs(r['return_pct'] - 5.0) < 1e-9
+
+
+def test_horizon_counts_trading_sessions_not_calendar_days():
+    """Same class as AF-20260930-30: h3 from a Thursday priced the Sunday -> Monday close (2
+    sessions); h7 averaged 7.45 calendar days (~5 sessions) live. h = the h-th session."""
+    conn = make_db(market_every_day=False)
+    thu = datetime.date.fromisoformat(SIGNAL_DATE)
+    thu -= datetime.timedelta(days=(thu.weekday() - 3) % 7)
+    d = thu - datetime.timedelta(days=7)
+    while d <= thu + datetime.timedelta(days=21):
+        if d.weekday() < 5:
+            conn.execute("INSERT INTO stock_ohlcv (symbol, date, close) VALUES ('WKD', ?, ?)",
+                         (d.isoformat(), 100.0 + (d - thu).days))
+        d += datetime.timedelta(days=1)
+    conn.execute("INSERT INTO confluence_signals (symbol, computed_at, current_price, screener_ids_json) "
+                 "VALUES ('WKD', ?, 100.0, '[]')", (thu.isoformat(),))
+    conn.commit()
+    track_outcomes(conn)
+    got = {r['horizon_days']: str(r['check_date'])[:10] for r in conn.execute(
+        "SELECT horizon_days, check_date FROM signal_outcomes WHERE symbol='WKD'").fetchall()}
+    assert got[3] == (thu + datetime.timedelta(days=5)).isoformat()   # Fri, Mon, Tue
+    assert got[1] == (thu + datetime.timedelta(days=1)).isoformat()
+
+
+def test_relabel_regrades_rows_written_under_the_old_rules():
+    conn = make_db()
+    _seed_confluence_signal(conn, 'OLDR', price=100.0)
+    _seed_close(conn, 'OLDR', 1, 105.0)
+    conn.execute("INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, entry_price, return_pct, "
+                 "outcome, signal_source) VALUES ('OLDR', ?, 1, 100.0, -4.5, 'LOSS', 'confluence')", (SIGNAL_DATE,))
+    conn.commit()
+    track_outcomes(conn)
+    assert conn.execute("SELECT outcome FROM signal_outcomes WHERE symbol='OLDR' AND horizon_days=1").fetchone()[0] == 'LOSS'
+    track_outcomes(conn, relabel=True)
+    assert conn.execute("SELECT outcome FROM signal_outcomes WHERE symbol='OLDR' AND horizon_days=1").fetchone()[0] == 'WIN'

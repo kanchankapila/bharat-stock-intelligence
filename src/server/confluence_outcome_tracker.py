@@ -12,6 +12,8 @@ Run daily after market close:
   python confluence_outcome_tracker.py
 """
 
+import bisect
+import sys
 from datetime import datetime, timedelta
 
 from db_compat import connect
@@ -33,15 +35,19 @@ def get_ohlcv_close_cached(ohlcv_cache, symbol: str, date_str: str):
             return close, target
     return None, None
 
-def track_outcomes(conn):
-    today = datetime.now().strftime('%Y-%m-%d')
+def track_outcomes(conn, relabel: bool = False):
 
-    # Find all unique signal dates from confluence_signals that have entry price
+    # One signal per (symbol, day): the day's FIRST snapshot, when it was first actionable.
+    # confluence_signals is re-snapshotted every 30 min; DISTINCT over current_price fed several
+    # entries into one outcome key and the upsert mixed one snapshot's entry with another's
+    # return (49% of rows, AF-20261001-32).
     signal_rows = conn.execute("""
-        SELECT DISTINCT symbol, DATE(computed_at) AS signal_date, current_price, screener_ids_json
+        SELECT DISTINCT ON (symbol, DATE(computed_at))
+               symbol, DATE(computed_at) AS signal_date, current_price, screener_ids_json
         FROM confluence_signals
         WHERE current_price IS NOT NULL AND current_price > 0
         AND DATE(computed_at) <= DATE('now', '-1 day')
+        ORDER BY symbol, DATE(computed_at), computed_at
     """).fetchall()
 
     if not signal_rows:
@@ -75,6 +81,10 @@ def track_outcomes(conn):
             ohlcv_cache[sym] = {}
         ohlcv_cache[sym][dt] = close
     print(f"[OUTCOME-TRACKER] Loaded {len(ohlcv_rows)} closing prices for {len(ohlcv_cache)} symbols")
+    # Horizons are TRADING SESSIONS (same rule as outcome_resolver, AF-20260930-30): a
+    # calendar-day h3 from a Thursday priced Monday, 2 sessions. The market calendar is every
+    # date any symbol has a clean bar.
+    sessions = sorted({d for bars in ohlcv_cache.values() for d in bars})
 
     # Load existing outcomes to skip already-resolved ones. Scoped to signal_source='confluence'
     # (2026-08): this used to key on ANY row for (symbol, signal_date, horizon_days) regardless
@@ -82,7 +92,9 @@ def track_outcomes(conn):
     # vice versa) instead of writing its own, correctly-attributed row alongside — see the
     # signal_outcomes.signal_source migration for the full mechanism.
     existing_outcomes = set()
-    existing_rows = conn.execute(
+    # relabel=True regrades every row (one-off backfill for AF-20261001-32/-33: rows written
+    # under calendar horizons / mixed snapshot entries are otherwise skipped forever).
+    existing_rows = [] if relabel else conn.execute(
         "SELECT symbol, signal_date, horizon_days FROM signal_outcomes WHERE signal_source = 'confluence'"
     ).fetchall()
     for row in existing_rows:
@@ -94,6 +106,7 @@ def track_outcomes(conn):
           check_date, exit_price, return_pct, outcome, signal_source, label_definition)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confluence', 'terminal_pct2')
         ON CONFLICT(symbol, signal_date, horizon_days, signal_source) DO UPDATE SET
+          entry_price = excluded.entry_price,
           exit_price = excluded.exit_price,
           return_pct = excluded.return_pct,
           outcome    = excluded.outcome,
@@ -113,9 +126,10 @@ def track_outcomes(conn):
             if (symbol, signal_date, horizon) in existing_outcomes:
                 continue
 
-            exit_date = (datetime.strptime(signal_date, '%Y-%m-%d') + timedelta(days=horizon)).strftime('%Y-%m-%d')
-            if exit_date > today:
-                continue  # not yet
+            i = bisect.bisect_right(sessions, signal_date) + horizon - 1
+            if i >= len(sessions):
+                continue  # the h-th session after the signal has not happened yet
+            exit_date = sessions[i]
 
             exit_price, actual_exit_date = get_ohlcv_close_cached(ohlcv_cache, symbol, exit_date)
             if exit_price is None or entry_price <= 0:
@@ -280,7 +294,7 @@ def recompute_screener_reliability(conn):
 if __name__ == '__main__':
     conn = get_connection()
     try:
-        track_outcomes(conn)
+        track_outcomes(conn, relabel='--relabel' in sys.argv)
         recompute_screener_reliability(conn)
     finally:
         conn.close()
