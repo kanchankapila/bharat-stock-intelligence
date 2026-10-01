@@ -1381,6 +1381,30 @@ export function resolveTradeableSymbol(
   return mapped && priced.has(mapped.symbol) ? mapped.symbol : undefined;
 }
 
+/** A confirming same-direction hit raises confidence only. Geometry is NOT moved: re-pricing entry
+ *  to a later LTP while signal_generated_at keeps the first publish time grades the call from a
+ *  price it was never published at (AF-20261001-16). */
+export const SCREENER_CONFIRM_SQL = "UPDATE unified_signals SET confidence_score = ?, reasoning = ? WHERE id = ?";
+
+/** Direction a screener's sentiment implies. */
+export function screenerDirection(sentiment: string): 'BUY' | 'SELL' | null {
+  // 'neutral' used to fall through to BUY: 1,250 Sept BUY rows had no direction behind them.
+  return sentiment === 'bearish' ? 'SELL' : sentiment === 'bullish' ? 'BUY' : null;
+}
+
+/** What to do with a new screener hit given today's existing row for the symbol (if any). */
+export function screenerHitAction(
+  existing: { signal_type: string; status: string } | null | undefined,
+  newType: 'BUY' | 'SELL',
+): 'publish' | 'confirm' | 'invalidate_only' | 'skip' {
+  // An opposite same-day hit kills the live call; it does not open the reverse one. Flipping
+  // made 87% of symbol-days carry both a BUY and a SELL (AF-20261001-14), and a conflicted name
+  // stays off the book for the rest of the day instead of whipsawing every 30-min scan.
+  if (!existing) return 'publish';
+  if (existing.status === 'INVALIDATED_CONFLICT') return 'skip';
+  return existing.signal_type === newType ? 'confirm' : 'invalidate_only';
+}
+
 export async function runIntradayScreenerScan(): Promise<{
   screenersScanned: number;
   highScoringStocksFound: number;
@@ -1438,6 +1462,8 @@ export async function runIntradayScreenerScan(): Promise<{
       const name = screener.screener_name;
       const screenpk = screener.screenpk;
       const sentiment = screener.inferred_sentiment || screener.sentiment || 'neutral';
+      const newType = screenerDirection(sentiment);
+      if (!newType) continue;
 
       console.log(`🔍 [INTRADAY SCAN] Scanning screener: ${name} (PK: ${screenpk}, Sentiment: ${sentiment})...`);
 
@@ -1482,7 +1508,6 @@ export async function runIntradayScreenerScan(): Promise<{
 
         // 4. Handle active signal deduplication, confluence upgrades, and conflict resolution (TODAY only)
         const todayIso = new Date().toISOString().split('T')[0];
-        const newType = sentiment === 'bearish' ? 'SELL' : 'BUY';
         const entry = stock.ltp || 0;
         const target = newType === 'BUY' ? parseFloat((entry * 1.05).toFixed(2)) : parseFloat((entry * 0.95).toFixed(2));
         const stopLoss = newType === 'BUY' ? parseFloat((entry * 0.97).toFixed(2)) : parseFloat((entry * 1.03).toFixed(2));
@@ -1490,24 +1515,25 @@ export async function runIntradayScreenerScan(): Promise<{
         let existingActiveSignal: any = null;
         try {
           existingActiveSignal = await dbGet(
-            "SELECT id, signal_type, confidence_score, reasoning FROM unified_signals WHERE symbol = ? AND status = 'ACTIVE' AND signal_source = 'screener' AND signal_date = ?",
+            // A same-day INVALIDATED_CONFLICT row wins the ORDER BY, so a conflicted name is skipped.
+            "SELECT id, signal_type, status, confidence_score, reasoning FROM unified_signals WHERE symbol = ? AND status IN ('ACTIVE', 'INVALIDATED_CONFLICT') AND signal_source = 'screener' AND signal_date = ? ORDER BY (status = 'INVALIDATED_CONFLICT') DESC LIMIT 1",
             [symbol, todayIso]
           );
         } catch (err) {
           console.error(`❌ [INTRADAY SCAN] Error checking active signals for ${symbol}:`, err);
         }
 
+        const action = screenerHitAction(existingActiveSignal, newType);
+        if (action === 'skip') continue;
         if (existingActiveSignal) {
-          if (existingActiveSignal.signal_type !== newType) {
-            // Directional conflict: previous signal is BUY and new is SELL (or vice versa).
-            // Invalidate the conflicting previous signal.
+          if (action === 'invalidate_only') {
             try {
               await dbRun("UPDATE unified_signals SET status = 'INVALIDATED_CONFLICT' WHERE id = ?", [existingActiveSignal.id]);
               console.log(`⚠️ [INTRADAY SCAN] Conflicting directional signal detected for ${symbol} (Existing: ${existingActiveSignal.signal_type}, New: ${newType}). Invalidated previous signal ID ${existingActiveSignal.id}.`);
             } catch (err) {
               console.error(`❌ [INTRADAY SCAN] Failed to invalidate conflicting signal for ${symbol}:`, err);
             }
-            // Proceed to generate fresh signal for new direction below
+            continue;
           } else {
             // Confirming confluence signal: Upgrade confidence (+3% boost, capped at 98%) and append reasoning
             const baseConfidence = Math.max(existingActiveSignal.confidence_score || 0, Math.round(score));
@@ -1516,8 +1542,8 @@ export async function runIntradayScreenerScan(): Promise<{
 
             try {
               await dbRun(
-                "UPDATE unified_signals SET confidence_score = ?, reasoning = ?, entry_price = ?, target_price = ?, stop_loss = ? WHERE id = ?",
-                [upgradedConfidence, updatedReasoning, entry, target, stopLoss, existingActiveSignal.id]
+                SCREENER_CONFIRM_SQL,
+                [upgradedConfidence, updatedReasoning, existingActiveSignal.id]
               );
               console.log(`🔄 [INTRADAY SCAN] UPGRADED CONFLUENCE SIGNAL FOR ${symbol}! Confidence: ${upgradedConfidence}% | Added Screener: '${name}'`);
             } catch (err) {

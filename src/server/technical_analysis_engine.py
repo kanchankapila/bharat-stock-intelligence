@@ -96,6 +96,12 @@ def to_unified_signal_row(row: dict, signal_date: str) -> dict:
     }
 
 
+def drop_stale(results, signal_date):
+    """Keep only rows whose last bar IS the session being published. A symbol whose feed stopped
+    was re-stamped with every later signal_date on its old close (~30 rows/day, AF-20261001-12)."""
+    return [r for r in results if r.get('bar_date') == signal_date]
+
+
 class TechnicalAnalysisEngine:
     def __init__(self):
         self.engine = get_engine()
@@ -108,7 +114,9 @@ class TechnicalAnalysisEngine:
 
     def analyze_stock(self, symbol):
         df = self.load_ohlcv(symbol)
-        if df.empty or len(df) < 50:
+        # A non-positive close cannot carry an entry/target/stop (AF-20261001-12: 3 all-zero
+        # symbols published 63 Neutral rows at price 0).
+        if df.empty or len(df) < 50 or not float(df['close'].iloc[-1]) > 0:
             return None
 
         # 1. Indicators
@@ -195,7 +203,8 @@ class TechnicalAnalysisEngine:
             # signal_generated_at LATER than created_at (see signal-provenance-monotonic in
             # dataQualityChecks.ts / recurring-bugs.md) -- a different mechanism from the
             # already-fixed ON CONFLICT drift bug, same symptom.
-            'last_updated': datetime.datetime.now(datetime.timezone.utc).isoformat()
+            'last_updated': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'bar_date': str(latest['date'])[:10],
         }
 
     def process_all(self):
@@ -225,6 +234,7 @@ class TechnicalAnalysisEngine:
             today_str = logical_write_floor(
                 fallback=datetime.datetime.now(datetime.timezone.utc).date().isoformat()
             )
+            results = drop_stale(results, today_str)
             unified_rows = [to_unified_signal_row(r, signal_date=today_str) for r in results]
             with self.engine.begin() as conn:
                 conn.execute(text("""

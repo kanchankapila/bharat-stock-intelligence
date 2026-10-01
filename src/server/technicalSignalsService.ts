@@ -1085,6 +1085,27 @@ export function parseMoneyToNumber(s: string | undefined | null): number | null 
   return m ? parseFloat(m[0].replace(/,/g, '')) : null;
 }
 
+/** Label + geometry written to unified_signals and recommendation_log for one scan result. */
+export function scanSignalWrites(r: SignalResult): {
+  signalType: 'BUY' | 'SELL'; entry: number | null;
+  target: number | null; stop: number | null;
+  recLog: { stop: number | null; t1: number | null; t2: number | null; t3: number | null } | null;
+} {
+  // Same direction getTradingSetup() built the barriers with, so label and geometry agree.
+  const short = inferSetupDirection(r.signals) === 'short';
+  const stop = parseMoneyToNumber(r.stopLoss);
+  const t1 = parseMoneyToNumber(r.targets);
+  const t2 = (t1 !== null && r.cmp) ? Math.round((r.cmp + 2 * (t1 - r.cmp)) * 100) / 100 : null;
+  const t3 = (t1 !== null && r.cmp) ? Math.round((r.cmp + 3 * (t1 - r.cmp)) * 100) / 100 : null;
+  return {
+    signalType: short ? 'SELL' : 'BUY',
+    entry: r.cmp ?? null,
+    target: t1,
+    stop,
+    recLog: short ? null : { stop, t1, t2, t3 },
+  };
+}
+
 export async function getTradingSetup(r: SignalResult): Promise<{
   aiInsight: string; entryZone: string; stopLoss: string;
   targets: string; setupQuality: string; timeHorizon: string;
@@ -1202,7 +1223,9 @@ export async function runTechnicalSignalScan(options: {
     return;
   }
 
-  const { minScore = 2, aiInsightsLimit = 10 } = options;
+  // aiInsightsLimit defaulted to 10 while every signalScore>0 row is published to unified_signals:
+  // 3,523/3,699 Sept rows had no stop (AF-20261001-10). Every published setup now gets geometry.
+  const { minScore = 2, aiInsightsLimit = Number.POSITIVE_INFINITY } = options;
   const scanDate = options.date ?? new Date().toISOString().slice(0, 10);
 
   progress = {
@@ -1553,9 +1576,13 @@ export async function runTechnicalSignalScan(options: {
       -- reward_engine.py's exclusion list had already fallen through it. Matches the 'source'
       -- this same function writes to recommendation_log. Renamed in history by migration
       -- 1786930000000; grep BOTH spellings before adding a consumer.
-      VALUES (?, current_date, 'technical_scan', 'BUY', ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
+      -- signal_date = scanDate (was current_date, which mis-dated any historical rescan) and
+      -- signal_type follows the setup direction (was a hardcoded 'BUY'), AF-20261001-10.
+      VALUES (?, ?, 'technical_scan', ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
       ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
         entry_price=excluded.entry_price,
+        target_price=excluded.target_price,
+        stop_loss=excluded.stop_loss,
         technical_score=excluded.technical_score,
         confidence_score=excluded.confidence_score
         -- signal_generated_at deliberately NOT refreshed (2026-08-12). This scan re-runs every
@@ -1617,14 +1644,16 @@ export async function runTechnicalSignalScan(options: {
         ]);
 
         // Mirror actionable signals to unified_signals for cross-source tracking
+        const w = scanSignalWrites(r);
         if (r.signalScore > 0) {
           const signalTs = new Date().toISOString();
-          const slNumeric = parseMoneyToNumber(r.stopLoss);
           await tx.run(unifiedUpsertSql, [
             r.symbol,
-            r.cmp ?? null,
-            null,                        // target_price — not computed by technical scanner
-            slNumeric,
+            scanDate,
+            w.signalType,
+            w.entry,
+            w.target,
+            w.stop,
             r.signalScore * 10.0,        // 0–10 score → 0–100 confidence (db.ts: "0-100, from
                                          // any source"). Was /10.0, which put this writer on a
                                          // 0–1 scale in a column the AI path fills 0–100.
@@ -1646,19 +1675,12 @@ export async function runTechnicalSignalScan(options: {
           }
         }
 
-        if (r.signalScore >= 5) {
+        // recommendation_log is long-only (rec_type BUY/STRONG_BUY): w.recLog is null for a short setup.
+        if (r.signalScore >= 5 && w.recLog) {
           // Fix 4: In BEAR regime, only log high-conviction signals (score >= 7)
           if (r.niftyRegime === 'BEAR' && r.signalScore < 7) continue;
 
-          const sl = r.stopLoss ? parseFloat(r.stopLoss) : null;
-          const t1 = r.targets
-            ? (() => {
-                const m = r.targets!.match(/₹([\d,]+)/);
-                return m ? parseFloat(m[1].replace(/,/g, '')) : null;
-              })()
-            : null;
-          const t2 = (t1 !== null && r.cmp) ? Math.round((r.cmp + 2 * (t1 - r.cmp)) * 100) / 100 : null;
-          const t3 = (t1 !== null && r.cmp) ? Math.round((r.cmp + 3 * (t1 - r.cmp)) * 100) / 100 : null;
+          const { stop: sl, t1, t2, t3 } = w.recLog;
           await tx.run(recLogUpsertSql, [
             r.symbol, scanDate, r.cmp ?? null, sl, t1, t2, t3,
             r.signalScore, r.signalScore, JSON.stringify(r.signals),
