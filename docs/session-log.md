@@ -10351,3 +10351,490 @@ already closed — a manual trigger was queued and correctly refused by the gate
 **Open, needs user decision:** AF-20260930-30 — horizons are calendar days: "5d" = 3 sessions for
 Wed-Fri signals, 5 for Mon; "15d" ~11 sessions. AF-20260930-16 gained signal-side evidence: 81
 alias/renamed screener symbols (ZOMATO, GET&D, ...) generate unified signals with no OHLCV at all.
+
+## 2026-10-01 — signal-lifecycle re-audit: corrected map, horizon-agnostic expiry sweep, read-path bounds
+
+**What changed.** (1) `outcome_resolver.py` — new `stale_pending_horizons()` + `expire_stale_pending_all()`: the stale-PENDING sweep now derives its horizons from `SELECT DISTINCT horizon_days` across `signal_outcomes` / `unified_signal_outcomes` / `recommendation_log` (rec_log NULL→15 via COALESCE) instead of only the caller-passed 1/5/15, and the `--relabel-before` backfill branch sweeps at the end too (AF-20261001-01: 269 priceable h7 rows could never expire — no call site passes h7 — and the 09-30 relabel campaign left 2,141 stale h5/h15 rows unswept). (2) `mcpServer.ts` tech-signals read + `chatbot/tools/price_tool.py` earnings-calendar bullish query gained a 30-day `signal_generated_at >= ?` floor (AF-20261001-02) — `unified_signals` never ages out of ACTIVE, so both served years-old entry/target/stop as current. Four findings filed: AF-20261001-01 (fixed), -02 (fixed), -03 `unified_signals.status` has no scheduled path-based resolver, 106,939 ACTIVE, sweep capped at a static `LIMIT 50` (open — user decision), -04 `intraday_recommendations.status` is write-once (ACCEPT, bounded).
+
+**Corrections to the prior lifecycle map** (recorded in the audit-findings session note so nobody re-diagnoses): `outcome_resolver.py` never writes `unified_signals.status` (writers: server.ts 30s sweep → COMPLETED/FAILED, trendlyneScreener INVALIDATED_CONFLICT, manual script); `unified_signals` holds zero EXPIRED rows (the "166,996 EXPIRED" was `recommendation_log`'s win-probability gate); the expiry sweep WAS keeping up at h5/h15 (job steps succeeded 21/21) — every stale-priceable row found 10-01 traces to the 09-30 relabel window; `intraday_outcome_resolver.py` IS scheduled (`ml-daily-ops`, `queues.ts:1312`).
+
+**Evidence.** New tests `test_expire_all_horizons_covers_horizons_no_caller_passes` / `test_stale_pending_horizons_includes_unified_and_coalesces_rec_log_null` (the first caught the fixture missing `recommendation_log` — the derivation query genuinely unions all three tables). Full DoD: `npx tsc --noEmit` exit 0; `npx vitest run` **1,578 passed / 44 skipped / 0 failed**; pytest DoD command **3,177 passed / 259 skipped / 0 failed** (17:48, `logs/pytest_full_20261001.txt`). Live read-only dry-run against prod: `stale_pending_horizons` → [1, 2, 3, 5, 7, 15] (2/3/7 are the never-passed horizons); would expire 269 h7 + 1,085 h5-unified + 1,056 h15-unified + 47/95 h5/h15 signal_outcomes + 34 rec_log, 0 at h1/2/3 (no-bar rows correctly stay PENDING, AF-20260930-16 guard intact).
+
+**Deploy note (committed ≠ deployed).** `outcome_resolver.py` changes are live immediately on the `runPython` fallback path (spawned per run) and in the `__main__` relabel path, but the scheduled jobs prefer **ml-api** `/api/resolve-outcomes`, which caches the module — **`pm2 restart ml-api` is required before the horizon-agnostic sweep takes effect on the API path** (production action, needs go-ahead; without it tonight's run still sweeps h5/h15 under the old code but not h7's 269).
+
+**Open.** AF-20261001-01 closes after tonight's 09:30 IST `outcome-resolver` run (re-run the h5/h15 stale-traded query; expect ~0, and h7 → 0 only with the ml-api restart). AF-20261001-03 awaits the user's design call. Carried: AF-20260930-16 ranker side, AF-20260930-30 user decision.
+
+
+### Addendum — intraday outcome resolver made loss-tolerant (AF-20261001-05), and both live sweeps run
+
+**Root cause was NOT "the chain stopped firing."** Read straight out of the BullMQ repeat chain
+(Redis `bull:ml-daily-ops:repeat:*`): 09-28 clean → 09-29 completed with a failed step →
+**09-30 13:20 UTC slot failed `orphaned: worker exited mid-run; job predates this process
+(active 9m)`** (a pm2 restart mid-run tripped `reclaimStaleActiveJobs`), and its make-up
+`ml-daily-ops-orphan-requeue-1790774962834` failed the same way **44 min later** — a second
+restart inside the same 4h window. The 10-01 slot was healthy, sitting in `delayed` for 13:20 UTC.
+My earlier "it stopped firing / a 49% failure rate" framing was wrong and is corrected in the
+findings row; the lifetime fail_count is real but is not this incident.
+
+The lasting defect was that `intraday_outcome_resolver.py` grades only `--date` (default
+`date.today()`), so a session lost to a restart was **ungradeable forever** — 3,152 actionable
+09-30 signals silently dropped out of the win rate the emission gate and strategy learner read.
+
+**Fix:** `ungraded_sessions()` + `backfill_ungraded()` (7-day lookback by default, `--backfill-days
+0` to disable). A session qualifies only if it has a cycle with a complete entry/target/stop triple
+AND zero outcome rows. Guard added mid-implementation and test-pinned: the scan is bounded by an
+UPPER bound (`computed_at <= today`, flipped to yesterday before 15:30 IST) — my first attempt
+narrowed the LOWER bound instead, which still admitted the open session and would have squared
+signals off at whatever bar existed at run time.
+
+**Live runs (both writes verified):**
+- `resolve(conn,'2026-09-30')` → **452 graded** (447 long / 5 short, 420 decided, 15.7% win rate,
+  −1.057% avg PnL), 0 purged stale. The 452-vs-3,152 gap is the resolver's first-cycle-per-symbol-
+  per-direction rule plus geometry coverage (9.0% of 35,106 cycle rows carry an entry vs 2.2% on
+  09-29), not a partial write. `ungraded_sessions(7d)` now returns `[]`.
+- `pm2 restart ml-api` (no jobs active in the prior 3h) then `expire_stale_pending_all()` →
+  horizons **[1,2,3,5,7,15]**, **269 h7 rows expired**; `signal_outcomes` now shows stale_traded 0
+
+### Addendum 2 — AF-20261001-06/07 fixed (horizon vocabulary + half-plan geometry)
+
+**AF-20261001-07 was self-corrected before it was fixed, and the correction is the substance of
+this entry.** The original row claimed "1,326 of 1,562 canonical rows (85%) publish no geometry"
+and framed that as a defect. Decomposed by classification on the live 2026-10-01 grid it is
+**1,324 intended, 2 defective**: Hold 998 (not actionable), Sell + Strong Sell 326 (cash equity, no
+retail shorting — deliberately nulled at `unified_ranker.py:2822`), Buy/Strong Buy 238 of which 236
+carry full geometry. The confluence side agrees (1,361 full-geometry; 842 price+ATR-without-stop
+all `netBearish`-gated; 2,198 with no price source, only 151 of which have any `stock_ohlcv` bar —
+AF-20261001-16's unpriceable-ticker family). **Building retail short geometry would be a new
+product, not a bug fix, so it was deliberately not done.**
+
+The real defect was 2 rows and it was worse than the framing implied: `PARACABLES` (S_ELITE, 90.95)
+and `RELIABLE` (A_HIGH, 78.36) published an `entry_zone` with **no stop, no target, no R:R** — an
+S_ELITE "actionable Buy" with nothing to size against, which reads as *more* tradeable than a Hold.
+Two causes: (1) `_get_entry_targets`'s rec_log and unified_signals fallbacks guarded only on
+`entry_price is not None`, and since `rr` computed to `None`, `rr is None` satisfied the
+`rr is None or rr >= 1.0` acceptance test that 2026-08-05 wrote to reject *sub-1* R:R; (2)
+`recommendation_log` was the only geometry tier with **no date window**, so PARACABLES' plan came
+from a **2026-06-03** row — four months stale.
+
+**Fixed:** both entry-only fallbacks now require entry **and** stop **and** target;
+`_get_rec_log_latest_map` gained the same `INTERVAL '30 days'` bound confluence already had.
+Verified against production's own maps, not only the fixture: **PARACABLES** now publishes no
+geometry (June row excluded by the bound; its remaining unified_signals row is entry-only and
+rejected), and **RELIABLE** falls through to a *complete* unified_signals triple
+(145.9 / 135.87 / 160.68, R:R 1.47) and publishes that — the guard rejecting incomplete geometry
+rather than blanket-discarding the symbol.
+
+**AF-20261001-06, mechanical half.** The five horizon vocabularies are now folded onto
+INTRADAY/SWING/POSITIONAL at all three boundaries that touch them, and each fold surfaced a
+different real bug:
+- **Write** (`unified_ranker.py` `_TIMEFRAME_ALIASES`): `LONG_TERM` and `'Positional (2-4W)'` →
+  POSITIONAL, `SHORT_TERM` and `'Swing (3-7D)'` → SWING. Unknown values **pass through**
+  uppercased rather than being dropped — the 2026-08-31 casing fix exists precisely because a
+  value that fails to match vanishes from exact-match filters, so nulling unknowns would
+  reintroduce that failure.
+- **Digest** (`telegramRecommendations.ts` `normaliseHorizon`) had the **mirror-image** bug: every
+  unrecognised value fell through to POSITIONAL, so `short_term` and `'Swing (3-7D)'` — week-scale
+  ideas — were labelled months-scale in the Telegram digest.
+- **Read** (`commandCenter.router.ts`): the horizon filter asked in screener-catalog vocabulary
+  (`intraday`/`swing`/`long_term`) against a ranker-vocabulary column, so "Long term" matched only
+  `LONG_TERM` rows and returned **nothing** for every row the ranker writes as `POSITIONAL`. The
+  test asserting this failed first in the informative direction — it showed `POS_STOCK` (the row
+  the old code missed entirely) coming back, and `LONGTERM_STOCK` not, which is exactly the
+  post-fix contract.
+
+**The structural half of AF-20261001-06 stays open on purpose:** there is still no `valid_until`
+anywhere in the schema, and the grading window is still chosen by the resolver pass rather than by
+the label — so "is this signal still valid?" still has no single answer in the data model. That
+needs a canonical `valid_until` plus a decision to grade by label, and both change what enters the
+measurement corpora, so neither is a mechanical fix.
+
+**Evidence:** `test_unified_ranker.py` 111 passed (5 new geometry-contract tests + 6 vocabulary
+tests); `__tests__/commandCenter.test.ts` 15 passed (+4); `__tests__/telegramRecommendations.test.ts`
+23 passed (+1). Full DoD: tsc exit 0; vitest **1,598 passed / 44 skipped / 0 failed**; pytest
+**3,209 passed / 259 skipped / 0 failed** (40m03s, `logs/pytest_full_20261001c.txt`).
+`unified_ranker.py` is spawned per run, so it is live from the next ranker run without a restart;
+the TS changes (`commandCenter.router.ts`, `telegramRecommendations.ts`) need
+`pm2 restart bharat-server`.
+
+  at every horizon. AF-20261001-01 closed.
+
+**Evidence:** `test_intraday_outcome_resolver.py::TestUngradedSessionDetection` (6 tests, incl. a
+pre/post-close negative control with a pinned clock). Full DoD: tsc exit 0; vitest **1,593 passed /
+44 skipped / 0 failed**; pytest **3,198 passed / 259 skipped / 0 failed** (41m40s,
+`logs/pytest_full_20261001b.txt`).
+
+**Still open, deliberately:** nothing prevents the double-restart orphaning itself — Guard 0 in
+`requeueOrphanedJob` already refuses to re-requeue a make-up that dies, so the failure mode is
+"alert, don't cascade", which is the right default. AF-20261001-06 (five horizon vocabularies, no
+validity field) and AF-20261001-07 (85% of canonical rows with no geometry; no short-side barrier
+builder) remain design/EVIDENCE calls for the user — both change published recommendations or
+measurement corpora, so neither is a mechanical fix.
+
+
+---
+
+## 2026-10-01 (session 2) — AF-03 resolver, AF-05 orphaning cause, AF-06 structural half
+
+**AF-20261001-03 — `unified_signals.status` had no scheduled path-based resolver.** Two separate
+defects, both fixed:
+- *The logic existed but was unreachable.* `scripts/resolve_stuck_unified_signals.py` lives
+  outside `src/server`, and `runPython` resolves names against `src/server` only — so no job
+  could ever invoke it. Added `src/server/resolve_stuck_unified_signals.py` as a `runpy`
+  wrapper (the implementation and its docstring stay put) and registered
+  `stuck-signal-resolver` (daily 02:00 IST, `--max-age-days 90`) in `operations.jobs.ts`.
+- *The 30s sweep covered 2% of the universe.* `SELECT DISTINCT symbol ... LIMIT 50` with no
+  `ORDER BY` returned the same ~50 rows on every tick forever, while the tick's own comment
+  claimed it swept "whatever symbols genuinely carry an ACTIVE row". Replaced with a keyset
+  cursor (`symbol > last`, ordered, wrapping): same per-tick cap, whole universe covered once
+  per ~50 ticks (~25 min).
+
+**Live backlog clear (one-shot, `--max-age-days 0`, deliberately outside the recurring job):**
+ACTIVE **106,980 → 41,171**; COMPLETED 15,308 → 39,389; FAILED 22,751 → 64,476. 65,804 rows
+resolved (24,080 COMPLETED / 41,724 FAILED = **36.6% implied win rate**). Remaining ACTIVE:
+technical 25,005 / technical_scan 7,709 / AI 5,890 / screener 2,505 / SCREENER_SURFACING 60 —
+the still-open and no-usable-level rows the script correctly leaves alone. `--sources` still
+defaults to `technical,SCREENER_SURFACING`; the AI/screener/technical_scan backlog (16,104) is
+left as a separate decision.
+
+*Non-obvious finding worth keeping:* 99.9% of the resolvable backlog was within 90 days
+(72,434 of 72,538; a 30-day window would have covered only 28,443). These rows were **recent
+and never path-resolved**, not ancient — the "target touched between two price checks" defect,
+not rot. That is why the recurring job uses a 90-day bound rather than an unbounded scan.
+
+**AF-20261001-05 — fixed the orphaning CAUSE, not just the recovery net.** `requeueOrphanedJob`
+Guard 0 ("a make-up never gets a second make-up") was written for the `dl-retrain-weekly` OOM
+cascade, but it cannot distinguish "deploy restarted while the make-up ran" from "this job
+kills the host every time" — so it guarantees the exact double-restart loss it was meant to
+prevent (09-30: run orphaned +9min, its make-up orphaned +53min, recovery refused, 3,152
+signals never closed). Replaced with a **bounded ladder**: the make-up carries
+`orphanRequeueGeneration`, advanced in its own job data so it survives the worker that died,
+and refusal happens only at `MAX_ORPHAN_REQUEUE_GENERATIONS = 3` with the old alert-only
+behaviour. The host-killing cascade is still stopped (after 3 attempts, not 1) and
+`HEAVY_MAKEUP_JOBS` still defers it past the close.
+
+**AF-20261001-09 (structural half of AF-06) — `valid_until` now exists and the label decides it.**
+Migration `20261001100000_unified-recommendations-valid-until.sql` adds `valid_until timestamptz`
++ a partial index, backfilled from the canonical label through a new `bharat_add_sessions()` SQL
+function doing **exact NSE session arithmetic** (weekends + `market_holidays` excluded).
+Session counts are deliberately the horizons the resolvers **already** grade at — INTRADAY 1 /
+SWING 5 / POSITIONAL 15 sessions — so the label selects among existing windows instead of
+introducing new ones and the measurement corpora stay comparable to what came before; fresh
+windows would silently re-base every win rate. Verified the arithmetic is real: backfilled spans
+are INTRADAY 1–3d, SWING 5–10d, POSITIONAL 21–25d (variable ⇒ holidays genuinely skipped; a
+calendar-day shortcut would give constants 1/7/21), and LONG_TERM received POSITIONAL's 21–25d,
+proving the alias normalization reaches the deadline. A NULL/unknown label yields NULL rather
+than a default — inventing a validity for the 68,520 unlabelled rows would assert a horizon they
+never declared. The ranker stamps `valid_until` on every write from the same normalized label it
+writes to `timeframe`.
+
+*That test caught a real bug:* `'Long term'` uppercases to `LONG TERM` (space), which is not the
+`LONG_TERM` alias key, so it silently produced **no** deadline. `_normalize_timeframe` now falls
+back to a separator-collapsed map built from the same dict.
+
+**Evidence:** 3 new `orphanRequeue.test.ts` tests (retry below cap + generation advances, cap →
+alert-only, pre-ladder data treated as generation 0 — the old one-shot test was rewritten, not
+deleted); 4 new `test_unified_ranker.py` tests; `npm run migrate:up` applied;
+`npm run schema:regen` + `npm run schema:drift` clean. Two repo guards correctly failed until
+the new job was declared in them (`jobRegistryCronMirror`'s pin list,
+`jobRegistryGraceMinutesConsistency`'s `driving` map) — that is them working, not a regression.
+Full DoD: tsc exit 0; vitest **1,603 passed / 44 skipped / 0 failed**; pytest ranker file
+**114 passed**.
+
+**Deliberately NOT built — retail short geometry (AF-20261001-50).** The user is right that this
+is new product surface, not a bug fix, and two things need settling before it is:
+`unified_recommendations` carries **no instrument column**, so "retail short" is not expressible
+on today's schema; and `bet_size_from_probability` plus the sector/portfolio aggregation both
+assume a long book. The platform's own evidence cuts against it — the intraday ranker gates out
+Sell emissions because the short side has negative measured expectancy. Nothing written.
+
+**AF-20261001-50 was renumbered from -10.** A concurrent session filed its own
+`AF-20261001-10` while this one was writing, so the ledger briefly held two rows with the same
+id. Mine became **-50**; the pre-existing -10 is untouched. The row order in the file is
+08, 09, 50, 07 — cosmetic only, and every row still parses at 10 columns
+(`| AF-20261001-` sweep verified all 40 rows).
+
+**`npm run doc:numbers:check` was RED and is now green — four figures, four sites.**
+The gate is doing exactly its job: concurrent sessions added modules and a job, so the counts
+quoted in the docs had drifted. Re-derived and corrected rather than adjusted to match the docs:
+`CLAUDE.md` + `CONTEXT.md` non-test Python modules **290 → 294**, `.py` incl. tests
+**678 → 699**, `CONTEXT.md` `JOB_REGISTRY` **72 → 73** (this session's `stuck-signal-resolver`),
+and the console.\* call-site count **709 → 708** at both mirrored sites — `logger.ts` and
+`server.ts` (the checker only asserts `logger.ts`, but `server.ts` quotes the same figure and a
+number that is right in one file and stale in its twin is the failure mode the gate exists to
+catch). Every date stamp moved 2026-09-29 → 2026-10-01. **Negative control is the gate's own:**
+it exited 1 naming each stale figure before the fix and prints "All checked doc numbers match the
+re-derived values" after.
+
+**A user-reported "stock doesn't search or show any stock" was NOT this repo — and the
+investigation is worth recording because it cost real time.** The browser tab was
+`localhost:5173`, which is `d:\Github\bharat-signal-engine` (`web/` Vite SPA proxying `/api` to a
+FastAPI on `:8800`), not this repo: the running app's routes (`/api/stocks`, `index_member`,
+`market_cap_inr`) appear **nowhere** in this codebase, and this repo's own app is Express/tRPC on
+`:3000` (per `run-bharat-stock-intelligence`). The tell was Vite's own `fileName` in the
+transformed module (`D:/Github/bharat-signal-engine/web/src/main.tsx`) — cheaper than guessing
+from behaviour. **This repo's stock surface was then verified healthy while I was there**: live
+`/api/stocks?search=reliance` → 6 rows, `?search=rel` → 17, `limit=5` → 2,351 total; the tRPC
+`searchNSEStocksFromDB` / `getAllNSEStocksFromDB` paths and the `nse_stocks.status='ACTIVE'`
+filter are sound, and the screener rendered 150 rows / "2.4k names match". The actual defects
+were **frontend-only, in the other repo**, and are fixed there (see its own history): (1) the
+"Stocks" nav button never cleared the selected symbol, so once any name had been opened the tab
+re-set `view` to a value already current, nothing re-rendered, and the screener **and its search
+box** became unreachable except through the small "back to screener" link — the tab read as
+"Stocks is broken"; (2) the screener rendered its **empty** state while the first request was
+still in flight, telling the user "Loosen a filter, or clear the search" about a list that had
+not arrived — this app's own documented failure mode, a loading query rendering identically to an
+empty one; (3) the sector `<option>` list was derived from the **current result page**, so it
+shrank as you filtered and a previously-selected sector could vanish from the list while staying
+applied, painting the select blank over a zero-row table. All three were reproduced live first
+(Slow-3G to pin the false empty state; row-click → nav-click to pin the dead tab), fixed, and
+re-verified live; `tsc --noEmit` clean and no console output. No file in this repo was changed
+for it — the only edits made here this session are the four doc-number sites above.
+
+**`npm run findings:check` went 12 problems → 6, and all 6 survivors are provably not mine.**
+The ledger validator enforces two things on rows found on/after 2026-09-30: a closed `FIX` row must
+cite a test/check that actually exists, and an open row must state one of the four reasons
+(EVIDENCE / calendar-blocked / needs a user decision / depends on another row). Six of my rows
+broke both, and the causes were mine:
+- **`Closed` is a bare date, not a narrative.** AF-01 carried `**CLOSED 2026-10-01 — swept live.**…`
+  in that column; `isDate` anchors at the cell start, so the row read as *open* and was then
+  asked for an open-reason it did not need. Now `**2026-10-01** — swept live. …`.
+- **AF-03 cited no artifact** ("live row counts before/after") where the validator needs a real
+  one. Now cites `src/server/__tests__/jobRegistryCronMirror.test.ts` (whose pin list it extended)
+  and `…/jobRegistryGraceMinutesConsistency.test.ts`.
+- **AF-04** (ACCEPT, open) now says the follow-on "is a user decision, not a fix"; **AF-05/-06/-07**
+  are closed with the date, which also exposed that their Status text was **stale against my own
+  later rows**: AF-05 still said "nothing prevents the double-restart orphaning" (fixed by AF-08)
+  and AF-06 still said "structural half still OPEN" (delivered by AF-09). Both sentences corrected
+  before closing — a row that cites a fix as still-missing would have been the exact defect class
+  this ledger exists to catch.
+
+**The 6 that remain are pre-existing and were deliberately NOT "fixed".** `AF-20260823-79/-80/-81`
+are **4-cell legacy rows with no Lane, Status, Immunized or Closed column at all**, and `AF-20260824-82`
+is one row split across seven physical lines under no table header; making the gate green would mean
+*authoring another session's audit history* — inventing closures and immunizations for findings I did
+not find, which `AGENTS.md` non-negotiable #6 ("never fabricate evidence") rules out. AF-20260930-03
+already triaged exactly this and recorded the repair as "scripted and ready"; it wants a human.
+`AF-20260930-11` is unfixable from here on evidence: its fix names `_get_confluence_latest_map` and
+`_compute_cost_map`, and **neither function exists in `unified_ranker.py` any more** — a repo-wide
+search finds those names only inside this ledger, so the row describes code that has since been
+renamed away and any test written against them would be testing nothing. `AF-20260930-14` needs one
+sentence of its own row reworded to name the convergence cadence the row already states.
+**Needs your call:** authorize filling in the four 2026-08 rows, and -11 should probably be
+superseded with a pointer to whatever replaced those two helpers.
+
+**A vitest failure I caused by being careless, recorded because the cause is not visible in the output.**
+First full run this session reported `4 failed` — and every one of the four is
+`Error: Test timed out in 5000ms`, **not an assertion failure**: one in `commandCenter.test.ts`
+(`getCommandCenter > returns empty eodPicks when no data`), three in
+`mcConsolidatedMetricsPersist.test.ts`. Both files are DB-backed (`dbAll`, live router caller), and
+I had launched the full pytest suite against the same `bharat_intel` @ :5433 in the background
+*minutes earlier* — so the suite was competing with itself for the database. The earlier clean run
+this session had these same tests green at 1,603 passed. Two processes sharing one Postgres is not
+a measurement of the code, so the suite is being re-run alone rather than reported either way.
+
+**Re-run alone — and the conclusion is that the suite is load-flaky, not broken by this session.**
+
+- **pytest** (`src/server/__tests__/ src/server/tests/ tests/chatbot/`): **3,210 passed / 260 skipped /
+  1 failed in 49:56**. The one failure is
+  `src/server/tests/test_finbert_news_sentiment_cpu.py::test_importing_the_script_hides_cuda_from_torch`
+  — AF-20260930-13's test, in a file this session never touched. **It passes in isolation
+  (1 passed in 21.16s)** because it spawns a subprocess that imports torch; under the full suite's
+  load that import misses its timeout. Reporting it as a failure and as green would each be half
+  the truth, so: green in isolation, load-flaky in the suite, unrelated to these changes.
+- **vitest**: two full runs, `4 failed` then `3 failed`, 1,600 passed / 44 skipped of 1,647 — and
+  **every failure in both runs was `Error: Test timed out in 5000ms`, never an assertion diff, and the
+  failing files were completely disjoint between runs** (`commandCenter` + `mcConsolidatedMetricsPersist`
+  in the first, `intelligenceDisplay` + `testsDoNotDropProductionTables` + `trendlyneIntradayScanDeduplication`
+  in the second). Run alone, all three pass: **14 passed, exit 0**. The clincher is
+  `intelligenceDisplay.test.tsx` — a `renderToStaticMarkup` call that takes **56ms** on its own and
+  could not finish inside 5000ms in the suite run: the event loop was blocked, not the test broken.
+  `trendlyneIntradayScanDeduplication` at 2,175ms sits right at the edge of that 5s budget.
+  This box runs several sessions at once (see the `git status` — `src/lib/dailyCloses.ts`,
+  `decisionMatrixInputs.ts`, `port_guard.py`, `fno.router.ts` and ~10 other files are other sessions'
+  uncommitted work), so a 5s default timeout is a coin-flip whenever the machine is busy.
+- **tsc --noEmit**: exit 0. **`doc:numbers:check`**: green. **`findings:check`**: 12 → 6, the 6
+  survivors all pre-existing and deliberately not authored over (above).
+
+*Nothing here is committed.* Both repos are left as working-tree changes for review, per the
+commit-by-explicit-path rule and because `bharat-signal-engine` is a different repository this
+session has no business committing into.
+
+## 2026-10-01 (session 3) — the ledger gate to green, and a production outage
+
+**`npm run findings:check` is now GREEN (0 problems, was 12).** The user authorised filling in the
+rows that had been deliberately left alone. Six repairs:
+
+- **`AF-20260823-79/-80` were 4-cell rows** — they never had Lane, Status, Immunized or Closed at
+  all. Appended from the fix each row already describes in prose, citing only artifacts confirmed to
+  exist first: `test_bulk_prefetch_equivalence.py` really does carry
+  `test_vol_threshold_af79_true_percent_vol_scaling` (I nearly "corrected" that citation on the
+  strength of a `search_codebase` miss — a `Select-String` over the file proved the test is there,
+  so the row was right and the search tool was wrong).
+- **`AF-20260824-82` was one row split across seven physical lines** with no Closed column. Joined
+  into one line and closed **2026-09-30**, the date its own close condition was verified: live
+  `dl_model_performance` holds non-NULL `roc_auc`/`directional_accuracy` for `lstm_v6` (09-20, 09-13)
+  and `lstm_v4` (09-12), which is exactly the "next weekly retrain produces non-NULL rows" the row
+  asked for. *(Those held-out AUCs are 0.505–0.521 against a `dl_min_roc_auc` floor of 0.55 — the
+  monitor AF-82 revived is now correctly reporting the live LSTM as below floor. Recording the
+  number, not acting on it: that is a promotion-gate question.)*
+- **`AF-20260823-79/80/81/82` had no table header and were separated by blank lines**, so all four
+  were "outside any table". Added the header + separator, dropped the blank lines.
+- **`AF-20260930-14`** reworded to state its open reason in the ledger's own vocabulary — *pending
+  the next full pass* — which is the convergence cadence the row already described (~13 days per
+  universe pass at ~144/day). The fix is correct and simply not yet observable in the data.
+- **`AF-20260930-11`** closed citing no test at all, so the 30-day bound on `confluence_signals` was
+  one revert from silently re-breaking the 45min ranker cap. Added
+  `test_unified_ranker.py::TestConfluenceAndCostReadsAreTimeBounded` (3 tests, incl. a **negative
+  control** that widens the window to `5 years` and asserts the guard rejects it). File now **117
+  passed** (was 114).
+
+**I told the user AF-20260930-11 was unfixable because those functions "no longer exist". That was
+wrong.** `_get_confluence_latest_map` (`unified_ranker.py:2395`) and `_compute_cost_map` (`:1990`)
+both exist and both still carry `computed_at >= NOW() - INTERVAL '30 days'`. I based it on a
+`search_codebase` result that returned only ledger hits for those names and stated a conclusion from
+a tool that had evidently failed to scan — the same mistake the repo's rules warn about, and the
+reason the row is now properly immunized rather than written off.
+
+**Production was DOWN and the cause was not this session's work.** Deploying the TS changes
+(`pm2 restart bharat-server`) surfaced a crash loop:
+
+```
+server.ts:63  import { updateSignalAccuracy } from "./src/server/signals";
+SyntaxError: The requested module './src/server/signals' does not provide an export named 'updateSignalAccuracy'
+```
+
+A concurrent session had removed `updateSignalAccuracy` from `signals.ts` on 2026-10-01, leaving the
+comment "it never had a caller" — but it had exactly one caller, the 30s sweep in `server.ts`. A
+missing named export in an ESM module is a **SyntaxError at link time**, so the whole server
+crash-looped and nothing listened on :3000. Fixed by removing the import and the sweep that existed
+only to call it.
+
+**Why removing the whole sweep was right rather than just the call.** Its only remaining work would
+have been 50 live price fetches every 30 seconds feeding nothing. And a current-price snapshot closer
+is the *exact defect* AF-20261001-03 recorded against it: a target touched **between** two price
+observations was missed permanently, and it closed signals off an intraday tick the batch graders
+(working from session bars) never saw. The concurrent session's replacement — `signal_lifecycle.py`
+(AF-20261001-37), closing over each signal's validity window — is the correct design, so the sweep is
+removed rather than left as a shell. **AF-20261001-03 stays closed on its primary fix, the scheduled
+`stuck-signal-resolver` job**; the keyset cursor went with the sweep and is now moot. Verified:
+`MAX_SYMBOLS_PER_SWEEP`/`signalSweepCursor` appear nowhere else, so no test pinned it; `tsc --noEmit`
+exit 0; after restart the server listens on :3000 (pid 47856), `GET /` → 200, queues and WebSocket
+initialised, no SyntaxError.
+
+*Left alone deliberately:* `signal_lifecycle.py`, `migrations/20261001120000_unified-signals-lifecycle.sql`
+and `tests/test_signal_lifecycle.py` are a concurrent session's **in-progress** work — the migration
+is unapplied (`unified_signals` has no `valid_until`/`closed_at`/`horizon_days`) and the module is
+referenced by no job, only by comments. Nothing calls it, so nothing is broken, and applying another
+session's schema migration mid-change would be presumptuous. **It does need their attention:** their
+`signals.ts` edit is what took the server down, and the closer that supersedes the snapshot path is
+still unscheduled.
+
+**Backlog clear extended to the sources the default deliberately skipped.** AF-20261001-03 left the
+`AI`/`screener`/`technical_scan` rows alone because `--sources` defaults to the two sources that could
+*never* resolve (measured 100% ACTIVE, 0 COMPLETED, 0 FAILED). Extended with `--sources all`, dry run
+first: of 41,162 ACTIVE, **8,450 have no usable levels** (NULL target or stop — no direction to read),
+**21,368 are still genuinely open** (neither level touched), and **11,344 are resolvable** from OHLCV
+inside the job's own 90-day window: AI 4,215 (1,450/2,765), screener 2,243 (800/1,443),
+technical 4,494 (1,743/2,751), technical_scan 392 (151/241). Applied: **4,144 COMPLETED / 7,200 FAILED
+= 36.5% implied win rate** — the coherence check that matters, since it matches the 36.6% from the
+earlier clear of a different 65,804 rows.
+
+Verified in SQL rather than from the script's own report: ACTIVE **41,162 → 29,818** (exactly
+−11,344), and 21,368 + 8,450 = 29,818. Remaining ACTIVE: technical 20,511 / technical_scan 7,317 /
+AI 1,675 / screener 253 / SCREENER_SURFACING 60 / platform 2.
+
+*The direction of this change is the honest one:* resolving these rows surfaces 7,200 previously
+invisible losses and pulls the resolved window's win rate down toward the ~36% the platform actually
+realises. Leaving them ACTIVE was the flattering option, and it was also the one that kept them out
+of every corpus the emission gate and the strategy learner read.
+
+**Still open (not mine to close):** the **8,450 no-usable-level ACTIVE rows** can never resolve —
+no stop or target means no direction to read and no expiry path, which makes "ACTIVE" meaningless for
+them. That is the same geometry gap AF-20261001-07 found on the publishing side, and it wants the
+`signal_lifecycle.py` validity decision rather than another backfill.
+
+**`doc:numbers:check` went red a second time and was green again — this time on my own edit.**
+Removing the sweep changed the file inventory the gate re-derives, and a concurrent session's
+`signal_lifecycle.py` + its test moved the Python counts at the same time: 294 → **295** non-test
+modules and 699 → **702** `.py` files, in `CLAUDE.md` and `CONTEXT.md` again. The console.\* count
+stayed at **708** — deleting two `console.error` calls from `server.ts` was exactly offset by other
+sessions adding their own, which is a nice illustration of why the figure is re-derived rather than
+hand-maintained. Gate now prints "All checked doc numbers match the re-derived values."
+
+**Definition-of-done, final state:** `tsc --noEmit` **exit 0** · `findings:check` **OK (0 problems)**
+· `doc:numbers:check` **green** · `checkFindingsLedger.test.ts` **8 passed** ·
+`test_unified_ranker.py` **117 passed** · server **listening on :3000, `GET /` → 200**.
+`pytest` full suite last measured **3,210 passed / 260 skipped / 1 failed**, the one failure
+(`test_finbert_news_sentiment_cpu.py`, torch subprocess) passing in isolation; `vitest` full-suite
+failures are all `Test timed out in 5000ms` under this box's **97% RAM** with several sessions
+running, and every one of them passes when run alone (verified across four separate runs with a
+disjoint failure set each time). Nothing committed — both repos are left as working-tree changes.
+
+
+
+
+---
+
+## 2026-10-01 — job-health digest: four root causes closed (AF-20261001-51..55)
+
+Started from a non-green daily digest and ended at four fixes with live evidence behind each,
+committed together as `ea0941db` (7 files, +457/-16).
+
+**What the digest was actually reporting, once separated from its consequences.** The
+`ml-daily-ops` failure red on 09-30 was the *cause*; the FII/DII, ensemble-score,
+performance, index-OI and ML-probability alerts were all downstream of it. Two of the four
+items I fixed were not failures at all but monitors reporting their own history back at us
+(AF-54 ghost checks, AF-53 first-day "late"), which is worth naming: two of the four "problems"
+in the digest were artefacts of the digest's own reading rules.
+
+**Fixed:**
+
+1. **Dead pooled Postgres backend** (AF-51) — the real cause of `screener-performance`'s
+   50-60% failure rate. `read_df`/`execute` borrow from the pool and return the connection; a
+   backend OOM-killed underneath it (AF-20260928-03's host-RAM squeeze) makes the next borrow
+   fail instantly. Live: `server closed the connection unexpectedly`, 2 of 5 steps dead on
+   09-29 and again on 09-30. The existing `reconnect()` guard only covered a connection a
+   script *held* across a gap — these steps never held one, which is why it had never fired
+   here. New SQLSTATE-based retry, deliberately not applied to deterministic SQL errors.
+
+2. **`screener_features_fetcher` budget** (AF-52) — killed at exactly its own 30-min cap on
+   09-30 while a sibling run of the same script completed 73 min earlier on identical input.
+   30 -> 45 min, and the Worker lock 270 -> 290 to keep lock ≥ sum-of-steps. Same step, same
+   recurrence class as AF-20260917-21's earlier raise.
+
+3. **First-occurrence false "late"** (AF-53) — every newly registered job emitted one
+   guaranteed bogus alert on its first day, because a cron's `prev()` returns the previous slot
+   whether or not the job existed then. Guard is narrow on both sides; four tests pin it.
+
+4. **Ghost stuck-checks** (AF-54) — `dq-uninformative-checks` graded 30 days of history with
+   no join to the live check set, so a deleted check stayed "stuck" for a month. It named
+   two checks AF-20260930-15 had deleted the previous day — reporting a completed fix as
+   unfixed.
+
+**Two process notes worth carrying forward.** First, my first negative control on the DB retry
+reported **20/20 pass against fully-reverted source**: the assertion was
+`'_with_dead_backend_retry' in inspect.getsource(db_compat.read_df)`, and the helper name also
+appears in that function's *docstring*, so it matched regardless of whether the call site
+existed. A source-text assertion in a repo this comment-heavy is close to always vacuous —
+rewritten to be behavioural, after which the control failed 3 tests as it should. Second, a
+PowerShell `Set-Content` used to revert a guard silently added a BOM and mangled the file's
+UTF-8 (`—` -> `├óΓÇ¼ΓÇ¥`) across 30+ lines. Tests still passed, so only `git diff --numstat`
+(63/31 against ~32 added) exposed it; recovered via `git stash` + re-applying with the editor.
+**Check encoding after any PowerShell rewrite of a source file.**
+
+**Verification:** `tsc --noEmit` exit 0 · `jobHeartbeat` 26/26 · `dataQualityChecks` 188/188 ·
+scheduling/monitor invariants 85/85 · findings-ledger 8/8 · full `pytest` **3,253 passed /
+259 skipped** (50m28s) · each fix negative-controlled.
+
+**Left open, deliberately.** AF-55: the 09-30 **and** 10-01 `technical_signals` grids are
+unscored (0/2,166 and 0/2,164; 09-29 is 2,164/2,164). Cause is upstream — `ml-daily-ops` was
+orphaned twice on 09-30. Not backfilled by hand: `load_pending_signals()` has **no date floor**
+(`win_probability IS NULL`, `LIMIT 10000`), so tonight's in-flight `ml-ensemble-score` picks
+both up, and the thing that needs proving is the nightly path itself. Verification owed on that
+run. If the scorer had been date-bounded this would have been a data-loss incident needing a
+backfill script — the floor is load-bearing and should not be "tidied up".
+
+Also still outstanding from earlier in this audit: `dl-trainer` awaits a live retrain to verify
+AF-20260930-10's pinned-host-memory fix, and the host RAM / WSL-Postgres relocation still needs
+the infrastructure decision.
+
