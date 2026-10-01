@@ -186,7 +186,11 @@ export const mlRouter = router({
                  AVG(actual_return_pct) AS avg_return,
                  MAX(actual_return_pct) AS best_return,
                  MIN(actual_return_pct) AS worst_return
-          FROM recommendation_log WHERE outcome IS NOT NULL
+          -- Graded trades only: 'PENDING' is not NULL, and an expiry-fabricated flat NEUTRAL has
+          -- no exit price — live 2026-10-01 those were 11,268 + 868 of 64,914 rows counted here
+          -- as closed trades (AF-20261001-38).
+          FROM recommendation_log
+          WHERE outcome IN ('WIN', 'LOSS', 'NEUTRAL') AND actual_exit_price IS NOT NULL
         `),
       ]);
       return { bySignalType, recommendationStats };
@@ -300,7 +304,10 @@ export const mlRouter = router({
 
       const outcomeSummary = dbAll<any>(`
         SELECT 'TECHNICAL' AS signal_source,
-               15 AS horizon_days,
+               -- was a hardcoded 15 over a population pooling h1+h5+h15, i.e. a mostly-h1
+               -- number labelled h15; a win rate is not comparable across horizons or label
+               -- definitions (measurement.md), so report each horizon as itself (AF-20261001-38).
+               horizon_days,
                COUNT(*) AS total_outcomes,
                SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
                SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS loss_count,
@@ -309,10 +316,12 @@ export const mlRouter = router({
                AVG(max_return_pct) AS avg_max_return_pct,
                NULL AS avg_min_return_pct
         FROM signal_outcomes
-        WHERE outcome IS NOT NULL AND signal_source = 'technical'
+        WHERE outcome IN ('WIN', 'LOSS', 'NEUTRAL', 'STOP_LOSS') AND signal_source = 'technical'
+          AND label_definition = 'path_barrier' AND exit_price IS NOT NULL
+        GROUP BY horizon_days
         UNION ALL
         SELECT 'RECOMMENDATION' AS signal_source,
-               15 AS horizon_days,
+               COALESCE(horizon_days, 15) AS horizon_days,
                COUNT(*) AS total_outcomes,
                SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
                SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS loss_count,
@@ -321,7 +330,8 @@ export const mlRouter = router({
                NULL AS avg_max_return_pct,
                NULL AS avg_min_return_pct
         FROM recommendation_log
-        WHERE outcome IS NOT NULL
+        WHERE outcome IN ('WIN', 'LOSS', 'NEUTRAL') AND actual_exit_price IS NOT NULL
+        GROUP BY COALESCE(horizon_days, 15)
         ORDER BY signal_source, win_count DESC
       `);
 
