@@ -131,9 +131,15 @@ def run(conn, dry_run: bool = False) -> dict:
             counts['rec_log_expired'] = expire_stale_recommendations(conn, dry_run=True)
             print(f"[signal-lifecycle] DRY RUN: would close {dict(counts)} of {len(rows)} active")
             return dict(counts)
-        conn.executemany(
-            "UPDATE unified_signals SET status = ?, closed_at = ?, exit_price = ?, exit_reason = ?, "
-            "horizon_sessions = ? WHERE id = ? AND status = 'ACTIVE'", updates)
+        # PostgreSQL hard limit: 65,535 bind parameters per statement.
+        # With 6 params per row, >10,922 rows in one executemany() raises
+        # sqlalche.me/e/20/f405 (seen live 2026-10-02 with 15,301 updates).
+        # Chunk at 1,000 rows (6,000 params) — 10× headroom even at today's volume.
+        CHUNK = 1_000
+        for i in range(0, len(updates), CHUNK):
+            conn.executemany(
+                "UPDATE unified_signals SET status = ?, closed_at = ?, exit_price = ?, exit_reason = ?, "
+                "horizon_sessions = ? WHERE id = ? AND status = 'ACTIVE'", updates[i:i + CHUNK])
     for source, h in list(HORIZON_SESSIONS.items()) + [(None, DEFAULT_HORIZON)]:
         if source is None:
             conn.execute("UPDATE unified_signals SET horizon_sessions = ? WHERE horizon_sessions IS NULL "
