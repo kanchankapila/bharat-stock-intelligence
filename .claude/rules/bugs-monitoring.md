@@ -228,8 +228,11 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   (2026-10-02, AF-20261002-01/-03).** (1) A heartbeat is the LAST run: both critical failures (`quant-scoring` 11:48,
   `stuck-signal-resolver` 12:44) had been overwritten by retried successes, so the table read 16/16 green. Count
   `job_run_history` rows with `status <> 'success'` over the IST day (`ran_at >= '<prev day> 18:30+00'`) instead. (2) On a
-  trading holiday a "success" can be a logged skip (`unified-ranker` 22:30, duration 0 s, "skipped — trading holiday");
-  judge by the output table's `generated_at`, not the stamp. (3) `[QUEUE] <job> sent` is a generic `onCompleted` hook that
+  trading holiday a "success" can be a logged skip (`unified-ranker` 22:30, duration 0 s, "skipped — trading holiday"):
+  the ranker's and news-sentiment's `completed` handlers stamped it unconditionally until AF-20261002-04. In BullMQ a
+  skip is `processedOn == finishedOn`, and the real holiday work is `closed-day-early` jobs with ids
+  `holiday-<queue>-<epoch>` dispatched by hand (`scripts/orchestrate_holiday_pipeline.mjs`) — read the job id before
+  blaming a "replay". Judge by the output table's `generated_at`, not the stamp. (3) `[QUEUE] <job> sent` is a generic `onCompleted` hook that
   also prints after a SKIPPED run — delivery evidence is `[TelegramRecs] Sent N message(s)`, and counting those showed the
   digest went out THREE times. (4) `pgmigrations.run_on` is a naive UTC `timestamp` (DB `TimeZone=UTC`): applying
   `AT TIME ZONE 'Asia/Kolkata'` to it shifts it the wrong way by 5.5 h, which made a migration look applied hours before

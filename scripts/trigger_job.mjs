@@ -7,7 +7,9 @@ const REDIS = {
   password: process.env.REDIS_PASSWORD || undefined,
 };
 
-// Usage: node scripts/trigger_job.mjs [queueName] [jobName]
+// Usage: node scripts/trigger_job.mjs [queueName] [jobName] [jsonData]
+// jsonData is the job's data payload, e.g. '{"force":true}' to re-send an already-delivered
+// recommendations digest (AF-20261002-01); without it the payload is {}.
 // Both default to the original hardcoded ml-weekly-retrain target, so every existing
 // invocation keeps its exact previous behaviour; the args exist because the same one-line
 // BullMQ add is needed for other queues (first real use: re-running unified-ranker after an
@@ -18,10 +20,11 @@ const REDIS = {
 // (queues.ts). Passing a different name here therefore cannot recurse.
 const QUEUE_NAME = process.argv[2] || 'ml-weekly-retrain';
 const JOB_NAME = process.argv[3] || 'ml-weekly-retrain-manual';
+const JOB_DATA = process.argv[4] ? JSON.parse(process.argv[4]) : {};
 
 async function run() {
   const q = new Queue(QUEUE_NAME, { connection: REDIS });
-  const job = await q.add(JOB_NAME, {}, { jobId: 'manual-' + Date.now() });
+  const job = await q.add(JOB_NAME, JOB_DATA, { jobId: 'manual-' + Date.now() });
   console.log(`Job added: queue=${QUEUE_NAME} name=${JOB_NAME} id=${job.id}`);
   await q.close();
 }

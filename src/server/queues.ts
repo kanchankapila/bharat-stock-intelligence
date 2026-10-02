@@ -2354,7 +2354,11 @@ export async function initQueues(): Promise<boolean> {
       },
     );
 
-    newsSentimentWorker.on('completed', (job) => {
+    newsSentimentWorker.on('completed', (job, result) => {
+      // The "-hot" results-season variants return { skipped: true } outside results season; they
+      // share this one heartbeat with ~15 other cycles, so a skip stamped here hid a real failure
+      // of any of them (AF-20261002-04).
+      if ((result as { skipped?: boolean } | undefined)?.skipped) return;
       console.log('[QUEUE] news-sentiment completed');
       recordHeartbeat('news-sentiment', 'success', undefined, bullJobDurationMs(job));
     });
@@ -3293,7 +3297,11 @@ export async function initQueues(): Promise<boolean> {
         removeOnFail: { age: 86400 * 3, count: 20 },
       },
     );
-    unifiedRankerWorkerInstance.on('completed', (job) => {
+    unifiedRankerWorkerInstance.on('completed', (job, result) => {
+      // A holiday skip is not a success (jobHeartbeat.ts: "a skip is deliberately NOT stamped as a
+      // success"; the lateness math forgives the idle slot). Stamping it overwrote the morning
+      // closed-day run's real verdict with a 0 s success every holiday evening (AF-20261002-04).
+      if ((result as { skipped?: boolean } | undefined)?.skipped) return;
       console.log('[QUEUE] unified-ranker done');
       recordHeartbeat('unified-ranker', 'success', undefined, bullJobDurationMs(job));
     });
