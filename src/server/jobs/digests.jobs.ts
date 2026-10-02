@@ -14,7 +14,7 @@
 import { buildDailyDigest } from '../jobWatchdog';
 import { telegramService } from '../telegramService';
 import { registerRepeatableJob } from './registerJob';
-import { dbGet } from '../dbAsync';
+import { dbGet, dbRun } from '../dbAsync';
 
 export const QUEUE_JOB_DIGEST = 'job-digest';
 export const QUEUE_JOB_DIGEST_MORNING = 'job-digest-morning';
@@ -80,7 +80,13 @@ async function unifiedRankingIsFresh(): Promise<boolean> {
   }
 }
 
-async function processRecommendationsDigest(): Promise<void> {
+// The ranking a digest was built from, recorded only after a fully successful send. A server
+// restart replays the closed-day batch and re-fires this job, and the scheduled 22:40 slot then
+// repeats a ranking that was already delivered -- 2026-10-02 sent three digests, the last two from
+// the same 14:24 ranking (AF-20261002-01). Sending identical content again carries no information.
+const DIGEST_LAST_SENT_KEY = 'recommendations_digest_last_sent_ranking';
+
+export async function processRecommendationsDigest(job?: { data?: { force?: boolean } }): Promise<void> {
   // 2026-09-22: the 17:10 UTC cron races unified-ranker's own 17:00 UTC slot BY DESIGN —
   // measured completions 17:11 / 17:21 / 17:39 / 17:42, and after a failed attempt the
   // bounded make-up (AF-20260917-20: 45min budget + 15min delay) can land around 18:18.
@@ -113,12 +119,32 @@ async function processRecommendationsDigest(): Promise<void> {
     // surface AF-20260910-03 gave company-profiles-sync.
     return { success: false, failedSteps: [msg] } as unknown as void;
   }
+  const ranking = await dbGet<{ g: string | null }>(`SELECT MAX(generated_at)::text AS g FROM unified_recommendations`);
+  const rankingKey = ranking?.g ?? null;
+  if (rankingKey && !job?.data?.force) {
+    const last = await dbGet<{ value: string }>(`SELECT value FROM app_settings WHERE key = ?`, [DIGEST_LAST_SENT_KEY]);
+    if (last?.value === rankingKey) {
+      // A normal return, not a { skipped: true } marker: that would stamp no heartbeat, and on a
+      // holiday evening (ranking unchanged since an earlier send) the critical job's last success
+      // would sit before the 22:40 slot and raise a false "late" alert. The outcome this job
+      // exists for -- this ranking is delivered -- already holds, and the key is only ever
+      // written after a fully successful send, so this cannot hide an earlier failure.
+      console.log(`[QUEUE] recommendations-digest: ranking ${rankingKey} was already delivered -- not re-sending`);
+      return;
+    }
+  }
   const { sendRecommendationsDigest } = await import('../telegramRecommendations');
   const res = await sendRecommendationsDigest();
   if (!res.sent && res.picks > 0) {
     // Picks existed but Telegram rejected the send -- fail loudly so the heartbeat marks
     // it failed rather than reporting success on a digest nobody received.
     throw new Error('recommendations digest failed to send to Telegram');
+  }
+  if (res.sent && rankingKey) {
+    await dbRun(
+      `INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+      [DIGEST_LAST_SENT_KEY, rankingKey],
+    );
   }
 }
 

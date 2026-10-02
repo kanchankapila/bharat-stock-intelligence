@@ -10838,3 +10838,16 @@ Also still outstanding from earlier in this audit: `dl-trainer` awaits a live re
 AF-20260930-10's pinned-host-memory fix, and the host RAM / WSL-Postgres relocation still needs
 the infrastructure decision.
 
+## 2026-10-02 (night) — "did all critical jobs run today, without error?"
+
+**Answer: no, not error-free — but all 16 critical jobs are green now, and both critical failures recovered.** 2 Oct was an NSE holiday (Mahatma Gandhi Jayanti; `market_holidays`, 0 `stock_ohlcv` rows), so "should have run" was judged against the holiday logic, not the raw cron: zero `stock-refresh` rows is correct, and the 22:30 `unified-ranker` "success" (0 s) was a logged skip ("closed-day-early-batch already ran this morning"), not a ranking — the real rankings were 07:30 and 14:24.
+
+**Verified by output, not by heartbeat:** `ml-daily-ops` 19 ok / 0 failed and `win_probability` 100% on 09-30 and 10-01 (the AF-20261001-55 gap is healed); `quant-scoring` 14:20 wrote fresh factor picks (14:16-14:20 IST) and 2,424 `quant_scores` rows with beta/Sortino; `outcome-resolver` stamped 0 fabricated unified labels today, 7 technical h15 (halted tickers J, S, M, ARE, GVT…: the unmerged AF-20261001-30 defect, still live).
+
+**Failures today (7 rows = 4 incidents; each run writes a job-level and a step-level heartbeat):** `quant-scoring` 11:48 (critical, 3 timeouts under a restart catch-up stampede; retried 14:20 OK); `stuck-signal-resolver` 12:44 (critical; `signal_lifecycle.py` ran one minute before its migration was applied at 12:45:27 IST — `pgmigrations.run_on` is naive UTC, 07:15:27 — a designed fail-loud; retried 12:47 OK); `trendlyne-catchup` + `mover-intraday-capture` 12:32 (host memory, 0xC0000017 / 0xC000012D, followed by a Node `ENOMEM` crash at 12:33:40); `screener-performance` 00:24 (non-critical, dead Postgres backend — the retry fix `ea0941db` was committed 20:44 but the running server dated from 17:58, i.e. committed ≠ deployed).
+
+**Fixed:** AF-20261002-01 — the digest was delivered 3× (12:18, 14:26, 22:40), the last two from the same ranking; now keyed to the ranking. **Filed:** AF-20261002-02 (a critical job exists only in uncommitted code that production runs), AF-20261002-03 (restart stampede, ties to AF-20260930-26).
+
+**Reading the instruments:** `recommendations-digest sent` is a generic `onCompleted` log and prints after a SKIPPED run — count `[TelegramRecs] Sent` instead. A confluence-compute gap of 352 min (01:00-06:00 IST) is designed (market-hours and static-input windows return `skipped`, no heartbeat), not an outage; `news-sentiment` was never silent for more than 20 min.
+
+Not deployed: no `pm2 restart` into a tree with 152 uncommitted paths.

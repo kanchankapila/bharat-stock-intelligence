@@ -224,6 +224,18 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   verify against the log's latest completed slot and a fresh heartbeat before spending a session on the flag. Related
   measurement trap: `job_heartbeat` stores naive-UTC epochs and pg's JSON rendering appends a bogus `Z` to
   `AT TIME ZONE`-converted values — UTC instants read as IST wall times and vice versa; use raw epoch math (repo-doctor does).
+- **"All critical jobs succeeded today" cannot be read off `job_heartbeat` — four instruments lie in four different ways
+  (2026-10-02, AF-20261002-01/-03).** (1) A heartbeat is the LAST run: both critical failures (`quant-scoring` 11:48,
+  `stuck-signal-resolver` 12:44) had been overwritten by retried successes, so the table read 16/16 green. Count
+  `job_run_history` rows with `status <> 'success'` over the IST day (`ran_at >= '<prev day> 18:30+00'`) instead. (2) On a
+  trading holiday a "success" can be a logged skip (`unified-ranker` 22:30, duration 0 s, "skipped — trading holiday");
+  judge by the output table's `generated_at`, not the stamp. (3) `[QUEUE] <job> sent` is a generic `onCompleted` hook that
+  also prints after a SKIPPED run — delivery evidence is `[TelegramRecs] Sent N message(s)`, and counting those showed the
+  digest went out THREE times. (4) `pgmigrations.run_on` is a naive UTC `timestamp` (DB `TimeZone=UTC`): applying
+  `AT TIME ZONE 'Asia/Kolkata'` to it shifts it the wrong way by 5.5 h, which made a migration look applied hours before
+  the failure it explained. Also: a Windows exit code `0xC0000017` / `0xC000012D` in two scripts in the same millisecond, followed
+  by a Node `ENOMEM`, is one host-memory event, not two script bugs. **Tell:** an exact tie between "green dashboard" and
+  "I was told something failed" — query the run history for the day before reading any heartbeat.
 - **A buy/sell inversion can exist at the DISPLAY layer while the data is correct — check the mapping when a report "looks backwards".**
   The 2026-09-09 accuracy-digest audit: the ranker was monotone-correct (avg unified_score Strong Buy 85.6 → Strong Sell 14.0),
   class strings title-case, retrospective class sets pinned by tests — but the Grafana "top losers" panel mapped
