@@ -1,6 +1,6 @@
 # Bharat Stock Intelligence — Claude Instructions
 
-Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, 290 non-test Python modules in `src/server/` (82 `*_fetcher.py` + ML engines/jobs/helpers; 678 `.py` files including tests — counts measured 2026-09-29).
+Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, 295 non-test Python modules in `src/server/` (82 `*_fetcher.py` + ML engines/jobs/helpers; 702 `.py` files including tests — counts measured 2026-10-01).
 
 > **Counts drift, so treat the numbers above as a dated snapshot, not a fact to quote.** The
 > authoritative live inventory is filesystem + `information_schema`, and each figure below names

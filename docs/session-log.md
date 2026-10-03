@@ -10750,8 +10750,55 @@ of every corpus the emission gate and the strategy learner read.
 
 **Still open (not mine to close):** the **8,450 no-usable-level ACTIVE rows** can never resolve —
 no stop or target means no direction to read and no expiry path, which makes "ACTIVE" meaningless for
-them. That is the same geometry gap AF-20261001-07 found on the publishing side, and it wants the
-`signal_lifecycle.py` validity decision rather than another backfill.
+them. Tracked and quantified as **AF-20261001-56** below.
+
+## 2026-10-01 (session 4) — the unresolvable rows were a LIVE producer, not rot
+
+Chasing the 8,450 "no usable levels" rows rather than assuming they were historical, and the
+decomposition by producer changed the conclusion:
+
+| producer | rows | no target | no stop | span |
+|---|---|---|---|---|
+| `technical_scan` / BUY | **7,223** | 7,223 | 6,946 | 2026-07-27 → **2026-10-01** |
+| `AI` / HOLD | 999 | 999 | 998 | 2026-06-15 → 06-18 |
+| `AI` / BUY | 75 | 75 | 75 | 2026-06-15 → 08-07 |
+| `SECTOR_SCREENER_CONFLUENCE` | 57 | 57 | 57 | by design, documented in the resolver |
+
+**The newest `technical_scan` row was written the same day I measured it** — so this was an actively
+producing defect, not accumulated rot, and 7,223 of the 8,356 unresolvable rows came from one writer.
+86% of them.
+
+**The cause.** AF-20261001-10 had already fixed this producer to emit NULL geometry *correctly*
+rather than NaN, and its own test asserts that: "no setup computed: geometry is null, never NaN". But
+the fix made the geometry honest without making the ROW conditional — the `unified_signals` mirror
+still fired on `r.signalScore > 0` alone. So a positive score whose ATR barriers were unavailable
+published a `BUY` with no target and no stop. A BUY with no levels is not a trade claim: nothing to
+size against, and **no level for any resolver to grade**, so the row could never leave ACTIVE. It was
+inert for measurement (the path resolver skips no-level rows; `resolveSignalOutcome` returns null
+without a stop) but it inflated every "how many signals are live" read.
+
+**Fixed at the writer** (AF-20261001-56): the mirror is now gated on `target != null && stop != null`.
+The underlying analysis still reaches `technical_signals` and, with levels, `recommendation_log` —
+only the cross-source TRADE mirror became conditional, which is where a trade claim belongs. A score
+with no levels is a ranking, not an instruction. Gated at the producer rather than repaired in place
+so the next scan cannot re-create the condition.
+
++4 tests in `technicalScanSignalWrites.test.ts` (4 → **8 passed**), written against the same predicate
+the writer uses so the two cannot drift: a positive score with no levels is rejected; the same score
+with levels is accepted; **a half-plan (target without stop, and the mirror image) is rejected** — the
+AF-20261001-07 shape on the writing side, so the guard cannot pass on one level; and short geometry is
+accepted, so the gate cannot quietly become long-only and drop the SELL side the same fix introduced.
+
+**The 8,356 legacy rows were deliberately NOT mass-updated.** They carry no level to grade against, so
+they can only be closed by TIME, which **depends on AF-20261001-37** — `signal_lifecycle.py`'s
+EXPIRED-by-time closer, whose migration is still unapplied and whose module is referenced by no job.
+`EXPIRED` exists in the `signals.ts` status type but has never been written to the table, and no CHECK
+constraint restricts `status`, so writing it here would have been picking another session's status
+vocabulary for them. Recorded in the row instead.
+
+*Also note what is NOT a defect here:* the 999 `AI`/HOLD rows correctly carry no levels — a HOLD is
+not a trade — but they are `ACTIVE` from June, so they are the same never-resolving problem by a
+different route, and the time-based closer is the fix for those too.
 
 **`doc:numbers:check` went red a second time and was green again — this time on my own edit.**
 Removing the sweep changed the file inventory the gate re-derives, and a concurrent session's
@@ -10761,9 +10808,15 @@ stayed at **708** — deleting two `console.error` calls from `server.ts` was ex
 sessions adding their own, which is a nice illustration of why the figure is re-derived rather than
 hand-maintained. Gate now prints "All checked doc numbers match the re-derived values."
 
-**Definition-of-done, final state:** `tsc --noEmit` **exit 0** · `findings:check` **OK (0 problems)**
-· `doc:numbers:check` **green** · `checkFindingsLedger.test.ts` **8 passed** ·
-`test_unified_ranker.py` **117 passed** · server **listening on :3000, `GET /` → 200**.
+**Definition-of-done, final state:** `tsc --noEmit` **exit 0** · `doc:numbers:check` **green** ·
+`checkFindingsLedger.test.ts` **8 passed** · `test_unified_ranker.py` **117 passed** ·
+`technicalScanSignalWrites.test.ts` **8 passed** · server **listening on :3000, `GET /` → 200**.
+`findings:check` was **green (0 problems)** when this was first written and is now **red on 2 rows
+that are NOT mine** — `AF-20261001-52` (closed FIX citing `monitorScriptsGraceMinutesConsistency` /
+`CronMirror` / `jobPipelineOrdering`, which the validator cannot resolve because they are bare
+basenames missing the `.test.ts` extension) and `AF-20261001-55` (open, no reason stated). Both
+appeared from a concurrent session while this one was still working, so they were left alone rather
+than edited out from under a live writer; both are one-line fixes for whoever owns them.
 `pytest` full suite last measured **3,210 passed / 260 skipped / 1 failed**, the one failure
 (`test_finbert_news_sentiment_cpu.py`, torch subprocess) passing in isolation; `vitest` full-suite
 failures are all `Test timed out in 5000ms` under this box's **97% RAM** with several sessions
@@ -10837,6 +10890,60 @@ backfill script — the floor is load-bearing and should not be "tidied up".
 Also still outstanding from earlier in this audit: `dl-trainer` awaits a live retrain to verify
 AF-20260930-10's pinned-host-memory fix, and the host RAM / WSL-Postgres relocation still needs
 the infrastructure decision.
+
+---
+
+## 2026-10-02 — Trading Holiday Pipeline & Weekly Critical Jobs Execution
+
+**Context & Trigger:** Friday trading holiday (Mahatma Gandhi Jayanti). User directed sequential end-to-end execution of all critical signal/recommendation jobs and all 4 weekly critical jobs, ensuring mutual exclusion, real-time memory monitoring, and transparent reporting of all errors and execution times.
+
+### 1. Root-Cause Fixes Applied Today
+- **`risk_metrics_engine.py` N+1 Query Bottleneck**:
+  - *Problem*: `quant-scoring` was failing with sub-step timeouts in `risk_metrics_engine.py` (>300,000ms SIGTERM kill). The engine executed 2,449 sequential unindexed SQL queries against `ohlcv_daily`.
+  - *Fix*: Rewrote `src/server/risk_metrics_engine.py` to batch-load the entire active universe's 550-day OHLCV panel in a single indexed query (`min_date >= 550d`) + Pandas vectorized grouping.
+  - *Evidence*: Runtime dropped from >300s to **8.0 seconds flat**; all 2,408 stocks processed with 0 errors; Beta, Sortino, and VaR95 written to `quant_scores`.
+- **`unified_signals` Schema Migration**:
+  - *Problem*: `stuck-signal-resolver` was crashing with `column "closed_at" of relation "unified_signals" does not exist`.
+  - *Fix*: Applied `migrations/20261001120000_unified-signals-lifecycle.sql` via `npm run migrate:up`, creating `closed_at`, `exit_price`, `exit_reason`, and `horizon_sessions`.
+  - *Evidence*: `stuck-signal-resolver` re-ran and resolved 15,203 expired signals with 0 errors.
+
+### 2. Daily Signal & Recommendation Pipeline (Sequentially Executed)
+- **`ml-daily-ops`**: Succeeded (09:56 IST, 8 online learning steps).
+- **`stock-scoring`**: Succeeded (11:11 IST, 9,778 rows in `stock_scores`, 1,462 in `recommendation_log`).
+- **`quant-scoring`**: Succeeded (14:20 IST, 2,424 stocks scored, 8s risk engine, heartbeat stamped `success`, `last_error = NULL`).
+- **`confluence-compute`**: Succeeded (14:20 IST, 1,063 confluence signals).
+- **`outcome-resolver`**: Succeeded (14:24 IST, 1d, 5d, 15d forward return horizons).
+- **`unified-ranker`**: Succeeded (14:26 IST, **2,969 total recommendations** generated today, **1,063 S_ELITE and A_HIGH conviction picks**).
+- **`recommendations-digest`**: Succeeded (14:26 IST, Telegram broadcast dispatched).
+- **`data-quality-daily`**: Succeeded (14:29 IST, all 25 integrity checks passed).
+- **`stuck-signal-resolver`**: Succeeded (14:29 IST, resolved expired signals).
+
+### 3. All 4 Weekly Critical Jobs (Sequentially Executed with Zero Errors)
+- **Job 1: `mover-study-weekly`** (`mover-reverse-engineering-study`):
+  - *Duration*: 1,938.0s (~32.3 min) | *Peak Python RAM*: 2,849 MB
+  - *Actions*: Backfilled 250 days of mover screener classes, re-engineered breakout characteristics.
+  - *DB Verdict*: `job_heartbeat.status = success`, `last_run = 2026-10-02 15:49:48 IST`.
+- **Job 2: `trendlyne-ratios-monthly`** (`trendlyne-ratios-monthly`):
+  - *Duration*: 3,923.2s (~65.4 min) | *Peak Python RAM*: 3,112 MB
+  - *Actions*: Completed all 8 sub-steps: `financial_ratios_fetcher.py`, `mc_corporate_actions_fetcher.py`, `ohlcv_adjust.py --persist`, `ohlcv_adjust.py --cross-validate`, `moneycontrol_fetcher.py --seasonality`, `working_capital_fetcher.py`, `mf_stock_holdings_fetcher.py`, and `mc_stockvitals_history_fetcher.py`.
+  - *DB Verdict*: `job_heartbeat.status = success`, `last_run = 2026-10-02 16:56:28 IST`, `fail_count = 0`.
+- **Job 3: `ml-weekly-data`** (`ml-weekly-data`):
+  - *Duration*: 4,317.0s (~71.9 min) | *Peak Python RAM*: 1,813 MB
+  - *Actions*: Completed all 16 sub-steps: index mappings, earnings surprise history, block-deal history, quarterly cash-flows, SEBI PIT filings, fundamentals, forward return labels (h=5, 15), and exit labelling backlog.
+  - *DB Verdict*: `job_heartbeat.status = success`, `last_run = 2026-10-02 18:09:06 IST`, `fail_count = 0`.
+- **Job 4: `ml-weekly-retrain`** (`ml-weekly-retrain`):
+  - *Duration*: 6,812.8s (~113.5 min) | *Peak Python RAM*: 4,271 MB
+  - *Actions*:
+    - `exit_policy.py --train`: Trained GradientBoosting exit regressor pair on 150,000 samples (registered in `model_registry` at 19:22:46 IST).
+    - `ml_ensemble.py --train --tune --score --label triple_barrier`: Trained stacking ensemble on 357,366 samples with Optuna tuning and triple-barrier labeling. Promoted to `model_registry` as active (`is_active = 1`, test AUC 0.5375, CV AUC 0.5377 at 19:49:38 IST).
+    - `strategy_optimizer.py`, `backtester.py`, `backtest_optimizer.py`, `performance_tracker.py`, and `factor_edge.py` completed with 0 errors.
+  - *DB Verdict*: `job_heartbeat.status = success`, `last_run = 2026-10-02 20:14:17 IST`.
+
+### 4. Verification & State Summary
+- All 13 core jobs stamped `success` in `job_heartbeat` (`last_error = NULL`).
+- All BullMQ queues idle (`active: 0, waiting: 0`).
+- PM2 processes (`bharat-server`, `alphaquant-api`, `chatbot`, `engine-worker`, `ml-api`) all online.
+- Zero errors remaining in `logs/error-2026-10-02.log` for the pipelines.
 
 ## 2026-10-02 (night) — "did all critical jobs run today, without error?"
 

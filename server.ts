@@ -14,7 +14,7 @@ initSentry();
 // Routes every console.log/info/debug/warn/error call in the whole process (not just this
 // file) through the real Winston logger — structured JSON + rotation + levels for the ~90
 // server files' worth of raw console.* calls that remain, none of which need to change
-// (709 call sites, measured 2026-09-29; re-derive with `node scripts/docNumbers.mjs`).
+// (708 call sites, measured 2026-10-01; re-derive with `node scripts/docNumbers.mjs`).
 // Installed as early
 // as possible so even the uncaughtException/unhandledRejection handlers just below get it.
 // Also absorbs the ioredis ACL-warning suppression that used to be its own standalone
@@ -60,7 +60,10 @@ import { isAuthorizedInternalCaller, isAuthorizedInternalOrUser, makeRateLimiter
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { updateSignalAccuracy } from "./src/server/signals";
+// 2026-10-01: `updateSignalAccuracy` is no longer imported here. It was removed from
+// ./src/server/signals (its current-price snapshot close is superseded by signal_lifecycle.py's
+// window-based closer, AF-20261001-37), and leaving this import behind crash-looped the whole
+// server on boot — a missing named export in an ESM module is a SyntaxError, not a warning.
 
 async function startServer() {
   const { validateEnv } = await import('./src/server/envConfig');
@@ -258,34 +261,23 @@ async function startServer() {
     import('./src/server/moneycontrolScreener').then(m => m.syncMoneyControlScreeners());
   }
 
-  // Real-time signal-accuracy sweep: marks ACTIVE unified_signals COMPLETED/FAILED the moment
-  // live price crosses the stored target/stop, ahead of the batch outcome-resolution jobs that
-  // run post-close. Was hardcoded to 3 demo symbols (RELIANCE/TCS/HDFCBANK) regardless of what
-  // was actually active — every other live signal never got this real-time check. Now sweeps
-  // whatever symbols genuinely carry an ACTIVE unified_signals row, capped so a busy day can't
-  // fan out into hundreds of concurrent price fetches every 30s.
-  setInterval(async () => {
-    const MAX_SYMBOLS_PER_SWEEP = 50;
-    try {
-      const { dbAll } = await import('./src/server/dbAsync');
-      const rows = await dbAll<{ symbol: string }>(
-        `SELECT DISTINCT symbol FROM unified_signals WHERE status = 'ACTIVE' LIMIT ?`,
-        [MAX_SYMBOLS_PER_SWEEP]
-      );
-      for (const { symbol } of rows) {
-        try {
-          const data = await fetchStockDataWithCache(symbol);
-          if (data && data.price) {
-            await updateSignalAccuracy(symbol, data.price);
-          }
-        } catch (error) {
-          console.error(`Failed to update signal accuracy for ${symbol}`, error);
-        }
-      }
-    } catch (error) {
-      console.error('Signal-accuracy sweep failed to load active symbols', error);
-    }
-  }, 30000); // Every 30 seconds
+  // Real-time signal-accuracy sweep: REMOVED 2026-10-01 (restored service after it crash-looped
+  // the server). Its only action was calling `updateSignalAccuracy`, a current-price snapshot
+  // closer that `src/server/signals.ts` removed the same day — see the comment it left there —
+  // because a signal must be closed over its VALIDITY WINDOW, not on whichever mid-session price
+  // happened to print last. `signal_lifecycle.py` (AF-20261001-37) now owns closing
+  // `unified_signals`, and the path-based `stuck-signal-resolver` job (AF-20261001-03) owns the
+  // ones that need real resolution.
+  //
+  // Two reasons not to keep a shell of it. (1) Its sole remaining work would be 50 live price
+  // fetches every 30s feeding nothing — real vendor quota for no decision. (2) A snapshot closer
+  // is the exact defect AF-20261001-03 recorded against it: a target touched BETWEEN two price
+  // observations was missed permanently, and it graded a signal closed off an intraday tick that
+  // the batch graders (which use session bars) never saw.
+  //
+  // The keyset cursor this block carried (`symbol > last`, added 2026-10-01 for AF-20261001-03) is
+  // therefore moot along with the sweep. AF-20261001-03 stays closed on its primary fix — the
+  // scheduled `stuck-signal-resolver` job, which resolves by path over OHLCV bars instead.
 
   // JSON body parser with increased limit for large payloads (e.g. stock list sync)
   app.use(express.json({ limit: '50mb' }));

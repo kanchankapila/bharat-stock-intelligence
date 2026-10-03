@@ -1,6 +1,6 @@
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Add src/server to import path for db_compat
@@ -53,6 +53,11 @@ def get_earnings_calendar(days_ahead: int = 14, db_path: str = DB_PATH) -> dict:
     # 4-col conflict key allows multiple signal_types/day, so "latest row" needs an explicit
     # MAX(signal_generated_at) rather than assuming one row per symbol.
     conn = connect()
+    # AF-20261001-02: "latest technical Bullish" had no date floor, and unified_signals rows
+    # never age out of status='ACTIVE' (no scheduled path-based resolver), so a retired or
+    # dormant symbol's months-old bullish row could be served as current. 30-day floor —
+    # the same bound as the TS reads (misc.router.ts AI panel, mcpServer tech-signals block).
+    signal_floor = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
     bullish = conn.execute("""
         SELECT tas.symbol, ns.name, ns.sector, tas.signal_type AS trend,
                tas.technical_score AS rsi, ss.score, ss.classification
@@ -60,13 +65,14 @@ def get_earnings_calendar(days_ahead: int = 14, db_path: str = DB_PATH) -> dict:
         JOIN nse_stocks ns ON tas.symbol = ns.symbol
         LEFT JOIN stock_scores ss ON tas.symbol = ss.symbol AND ss.timeframe = 'long_term'
         WHERE tas.signal_source = 'technical' AND tas.signal_type = 'Bullish'
+          AND tas.signal_generated_at >= ?
           AND tas.signal_generated_at = (
               SELECT MAX(u2.signal_generated_at) FROM unified_signals u2
               WHERE u2.symbol = tas.symbol AND u2.signal_source = 'technical')
           AND (ss.classification IN ('Buy','Strong Buy') OR ss.classification IS NULL)
         ORDER BY ss.score DESC
         LIMIT 20
-    """).fetchall()
+    """, (signal_floor,)).fetchall()
     conn.close()
 
     return {

@@ -17,7 +17,7 @@ cycle_at, exits scanned only on later bars, and no gap semantics at all.
 
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -175,3 +175,118 @@ class TestOffGridBarsRejected:
     def test_snapshot_bar_rejected(self):
         assert not ior._on_grid(datetime(2026, 7, 30, 9, 30, 20, tzinfo=_IST))
         assert not ior._on_grid(datetime(2026, 7, 30, 9, 37, tzinfo=_IST))
+
+
+class _FixedDatetime(datetime):
+    """datetime subclass pinned to one instant, for the pre/post-close branch."""
+
+    _pinned: datetime
+
+    def __new__(cls, pinned: datetime):
+        obj = super().__new__(cls, pinned.year, pinned.month, pinned.day,
+                             pinned.hour, pinned.minute, pinned.second,
+                             pinned.microsecond, pinned.tzinfo)
+        obj._pinned = pinned
+        return obj
+
+    def now(self, tz=None):
+        return self._pinned if tz is None else self._pinned.astimezone(tz)
+
+    def today(self):
+        return self._pinned.date()
+
+    @staticmethod
+    def now_utc(*_a, **_k):
+        raise AssertionError("unused")
+
+
+class _FakeConn:
+    """Minimal conn standing in for the two tables ungraded_sessions() reads. Row shape follows
+    the real columns; `grouped` is the (computed_at, gradeable_cycle_count) the query returns."""
+
+    def __init__(self, grouped):
+        self._grouped = grouped
+
+    def execute(self, sql, params=()):
+        return self
+
+
+    def fetchall(self):
+        return [(g, 1) for g in self._grouped]
+
+
+class TestUngradedSessionDetection:
+    """AF-20261001-05: on 2026-09-30 `ml-daily-ops` was orphaned twice by pm2 restarts (the run
+    9 min in, then its make-up 44 min in), leaving 3,152 actionable signals with no outcome rows
+    -- and the next night's run only ever grades *today*, so the session was ungradeable forever
+    and silently vanished from the win rate the emission gate and strategy learner read."""
+
+    def test_session_with_outcomes_is_not_backfilled(self):
+        assert ior.ungraded_sessions(_FakeConn([])) == []
+
+    def test_lost_session_is_detected(self):
+        assert ior.ungraded_sessions(_FakeConn(["2026-09-30"])) == ["2026-09-30"]
+
+    def test_multiple_lost_sessions_are_returned_in_order(self):
+        conn = _FakeConn(["2026-09-28", "2026-09-29", "2026-09-30"])
+        assert ior.ungraded_sessions(conn) == ["2026-09-28", "2026-09-29", "2026-09-30"]
+
+    def test_query_requires_a_complete_geometry_and_an_actionable_classification(self):
+        """A session whose cycles carry no entry/target/stop, or are all Hold, has nothing a
+        paper trade could resolve -- backfilling it would manufacture 'no tradeable recs' noise
+        every night. The SQL, not the caller, is the guard."""
+        import inspect
+        sql = inspect.getsource(ior.ungraded_sessions)
+        for needle in ("entry_price IS NOT NULL", "target_1 IS NOT NULL",
+                       "stop_loss IS NOT NULL", "NOT EXISTS"):
+            assert needle in sql, f"ungraded_sessions lost its {needle!r} guard"
+
+    def test_backfill_grades_each_detected_session(self, monkeypatch):
+        seen = []
+        monkeypatch.setattr(ior, "ungraded_sessions", lambda conn, days=7: ["2026-09-29", "2026-09-30"])
+        monkeypatch.setattr(ior, "resolve",
+                            lambda conn, d: (seen.append(d), {"resolved": 5})[1])
+        monkeypatch.setattr(ior, "_gradable_cycles", lambda conn, d: 99)
+        out = ior.backfill_ungraded(_FakeConn([]))
+        assert seen == ["2026-09-29", "2026-09-30"]
+        assert [o["date"] for o in out] == ["2026-09-29", "2026-09-30"]
+        assert all(o["resolved"] == 5 and o["gradeable_cycles"] == 99 for o in out)
+
+    def test_open_session_is_excluded_before_the_close(self, monkeypatch):
+        """The intraday chain writes shadow cycles all day, so `computed_at = today` always looks
+        gradeable. Grading it at 11:30 IST would square every signal off at whatever bar exists
+        so far -- exits that never happened. Negative control: the same rows ARE included once
+        15:30 IST has passed, which is when the nightly job actually runs."""
+        today = date.today().isoformat()
+
+        class _SpyConn:
+            """Honours both bounds the function binds, so the assertions test the real filter."""
+
+            def __init__(self):
+                self.params = []
+
+            def execute(self, sql, params=()):
+                self.params.append(tuple(params))
+                return self
+
+            def fetchall(self):
+                lo, hi = self.params[-1]
+                return [(today, 1)] if lo <= today <= hi else []
+
+        # 11:00 IST -- mid-session
+        monkeypatch.setattr(ior, "datetime", _FixedDatetime(datetime(2026, 10, 1, 5, 30, tzinfo=timezone.utc)))
+        conn = _SpyConn()
+        assert ior.ungraded_sessions(conn) == []
+        assert conn.params[0] == ((date.today() - timedelta(days=7)).isoformat(),
+                                  (date.today() - timedelta(days=1)).isoformat()), \
+            "before the close the upper bound must EXCLUDE today -- narrowing the lower bound " \
+            "would still admit it, which is the row this guard exists to protect"
+
+        # 16:30 IST -- after the close, same rows now included
+        monkeypatch.setattr(ior, "datetime", _FixedDatetime(datetime(2026, 10, 1, 11, 0, tzinfo=timezone.utc)))
+        conn2 = _SpyConn()
+        assert ior.ungraded_sessions(conn2) == [today]
+        assert conn2.params[0] == ((date.today() - timedelta(days=7)).isoformat(), today)
+
+    def test_lookback_is_used_verbatim_after_the_close(self):
+        assert ior.NSE_CLOSE_MINUTES_IST == 930

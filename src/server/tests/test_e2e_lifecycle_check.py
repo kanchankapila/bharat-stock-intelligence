@@ -13,7 +13,7 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from e2e_lifecycle_check import MIN_UNIVERSE, _age_days, stage_verdict
+from e2e_lifecycle_check import MIN_UNIVERSE, _age_days, disabled_stage, stage_verdict
 
 
 class TestStageVerdict:
@@ -49,6 +49,24 @@ class TestStageVerdict:
 
     def test_no_max_age_means_freshness_is_not_asserted(self):
         assert stage_verdict(2075, age_days=900) == (True, None)
+
+    def test_weekly_composite_age_is_inside_its_ten_day_window(self):
+        assert stage_verdict(2177, age_days=6, max_age_days=10, min_universe=0) == (True, None)
+
+    def test_disabled_engine_is_reported_as_skipped_not_failed(self):
+        stage = disabled_stage('engine:cs_score (cs_ranker)', 'producer retired')
+        assert stage['disabled'] is True
+        assert stage['alive'] is True
+        assert stage['universe'] == 0
+        assert stage['note'] == 'SKIPPED: producer retired'
+
+
+def test_outcome_smoke_queries_use_native_date_comparisons():
+    import inspect
+    from e2e_lifecycle_check import main
+    source = inspect.getsource(main)
+    assert source.count('signal_date >= CURRENT_DATE - 30') == 2
+    assert '(CURRENT_DATE - 30)::text' not in source
 
 
 class TestAgeDays:

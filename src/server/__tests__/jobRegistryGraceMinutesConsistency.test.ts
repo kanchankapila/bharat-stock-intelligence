@@ -170,6 +170,10 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'outcome-resolver': "jobName: 'outcome-resolver-daily'",
     'chatbot-reingest': "jobName: 'chatbot-reingest-daily'",
     'ontology-refresh': "jobName: 'ontology-refresh-daily'",
+    // AF-20261001-03. graceMinutes 90 vs a 45min lockDuration: the resolver's own runPython
+    // budget is 30min, so the lock can legitimately hold for ~30min plus queueing, and a
+    // first run against a real backlog is the slowest case it will ever see.
+    'stuck-signal-resolver': "jobName: 'stuck-signal-resolver'",
     'ml-daily-ops': 'mlDailyOpsWorker = new Worker',
     'trendlyne-daily-fetch': 'trendlyneDailyFetchWorker = new Worker',
     'ml-weekly-data': 'mlWeeklyDataWorker = new Worker',

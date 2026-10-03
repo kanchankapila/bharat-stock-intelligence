@@ -8,7 +8,37 @@ import { fetchWithCache } from "../cacheService";
 import type { FnoIndexId } from "../marketIntelService";
 import { router, publicProcedure, adminProcedure } from "../trpc";
 
+const BUILDUP_BUCKETS = ['Long Buildup', 'Short Buildup', 'Short Covering', 'Long Unwinding'] as const;
+
 export const fnoRouter = router({
+  // Per-stock futures OI positioning for the latest captured session (MoneyControl FUTSTK via
+  // stock_futures_oi_history), near-month contract only, ranked by |OI % change|. Replaces the
+  // hard-coded ticker lists the Decision Matrix used to render (AF-20260930-41).
+  getFuturesBuildupMatrix: publicProcedure
+    .input(z.object({ perBucket: z.number().int().min(1).max(20).default(5) }))
+    .query(async ({ input }) => {
+      const rows = await dbAll<{ symbol: string; date: string; oi_buildup: string; oi_pct_change: number | null; futures_price: number | null }>(`
+        -- expiry > date: a contract on its own expiry day carries no positioning (oi_change 0
+        -- after the close) -- AF-20260930-44. Such a session falls back to the last valid one.
+        WITH latest AS (SELECT MAX(date) AS d FROM stock_futures_oi_history
+                        WHERE source = 'moneycontrol' AND expiry::date > date),
+        near AS (
+          SELECT DISTINCT ON (h.symbol) h.symbol, h.date::text AS date, h.oi_buildup,
+                 h.oi_pct_change, h.futures_price
+          FROM stock_futures_oi_history h, latest
+          WHERE h.source = 'moneycontrol' AND h.date = latest.d AND h.expiry::date > h.date
+          ORDER BY h.symbol, h.expiry ASC
+        )
+        SELECT * FROM near ORDER BY ABS(oi_pct_change) DESC NULLS LAST
+      `);
+      const buckets = Object.fromEntries(BUILDUP_BUCKETS.map(b => [b, [] as typeof rows])) as Record<(typeof BUILDUP_BUCKETS)[number], typeof rows>;
+      for (const r of rows) {
+        const b = buckets[r.oi_buildup as keyof typeof buckets];
+        if (b && b.length < input.perBucket) b.push({ ...r, oi_pct_change: r.oi_pct_change == null ? null : Number(r.oi_pct_change) });
+      }
+      return { asOf: rows[0]?.date ?? null, buckets };
+    }),
+
   getFnOSignals: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => getFnOSignals(input.symbol)),

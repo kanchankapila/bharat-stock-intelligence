@@ -213,6 +213,10 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'outcome-resolver', marker: "jobName: 'outcome-resolver-daily'", label: 'operations.jobs.ts' },
     { jobName: 'chatbot-reingest', marker: "jobName: 'chatbot-reingest-daily'", label: 'operations.jobs.ts' },
     { jobName: 'ontology-refresh', marker: "jobName: 'ontology-refresh-daily'", label: 'operations.jobs.ts' },
+    // AF-20261001-03: the path-based unified_signals resolver. Before this, 106,980 ACTIVE rows
+    // had no scheduled resolver at all -- the logic existed in scripts/ but nothing invoked it,
+    // so the registry entry is the whole fix and this pin is what keeps it wired.
+    { jobName: 'stuck-signal-resolver', marker: "jobName: 'stuck-signal-resolver'", label: 'operations.jobs.ts' },
     { jobName: 'trendlyne-ratios-monthly', marker: "jobName: 'trendlyne-ratios-monthly-check'", label: 'trendlyneWeekly.jobs.ts' },
     { jobName: 'mover-study-weekly', marker: "'mover-study-weekly'", label: 'queues.ts' },
     { jobName: 'nt-live-filter-capture', marker: "'nt-live-filter-slot'", label: 'queues.ts' },
@@ -233,6 +237,11 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     const pinnedNames = new Set(pinned.map(p => p.jobName));
     const missing = scheduled.map(j => j.jobName).filter(n => !pinnedNames.has(n));
     expect(missing).toEqual([]);
+  });
+
+  it('stuck-signal-resolver runs lifecycle expiry, not only the one-off path backfill', () => {
+    expect(src).toContain("runPython('signal_lifecycle.py'");
+    expect(src).not.toContain("runPython('resolve_stuck_unified_signals.py'");
   });
 
   it.each(pinned)('$jobName matches its driving job: $label', ({ jobName, marker }) => {

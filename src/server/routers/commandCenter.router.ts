@@ -46,8 +46,29 @@ export const commandCenterRouter = router({
         params.push(input.conviction);
       }
       if (input.horizon !== 'ALL') {
-        query += ` AND timeframe = ?`;
-        params.push(input.horizon.toUpperCase());
+        // Canonical-ise the filter to match the column (AF-20261001-06). This router's UI enum
+        // is the screener catalog's vocabulary ('intraday'/'swing'/'long_term') while
+        // unified_recommendations.timeframe is written as the ranker's canonical
+        // INTRADAY/SWING/POSITIONAL, so an exact match on 'LONG_TERM' matched only the rows
+        // whose geometry happened to come from recommendation_log, and silently missed every
+        // POSITIONAL row of the same concept -- the filter's contents depended on which
+        // upstream source supplied each row's levels. Mirrors _TIMEFRAME_ALIASES in
+        // unified_ranker.py (the write side) and HORIZON_ALIASES in telegramRecommendations.ts.
+        const HORIZON_TO_CANONICAL: Record<string, string> = {
+          INTRADAY: 'INTRADAY',
+          SWING: 'SWING',
+          SHORT_TERM: 'SWING',
+          LONG_TERM: 'POSITIONAL',
+          POSITIONAL: 'POSITIONAL',
+        };
+        const canonical = HORIZON_TO_CANONICAL[input.horizon.toUpperCase()];
+        if (canonical) {
+          query += ` AND timeframe = ?`;
+          params.push(canonical);
+        }
+        // An unrecognized horizon value is IGNORED rather than pushed through: passing the raw
+        // string would return an empty result set that reads as "no picks in this horizon" —
+        // a silent lie. A zod enum already constrains this, so this is defence in depth.
       }
       // trpc-surface-review, 2026-08-14: Postgres sorts NaN highest on ORDER BY DESC, so an
       // unscored/NaN row would rank #1 instead of last. No live NaN currently (dormant), but

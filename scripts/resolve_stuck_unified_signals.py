@@ -50,6 +50,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from db_compat import connect  # noqa: E402
 
 # One statement. The lateral finds the earliest bar touching either level, and reports which.
+# `max_age_days` is bound into the CTE, not applied in Python: the LATERAL must not run for rows
+# outside the window, and unbounded it walks every still-ACTIVE historical row on every run
+# (106,980 of them, of which ~26k are legitimately still open and will be re-examined forever).
 PLAN_SQL = """
 WITH stuck AS (
     SELECT id, symbol, signal_source, signal_type, signal_date,
@@ -60,6 +63,7 @@ WITH stuck AS (
       AND target_price IS NOT NULL
       AND stop_loss IS NOT NULL
       AND target_price <> stop_loss
+      {age_filter}
 ),
 touch AS (
     SELECT s.id, s.symbol, s.signal_source, s.is_long, t.date AS touch_date,
@@ -99,6 +103,12 @@ def main() -> None:
             "before doing that."
         ),
     )
+    ap.add_argument(
+        "--max-age-days", type=int, default=90,
+        help=("only consider signals from the last N days (default 90 -- the window the "
+              "scheduled stuck-signal-resolver job uses). 0 disables the bound for a "
+              "deliberate one-shot backlog clear."),
+    )
     args = ap.parse_args()
 
     # Why the default is NOT 'all', even though the method is sound for every source:
@@ -111,6 +121,17 @@ def main() -> None:
 
     conn = connect()
 
+    # --max-age-days (AF-20261001-03): the SCHEDULED invocation passes the default 90 so the
+    # nightly run only ever re-examines recent signals. The historical backlog is a one-off
+    # migration, not a recurring cost -- clearing it with `--max-age-days 0` is a deliberate act
+    # (see the session log), and the job itself never asks for the unbounded scan.
+    age_filter = ""
+    params: tuple = ()
+    if args.max_age_days > 0:
+        age_filter = "AND signal_date >= CURRENT_DATE - (? * INTERVAL '1 day')"
+        params = (args.max_age_days,)
+    scope = f"last {args.max_age_days}d" if args.max_age_days > 0 else "ALL dates"
+
     total_active = conn.execute(
         "SELECT COUNT(*) FROM unified_signals WHERE status = 'ACTIVE'"
     ).fetchone()[0]
@@ -119,12 +140,12 @@ def main() -> None:
         "AND (target_price IS NULL OR stop_loss IS NULL OR target_price = stop_loss)"
     ).fetchone()[0]
 
-    rows = conn.execute(PLAN_SQL).fetchall()
+    rows = conn.execute(PLAN_SQL.format(age_filter=age_filter), params).fetchall()
     by_source = Counter((r[2], r[3]) for r in rows)
 
     print(f"ACTIVE rows total            : {total_active}")
     print(f"  no usable levels (skipped) : {no_levels}")
-    print(f"  resolvable from OHLCV      : {len(rows)}")
+    print(f"  resolvable from OHLCV      : {len(rows)}   (scope: {scope})")
     print(f"  still open (never touched) : {total_active - no_levels - len(rows)}")
     print()
     print(f"{'signal_source':22} {'new_status':12} {'rows':>8}")
@@ -151,7 +172,8 @@ def main() -> None:
         )
         updated += 1
     conn.commit()
-    print(f"\nAPPLIED: {updated} rows updated.")
+    completed = sum(1 for r in targeted if r[3] == 'COMPLETED')
+    print(f"\nAPPLIED: {updated} rows updated ({completed} COMPLETED / {updated - completed} FAILED).")
     conn.close()
 
 

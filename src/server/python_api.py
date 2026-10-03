@@ -87,5 +87,11 @@ async def infer_dl():
 if __name__ == "__main__":
     port = int(os.environ.get("PYTHON_API_PORT", 8000))
     logger.info(f"Starting Python API on port {port}...")
+    try:
+        from port_guard import wait_for_port_free  # on PYTHONPATH under pm2 (ecosystem pyService)
+    except ImportError:  # `npm start` runs without it: no restart loop to guard against there
+        wait_for_port_free = None
+    if wait_for_port_free:
+        wait_for_port_free("127.0.0.1", port)
     uvicorn.run("python_api:app", host="127.0.0.1", port=port, reload=False)
 

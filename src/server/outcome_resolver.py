@@ -1354,6 +1354,41 @@ def expire_stale_pending(conn: ConnWrapper, horizon_days: int, dry_run: bool = F
     return len(rows)
 
 
+def stale_pending_horizons(conn: ConnWrapper) -> list[int]:
+    """Every horizon that still holds a PENDING row in any of the three outcome tables.
+
+    AF-20261001-01: the sweep (like the resolve_* passes) was keyed to the horizon the OPERATOR
+    passed — the two job call sites only ever pass 1/5/15 — but the tables carry
+    {1,2,3,5,7,14,15,30}, written by their own engines (confluence resolves at h7; rec_log
+    writers stamp their own horizon). A horizon nobody passes was never resolved and never
+    expired, so its stale PENDING rows sat forever: 269 h7 rows past their window, every one
+    priceable (measured live 2026-10-01)."""
+    rows = conn.execute("""
+        SELECT DISTINCT horizon_days FROM (
+            SELECT horizon_days FROM signal_outcomes WHERE outcome = 'PENDING'
+            UNION
+            SELECT horizon_days FROM unified_signal_outcomes WHERE outcome = 'PENDING'
+            UNION
+            SELECT COALESCE(horizon_days, 15) FROM recommendation_log WHERE outcome = 'PENDING'
+        ) h
+        ORDER BY horizon_days
+    """).fetchall()
+    return [int(r[0]) for r in rows]
+
+
+def expire_stale_pending_all(conn: ConnWrapper, dry_run: bool = False) -> int:
+    """Run the stale-PENDING sweep for every horizon actually present, not just the passed one.
+
+    Also covers the AF-20260930-30 `--relabel-before` backfill path, which re-stamps PENDING
+    over previously-expired rows (window bars missing under the new session definition) and
+    previously skipped the sweep entirely — the 09-30 campaign left 2,141 stale-but-priceable
+    h5/h15 PENDING rows unswept until the next scheduled run (measured live 2026-10-01)."""
+    total = 0
+    for h in stale_pending_horizons(conn):
+        total += expire_stale_pending(conn, h, dry_run=dry_run)
+    return total
+
+
 def resolve_recommendation_log(
     conn: ConnWrapper,
     horizon_days: int = 15,
@@ -1521,7 +1556,10 @@ def run(horizon_days: int = 1, dry_run: bool = False):
         resolve_unified_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)
         resolve_recommendation_log(conn, horizon_days=horizon_days, dry_run=dry_run)
         resolve_dl_predictions(conn, dry_run=dry_run)
-        expire_stale_pending(conn, horizon_days=horizon_days, dry_run=dry_run)
+        # AF-20261001-01: sweep every horizon present in the tables, not just the one this
+        # run() was invoked with — a horizon no call site passes (h7 confluence, h3, h30, ...)
+        # was previously never expired, so its stale PENDING rows accumulated forever.
+        expire_stale_pending_all(conn, dry_run=dry_run)
     finally:
         conn.close()
 
@@ -1542,6 +1580,11 @@ if __name__ == '__main__':
             resolve_unified_outcomes(conn, **kw)
             if args.horizon == 15:  # per-row 5/15 horizons are all gradeable under the h15 cutoff
                 resolve_recommendation_log(conn, **kw)
+            # The regrade re-stamps PENDING over rows whose window bars are missing under the
+            # new definition — exactly the rows expire_stale_pending exists to sweep. Without
+            # this a multi-day relabel campaign leaves stale PENDING unswept until the next
+            # scheduled run (AF-20261001-01: 2,141 h5/h15 rows after the 09-30 campaign).
+            expire_stale_pending_all(conn, dry_run=args.dry_run)
         finally:
             conn.close()
     else:

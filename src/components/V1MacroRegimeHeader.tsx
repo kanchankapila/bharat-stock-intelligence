@@ -35,7 +35,7 @@ export const V1MacroRegimeHeader: React.FC<{
             <div>
               <div style={{ fontFamily: FONT_MONO, fontSize: 8, color: '#94a3b8' }}>REGIME</div>
               <div style={{ fontFamily: FONT_DISPLAY, fontSize: 13, fontWeight: 700, color: '#f8fafc' }}>
-                {regime?.regime ?? 'ACTIVE'} {regime?.prob ? `(${(regime.prob * 100).toFixed(0)}%)` : ''}
+                {regime?.regime ?? '—'} {regime?.prob ? `(${(regime.prob * 100).toFixed(0)}%)` : ''}
               </div>
             </div>
           </div>
@@ -70,19 +70,19 @@ export const V1MacroRegimeHeader: React.FC<{
       <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
         <div className="p-1.5 rounded bg-slate-900/60 border border-slate-800">
           <span style={{ fontFamily: FONT_MONO, fontSize: 8, color: '#64748b' }}>INDIA VIX</span>
-          <div style={{ fontFamily: FONT_MONO, fontSize: 12, fontWeight: 700, color: '#f1f5f9' }}>{vixTile?.close ? vixTile.close.toFixed(2) : '13.40'}</div>
+          <div style={{ fontFamily: FONT_MONO, fontSize: 12, fontWeight: 700, color: '#f1f5f9' }}>{vixTile?.close ? vixTile.close.toFixed(2) : '—'}</div>
         </div>
         <div className="p-1.5 rounded bg-slate-900/60 border border-slate-800">
           <span style={{ fontFamily: FONT_MONO, fontSize: 8, color: '#64748b' }}>USD/INR</span>
-          <div style={{ fontFamily: FONT_MONO, fontSize: 12, fontWeight: 700, color: '#f1f5f9' }}>{usdTile?.close ? usdTile.close.toFixed(2) : '83.95'}</div>
+          <div style={{ fontFamily: FONT_MONO, fontSize: 12, fontWeight: 700, color: '#f1f5f9' }}>{usdTile?.close ? usdTile.close.toFixed(2) : '—'}</div>
         </div>
         <div className="p-1.5 rounded bg-slate-900/60 border border-slate-800">
           <span style={{ fontFamily: FONT_MONO, fontSize: 8, color: '#64748b' }}>CRUDE</span>
-          <div style={{ fontFamily: FONT_MONO, fontSize: 12, fontWeight: 700, color: '#f1f5f9' }}>{crudeTile?.close ? `$${crudeTile.close.toFixed(1)}` : '$76.5'}</div>
+          <div style={{ fontFamily: FONT_MONO, fontSize: 12, fontWeight: 700, color: '#f1f5f9' }}>{crudeTile?.close ? `$${crudeTile.close.toFixed(1)}` : '—'}</div>
         </div>
         <div className="p-1.5 rounded bg-slate-900/60 border border-slate-800">
           <span style={{ fontFamily: FONT_MONO, fontSize: 8, color: '#64748b' }}>GIFT NIFTY</span>
-          <div style={{ fontFamily: FONT_MONO, fontSize: 12, fontWeight: 700, color: '#f1f5f9' }}>{giftTile?.close ? giftTile.close.toFixed(0) : '24,580'}</div>
+          <div style={{ fontFamily: FONT_MONO, fontSize: 12, fontWeight: 700, color: '#f1f5f9' }}>{giftTile?.close ? giftTile.close.toFixed(0) : '—'}</div>
         </div>
         {premarket?.gapUp?.[0] && (
           <div onClick={() => onSelectStock?.(premarket.gapUp[0].symbol)} className="p-1.5 rounded bg-emerald-950/30 border border-emerald-800/40 cursor-pointer">

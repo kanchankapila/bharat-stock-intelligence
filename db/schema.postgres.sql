@@ -4699,8 +4699,10 @@ CREATE TABLE IF NOT EXISTS "unified_recommendations" (
   "smart_money_score" DOUBLE PRECISION,
   "generated_at" TIMESTAMPTZ,
   "est_cost_bps" DOUBLE PRECISION,
+  "valid_until" TIMESTAMPTZ,
   UNIQUE ("symbol", "computed_at")
 );
+CREATE INDEX idx_unified_recommendations_valid_until ON public.unified_recommendations USING btree (valid_until) WHERE (valid_until IS NOT NULL);
 CREATE INDEX idx_ur_conviction ON public.unified_recommendations USING btree (computed_at, conviction_level);
 CREATE INDEX idx_ur_date_score ON public.unified_recommendations USING btree (computed_at, unified_score DESC);
 CREATE INDEX idx_ur_generated_at ON public.unified_recommendations USING btree (computed_at, generated_at);

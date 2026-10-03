@@ -1643,9 +1643,25 @@ export async function runTechnicalSignalScan(options: {
           r.timeHorizon  ?? null,
         ]);
 
-        // Mirror actionable signals to unified_signals for cross-source tracking
+        // Mirror actionable signals to unified_signals for cross-source tracking.
+        //
+        // ACTIONABLE MEANS GEOMETRY EXISTS. `signalScore > 0` alone is not a trade claim: a BUY/SELL
+        // row with no target and no stop has nothing to size against, and — the part that actually
+        // mattered — no level for any resolver to grade, so it can never leave ACTIVE. Measured live
+        // 2026-10-01: of the ACTIVE rows with no usable levels, **7,223 were technical_scan BUYs**
+        // (every one with no target, 6,946 with no stop, spanning 2026-07-27 to 2026-10-01 — i.e.
+        // still accruing on the same day this was measured) plus 75 AI BUYs. They were inert for
+        // measurement (the resolver skips them, `resolveSignalOutcome` returns null without a stop)
+        // but they inflated every "how many signals are live" read, and AF-20261001-10's fix made
+        // this producer emit NULL geometry *correctly* without making the row itself conditional.
+        //
+        // Gated here rather than repaired in place so the next scan cannot re-create them. The
+        // underlying analysis still reaches `technical_signals` and (with levels) `recommendation_log`
+        // below — only the cross-source TRADE mirror is conditional, which is where a trade claim
+        // belongs. A score with no levels is a ranking, not an instruction.
         const w = scanSignalWrites(r);
-        if (r.signalScore > 0) {
+        const hasActionableGeometry = w.target != null && w.stop != null;
+        if (r.signalScore > 0 && hasActionableGeometry) {
           const signalTs = new Date().toISOString();
           await tx.run(unifiedUpsertSql, [
             r.symbol,

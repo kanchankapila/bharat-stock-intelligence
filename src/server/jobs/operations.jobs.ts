@@ -28,6 +28,7 @@ export const QUEUE_RESEARCH_PREMARKET = 'research-premarket';
 export const QUEUE_RESEARCH_POSTCLOSE = 'research-postclose';
 export const QUEUE_OUTCOME_RESOLVER   = 'outcome-resolver';
 export const QUEUE_ONTOLOGY_REFRESH   = 'ontology-refresh';
+export const QUEUE_STUCK_SIGNAL_RESOLVER = 'stuck-signal-resolver';
 
 /**
  * Resolve outcomes at the given horizon. Prefer the in-process ml-api HTTP call (:8000),
@@ -260,5 +261,33 @@ export async function registerOperationsJobs(connection: any) {
     lockDuration: 25 * 60 * 1000,
   });
 
-  return { researchPremarket, researchPostclose, outcomeResolver, chatbotReingest, ontologyRefresh };
+  // Close published unified_signals by first target/stop touch or the source's expiry window
+  // (AF-20261001-37). The job keeps its original identity for schedule/heartbeat continuity;
+  // signal_lifecycle.py handles both path-based exits and time-based expiry. The older
+  // resolve_stuck_unified_signals.py repair script is a one-off backfill, not the live lifecycle.
+  //
+  // 20:30 UTC = 02:00 IST next day, after ml-daily-ops (13:20 UTC) has finished its
+  // outcome work and after confluence-outcomes (15:40 UTC): this resolves STATUS on the signal
+  // rows, which is independent of outcome grading but must not compete with it for the table.
+  // --max-age-days 90 (the script's own default) keeps the LATERAL scan off the ~26k historical
+  // rows that are legitimately still open; the pre-existing backlog was cleared once by hand.
+  const stuckSignalResolver = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_STUCK_SIGNAL_RESOLVER,
+    jobName: 'stuck-signal-resolver',
+    repeat: { pattern: '30 20 * * 1-5' },
+    jobId: 'stuck-signal-resolver',
+    removeOnComplete: 3,
+    removeOnFail: 3,
+    processor: async () => {
+      await runPython('signal_lifecycle.py', [], 30 * 60_000);
+      return { success: true };
+    },
+    monitorName: 'stuck-signal-resolver',
+    concurrency: 1,
+    lockDuration: 45 * 60 * 1000,
+    lockRenewTime: 10 * 60 * 1000,
+  });
+
+  return { researchPremarket, researchPostclose, outcomeResolver, chatbotReingest, ontologyRefresh, stuckSignalResolver };
 }

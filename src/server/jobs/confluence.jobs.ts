@@ -129,7 +129,16 @@ async function processConfluenceOutcomes(job: Job): Promise<{ success: boolean; 
   // console.warn, so both could fail and this job still reported success. T.fail preserves the
   // don't-abort-the-sibling property and degrades the job verdict.
   const T = new StepTracker('confluence-outcomes');
-  await runPython('confluence_outcome_tracker.py', [], 20 * 60_000)
+  // 20 -> 40 min (2026-10-02, measured). Killed at exactly its own 1200000ms cap on 2026-10-01
+  // ("Timed out after 1200000ms"), and a standalone run measured **1144.2s = 19.1 min** to
+  // complete -- a **56-second margin**, i.e. the budget was already inside the runtime's own
+  // variance and could only ever pass on a fully idle box. The workload grows daily (it loads an
+  // OHLCV cache "date >= 2026-07-02" -- 158,062 closing prices over 2,415 symbols on the measured
+  // run, and that window keeps widening), so this is recurring-bugs.md's budget-sized-once-never-
+  // revisited class. 40 min = the measured 19.1 min plus ~2x contention headroom for an evening
+  // run; deliberately NOT "just over 20", since a completed measurement is a floor for a
+  // monotonically growing input, not a ceiling.
+  await runPython('confluence_outcome_tracker.py', [], 40 * 60_000)
     .catch(e => T.fail('confluence_outcome_tracker', e));
   await runPython('confluence_ml_engine.py', ['--train'], 15 * 60_000)
     .catch(e => T.fail('confluence_ml_engine_train', e));
@@ -168,10 +177,16 @@ export async function registerConfluenceJobs() {
     processor: processConfluenceOutcomes,
     monitorName: 'confluence-outcomes',
     concurrency: 1,
-    // lockDuration must exceed the processor's now-sequential runs (5min tracker +
-    // 15min trainer = 20min worst case); the BullMQ default 30s lock marked every
-    // real run "stalled more than allowable limit"
-    lockDuration: 25 * 60 * 1000,
+    // lockDuration must exceed the processor's sequential runs (tracker + 15min trainer); the
+    // BullMQ default 30s lock marked every real run "stalled more than allowable limit".
+    // The comment previously read "5min tracker + 15min trainer = 20min worst case" -- already
+    // stale before this pass, since the tracker's budget was 20 min, not 5.
+    // 25 -> 70 min (2026-10-02): tracker 20 -> 40 (measured 19.1 min standalone, was being killed
+    // at 20) plus the 15-min trainer = 55 min of step budget, so the lock must exceed that. Left at
+    // 25 it would have expired inside the tracker step and BullMQ would re-deliver a HEALTHY job
+    // into a concurrent double execution -- the same invariant enforced for screener-performance
+    // (AF-20260912-16). +15 over the sum, matching the margin convention used there.
+    lockDuration: 70 * 60 * 1000,
   });
 
   return { compute, outcomes };

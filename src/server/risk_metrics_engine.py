@@ -125,16 +125,25 @@ def run(symbol: Optional[str] = None, window_days: int = WINDOW_LONG, test: bool
     nifty_df = nifty_df.set_index("date").sort_index()
     nifty_ret = _daily_returns(nifty_df["close"])
 
-    # Fetch list of symbols to process
+    min_date = (datetime.date.today() - datetime.timedelta(days=int(window_days * 2.2))).isoformat()
     if symbol:
-        symbols = [symbol]
+        ohlcv_df = read_df(
+            "SELECT symbol, date, close FROM stock_ohlcv WHERE symbol=? AND close>0 AND date >= ? ORDER BY date ASC",
+            (symbol, min_date)
+        )
     else:
-        conn = connect()
-        rows = conn.execute("SELECT DISTINCT symbol FROM stock_ohlcv WHERE symbol != ?", (NIFTY_SYMBOL,)).fetchall()
-        conn.close()
-        symbols = [r[0] for r in rows]
-        if test:
-            symbols = symbols[:10]
+        ohlcv_df = read_df(
+            "SELECT symbol, date, close FROM stock_ohlcv WHERE symbol != ? AND close>0 AND date >= ? ORDER BY symbol, date ASC",
+            (NIFTY_SYMBOL, min_date)
+        )
+
+    if ohlcv_df.empty:
+        print("[RiskMetrics] No stock data found for specified window. Aborting.")
+        return {"processed": 0, "skipped": 0, "errors": 0}
+
+    ohlcv_df["date"] = pd.to_datetime(ohlcv_df["date"])
+    groups = {sym: g for sym, g in ohlcv_df.groupby("symbol")}
+    symbols = [symbol] if symbol else (list(groups.keys())[:10] if test else list(groups.keys()))
 
     print(f"[RiskMetrics] Processing {len(symbols)} symbols...")
 
@@ -143,17 +152,13 @@ def run(symbol: Optional[str] = None, window_days: int = WINDOW_LONG, test: bool
 
     for sym in symbols:
         try:
-            df = read_df(
-                "SELECT date, close FROM stock_ohlcv WHERE symbol=? AND close>0 ORDER BY date ASC",
-                (sym,)
-            )
-            if df.empty or len(df) < MIN_DAYS:
+            df = groups.get(sym)
+            if df is None or len(df) < MIN_DAYS:
                 skipped += 1
                 continue
 
-            df["date"] = pd.to_datetime(df["date"])
-            df = df.set_index("date").sort_index()
-            stock_ret = _daily_returns(df["close"])
+            s_df = df.set_index("date").sort_index()
+            stock_ret = _daily_returns(s_df["close"])
 
             # Align benchmark to this stock's date range
             bench = nifty_ret.reindex(stock_ret.index).ffill()

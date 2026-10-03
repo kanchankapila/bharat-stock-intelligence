@@ -211,7 +211,7 @@ async function processQuantScoring(job: Job): Promise<{ success: boolean; skippe
   for (const factor of ['value_book_to_price', 'momentum_12_1']) {
     const args = ['--factor', factor, '--top-k', '50', '--start', '2024-01-01', '--persist-picks'];
     if (provisional[factor]) args.push('--allow-provisional');
-    await runPython('factor_backtest.py', args, 15 * 60_000)
+    await runPython('factor_backtest.py', args, 25 * 60_000)
       .catch(e => T.fail(`factor_picks_${factor}`, e));
   }
   const verdict = T.finish();

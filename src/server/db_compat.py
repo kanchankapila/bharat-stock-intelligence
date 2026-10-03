@@ -610,16 +610,40 @@ def safe_alter(conn_or_none, ddl: str) -> bool:
     # table (11 of the 14 call sites). A psycopg2 cursor and a db_compat ConnWrapper both take a
     # plain SQL string; a raw SQLAlchemy Connection needs text().
     if conn_or_none is not None:
-        try:
+        from sqlalchemy.exc import ObjectNotExecutableError
+
+        # ConnWrapper/CursorWrapper roll the WHOLE transaction back when a statement aborts it
+        # (_usable_after_failure) -- right for an ordinary statement, fatal here: it would discard
+        # the caller's uncommitted CREATE TABLE and the savepoint along with it. So talk to the
+        # underlying connection, where a failure only costs the savepoint.
+        target = getattr(conn_or_none, "_conn", conn_or_none)
+
+        def _run(sql):
             try:
-                conn_or_none.execute(pg_ddl)
-            except Exception:
-                # A raw SQLAlchemy Connection rejects a bare string with
-                # ObjectNotExecutableError (not TypeError), so retry wrapped rather than
-                # keying on one exception type.
-                conn_or_none.execute(text(pg_ddl))
+                target.execute(sql)
+            except ObjectNotExecutableError:
+                # A raw SQLAlchemy Connection rejects a bare string; retry wrapped. Only this
+                # error: retrying on ANY exception re-ran a genuinely failing statement and
+                # replaced its real message with a misleading second one.
+                target.execute(text(sql))
+
+        # A SAVEPOINT makes the docstring's promise -- "without aborting the surrounding
+        # transaction" -- hold for EVERY failure, not just "column already exists". On the
+        # caller's connection a failed ALTER (target table missing) aborted the whole open
+        # transaction, and the caller's next commit() silently rolled back the CREATE TABLE it had
+        # just issued: `relation "fno_rollover" does not exist` (AF-20260930-48). Five callers
+        # (event_triggers, fno_rollover_fetcher, high_flyer_retrospective, ml_calibration) do
+        # CREATE TABLE then ALTER in one transaction.
+        try:
+            _run("SAVEPOINT safe_alter_sp")
+            _run(pg_ddl)
+            _run("RELEASE SAVEPOINT safe_alter_sp")
             return True
         except Exception as exc:
+            try:
+                _run("ROLLBACK TO SAVEPOINT safe_alter_sp")
+            except Exception:
+                pass
             print(f"[db_compat] safe_alter warning (caller conn): {exc}")
             return False
     try:

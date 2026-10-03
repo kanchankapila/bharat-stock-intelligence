@@ -212,12 +212,18 @@ def load_mc_symbol_map(symbols: list[str] | None = None) -> dict:
     return m
 
 
-def fetch_symbol(sc_id: str, max_expiries: int = 1) -> list[dict]:
+def fetch_symbol(sc_id: str, max_expiries: int = 1, as_of: str | None = None) -> list[dict]:
     """Near-expiry contract(s) for one stock. Defaults to the near month only: that is where
-    essentially all stock-futures liquidity sits, and it keeps this to 2 requests per name."""
+    essentially all stock-futures liquidity sits, and it keeps this to 2 requests per name.
+
+    The near month is the first expiry STRICTLY AFTER the session date (`as_of`, the date the
+    row is written under). On expiry day the expiring contract reports oi_change 0 after the
+    close, and `>= date.today()` picked it: all 232 rows on 2026-09-29 carried zero change
+    (AF-20260930-44). Anchored to the session date, not the wall clock, so a catch-up run is right.
+    """
     expiries = parse_expiries(_get(_EXPIRY_URL.format(sc_id=sc_id)))
-    today = datetime.date.today().isoformat()
-    future = [e for e in expiries if e >= today] or expiries
+    session = as_of or logical_trading_date()
+    future = [e for e in expiries if e > session] or expiries
     out = []
     for exp in future[:max_expiries]:
         row = parse_futures(_get(_FUTURES_URL.format(sc_id=sc_id, expiry=exp)))
@@ -237,7 +243,7 @@ def run(symbols: list[str] | None = None, dry_run: bool = False, sleep: float = 
     rows, failed = [], 0
     for i, (sym, sc_id) in enumerate(sorted(mapping.items()), 1):
         try:
-            for r in fetch_symbol(sc_id):
+            for r in fetch_symbol(sc_id, as_of=as_of):
                 # Not every NSE name has a futures contract; MC answers with an empty payload
                 # for those, which parse_futures already turns into None.
                 r["symbol"] = sym

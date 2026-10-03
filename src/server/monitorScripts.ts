@@ -350,7 +350,13 @@ export const MONITOR_SCRIPTS = [
     // 180 -> 300 (AF-20260917-21): the chain's step budgets now sum to 258 min, so a
     // legitimate near-budget run ends ~20:50 UTC -- past the old 19:40 UTC deadline
     // (16:40 + 180min) and would false-flag 'late' on its heaviest evenings.
-    graceMinutes: 300,
+    // 300 -> 360 (2026-10-02): two measured step raises have taken the sum to 298 min --
+    // screener_features_fetcher 30->45 (killed at exactly its own cap on 09-30) and the
+    // backtest_live_screener swing leg 10->35 (measured 22.4 min standalone). The grace must
+    // stay ABOVE the Worker lockDuration (320), or the watchdog calls a healthy long chain
+    // "late" -- reintroducing exactly the digest red these raises are meant to remove. Ordering
+    // enforced by monitorScriptsGraceMinutesConsistency.test.ts (grace >= lock).
+    graceMinutes: 360,
   },
   {
     id: 'company-profiles-sync',

@@ -64,10 +64,15 @@ describe('checkFindingsLedger.validate', { timeout: 60_000 }, () => {
   // progress"). The per-row policy checks run via `npm run findings:check` in the audit-loop /
   // weekend-audit / session-close skills: a concurrent session's half-written row must not turn
   // every other session's suite red.
-  // AF-20260930-03: the repair of these rows was refused by the auto-mode classifier and is
-  // scripted in scratch/af_20260930_ledger_fix.py. Once repaired this list must be emptied --
-  // the second assertion fails if it goes stale.
-  const KNOWN_BLOCKED = ['AF-20260823-79', 'AF-20260823-80', 'AF-20260823-81', 'AF-20260824-82'];
+  //
+  // AF-20260930-03 left AF-20260823-79/-80/-81 and AF-20260824-82 here as a known-blocked list --
+  // headerless rows after prose, blank lines between them, -79/-80 missing four columns entirely,
+  // and -82 split across seven physical lines. REPAIRED 2026-10-01 (user-authorised): the four
+  // missing columns filled in from each row's own prose, -82 joined into one line and closed
+  // against the non-NULL held-out AUC rows it was waiting on, and the table header + separator
+  // restored above the block. The list is therefore EMPTY, which is the stronger end state -- it
+  // now guards the whole ledger rather than four known holes. `npm run findings:check` is green.
+  const KNOWN_BLOCKED: string[] = [];
 
   it('the real ledger has no structural problems beyond the known-blocked rows', () => {
     const real = readFileSync(resolve(__dirname, '../../docs/audit-findings.md'), 'utf8');

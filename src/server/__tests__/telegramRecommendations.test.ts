@@ -54,6 +54,17 @@ describe('normaliseHorizon', () => {
     expect(normaliseHorizon('short')).toBe('SWING');
   });
 
+  it('maps the catalog/technical_signals spellings too (AF-20261001-06)', () => {
+    // The same five-vocabulary problem the Python side folds in _TIMEFRAME_ALIASES. The
+    // default-to-POSITIONAL below would have caught long_term by luck, but 'short_term' and
+    // 'Swing (3-7D)' would NOT: they fall through to the longest bucket, which silently
+    // upgraded week-scale ideas to a months-scale label in the Telegram digest.
+    expect(normaliseHorizon('short_term')).toBe('SWING');
+    expect(normaliseHorizon('SHORT_TERM')).toBe('SWING');
+    expect(normaliseHorizon('Short term')).toBe('SWING');
+    expect(normaliseHorizon('Swing (3-7D)')).toBe('SWING');
+  });
+
   it('defaults NULL/unknown to the longest horizon, never intraday', () => {
     // Conservative direction: mislabelling a multi-day idea as intraday would put a
     // same-session trade in front of the user off a multi-day thesis.

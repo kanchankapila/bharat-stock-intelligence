@@ -104,4 +104,10 @@ if __name__ == "__main__":
     # nothing ever bound to the port. Mirrors python_api.py's entrypoint exactly.
     port = int(os.environ.get("ENGINE_WORKER_PORT", 8005))
     logger.info("Starting Engine Worker on port %d...", port)
+    try:
+        from port_guard import wait_for_port_free  # on PYTHONPATH under pm2 (ecosystem pyService)
+    except ImportError:  # `npm start` runs without it: no restart loop to guard against there
+        wait_for_port_free = None
+    if wait_for_port_free:
+        wait_for_port_free("127.0.0.1", port)
     uvicorn.run("worker_service:app", host="127.0.0.1", port=port, reload=False)

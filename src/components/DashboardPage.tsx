@@ -31,6 +31,7 @@ import { V1ConfluenceMatrixWidget } from './V1ConfluenceMatrixWidget';
 import { V1SmartMoneyFlowWidget } from './V1SmartMoneyFlowWidget';
 import { V1FnOMicrostructureWidget } from './V1FnOMicrostructureWidget';
 import { V1TradeRiskCalculatorWidget } from './V1TradeRiskCalculatorWidget';
+import { dailyCloses } from '../lib/dailyCloses';
 
 // ─── Fonts injected once ──────────────────────────────────────────────────────
 const FONT_FAMILY_DISPLAY = "'Archivo', sans-serif";
@@ -398,13 +399,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const featureImportanceData = useMemo(() => (featureImportanceRaw ?? []).map((f: any) => ({
     name: String(f.feature_name).replace(/_/g, ' ').toUpperCase(), Weight: f.importance * 100,
   })), [featureImportanceRaw]);
-  const graphData = useMemo(() => {
-    const candles: any[] = niftyOhlc?.data ?? [];
-    return candles.slice(-30).map((d: any, i: number) => ({
-      time: i,
-      value: +(d.close ?? d.c ?? 0),
-    }));
-  }, [niftyOhlc]);
+  const graphData = useMemo(
+    () => dailyCloses(niftyOhlc?.data ?? [], 30).map((d, i) => ({ time: i, date: d.date, value: d.value })),
+    [niftyOhlc],
+  );
 
   const enqueueSignalsMutation = trpc.enqueueSignals.useMutation();
   const { data: queueStats, refetch: refetchStats } = trpc.getQueueStats.useQuery(undefined, {
@@ -603,8 +601,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         />
         <KpiChip
           label="Win Rate"
-          value={accuracyMetrics && accuracyMetrics.totalSignals > 0 ? `${accuracyMetrics.profitHitRate.toFixed(0)}%` : '—'}
-          sub={accuracyMetrics && accuracyMetrics.totalSignals > 0 ? `${accuracyMetrics.totalSignals} signals resolved` : 'No resolved signals yet'}
+          value={accuracyMetrics && accuracyMetrics.resolvedSignals > 0 ? `${accuracyMetrics.profitHitRate.toFixed(0)}%` : '—'}
+          sub={accuracyMetrics && accuracyMetrics.resolvedSignals > 0 ? `${accuracyMetrics.resolvedSignals.toLocaleString('en-IN')} signals resolved` : 'No resolved signals yet'}
           up={(accuracyMetrics?.profitHitRate ?? 0) >= 50}
           accent={emerald}
           icon={<TrendingUp size={9} />}
@@ -886,7 +884,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                 <div className="flex flex-col items-center justify-center py-12">
                   <Zap size={24} style={{ color: `${amber}33` }} />
                   <p style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 9, color: '#64748b', marginTop: 10, letterSpacing: 2 }}>
-                    ENGINE INITIALISING…
+                    {/* aiSignals only fill after an on-demand Refresh run -- "ENGINE INITIALISING"
+                        claimed work in progress while nothing was running (AF-20260930-45). */}
+                    {isGenerating ? 'GENERATING…' : 'NO SIGNALS THIS SESSION — PRESS REFRESH'}
                   </p>
                 </div>
               )}

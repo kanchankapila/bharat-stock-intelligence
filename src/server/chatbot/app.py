@@ -185,4 +185,10 @@ if __name__ == "__main__":
     # backend-python). The only consumers are the localhost browser client
     # (StockChatbot.tsx hardcodes http://localhost:8001) and the nightly reingest job —
     # binding 0.0.0.0 exposed /ingest and the LLM-spending /chat to the LAN for nothing.
+    try:
+        from port_guard import wait_for_port_free  # on PYTHONPATH under pm2 (ecosystem pyService)
+    except ImportError:  # `npm start` runs without it: no restart loop to guard against there
+        wait_for_port_free = None
+    if wait_for_port_free:
+        wait_for_port_free("127.0.0.1", CHATBOT_PORT)
     uvicorn.run("app:app", host="127.0.0.1", port=CHATBOT_PORT, reload=False)

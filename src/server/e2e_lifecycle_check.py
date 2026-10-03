@@ -88,6 +88,11 @@ def stage_verdict(n_rows, degraded=False, age_days=None, max_age_days=None,
     return True, None
 
 
+def disabled_stage(name, reason):
+    return {'stage': name, 'kind': 'engine', 'alive': True, 'disabled': True,
+            'universe': 0, 'note': 'SKIPPED: ' + reason}
+
+
 def pick_movers(rk, n):
     """Top |move| names ON the latest session, restricted to the ranker's own tradeable
     universe. Raw top movers are illiquid microcaps the ranker correctly refuses to rank, so
@@ -214,7 +219,8 @@ def main():
     # --- engines the ranker blends (its own getters, its own freshness cutoffs) -------------
     engine_stage('feature:win_probability (ml_ensemble)', rk._get_win_probabilities)
     engine_stage('engine:ml_score',                       rk._get_ml_scores)
-    engine_stage('engine:cs_score (cs_ranker)',           rk._get_cs_scores)
+    _record(disabled_stage('engine:cs_score (cs_ranker)',
+                           'producer retired; no longer blended by unified_ranker'))
     engine_stage('engine:confluence',                     rk._get_confluence_scores)
     engine_stage('engine:technical (signal_score)',       rk._get_technical_scores)
     engine_stage('engine:dl (deep_learning_predictions)', rk._get_dl_scores)
@@ -271,10 +277,10 @@ def main():
               per_symbol=False, max_age_days=10)
     sql_stage('outcomes:signal_outcomes (30d)',
               "SELECT COUNT(*) AS n, MAX(signal_date) AS last FROM signal_outcomes "
-              "WHERE signal_date >= (CURRENT_DATE - 30)::text", per_symbol=False, max_age_days=5)
+              "WHERE signal_date >= CURRENT_DATE - 30", per_symbol=False, max_age_days=5)
     sql_stage('outcomes:signal_excursions tb_label (30d)',
               "SELECT COUNT(*) AS n, MAX(signal_date) AS last FROM signal_excursions "
-              "WHERE tb_label IS NOT NULL AND signal_date >= (CURRENT_DATE - 30)::text",
+              "WHERE tb_label IS NOT NULL AND signal_date >= CURRENT_DATE - 30",
               per_symbol=False, max_age_days=5)
     # stock_scores.updated_at is 100% NULL (dead column); last_updated is the real stamp.
     sql_stage('scoring_engine:stock_scores',
@@ -285,7 +291,7 @@ def main():
               'WHERE date = (SELECT MAX(date) FROM feature_store)', max_age_days=5)
     sql_stage('composite:engine_composite_scores (latest)',
               'SELECT symbol, date FROM engine_composite_scores '
-              'WHERE date = (SELECT MAX(date) FROM engine_composite_scores)', max_age_days=5)
+              'WHERE date = (SELECT MAX(date) FROM engine_composite_scores)', max_age_days=10)
     # signal_date is TIMESTAMPTZ here (signal_outcomes' same-named column is TEXT).
     sql_stage('signals:unified_signals (7d)',
               'SELECT DISTINCT symbol, signal_date FROM unified_signals '
@@ -382,8 +388,9 @@ def main():
         if 'verdicts' in st:
             blocked = [s for s, ok in st['verdicts'].items() if not ok]
             cov = 'rl-blocked=' + (','.join(blocked) if blocked else 'none')
+        status = 'SKIP' if st.get('disabled') else ('ok' if st['alive'] else 'FAIL')
         print('%-46s %-6s %7s  %s%s' % (
-            st['stage'], 'ok' if st['alive'] else 'FAIL', st.get('universe', ''), cov,
+            st['stage'], status, st.get('universe', ''), cov,
             ('  ERR: ' + st['error']) if st.get('error') else ''))
 
     print('\n%-14s %-14s %-12s SCORE' % ('SYMBOL', 'CALL', 'CONVICTION'))

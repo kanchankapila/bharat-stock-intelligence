@@ -9,8 +9,9 @@ Two calls per stock (weekly):
 
 ML features produced:
   analyst_upside_pct    consensus target upside vs latest price (%)
-  analyst_count         number of distinct broker reports (last 365d)
-  analyst_buy_pct       fraction of recent reports that are BUY (0-100)
+  analyst_count         broker reports returned (last 365d). The endpoint returns only the 5 most
+                        recent, so this saturates at 5 -- it is a page size, not a coverage count
+  analyst_buy_pct       share of those reports rated BUY (0-100); NULL when none carries a rating
   roe_annual            Return on Equity % (latest annual)
   roce_annual           Return on Capital Employed % (latest annual)
   ebitda_margin         EBITDA margin % (latest annual)
@@ -338,11 +339,21 @@ def write_analyst_targets(symbol: str, recent: list, today: str, con) -> None:
                 r.get("postAuthor", ""),
                 _safe(r.get("targetPrice")),
                 _safe(r.get("recoPrice")),
-                r.get("rec", ""),
+                r.get("recoType") or None,
             ))
         except Exception:
             pass
     con.commit()
+
+
+_BUY_RATINGS = {"BUY", "STRONG BUY", "ACCUMULATE", "ADD", "OUTPERFORM", "OVERWEIGHT"}
+_OTHER_RATINGS = {"HOLD", "NEUTRAL", "SELL", "STRONG SELL", "REDUCE", "UNDERPERFORM", "UNDERWEIGHT",
+                  "MARKET PERFORM", "EQUAL WEIGHT"}
+_WARNED_RATINGS: set = set()
+
+
+def _rating(report: dict) -> str:
+    return str(report.get("recoType") or "").strip().upper()
 
 
 def extract_analyst_data(body: dict, symbol: str, today: str) -> dict:
@@ -367,8 +378,17 @@ def extract_analyst_data(body: dict, symbol: str, today: str) -> dict:
     targets = [t for t in targets if t and t > 0]
     target_mean = round(sum(targets) / len(targets), 2) if targets else None
 
-    buy_count = sum(1 for r in recent if str(r.get("rec", "")).upper() in ("BUY", "STRONG BUY", "OUTPERFORM", "OVERWEIGHT"))
-    buy_pct   = round(buy_count / len(recent) * 100, 1) if recent else None
+    # The rating is `recoType` ("Buy"). This read a key named `rec`, which does not exist, so every
+    # report counted as not-a-buy and the column was 0.0 for every covered stock (AF-20260930-47).
+    # A report with no rating says nothing either way: it is left out of the denominator, and if
+    # no report carries one the answer is NULL -- never a 0.0 that claims "0% buy".
+    ratings = [_rating(r) for r in recent]
+    ratings = [x for x in ratings if x]
+    for x in ratings:
+        if x not in _BUY_RATINGS and x not in _OTHER_RATINGS and x not in _WARNED_RATINGS:
+            _WARNED_RATINGS.add(x)
+            print(f"[trendlyne_overview] unrecognised recoType {x!r} counted as not-a-buy", file=sys.stderr)
+    buy_pct = round(sum(x in _BUY_RATINGS for x in ratings) / len(ratings) * 100, 1) if ratings else None
 
     # Use most recent reco_price as proxy for CMP
     reco_prices = [_safe(r.get("recoPrice")) for r in recent if r.get("recoPrice")]

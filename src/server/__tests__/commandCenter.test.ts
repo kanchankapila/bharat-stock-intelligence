@@ -95,6 +95,65 @@ describe('getCommandCenter', () => {
     expect(result.regime.name).toBe('BEAR');
     expect(result.regime.confidence).toBe(0.75);
   });
+
+  // AF-20261001-06: this router's `horizon` enum is the screener catalog's vocabulary
+  // (intraday/swing/long_term) while unified_recommendations.timeframe is written as the
+  // ranker's canonical INTRADAY/SWING/POSITIONAL. The filter used to push the raw uppercased
+  // value straight into `timeframe = ?`, so "Long term" matched only LONG_TERM rows and
+  // silently missed every POSITIONAL row of the same concept -- the filter's contents depended
+  // on which upstream source happened to supply each row's geometry.
+  describe('horizon filter is canonicalised', () => {
+    const ts = '2026-08-03T00:00:00.000Z';
+    beforeEach(async () => {
+      invalidateUrLatestAt();
+      await dbRun(`INSERT INTO market_regimes (date, regime, regime_prob) VALUES (CURRENT_DATE,'BULL',0.8)`);
+      const rows: [string, string][] = [
+        ['POS_STOCK', 'POSITIONAL'],
+        ['LONGTERM_STOCK', 'LONG_TERM'],
+        ['SWING_STOCK', 'SWING'],
+        ['INTRADAY_STOCK', 'INTRADAY'],
+      ];
+      for (const [symbol, tf] of rows) {
+        await dbRun(`INSERT INTO unified_recommendations
+          (symbol, computed_at, regime, unified_score, conviction_level, classification, timeframe)
+          VALUES (?, ?, 'BULL', 70.0, 'A_HIGH', 'Buy', ?)`, [symbol, ts, tf]);
+      }
+    });
+
+    it("'long_term' filter matches the canonical POSITIONAL rows", async () => {
+      // The defect: the old exact match on 'LONG_TERM' returned the empty set for every row
+      // the ranker writes as POSITIONAL — i.e. the filter showed nothing at all. Post-fix the
+      // filter asks in canonical terms, so it returns them.
+      const result = await caller.getCommandCenter({ horizon: 'long_term' });
+      const symbols = result.eodPicks.map((p: any) => p.symbol);
+      expect(symbols).toContain('POS_STOCK');
+      expect(symbols).not.toContain('SWING_STOCK');
+      expect(symbols).not.toContain('INTRADAY_STOCK');
+    });
+
+    it("'long_term' no longer matches the legacy LONG_TERM label", async () => {
+      // Both halves of the fix matter. The write boundary now canonicalises LONG_TERM ->
+      // POSITIONAL, so no newly written row carries it; a pre-existing one must not leak into
+      // a POSITIONAL filter either, or the same concept would be double-counted in the bucket.
+      // In production this is moot within one ranker run (every row is written in one pass);
+      // it is pinned here because the two are independent fixes and either alone leaves a gap.
+      const result = await caller.getCommandCenter({ horizon: 'long_term' });
+      const symbols = result.eodPicks.map((p: any) => p.symbol);
+      expect(symbols).not.toContain('LONGTERM_STOCK');
+    });
+
+    it("'swing' returns only swing rows", async () => {
+      const result = await caller.getCommandCenter({ horizon: 'swing' });
+      const symbols = result.eodPicks.map((p: any) => p.symbol);
+      expect(symbols).toEqual(['SWING_STOCK']);
+    });
+
+    it("'intraday' returns only intraday rows", async () => {
+      const result = await caller.getCommandCenter({ horizon: 'intraday' });
+      const symbols = result.eodPicks.map((p: any) => p.symbol);
+      expect(symbols).toEqual(['INTRADAY_STOCK']);
+    });
+  });
 });
 
 describe('getBuyRecommendations', () => {

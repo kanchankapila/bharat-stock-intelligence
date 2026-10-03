@@ -84,7 +84,9 @@ export const signalsRouter = router({
       return {
         precision:     stats.resolved > 0 ? (stats.profit / stats.resolved) * 100 : 0,
         profitHitRate: stats.resolved > 0 ? (stats.profit / stats.resolved) * 100 : 0,
-        totalSignals:  stats.total || 0,
+        totalSignals:  Number(stats.total) || 0,
+        // The hit rate's denominator. totalSignals also counts PENDING rows (AF-20260930-40).
+        resolvedSignals: Number(stats.resolved) || 0,
       };
     }),
 

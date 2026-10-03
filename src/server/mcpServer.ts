@@ -164,13 +164,18 @@ server.tool(
       // 3. Technical analysis signals (technical_analysis_signals folded into unified_signals,
       // signal_source='technical', Cluster B-lite 2026-08 -- aliases keep the same shape
       // markdown below reads: trend/rsi/entry_price/target_price/stop_loss/patterns)
+      // AF-20261001-02: 30-day floor, computed in JS (same bound as misc.router.ts's AI panel).
+      // unified_signals rows never age out of status='ACTIVE' (no scheduled path-based
+      // resolver), so without a date bound "latest technical signal" served years-old
+      // entry/target/stop levels for retired or long-dormant symbols as if current.
       const techSignals = await dbGet(`
         SELECT signal_type AS trend, technical_score AS rsi, entry_price, target_price,
                stop_loss, ai_reasoning AS patterns
         FROM unified_signals
         WHERE symbol = ? AND signal_source = 'technical'
+          AND signal_generated_at >= ?
         ORDER BY signal_generated_at DESC LIMIT 1
-      `, [sym]) as any;
+      `, [sym, new Date(Date.now() - 30 * 86_400_000).toISOString()]) as any;
       const dailyTech = await dbGet("SELECT * FROM technical_signals WHERE symbol = ? ORDER BY date DESC LIMIT 1", [sym]) as any;
 
       // 4. Fundamentals (Yahoo bulk sync data)

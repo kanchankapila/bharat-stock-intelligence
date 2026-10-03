@@ -6,6 +6,7 @@ Run after market close: python unified_ranker.py
 import json
 import csv
 import math
+import re
 import sys
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
@@ -177,18 +178,157 @@ HORIZON_MULT = {
 # DIRECTIONAL_BUY_FLOOR-style absolute thresholds. Left alone for the same reason as then.
 # Re-check via a fresh blend_walkforward.py run once ~20+ further sessions accumulate; if
 # the dIC advantage reverses on the larger sample, revert is a one-commit operation.
-# Timeframe casing normalizer (2026-08-31): confluence_signals.suggested_timeframe and
-# recommendation_log.timeframe arrive in mixed conventions ('swing', 'long_term',
-# 'Intraday'), while the ranker's own literals are uppercase. unified_recommendations is
-# read with exact-match timeframe filters in several routers, so a lowercase variant
-# silently vanishes from those surfaces (live: a handful of 'intraday'/'long_term' rows
-# per day were invisible to every timeframe='SWING'-style filter). Normalize at the write
-# boundary so the table carries one convention only.
+# Timeframe casing + vocabulary normalizer (2026-08-31 casing, 2026-10-01 vocabulary):
+# confluence_signals.suggested_timeframe and recommendation_log.timeframe arrive in mixed
+# conventions ('swing', 'long_term', 'Intraday'), while the ranker's own literals are uppercase.
+# unified_recommendations is read with exact-match timeframe filters in several routers, so a
+# lowercase variant silently vanishes from those surfaces (live: a handful of 'intraday'/
+# 'long_term' rows per day were invisible to every timeframe='SWING'-style filter). Normalize at
+# the write boundary so the table carries one convention only.
+#
+# The CANONICAL vocabulary (AF-20261001-06) is the three the ranker itself emits and the UI
+# filters on: INTRADAY / SWING / POSITIONAL. The platform carried FIVE mutually unmapped
+# vocabularies -- confluence {INTRADAY,SWING,POSITIONAL}; recommendation_log {long_term,...};
+# technical_signals {'Positional (2-4W)','Swing (3-7D)'}; the screener catalog
+# {intraday,short_term,long_term}; and the grading horizons {1,5,15} + confluence {1,3,7,14,30}
+# sessions. 'long_term' meant the same thing as 'POSITIONAL' but survived uppercasing as
+# 'LONG_TERM', so one concept appeared under two labels in the SAME grid (live 2026-10-01: 17
+# LONG_TERM rows beside 46 POSITIONAL) and a timeframe filter could miss half the bucket.
+#
+# Mapping, not deletion: every source spelling is folded onto the canonical three, so no row
+# becomes invisible -- the opposite failure to the one the 2026-08-31 casing fix was written for.
+# An unrecognized value still passes through uppercased rather than being dropped, so a genuinely
+# new vocabulary degrades to "surfaces on its own literal" instead of vanishing.
+CANONICAL_TIMEFRAMES = ('INTRADAY', 'SWING', 'POSITIONAL')
+
+_TIMEFRAME_ALIASES = {
+    # screener catalog investment_horizon
+    'INTRADAY': 'INTRADAY',
+    'SHORT_TERM': 'SWING',
+    'SWING': 'SWING',
+    'LONG_TERM': 'POSITIONAL',
+    'POSITIONAL': 'POSITIONAL',
+    # technical_signals.time_horizon ('Positional (2-4W)' / 'Swing (3-7D)')
+    'POSITIONAL (2-4W)': 'POSITIONAL',
+    'SWING (3-7D)': 'SWING',
+    'POSITIONAL (1-3M)': 'POSITIONAL',
+}
+
+# Same mapping with separators collapsed, consulted only after the exact lookup misses.
+#
+# 'Long term' uppercases to 'LONG TERM' (space), which is NOT the 'LONG_TERM' key above -- so a
+# human-written label silently failed to normalize and, downstream, produced NO valid_until at
+# all rather than the POSITIONAL deadline it plainly meant. Found by the alias-equality test
+# added with AF-20261001-04, which is exactly the kind of thing the label must never be able
+# to do: two spellings of one concept must not get different deadlines.
+#
+# Built from the SAME dict rather than hand-listed, so a new alias cannot be added to one map
+# and forgotten in the other.
+_TIMEFRAME_ALIASES_COLLAPSED = {
+    re.sub(r'[\s\-]+', '_', k): v for k, v in _TIMEFRAME_ALIASES.items()
+}
+
+
 def _normalize_timeframe(raw):
     if raw is None:
         return None
     t = str(raw).strip().upper()
-    return t or None
+    if not t:
+        return None
+    if t in _TIMEFRAME_ALIASES:
+        return _TIMEFRAME_ALIASES[t]
+    return _TIMEFRAME_ALIASES_COLLAPSED.get(re.sub(r'[\s\-]+', '_', t), t)
+
+
+# ── valid_until (AF-20261001-04, structural half) ───────────────────────────────────────────
+# A recommendation used to carry a horizon LABEL but no statement of when the idea stopped
+# being actionable, so every consumer invented its own expiry and the grading windows were
+# chosen by whichever resolver pass ran rather than by the label on the row.
+#
+# The session counts are deliberately the horizons the resolvers ALREADY grade at -- 1/5/15
+# sessions, i.e. the intraday / 5d / 15d outcome horizons. This makes the label select among
+# existing windows instead of introducing new ones, so every measurement corpus stays directly
+# comparable to what came before. Anything else here would silently re-base the numbers.
+HORIZON_SESSIONS = {'INTRADAY': 1, 'SWING': 5, 'POSITIONAL': 15}
+
+_holiday_cache = None
+_holiday_cache_tried = False
+
+
+def _nse_holidays(conn=None):
+    """NSE holiday dates, cached. Returns None when the calendar is unreachable.
+
+    Falls back to None rather than raising: a missing calendar must degrade the deadline to
+    weekday-count (never to a crash inside the ranker's write loop), and the miss is visible in
+    the resulting valid_until rather than swallowed.
+    """
+    global _holiday_cache, _holiday_cache_tried
+    if _holiday_cache_tried:
+        return _holiday_cache
+    _holiday_cache_tried = True
+    try:
+        if conn is None:
+            from db_compat import connect as _c
+            conn = _c()
+        cur = conn.cursor()
+        cur.execute("SELECT date FROM market_holidays WHERE exchange = 'NSE'")
+        _holiday_cache = {r[0] for r in cur.fetchall()}
+        try:
+            conn.close()
+        except Exception:
+            pass
+    except Exception:
+        _holiday_cache = None
+    return _holiday_cache
+
+
+def add_sessions(start, n, holidays=None):
+    """The n-th NSE trading session strictly after `start` (a date), or None.
+
+    Weekends and market_holidays are skipped, so a 5-session window is 7 calendar days -- 12
+    across a Diwali week. Calendar-day arithmetic would set the deadline BEFORE the idea's own
+    window had elapsed, which is the exact bug this replaces.
+    """
+    d = start
+    counted = 0
+    # Bounded so a missing/absent calendar cannot spin forever.
+    for _ in range(n * 4 + 14):
+        d = d + timedelta(days=1)
+        if d.weekday() >= 5:
+            continue
+        if holidays and d in holidays:
+            continue
+        counted += 1
+        if counted == n:
+            return d
+    return None
+
+
+def valid_until_for(raw_timeframe, generated_at, conn=None):
+    """Deadline for a recommendation, derived from its canonical horizon label.
+
+    Returns None when the label is absent or unknown. 68,520 of 74,180 historical rows have
+    timeframe IS NULL (measured 2026-10-01): inventing a deadline for those would assert a
+    horizon the data never declared, and would let an expiry sweep close rows on a made-up
+    deadline. NULL means "validity unknown", which is the truth about them.
+    """
+    tf = _normalize_timeframe(raw_timeframe)
+    if tf not in HORIZON_SESSIONS or generated_at is None:
+        return None
+    if isinstance(generated_at, str):
+        try:
+            generated_at = datetime.fromisoformat(generated_at.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+    if generated_at.tzinfo is not None:
+        generated_at = generated_at.astimezone(timezone(timedelta(hours=5, minutes=30)))
+    start = generated_at.date()
+    due = add_sessions(start, HORIZON_SESSIONS[tf], _nse_holidays(conn))
+    if due is None:
+        return None
+    # Same wall-clock time of day, IST. The session count decides the DATE; keeping the clock
+    # time means an expiry sweep can compare against generated_at without timezone drift.
+    return datetime.combine(due, generated_at.time(), tzinfo=timezone(timedelta(hours=5, minutes=30)))
 
 
 REGIME_WEIGHTS = {
@@ -2280,6 +2420,13 @@ class UnifiedRanker:
             return {}
 
     def _get_rec_log_latest_map(self):
+        # 30-day bound (2026-10-01, AF-20261001-07), matching the one on
+        # _get_confluence_latest_map. Unbounded, this handed a live S_ELITE Buy row a trade plan
+        # from a 2026-06-03 row -- four months stale, and (because that row carried no stop or
+        # target) a half-plan besides. A geometry source is advice about a CURRENT trade; the
+        # older the row, the less its entry band describes today's price. Symbols whose rec_log
+        # has been silent for 30+ days now fall through to the unified_signals tier, exactly as
+        # the confluence bound documents for its own case.
         try:
             rows = self.conn.execute("""
                 SELECT * FROM (
@@ -2287,6 +2434,7 @@ class UnifiedRanker:
                            reasoning AS trade_reasoning, sector,
                            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY generated_at DESC) AS rn
                     FROM recommendation_log
+                    WHERE generated_at >= NOW() - INTERVAL '30 days'
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}
@@ -2432,8 +2580,19 @@ class UnifiedRanker:
         # sub-1 R:R isn't a data-integrity bug in the source row itself, but it's not a trade
         # plan this ranker should hand out as "Buy" geometry either -- fall through to the
         # next, hopefully-better source instead of accepting it.
+        #
+        # INCOMPLETE geometry (2026-10-01, AF-20261001-07): the entry-only guard below let a row
+        # whose stop_loss AND targets are all NULL through, because `rr is None` satisfied
+        # `rr is None or rr >= 1.0` and the return then published entry_zone_low/high with no stop
+        # and no target. Two such rows on the live 2026-10-01 grid: PARACABLES (S_ELITE, 90.95) and
+        # RELIABLE (A_HIGH, 78.36) -- an S_ELITE row whose entire "actionable" plan was an entry
+        # band with no risk level, the same class of lie the rr floor above was written to
+        # prevent. Compounding it, rec_log is UNBOUNDED by date (no window bound like
+        # confluence's 30 days), so PARACABLES' entry came from a 2026-06-03 row -- four months
+        # stale. A trade plan needs a stop; without one there is nothing to size against, so
+        # fall through rather than publish half a plan.
         row = rec_log_map.get(symbol)
-        if row and row['entry_price'] is not None:
+        if row and row['entry_price'] is not None and row['stop_loss'] is not None and row['target_1'] is not None:
             ep = float(row['entry_price'])
             sl = float(row['stop_loss']) if row['stop_loss'] is not None else None
             t1 = float(row['target_1']) if row['target_1'] is not None else None
@@ -2460,8 +2619,12 @@ class UnifiedRanker:
         # screener_summary fallback (see `if not et.get('trade_reasoning')` in run()) already
         # covers this case with equally relevant context (why the stock scored the way it did),
         # so there's nothing lost by falling through the same way fallback 2 does.
+        #
+        # Same incomplete-geometry guard as fallback 2 (AF-20261001-07): an entry with no stop
+        # and no target is not a trade plan, and this branch's caller publishes entry_zone_* to
+        # the UI, so accepting one would hand out exactly the half-plan that guard rejects.
         row = unified_map.get(symbol)
-        if row and row['entry'] is not None:
+        if row and row['entry'] is not None and row['stopLoss'] is not None and row['target'] is not None:
             ep = float(row['entry'])
             sl = float(row['stopLoss']) if row['stopLoss'] is not None else None
             t1 = float(row['target']) if row['target'] is not None else None
@@ -2870,6 +3033,10 @@ class UnifiedRanker:
                 'target_3':                None,
                 'risk_reward':             None,
                 'timeframe':               None,
+                # AF-20261001-04: derived from the canonical label in `et`, which is the same
+                # value normalized at _get_entry_targets. Kept beside it (not recomputed from a
+                # second source) so the deadline can never disagree with the horizon it claims.
+                'valid_until':            valid_until_for(et.get('timeframe'), generated_at),
                 'trade_reasoning':         None,
                 'sector':                  None,
                 'position_size_pct':       0.0,
@@ -2950,8 +3117,8 @@ class UnifiedRanker:
                  avg_engine_track_record, engine_coverage_count, bullish_screener_count,
                  bearish_screener_count,
                  fundamental_score, entry_zone_low, entry_zone_high, stop_loss,
-                 target_1, target_2, target_3, risk_reward, timeframe, trade_reasoning, sector,
-                 position_size_pct)
+                 target_1, target_2, target_3, risk_reward, timeframe, valid_until,
+                 trade_reasoning, sector, position_size_pct)
                 VALUES (:symbol, :computed_at, :generated_at, :regime, :unified_score,
                         :conviction_level, :classification,
                         :screener_names_json,
@@ -2961,7 +3128,7 @@ class UnifiedRanker:
                         :bullish_screener_count,
                         :bearish_screener_count, :fundamental_score, :entry_zone_low,
                         :entry_zone_high, :stop_loss, :target_1, :target_2, :target_3,
-                        :risk_reward, :timeframe, :trade_reasoning, :sector,
+                        :risk_reward, :timeframe, :valid_until, :trade_reasoning, :sector,
                         :position_size_pct)
                 ON CONFLICT(symbol, computed_at) DO UPDATE SET
                     -- Deliberately overwritten, not preserved: this row IS the later run's
@@ -2985,6 +3152,7 @@ class UnifiedRanker:
                     stop_loss=excluded.stop_loss, target_1=excluded.target_1,
                     target_2=excluded.target_2, target_3=excluded.target_3,
                     risk_reward=excluded.risk_reward, timeframe=excluded.timeframe,
+                    valid_until=excluded.valid_until,
                     trade_reasoning=excluded.trade_reasoning, sector=excluded.sector,
                     position_size_pct=excluded.position_size_pct
             ''', r)

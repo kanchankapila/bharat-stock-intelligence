@@ -126,7 +126,14 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // IST 06:00-07:30 -> UTC 00:30-02:00, IST 17:00-23:30 -> UTC 11:30-18:00.
   { jobName: 'confluence-compute', label: 'Confluence Engine', everyMs: 30 * 60 * 1000, graceMinutes: 45, critical: true,
     lateDeadlineCronPatterns: ['30 0 * * *', '0,30 1 * * *', '0 2 * * *', '30 11 * * *', '*/30 12-17 * * *', '0 18 * * *'] },
-  { jobName: 'confluence-outcomes', label: 'Confluence Outcomes', cronPattern: '40 15 * * 1-5', graceMinutes: 60, critical: false },
+  // graceMinutes 60 -> 90 (2026-10-02): the two steps now sum to 55 min (tracker 40, measured at
+  // 19.1 min and previously killed at its own 20-min cap; trainer 15) and the Worker lockDuration
+  // moved 25 -> 70 to match. The grace MUST stay above the lock or the watchdog calls a healthy
+  // long chain "late" — the exact phantom-alert this class exists to prevent, and what a 60-min
+  // grace against a 70-min lock would guarantee on every contended evening. Enforced by
+  // jobRegistryGraceMinutesConsistency.test.ts, which is what caught this (it failed on the
+  // intermediate state: "expected 60 to be greater").
+  { jobName: 'confluence-outcomes', label: 'Confluence Outcomes', cronPattern: '40 15 * * 1-5', graceMinutes: 90, critical: false },
   // Takes one bounded slice of one trendlyne.com fetcher per run (see trendlyneWeekly.jobs.ts).
   // critical:false — a single missed slice is made up by the next one; only a sustained outage
   // matters, which the 60min grace against a 20min cadence is what catches.
@@ -160,6 +167,12 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'chatbot-reingest', label: 'Chatbot RAG Re-ingest', cronPattern: '0 20 * * *', graceMinutes: 90, critical: false },
   // Mirror of operations.jobs.ts's ontology-refresh-daily (added 2026-09-30).
   { jobName: 'ontology-refresh', label: 'Semantic Ontology/Identity Refresh', cronPattern: '50 21 * * *', graceMinutes: 60, critical: false },
+  // AF-20261001-03: the path-based resolver for unified_signals rows that can never leave ACTIVE
+  // (106,980 measured). 20:30 UTC = 02:00 IST, after ml-daily-ops and confluence-outcomes have
+  // finished their outcome work, so it never competes with grading for the same tables.
+  // critical:true — without it signals accumulate in ACTIVE forever, which is exactly the
+  // failure that left 106,980 of them, and nothing noticed because no monitor tracked this job.
+  { jobName: 'stuck-signal-resolver', label: 'Stuck Signal Resolver (path-based)', cronPattern: '30 20 * * 1-5', graceMinutes: 90, critical: true },
   // graceMinutes 60 -> 270: the Worker's own lockDuration is 4h (240min, "covers the full
   // daily ops run" per queues.ts's own comment) and processMlDailyOps is wrapped in
   // withJobTimeout(..., 3.5h) -- 60min grace flagged 'late' (critical: true, real Telegram

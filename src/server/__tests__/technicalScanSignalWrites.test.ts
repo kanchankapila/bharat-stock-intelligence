@@ -48,4 +48,44 @@ describe('scanSignalWrites', () => {
     expect(w.stop).toBeNull();
     expect(w.recLog).toEqual({ stop: null, t1: null, t2: null, t3: null });
   });
+
+  // The mirror that writes these rows to unified_signals must treat "has levels" as the definition
+  // of actionable. Expressed against the same predicate the writer uses so the two cannot drift:
+  // a positive score with no target/stop is a ranking, and publishing it as a BUY creates a row no
+  // resolver can ever close (measured 2026-10-01: 7,223 such technical_scan BUYs sat ACTIVE, the
+  // newest written that same day).
+  describe('actionable geometry gate', () => {
+    const isActionable = (w: ReturnType<typeof scanSignalWrites>) => w.target != null && w.stop != null;
+
+    it('rejects a positive score whose setup has no levels', () => {
+      const w = scanSignalWrites(result({ signalScore: 6 }));
+      expect(w.signalType).toBe('BUY');
+      expect(isActionable(w)).toBe(false);
+    });
+
+    it('accepts the same score once target and stop exist', () => {
+      const w = scanSignalWrites(result({ signalScore: 6, stopLoss: '₹60.33', targets: '₹70.55' }));
+      expect(isActionable(w)).toBe(true);
+    });
+
+    it('rejects a half-plan: a target without a stop is not actionable', () => {
+      // The AF-20261001-07 failure shape on the writing side — one level is not a trade plan.
+      const targetOnly = scanSignalWrites(result({ signalScore: 6, targets: '₹70.55' }));
+      expect(targetOnly.target).not.toBeNull();
+      expect(isActionable(targetOnly)).toBe(false);
+      const stopOnly = scanSignalWrites(result({ signalScore: 6, stopLoss: '₹60.33' }));
+      expect(stopOnly.stop).not.toBeNull();
+      expect(isActionable(stopOnly)).toBe(false);
+    });
+
+    it('accepts short geometry, so the gate does not quietly become long-only', () => {
+      const w = scanSignalWrites(result({
+        signalScore: 6,
+        signals: [sig('DEATH_CROSS'), sig('DISTRIBUTION_DAY'), sig('GOLDEN_CROSS')],
+        stopLoss: '₹68.90', targets: '₹59.15',
+      }));
+      expect(w.signalType).toBe('SELL');
+      expect(isActionable(w)).toBe(true);
+    });
+  });
 });

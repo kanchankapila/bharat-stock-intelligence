@@ -107,4 +107,11 @@ class TestTrendlyneOverviewLiveDataSource:
             f"write_analyst_targets wrote {target_rows['n']} rows but extract_analyst_data "
             f"returned {len(reports)} reports for RELIANCE"
         )
+        # AF-20260930-47: the count above passed for weeks while every stored rating was '' and
+        # analyst_buy_pct was 0.0 -- the parser read a key the vendor does not send (`rec`, not
+        # `recoType`). Assert the VALUES, not just the row count.
+        stored = [r["rating"] for r in conn.execute(
+            "SELECT rating FROM trendlyne_analyst_targets WHERE symbol = ?", (REAL_SYMBOL,)).fetchall()]
+        assert stored and all(stored), f"broker ratings were not persisted: {stored!r}"
+        assert profile.get("analyst_buy_pct") is not None and 0 <= profile["analyst_buy_pct"] <= 100
         conn.close()

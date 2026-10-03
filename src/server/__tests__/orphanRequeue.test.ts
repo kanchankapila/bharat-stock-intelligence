@@ -4,6 +4,7 @@ import {
   requeueOrphanedJob,
   ORPHAN_REQUEUE_MAX_AGE_MS,
   ORPHAN_REQUEUE_SKIP_WINDOW_MS,
+  MAX_ORPHAN_REQUEUE_GENERATIONS,
 } from '../jobs/registerJob';
 
 /**
@@ -142,19 +143,55 @@ describe('requeueOrphanedJob (AF-20260909-06)', () => {
     expect(queue.add).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT requeue an orphan that was itself a make-up (one make-up per missed run)', async () => {
-    // 2026-09-10/11: dl-retrain-weekly exhausted host memory and killed the WSL2 VM (and the DB
-    // with it); every boot requeued it and it killed the VM again -- 23:48, 00:42 and 06:34 IST.
-    // A make-up that also dies mid-run is a signal, not a miss; re-running it is how one
-    // host-killing job becomes a crash loop.
+  it('requeues a make-up that itself died, but only up to the retry budget', async () => {
+    // AF-20261001-05: the old rule was "a make-up NEVER gets a second make-up", written to stop
+    // the dl-retrain-weekly OOM cascade (23:48, 00:42, 06:34 IST — each boot requeued a job that
+    // killed the host again). But it also discarded the ordinary case measured on 2026-09-30:
+    // ml-daily-ops was orphaned 9 min into its run by one pm2 restart, and the make-up was then
+    // orphaned 44 min later by a SECOND restart inside the same 4h window — so 3,152 gradeable
+    // intraday signals were never closed and nothing re-ran them. The invariant that was actually
+    // wanted is BOUNDED: a job may be re-made-up a few times, never in an unbounded loop.
     const queue = fakeQueue({
       repeatables: [{ name: 'ml-daily-ops', next: Date.now() + 22 * HOUR }],
     });
     const makeup = { ...makeOrphanJob('10', Date.now() - HOUR),
-      data: { foo: 'bar', isCatchup: true, orphanRequeue: true, requeuedFrom: '9' } };
+      data: { foo: 'bar', isCatchup: true, orphanRequeue: true,
+              orphanRequeueGeneration: 1, requeuedFrom: '9' } };
+    const ok = await requeueOrphanedJob(queue, makeup);
+    expect(ok).toBe(true);
+    expect(queue.add).toHaveBeenCalledTimes(1);
+    // The generation must ADVANCE, or the next boot would read the same value and the ladder
+    // would never terminate -- that is the loop the budget exists to bound.
+    const [, data] = queue.add.mock.calls[0];
+    expect(data.orphanRequeueGeneration).toBe(2);
+  });
+
+  it('STOPS requeueing once the make-up has died MAX_ORPHAN_REQUEUE_GENERATIONS times', async () => {
+    // The host-killing cascade Guard 0 was written for: bounded, alerted, not looped. At the cap
+    // the reclaim must fall back to alert-only exactly as the one-shot rule did.
+    const queue = fakeQueue({
+      repeatables: [{ name: 'ml-daily-ops', next: Date.now() + 22 * HOUR }],
+    });
+    const makeup = { ...makeOrphanJob('11', Date.now() - HOUR),
+      data: { isCatchup: true, orphanRequeue: true,
+              orphanRequeueGeneration: MAX_ORPHAN_REQUEUE_GENERATIONS, requeuedFrom: '9' } };
     const ok = await requeueOrphanedJob(queue, makeup);
     expect(ok).toBe(false);
     expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it('treats a make-up with NO generation field as generation 0 (pre-ladder, still retried)', async () => {
+    // A make-up queued by the previous build carries no generation. Treating it as "already
+    // exhausted" would refuse exactly the recovery this change exists for, so the default is 0.
+    const queue = fakeQueue({
+      repeatables: [{ name: 'ml-daily-ops', next: Date.now() + 22 * HOUR }],
+    });
+    const makeup = { ...makeOrphanJob('12', Date.now() - HOUR),
+      data: { isCatchup: true, orphanRequeue: true, requeuedFrom: '9' } };
+    const ok = await requeueOrphanedJob(queue, makeup);
+    expect(ok).toBe(true);
+    const [, data] = queue.add.mock.calls[0];
+    expect(data.orphanRequeueGeneration).toBe(1);
   });
 
   it('never throws even when the queue add fails', async () => {

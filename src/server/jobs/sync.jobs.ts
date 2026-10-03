@@ -155,7 +155,19 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; skippe
   await T.run('live-screener-ml-train', () => runPython('live_screener_ml_ranker.py', ['--train'], 30 * 60_000));
 
   // 9. Auto-backtest top combinations so frontend cockpit always has fresh performance data
-  await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5'], 10 * 60_000)
+  // 10 -> 35 min (2026-10-02, measured). Its intraday sibling directly below was ALREADY raised
+  // 10 -> 30 min on 2026-09-17 (AF-20260917-21) for precisely this reason, and this leg was left
+  // behind on the old 10-min figure -- so the pair now disagreed by 3x with no measured basis.
+  // Measured 2026-10-02 standalone on an otherwise-idle box: **1345.1s = 22.4 min** to complete
+  // ("[AutoBacktest] Completed. Results available in backtesting_runs"), i.e. the 600000ms budget
+  // killed it at **45% of its real runtime**, discarding a finished backtest. Live proof it is not
+  // a slow outlier: the 10-01/10-02 chain logged "Timed out after 600000ms" on this leg and then
+  // "execution completed" ~21 min later on the retry. The input grows daily (live_screener_
+  // appearances/outcomes), so this is recurring-bugs.md's budget-sized-once-never-revisited class
+  // for the THIRD time on this same chain. 35 min = the measured 22.4 min plus contention headroom
+  // for an evening run; NOT sized to "just above 22", since a completed measurement is a floor
+  // for a workload that only grows.
+  await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5'], 35 * 60_000)
     .catch(e => T.fail('backtest_live_screener', e));
   // 30 min (AF-20260917-21, measured): the 10-min budget killed this on 2026-09-17 at
   // exactly 600000ms; its swing sibling above kept passing, so only the intraday leg was
@@ -352,9 +364,16 @@ export async function registerSyncJobs(connection: any) {
     // it. Left at 270 the lock would expire INSIDE the final step on a legitimately long run and
     // BullMQ would re-deliver a healthy job into a concurrent double execution -- the exact
     // failure this number exists to prevent. +17 over the sum, matching the prior 270-over-258
-    // margin convention. MONITOR_SCRIPTS' screener-performance graceMinutes is 300, which
-    // still clears the new 290.
-    lockDuration: 290 * 60_000,
+    // margin convention.
+    // 290 -> 320 min (2026-10-02): the backtest_live_screener swing leg 10 -> 35 (measured 22.4
+    // min standalone), taking the step sum 273 -> 298. The lock MUST move again here: at 290 it
+    // would now expire INSIDE that leg, which is the same double-execution failure described
+    // above, just moved rather than fixed. +22 over the new sum, keeping the ~17-22 min margin
+    // convention of the two previous raises. MONITOR_SCRIPTS' screener-performance graceMinutes
+    // moved 300 -> 360 in the same pass, since a grace BELOW the lock would let the watchdog call
+    // a healthy long-running chain "late" -- reintroducing exactly the digest red these raises
+    // are meant to remove. Ordering is enforced by monitorScriptsGraceMinutesConsistency.test.ts.
+    lockDuration: 320 * 60_000,
     lockRenewTime: 20 * 60_000,
     monitorFn: updateMonitorState,
     suppressLockErrors: true,

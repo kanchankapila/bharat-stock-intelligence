@@ -7,15 +7,19 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { LegacyScoreBanner } from './CanonicalSourceNote';
+import { parseDecisionMatrixInputs, buildMatrixItems } from './decisionMatrixInputs';
 
 const fmt = (n: number | null | undefined, dec = 2) =>
   n == null || isNaN(n) ? '—' : n.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 
-const fmtCr = (n: number | null | undefined) => {
-  if (n == null || isNaN(n)) return '—';
-  const cr = n / 10000000;
-  return `${cr >= 0 ? '+' : ''}₹${cr.toFixed(1)} Cr`;
+// Input is already in ₹ crore (getFiiDiiFlow.fii_net); it used to be divided by 1e7 as if rupees.
+const fmtCr = (cr: number | null | undefined) => {
+  if (cr == null || isNaN(cr)) return '—';
+  return `${cr >= 0 ? '+' : '−'}₹${Math.abs(cr).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr`;
 };
+
+const fmtSignedPct = (n: number | null | undefined) =>
+  n == null || isNaN(n) ? '—' : `${n > 0 ? '+' : ''}${n.toFixed(2)}%`;
 
 const pctColor = (v: number | null | undefined) =>
   v == null || isNaN(v) ? 'text-slate-400' : v >= 0 ? 'text-emerald-400' : 'text-rose-400';
@@ -57,116 +61,21 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
   const { data: adRes } = trpc.getAdvanceDecline.useQuery(undefined, { refetchInterval: 60000, refetchOnWindowFocus: false });
   const { data: fiiRes } = trpc.getFiiDiiFlow.useQuery({ days: 10 }, { refetchInterval: 300000, refetchOnWindowFocus: false });
   const { data: sentimentRes } = trpc.getMarketSentiment.useQuery(undefined, { refetchInterval: 120000, refetchOnWindowFocus: false });
+  const { data: regimeRes } = trpc.getRegimeSummary.useQuery(undefined, { refetchInterval: 300000, refetchOnWindowFocus: false });
+  const { data: buildupRes } = trpc.getFuturesBuildupMatrix.useQuery({ perBucket: 5 }, { refetchInterval: 300000, refetchOnWindowFocus: false });
 
   const cockpitData = cockpitRes?.success ? cockpitRes.data : null;
   const rawCandidates: any[] = cockpitData?.candidates || [];
-  const unifiedRecs: any[] = (recsRes as any)?.recommendations || (recsRes as any)?.data || [];
+  const unifiedRecs: any[] = (recsRes as any)?.picks ?? [];
 
-  const indices: any[] = (overviewRes as any)?.data?.indiceList?.flatMap((g: any) => g.list) ?? (overviewRes as any)?.indices ?? (overviewRes as any)?.data ?? [];
-  const nifty = indices.find((i: any) => /nifty\s*50/i.test(i.name) || i.symbol === 'NIFTY 50' || i.symbol === '^NSEI');
-  const bankNifty = indices.find((i: any) => /bank.?nifty/i.test(i.name) || i.symbol === 'NIFTY BANK');
-  const indiaVix = indices.find((i: any) => /vix/i.test(i.name) || i.symbol === 'INDIA VIX');
+  const { nifty, bankNifty, vix, advances, declines, fiiNetCr, fiiDate, pcr } =
+    parseDecisionMatrixInputs({ overviewRes, adRes, fiiRes, sentimentRes });
+  const advPct = advances != null && declines != null && advances + declines > 0
+    ? Math.round((advances / (advances + declines)) * 100) : null;
+  const regime = regimeRes?.current ?? null;
+  const pcrText = pcr == null ? '—' : pcr.toFixed(2);
 
-  const adData: any = adRes || {};
-  const advances = adData.advances ?? adData.advancing ?? 1240;
-  const declines = adData.declines ?? adData.declining ?? 810;
-  const totalAD = Math.max(1, advances + declines);
-  const advPct = Math.round((advances / totalAD) * 100);
-
-  const fiiRows: any[] = (fiiRes as any)?.data || (fiiRes as any)?.flows || [];
-  const latestFii = fiiRows[0] || {};
-  const fiiNet = latestFii.fii_net ?? latestFii.fiiNet ?? 1420;
-  const pcr = (sentimentRes as any)?.pcr ?? (sentimentRes as any)?.latest?.pcr ?? 1.15;
-
-  const combinedItems = useMemo(() => {
-    const map = new Map<string, any>();
-
-    rawCandidates.forEach((c: any) => {
-      const sym = c.symbol || c.stock_symbol;
-      if (!sym) return;
-      map.set(sym, {
-        symbol: sym,
-        name: c.company_name || c.name || sym,
-        price: c.price || c.cmp || c.close || 0,
-        changePct: c.change_pct || c.pChange || 0,
-        action: c.verdict || c.action || (c.score > 75 ? 'STRONG BUY' : c.score > 60 ? 'BUY' : 'WATCH'),
-        score: Math.round(c.score || c.confidence || 78),
-        confidence: c.confidence || Math.min(96, Math.round((c.score || 75) * 1.1)),
-        rsi: c.rsi || 58,
-        rrRatio: c.rr_ratio || c.rrRatio || '1:3.2',
-        entryZone: c.entry_zone || `₹${fmt(c.price || 1000, 0)}`,
-        target1: c.target1 || (c.price ? c.price * 1.08 : 1080),
-        target2: c.target2 || (c.price ? c.price * 1.15 : 1150),
-        stopLoss: c.stop_loss || (c.price ? c.price * 0.95 : 950),
-        reasoning: c.why_this_pick || c.reasoning || 'Strong multi-factor confluence with institutional buying',
-        factors: { value: c.value_score || 72, quality: c.quality_score || 84, momentum: c.momentum_score || 88, fnoBuildup: c.fno_score || 65 },
-        setupType: c.setup_type || (c.momentum_score > 80 ? 'BREAKOUT' : 'QUANT_ALPHA'),
-      });
-    });
-
-    unifiedRecs.forEach((r: any) => {
-      const sym = r.symbol;
-      if (!sym) return;
-      const existing = map.get(sym);
-      const score = Math.round(r.composite_score || r.score || (existing?.score ?? 82));
-      map.set(sym, {
-        symbol: sym,
-        name: r.company_name || r.name || existing?.name || sym,
-        price: r.price || r.close || existing?.price || 0,
-        changePct: r.change_pct || r.pChange || existing?.changePct || 0,
-        action: r.action || (score > 80 ? 'STRONG BUY' : score > 65 ? 'BUY' : 'ACCUMULATE'),
-        score: score,
-        confidence: r.confidence || existing?.confidence || Math.min(98, score + 12),
-        rsi: r.rsi || existing?.rsi || 62,
-        rrRatio: r.rr_ratio || existing?.rrRatio || '1:3.5',
-        entryZone: r.entry_price ? `₹${fmt(r.entry_price, 0)}` : existing?.entryZone || 'Market Entry',
-        target1: r.target1 || r.target_price || existing?.target1 || 0,
-        target2: r.target2 || existing?.target2 || 0,
-        stopLoss: r.stop_loss || existing?.stopLoss || 0,
-        reasoning: r.why_this_pick || r.reason || existing?.reasoning || 'Unified AI Cross-Engine Consensus Pick',
-        factors: {
-          value: r.value_score || existing?.factors?.value || 75,
-          quality: r.quality_score || existing?.factors?.quality || 80,
-          momentum: r.momentum_score || existing?.factors?.momentum || 85,
-          fnoBuildup: r.fno_score || existing?.factors?.fnoBuildup || 70,
-        },
-        setupType: r.setup_type || existing?.setupType || 'AI_UNIFIED',
-      });
-    });
-
-    if (map.size === 0) {
-      const fallbacks = [
-        { sym: 'RELIANCE', name: 'Reliance Industries Ltd.', price: 2940.5, chg: 1.8, action: 'STRONG BUY', score: 94, conf: 96, setup: 'SMART_MONEY', target1: 3150, stop: 2820, reason: 'Superstar portfolio expansion + FII Long Buildup + 200 EMA support bounce' },
-        { sym: 'TATASTEEL', name: 'Tata Steel Ltd.', price: 168.4, chg: 3.4, action: 'STRONG BUY', score: 91, conf: 92, setup: 'BREAKOUT', target1: 185, stop: 159, reason: 'Multi-year cup & handle pattern breakout with 3x average daily volume' },
-        { sym: 'INFY', name: 'Infosys Limited', price: 1845.0, chg: -0.4, action: 'BUY', score: 86, conf: 88, setup: 'QUANT_ALPHA', target1: 1980, stop: 1770, reason: 'Strong quarterly Earnings Surprises + Low volatility Quality factor leader' },
-        { sym: 'BHARTIARTL', name: 'Bharti Airtel Ltd.', price: 1420.2, chg: 1.2, action: 'STRONG BUY', score: 89, conf: 94, setup: 'SMART_MONEY', target1: 1540, stop: 1360, reason: 'Sustained institutional inflows + ARPU expansion momentum' },
-        { sym: 'ICICIBANK', name: 'ICICI Bank Ltd.', price: 1215.8, chg: 0.9, action: 'BUY', score: 85, conf: 90, setup: 'FNO_BUILDUP', target1: 1320, stop: 1160, reason: 'Long buildup in monthly contracts + PCR 1.4 Bullish stance' },
-        { sym: 'HAL', name: 'Hindustan Aeronautics Ltd.', price: 4680.0, chg: 4.2, action: 'STRONG BUY', score: 95, conf: 97, setup: 'BREAKOUT', target1: 5150, stop: 4450, reason: 'Defence sector tailwinds + Fresh FII block deal accumulation' },
-      ];
-      fallbacks.forEach(f => {
-        map.set(f.sym, {
-          symbol: f.sym,
-          name: f.name,
-          price: f.price,
-          changePct: f.chg,
-          action: f.action,
-          score: f.score,
-          confidence: f.conf,
-          rsi: 65,
-          rrRatio: '1:3.4',
-          entryZone: `₹${fmt(f.price, 0)}`,
-          target1: f.target1,
-          target2: f.target1 * 1.05,
-          stopLoss: f.stop,
-          reasoning: f.reason,
-          factors: { value: 78, quality: 88, momentum: 92, fnoBuildup: 80 },
-          setupType: f.setup,
-        });
-      });
-    }
-
-    return Array.from(map.values());
-  }, [rawCandidates, unifiedRecs]);
+  const combinedItems = useMemo(() => buildMatrixItems(rawCandidates, unifiedRecs), [rawCandidates, unifiedRecs]);
 
   const filteredItems = useMemo(() => {
     return combinedItems.filter(item => {
@@ -174,10 +83,10 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
       if (strategyFilter !== 'ALL' && item.setupType !== strategyFilter) return false;
       if (convictionFilter > 0 && item.confidence < convictionFilter) return false;
       return true;
-    }).sort((a, b) => b.score - a.score);
+    }).sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
   }, [combinedItems, searchTerm, strategyFilter, convictionFilter]);
 
-  const topPicks = useMemo(() => [...combinedItems].sort((a, b) => b.score - a.score).slice(0, 3), [combinedItems]);
+  const topPicks = useMemo(() => [...combinedItems].sort((a, b) => (b.score ?? -1) - (a.score ?? -1)).slice(0, 3), [combinedItems]);
 
   const calcResult = useMemo(() => {
     const maxRiskAmount = (calcPortfolioSize * calcRiskPct) / 100;
@@ -219,10 +128,13 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
             </div>
             <div>
               <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">MARKET BIAS & STANCE</div>
-              <div className="text-sm font-black text-emerald-400 tracking-wide flex items-center gap-1.5">
-                BULLISH MOMENTUM <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+              {/* Canonical HMM regime (getRegimeSummary) -- this headline used to be a hard-coded
+                  "BULLISH MOMENTUM" shown whatever the market did (AF-20260930-43). */}
+              <div className={cn('text-sm font-black tracking-wide flex items-center gap-1.5',
+                regime?.regime === 'BULL' ? 'text-emerald-400' : regime?.regime === 'BEAR' || regime?.regime === 'CRASH' ? 'text-rose-400' : 'text-amber-400')}>
+                {regime ? `${regime.regime} REGIME` : '—'}
               </div>
-              <div className="text-[10px] text-slate-400 font-mono">FII Accumulation + PCR {pcr}</div>
+              <div className="text-[10px] text-slate-400 font-mono">{regime?.guidance?.action ?? 'Regime unavailable'}</div>
             </div>
           </div>
         </div>
@@ -232,30 +144,31 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
           <div className="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/60">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">NIFTY 50</span>
             <div className="flex items-baseline gap-2 mt-0.5">
-              <span className="text-sm font-mono font-bold text-white">₹{fmt(nifty?.lastPrice || 24850, 0)}</span>
-              <span className={cn("text-xs font-mono font-bold", pctColor(nifty?.pChange || 0.65))}>+{(nifty?.pChange || 0.65).toFixed(2)}%</span>
+              <span className="text-sm font-mono font-bold text-white">{fmt(nifty?.value, 0)}</span>
+              <span className={cn("text-xs font-mono font-bold", pctColor(nifty?.changePct))}>{fmtSignedPct(nifty?.changePct)}</span>
             </div>
           </div>
 
           <div className="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/60">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">BANK NIFTY</span>
             <div className="flex items-baseline gap-2 mt-0.5">
-              <span className="text-sm font-mono font-bold text-white">₹{fmt(bankNifty?.lastPrice || 52400, 0)}</span>
-              <span className={cn("text-xs font-mono font-bold", pctColor(bankNifty?.pChange || 0.42))}>+{(bankNifty?.pChange || 0.42).toFixed(2)}%</span>
+              <span className="text-sm font-mono font-bold text-white">{fmt(bankNifty?.value, 0)}</span>
+              <span className={cn("text-xs font-mono font-bold", pctColor(bankNifty?.changePct))}>{fmtSignedPct(bankNifty?.changePct)}</span>
             </div>
           </div>
 
           <div className="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/60">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">INDIA VIX</span>
             <div className="flex items-baseline gap-2 mt-0.5">
-              <span className="text-sm font-mono font-bold text-amber-400">{fmt(indiaVix?.lastPrice || 13.8, 2)}</span>
+              <span className="text-sm font-mono font-bold text-amber-400">{fmt(vix, 2)}</span>
             </div>
           </div>
 
           <div className="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/60">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">FII NET FLOW</span>
             <div className="flex items-baseline gap-2 mt-0.5">
-              <span className={cn("text-sm font-mono font-bold", pctColor(fiiNet))}>{fmtCr(fiiNet)}</span>
+              <span className={cn("text-sm font-mono font-bold", pctColor(fiiNetCr))}>{fmtCr(fiiNetCr)}</span>
+              {fiiDate && <span className="text-[9px] text-slate-500 font-mono">{fiiDate}</span>}
             </div>
           </div>
 
@@ -263,20 +176,24 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">BREADTH</span>
             <div className="mt-1 space-y-1">
               <div className="flex justify-between text-[10px] font-mono font-bold">
-                <span className="text-emerald-400">{advances} Adv</span>
-                <span className="text-rose-400">{declines} Dec</span>
+                <span className="text-emerald-400">{advances ?? '—'} Adv</span>
+                <span className="text-rose-400">{declines ?? '—'} Dec</span>
               </div>
-              <div className="w-full h-1.5 bg-rose-500/30 rounded-full overflow-hidden flex">
-                <div className="h-full bg-emerald-500" style={{ width: `${advPct}%` }} />
-              </div>
+              {advPct != null && (
+                <div className="w-full h-1.5 bg-rose-500/30 rounded-full overflow-hidden flex">
+                  <div className="h-full bg-emerald-500" style={{ width: `${advPct}%` }} />
+                </div>
+              )}
             </div>
           </div>
 
           <div className="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/60">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">F&O PCR</span>
             <div className="flex items-baseline gap-2 mt-0.5">
-              <span className="text-sm font-mono font-bold text-cyan-400">{pcr}</span>
-              <span className="text-[10px] text-cyan-400 font-bold uppercase">BULLISH</span>
+              <span className="text-sm font-mono font-bold text-cyan-400">{pcrText}</span>
+              {pcr != null && (
+                <span className="text-[10px] text-cyan-400 font-bold uppercase">{pcr >= 1 ? 'PUTS ≥ CALLS' : 'CALLS > PUTS'}</span>
+              )}
             </div>
           </div>
         </div>
@@ -303,7 +220,7 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
                     {pick.symbol}
                   </h3>
                   <span className={cn("px-2 py-0.5 text-[9px] font-black rounded border", bgPctColor(pick.changePct))}>
-                    {pick.changePct >= 0 ? '+' : ''}{pick.changePct}%
+                    {fmtSignedPct(pick.changePct)}
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 truncate max-w-[200px]">{pick.name}</p>
@@ -312,31 +229,31 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
               <div className="grid grid-cols-2 gap-2 bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
                 <div>
                   <span className="text-[9px] font-bold text-slate-400 uppercase block">AI SCORE</span>
-                  <div className="text-lg font-mono font-black text-emerald-400">{pick.score}<span className="text-xs text-slate-500">/100</span></div>
+                  <div className="text-lg font-mono font-black text-emerald-400">{pick.score ?? '—'}<span className="text-xs text-slate-500">/100</span></div>
                 </div>
                 <div>
                   <span className="text-[9px] font-bold text-slate-400 uppercase block">CONVICTION</span>
-                  <div className="text-lg font-mono font-black text-cyan-400">{pick.confidence}%</div>
+                  <div className="text-lg font-mono font-black text-cyan-400">{pick.confidence != null ? `${Math.round(pick.confidence)}%` : '—'}</div>
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
                 <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800">
                   <span className="text-slate-400 font-bold block">ENTRY</span>
-                  <span className="font-mono font-bold text-white">{pick.entryZone}</span>
+                  <span className="font-mono font-bold text-white">{pick.entryZone ?? '—'}</span>
                 </div>
                 <div className="bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20">
                   <span className="text-emerald-400 font-bold block">TARGET</span>
-                  <span className="font-mono font-bold text-emerald-400">₹{fmt(pick.target1, 0)}</span>
+                  <span className="font-mono font-bold text-emerald-400">{pick.target1 != null ? `₹${fmt(pick.target1, 0)}` : '—'}</span>
                 </div>
                 <div className="bg-rose-500/10 p-2 rounded-lg border border-rose-500/20">
                   <span className="text-rose-400 font-bold block">STOP LOSS</span>
-                  <span className="font-mono font-bold text-rose-400">₹{fmt(pick.stopLoss, 0)}</span>
+                  <span className="font-mono font-bold text-rose-400">{pick.stopLoss != null ? `₹${fmt(pick.stopLoss, 0)}` : '—'}</span>
                 </div>
               </div>
 
               <p className="text-xs text-slate-300 italic bg-slate-950/40 p-2.5 rounded-lg border border-slate-800/50 leading-relaxed">
-                "{pick.reasoning}"
+                {pick.reasoning ? `"${pick.reasoning}"` : 'No rationale recorded for this pick.'}
               </p>
 
               <div className="pt-1 flex gap-2">
@@ -449,23 +366,23 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
                           <div className="text-[10px] text-slate-400 truncate max-w-[140px]">{item.name}</div>
                         </td>
                         <td className="py-3 px-3">
-                          <div className="font-bold text-white">₹{fmt(item.price, 1)}</div>
-                          <div className={cn("text-[10px] font-bold", pctColor(item.changePct))}>{item.changePct >= 0 ? '+' : ''}{item.changePct}%</div>
+                          <div className="font-bold text-white">{item.price != null ? `₹${fmt(item.price, 1)}` : '—'}</div>
+                          <div className={cn("text-[10px] font-bold", pctColor(item.changePct))}>{fmtSignedPct(item.changePct)}</div>
                         </td>
                         <td className="py-3 px-3 font-sans">
-                          <span className={cn("px-2.5 py-1 rounded-md text-[10px] font-black uppercase", item.action.includes('STRONG') ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40" : "bg-cyan-500/20 text-cyan-400 border border-cyan-500/40")}>
-                            {item.action}
+                          <span className={cn("px-2.5 py-1 rounded-md text-[10px] font-black uppercase", (item.action ?? '').includes('STRONG') ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40" : "bg-cyan-500/20 text-cyan-400 border border-cyan-500/40")}>
+                            {item.action ?? '—'}
                           </span>
                         </td>
                         <td className="py-3 px-3 text-center">
-                          <span className="font-black text-sm text-emerald-400">{item.score}</span>
+                          <span className="font-black text-sm text-emerald-400">{item.score ?? '—'}</span>
                         </td>
-                        <td className="py-3 px-3 text-center font-bold text-cyan-400">{item.rrRatio}</td>
+                        <td className="py-3 px-3 text-center font-bold text-cyan-400">{item.rrRatio ?? '—'}</td>
                         <td className="py-3 px-3 text-[11px]">
-                          <div className="text-emerald-400 font-bold">T: ₹{fmt(item.target1, 0)}</div>
-                          <div className="text-rose-400">SL: ₹{fmt(item.stopLoss, 0)}</div>
+                          <div className="text-emerald-400 font-bold">T: {item.target1 != null ? `₹${fmt(item.target1, 0)}` : '—'}</div>
+                          <div className="text-rose-400">SL: {item.stopLoss != null ? `₹${fmt(item.stopLoss, 0)}` : '—'}</div>
                         </td>
-                        <td className="py-3 px-4 font-sans text-slate-300 text-[11px] max-w-xs leading-snug">{item.reasoning}</td>
+                        <td className="py-3 px-4 font-sans text-slate-300 text-[11px] max-w-xs leading-snug">{item.reasoning ?? '—'}</td>
                         <td className="py-3 px-4 text-right font-sans">
                           <button onClick={() => onSelectStock(item.symbol)} className="p-2 rounded-xl bg-slate-800 hover:bg-cyan-600 text-slate-300 hover:text-white transition-colors">
                             <ChevronRight className="w-4 h-4" />
@@ -485,9 +402,9 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
                         <h4 className="text-base font-black text-white">{item.symbol}</h4>
                         <p className="text-xs text-slate-400">{item.name}</p>
                       </div>
-                      <span className={cn("px-2 py-0.5 text-xs font-bold rounded", bgPctColor(item.changePct))}>{item.changePct}%</span>
+                      <span className={cn("px-2 py-0.5 text-xs font-bold rounded", bgPctColor(item.changePct))}>{fmtSignedPct(item.changePct)}</span>
                     </div>
-                    <p className="text-xs text-slate-300 line-clamp-2">"{item.reasoning}"</p>
+                    {item.reasoning && <p className="text-xs text-slate-300 line-clamp-2">"{item.reasoning}"</p>}
                   </div>
                 ))}
               </div>
@@ -498,27 +415,32 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
           <motion.div key="regime" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-2">
-                <span className="text-xs font-bold text-slate-400 uppercase">VOLATILITY REGIME</span>
-                <h3 className="text-xl font-black text-emerald-400">LOW VOLATILITY</h3>
-                <p className="text-xs text-slate-400">India VIX @ {fmt(indiaVix?.lastPrice || 13.8, 1)} suggests favorable environment for swing breakouts.</p>
+                {/* Every headline below used to be a hard-coded verdict ("LOW VOLATILITY", "LONG
+                    BUILD-UP", "NET ACCUMULATION", "70% allocation") shown whatever the data said
+                    (AF-20260930-43). Now: the live value, and only a factual description of it. */}
+                <span className="text-xs font-bold text-slate-400 uppercase">INDIA VIX</span>
+                <h3 className="text-xl font-black text-amber-400">{fmt(vix, 2)}</h3>
+                <p className="text-xs text-slate-400">Live India VIX (annualised expected 30-day NIFTY volatility, %).</p>
               </div>
 
               <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-2">
-                <span className="text-xs font-bold text-slate-400 uppercase">DERIVATIVES STANCE</span>
-                <h3 className="text-xl font-black text-cyan-400">LONG BUILD-UP</h3>
-                <p className="text-xs text-slate-400">Nifty PCR at {pcr} indicates strong put writing support at key strike zones.</p>
+                <span className="text-xs font-bold text-slate-400 uppercase">NIFTY PUT/CALL RATIO</span>
+                <h3 className="text-xl font-black text-cyan-400">{pcrText}</h3>
+                <p className="text-xs text-slate-400">{pcr == null ? 'PCR unavailable.' : pcr >= 1 ? 'More put than call open interest.' : 'More call than put open interest.'}</p>
               </div>
 
               <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-2">
-                <span className="text-xs font-bold text-slate-400 uppercase">INSTITUTIONAL BIAS</span>
-                <h3 className="text-xl font-black text-emerald-400">NET ACCUMULATION</h3>
-                <p className="text-xs text-slate-400">FII net flows at {fmtCr(fiiNet)} showing steady institutional demand.</p>
+                <span className="text-xs font-bold text-slate-400 uppercase">FII NET FLOW{fiiDate ? ` · ${fiiDate}` : ''}</span>
+                <h3 className={cn('text-xl font-black', pctColor(fiiNetCr))}>{fiiNetCr == null ? '—' : fiiNetCr >= 0 ? 'NET BUYING' : 'NET SELLING'}</h3>
+                <p className="text-xs text-slate-400">FII cash-market net: {fmtCr(fiiNetCr)}.</p>
               </div>
 
               <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-2">
-                <span className="text-xs font-bold text-slate-400 uppercase">TACTICAL ALLOCATION</span>
-                <h3 className="text-xl font-black text-amber-400">BULLISH BREAKOUT</h3>
-                <p className="text-xs text-slate-400">70% allocation to high-conviction momentum setups with trailing stop protection.</p>
+                <span className="text-xs font-bold text-slate-400 uppercase">REGIME GUIDANCE</span>
+                <h3 className={cn('text-xl font-black', regime?.regime === 'BULL' ? 'text-emerald-400' : regime?.regime === 'BEAR' || regime?.regime === 'CRASH' ? 'text-rose-400' : 'text-amber-400')}>
+                  {regime?.regime ?? '—'}
+                </h3>
+                <p className="text-xs text-slate-400">{regime?.guidance?.action ?? 'Regime unavailable.'} (canonical HMM regime detector)</p>
               </div>
             </div>
           </motion.div>
@@ -552,24 +474,38 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-4">
               <h3 className="text-lg font-black text-white flex items-center gap-2 font-display">
                 <Flame className="w-5 h-5 text-amber-400" /> Open Interest Build-Up Matrix
+                <span className="text-[10px] font-mono font-normal text-slate-500">
+                  {buildupRes?.asOf ? `stock futures, near month · ${buildupRes.asOf}` : 'no futures OI data'}
+                </span>
               </h3>
+              {/* Was four hard-coded ticker lists (RELIANCE, HAL, TATASTEEL ...); now
+                  stock_futures_oi_history via getFuturesBuildupMatrix (AF-20260930-41). */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-center">
-                <div className="bg-emerald-500/10 border border-emerald-500/30 p-4 rounded-xl">
-                  <span className="text-[10px] font-bold text-emerald-400 uppercase block">LONG BUILD-UP</span>
-                  <p className="text-sm font-mono font-bold text-white mt-1">RELIANCE, HAL, TATASTEEL</p>
-                </div>
-                <div className="bg-cyan-500/10 border border-cyan-500/30 p-4 rounded-xl">
-                  <span className="text-[10px] font-bold text-cyan-400 uppercase block">SHORT COVERING</span>
-                  <p className="text-sm font-mono font-bold text-white mt-1">INFY, ICICIBANK</p>
-                </div>
-                <div className="bg-rose-500/10 border border-rose-500/30 p-4 rounded-xl">
-                  <span className="text-[10px] font-bold text-rose-400 uppercase block">SHORT BUILD-UP</span>
-                  <p className="text-sm font-mono font-bold text-white mt-1">BAJFINANCE, WIPRO</p>
-                </div>
-                <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl">
-                  <span className="text-[10px] font-bold text-amber-400 uppercase block">LONG UNWINDING</span>
-                  <p className="text-sm font-mono font-bold text-white mt-1">AXISBANK</p>
-                </div>
+                {([
+                  ['Long Buildup', 'LONG BUILD-UP', 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'],
+                  ['Short Covering', 'SHORT COVERING', 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'],
+                  ['Short Buildup', 'SHORT BUILD-UP', 'bg-rose-500/10 border-rose-500/30 text-rose-400'],
+                  ['Long Unwinding', 'LONG UNWINDING', 'bg-amber-500/10 border-amber-500/30 text-amber-400'],
+                ] as const).map(([key, label, tone]) => {
+                  const rows = buildupRes?.buckets?.[key] ?? [];
+                  return (
+                    <div key={key} className={cn('border p-4 rounded-xl', tone)}>
+                      <span className="text-[10px] font-bold uppercase block">{label}</span>
+                      {rows.length ? (
+                        <div className="mt-1 flex flex-wrap justify-center gap-1">
+                          {rows.map(r => (
+                            <button key={r.symbol} onClick={() => onSelectStock(r.symbol)}
+                              className="text-xs font-mono font-bold text-white hover:underline">
+                              {r.symbol}{r.oi_pct_change != null ? ` (${r.oi_pct_change > 0 ? '+' : ''}${r.oi_pct_change.toFixed(1)}% OI)` : ''}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs font-mono text-slate-500 mt-1">{buildupRes ? 'none this session' : '—'}</p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </motion.div>

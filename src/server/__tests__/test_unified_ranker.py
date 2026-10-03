@@ -79,6 +79,11 @@ def make_db():
             entry_zone_low REAL, entry_zone_high REAL, stop_loss REAL,
             target_1 REAL, target_2 REAL, target_3 REAL,
             risk_reward REAL, timeframe TEXT, sector TEXT,
+            -- AF-20261001-04: the machine-readable deadline derived from `timeframe`. Absent
+            -- here the ranker's INSERT names a column the fixture table lacks and every
+            -- run-test errors on UndefinedColumn -- a schema addition that would otherwise
+            -- masquerade as a logic failure.
+            valid_until TEXT,
             trade_reasoning TEXT, position_size_pct REAL, UNIQUE(symbol, computed_at)
         );
         -- Append-only point-in-time snapshot: keyed on generated_at, so a re-run adds a row
@@ -577,6 +582,282 @@ class TestUnifiedRankerRun:
         # forgets the exclusion fails on this line rather than silently breaching the ceiling.
         assert [REGIME_WEIGHTS[r]['breakout'] for r in
                 ('BULL', 'BEAR', 'HIGH_VOL', 'CRASH', 'SIDEWAYS')] == [0.15, 0.05, 0.10, 0.05, 0.13]
+
+
+class TestIncompleteGeometryIsNotPublishedAsATradePlan:
+    """AF-20261001-07: `_get_entry_targets`'s rec_log and unified_signals fallbacks accepted a row
+    that had an entry but NO stop and NO target. `rr` computed to None, `rr is None` satisfied the
+    `rr is None or rr >= 1.0` acceptance test, and the branch returned an entry zone with nothing
+    to size against -- which the UI renders as an actionable Buy. Live 2026-10-01: PARACABLES
+    (S_ELITE, unified_score 90.95) and RELIABLE (A_HIGH, 78.36) were published exactly that way,
+    PARACABLES' plan coming from a 2026-06-03 recommendation_log row (rec_log was unbounded by
+    date, unlike confluence's 30-day window). A trade plan needs a stop; half a plan is worse
+    than none because it looks actionable."""
+
+    def _setup_with_entry_only_rec_log_row(self):
+        import os
+        ranker, conn, csv_path = TestUnifiedRankerRun()._setup()
+        # HALFPLAN: bullish membership (same shape as INFY) and a recommendation_log row that
+        # carries an entry but NO stop and NO target -- the live PARACABLES shape. Whether the
+        # blend lands on Buy or Hold depends on which engine tables this fixture lacks, so the
+        # assertions below pin the GEOMETRY contract via _get_entry_targets directly, the same
+        # way TestSellRowGeometryBackstop pins "not a long" instead of one specific label.
+        conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','HALFPLAN','HALFPLAN')")
+        conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('fund1','HALFPLAN','HALFPLAN')")
+        conn.execute("INSERT INTO stock_scores VALUES ('HALFPLAN','long_term',80)")
+        conn.execute("INSERT INTO recommendation_log "
+                     "(symbol, signal_date, actual_return_pct, generated_at, entry_price, stop_loss, target_1) "
+                     "VALUES ('HALFPLAN','2026-05-01',5.0,date('now','-10 days'), 100.0, NULL, NULL)")
+        conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) "
+                     "VALUES ('HALFPLAN', date('now'), 0.75, 70)")
+        conn.commit()
+        return ranker, conn, csv_path
+
+    def test_entry_without_stop_or_target_publishes_no_geometry(self):
+        """The defect, pinned at the function that produced it: an entry-only rec_log row must
+        NOT yield a trade plan. Pre-fix this returned entry_zone_low/high with stop_loss,
+        target_1 and risk_reward all None, which the caller writes to unified_recommendations
+        and the UI renders as an actionable Buy."""
+        import os
+        ranker, conn, csv_path = self._setup_with_entry_only_rec_log_row()
+        try:
+            et = ranker._get_entry_targets(
+                'HALFPLAN',
+                ranker._get_confluence_latest_map(),
+                ranker._get_rec_log_latest_map(),
+                ranker._get_unified_signals_latest_map(),
+                ranker._get_sector_map(),
+            )
+            for field in ('entry_zone_low', 'entry_zone_high', 'stop_loss',
+                          'target_1', 'target_2', 'target_3', 'risk_reward'):
+                assert et[field] is None, \
+                    f"{field} published from an entry-only source row: {et[field]}"
+        finally:
+            os.unlink(csv_path)
+
+    def test_a_complete_rec_log_row_still_provides_geometry(self):
+        """Negative control: the guard must reject only the INCOMPLETE shape. A rec_log row with a
+        full entry/stop/target triple and a healthy R:R is the intended use of this tier; if this
+        fails the fix has silently removed real geometry from the surface."""
+        import os
+        ranker, conn, csv_path = TestUnifiedRankerRun()._setup()
+        try:
+            conn.execute("INSERT INTO recommendation_log "
+                         "(symbol, signal_date, actual_return_pct, generated_at, entry_price, stop_loss, target_1) "
+                         "VALUES ('FULLPLAN','2026-05-01',5.0,date('now','-10 days'), 100.0, 92.0, 120.0)")
+            conn.commit()
+            et = ranker._get_entry_targets(
+                'FULLPLAN',
+                ranker._get_confluence_latest_map(),
+                ranker._get_rec_log_latest_map(),
+                ranker._get_unified_signals_latest_map(),
+                ranker._get_sector_map(),
+            )
+            assert et['stop_loss'] == pytest.approx(92.0), et
+            assert et['target_1'] == pytest.approx(120.0), et
+            # rr = (120-100)/(100-92) = 2.5. Asserted from the formula rather than a literal so the
+            # test states the R:R contract instead of a number that could drift with rounding.
+            assert et['risk_reward'] == pytest.approx((120.0 - 100.0) / (100.0 - 92.0), abs=0.01), et
+            assert et['entry_zone_low'] is not None
+        finally:
+            os.unlink(csv_path)
+
+    def test_unified_signals_entry_only_row_also_publishes_nothing(self):
+        """Fallback 3 had the identical hole; pinned separately so fixing one tier without the
+        other cannot pass."""
+        import os
+        ranker, conn, csv_path = TestUnifiedRankerRun()._setup()
+        try:
+            conn.execute(
+                "INSERT INTO unified_signals (symbol, signal_date, signal_source, signal_type, "
+                "entry_price, target_price, stop_loss) "
+                "VALUES ('UHALF','2026-05-01','technical','Bullish', 100.0, NULL, NULL)"
+            )
+            conn.commit()
+            et = ranker._get_entry_targets(
+                'UHALF',
+                ranker._get_confluence_latest_map(),
+                ranker._get_rec_log_latest_map(),
+                ranker._get_unified_signals_latest_map(),
+                ranker._get_sector_map(),
+            )
+            for field in ('entry_zone_low', 'entry_zone_high', 'stop_loss',
+                          'target_1', 'target_2', 'target_3', 'risk_reward'):
+                assert et[field] is None, \
+                    f"{field} published from an entry-only unified_signals row: {et[field]}"
+        finally:
+            os.unlink(csv_path)
+
+    def test_rec_log_geometry_source_is_bounded_to_30_days(self):
+        """The 4-month-stale half of the live defect: rec_log was the only geometry tier with NO
+        date window, so a June row described an October trade. Pinned at the SQL so the bound
+        cannot be dropped without this failing."""
+        import inspect
+        from unified_ranker import UnifiedRanker
+        sql = inspect.getsource(UnifiedRanker._get_rec_log_latest_map)
+        assert "INTERVAL '30 days'" in sql, \
+            "rec_log geometry must be bounded like the confluence tier, or stale rows resurface"
+
+    def test_both_entry_only_tiers_require_stop_and_target(self):
+        import inspect
+        from unified_ranker import UnifiedRanker
+        src = inspect.getsource(UnifiedRanker._get_entry_targets)
+        # Fallback 2 (rec_log) and fallback 3 (unified_signals) each guard on entry AND stop AND
+        # target. Counted so adding a fourth entry-only tier later fails here.
+        assert src.count("['entry_price'] is not None and row['stop_loss'] is not None "
+                         "and row['target_1'] is not None") == 1
+        assert src.count("row['entry'] is not None and row['stopLoss'] is not None "
+                         "and row['target'] is not None") == 1
+
+
+class TestConfluenceAndCostReadsAreTimeBounded:
+    """AF-20260930-11: `unified-ranker` timed out 3/7 runs (45->75min caps) because
+    `_get_confluence_latest_map` had no time bound over `confluence_signals` -- a ~6GB / 8M-row
+    hypertable whose chunks compress after 30 days, so the unbounded ROW_NUMBER() decompressed
+    every chunk on every run (measured 7m42s+ and still going, IO-bound, inside the 22:30-00:00
+    IST window where unified-ranker and screener-performance then timed out). `_compute_cost_map`
+    had the same unbounded read in its ATR subquery.
+
+    The fix is a `computed_at >= NOW() - INTERVAL '30 days'` predicate on both. The row was closed
+    citing no regression test, so the bound could have been dropped again silently -- pinned here
+    at the SQL, which is the only place the behaviour lives (both are single queries).
+
+    `confluence-compute` rewrites every active symbol ~15x/day, so inside the uncompressed window
+    the latest row per live symbol is unchanged; a symbol silent for 30+ days falls through to the
+    rec_log / unified_signals tiers of `_get_entry_targets`. That is the intended trade and it is
+    the reason a bound -- rather than a chunk-pruning or index change -- is the correct fix."""
+
+    @staticmethod
+    def _has_30d_bound(sql: str) -> bool:
+        return "INTERVAL '30 days'" in sql
+
+    def test_confluence_latest_map_is_bounded_to_30_days(self):
+        import inspect
+        from unified_ranker import UnifiedRanker
+        src = inspect.getsource(UnifiedRanker._get_confluence_latest_map)
+        assert self._has_30d_bound(src), \
+            "unbounded confluence_latest_map decompresses every hypertable chunk and re-breaks " \
+            "the 45min ranker cap"
+
+    def test_cost_map_atr_lookup_is_bounded_to_30_days(self):
+        import inspect
+        from unified_ranker import UnifiedRanker
+        src = inspect.getsource(UnifiedRanker._compute_cost_map)
+        assert self._has_30d_bound(src), \
+            "_compute_cost_map reads confluence_signals.atr unbounded -- the same chunk-" \
+            "decompression cost the latest-map bound removed"
+
+    def test_negative_control_bound_stripped_sql_is_rejected(self):
+        """Proves the guard discriminates rather than passing on any source. A source-parsing
+        assertion that cannot fail is not a check -- this is the reason the check can fail."""
+        import inspect
+        from unified_ranker import UnifiedRanker
+        src = inspect.getsource(UnifiedRanker._get_confluence_latest_map)
+        assert self._has_30d_bound(src), "precondition: the bound is present today"
+        stripped = src.replace("INTERVAL '30 days'", "INTERVAL '5 years'")
+        assert not self._has_30d_bound(stripped), \
+            "the bound check must reject SQL whose window has been widened"
+
+
+class TestTimeframeVocabularyIsCanonical:
+    """AF-20261001-06: the platform carried FIVE horizon vocabularies and no mapping between them.
+    The visible symptom was 'LONG_TERM' surviving the write-boundary uppercase as a DISTINCT label
+    from 'POSITIONAL' -- the same concept under two names in one grid, so an exact-match
+    timeframe filter could miss half a bucket (live 2026-10-01: 17 LONG_TERM beside 46 POSITIONAL).
+    Folding every known spelling onto the canonical three is the mechanical part of that finding;
+    the deeper structural half (no validity field; grading windows chosen independently of the
+    label) is recorded in the ledger as still-open rather than pretended fixed here."""
+
+    def test_valid_until_is_derived_from_the_label_not_the_resolver_pass(self):
+        """AF-20261001-04 (structural half): the horizon LABEL must decide the window.
+
+        The counts are deliberately the horizons the resolvers already grade at (1/5/15 sessions),
+        so making the label authoritative keeps every measurement corpus comparable to what
+        came before instead of re-basing the numbers.
+        """
+        from unified_ranker import HORIZON_SESSIONS
+        assert HORIZON_SESSIONS == {'INTRADAY': 1, 'SWING': 5, 'POSITIONAL': 15}
+
+    def test_valid_until_skips_weekends_and_holidays(self):
+        from unified_ranker import add_sessions
+        from datetime import date
+        # Friday + 1 session = Monday, NOT Saturday.
+        assert add_sessions(date(2026, 10, 2), 1, set()) == date(2026, 10, 5)
+        # A holiday ON the would-be deadline pushes it out: Monday 10-05 closed -> Tuesday.
+        assert add_sessions(date(2026, 10, 2), 1, {date(2026, 10, 5)}) == date(2026, 10, 6)
+        # 5 sessions from a Monday with two holidays is 14 calendar days, not 7 -- the exact
+        # case a calendar-day approximation gets wrong (it would expire the idea early).
+        due = add_sessions(date(2026, 10, 5), 5, {date(2026, 10, 6), date(2026, 10, 7)})
+        assert due == date(2026, 10, 14)
+        assert (due - date(2026, 10, 5)).days > 7
+
+    def test_valid_until_is_null_for_a_missing_or_unknown_label(self):
+        """68,520 of 74,180 historical rows have timeframe IS NULL. Inventing a deadline for
+        them would let an expiry sweep close rows on a horizon they never declared."""
+        from unified_ranker import valid_until_for
+        assert valid_until_for(None, '2026-10-01T09:00:00') is None
+        assert valid_until_for('', '2026-10-01T09:00:00') is None
+        assert valid_until_for('SOME_NEW_VOCAB', '2026-10-01T09:00:00') is None
+
+    def test_valid_until_normalizes_alias_labels_before_deciding(self):
+        """'LONG_TERM' and 'POSITIONAL' are one concept; they must get the same deadline, or a
+        label that survived uppercasing silently expires on a different window."""
+        from unified_ranker import valid_until_for
+        import unified_ranker as ur
+        ur._holiday_cache, ur._holiday_cache_tried = set(), True
+        try:
+            a = valid_until_for('POSITIONAL', '2026-10-01T09:00:00')
+            b = valid_until_for('Long term', '2026-10-01T09:00:00')
+            assert a is not None
+            assert a == b
+            # SWING is a shorter window than POSITIONAL on the same day.
+            assert valid_until_for('SWING', '2026-10-01T09:00:00') < a
+        finally:
+            ur._holiday_cache, ur._holiday_cache_tried = None, False
+
+
+        from unified_ranker import _normalize_timeframe, CANONICAL_TIMEFRAMES
+        sources = [
+            'INTRADAY', 'intraday',            # confluence + screener catalog
+            'SWING', 'swing',
+            'POSITIONAL', 'positional',
+            'LONG_TERM', 'long_term',          # recommendation_log
+            'SHORT_TERM', 'short_term',        # screener catalog / screener_catalog_enricher
+            'Positional (2-4W)', 'Swing (3-7D)',  # technical_signals.time_horizon
+        ]
+        for raw in sources:
+            got = _normalize_timeframe(raw)
+            assert got in CANONICAL_TIMEFRAMES, f"{raw!r} -> {got!r} is not canonical"
+
+    def test_long_term_and_positional_collapse_to_one_label(self):
+        """The actual live defect: these two must stop being distinguishable."""
+        from unified_ranker import _normalize_timeframe
+        assert _normalize_timeframe('LONG_TERM') == _normalize_timeframe('POSITIONAL') == 'POSITIONAL'
+        assert _normalize_timeframe('long_term') == 'POSITIONAL'
+        assert _normalize_timeframe('Positional (2-4W)') == 'POSITIONAL'
+
+    def test_short_term_and_swing_collapse_to_one_label(self):
+        from unified_ranker import _normalize_timeframe
+        assert _normalize_timeframe('SHORT_TERM') == _normalize_timeframe('SWING') == 'SWING'
+        assert _normalize_timeframe('Swing (3-7D)') == 'SWING'
+
+    def test_intraday_survives_every_spelling(self):
+        from unified_ranker import _normalize_timeframe
+        for raw in ('INTRADAY', 'intraday', 'Intraday', ' INTRADAY '):
+            assert _normalize_timeframe(raw) == 'INTRADAY'
+
+    def test_unknown_value_passes_through_rather_than_vanishing(self):
+        """A genuinely new vocabulary must degrade to 'surfaces on its own literal', NOT to NULL.
+        The 2026-08-31 casing fix existed because an unnormalized value silently disappeared from
+        exact-match filters; dropping unknown values would reintroduce exactly that failure."""
+        from unified_ranker import _normalize_timeframe
+        assert _normalize_timeframe('BRAND_NEW') == 'BRAND_NEW'
+
+    def test_none_and_blank_stay_none(self):
+        from unified_ranker import _normalize_timeframe
+        assert _normalize_timeframe(None) is None
+        assert _normalize_timeframe('') is None
+        assert _normalize_timeframe('   ') is None
 
 
 class TestSellRowGeometryBackstop:

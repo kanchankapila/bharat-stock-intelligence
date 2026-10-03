@@ -320,4 +320,10 @@ if __name__ == "__main__":
     # host. Override with ALPHAQUANT_HOST if the service is ever genuinely moved off-box,
     # at which point it needs real auth first, not just a wider bind.
     host = os.environ.get("ALPHAQUANT_HOST", "127.0.0.1")
+    try:
+        from port_guard import wait_for_port_free  # on PYTHONPATH under pm2 (ecosystem pyService)
+    except ImportError:  # `npm start` runs without it: no restart loop to guard against there
+        wait_for_port_free = None
+    if wait_for_port_free:
+        wait_for_port_free(host, port)
     uvicorn.run("main:app", host=host, port=port, reload=False)

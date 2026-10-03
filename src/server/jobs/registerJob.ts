@@ -81,6 +81,15 @@ export const ORPHAN_REQUEUE_MAX_AGE_MS = 48 * 60 * 60_000;
  *  lose a batch to a restart, like ml-daily-ops on 2026-09-08) sit far outside it and requeue. */
 export const ORPHAN_REQUEUE_SKIP_WINDOW_MS = 90 * 60_000;
 
+/** How many times a single missed run may be re-made-up before the reclaim gives up and alerts
+ *  (AF-20261001-05). Replaces the old "a make-up never gets a second make-up" rule, which threw
+ *  away the ordinary double-restart case to defend against a cascade it could not distinguish.
+ *  3 covers "a deploy restart while a make-up was running" (the measured 2026-09-30 shape: run
+ *  orphaned at +9min, make-up orphaned at +53min) with headroom, while still bounding the
+ *  dl-retrain-weekly OOM cascade that motivated the guard -- that one is additionally deferred
+ *  past the close by HEAVY_MAKEUP_JOBS and fails on memory, not on restarts. */
+export const MAX_ORPHAN_REQUEUE_GENERATIONS = 3;
+
 /**
  * Requeue a make-up run for a job whose worker died mid-run (AF-20260909-06).
  *
@@ -121,14 +130,28 @@ export async function requeueOrphanedJob(
     // Guard 0: the orphan was itself a make-up. A job whose make-up also dies mid-run is a
     // signal, not a miss -- dl-retrain-weekly exhausted host memory and killed the WSL2 VM
     // (taking the DB with it), and each boot requeued it straight into the next kill
-    // (2026-09-10 23:48, 09-11 00:42 and 06:34 IST). One make-up per missed run; the regular
-    // schedule is the next attempt.
-    if (orphan.data?.orphanRequeue === true) {
+    // (2026-09-10 23:48, 09-11 00:42 and 06:34 IST).
+    //
+    // AF-20261001-05 made this a BOUNDED ladder rather than a hard stop. The old one-shot rule
+    // looked like it solved the OOM cascade, but it also discarded the ordinary case: on
+    // 2026-09-30 `ml-daily-ops` was orphaned 9 min into its run by one pm2 restart, and the make-up
+    // that reclaim queued was then orphaned 44 min later by a SECOND restart inside the same 4h
+    // window -- and Guard 0 refused the recovery, so 3,152 gradeable intraday signals were never
+    // closed. One make-up per missed run was the wrong invariant; the real risk is an UNBOUNDED
+    // loop, so the counter is what carries the protection the hard-stop provided.
+    //
+    // The counter lives in the make-up's own data, so it survives the worker that died. The
+    // dl-retrain-weekly cascade is still stopped -- after MAX_ORPHAN_REQUEUE_GENERATIONS
+    // attempts it alerts and stops, instead of looping for as many boots as the VM survives.
+    const generation = typeof orphan.data?.orphanRequeueGeneration === 'number'
+      ? orphan.data.orphanRequeueGeneration
+      : 0;
+    if (orphan.data?.orphanRequeue === true && generation >= MAX_ORPHAN_REQUEUE_GENERATIONS) {
       console.warn(
-        `[QUEUE] ${queue.name}: orphaned ${name} was itself a make-up run that also died ` +
-        `mid-run -- not requeueing again (investigate before its next scheduled slot).`);
+        `[QUEUE] ${queue.name}: orphaned ${name} has died ${generation}x as a make-up -- not ` +
+        `requeueing again (investigate before its next scheduled slot).`);
       void alertOrphanedJob(queue.name, name, startedAt, false,
-        'the make-up run also died mid-run; not requeued again');
+        `make-up died ${generation}x; retry budget exhausted`);
       return false;
     }
 
@@ -184,6 +207,10 @@ export async function requeueOrphanedJob(
       ...(orphan.data ?? {}),
       isCatchup: true,
       orphanRequeue: true,
+      // Carries the ladder: each make-up that itself dies comes back with one more generation, so
+      // Guard 0 can tell "restarted twice while deploying" (retry) from "this job kills the host
+      // every time it runs" (stop and alert).
+      orphanRequeueGeneration: generation + 1,
       requeuedFrom: orphan.id ?? null,
     }, {
       jobId: `${name}-orphan-requeue-${now}`,

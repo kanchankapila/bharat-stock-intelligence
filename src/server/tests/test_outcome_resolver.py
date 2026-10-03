@@ -801,3 +801,48 @@ def test_prefetch_resolved_keys_matches_native_date_column():
     assert ("ABX", SIGNAL_DATE, 1) in got, "resolved technical WIN row not prefetched — date = text regression"
     assert ("ABX", SIGNAL_DATE, 5) not in got, "PENDING row must not count as resolved"
     assert ("ABX", SIGNAL_DATE, 15) not in got, "confluence-sourced row must not count as resolved"
+
+
+def test_expire_all_horizons_covers_horizons_no_caller_passes():
+    """AF-20261001-01: the outcome tables carry horizons {1,2,3,5,7,14,15,30} (written by their
+    own engines), but run() was only ever invoked with 1/5/15 — so a horizon nobody passed was
+    never resolved and never expired: 269 h7 PENDING rows sat past their window, every one
+    priceable. The sweep must derive its horizons from the tables, not the caller."""
+    from outcome_resolver import expire_stale_pending_all, stale_pending_horizons
+    conn = make_multi_horizon_db()
+    sig = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
+    _seed_ohlcv(conn, 'H7LIVE', sig, n_post=10)
+    _seed_ohlcv(conn, 'H7GONE', sig, n_post=0)  # no bar after the signal: AF-20260930-16 guard
+    for sym in ('H7LIVE', 'H7GONE'):
+        conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome,signal_source) "
+                     "VALUES (?,?,7,'PENDING','confluence')", (sym, sig))
+    # stale_pending_horizons unions all three outcome tables; production always has rec_log,
+    # so the derivation query must not depend on the test fixture having rows in it.
+    conn.execute("CREATE TABLE recommendation_log (id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, "
+                 "signal_date TEXT, horizon_days INTEGER, outcome TEXT, actual_return_pct REAL, "
+                 "status TEXT, resolved_at TIMESTAMPTZ)")
+    conn.commit()
+    assert stale_pending_horizons(conn) == [7]
+    assert expire_stale_pending_all(conn) == 1
+    got = dict(conn.execute("SELECT symbol, outcome FROM signal_outcomes").fetchall())
+    assert got == {'H7LIVE': 'NEUTRAL', 'H7GONE': 'PENDING'}, \
+        "priceable stale row must expire, unpriced row must stay PENDING (no fabricated NEUTRAL)"
+
+
+def test_stale_pending_horizons_includes_unified_and_coalesces_rec_log_null():
+    """AF-20261001-01: the horizon list must come from all three outcome tables, and rec_log's
+    NULL horizon (expire treats it as 15 via COALESCE) must map to 15, not be dropped."""
+    from outcome_resolver import stale_pending_horizons
+    conn = make_multi_horizon_db()
+    sig = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
+    conn.execute("INSERT INTO unified_signals (symbol,signal_date,entry_price,target_price,stop_loss,"
+                 "signal_source,confidence_score) VALUES ('U7',?,100.0,110.0,90.0,'AI',75)", (sig,))
+    conn.execute("INSERT INTO unified_signal_outcomes (unified_signal_id,symbol,signal_date,horizon_days,"
+                 "outcome) VALUES (1,'U7',?,30,'PENDING')", (sig,))
+    conn.execute("CREATE TABLE recommendation_log (id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, "
+                 "signal_date TEXT, horizon_days INTEGER, outcome TEXT, actual_return_pct REAL, "
+                 "status TEXT, resolved_at TIMESTAMPTZ)")
+    conn.execute("INSERT INTO recommendation_log (symbol,signal_date,horizon_days,outcome) "
+                 "VALUES ('U7',?,NULL,'PENDING')", (sig,))
+    conn.commit()
+    assert stale_pending_horizons(conn) == [15, 30]

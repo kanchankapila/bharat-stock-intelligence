@@ -62,10 +62,35 @@ const HORIZON_LABEL: Record<Horizon, string> = {
   POSITIONAL: 'LONG TERM (weeks to months)',
 };
 
+/**
+ * Every source spelling of each horizon, folded onto the three canonical buckets.
+ * AF-20261001-06: the platform carried FIVE unmapped horizon vocabularies (confluence
+ * {INTRADAY,SWING,POSITIONAL}, recommendation_log {long_term}, technical_signals
+ * {'Positional (2-4W)','Swing (3-7D)'}, the screener catalog {intraday,short_term,long_term},
+ * and the grading horizons). Mirrors `_TIMEFRAME_ALIASES` in unified_ranker.py -- keep the two
+ * in step, they normalise the same column from opposite ends of the pipeline.
+ *
+ * The bug this fixes here specifically: everything unrecognised used to fall through to
+ * 'POSITIONAL', so 'short_term' and 'Swing (3-7D)' -- week-scale ideas -- were labelled
+ * months-scale in the Telegram digest. Conservative-by-default is right for an UNKNOWN value,
+ * wrong for a known synonym.
+ */
+const HORIZON_ALIASES: Record<string, Horizon> = {
+  INTRADAY: 'INTRADAY',
+  SWING: 'SWING',
+  SHORT: 'SWING',
+  SHORT_TERM: 'SWING',
+  'SWING (3-7D)': 'SWING',
+  POSITIONAL: 'POSITIONAL',
+  LONG_TERM: 'POSITIONAL',
+  'POSITIONAL (2-4W)': 'POSITIONAL',
+  'POSITIONAL (1-3M)': 'POSITIONAL',
+};
+
 export function normaliseHorizon(raw: string | null | undefined): Horizon {
   const t = (raw ?? '').trim().toUpperCase();
-  if (t === 'INTRADAY') return 'INTRADAY';
-  if (t === 'SWING' || t === 'SHORT') return 'SWING';
+  const mapped = HORIZON_ALIASES[t] ?? HORIZON_ALIASES[t.replace(/[\s-]+/g, '_')];
+  if (mapped) return mapped;
   // POSITIONAL, LONG_TERM and NULL all mean a multi-day hold. NULL is the common case for
   // rows whose levels came from a source that never recorded a horizon, and defaulting those
   // to the longest bucket is the conservative read -- it never mislabels a multi-day idea
@@ -116,6 +141,7 @@ export async function fetchLongTermPicks(limit = MAX_PICKS_PER_HORIZON): Promise
       WHERE substring(computed_at, 1, 10) = (
               SELECT max(substring(computed_at, 1, 10)) FROM unified_recommendations)
         AND classification IN (?, ?)
+        AND valid_until > CURRENT_TIMESTAMP
         AND COALESCE(upper(timeframe), 'POSITIONAL') <> 'INTRADAY'
       ORDER BY unified_score DESC
       LIMIT ?`,
@@ -159,6 +185,7 @@ export async function fetchUnifiedIntradayPicks(limit = MAX_PICKS_PER_HORIZON): 
       WHERE substring(computed_at, 1, 10) = (
               SELECT max(substring(computed_at, 1, 10)) FROM unified_recommendations)
         AND classification IN (?, ?)
+        AND valid_until > CURRENT_TIMESTAMP
         AND upper(timeframe) = 'INTRADAY'
       ORDER BY unified_score DESC
       LIMIT ?`,

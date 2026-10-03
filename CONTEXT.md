@@ -7,8 +7,8 @@ copying it, because copied inventories are what went stale here before (the prev
 named 5 fetchers that do not exist and a GPT-4o agent file that never did).
 
 ## What it is
-Indian equity (NSE/BSE) intelligence platform: 82 `*_fetcher.py` (of 290 non-test Python modules in `src/server/`;
-678 `.py` files including tests — measured 2026-09-29) pull vendor data into
+Indian equity (NSE/BSE) intelligence platform: 82 `*_fetcher.py` (of 295 non-test Python modules in `src/server/`;
+702 `.py` files including tests — measured 2026-10-01) pull vendor data into
 Postgres/TimescaleDB, engines score every stock, and `unified_ranker.py` blends them into one
 canonical ranking the React UI, Telegram digests and the chatbot read.
 
@@ -30,7 +30,7 @@ vendors (NSE, MoneyControl, Trendlyne, NiftyTrader, MarketsMojo, ET, Yahoo, ...)
 ## Sources of truth (read these, don't trust a copy)
 | Question | Where the answer lives |
 |---|---|
-| What jobs run, when (cron is **UTC**) | `src/server/jobRegistry.ts` (72 entries) — mirrors `queues.ts`/`jobs/*.jobs.ts` |
+| What jobs run, when (cron is **UTC**) | `src/server/jobRegistry.ts` (73 entries) — mirrors `queues.ts`/`jobs/*.jobs.ts` |
 | Which tables are monitored for freshness | `TABLE_FRESHNESS_CHECKS` + checks in `src/server/dataQualityChecks.ts` |
 | Table schemas | `db/schema.postgres.sql` (regenerated from live; `npm run schema:drift` to diff) |
 | Provider id per stock | `src/data/stocklist.ts` via `src/server/stockMapping.ts` |

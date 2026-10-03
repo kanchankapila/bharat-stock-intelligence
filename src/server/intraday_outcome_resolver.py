@@ -51,6 +51,10 @@ from db_compat import connect
 
 NEUTRAL_BAND = 0.2  # |pnl%| below this at a close-exit = NEUTRAL
 
+# NSE session close, minutes past midnight IST. Same constant as intraday_ranker.py's
+# NSE_CLOSE_MINUTES_IST -- a session is only gradeable once this has passed.
+NSE_CLOSE_MINUTES_IST = 15 * 60 + 30  # 15:30 IST
+
 # Execution-cost model. Previously paper_trade() compared pure price levels with no cost at
 # all, so the reported win-rate/avg-PnL was the best case, not the realistic one -- every
 # other backtest path in this codebase (backtester.py) models slippage + commission.
@@ -346,8 +350,95 @@ def resolve(conn, d: str) -> dict:
             "avg_pnl_pct": round(pnl_sum / n, 3) if n else 0.0}
 
 
+def ungraded_sessions(conn, lookback_days: int = 7) -> list:
+    """Sessions in `intraday_recommendations_history` that produced gradeable signals but have
+    no `intraday_recommendation_outcomes` rows at all.
+
+    AF-20261001-05: the resolver is a step of `ml-daily-ops`, and on 2026-09-30 that chain was
+    orphaned TWICE by pm2 restarts (the run itself 9 min in, then its make-up 44 min in), so
+    3,152 actionable 09-30 signals were never graded. Nothing in the system noticed: the next
+    night's run grades only *today's* date (`--date` defaults to `date.today()`), so a lost
+    session stays lost forever and silently drops out of the win rate the emission gate and the
+    strategy learner both read.
+
+    A session counts as ungraded only when it has at least one CYCLE carrying a full entry/
+    target/stop triple -- i.e. something a paper trade could actually have resolved. Gated on
+    the history table's own `computed_at` so it works on both the TEXT column shape (SQLite dev
+    fallback) and Postgres.
+    """
+    lower = (date.today() - timedelta(days=lookback_days)).isoformat()
+    today = date.today().isoformat()
+    # Never grade a session that has not finished. The intraday chain writes shadow cycles all
+    # day, so `computed_at = today` always has gradeable-looking rows; running this intraday
+    # would square every one of them off at whatever bar happens to exist so far (11:30 IST =
+    # a 2-hour "session"), manufacturing exits that never happened. The nightly job runs at
+    # 18:50 IST, well after the 15:30 close, so this only ever bites a manual mid-session run.
+    #
+    # An upper bound, not a narrowed lower bound: `computed_at >= yesterday` would still include
+    # today, which is the exact row the guard exists to exclude.
+    ist_now = datetime.now(timezone.utc).astimezone(_IST)
+    upper = today if ist_now.hour * 60 + ist_now.minute >= NSE_CLOSE_MINUTES_IST else (
+        (date.today() - timedelta(days=1)).isoformat())
+    rows = conn.execute(
+        """
+        SELECT h.computed_at
+        FROM intraday_recommendations_history h
+        WHERE h.computed_at >= ?
+          AND h.computed_at <= ?
+          AND h.entry_price IS NOT NULL
+          AND h.target_1 IS NOT NULL
+          AND h.stop_loss IS NOT NULL
+          AND h.classification IN ('Strong Buy', 'Buy', 'Strong Sell', 'Sell')
+        GROUP BY h.computed_at
+        HAVING NOT EXISTS (
+            SELECT 1 FROM intraday_recommendation_outcomes o
+            WHERE o.computed_at = h.computed_at
+        )
+        ORDER BY h.computed_at
+        """,
+        (lower, upper),
+    ).fetchall()
+    return [str(r[0])[:10] for r in rows]
+
+
+def _gradable_cycles(conn, d: str) -> int:
+    """How many gradeable cycles a session had -- reported, never used to decide anything."""
+    return len(conn.execute(
+        "SELECT 1 FROM intraday_recommendations_history "
+        "WHERE computed_at = ? AND entry_price IS NOT NULL AND target_1 IS NOT NULL "
+        "AND stop_loss IS NOT NULL "
+        "AND classification IN ('Strong Buy', 'Buy', 'Strong Sell', 'Sell')",
+        (d,),
+    ).fetchall())
+
+
+def backfill_ungraded(conn, lookback_days: int = 7) -> list:
+    """Grade every session a missed run left behind. Idempotent: `resolve()` upserts on
+    (symbol, computed_at, direction), and a session with no gradeable recs resolves to 0 rows."""
+    out = []
+    for d in ungraded_sessions(conn, lookback_days):
+        res = resolve(conn, d)
+        out.append({
+            "date": d,
+            "gradeable_cycles": _gradable_cycles(conn, d),
+            "resolved": res.get("resolved", 0),
+            "note": res.get("note"),
+        })
+        print(f"[IntradayOutcomeResolver] backfilled {d}: {res.get('resolved', 0)} graded "
+              f"({res.get('note') or 'ok'})", flush=True)
+    return out
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=date.today().isoformat())
+    # AF-20261001-05: a lost session is otherwise ungradeable forever -- the next run only ever
+    # looks at today. Default ON because the whole cost is a few SELECTs when there is nothing
+    # to do; --no-backfill exists only for an operator who wants a strictly single-day run.
+    ap.add_argument("--backfill-days", type=int, default=7,
+                    help="grade sessions from the last N days that have no outcome rows (0 = off)")
     args = ap.parse_args()
-    print(json.dumps(resolve(connect(), args.date)))
+    _conn = connect()
+    if args.backfill_days > 0:
+        backfill_ungraded(_conn, args.backfill_days)
+    print(json.dumps(resolve(_conn, args.date)))
