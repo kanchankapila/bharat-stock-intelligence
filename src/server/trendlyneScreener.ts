@@ -1405,6 +1405,21 @@ export function screenerHitAction(
   return existing.signal_type === newType ? 'confirm' : 'invalidate_only';
 }
 
+export function formatIntradayScanSummary(summary: {
+  screenersScanned: number;
+  activeScreeners: number;
+  highScoringMatches: number;
+  highScoringSymbols: number;
+  signalRowsCreated: number;
+  unpricedSkipped: number;
+}): string {
+  return `Screeners scanned: ${summary.screenersScanned}/${summary.activeScreeners} | ` +
+    `High-scoring screener-stock matches: ${summary.highScoringMatches} across ` +
+    `${summary.highScoringSymbols} distinct stocks | ` +
+    `Signal rows created this pass: ${summary.signalRowsCreated} | ` +
+    `Unpriced/unmapped matches skipped: ${summary.unpricedSkipped}`;
+}
+
 export async function runIntradayScreenerScan(): Promise<{
   screenersScanned: number;
   highScoringStocksFound: number;
@@ -1414,6 +1429,7 @@ export async function runIntradayScreenerScan(): Promise<{
   
   let screenersScanned = 0;
   let highScoringStocksFound = 0;
+  const highScoringSymbols = new Set<string>();
   let newSignalsGenerated = 0;
 
   try {
@@ -1505,6 +1521,7 @@ export async function runIntradayScreenerScan(): Promise<{
         }
 
         highScoringStocksFound++;
+        highScoringSymbols.add(symbol);
 
         // 4. Handle active signal deduplication, confluence upgrades, and conflict resolution (TODAY only)
         const todayIso = new Date().toISOString().split('T')[0];
@@ -1578,7 +1595,14 @@ export async function runIntradayScreenerScan(): Promise<{
       }
     }
 
-    console.log(`✅ [INTRADAY SCAN] Scan completed. Scanned: ${screenersScanned} | High-Scoring Stocks: ${highScoringStocksFound} | New Signals: ${newSignalsGenerated} | Unpriced/unmapped skipped: ${unpricedSkipped}`);
+    console.log(`✅ [INTRADAY SCAN] Scan completed. ${formatIntradayScanSummary({
+      screenersScanned,
+      activeScreeners: filtered.length,
+      highScoringMatches: highScoringStocksFound,
+      highScoringSymbols: highScoringSymbols.size,
+      signalRowsCreated: newSignalsGenerated,
+      unpricedSkipped,
+    })}`);
   } catch (error) {
     console.error('❌ [INTRADAY SCAN] Fatal error during intraday screener scan:', error);
   }

@@ -27,9 +27,9 @@ BODY = {
     "researchReports": {
         "tableData": [
             {"recoDate": "2026-08-01", "postAuthor": "Broker A", "targetPrice": "150",
-             "recoPrice": "120", "rec": "BUY"},
+             "recoPrice": "120", "recoType": "BUY"},
             {"recoDate": "2026-08-05", "postAuthor": "Broker B", "targetPrice": "140",
-             "recoPrice": "120", "rec": "HOLD"},
+             "recoPrice": "120", "recoType": "HOLD"},
         ]
     }
 }

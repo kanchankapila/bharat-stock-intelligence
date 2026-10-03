@@ -14,7 +14,7 @@ initSentry();
 // Routes every console.log/info/debug/warn/error call in the whole process (not just this
 // file) through the real Winston logger — structured JSON + rotation + levels for the ~90
 // server files' worth of raw console.* calls that remain, none of which need to change
-// (708 call sites, measured 2026-10-01; re-derive with `node scripts/docNumbers.mjs`).
+// (709 call sites, re-derived 2026-10-03; re-derive with `node scripts/docNumbers.mjs`).
 // Installed as early
 // as possible so even the uncaughtException/unhandledRejection handlers just below get it.
 // Also absorbs the ioredis ACL-warning suppression that used to be its own standalone

@@ -47,6 +47,10 @@ def make_db():
             date TEXT PRIMARY KEY, regime TEXT NOT NULL,
             regime_prob REAL, computed_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE market_holidays (
+            date DATE NOT NULL, exchange TEXT NOT NULL, description TEXT,
+            PRIMARY KEY (date, exchange)
+        );
         CREATE TABLE recommendation_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             symbol TEXT NOT NULL, signal_date TEXT NOT NULL,

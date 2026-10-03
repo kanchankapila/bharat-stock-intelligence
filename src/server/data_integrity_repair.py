@@ -16,6 +16,7 @@ Each repair is idempotent and can be run independently:
   --nan-recommendations  delete unified_recommendations rows with a non-finite unified_score
   --ghost-recommendations delete unified_recommendations rows for symbols with no price history
   --weekend-recommendations delete unified_recommendations snapshots dated to a closed day
+  --zero-neutral-outcomes requeue stale synthetic 0% neutral outcomes with no exit price
   --delivery-trades NULL stock_delivery_data.trades where it duplicates delivery_qty
   --all             run everything
 
@@ -564,7 +565,7 @@ def repair_ghost_recommendations(conn: ConnWrapper, dry: bool) -> None:
 
 
 def repair_weekend_recommendations(conn: ConnWrapper, dry: bool) -> None:
-    """Delete unified_recommendations snapshots stamped to a Saturday or Sunday.
+    """Delete unified_recommendations snapshots stamped to a weekend or known NSE holiday.
 
     Residue of the same bug as_of.logical_session_date() now prevents at the source: the
     pipeline deliberately runs early on closed days (queues.ts's closed-day-early-batch), and
@@ -582,35 +583,95 @@ def repair_weekend_recommendations(conn: ConnWrapper, dry: bool) -> None:
     strictly before date D" will select the Sunday row as Monday's pre-move signal. The
     2026-08-11 reverse audit did exactly that before this was found.
 
-    Weekend membership is computed in Python, not SQL, on purpose: computed_at is TEXT and
-    EXTRACT(DOW FROM ...) is Postgres-only, so a dialect branch here would fail silently on
-    the SQLite fallback path rather than erroring (see .claude/rules/recurring-bugs.md).
+    Weekend membership is computed in Python, not SQL, because computed_at is TEXT and
+    EXTRACT(DOW FROM ...) is Postgres-only. Weekday holidays come from the canonical calendar.
     """
+    holidays = {
+        str(r[0])[:10]
+        for r in conn.execute(
+            "SELECT date FROM market_holidays WHERE exchange = ?", ("NSE",)
+        ).fetchall()
+    }
     dates = [r['computed_at'] for r in conn.execute(
         "SELECT DISTINCT computed_at FROM unified_recommendations").fetchall()]
-    weekend = []
+    closed = []
     for d in dates:
         try:
-            if datetime.date.fromisoformat(str(d)[:10]).weekday() >= 5:
-                weekend.append(d)
+            iso_date = str(d)[:10]
+            if datetime.date.fromisoformat(iso_date).weekday() >= 5 or iso_date in holidays:
+                closed.append(d)
         except ValueError:
             continue                      # unparseable date -- not this repair's business
-    if not weekend:
+    if not closed:
         _log("weekend-recommendations: none found -- clean.")
         return
 
-    placeholders = ",".join("?" for _ in weekend)
+    placeholders = ",".join("?" for _ in closed)
     total = int(conn.execute(
         f"SELECT COUNT(*) AS c FROM unified_recommendations "
-        f"WHERE computed_at IN ({placeholders})", tuple(weekend)).fetchone()['c'] or 0)
-    _log(f"  {total} rows across {len(weekend)} non-trading-day snapshots: {sorted(weekend)}")
+        f"WHERE computed_at IN ({placeholders})", tuple(closed)).fetchone()['c'] or 0)
+    _log(f"  {total} rows across {len(closed)} closed-day snapshots: {sorted(closed)}")
     if dry:
         _log(f"weekend-recommendations: would delete {total} rows (dry run).")
         return
     conn.execute(f"DELETE FROM unified_recommendations "
-                 f"WHERE computed_at IN ({placeholders})", tuple(weekend))
+                 f"WHERE computed_at IN ({placeholders})", tuple(closed))
     conn.commit()
     _log(f"weekend-recommendations: deleted {total} rows.")
+
+
+def repair_zero_neutral_outcomes(conn: ConnWrapper, dry: bool) -> None:
+    """Requeue stale PENDING rows that expiry fabricated as 0% NEUTRAL without an exit price.
+
+    Only rows with a valid canonical bar after the signal are eligible. Genuine neutral exits
+    retain their exit price and are not touched; rows without a valid bar remain as recorded.
+    The normal outcome resolver then recomputes each selected row using its canonical path.
+    """
+    predicates = {
+        'signal_outcomes': "outcome = 'NEUTRAL' AND return_pct = 0 AND exit_price IS NULL",
+        'unified_signal_outcomes': "outcome = 'NEUTRAL' AND return_pct = 0 AND exit_price IS NULL",
+        'recommendation_log': (
+            "outcome = 'NEUTRAL' AND actual_return_pct = 0 AND actual_exit_price IS NULL "
+            "AND status = 'RESOLVED'"
+        ),
+    }
+    counts = {}
+    for table, predicate in predicates.items():
+        counts[table] = int(conn.execute(
+            f"SELECT count(*) FROM {table} x WHERE {predicate} "
+            "AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE o.symbol = x.symbol "
+            "AND o.date > CAST(x.signal_date AS date) AND COALESCE(o.is_suspect, 0) = 0)"
+        ).fetchone()[0] or 0)
+
+    total = sum(counts.values())
+    _log(f"  stale synthetic neutral rows eligible for re-resolution: {counts} (total={total})")
+    if total == 0 or dry:
+        if dry:
+            _log("zero-neutral-outcomes: dry run -- nothing written.")
+        return
+
+    conn.execute("""
+        UPDATE signal_outcomes x SET outcome='PENDING', return_pct=NULL
+        WHERE outcome='NEUTRAL' AND return_pct=0 AND exit_price IS NULL
+          AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE o.symbol=x.symbol
+                      AND o.date > CAST(x.signal_date AS date) AND COALESCE(o.is_suspect,0)=0)
+    """)
+    conn.execute("""
+        UPDATE unified_signal_outcomes x SET outcome='PENDING', return_pct=NULL, exit_reason=NULL
+        WHERE outcome='NEUTRAL' AND return_pct=0 AND exit_price IS NULL
+          AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE o.symbol=x.symbol
+                      AND o.date > CAST(x.signal_date AS date) AND COALESCE(o.is_suspect,0)=0)
+    """)
+    conn.execute("""
+        UPDATE recommendation_log x
+        SET outcome='PENDING', actual_return_pct=NULL, status='ACTIVE', resolved_at=NULL
+        WHERE outcome='NEUTRAL' AND actual_return_pct=0 AND actual_exit_price IS NULL
+          AND status='RESOLVED'
+          AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE o.symbol=x.symbol
+                      AND o.date > CAST(x.signal_date AS date) AND COALESCE(o.is_suspect,0)=0)
+    """)
+    conn.commit()
+    _log(f"zero-neutral-outcomes: requeued {total} rows for the normal resolver.")
 
 
 def repair_delivery_trades(conn: ConnWrapper, dry: bool) -> None:
@@ -736,6 +797,7 @@ TASKS = {
     'nan_recommendations': repair_nan_recommendations,
     'ghost_recommendations': repair_ghost_recommendations,
     'weekend_recommendations': repair_weekend_recommendations,
+    'zero_neutral_outcomes': repair_zero_neutral_outcomes,
     'delivery_trades': repair_delivery_trades,
 }
 

@@ -1080,6 +1080,7 @@ describe('audit regression guards (2026-08-11)', () => {
     expect(c.evaluate({ bad_days: 4 }, now).status).toBe('fail');
     expect(c.evaluate({ bad_days: 4 }, now).detail).toContain('logical_session_date');
     expect(c.evaluate({ bad_days: 0 }, now).status).toBe('pass');
+    expect(c.sql).toContain('COALESCE(s.is_suspect, 0) = 0');
   });
 
   it('liquid-coverage check fails when the ranker universe diverges from the tradeable one', () => {

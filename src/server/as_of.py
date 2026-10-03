@@ -116,8 +116,8 @@ def logical_trading_date(cutoff_hour: int = 4, now=None) -> str:
 
 
 def logical_session_date(cutoff_hour: int = 4, now=None,
-                         open_hour: int = 9, open_minute: int = 15) -> str:
-    """logical_trading_date(), rolled forward off a weekend to the session it is FOR.
+                         open_hour: int = 9, open_minute: int = 15, conn=None) -> str:
+    """logical_trading_date(), rolled forward to the next known actionable session.
 
     A third bug class, distinct from both functions around it. The daily pipeline
     deliberately runs early on closed days (queues.ts's closed-day-early-batch dispatches
@@ -129,11 +129,9 @@ def logical_session_date(cutoff_hour: int = 4, now=None,
     are written and are simply unreachable to any consumer that joins on a real trading date,
     and they make the table look like it has snapshots it does not have.
 
-    Weekends only, deliberately. `market_holidays` is built from observed trading gaps and
-    currently stops at 2026-04-14, so it cannot answer whether a FUTURE weekday is a holiday
-    -- and guessing would be worse than not rolling. The asymmetry is what makes this safe:
-    a holiday-dated snapshot is superseded by that holiday's own early-batch run a few hours
-    later, whereas a weekend-dated one is never superseded by anything.
+    Weekends are always skipped. When the caller has a DB connection, known NSE holidays from
+    `market_holidays` are skipped too. A missing calendar entry is not guessed; the caller
+    retains weekday behavior when no connection is available.
 
     Deliberately NOT logical_write_floor(): that returns the last COMPLETED session
     (MAX(date) FROM stock_ohlcv), so a Monday 07:30 pre-market run would label its output
@@ -162,9 +160,18 @@ def logical_session_date(cutoff_hour: int = 4, now=None,
     if now is None:
         now = datetime.datetime.now()
     d = datetime.date.fromisoformat(logical_trading_date(cutoff_hour, now))
+    holidays = set()
+    if conn is not None:
+        holidays = {
+            str(row[0])[:10]
+            for row in conn.execute(
+                "SELECT date FROM market_holidays WHERE exchange = ?", ("NSE",)
+            ).fetchall()
+        }
     # 5 = Saturday, 6 = Sunday. The open-passed test terminates on its own: once d moves to a
     # future date its open is by definition still ahead of `now`.
     while (d.weekday() >= 5
+           or d.isoformat() in holidays
            or now >= datetime.datetime.combine(d, datetime.time(open_hour, open_minute))):
         d += datetime.timedelta(days=1)
     return d.isoformat()

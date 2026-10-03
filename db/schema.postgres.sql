@@ -4785,6 +4785,10 @@ CREATE TABLE IF NOT EXISTS "unified_signals" (
   "screener_momentum_score" REAL,
   "screener_tier1_count" REAL,
   "screener_cat_breadth" REAL,
+  "horizon_sessions" SMALLINT,
+  "closed_at" DATE,
+  "exit_price" DOUBLE PRECISION,
+  "exit_reason" TEXT,
   UNIQUE ("symbol", "signal_source", "signal_type", "signal_date")
 );
 CREATE INDEX idx_unified_signals_date ON public.unified_signals USING btree (signal_date DESC);

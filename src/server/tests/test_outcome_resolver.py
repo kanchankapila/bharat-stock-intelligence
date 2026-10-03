@@ -239,6 +239,90 @@ def make_unified_db():
     return conn
 
 
+def test_unified_signal_with_null_entry_uses_next_day_open():
+    from outcome_resolver import resolve_unified_outcomes
+    conn = make_unified_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, 0, -1):
+        d = (base - datetime.timedelta(days=i)).isoformat()
+        conn.execute(
+            "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) "
+            "VALUES (?,?,100,100,100,100,100000)", ("NULL_ENTRY", d))
+    conn.execute(
+        "INSERT INTO unified_signals (symbol,signal_date,entry_price,target_price,stop_loss,signal_source,confidence_score) "
+        "VALUES ('NULL_ENTRY',?,NULL,110,90,'AI',75)", (sig_date,))
+    for offset, price in ((1, 101.0), (2, 102.0), (3, 103.0)):
+        d = (base + datetime.timedelta(days=offset)).isoformat()
+        conn.execute(
+            "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) "
+            "VALUES (?,?,?,?,?,?,100000)", ("NULL_ENTRY", d, price, price, price, price))
+    for offset in (4, 5):
+        d = (base + datetime.timedelta(days=offset)).isoformat()
+        conn.execute(
+            "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) "
+            "VALUES (?,?,100,100,100,100,100000)", ("MARKET_CONTROL", d))
+    conn.commit()
+
+    result = resolve_unified_outcomes(conn, horizon_days=5)
+    row = conn.execute(
+        "SELECT entry_price, exit_price, outcome FROM unified_signal_outcomes WHERE symbol='NULL_ENTRY'"
+    ).fetchone()
+    assert result["resolved"] == 1
+    assert row["entry_price"] == 101.0
+    assert row["exit_price"] == 103.0
+    assert row["outcome"] == "WIN"
+
+
+def test_zero_neutral_repair_requeues_only_synthetic_labels_with_valid_bars():
+    from data_integrity_repair import repair_zero_neutral_outcomes
+    conn = pg_memory_conn()
+    conn.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date DATE, is_suspect INTEGER DEFAULT 0)")
+    conn.execute("""
+        CREATE TABLE signal_outcomes (
+            symbol TEXT, signal_date DATE, outcome TEXT, return_pct DOUBLE PRECISION,
+            exit_price DOUBLE PRECISION
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE unified_signal_outcomes (
+            symbol TEXT, signal_date DATE, outcome TEXT, return_pct DOUBLE PRECISION,
+            exit_price DOUBLE PRECISION, exit_reason TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE recommendation_log (
+            symbol TEXT, signal_date DATE, outcome TEXT, actual_return_pct DOUBLE PRECISION,
+            actual_exit_price DOUBLE PRECISION, status TEXT, resolved_at TIMESTAMPTZ
+        )
+    """)
+    signal_date = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
+    conn.execute("INSERT INTO stock_ohlcv VALUES ('LIVE', ?, 0)",
+                 ((datetime.date.fromisoformat(signal_date) + datetime.timedelta(days=1)).isoformat(),))
+    for table, columns in (
+        ('signal_outcomes', 'symbol, signal_date, outcome, return_pct, exit_price'),
+        ('unified_signal_outcomes', 'symbol, signal_date, outcome, return_pct, exit_price, exit_reason'),
+    ):
+        conn.execute(f"INSERT INTO {table} ({columns}) VALUES ('LIVE', ?, 'NEUTRAL', 0, NULL" +
+                     (", NULL)" if table == 'unified_signal_outcomes' else ")"), (signal_date,))
+        conn.execute(f"INSERT INTO {table} ({columns}) VALUES ('LIVE', ?, 'NEUTRAL', 0, 100" +
+                     (", 'TIME_EXIT')" if table == 'unified_signal_outcomes' else ")"), (signal_date,))
+    conn.execute("INSERT INTO recommendation_log VALUES ('LIVE', ?, 'NEUTRAL', 0, NULL, 'RESOLVED', now())",
+                 (signal_date,))
+    conn.execute("INSERT INTO recommendation_log VALUES ('LIVE', ?, 'NEUTRAL', 0, 100, 'RESOLVED', now())",
+                 (signal_date,))
+    conn.commit()
+
+    repair_zero_neutral_outcomes(conn, dry=False)
+
+    assert conn.execute("SELECT outcome FROM signal_outcomes WHERE exit_price IS NULL").fetchone()[0] == 'PENDING'
+    assert conn.execute("SELECT outcome FROM signal_outcomes WHERE exit_price IS NOT NULL").fetchone()[0] == 'NEUTRAL'
+    assert conn.execute("SELECT outcome FROM unified_signal_outcomes WHERE exit_price IS NULL").fetchone()[0] == 'PENDING'
+    assert conn.execute("SELECT outcome FROM unified_signal_outcomes WHERE exit_price IS NOT NULL").fetchone()[0] == 'NEUTRAL'
+    assert conn.execute("SELECT outcome FROM recommendation_log WHERE actual_exit_price IS NULL").fetchone()[0] == 'PENDING'
+    assert conn.execute("SELECT outcome FROM recommendation_log WHERE actual_exit_price IS NOT NULL").fetchone()[0] == 'NEUTRAL'
+
+
 def test_unified_target_capture_beats_faded_horizon_close():
     from outcome_resolver import resolve_unified_outcomes
     conn = make_unified_db()
@@ -680,7 +764,12 @@ def test_expire_does_not_fabricate_neutral_for_unpriced_symbol():
     conn.commit()
     expire_stale_pending(conn, horizon_days=5)
     got = dict(conn.execute("SELECT symbol, outcome FROM signal_outcomes").fetchall())
-    assert got == {'GONE': 'PENDING', 'SUSPD': 'NEUTRAL'}
+    assert got == {'GONE': 'PENDING', 'SUSPD': 'PENDING'}
+    zero_labels = conn.execute(
+        "SELECT count(*) FROM signal_outcomes WHERE outcome='NEUTRAL' AND return_pct=0 "
+        "AND exit_price IS NULL"
+    ).fetchone()[0]
+    assert zero_labels == 0
 
 
 def test_conflict_invalidated_signal_is_not_graded():
@@ -825,8 +914,8 @@ def test_expire_all_horizons_covers_horizons_no_caller_passes():
     assert stale_pending_horizons(conn) == [7]
     assert expire_stale_pending_all(conn) == 1
     got = dict(conn.execute("SELECT symbol, outcome FROM signal_outcomes").fetchall())
-    assert got == {'H7LIVE': 'NEUTRAL', 'H7GONE': 'PENDING'}, \
-        "priceable stale row must expire, unpriced row must stay PENDING (no fabricated NEUTRAL)"
+    assert got == {'H7LIVE': 'PENDING', 'H7GONE': 'PENDING'}, \
+        "expiry must count stale work without fabricating a zero-return outcome"
 
 
 def test_stale_pending_horizons_includes_unified_and_coalesces_rec_log_null():

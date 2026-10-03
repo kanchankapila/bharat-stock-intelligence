@@ -1055,9 +1055,6 @@ def resolve_unified_outcomes(
         stop_loss = float(row['stop_loss']) if row['stop_loss'] else None
         source = row['signal_source']
 
-        if not entry:
-            continue
-
         signal_date_obj = datetime.date.fromisoformat(signal_date[:10])
         # AF-20260823-80 stage 2: batched next-open map, inline SQL fallback.
         nphit = _np_map_u.get((sym, signal_date[:10], 'AFTER_OPEN'))
@@ -1074,6 +1071,9 @@ def resolve_unified_outcomes(
             entry = float(nphit[1])
         else:
             next_trading_day = (signal_date_obj + datetime.timedelta(days=1)).isoformat()
+
+        if not entry:
+            continue
             
         exit_target_date = row['_exit']
 
@@ -1296,16 +1296,14 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
 
 
 def expire_stale_pending(conn: ConnWrapper, horizon_days: int, dry_run: bool = False) -> int:
-    """Mark PENDING outcomes older than 2×horizon as NEUTRAL (stock/data unavailable).
-    Covers signal_outcomes, unified_signal_outcomes and recommendation_log so no table
-    accumulates permanently-stuck PENDING rows.
+    """Count stale PENDING outcomes without fabricating a zero-return NEUTRAL label.
 
-    Only where the symbol has a canonical daily bar after the signal. A retired/untradeable
-    code (ZOMATO, INDIAVIX, ...) was never priceable, so a 0.0% NEUTRAL would be a fabricated
-    label (2,587 unified rows, AF-20260930-16); it stays PENDING, i.e. ungraded, and the
-    resolver's own EXISTS filter stops re-selecting it."""
+    Resolvers run first and use the last available valid close for a partial window. Anything
+    still PENDING is not safely gradeable; keep it out of resolved-label consumers and report
+    the backlog instead of converting missing data into a real-looking 0.0% outcome.
+    """
     traded = ("AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE o.symbol = {t}.symbol "
-              "AND o.date > CAST({t}.signal_date AS date))")
+              "AND o.date > CAST({t}.signal_date AS date) AND COALESCE(o.is_suspect, 0) = 0)")
     cutoff = (datetime.date.today() - datetime.timedelta(days=horizon_days * 2)).isoformat()
 
     rows = conn.execute("""
@@ -1327,30 +1325,10 @@ def expire_stale_pending(conn: ConnWrapper, horizon_days: int, dry_run: bool = F
         WHERE outcome = 'PENDING' AND COALESCE(horizon_days, 15) = ? AND signal_date < ? {traded}
     """.format(traded=traded.format(t='recommendation_log')), (horizon_days, cutoff)).fetchone()[0]
 
-    if dry_run:
-        print(f"[OutcomeResolver] Would expire {len(rows)} signal_outcomes, "
-              f"{uni_stale} unified, {rec_stale} rec_log stale {horizon_days}D PENDING")
-        return len(rows)
-
-    conn.execute("""
-        UPDATE signal_outcomes
-        SET outcome = 'NEUTRAL', return_pct = 0.0, computed_at = CURRENT_TIMESTAMP
-        WHERE outcome = 'PENDING' AND horizon_days = ? AND signal_date < ? {traded}
-    """.format(traded=traded.format(t='signal_outcomes')), (horizon_days, cutoff))
-    conn.execute("""
-        UPDATE unified_signal_outcomes
-        SET outcome = 'NEUTRAL', return_pct = 0.0, computed_at = CURRENT_TIMESTAMP
-        WHERE outcome = 'PENDING' AND horizon_days = ? AND signal_date < ? {traded}
-    """.format(traded=traded.format(t='unified_signal_outcomes')), (horizon_days, cutoff))
-    conn.execute("""
-        UPDATE recommendation_log
-        SET outcome = 'NEUTRAL', actual_return_pct = 0.0,
-            status = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP
-        WHERE outcome = 'PENDING' AND COALESCE(horizon_days, 15) = ? AND signal_date < ? {traded}
-    """.format(traded=traded.format(t='recommendation_log')), (horizon_days, cutoff))
-    conn.commit()
-    print(f"[OutcomeResolver] Expired stale {horizon_days}D PENDING -> NEUTRAL "
-          f"(signal_outcomes={len(rows)}, unified={uni_stale}, rec_log={rec_stale})")
+    mode = "Would leave" if dry_run else "Leaving"
+    print(f"[OutcomeResolver] {mode} stale {horizon_days}D PENDING rows ungraded "
+          f"(signal_outcomes={len(rows)}, unified={uni_stale}, rec_log={rec_stale}); "
+          "no synthetic zero-return labels written")
     return len(rows)
 
 

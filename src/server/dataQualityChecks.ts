@@ -1500,25 +1500,26 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // snapshot is unreachable to any consumer joining on a trading date. Fixed at source by
     // as_of.logical_session_date(); this catches a regression or a new writer repeating it.
     //
-    // NOT a bare "no matching stock_ohlcv row" test (2026-08-13 false positive, found live):
+    // NOT a bare "no matching valid stock_ohlcv row" test (2026-08-13 false positive, found live):
     // logical_session_date() also rolls a run whose market OPEN has already passed forward to
     // the NEXT session (as_of.py, 2026-08-12) -- a legitimate evening/post-close re-run for
     // TODAY correctly gets stamped with TOMORROW's date, a real future weekday that simply has
     // no stock_ohlcv row yet because that session hasn't happened. A bare NOT EXISTS flagged
-    // 2026-08-14 (a Friday) every night until that day's bar landed. Only a WEEKEND date is
-    // knowable as bad in advance (never gets a bar); a non-weekend date only counts as bad once
-    // it is safely in the past and still has no bar.
+    // 2026-08-14 (a Friday) every night until that day's bar landed. Quarantined fabricated
+    // closed-session bars do not establish that a session traded; a weekday is bad only once it
+    // is in the past and still has no non-suspect OHLCV bar.
     sql: `SELECT COUNT(DISTINCT u.computed_at) AS bad_days
           FROM unified_recommendations u
           WHERE EXTRACT(ISODOW FROM u.computed_at::date) IN (6, 7)
              OR (u.computed_at::date < CURRENT_DATE AND NOT EXISTS (
-                   SELECT 1 FROM stock_ohlcv s WHERE s.date = u.computed_at::date
+               SELECT 1 FROM stock_ohlcv s
+               WHERE s.date = u.computed_at::date AND COALESCE(s.is_suspect, 0) = 0
                  ))`,
     evaluate: (row) => {
       const bad = Number(row?.bad_days) || 0;
       if (bad > 0) return {
         status: 'fail',
-        detail: `${bad} snapshot date(s) are not trading days — check as_of.logical_session_date(), ` +
+        detail: `${bad} snapshot date(s) have no valid trading session — check as_of.logical_session_date(), ` +
                 `then: python data_integrity_repair.py --weekend-recommendations`,
       };
       return { status: 'pass', detail: 'All snapshots are dated to real sessions' };

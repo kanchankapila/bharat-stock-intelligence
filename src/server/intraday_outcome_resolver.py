@@ -378,7 +378,7 @@ def ungraded_sessions(conn, lookback_days: int = 7) -> list:
     # today, which is the exact row the guard exists to exclude.
     ist_now = datetime.now(timezone.utc).astimezone(_IST)
     upper = today if ist_now.hour * 60 + ist_now.minute >= NSE_CLOSE_MINUTES_IST else (
-        (date.today() - timedelta(days=1)).isoformat())
+        (date.today() - timedelta(days=1)).isoformat())  # trading-day-exempt: upper bound only; actual lookback is separate.
     rows = conn.execute(
         """
         SELECT h.computed_at

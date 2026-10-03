@@ -12,6 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import as_of  # noqa: E402
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 
 def at(y, m, d, hh=9, mm=0):
@@ -33,6 +34,24 @@ class TestWeekendRollForward:
 
     def test_saturday_rolls_two_days(self):
         assert as_of.logical_session_date(now=at(2026, 8, 8)) == "2026-08-10"
+
+
+class TestKnownHolidayRollForward:
+    def test_known_nse_weekday_holiday_rolls_to_the_next_session(self):
+        conn = pg_memory_conn()
+        conn.execute("""
+            CREATE TABLE market_holidays (
+                date DATE NOT NULL,
+                exchange TEXT NOT NULL,
+                description TEXT
+            )
+        """)
+        conn.execute(
+            "INSERT INTO market_holidays (date, exchange, description) VALUES (?, ?, ?)",
+            ("2026-10-02", "NSE", "Mahatma Gandhi Jayanti"),
+        )
+
+        assert as_of.logical_session_date(now=at(2026, 10, 2, 7, 30), conn=conn) == "2026-10-05"
 
 
 class TestWeekdaysAreUnchanged:

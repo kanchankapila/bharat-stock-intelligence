@@ -109,11 +109,15 @@ class TestWeekendPurge:
         c = pg_memory_conn()
         c.execute("CREATE TABLE unified_recommendations "
                   "(symbol TEXT, computed_at TEXT, classification TEXT, unified_score REAL)")
+        c.execute("CREATE TABLE market_holidays (date DATE, exchange TEXT, description TEXT)")
+        c.execute("INSERT INTO market_holidays VALUES (?, ?, ?)",
+                  ("2026-10-02", "NSE", "Mahatma Gandhi Jayanti"))
         c.executemany("INSERT INTO unified_recommendations VALUES (?,?,?,?)", [
             ("RELIANCE", "2026-08-07", "Buy", 71.0),      # Friday   -> keep
             ("INFY",     "2026-08-08", "Buy", 60.0),      # Saturday -> delete
             ("TCS",      "2026-08-09", "Sell", 30.0),     # Sunday   -> delete
             ("HDFCBANK", "2026-08-10", "Buy", 66.0),      # Monday   -> keep
+            ("LT",       "2026-10-02", "Buy", 61.0),      # NSE holiday -> delete
             ("WIPRO",    "not-a-date", "Hold", 10.0),     # unparseable -> keep, not ours
         ])
         c.commit()
@@ -136,7 +140,7 @@ class TestWeekendPurge:
 
     def test_dry_run_deletes_nothing(self, wconn):
         dir_.repair_weekend_recommendations(wconn, dry=True)
-        assert len(rows(wconn)) == 5
+        assert len(rows(wconn)) == 6
         assert wconn.commits == 0
 
     def test_is_idempotent_and_clean_table_is_a_no_op(self, wconn):

@@ -140,7 +140,7 @@ def main():
         degrade_log.append(msg)
         _degraded_orig(msg)
     rk._degraded = _degraded_capture
-    today = as_of.logical_session_date()
+    today = as_of.logical_session_date(conn=conn)
     stages, failures = [], []
 
     if args.run_ranker:
