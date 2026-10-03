@@ -1,5 +1,6 @@
 ---
 description: Review a new or pending node-pg-migrate migration against this repo's TimescaleDB hypertable constraints, SQLite/Postgres dual-schema drift, and the "written ≠ applied" gap before it runs against production
+disable-model-invocation: true
 ---
 
 # Migration Safety Review

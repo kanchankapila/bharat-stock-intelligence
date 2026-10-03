@@ -1,5 +1,6 @@
 ---
 description: Sweep every multi-writer table for enum-case collisions, provider-missing-from-PK, derived-key upserts, and provenance columns caught in ON CONFLICT DO UPDATE — the collision family that has independently bitten this repo 4+ times
+disable-model-invocation: true
 ---
 
 # Cross-Writer Collision Audit

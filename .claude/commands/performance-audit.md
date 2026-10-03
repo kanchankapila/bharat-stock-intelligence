@@ -1,5 +1,6 @@
 ---
 description: Find and fix real performance bottlenecks on this single-box stack — write amplification, missing resumability, work after a kill point, subprocess pool starvation, duplicate scheduled runs — with a measured before-number for every claim
+disable-model-invocation: true
 ---
 
 # Performance Audit

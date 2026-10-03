@@ -1,5 +1,6 @@
 ---
 description: Find every monitor, gate and alarm whose verdict never varies, and every threshold constant applied to data it was never calibrated on — the class where a detector sits below its own data's noise floor, fires 16/16, and silently multiplies a real haircut into live scores
+disable-model-invocation: true
 ---
 
 # Threshold Calibration Audit

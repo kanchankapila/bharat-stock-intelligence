@@ -1,5 +1,6 @@
 ---
 description: Close the deploy/reliability gaps on this single-box pm2 stack — manual restarts that get skipped, migrations written but not applied, duplicate catch-up runs, lateness branches that can never fire, and monitoring that watches table freshness instead of feature delivery. Not a Kubernetes migration.
+disable-model-invocation: true
 ---
 
 # Deploy & Reliability Review

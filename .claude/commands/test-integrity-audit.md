@@ -1,5 +1,6 @@
 ---
 description: Sweep the 258 Python and 106 TypeScript test files for suites that are green while protecting nothing — tests that reimplement the logic under test, derive their expectation from the constant being tested, guard a hand-enumerated allowlist, or leak shared env state between workers
+disable-model-invocation: true
 ---
 
 # Test Integrity Audit

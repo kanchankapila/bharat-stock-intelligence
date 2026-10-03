@@ -1,5 +1,6 @@
 ---
 description: Check every dashboard shell and every scoring/ranking-shaped tRPC procedure against scoring-authority.md's rule that UI reads must not bypass the canonical unified_recommendations table
+disable-model-invocation: true
 ---
 
 # Canonical Read Audit

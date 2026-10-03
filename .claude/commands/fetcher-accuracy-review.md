@@ -1,5 +1,6 @@
 ---
 description: Audit a fetcher against the mandatory data-sources.md checklist and the fetcher-shaped bug classes in recurring-bugs.md — one fetcher from a diff, or the full project sweep across every fetcher hitting an external URL
+disable-model-invocation: true
 ---
 
 # Fetcher Accuracy Review

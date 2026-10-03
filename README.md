@@ -28,15 +28,16 @@ A local-first quantitative intelligence platform for NSE/BSE equities. Synthesiz
 │  Signal Pipeline (Node)                                             │
 │  technicalSignalsService → confluenceEngine → scoring_engine.py    │
 │                                                                     │
-│  ML Pipeline (Python, ~210 modules incl. 81 *_fetcher.py)          │
+│  ML Pipeline (Python, 295 non-test modules incl. 82 *_fetcher.py;        │
+│  re-derive any count via `npm run doc:numbers` — never trust it cold)     │
 │  feature_engineering → regime_detector → ml_ensemble → dl_engine  │
 │  outcome_resolver → performance_tracker → reward_engine → rl_agent │
 │  online_learner → strategy_optimizer → backtester                  │
 │  → unified_ranker.py (canonical cross-source ranking)              │
 ├─────────────────────────────────────────────────────────────────────┤
-│  greenfield/  parallel rebuild pipeline (~105 .ts files), scheduled │
-│  as its own cron_restart tier — nothing in the app above imports it │
-│  yet; see "Greenfield Shadow Pipeline" below                        │
+│  greenfield/  parallel rebuild (~105 .ts files) — NOT scheduled and     │
+│  NOT imported by anything above; its pm2 jobs were deregistered          │
+│  2026-09-10; see "Greenfield Shadow Pipeline" below                      │
 └────────────────────────┬────────────────────────────────────────────┘
                          │ PostgreSQL/TimescaleDB (:5433) — the only DB
                          ▼
@@ -47,9 +48,10 @@ A local-first quantitative intelligence platform for NSE/BSE equities. Synthesiz
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-All processes run under pm2 in production (`ecosystem.config.cjs`) — 17 apps total: the 5
-long-running services above plus a `cron_restart` tier (11 `greenfield` one-shot jobs +
-`pg-backup-nightly`). `npm start` runs the 4 core dev services directly without pm2.
+All processes run under pm2 in production (`ecosystem.config.cjs`) — **6 apps**: the 5
+long-running services above plus one `cron_restart` job, `pg-backup-nightly` (the 11 `gf-*`
+greenfield cron jobs were deregistered 2026-09-10 — nothing in the live app imports
+`greenfield/`). `npm start` runs the 4 core dev services directly without pm2.
 
 See [Data Source Integration Guide](docs/DATA_SOURCE_INTEGRATION_GUIDE.md) for the reusable
 provider catalog, endpoint families, identifier mappings, authentication, output ownership,
@@ -201,8 +203,10 @@ Scripts tracked:
 above, reads/writes its own tables, feeds nothing the live app reads yet): bhavcopy 7:30 PM IST →
 FII/DII 9:00 PM → features 9:30 PM → DQ checks 9:40–9:50 PM → ranker 10:00 PM → divergence
 analysis 10:15 PM, all daily weekdays; screener membership/fundamentals/analyst-estimates/
-insider-activity transfers run Saturday mornings. Scheduled as pm2 `cron_restart` apps, not
-BullMQ — see `ecosystem.config.cjs`.
+insider-activity transfers run Saturday mornings. **As of 2026-09-10 these are NOT scheduled** —
+the 11 `gf-*` pm2 `cron_restart` apps were deregistered (they all sat at `stopped` and
+`greenfield/`'s :5434 database refuses connections); the schedule above is what they *were*.
+Restore the block from git history in `ecosystem.config.cjs` to revive them.
 
 **Holiday-aware scheduling.** On a mid-week NSE trading holiday (a weekday the exchange is shut —
 not caught by cron's own day-of-week check), a dedicated `closed-day-early-batch` job runs the
@@ -235,7 +239,7 @@ Local analytics MCP server at `ALPHAQUANT_URL` (default `http://127.0.0.1:8002`)
 ### 1. Clone and install dependencies
 
 ```bash
-git clone https://github.com/your-org/bharat-stock-intelligence
+git clone https://github.com/kanchankapila/bharat-stock-intelligence
 cd bharat-stock-intelligence
 
 npm install
@@ -461,8 +465,10 @@ python src/server/feature_engineering.py --lookback 252
 
 ---
 
-## Database Tables (~126 total)
+## Database Tables
 
+> Re-derive the live table count from `db/schema.postgres.sql` or `information_schema`
+> (never hand-quote a total — they drift; the old "~126 total" heading was already wrong).
 > The trade-signal model was consolidated in the Phase-3 program: **four signal tables, and that's
 > the ceiling** — `unified_signals`, `technical_signals`, `signal_outcomes`, `unified_signal_outcomes`
 > — the legacy `signals` and `technical_analysis_signals` tables were dropped/folded in.

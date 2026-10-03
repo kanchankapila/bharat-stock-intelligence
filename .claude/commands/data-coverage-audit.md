@@ -1,5 +1,6 @@
 ---
 description: Whole-repo sweep for fetchers with no live_datasource test, tables with no freshness check, and freshness checks that pass while the feature they exist to deliver never populated
+disable-model-invocation: true
 ---
 
 # Data Coverage Audit

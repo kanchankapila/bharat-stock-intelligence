@@ -1,5 +1,6 @@
 ---
 description: Check whether a frontend surface renders missing/stale/NULL backend data as if it were a real, current value — the UI-facing instance of this repo's dominant "looks healthy, is actually broken" bug class
+disable-model-invocation: true
 ---
 
 # Data Honesty Review

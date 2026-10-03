@@ -1,5 +1,6 @@
 ---
 description: Reverse-engineer real market movers against what the system predicted, and report what it missed
+disable-model-invocation: true
 ---
 
 # Signal Accuracy Review

@@ -1,6 +1,21 @@
 # Enterprise Financial Data Ingestion & API Fetching Specification
 ### Universal Guide for Querying and Parsing All 3,408 Validated Market Endpoints
 
+> **Scope (clarified 2026-10-03): THIS file is the request-level how-to** — headers, auth
+> handshakes, per-provider payload specs and client skeletons for calling the external endpoint
+> corpus from any codebase. The data documentation now has exactly one file per purpose; do not
+> re-create any of them elsewhere:
+>
+> | Need | File |
+> |---|---|
+> | The **binding rules** (registry-first lookup, vendor-dead protocol, onboarding contract) | `.claude/rules/data-sources.md` |
+> | **How to call** an external endpoint (headers, cookies, POST payloads, unwrap patterns) | **this file** |
+> | The **in-repo catalog** (identifier mappings, which fetcher/table owns what) | `docs/DATA_SOURCE_INTEGRATION_GUIDE.md` |
+> | **Run/operations** per fetcher (schedule, coverage, verification queries) | `docs/INGESTION_PIPELINE.md` |
+>
+> Endpoint liveness moves: a URL proven 200 can 404 tomorrow. Re-probe per `data-sources.md`
+> before trusting any status claim — including this file's own header.
+
 > **Target Audience**: Data engineers, backend developers, and automated ingestion pipelines integrating with Indian financial market data endpoints across Trendlyne, Economic Times / ETnow, MoneyControl, SapphireBroking, NiftyTrader, Tickertape, InvestSights, NSE India, MarketsMojo, and StockEdge.
 >
 > **Status**: Verified Live (`HTTP 200 OK` across all 3,408 endpoints with active response payloads).

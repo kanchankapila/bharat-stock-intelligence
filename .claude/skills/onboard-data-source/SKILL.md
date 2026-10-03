@@ -32,7 +32,7 @@ of them from turning into twenty disconnected, redundant passes.
 2. **Check the 3,000+ discovery registry and dedupe against what's already onboarded**,
    per-URL, before spending time on any of them:
    - **Query `market_endpoint_registry` first** in PostgreSQL (`bharat_intel` on `:5433`, 3,408 live working endpoints: 2,864 GET / 544 POST; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`). Most screeners, financial metrics, and options endpoints are already cataloged here.
-   - **Check `url_endpoints`** (830 templates) via `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>`.
+   - **Check `url_endpoints`** (834 templates; re-derive with `node scripts/docNumbers.mjs`) via `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>`.
    - **Check `unique_urls.txt`** (3,103 raw URLs in repo root) and consult [`DATA_FETCHING_GUIDE.md`](../../DATA_FETCHING_GUIDE.md) for proven headers, cookies, POST payloads, and JSON unwrap patterns.
    - `grep` the domain across `src/server/*.ts`/`*.py` and `dataQualityChecks.ts`. A URL
    whose domain is already fetched elsewhere may just be one more endpoint on an existing

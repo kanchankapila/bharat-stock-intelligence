@@ -1,5 +1,6 @@
 ---
 description: Sweep every date anchor, staleness calculation, cron mirror and row-vs-date window in the repo against the "Dates & scheduling" bug cluster — the single largest recurrence group in recurring-bugs.md (~35 recorded instances), only 2 of whose 6 signatures are statically enforced
+disable-model-invocation: true
 ---
 
 # Temporal Correctness Audit

@@ -302,3 +302,15 @@ back.
 Everything is fixture-tested only. All six market-data hosts are blocked by the environment's
 network policy (AF-20260928-10), so no connector in this batch has seen a live response.
 
+## 2026-10-03 — Holiday-aware ranker dates and audit
+
+- `logical_session_date()` now consumes known NSE holidays when the ranker has a DB connection;
+  weekends and market-open roll-forward behavior remain covered. The DQ check no longer treats
+  quarantined `is_suspect` bars as proof of a trading session.
+- The existing closed-day repair now removes weekend and known-holiday rows from the current
+  recommendations table. Live repair removed 3,414 closed-session rows; append-only history was
+  intentionally preserved. The live DQ sweep returned zero critical failures.
+- Trendlyne TA snapshots are updated by two distinct paths. The Python fetcher is currently fresh,
+  while the TypeScript composite writer is blocked and its stale scores are consumed by scoring.
+  Do not disable or substitute the composite without point-in-time predictive measurement.
+

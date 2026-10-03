@@ -1,5 +1,6 @@
 ---
 description: Review a tRPC procedure (new or existing) in router.ts/routers/*.ts against this repo's SQL-dialect, NaN-handling, and freshness conventions — the backend-code counterpart to fetcher-accuracy-review for procedures that don't fetch external data
+disable-model-invocation: true
 ---
 
 # tRPC Surface Review

@@ -1,5 +1,12 @@
 # Developer Guide: Replicating Trendlyne & ETNow Screener Fetching
 
+> **⚠ SNAPSHOT (2026-07) — a live parse target, not current documentation.**
+> `src/server/url_explorer/screeners.py` reads this file at the repo root (`HELPER_MD`) to
+> build the `screener_instances` table, so the file and path must stay. Its prose describes the
+> July-2026 urls-explorer screener catalogue; for current endpoint call specs use
+> `DATA_FETCHING_GUIDE.md`, for the binding protocol `.claude/rules/data-sources.md`. Cited by
+> `docs/DATA_SOURCE_INTEGRATION_GUIDE.md` §9.3.
+
 This helper guide details how to query and parse stock screener datasets from **Trendlyne** and **ETNow** in any external codebase. It covers endpoint locations, required headers, query payloads, parsing logic, and best practices.
 
 ---

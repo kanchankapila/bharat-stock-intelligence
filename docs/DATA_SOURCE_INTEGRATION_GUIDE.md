@@ -1,5 +1,15 @@
 # Data Source Integration Guide
 
+> **Scope (clarified 2026-10-03): THIS file is the in-repo integration catalog** — canonical
+> identifier rules, provider endpoint families as *this repo* consumes them, and which
+> fetcher/table owns what. One file per purpose for data documentation; the other three:
+>
+> | Need | File |
+> |---|---|
+> | The **binding rules** (registry-first lookup, vendor-dead protocol, onboarding contract) | `.claude/rules/data-sources.md` |
+> | **How to call** an external endpoint (headers, cookies, POST payloads) | `DATA_FETCHING_GUIDE.md` (repo root) |
+> | **Run/operations** per fetcher (schedule, coverage, verification queries) | `docs/INGESTION_PIPELINE.md` |
+
 Verified against the repository on 2026-08-12.
 
 This document catalogs the external market, fundamental, news, alternative-data, AI, and
@@ -917,7 +927,7 @@ For exact header dictionaries, session cookie initialization (e.g. SapphireBroki
 
 **Mandatory Lookup Order**:
 1. `market_endpoint_registry` (3,408 verified endpoints)
-2. `url_endpoints` via `python -m url_explorer.ingest --find-alternates "<targets>"` (830 templates)
+2. `url_endpoints` via `python -m url_explorer.ingest --find-alternates "<targets>"` (834 templates; re-derive with `node scripts/docNumbers.mjs`)
 3. `unique_urls.txt` (3,103 raw URLs) / `DATA_FETCHING_GUIDE.md`
 4. Sibling routes in repository fetchers
 5. Only then ask the user with the per-route breakdown.

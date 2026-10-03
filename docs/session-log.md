@@ -10962,3 +10962,55 @@ the infrastructure decision.
 **Reading the instruments:** `recommendations-digest sent` is a generic `onCompleted` log and prints after a SKIPPED run — count `[TelegramRecs] Sent`. A confluence-compute gap of 352 min (01:00-06:00 IST) is designed (market-hours and static-input windows return `skipped`, no heartbeat); `news-sentiment` was never silent for more than 20 min.
 
 Not deployed: no `pm2 restart` into a tree with 152 uncommitted paths.
+
+## 2026-10-03 — Context refresh and closed-session recommendation repair
+
+Updated `CONTEXT.md` from current sources: it now describes product intent separately from live
+behavior, states the decision-support boundary, names the active architecture, and gives AI
+contributors explicit source-of-truth and evidence expectations. The inventory figures are the
+freshly re-derived 82 fetchers / 73 job registrations; `npm run doc:numbers:check` passes.
+
+Audit found `as_of.logical_session_date()` rolled weekends forward but ignored known NSE weekday
+holidays. The live ranker wrote 1,493 recommendations on 2026-10-02 (Mahatma Gandhi Jayanti) and
+1,921 on 2026-09-14; the latter date had only quarantined OHLCV bars. Updated the helper to skip
+recorded holidays, threaded the ranker's DB connection through, made the trading-day DQ check
+require a non-suspect bar, and extended the existing repair to remove both weekends and known
+holidays. Live repair deleted 3,414 current recommendation rows; 6,863 append-only history rows
+were preserved. The subsequent DQ sweep had zero critical failures.
+
+Corrected the Trendlyne analyst-target regression fixture to use the provider's `recoType` field.
+The initial full pytest exposed the mismatch; the focused test then passed. The full Python gate
+passed 3,266 tests / 259 skips; Vitest passed 1,625 / 44 skips; `tsc`, Vite build, schema drift,
+router smoke (10/10 on retry), recurring-bug scan, ledger check, and documentation-number check
+passed. The first router smoke had one non-reproducible ROC-diagnostics timeout; its DB join took
+3.25s under `EXPLAIN ANALYZE`, the retry passed, and no model timeout/code change was made.
+
+Open evidence item AF-20261003-02 records 549/2,002 Trendlyne technical composite scores older
+than 30 days. This stale table is read by scoring code; the separate Python endpoint fetcher is
+currently fresh, but its representation is not equivalent. No score or weight change was made
+without point-in-time predictive evidence. AF-20261001-52 is calendar-blocked until the next
+trading-day run verifies the raised screener budgets. The final repo doctor had 0 FAIL and 9
+WARN; operational warnings include the quant-sync Trendlyne 405, DL training failures, and
+host/network errors. The holiday-aware monitor is not yet deployed to the resident
+`bharat-server` process; restart verification remains pending until active BullMQ jobs clear.
+
+## 2026-10-03 — Codebase sanitation, audit consolidation, skill/command trim
+
+Removed what no longer carried weight and made the Claude-facing docs one-file-per-purpose.
+**Deleted** (commit `cb3a2d18`): `ACTION_ITEMS.md`/`IDEA.md` stubs, 4 broken root `test_*.ts` (imported the long-deleted
+`db`), `verify_imports.py`, AI-Studio export leftovers, tracked `scratch_verify/` and `.superpowers/`, ~90 untracked scratch
+files; later `AI_ENDPOINT_MEMORY.md` (671 KB prose nothing parses; the JSON sibling stays), the `setup-matt-pocock-skills` and
+`production-grade-hardening` skills (its three live items are AF-20261003-09) and the three generic `.agents/skills/*`.
+**Not deleted** (the permission classifier refused the batch twice): `greenfield/`, `bharatquant/`, `PATHFINDER-2026-09-02/`,
+`docs/superpowers/`, `docs/.archive/` and the superseded audit reports — still pending the user's own `git rm`.
+**Audit consolidation:** every dated audit report was re-read against the ledger, `measurement.md` and live data; AF-20261003-03
+is the disposition table and AF-20261003-04..09 are the only items worth implementing. The 2026-08-12 Manus reports are
+discard: their post-mortem matrix cites a +14.2% move on a Saturday and moves that real bars contradict.
+**Rewrote** `CLAUDE.md` (29 KB -> ~13 KB: dated incident narrative removed, every rule kept), `AGENTS.md` (now only the
+inventory of skills/commands/subagents/hooks; its duplicated rules live in `CLAUDE.md`) and restored operational facts the
+concurrent `CONTEXT.md` rewrite had dropped (measured edge, UTC crons, `logical_trading_date`, ML/DL separation, `bharat_alpha`).
+**Skill list:** 18 of the 19 review commands now carry `disable-model-invocation: true` (a documented frontmatter key), so they
+leave the model's skill list but remain `/name` for the user; `production-debug` stays model-visible.
+Reviewed and kept the concurrent session's code (holiday-aware `logical_session_date`, `expire_stale_pending` no longer fabricates
+0% NEUTRAL, `repair_zero_neutral_outcomes`, intraday scan summary units, `unified_signals` lifecycle columns — schema matches live).
+Gates: tsc 0; vitest 1,626 passed; hooks 74; schema:drift clean; findings:check + doc:numbers:check pass.

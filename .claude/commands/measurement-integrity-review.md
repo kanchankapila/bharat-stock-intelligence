@@ -1,5 +1,6 @@
 ---
 description: Sanity-check a backtest, accuracy, win-rate, or IC number (or the script that produced it) against measurement.md's panel spec before it gets cited as evidence
+disable-model-invocation: true
 ---
 
 # Measurement Integrity Review

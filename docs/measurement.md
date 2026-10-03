@@ -1,5 +1,10 @@
 # Greenfield DB — Measurement Notes
 
+> **Not the platform measurement rules.** If you are looking for how edge/win-rate/IC claims are
+> measured and graded on the live platform, that is `.claude/rules/measurement.md` (history:
+> `docs/measurement-history.md`). This file is only about the `greenfield/` rebuild's DB
+> provenance, and its name collides with the rule file deliberately avoided here.
+
 Distinct from `.claude/rules/measurement.md`, which covers the old/live platform. This file
 tracks measurement facts specific to the rebuilt (`greenfield/`) database.
 

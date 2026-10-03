@@ -1,5 +1,6 @@
 ---
 description: Review a model-training/promotion-gate script (champion/challenger comparison, CV setup, staleness override) against the bug classes in `.claude/rules/ml-model-bugs.md` — one script from a diff, or the full sweep across every promotion-gated engine
+disable-model-invocation: true
 ---
 
 # ML Promotion-Gate Review

@@ -1,5 +1,11 @@
 # Ingestion & Backfill Pipeline Guide
 
+> **Scope (clarified 2026-10-03): THIS file is the run/operations doc for individual
+> ingestion & backfill processes** — what each fetcher writes, how it runs, measured
+> performance, and verification queries. The other three data docs, one per purpose:
+> rules → `.claude/rules/data-sources.md` · endpoint how-to → `DATA_FETCHING_GUIDE.md` (repo
+> root) · in-repo catalog → `docs/DATA_SOURCE_INTEGRATION_GUIDE.md`.
+
 Living documentation of every data-fetching/backfilling process onboarded or upgraded in the
 2026-08-31 → 2026-09-01 sessions: what it does, how it runs, measured performance, coverage
 reality, and when to prefer it. Verification queries included so any claim here can be
@@ -139,7 +145,7 @@ Tests: `src/server/tests/test_analyst_estimates_snapshot.py` (24 cases).
 | Quarterly revenue/EPS/growth history (deep, 2005+) | **DalalOS table** (§3) | Largest, deepest; extend via MCP bridge |
 | Analyst targets/consensus/forward EPS | **Hybrid engine** (§5) | Fastest (2.6 min), widest coverage, daily |
 | Revenue estimates next-period | MC fallback inside hybrid | Only source carrying them |
-| New source onboarding / failing feed alternate | **Discovery Registry (3,000+ endpoints)** | `market_endpoint_registry` (3,408 live endpoints in Postgres), `url_endpoints` (830 templates via `--find-alternates`), `unique_urls.txt` (3,103 raw URLs) |
+| New source onboarding / failing feed alternate | **Discovery Registry (3,000+ endpoints)** | `market_endpoint_registry` (3,408 live endpoints in Postgres), `url_endpoints` (834 templates via `--find-alternates`; re-derive with `node scripts/docNumbers.mjs`), `unique_urls.txt` (3,103 raw URLs) |
 
 ## 7. Operational notes
 

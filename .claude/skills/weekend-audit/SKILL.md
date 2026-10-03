@@ -6,8 +6,9 @@ description: Weekly whole-system health sweep across repo/build, the five servic
 # Weekend audit
 
 Nothing here is a new monitoring engine. The 15-minute `jobWatchdog`, the 62 checks in
-`dataQualityChecks.ts`, and the 19 `.claude/commands/*.md` review files already cover most
-of this. This skill exists for the gaps those cannot see:
+`dataQualityChecks.ts`, and the `.claude/commands/*.md` review files already cover most
+of this. (Those commands are user-invoked as `/name` and hidden from the model's skill list via
+`disable-model-invocation`; to run one yourself, Read its file and follow it.) This skill exists for the gaps those cannot see:
 
 - **They answer "is it fresh", never "is it correct".** `recurring-bugs.md`'s dominant class is
   a pipeline reporting health while producing nothing — skip stamped as success, a job SIGKILLed

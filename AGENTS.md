@@ -1,28 +1,16 @@
 # Agent Guide — Bharat Stock Intelligence
 
-For any coding agent (Claude Code, Codex, Cursor, …). Claude Code also loads `CLAUDE.md`
-automatically; other agents should read it first — it holds the rules, the Definition of done,
-and the service map. Domain orientation is in `CONTEXT.md`.
+For any coding agent (Claude Code, Codex, Cursor, …). Read in this order:
 
-> The previous version of this file described a GPT-4o "agents/openai.yaml" registry and tools
-> (read_files, search_codebase, a postgres MCP) that do not exist in this repo.
-> Everything below is a real file; if you add or remove one, update this list in the same change.
+1. `CLAUDE.md` — the operating manual: rules, Definition of done, services, conventions.
+2. `CONTEXT.md` — what the product is for and which contracts a change must preserve.
+3. The rule file for the area you touch (table below).
 
-## Non-negotiables (full text in CLAUDE.md)
-1. **Done = the check ran and passed** — `npx tsc --noEmit`, `npx vitest run`,
-   `backend-python/venv/Scripts/python.exe -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/`,
-   `npm run schema:drift` for migrations, `npm run doc:numbers:check` after changing any
-   repo-inventory count quoted in a doc or comment. Signal/scoring changes also need backtest evidence
-   (enforced by the `verify-gate.mjs` Stop hook).
-2. **Verify against live production, not the code** — `scripts/sql.py` for read-only queries.
-3. **Committed ≠ deployed** — `.ts` needs `pm2 restart bharat-server`; migrations need `npm run migrate:up`.
-4. **One tracker** — findings go to `docs/audit-findings.md`; fix and close in the same pass by default.
-5. **Commit by explicit path**, never `git add -A` — several sessions edit this repo concurrently.
-6. **Never fabricate evidence** — a number a model reports about itself is not evidence; grade against realized returns.
-7. **Never hand-write a count into a doc** — re-derive it (`npm run doc:numbers`) and paste the output. Invented or
-   remembered counts are how "~210 Python modules" outlived a 290-module tree.
+This file is only the **inventory of agent tooling**. It holds no rules of its own, so it cannot
+drift from `CLAUDE.md`. Every name below is a real file — `claude-config.test.mjs` fails if a
+skill, command or subagent exists but is not listed here, or if a cited path does not exist.
 
-## Rules (auto-scoped by `paths:` frontmatter — Claude Code loads each when you touch a matching file)
+## Rules (auto-scoped by `paths:` frontmatter — loaded when you touch a matching file)
 | File | Covers |
 |---|---|
 | `.claude/rules/recurring-bugs.md` | every bug class that has recurred — skim before any Python/SQL/TS |
@@ -33,7 +21,7 @@ and the service map. Domain orientation is in `CONTEXT.md`.
 
 Rules apply even when you only *quote* a number without touching a file — read `measurement.md` then.
 
-## Skills (`.claude/skills/<name>/SKILL.md`)
+## Skills (`.claude/skills/<name>/SKILL.md`, model-invocable)
 | Skill | Use when |
 |---|---|
 | `verify-gate-runner` | running the Definition-of-done checks |
@@ -44,12 +32,12 @@ Rules apply even when you only *quote* a number without touching a file — read
 | `session-close` | end-of-session log / memory / rules / findings update |
 | `onboard-data-source` | adding a URL/API as a fetcher |
 | `e2e-lifecycle-check` | tracing 10 real stocks through every pipeline stage |
-| `production-grade-hardening` | outstanding production-readiness gaps |
 | `run-bharat-stock-intelligence` | starting and driving the web app / screenshots |
 | `trade-desk`, `screener-combo-predictor` | daily trading loop and intraday pick lists |
-| `setup-matt-pocock-skills` | issue-tracker / label / domain-doc config |
 
-## Review commands (`.claude/commands/*.md`, invoked as `/<name>`)
+## Review commands (`.claude/commands/*.md`)
+Invoked by the user as `/<name>`. All but `production-debug` carry `disable-model-invocation`, so
+they stay out of the model's skill list; to run one yourself, Read the file and follow it.
 `production-debug` (live failure end-to-end) · `fetcher-accuracy-review` · `data-coverage-audit` ·
 `measurement-integrity-review` · `ml-promotion-gate-review` · `migration-safety-review` ·
 `trpc-surface-review` · `canonical-read-audit` · `cross-writer-collision-audit` ·
@@ -77,14 +65,4 @@ every declared command. A hook that cannot run exits 0 silently and looks like a
 
 ## Not for Claude Code
 `bharat-*-skill.md` at the repo root and `HERMES_MIGRATION_GUIDE.md` belong to the Hermes agent
-integration; Claude Code does not load them.
-
-## Data sourcing contract
-A source that stops returning data is never declared dead without: registry lookup →
-`--find-alternates` → raw URL corpus → repo grep → route-by-route probing with the minimum headers
-(start from NO headers) → only then ask the user for a captured browser request. Detail:
-`.claude/rules/data-sources.md`.
-
-## Handoff
-Append a dated entry to `docs/session-log.md` (what changed, evidence, anything left open and why);
-open items become `docs/audit-findings.md` rows. `/session-close` walks this.
+integration (with the `*hermes*` scripts and `hermes-*.yaml`); Claude Code does not load them.

@@ -1,5 +1,6 @@
 ---
 description: Check BullMQ jobs and cron-scheduled scripts for silent budget-kill truncation, tail-of-script steps that never execute, and write-amplification patterns — the class of bug where the pipeline reports health while quietly producing nothing or costing far more than expected
+disable-model-invocation: true
 ---
 
 # Job Runtime Audit

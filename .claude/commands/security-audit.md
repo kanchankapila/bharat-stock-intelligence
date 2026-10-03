@@ -1,5 +1,6 @@
 ---
 description: Audit authorization coverage, the three unguarded Python services, injection surface, and secrets handling against this platform's ACTUAL auth layer (internalAuth.ts) — every finding must cite a file:line, no generic OWASP checklist items
+disable-model-invocation: true
 ---
 
 # Security Audit
