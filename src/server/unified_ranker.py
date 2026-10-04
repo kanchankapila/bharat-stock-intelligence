@@ -1667,8 +1667,8 @@ class UnifiedRanker:
                                 'UPDATE screener_catalog SET subcategory=? WHERE screener_name=?',
                                 (corr['corrected'], name),
                             )
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        print(f"[unified_ranker] screener_catalog correction update failed: {type(_e).__name__}: {_e}", file=sys.stderr)
         self.conn.commit()
         return len(rows)
 

@@ -62,9 +62,10 @@ def ensure_schema() -> None:
     for col, dtype in _NEW_COLS:
         try:
             execute(f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} {dtype}")
-        except Exception:
-            # Column already exists — this is the normal path after first run.
-            pass
+        except Exception as _e:
+            # ADD COLUMN IF NOT EXISTS does not raise when the column exists, so anything caught
+            # here is a real failure (lock timeout, permissions) -- say so, then try the next column.
+            print(f"[analyst_revision] ALTER TABLE technical_signals ADD COLUMN {col} failed: {type(_e).__name__}: {_e}", file=sys.stderr)
 
 
 # ─── Core computation ─────────────────────────────────────────────────────────

@@ -319,8 +319,9 @@ def ensure_schema(conn):
     cur.execute(DDL)
     try:
         cur.execute(INDEX_DDL)
-    except Exception:
-        pass  # index may already exist
+    except Exception as _e:
+        # CREATE INDEX IF NOT EXISTS (if that is what INDEX_DDL is) does not raise when present.
+        print(f"[nt_live_screener] index DDL failed: {type(_e).__name__}: {_e}", file=sys.stderr)
     conn.commit()
 
 

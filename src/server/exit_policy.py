@@ -19,6 +19,7 @@ Run:  python exit_policy.py --train
       python exit_policy.py --train --min-samples 200
 """
 
+import sys
 import argparse
 import datetime
 import os
@@ -211,8 +212,10 @@ def _active_exit_baseline(conn) -> dict | None:
         if row and row[1] is not None and row[2] is not None:
             return {'id': row[0], 'mfe_holdout_mae': float(row[1]), 'mae_holdout_mae': float(row[2]),
                     'trained_at': row[3]}
-    except Exception:
-        pass
+    except Exception as _e:
+        # No readable champion makes the promotion gate treat the next challenger as the first
+        # model ever -- that must never be silent.
+        print(f"[exit_policy] active-champion read failed: {type(_e).__name__}: {_e}", file=sys.stderr)
     return None
 
 

@@ -341,8 +341,9 @@ def write_analyst_targets(symbol: str, recent: list, today: str, con) -> None:
                 _safe(r.get("recoPrice")),
                 r.get("recoType") or None,
             ))
-        except Exception:
-            pass
+        except Exception as _e:
+            print(f"[trendlyne_overview] analyst-target row insert failed for {symbol}: "
+                  f"{type(_e).__name__}: {_e}", file=sys.stderr)
     con.commit()
 
 

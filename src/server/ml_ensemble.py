@@ -3636,8 +3636,8 @@ def _get_current_regime(con) -> str:
         ).fetchone()
         if row:
             return row[0]  # 'BULL', 'BEAR', or 'SIDEWAYS'
-    except Exception:
-        pass
+    except Exception as _e:
+        print(f"[ml_ensemble] app_settings current_regime read failed: {type(_e).__name__}: {_e}", file=sys.stderr)
     # Also accept the existing key name used by regime_threshold()
     try:
         row = con.execute(
@@ -3645,8 +3645,8 @@ def _get_current_regime(con) -> str:
         ).fetchone()
         if row and row[0] in ('BULL', 'BEAR', 'SIDEWAYS'):
             return row[0]
-    except Exception:
-        pass
+    except Exception as _e:
+        print(f"[ml_ensemble] app_settings current_nifty_regime read failed: {type(_e).__name__}: {_e}", file=sys.stderr)
     # Fallback: derive from recent GIFT Nifty + India VIX
     try:
         row = con.execute("""
@@ -3663,8 +3663,8 @@ def _get_current_regime(con) -> str:
                 return 'BULL'
             elif gift < -0.5 or vix > 25:
                 return 'BEAR'
-    except Exception:
-        pass
+    except Exception as _e:
+        print(f"[ml_ensemble] macro regime fallback read failed, defaulting to SIDEWAYS: {type(_e).__name__}: {_e}", file=sys.stderr)
     return 'SIDEWAYS'
 
 

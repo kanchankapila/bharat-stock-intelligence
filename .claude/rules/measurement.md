@@ -260,7 +260,7 @@ Re-grade the Python history at ~20 effective 5d dates (~mid-December).
   ("no edge"), 21d -0.0149 (LOW-DATA, 17 dates). Closed; do not re-run as "highest-value".
 - **`stock_futures_oi_history` graded 2026-09-19 (close-entry, LOW-DATA 13-17 dates), RE-GRADED
   2026-09-26:** `basis` 1d now reads **rank_IC +0.1355, AUC —, 22 dates, eff 22.0 → verdict
-  `USABLE`** (`factor_edge_history`, run 2026-09-26T12:45; the panel is 26 dates, 2026-08-21..09-25).
+  `USABLE`** **[SUPERSEDED 2026-10-04: +0.064/0.532 on 25 dates = `no edge`; see the end of this file]** (`factor_edge_history`, run 2026-09-26T12:45; the panel is 26 dates, 2026-08-21..09-25).
   **WAS -> +0.139 / AUC 0.565 on 17 dates, labelled "a lead, not a result".** `basis` 5d +0.0596 (18
   dates, eff 3.6, LOW-DATA); `oi_change` 5d +0.078/0.532 (13); `oi_pcr` ~0; `rollover_pct` negative
   at both horizons. The 1d column is the platform's only non-capacity-constrained reading above
@@ -762,3 +762,17 @@ any row: `docs/measurement-history.md`.
   unified_signals tiers instead of >30-day-old confluence levels — geometry only, not score. Also
   measured: `atr` is ~50% NULL, so an unbounded `atr IS NOT NULL ORDER BY computed_at DESC LIMIT 1`
   per symbol walked the full compressed history for every always-NULL symbol.
+
+- **2026-10-04 re-grade batch (`factor_edge`, open-entry panels, persisted to `factor_edge_history`, run_at 2026-10-04T20:28-20:29).
+  Supersedes the 2026-09-26 `basis` reading above — `basis` is NO LONGER `USABLE`.**
+  - `basis` 1d on the 25-date panel (eff 25.0): rank_IC **+0.064**, AUC 0.532, top-50 excess +0.129%, t_eff 1.84 → verdict **`no edge`**. The
+    2026-09-26 `+0.1355 / USABLE` (22 dates) decayed as the panel grew; `+0.139 / 0.565` (17 dates) was the small-sample peak. `basis` 5d +0.004
+    (21 dates, eff 4.2) is a median-beater (+IC, top-50 loses to the universe mean). **Do not cite basis as the platform's one usable factor.**
+    `oi_change`/`oi_pct_change`/`oi_pcr`/`rollover_pct` 1d are all `no edge`. (A basis cost-adjusted test, AF-20261003-05, is lower priority now.)
+  - Engines, 37-date panel (2026-08-10..10-05), every horizon still `LOW-DATA` (eff 0.8-6.2): `unified_score` 5d IC +0.047 / t 2.03; `confluence_score`
+    the strongest (21d +0.143 but eff 0.8); `technical_score` and `dl_score` ~0 and `technical_score` 10d/21d are median-beaters; `ml_score` ~0.
+    Nothing here clears the eff-date gate, so none is evidence of edge — the positive ICs are the same overlapping-window inflation as factor_edge
+    Overlap Correction.
+  - `ext_t80_tech_score` 5d +0.053 / 10d +0.087 / 21d +0.153, 51 dates but eff 10.2 / 4.6 / 1.7 → `LOW-DATA`; promising and unproven.
+  - `screener_momentum_score` post-reclass (since 2026-08-31, 21 dates) 1d IC **-0.023**, AUC 0.486 → `no edge`, negative sign.
+  - Analyst revision trio is still at 18 dates (< `MIN_DATES_RELIABLE`=20): not gradeable before ~2026-10-08.

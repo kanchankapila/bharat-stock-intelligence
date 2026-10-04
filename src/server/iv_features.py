@@ -18,6 +18,7 @@ Run:  python iv_features.py            # backfill iv_rank/iv_skew for all dates
       python iv_features.py --date today
 """
 
+import sys
 import argparse
 import datetime
 
@@ -73,8 +74,8 @@ def compute_options_walls(conn, symbol: str, spot: float, as_of_date: str, rows=
             pw = strikes[oi_p.index(max(oi_p))]
             result['put_wall_dist_pct'] = (spot - pw) / spot * 100
         result['near_expiry_gamma'] = 1.0 if days_to_exp <= 7 else 0.0
-    except Exception:
-        pass
+    except Exception as _e:
+        print(f"[iv_features] option-wall features unavailable, returning partial result: {type(_e).__name__}: {_e}", file=sys.stderr)
     return result
 
 

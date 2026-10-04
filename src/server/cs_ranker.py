@@ -273,8 +273,10 @@ def _active_cs_baseline_row(conn: ConnWrapper) -> dict | None:
         ).fetchone()
         if row and row[1] is not None:
             return {'id': row[0], 'rho': float(row[1]), 'trained_at': row[2]}
-    except Exception:
-        pass
+    except Exception as _e:
+        # No readable champion makes the promotion gate treat the next challenger as the first
+        # model ever -- that must never be silent.
+        print(f"[cs_ranker] active-champion read failed: {type(_e).__name__}: {_e}", file=sys.stderr)
     return None
 
 

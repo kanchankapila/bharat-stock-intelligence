@@ -193,8 +193,9 @@ def register_update(conn: ConnWrapper, state: dict, n_new: int, cv_auc: float) -
         ).fetchone()
         if row and row[0] is not None:
             baseline_auc = float(row[0])
-    except Exception:
-        pass
+    except Exception as _e:
+        # Unreadable baseline => baseline_auc stays None => the new model is activated unopposed.
+        print(f"[online_learner] active-baseline read failed: {type(_e).__name__}: {_e}", file=sys.stderr)
 
     is_active = 1 if (baseline_auc is None or cv_auc >= baseline_auc - ONLINE_REGRESSION_TOLERANCE) else 0
     notes = f"Incremental update — {n_new} new outcomes"

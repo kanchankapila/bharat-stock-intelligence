@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 import json
 import datetime
@@ -166,8 +167,10 @@ class AlphaQuantScoringEngine:
                 if row2:
                     loaded2 = json.loads(row2[0])
                     self.SOURCE_WEIGHTS = {**self.SOURCE_WEIGHTS, **loaded2}
-        except Exception:
-            pass  # use defaults if app_settings not populated yet
+        except Exception as _e:
+            # Defaults apply, but a failed read must be visible: this is also how a broken
+            # app_settings schema (camelCase vs snake_case, AF-20260925) silently stops the learned weights.
+            print(f"[scoring] learned SOURCE_WEIGHTS read failed, using defaults: {type(_e).__name__}: {_e}", file=sys.stderr)
 
     def _load_etnow_screeners(self) -> list:
         """Read ETnow screeners from the database (source of truth)."""
@@ -712,8 +715,10 @@ class AlphaQuantScoringEngine:
                 """), {"cutoff": wp_cutoff}).fetchall()
             win_prob_map = {r[0]: float(r[2]) for r in wp_rows}
             win_prob_regime_map = {r[0]: r[1] for r in wp_rows}
-        except Exception:
-            pass
+        except Exception as _e:
+            # An empty win_prob_map drops Factor 3 from ~17.7/20 to 8/20 for every symbol and is
+            # invisible to rank-based diagnostics (the Monday empty-window incident) -- never silent.
+            print(f"[scoring] win_probability map read failed, Factor 3 will be neutral: {type(_e).__name__}: {_e}", file=sys.stderr)
 
         # Apply drift multiplier to win_probability values (haircut when feature drift detected).
         #
