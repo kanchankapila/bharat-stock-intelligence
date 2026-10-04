@@ -5,7 +5,7 @@
  * into one Telegram watchdog + daily digest. Both sources are checked in real time by the
  * 15-minute watchdog (checkAndAlertLateJobs + checkAndAlertStaleScripts), in addition to
  * appearing in the once-daily digest. Deliberately does not introduce a third job registry:
- * see docs/superpowers/specs/2026-07-02-job-monitoring-telegram-alerts-design.md.
+ * see docs/superpowers/specs/2026-07-02-job-monitoring-telegram-alerts-design.md. [removed 2026-10-03; see git history]
  */
 import fs from 'fs';
 import path from 'path';

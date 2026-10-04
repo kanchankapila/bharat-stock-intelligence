@@ -8,7 +8,7 @@ import pytest
 from bharat_alpha.ingest.sources.investsights_estimates import parse_is_estimates
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
-PROBE = Path(__file__).resolve().parents[2] / "docs/audit-2026-07-31/payload_probe.json"
+PROBE = Path(__file__).resolve().parent / "fixtures" / "payload_probe.json"
 
 
 def payload(sym: str, rows: list[tuple[str, float, float, int]]) -> dict:

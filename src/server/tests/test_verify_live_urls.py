@@ -2,7 +2,7 @@
 
 The script's whole value is that a 200 is no longer treated as proof. Each test below pins a
 FAILURE MODE THAT ACTUALLY OCCURRED against this corpus (see
-docs/audit-2026-07-31/ENDPOINT_DATA_REVIEW_AND_QUANT_VALUE.md §1.2-§1.4 and §4.3), so a future
+docs/audit-2026-07-31/ENDPOINT_DATA_REVIEW_AND_QUANT_VALUE.md [removed 2026-10-03; see git history] §1.2-§1.4 and §4.3), so a future
 "simplification" back toward status-code-only scoring fails here instead of silently
 re-blessing dead endpoints.
 """

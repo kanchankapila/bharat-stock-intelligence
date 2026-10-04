@@ -3,7 +3,6 @@ backend-python/venv
 .venv
 .git
 .claude
-greenfield
 logs
 backups
 dist

@@ -9,7 +9,7 @@ Stored in alpha.fundamental as `est_is_<metric>_fy<YYYY>` (the table's key has n
 period_end is also set). Forward-only: the vendor returns its current view, so knowable_at is
 the fetch time and only a changed value is stored.
 
-Payload shape from the 2026-07-31 payload probe (docs/audit-2026-07-31/payload_probe.json):
+Payload shape from the 2026-07-31 payload probe (bharat_alpha/tests/fixtures/payload_probe.json):
 `{"success": true, "data": [{"symbol": "WEBELSOLAR.NS", "date": "2028-03-31", "epsAvg": 11.4,
 "revenueAvg": ..., "numAnalystsEps": 1, ...}, ...]}`. The price-target route answers
 `available: false` for NSE names (FMP coverage gap) and is not used. A row whose symbol is not

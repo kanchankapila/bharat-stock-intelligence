@@ -78,7 +78,6 @@ src/server/ml_models/
 # Scratch/temp directories and one-off scripts
 scratch/
 scratch_verify/
-PATHFINDER-*/
 .claude/worktrees/
 .claude/settings.local.json
 scripts/diagnose_db*.py

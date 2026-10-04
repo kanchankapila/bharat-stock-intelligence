@@ -120,12 +120,12 @@ service is not live in another until that service restarts.
 | `alphaquant-api` | `backend-python/main.py` | 8002 (`PYTHON_PORT`) | Backtesting, scoring, TV bridge, optimisation |
 | `engine-worker` | `src/server/worker_service.py` | 8005 | MCP tool dispatch + ingestion health/risk endpoints |
 
-`ecosystem.config.cjs` registers **6** pm2 apps: these five plus the `cron_restart` job `pg-backup-nightly`.
-A `cron_restart` app at `stopped`/`pid 0` looks identical whether idle or dormant after a failed first launch —
-see `recurring-bugs.md`. Three trees are parallel rebuilds the live app does not import: `greenfield/` and
-`bharatquant/` (dead — never wired in; pm2 jobs deregistered 2026-09-10) and `bharat_alpha/` (a from-scratch,
-self-grading rewrite with its own README, not yet serving users). Editing any of them changes nothing a user
-sees. Check which tree you are in before editing.
+`ecosystem.config.cjs` registers **7** pm2 apps: these five plus the `cron_restart` jobs `pg-backup-nightly` and
+`bqa-daily` (the `bharat_alpha` daily run). A `cron_restart` app at `stopped`/`pid 0` looks identical whether idle
+or dormant after a failed first launch — see `recurring-bugs.md`. `bharat_alpha/` is a from-scratch, self-grading
+rewrite with its own README; the live app does not import it and it is not yet serving users, so editing it
+changes nothing a user sees. The earlier `greenfield/` and `bharatquant/` rebuilds were removed 2026-10-03
+(never wired in); a reference to either is stale and the code is in git history.
 
 ## Layout
 

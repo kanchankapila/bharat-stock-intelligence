@@ -79,7 +79,7 @@ const pyService = {
   },
 };
 
-// Shared config for greenfield one-shot cron jobs (shadow-ranker pipeline).
+// Shared config for one-shot cron jobs (pg-backup-nightly, bqa-daily).
 // cron_restart schedules the run; autorestart:false lets the script exit normally
 // without pm2 restarting it immediately.
 //
@@ -95,9 +95,7 @@ const pyService = {
 // intent for as long as it has run. Fixed by rewriting each string to its true IST
 // value (arithmetic verified against the pre-existing "X UTC = Y IST" comments, which were
 // internally correct -- only the code never matched them) and updating comments to match.
-// Prerequisite: run `pnpm install` once inside the greenfield/ directory so that
-// @greenfield/* workspace packages are resolvable from their pnpm virtual store.
-const gfCron = {
+const cronApp = {
   autorestart: false,
   exec_mode: 'fork',
   kill_timeout: 600_000,        // 10 min default grace; overridden per-job where needed
@@ -105,10 +103,8 @@ const gfCron = {
   script: path.resolve(__dirname, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
   env: {
     ...dotenvVars,
-    // Greenfield scripts read DATABASE_URL; point at the greenfield DB if a
-    // separate GREENFIELD_DATABASE_URL is configured, else fall back to legacy.
-    DATABASE_URL: dotenvVars.GREENFIELD_DATABASE_URL ?? dotenvVars.DATABASE_URL,
   },
+  // Log file names kept as gf-*.log: pg-backup-nightly's history lives there.
   out_file: path.resolve(__dirname, 'logs', 'gf-out.log'),
   error_file: path.resolve(__dirname, 'logs', 'gf-err.log'),
   merge_logs: true,
@@ -154,20 +150,8 @@ module.exports = {
       interpreter: VENV_PY,
     },
 
-
-    // ------------------------------------------------------------------
-    // Greenfield shadow-ranker pipeline - DEREGISTERED 2026-09-10.
-    // ------------------------------------------------------------------
-    // The 11 gf-* cron_restart apps that used to sit here were removed from pm2, NOT
-    // deleted: greenfield/ still exists in git and nothing about the rebuild was lost.
-    // Why: measured 2026-09-10 - nothing in the live app imports greenfield/ (a grep for
-    // greenfield imports across src/ + server.ts returns zero), its own database on
-    // :5434 refuses connections, and all 11 apps were sitting at 'stopped'. A stopped
-    // cron_restart app is indistinguishable from a healthily-idle one (see CLAUDE.md),
-    // so registering 11 permanently-stopped apps only made `pm2 list` harder to read
-    // and hid that the pipeline had gone dormant. Deregistering makes the config state
-    // the truth. To revive: restore this block from git history, bring up the :5434 DB,
-    // then `pm2 start ecosystem.config.cjs`.
+    // (The 11 greenfield `gf-*` cron_restart apps were deregistered 2026-09-10 and the
+    // greenfield/ tree removed 2026-10-03; both are recoverable from git history.)
 
     // ------------------------------------------------------------------
     // Postgres logical backup (one-shot nightly)
@@ -179,7 +163,7 @@ module.exports = {
     // watches, so a silently-failing backup now surfaces the same day rather than on
     // restore day.
     {
-      ...gfCron,
+      ...cronApp,
       name: 'pg-backup-nightly',
       // 23:15 IST (17:45 UTC) — daily after all rankers, digests, and DQ checks complete.
       cron_restart: '15 23 * * *',
@@ -222,7 +206,7 @@ module.exports = {
     // over its real runtime is AF-20260929-04's exact failure (killed at the cap, reported as
     // a slow job).
     {
-      ...gfCron,
+      ...cronApp,
       name: 'bqa-daily',
       cron_restart: '0 6 * * *',
       kill_timeout: 10_800_000,          // 3h; see the warning above before trusting it

@@ -14,7 +14,7 @@ A run therefore records the quote as of when it ran, and the series only starts 
 starts. Rows are keyed by the run's IST date, so re-running within a day refreshes that day's
 quote rather than inventing a second observation.
 
-Payload shape from the 2026-07-31 probe (`docs/audit-2026-07-31/payload_probe.json`):
+Payload shape from the 2026-07-31 probe (`bharat_alpha/tests/fixtures/payload_probe.json`):
 `{"success": 1, "data": [{"name": "GIFT Nifty", "ltp": "24,458.50", "chg": "10.50",
 "chgper": "0.04", "market_state": "open", ...}, ...]}` — `ltp` carries thousands separators.
 """

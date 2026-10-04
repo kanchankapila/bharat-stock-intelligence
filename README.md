@@ -35,9 +35,8 @@ A local-first quantitative intelligence platform for NSE/BSE equities. Synthesiz
 │  online_learner → strategy_optimizer → backtester                  │
 │  → unified_ranker.py (canonical cross-source ranking)              │
 ├─────────────────────────────────────────────────────────────────────┤
-│  greenfield/  parallel rebuild (~105 .ts files) — NOT scheduled and     │
-│  NOT imported by anything above; its pm2 jobs were deregistered          │
-│  2026-09-10; see "Greenfield Shadow Pipeline" below                      │
+│  bharat_alpha/  from-scratch self-grading rewrite (own README) — not    │
+│  imported by anything above and not yet serving users                    │
 └────────────────────────┬────────────────────────────────────────────┘
                          │ PostgreSQL/TimescaleDB (:5433) — the only DB
                          ▼
@@ -48,10 +47,11 @@ A local-first quantitative intelligence platform for NSE/BSE equities. Synthesiz
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-All processes run under pm2 in production (`ecosystem.config.cjs`) — **6 apps**: the 5
-long-running services above plus one `cron_restart` job, `pg-backup-nightly` (the 11 `gf-*`
-greenfield cron jobs were deregistered 2026-09-10 — nothing in the live app imports
-`greenfield/`). `npm start` runs the 4 core dev services directly without pm2.
+All processes run under pm2 in production (`ecosystem.config.cjs`) — **7 apps**: the 5
+long-running services above plus two `cron_restart` jobs, `pg-backup-nightly` and `bqa-daily`
+(the `bharat_alpha` daily run). The earlier `greenfield/` and `bharatquant/` rebuilds were
+removed 2026-10-03 (never wired in; recoverable from git history). `npm start` runs the 4 core
+dev services directly without pm2.
 
 See [Data Source Integration Guide](docs/DATA_SOURCE_INTEGRATION_GUIDE.md) for the reusable
 provider catalog, endpoint families, identifier mappings, authentication, output ownership,
@@ -198,15 +198,6 @@ Scripts tracked:
 | DL Model Trainer | Weekly **Saturday** 11:30 AM IST | `dl_model_performance` |
 | OHLCV Gap Fill (weekly) | Weekly, Saturday 2:00 AM IST, 30-day lookback | `stock_ohlcv` |
 | Mover Reverse-Engineering Study | Weekly Sunday 12:00 PM IST | `mover_study_results`, `docs/mover_study_report.md` |
-
-**Greenfield shadow pipeline** (parallel rebuild, `greenfield/` — separate from everything
-above, reads/writes its own tables, feeds nothing the live app reads yet): bhavcopy 7:30 PM IST →
-FII/DII 9:00 PM → features 9:30 PM → DQ checks 9:40–9:50 PM → ranker 10:00 PM → divergence
-analysis 10:15 PM, all daily weekdays; screener membership/fundamentals/analyst-estimates/
-insider-activity transfers run Saturday mornings. **As of 2026-09-10 these are NOT scheduled** —
-the 11 `gf-*` pm2 `cron_restart` apps were deregistered (they all sat at `stopped` and
-`greenfield/`'s :5434 database refuses connections); the schedule above is what they *were*.
-Restore the block from git history in `ecosystem.config.cjs` to revive them.
 
 **Holiday-aware scheduling.** On a mid-week NSE trading holiday (a weekday the exchange is shut —
 not caught by cron's own day-of-week check), a dedicated `closed-day-early-batch` job runs the

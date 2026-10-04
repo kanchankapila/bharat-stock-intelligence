@@ -111,12 +111,6 @@ npx vitest run                                               # ~104 suites
 python -m pytest src/server/__tests__/ src/server/tests/ -q  # ~1750 tests
 ```
 
-`greenfield/` is a separate pnpm workspace with its own Postgres (port
-5434) — its tests need `DATABASE_URL` pointed there explicitly or they
-silently inherit the root `.env`'s `DATABASE_URL=database.sqlite` and fail
-with `getaddrinfo ENOTFOUND base`. Not part of this skill's unit; see
-`greenfield/`'s own tooling if driving that app instead.
-
 ## Gotchas
 
 - **No `chromium-cli`, no `tmux` on this box.** `driver.mjs` is a one-shot

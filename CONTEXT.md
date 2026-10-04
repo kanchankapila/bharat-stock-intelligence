@@ -57,9 +57,10 @@ This checkout currently has 82 Python `*_fetcher.py` modules and 73 `JOB_REGISTR
   rendered as ordinary v1 components.
 - `db/schema.postgres.sql`: checked-in PostgreSQL schema reference.
 
-Parallel rebuilds the live application does not import — a change there does not change the running
-product: `greenfield/` and `bharatquant/` (dead, never wired in) and `bharat_alpha/` (a from-scratch,
-point-in-time, self-grading rewrite; its README explains the design and why it is not yet serving users).
+`bharat_alpha/` is a from-scratch, point-in-time, self-grading rewrite the live application does not import;
+its README explains the design and why it is not yet serving users, and a change there does not change the
+running product. (Two earlier rebuilds, `greenfield/` and `bharatquant/`, were never wired in and were removed
+2026-10-03; any reference to them is stale.)
 
 ## Measured State Of The Edge
 The ranker has a small positive rank IC that is still LOW-DATA and has never passed a cost-aware

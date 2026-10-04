@@ -3,7 +3,7 @@
 WHY THIS WAS REWRITTEN
 ----------------------
 The original version recorded `response.status_code` and nothing else. The 2026-07-31
-endpoint-corpus review (docs/audit-2026-07-31/ENDPOINT_DATA_REVIEW_AND_QUANT_VALUE.md §1.1-1.5)
+endpoint-corpus review (docs/audit-2026-07-31/ENDPOINT_DATA_REVIEW_AND_QUANT_VALUE.md [removed 2026-10-03; see git history] §1.1-1.5)
 showed that criterion is insufficient in BOTH directions, and this repo has been burned by it
 twice already:
 

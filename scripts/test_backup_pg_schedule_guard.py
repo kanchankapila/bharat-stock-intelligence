@@ -1,5 +1,5 @@
 """Tests for backup_pg.py's _is_within_schedule_window() -- the Python twin of
-market-calendar's isWithinScheduleWindow (greenfield/packages/market-calendar/src/
+market-calendar's isWithinScheduleWindow (greenfield/packages/market-calendar/src/ [removed 2026-10-03]
 session-calendar.ts). Mirrors that file's own test cases (index.test.ts) so a
 transcription slip in the Python port -- the offset arithmetic, the midnight
 wraparound, the tolerance value -- doesn't go unnoticed the way it would with zero

@@ -22,11 +22,5 @@ b.push(j('trendlyne-midweek','TL Midweek','20:00 IST (Tue)','Weekly','Trendlyne'
 b.push(j('trendlyne-ratios-monthly','TL Ratios','06:00 IST (Sat)','Weekly','Trendlyne','Financial ratios','ET Markets','financial_ratios_fetcher.py'));
 b.push(j('tickertape-scorecard','Tickertape','18:30 IST (Sat)','Weekly','Sync','Scorecard','Tickertape','tickertape_scorecard_fetcher.py'));
 const p=[];
-p.push(j('gf-screener-daily','GF: Screener Daily','22:30 IST (Mon-Fri)','Mon-Fri','Greenfield','Screener data','TypeScript','greenfield/packages/ingestion/...'));
-p.push(j('gf-divergence-daily','GF: Divergence','22:15 IST (Mon-Fri)','Mon-Fri','Greenfield','Divergence analysis','TypeScript','greenfield/packages/ingestion/...'));
-p.push(j('gf-kayal-weekly','GF: Kayal Weekly','07:30 IST (Sat)','Weekly','Greenfield','Screener membership','TypeScript','greenfield/packages/ingestion/...'));
-p.push(j('gf-fundamentals-weekly','GF: Fundamentals','09:30 IST (Sat)','Weekly','Greenfield','Fundamentals transfer','TypeScript','greenfield/packages/ingestion/...'));
-p.push(j('gf-analyst-estimates-weekly','GF: Analyst Est.','11:30 IST (Sat)','Weekly','Greenfield','Analyst estimates','TypeScript','greenfield/packages/ingestion/...'));
-p.push(j('gf-insider-activity-weekly','GF: Insider Activity','12:00 IST (Sat)','Weekly','Greenfield','Insider activity','TypeScript','greenfield/packages/ingestion/...'));
 p.push(j('pg-backup-nightly','PostgreSQL Backup','23:30 IST','Daily','Backup','pg_dump backup','pg_dump','scripts/backup_pg.py'));
 module.exports={b,p};

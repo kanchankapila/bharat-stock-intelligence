@@ -23,7 +23,7 @@ addSheet('Intraday',j=>j.category==='Intraday');
 addSheet('Screener Syncs',j=>j.category==='Screener Sync');
 addSheet('ML and DL',j=>['ML Weekly','Deep Learning','Agent','Scoring','Confluence'].includes(j.category));
 addSheet('Sync and Research',j=>['Sync','Research','Digest','Data Quality','Ranking','Trendlyne','Quant Sync'].includes(j.category));
-addSheet('PM2 Cron',j=>['Greenfield','Backup'].includes(j.category));
+addSheet('PM2 Cron',j=>['Backup'].includes(j.category));
 const dsData=[['DATA SOURCES & URL REFERENCE'],[],['Provider','Base URL','Data Type','Used By']];
 dsData.push(['MoneyControl','https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{mcsymbol}','Live quotes, pricefeed','stock-refresh, mc-pricefeed']);
 dsData.push(['MoneyControl','https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history?symbol={NSE}&resolution={1D|15}','Historical OHLCV, intraday bars','intraday-fetcher, mc_ohlcv_backfill']);

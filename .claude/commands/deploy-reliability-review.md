@@ -7,14 +7,15 @@ disable-model-invocation: true
 
 ## Verified current state — do not propose against an imagined baseline
 
-- **Deployment is pm2 on a single host** (`ecosystem.config.cjs`): 4 long-lived services plus
-  greenfield one-shot cron jobs (`gfCron`: `autorestart:false`, `cron_restart`, `tsx`). pm2
+- **Deployment is pm2 on a single host** (`ecosystem.config.cjs`): 5 long-lived services plus
+  one-shot `cron_restart` jobs (`pg-backup-nightly`, `bqa-daily`; `cronApp`: `autorestart:false`). pm2
   replaced `concurrently` after `alphaquant-api` (:8002) silently died and stock scores went
   stale **for weeks**.
 - Restart policy: `autorestart:true`, `max_restarts:10`, `restart_delay:3000`, `min_uptime:10s`,
   `kill_timeout:10s`. Logs merged into `logs/pm2-{out,err}.log`.
-- **There is no `Dockerfile` and no Kubernetes.** `docker-compose.yml` runs Redis 7 (AOF,
-  `requirepass`, 512mb `noeviction`) and `timescaledb:2.30.0-pg16` only (upgraded from 2.17.2 on 2026-09-11) — infra deps, not the app.
+- **There is no Kubernetes, and pm2 (not Docker) is the production path.** `docker-compose.yml` runs Redis 7 (AOF,
+  `requirepass`, 512mb `noeviction`) and `timescaledb:2.30.0-pg16`; `docker/*.Dockerfile` plus
+  `docker-compose.override.yml` build the app services as an optional, not-yet-end-to-end-verified variant (AF-20261003-09).
 - CI is one workflow (`.github/workflows/ci.yml`), 3 jobs (`build-test`, `python-tests`,
   `smoke-test`), both test jobs with a `timescaledb` service, using `PGTEST_*` and never
   `POSTGRES_*` — deliberately, so a stray production URL can't redirect a schema-creating run.
