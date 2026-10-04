@@ -208,6 +208,14 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   `src/server/__tests__/testsDoNotDropProductionTables.test.ts`, a source-derived scan (not an
   allowlist) that only counts DROPs actually passed to a DB call, so `pgClient.test.ts` asserting
   that a string is REJECTED is not a false positive.
+  **RECURRED 2026-10-04 (AF-20261004-02), with that guard in place.** A full `vitest run` dropped the
+  same two tables again: the guard proved the throwaway schema EXISTS, not that the statement stayed
+  in it, and an unqualified `DROP TABLE x` resolves to the first schema in `search_path` that HAS `x`
+  (public, when the throwaway copy is missing). Found by `schema:drift` again, not by a test. **The
+  durable fix is qualification, not a better guard:** `DROP TABLE IF EXISTS "${VITEST_PG_SCHEMA}".x`
+  cannot reach `public` whatever the path, and the scan now fails any test DROP whose target is not
+  schema-qualified. **Run `npm run schema:drift` after any full vitest run that touched DDL** until
+  that is automatic.
 
 - **A test that can reach a network side effect without a mock WILL, on some full-suite run, perform it against production.**
   `addJobWithCatchupReclaims.test.ts` drove the real reclaim→requeue path; the dynamic `import('../telegramService')` inside

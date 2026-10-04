@@ -46,6 +46,20 @@ describe('tests must not be able to drop production tables', () => {
         .filter(({ line }) => /\bDROP\s+TABLE\b/i.test(line));
 
       if (drops.length === 0) continue;
+
+      // A guard that proves the throwaway schema exists is NOT enough: an unqualified
+      // `DROP TABLE x` resolves through search_path "<throwaway>",public to the first schema that
+      // HAS x, so a missing throwaway copy sends the drop to PRODUCTION. This happened a second
+      // time on 2026-10-04 (AF-20261004-02) with the guard in place. Require the target to be
+      // schema-qualified (`"${schema}".x` or `schema.x`) as well as the guard.
+      const unqualified = drops.filter(
+        (d) => !/\bDROP\s+TABLE\s+(IF\s+EXISTS\s+)?("?\$\{[^}]+\}"?|"?\w+"?)\./i.test(d.line)
+      );
+      if (unqualified.length) {
+        offenders.push(
+          `${file}: ${unqualified.map((d) => `L${d.n}`).join(', ')} DROP TABLE on an unqualified name`
+        );
+      }
       if (src.includes(GUARD)) continue;
 
       offenders.push(
@@ -65,7 +79,7 @@ describe('tests must not be able to drop production tables', () => {
     // If signalAccuracyDigest.test.ts stops dropping tables the assertion below should be
     // deleted along with this test -- but it must never pass by silently matching nothing.
     const src = readFileSync(path.join(TESTS_DIR, 'signalAccuracyDigest.test.ts'), 'utf8');
-    expect(/\bdbRun\s*\(\s*['"]DROP TABLE/i.test(src)).toBe(true);
+    expect(/\bdbRun\s*\(\s*['"`]DROP TABLE/i.test(src)).toBe(true);
     expect(src.includes(GUARD)).toBe(true);
   });
 });

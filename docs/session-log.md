@@ -11040,3 +11040,23 @@ of 6,008 runs, none since 2026-10-02 08:00 UTC; seven heartbeats not green, all 
 above (screener-performance, quant-eod-sync Trendlyne 405, intraday-fetcher timeouts, dl-trainer CUDA OOM, host
 memory-commit kills of mover-intraday-capture) plus one alert-dedupe ghost row (`feature-engineering`).
 Gates: tsc 0, schema:drift clean, findings:check and doc:numbers:check pass; the full suites are recorded below.
+
+## 2026-10-04 (later) — Production repairs run with the user's approval; a vitest run dropped two prod tables again
+
+**Run against production (user-approved, each through a committed tool, dry-run first):**
+`data_integrity_repair.py --zero-neutral-outcomes` (67,917 fabricated NEUTRAL rows requeued) then
+`outcome_resolver.py --horizon 1/5/15` regraded them with the new paged resolver: fabricated unified rows
+44,919 -> 14, technical 22,132 -> 0, rec_log 866 -> 2; `--delivery-trades` (115 rows NULLed); new
+`--dl-performance-sentinels` task (8 sentinel `dl_model_performance` rows NULLed, AF-20260930-01 closed);
+`live_screener_resolver.py` drained ~200k backlog rows (newest outcome 2026-09-10 -> 2026-09-11) and raised from its
+`finally` on a dead parked advisory-lock connection (AF-20261004-01, fixed); `live_screener_optimizer.py` ran end to
+end in 8 min on 1.07M groups (was a 25-min timeout at 9.8 GB); `signal_lifecycle.py` ran clean.
+**Not done:** `npm run migrate:up` for the table-drop migration was refused by the classifier (a DROP is read as a mass
+delete); the migration `20261004100000_drop-unused-order-book-and-timeframe-tables.sql` is written and guarded, the
+three follow-up steps are in AF-20261003-06.
+**Incident:** the 12:20 full vitest run dropped `high_flyer_daily_stats` / `high_flyer_retrospective` from production
+again (found by `schema:drift`). Unqualified DROP resolves to the first schema in search_path that HAS the table.
+Fixed by schema-qualifying the test and making `testsDoNotDropProductionTables` fail unqualified drops
+(AF-20261004-02); tables restored by `high_flyer_retrospective.py --backfill 10`. Full vitest then left `schema:drift` clean.
+Gates: vitest 1,626 passed (one earlier run had 3-8 transient failures that pass in isolation - load-dependent);
+pytest 3,281 passed / 259 skipped; findings:check and doc:numbers:check pass.

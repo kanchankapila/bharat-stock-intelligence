@@ -23,30 +23,35 @@ const { buildAccuracyDigest, formatAccuracyDigest, RECALL_ALERT_FLOOR } = await 
 );
 import type { AccuracyDigest } from '../signalAccuracyDigest';
 const { dbRun } = await import('../dbAsync');
+const SCHEMA = process.env.VITEST_PG_SCHEMA;
 
 async function seed(rows: {
   stats?: Array<[string, number, number, string]>;
   retro?: Array<[string, string, number, number, string]>;
 }) {
-  await dbRun('DROP TABLE IF EXISTS high_flyer_daily_stats');
-  await dbRun('DROP TABLE IF EXISTS high_flyer_retrospective');
-  await dbRun(`CREATE TABLE high_flyer_daily_stats (
+  // Schema-QUALIFIED on purpose (AF-20261004-02). The guard above proves the throwaway schema
+  // exists, but an UNQUALIFIED `DROP TABLE x` resolves through search_path "<throwaway>",public to
+  // the first schema that HAS x -- so when the throwaway copy was missing, the drop reached the
+  // PRODUCTION table (it happened again on 2026-10-04). A qualified name cannot.
+  await dbRun(`DROP TABLE IF EXISTS "${SCHEMA}".high_flyer_daily_stats`);
+  await dbRun(`DROP TABLE IF EXISTS "${SCHEMA}".high_flyer_retrospective`);
+  await dbRun(`CREATE TABLE "${SCHEMA}".high_flyer_daily_stats (
     date TEXT PRIMARY KEY, universe_n INTEGER, flyer_n INTEGER,
     recall_json TEXT, precursor_counts_json TEXT, computed_at TEXT)`);
-  await dbRun(`CREATE TABLE high_flyer_retrospective (
+  await dbRun(`CREATE TABLE "${SCHEMA}".high_flyer_retrospective (
     symbol TEXT NOT NULL, date TEXT NOT NULL, return_pct REAL NOT NULL,
     wrong_call INTEGER DEFAULT 0, prior_classification TEXT,
     PRIMARY KEY (symbol, date))`);
 
   for (const [date, universe, flyers, recallJson] of rows.stats ?? []) {
     await dbRun(
-      'INSERT INTO high_flyer_daily_stats (date, universe_n, flyer_n, recall_json) VALUES (?,?,?,?)',
+      `INSERT INTO "${SCHEMA}".high_flyer_daily_stats (date, universe_n, flyer_n, recall_json) VALUES (?,?,?,?)`,
       [date, universe, flyers, recallJson]
     );
   }
   for (const [symbol, date, ret, wrong, prior] of rows.retro ?? []) {
     await dbRun(
-      'INSERT INTO high_flyer_retrospective (symbol, date, return_pct, wrong_call, prior_classification) VALUES (?,?,?,?,?)',
+      `INSERT INTO "${SCHEMA}".high_flyer_retrospective (symbol, date, return_pct, wrong_call, prior_classification) VALUES (?,?,?,?,?)`,
       [symbol, date, ret, wrong, prior]
     );
   }

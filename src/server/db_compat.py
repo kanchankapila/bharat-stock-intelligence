@@ -823,8 +823,19 @@ def release_advisory_lock(name: str) -> None:
     try:
         conn.execute(text(translate("SELECT pg_advisory_unlock(?)")), build_params((_advisory_lock_key(name),)))
         conn.commit()
+    except Exception as e:
+        # The parked connection can die during a long run (idle timeout, backend restart). A
+        # session-level advisory lock dies with its session, so a dead backend means the lock is
+        # already released -- do not turn a finished run into a crash (AF-20261004-01).
+        if not _is_dead_backend(e):
+            raise
+        print(f"[advisory-lock] '{name}' connection was already gone at release; lock freed with it.",
+              file=_sys.stderr)
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _advisory_lock_key(name: str) -> int:

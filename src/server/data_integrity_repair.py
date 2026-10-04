@@ -18,6 +18,7 @@ Each repair is idempotent and can be run independently:
   --weekend-recommendations delete unified_recommendations snapshots dated to a closed day
   --zero-neutral-outcomes requeue stale synthetic 0% neutral outcomes with no exit price
   --delivery-trades NULL stock_delivery_data.trades where it duplicates delivery_qty
+  --dl-performance-sentinels NULL the unit-test sentinel roc_auc/directional_accuracy pair
   --all             run everything
 
 Run:  python data_integrity_repair.py --all [--dry-run]
@@ -712,6 +713,32 @@ def repair_delivery_trades(conn: ConnWrapper, dry: bool) -> None:
     _log(f"delivery-trades: nulled {total} rows.")
 
 
+def repair_dl_performance_sentinels(conn: ConnWrapper, dry: bool) -> None:
+    """NULL the unit-test sentinel metrics (roc_auc=0.58, directional_accuracy=0.55) in
+    dl_model_performance (AF-20260930-01).
+
+    A test once wrote that exact pair under model_version='lstm_v99'; the daily drift upsert
+    (`ON CONFLICT ... DO UPDATE SET model_version=excluded.model_version`) later relabelled some of
+    those rows 'current' while leaving the fake metrics, so a cleanup keyed on the label missed
+    them and dl.router.ts served them as history. Select by the polluted VALUE, never by a
+    provenance column an upsert can rewrite. The pair is required, not either half: a genuine run
+    can land on 0.58 alone. NULL (not delete) keeps the drift_score/eval_date bookkeeping.
+    """
+    where = "roc_auc = 0.58 AND directional_accuracy = 0.55"
+    total = int(conn.execute(
+        f"SELECT COUNT(*) AS c FROM dl_model_performance WHERE {where}").fetchone()['c'] or 0)
+    if total == 0:
+        _log("dl-performance-sentinels: none found -- clean.")
+        return
+    _log(f"  {total} dl_model_performance rows carry the sentinel metric pair")
+    if dry:
+        _log(f"dl-performance-sentinels: would NULL {total} rows (dry run).")
+        return
+    conn.execute(f"UPDATE dl_model_performance SET roc_auc = NULL, directional_accuracy = NULL WHERE {where}")
+    conn.commit()
+    _log(f"dl-performance-sentinels: nulled {total} rows.")
+
+
 # ── 12. fabricated closed-session bars ───────────────────────────────────────
 
 # Above this share of a day's universe being flat AND zero-volume, the exchange never opened.
@@ -799,6 +826,7 @@ TASKS = {
     'weekend_recommendations': repair_weekend_recommendations,
     'zero_neutral_outcomes': repair_zero_neutral_outcomes,
     'delivery_trades': repair_delivery_trades,
+    'dl_performance_sentinels': repair_dl_performance_sentinels,
 }
 
 
