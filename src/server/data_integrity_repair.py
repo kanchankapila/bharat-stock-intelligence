@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Data-integrity repairs from the 2026-07-30 bias audit
-(docs/audit-2026-07-30/DATA_BIAS_AND_QUANT_STRATEGY_AUDIT.md).
+(docs/audit-2026-07-30/DATA_BIAS_AND_QUANT_STRATEGY_AUDIT.md [removed 2026-10-03; see git history]).
 
 Each repair is idempotent and can be run independently:
 

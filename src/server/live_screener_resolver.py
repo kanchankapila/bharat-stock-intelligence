@@ -6,6 +6,7 @@ live_screener_appearances.
 """
 
 import sys
+import time
 import datetime
 from db_compat import connect, read_df, use_postgres, try_advisory_lock, release_advisory_lock
 
@@ -23,6 +24,11 @@ INTRADAY_DEVIATION_CAP = 0.30
 # a single run so one invocation can't hold the write transaction open for hours
 # against a pathological backlog — remaining rows just get picked up next run.
 MAX_PER_RUN = 50_000
+
+# Wall-clock budget for draining pages in one run. The caller's step timeout is 20 min
+# (jobs/operations.jobs.ts) and one page takes ~1-2 min, so 14 min leaves room to finish the
+# page in flight.
+RUN_BUDGET_S = 14 * 60
 
 
 def _ret(entry, exit_p):
@@ -108,110 +114,148 @@ def _load_intraday_close_series(symbols, start_date: str, end_date_exclusive: st
     return {(r["symbol"], r["d"]): r["close"] for _, r in last.iterrows()}
 
 
-def resolve_outcomes(dry_run=False):
+def _resolve_batch(conn, dry_run, after):
+    """Resolve one MAX_PER_RUN page of pending appearances, oldest first, starting strictly
+    after the keyset `after` = (created_at, id). Returns (selected, resolved, last_key).
+
+    `after` is what stops a row that cannot resolve (no price series: `continue` below, so no
+    outcome row is ever written) from being re-selected as the head of every page."""
+    cursor_sql = "AND (r.created_at, a.id) > (?, ?)" if after else ""
+    pending = conn.execute(f"""
+        SELECT a.id          AS app_id,
+               a.symbol,
+               a.filter_key,
+               a.price       AS entry_price,
+               r.created_at  AS run_ts
+        FROM   live_screener_appearances a
+        JOIN   live_screener_runs r ON a.run_id = r.id
+        LEFT   JOIN live_screener_outcomes o ON a.id = o.appearance_id
+        WHERE  (o.appearance_id IS NULL OR o.return_5d IS NULL OR o.return_intraday IS NULL)
+               {cursor_sql}
+        ORDER  BY r.created_at ASC, a.id ASC
+        LIMIT  {MAX_PER_RUN}
+    """, tuple(after) if after else ()).fetchall()
+
+    if not pending:
+        return 0, 0, after
+
+    print(f"[LiveScreenerResolver] Resolving {len(pending)} pending appearances...")
+
+    symbols = {row[1] for row in pending}
+    min_run_ts = min(str(row[4])[:10] for row in pending)
+    max_run_ts = max(str(row[4])[:10] for row in pending)
+    intraday_end_bound = (datetime.date.fromisoformat(max_run_ts) + datetime.timedelta(days=1)).isoformat()
+    prices = _load_price_series(symbols, min_run_ts)
+    intraday_closes = _load_intraday_close_series(symbols, min_run_ts, intraday_end_bound)
+
+    resolved = 0
+    to_write = []
+    nifty = prices.get(NIFTY_SYMBOL)
+
+    for row in pending:
+        app_id, symbol, filter_key, entry_price, run_ts = (
+            row[0], row[1], row[2], row[3], str(row[4])[:10]
+        )
+        series = prices.get(symbol)
+
+        entry_close = series.on_or_after(run_ts) if series else None
+        if entry_close is None:
+            entry_close = entry_price      # use live price as fallback
+
+        c1 = series.n_days_after(run_ts, 1) if series else None
+        c3 = series.n_days_after(run_ts, 3) if series else None
+        c5 = series.n_days_after(run_ts, 5) if series else None
+
+        r1, r3, r5 = _ret(entry_close, c1), _ret(entry_close, c3), _ret(entry_close, c5)
+
+        # Same-day exit: last intraday bar on the appearance date, falling back to the
+        # daily close when intraday_fetcher.py had no bars that day. entry_price (not
+        # entry_close) is the base here -- it is the live price captured the moment the
+        # NiftyTrader filter matched, which is what an intraday trade would actually enter at.
+        same_day_close = intraday_closes.get((symbol, run_ts))
+        if same_day_close is not None and entry_close:
+            if abs(same_day_close - entry_close) / entry_close > INTRADAY_DEVIATION_CAP:
+                same_day_close = None
+        if same_day_close is None:
+            same_day_close = entry_close
+        r_intraday = _ret(entry_price, same_day_close)
+
+        if r1 is None and r3 is None and r5 is None and r_intraday is None:
+            continue
+
+        alpha_3d = None
+        if r3 is not None and nifty is not None:
+            n_e = nifty.on_or_after(run_ts)
+            n3 = nifty.n_days_after(run_ts, 3)
+            if n_e and n3:
+                nifty_r3 = _ret(n_e, n3)
+                alpha_3d = round(r3 - nifty_r3, 4) if nifty_r3 is not None else None
+
+        if dry_run:
+            print(f"  [DRY] {app_id} {symbol}: intraday={r_intraday}% 1d={r1}% 3d={r3}% 5d={r5}% alpha3d={alpha_3d}%")
+        else:
+            to_write.append((app_id, symbol, filter_key, run_ts, entry_price, r1, r3, r5, r_intraday))
+        resolved += 1
+
+    if not dry_run and to_write:
+        CHUNK = 1000
+        for i in range(0, len(to_write), CHUNK):
+            conn.executemany("""
+                INSERT INTO live_screener_outcomes
+                    (appearance_id, symbol, filter_key, appeared_at,
+                     entry_price, return_1d, return_3d, return_5d, return_intraday)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(appearance_id) DO UPDATE SET
+                    return_1d = excluded.return_1d,
+                    return_3d = excluded.return_3d,
+                    return_5d = excluded.return_5d,
+                    return_intraday = excluded.return_intraday
+            """, to_write[i:i + CHUNK])
+        conn.commit()
+
+    last = pending[-1]
+    return len(pending), resolved, (last[4], last[0])
+
+
+def resolve_outcomes(dry_run=False, conn=None, budget_s=RUN_BUDGET_S):
+    """Drain the pending backlog in committed MAX_PER_RUN pages until it is empty or the time
+    budget is spent (AF-20261003-10).
+
+    A run used to resolve ONE page of 50,000 rows. Appearances arrive at ~260,000 a day and the
+    job runs 3-4 times a day, so capacity (~150-200k/day) sat permanently below inflow: by
+    2026-10-03 the newest outcome was 3+ weeks old (every consumer -- optimizer, ML ranker,
+    backtester -- trained on stale data) and the backlog could never close. Pages are committed
+    one at a time so the write transaction stays short, and the keyset cursor means a row that
+    cannot resolve is skipped rather than re-read as the head of every page."""
     if not try_advisory_lock("live_screener_resolver"):
         print("[LiveScreenerResolver] Another run is already in progress — skipping.")
         return
 
-    conn = connect()
+    own_conn = conn is None
+    conn = conn or connect()
     try:
-        # live_screener_runs uses created_at (not timestamp)
-        pending = conn.execute(f"""
-            SELECT a.id          AS app_id,
-                   a.symbol,
-                   a.filter_key,
-                   a.price       AS entry_price,
-                   r.created_at  AS run_ts
-            FROM   live_screener_appearances a
-            JOIN   live_screener_runs r ON a.run_id = r.id
-            LEFT   JOIN live_screener_outcomes o ON a.id = o.appearance_id
-            WHERE  o.appearance_id IS NULL OR o.return_5d IS NULL OR o.return_intraday IS NULL
-            ORDER  BY r.created_at ASC
-            LIMIT  {MAX_PER_RUN}
-        """).fetchall()
+        started = time.monotonic()
+        after, selected_total, resolved_total, pages = None, 0, 0, 0
+        while True:
+            selected, resolved, after = _resolve_batch(conn, dry_run, after)
+            pages += 1
+            selected_total += selected
+            resolved_total += resolved
+            if selected < MAX_PER_RUN or dry_run:
+                break          # drained (or a dry run: one page is enough to show the shape)
+            if time.monotonic() - started > budget_s:
+                print(f"[LiveScreenerResolver] Time budget ({budget_s}s) spent after {pages} pages; "
+                      f"the rest is picked up next run.")
+                break
 
-        if not pending:
+        if selected_total == 0:
             print("[LiveScreenerResolver] No pending appearances to resolve.")
             return
-
-        print(f"[LiveScreenerResolver] Resolving {len(pending)} pending appearances...")
-
-        symbols = {row[1] for row in pending}
-        min_run_ts = min(str(row[4])[:10] for row in pending)
-        max_run_ts = max(str(row[4])[:10] for row in pending)
-        intraday_end_bound = (datetime.date.fromisoformat(max_run_ts) + datetime.timedelta(days=1)).isoformat()
-        prices = _load_price_series(symbols, min_run_ts)
-        intraday_closes = _load_intraday_close_series(symbols, min_run_ts, intraday_end_bound)
-
-        resolved = 0
-        to_write = []
-        nifty = prices.get(NIFTY_SYMBOL)
-
-        for row in pending:
-            app_id, symbol, filter_key, entry_price, run_ts = (
-                row[0], row[1], row[2], row[3], str(row[4])[:10]
-            )
-            series = prices.get(symbol)
-
-            entry_close = series.on_or_after(run_ts) if series else None
-            if entry_close is None:
-                entry_close = entry_price      # use live price as fallback
-
-            c1 = series.n_days_after(run_ts, 1) if series else None
-            c3 = series.n_days_after(run_ts, 3) if series else None
-            c5 = series.n_days_after(run_ts, 5) if series else None
-
-            r1, r3, r5 = _ret(entry_close, c1), _ret(entry_close, c3), _ret(entry_close, c5)
-
-            # Same-day exit: last intraday bar on the appearance date, falling back to the
-            # daily close when intraday_fetcher.py had no bars that day. entry_price (not
-            # entry_close) is the base here -- it's the live price captured the moment the
-            # NiftyTrader filter matched, which is what an intraday trade would actually enter at.
-            same_day_close = intraday_closes.get((symbol, run_ts))
-            if same_day_close is not None and entry_close:
-                if abs(same_day_close - entry_close) / entry_close > INTRADAY_DEVIATION_CAP:
-                    same_day_close = None
-            if same_day_close is None:
-                same_day_close = entry_close
-            r_intraday = _ret(entry_price, same_day_close)
-
-            if r1 is None and r3 is None and r5 is None and r_intraday is None:
-                continue
-
-            alpha_3d = None
-            if r3 is not None and nifty is not None:
-                n_e = nifty.on_or_after(run_ts)
-                n3 = nifty.n_days_after(run_ts, 3)
-                if n_e and n3:
-                    nifty_r3 = _ret(n_e, n3)
-                    alpha_3d = round(r3 - nifty_r3, 4) if nifty_r3 is not None else None
-
-            if dry_run:
-                print(f"  [DRY] {app_id} {symbol}: intraday={r_intraday}% 1d={r1}% 3d={r3}% 5d={r5}% alpha3d={alpha_3d}%")
-            else:
-                to_write.append((app_id, symbol, filter_key, run_ts, entry_price, r1, r3, r5, r_intraday))
-            resolved += 1
-
-        if not dry_run and to_write:
-            CHUNK = 1000
-            for i in range(0, len(to_write), CHUNK):
-                conn.executemany("""
-                    INSERT INTO live_screener_outcomes
-                        (appearance_id, symbol, filter_key, appeared_at,
-                         entry_price, return_1d, return_3d, return_5d, return_intraday)
-                    VALUES (?,?,?,?,?,?,?,?,?)
-                    ON CONFLICT(appearance_id) DO UPDATE SET
-                        return_1d = excluded.return_1d,
-                        return_3d = excluded.return_3d,
-                        return_5d = excluded.return_5d,
-                        return_intraday = excluded.return_intraday
-                """, to_write[i:i + CHUNK])
-            conn.commit()
-            print(f"[LiveScreenerResolver] Resolved {resolved} outcomes.")
+        if dry_run:
+            print(f"[LiveScreenerResolver] Dry-run: {resolved_total} would be resolved.")
         else:
-            print(f"[LiveScreenerResolver] Dry-run: {resolved} would be resolved.")
-
-        if not dry_run:
+            print(f"[LiveScreenerResolver] Resolved {resolved_total} outcomes "
+                  f"({selected_total} examined, {pages} pages).")
             prune_old_appearances(conn)
 
     except Exception as e:
@@ -219,7 +263,8 @@ def resolve_outcomes(dry_run=False):
         conn.rollback()
         raise
     finally:
-        conn.close()
+        if own_conn:
+            conn.close()
         release_advisory_lock("live_screener_resolver")
 
 

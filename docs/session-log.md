@@ -11014,3 +11014,29 @@ leave the model's skill list but remain `/name` for the user; `production-debug`
 Reviewed and kept the concurrent session's code (holiday-aware `logical_session_date`, `expire_stale_pending` no longer fabricates
 0% NEUTRAL, `repair_zero_neutral_outcomes`, intraday scan summary units, `unified_signals` lifecycle columns — schema matches live).
 Gates: tsc 0; vitest 1,626 passed; hooks 74; schema:drift clean; findings:check + doc:numbers:check pass.
+
+## 2026-10-04 — Finish the cleanup; live-screener resolver and optimizer fixed; open-finding triage
+
+**Cleanup finished** (the permission classifier allowed the batch once the user repeated the instruction):
+`greenfield/`, `bharatquant/`, `PATHFINDER-2026-09-02/`, `docs/superpowers/`, `docs/.archive/` and the superseded audit
+reports are `git rm`'d. The payload probe that `bharat_alpha` tests read moved to `bharat_alpha/tests/fixtures/`.
+References were repaired in `README.md`, `CLAUDE.md`, `CONTEXT.md`, the deploy-reliability command, the run skill,
+`ecosystem.config.cjs` (`gfCron` -> `cronApp`; it also drives `pg-backup-nightly` and `bqa-daily`, so pm2 has **7** apps,
+not 6), `vite.config.ts`, `.dockerignore` and the job-report scripts. git-ignored remnants (`greenfield/node_modules`,
+`greenfield/.env`, `bharatquant/web/node_modules`) are still on disk and were left for the user.
+
+**Real defect found and fixed - AF-20261003-10.** `live_screener_outcomes` had no row newer than 2026-09-10 while ~260k
+appearances arrive a day. Every resolver run resolved exactly one 50,000-row page and the job runs 3-4 times a day, so
+capacity sat below inflow and the backlog (~5.4M rows) could never close; every run reported success. Now a run drains
+pages (committed one at a time, keyset cursor, 14-minute budget). **AF-20261003-11:** `live_screener_optimizer.py`
+pulled all 10.9M outcome rows into pandas (9.8GB peak, timed out, then killed by a dead backend); the grouping now happens
+in SQL. **AF-20261001-31** (resolver `ORDER BY ... LIMIT` head-of-line) was ported from agent branch `6e43091e` into main.
+Ledger rows -30/-31/-34/-37/-39 and AF-20261002-02 were re-checked against main and updated or closed.
+
+**Blocked, needs the user:** every production write was refused by the classifier, so the live requeue of 67,917
+fabricated 0% NEUTRAL outcomes (`data_integrity_repair.py --zero-neutral-outcomes`), the table drops of AF-20261003-06 and
+all verification-by-running of the scheduled jobs remain. Live job state at the time (job_run_history, 5 days): 47 failures
+of 6,008 runs, none since 2026-10-02 08:00 UTC; seven heartbeats not green, all last-run failures that predate the fixes
+above (screener-performance, quant-eod-sync Trendlyne 405, intraday-fetcher timeouts, dl-trainer CUDA OOM, host
+memory-commit kills of mover-intraday-capture) plus one alert-dedupe ghost row (`feature-engineering`).
+Gates: tsc 0, schema:drift clean, findings:check and doc:numbers:check pass; the full suites are recorded below.

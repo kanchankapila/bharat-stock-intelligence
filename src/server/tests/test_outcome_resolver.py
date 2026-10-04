@@ -935,3 +935,20 @@ def test_stale_pending_horizons_includes_unified_and_coalesces_rec_log_null():
                  "VALUES ('U7',?,NULL,'PENDING')", (sig,))
     conn.commit()
     assert stale_pending_horizons(conn) == [15, 30]
+
+
+def test_resolver_pages_the_whole_backlog_not_just_one_batch():
+    """AF-20261001-31: ~5.5k signals arrive a day against a LIMIT-2000 batch, so a single batch
+    starved older rows. A pass must keyset-page until the backlog is drained."""
+    from outcome_resolver import resolve_outcomes
+    conn = make_db()
+    for sym in ("AAA", "BBB", "CCC"):
+        seed_flat_history(conn, sym)
+        add_signal(conn, sym)
+        add_exit_bar(conn, sym)
+    conn.commit()
+
+    result = resolve_outcomes(conn, horizon_days=1, dry_run=False, limit=1)
+
+    assert result["processed"] == 3 and result["resolved"] == 3
+    assert conn.execute("SELECT COUNT(*) FROM signal_outcomes").fetchone()[0] == 3

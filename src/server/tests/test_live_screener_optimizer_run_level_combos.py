@@ -105,3 +105,39 @@ class TestOptimizeForHorizonGroupsByRunNotDay:
         src = inspect.getsource(lso.optimize_combinations)
         assert "a.run_id" in src
         assert "JOIN live_screener_appearances" in src
+
+
+class TestMatrixFromAggregatesMatchesTheRawBuilder:
+    """AF-20261003-11: the optimizer now groups to (run_id, symbol) in SQL and ships one row per
+    group with a `filters` list. That shortcut must produce the SAME matrix the pandas builder
+    does, or the shipped combos silently change."""
+
+    @staticmethod
+    def _aggregate_like_sql(df):
+        g = df.groupby(["run_id", "symbol"], sort=False)
+        agg = g.agg(
+            appeared_at=("appeared_at", "min"),
+            return_1d=("return_1d", "mean"), return_3d=("return_3d", "mean"),
+            return_5d=("return_5d", "mean"), return_intraday=("return_intraday", "mean"),
+            filters=("filter_key", lambda s: sorted(set(s))),
+        ).reset_index()
+        return agg
+
+    def test_same_flags_and_returns_as_the_raw_builder(self):
+        raw = _multi_run_day_frame()
+        want, want_cols = lso._build_run_matrix(raw)
+        got, got_cols = lso._matrix_from_aggregates(self._aggregate_like_sql(raw))
+
+        assert got_cols == want_cols
+        key = ["run_id", "symbol"]
+        cols = sorted(got.columns)
+        a = got[cols].sort_values(key).reset_index(drop=True)
+        b = want[cols].sort_values(key).reset_index(drop=True)
+        pd.testing.assert_frame_equal(a, b, check_dtype=False)
+
+    def test_filter_flags_are_binary_per_run(self):
+        got, cols = lso._matrix_from_aggregates(self._aggregate_like_sql(_multi_run_day_frame()))
+        run2 = got[got["run_id"] == 2].iloc[0]
+        assert run2["RSI_OVERSOLD"] == 1 and run2["VOLUME_SURGE"] == 1
+        run1 = got[got["run_id"] == 1].iloc[0]
+        assert run1["RSI_OVERSOLD"] == 1 and run1["VOLUME_SURGE"] == 0

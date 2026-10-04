@@ -719,13 +719,47 @@ def _nth_session_after(sessions: list, day: str, n: int) -> str:
             + datetime.timedelta(days=i - len(sessions) + 1)).isoformat()
 
 
-def resolve_outcomes(
+# Batches per pass. ~3,380 unified and ~2,170 technical signals arrive per day, so one
+# LIMIT-2000 batch fell behind every day and starved the oldest rows (AF-20261001-31).
+# ponytail: 20 x 2000 = 40k rows/pass bounds a backlog run; raise if a reset needs more.
+MAX_BATCHES = 20
+
+
+def _drain(batch_fn, conn, limit: int = 2000, max_batches: int = MAX_BATCHES, **kw) -> dict[str, int]:
+    """Page a resolver through its whole backlog, newest first, by keyset -- a row that stays
+    PENDING is never re-read in the same run, so it cannot hold a slot older rows need."""
+    total = {'processed': 0, 'resolved': 0}
+    after = None
+    for _ in range(max_batches):
+        r = batch_fn(conn, limit=limit, after=after, **kw)
+        total['processed'] += r['processed']
+        total['resolved'] += r['resolved']
+        if r['processed'] < limit:
+            break
+        after = r['last_key']
+    return total
+
+
+def resolve_outcomes(conn: ConnWrapper, horizon_days: int = 1, dry_run: bool = False,
+                     relabel_before: str | None = None, limit: int = 2000) -> dict[str, int]:
+    return _drain(_resolve_outcomes_batch, conn, limit, horizon_days=horizon_days,
+                  dry_run=dry_run, relabel_before=relabel_before)
+
+
+def resolve_unified_outcomes(conn: ConnWrapper, horizon_days: int = 1, dry_run: bool = False,
+                             relabel_before: str | None = None, limit: int = 2000) -> dict[str, int]:
+    return _drain(_resolve_unified_batch, conn, limit, horizon_days=horizon_days,
+                  dry_run=dry_run, relabel_before=relabel_before)
+
+
+def _resolve_outcomes_batch(
     conn: ConnWrapper,
     horizon_days: int = 1,
     dry_run: bool = False,
     relabel_before: str | None = None,
     limit: int = 2000,
-) -> dict[str, int]:
+    after: tuple | None = None,
+) -> dict:
     """
     PHASE 1 FIX: Resolve signal outcomes with proper time-of-day validation
     - Signals entered at next trading day's open
@@ -760,10 +794,13 @@ def resolve_outcomes(
                  AND so2.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
                  {relabel}
            )
-         ORDER BY ts.date DESC
+           {after}
+         ORDER BY ts.date DESC, ts.symbol DESC
          LIMIT ?
-    """.format(relabel=_RELABEL_SO if relabel_before else ''),
-        (cutoff, horizon_days) + ((relabel_before,) if relabel_before else ()) + (limit,)).fetchall()
+    """.format(relabel=_RELABEL_SO if relabel_before else '',
+               after='AND (ts.date, ts.symbol) < (?, ?)' if after else ''),
+        (cutoff, horizon_days) + ((relabel_before,) if relabel_before else ())
+        + (tuple(after) if after else ()) + (limit,)).fetchall()
 
     cols = ['symbol', 'signal_date', 'entry_price', 'signal_score', 'signals_json', 'stop_loss', 'time_horizon']
     rows = [dict(zip(cols, r)) for r in pending]
@@ -938,16 +975,18 @@ def resolve_outcomes(
         conn.commit()
 
     print(f"[OutcomeResolver] Resolved {resolved}/{len(rows)} signals.")
-    return {'processed': len(rows), 'resolved': resolved}
+    return {'processed': len(rows), 'resolved': resolved,
+            'last_key': (pending[-1][1], pending[-1][0])}
 
 
-def resolve_unified_outcomes(
+def _resolve_unified_batch(
     conn: ConnWrapper,
     horizon_days: int = 1,
     dry_run: bool = False,
     relabel_before: str | None = None,
     limit: int = 2000,
-) -> dict[str, int]:
+    after: tuple | None = None,
+) -> dict:
     """
     Resolve outcomes for all signal sources (AI, Quant, Technical) from unified_signals.
     """
@@ -977,10 +1016,13 @@ def resolve_unified_outcomes(
                 AND uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
                 {relabel}
           )
-        ORDER BY us.signal_date DESC
+          {after}
+        ORDER BY us.signal_date DESC, us.id DESC
         LIMIT ?
-    """.format(relabel=_RELABEL_USO if relabel_before else ''),
-        (cutoff, horizon_days) + ((relabel_before,) if relabel_before else ()) + (limit,)).fetchall()
+    """.format(relabel=_RELABEL_USO if relabel_before else '',
+               after='AND (us.signal_date, us.id) < (?, ?)' if after else ''),
+        (cutoff, horizon_days) + ((relabel_before,) if relabel_before else ())
+        + (tuple(after) if after else ()) + (limit,)).fetchall()
 
     cols = ['id', 'symbol', 'signal_date', 'entry_price', 'stop_loss', 'signal_source',
             'confidence_score', 'target_price']
@@ -1200,7 +1242,8 @@ def resolve_unified_outcomes(
         conn.commit()
 
     print(f"[OutcomeResolver] Resolved {resolved}/{len(rows)} unified signals.")
-    return {'processed': len(rows), 'resolved': resolved}
+    return {'processed': len(rows), 'resolved': resolved,
+            'last_key': (pending[-1][2], pending[-1][0])}
 
 
 def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str, int]:

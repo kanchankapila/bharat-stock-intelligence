@@ -96,6 +96,9 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   — the helper's own callers are the blast radius, not just the file you edited.** Sibling of
   this file's "measured 119s against a 120_000 budget — a 1-second margin" cases: the recurring
   defect is choosing a budget with no headroom, then never revisiting it when the work grows.
+- **A backlog-draining job that resolves ONE capped page per run, with inflow above (cap x runs per day), reports success forever while the backlog grows.** `live_screener_resolver.py` took the oldest 50,000 pending rows per run, 3-4 runs a day, against ~260,000 new appearances a day: the newest outcome was 3+ weeks old, every consumer (optimizer, ML ranker, backtester) trained on month-old data, and no job failed (AF-20261003-10). **Tell:** a log line that says `Resolved N` with the SAME N (the cap) on every run, and `MAX(<outcome date>)` far behind `MAX(<input date>)`. Fix: drain pages until empty or a wall-clock budget, one commit per page, with a keyset cursor `(sort_key, id) > (?, ?)` so a row that can never resolve (no outcome row is written for it) is skipped instead of re-selected as the head of every page. Same family as `outcome_resolver`'s newest-first `LIMIT 2000` starvation (AF-20260930-27, AF-20261001-31). Check the throughput arithmetic (cap x runs/day vs rows/day) whenever you add a `LIMIT` to a work queue.
+- **Loading millions of per-event rows into pandas to `groupby` them is a database job.** `live_screener_optimizer.py` pulled 10.9M outcome rows (9.8GB peak, then a timeout) to group by `(run_id, symbol)`; `GROUP BY` + `ARRAY_AGG(DISTINCT ...)` ships ~one row per group (AF-20261003-11). Memory ceilings and budgets are not the fix - they just move the failure date as the table grows.
+
 ## Limits in the wrong unit, and orderings that are only a comment (2026-09-12)
 
 - **A COUNT limit does not bound MEMORY, and a PER-PROCESS ceiling does not bound the HOST — two

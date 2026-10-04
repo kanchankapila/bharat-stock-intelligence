@@ -65,12 +65,29 @@ def _build_run_matrix(df: pd.DataFrame):
     return matrix, filter_cols
 
 
-def _optimize_for_horizon(df: pd.DataFrame, target_col: str, settings_key: str, fixed_horizon: bool = False):
+def _matrix_from_aggregates(agg: pd.DataFrame):
+    """The same (matrix, filter_cols) as _build_run_matrix, from rows already grouped to
+    (run_id, symbol) IN SQL (AF-20261003-11).
+
+    The optimizer used to pull every per-appearance outcome row into pandas (10.9M rows, a 9.8GB
+    peak, growing with the table) only to group it by (run_id, symbol) and pivot it. That
+    killed the host's memory headroom and then the 25-min budget; the database does the grouping
+    in one pass and ships roughly one row per (run, symbol). `agg` carries a `filters` list column."""
+    agg = agg.reset_index(drop=True)
+    exploded = agg['filters'].explode().dropna()
+    flags = pd.get_dummies(exploded, dtype='uint8').groupby(level=0).max()
+    filter_cols = sorted(flags.columns)
+    flags = flags.reindex(agg.index, fill_value=0)[filter_cols]
+    matrix = pd.concat([agg.drop(columns=['filters']), flags], axis=1)
+    return matrix, filter_cols
+
+
+def _optimize_for_horizon(df, target_col: str, settings_key: str, fixed_horizon: bool = False, prebuilt=None):
     """Trains the decision tree / single-filter rankings for one target horizon and saves
     the result to the given app_settings key. `fixed_horizon=True` skips the 3d->1d
     fallback (used for the intraday horizon, which has no fallback column). See
     _build_run_matrix's docstring for why matches are grouped by (run_id, symbol)."""
-    matrix, filter_cols = _build_run_matrix(df)
+    matrix, filter_cols = prebuilt if prebuilt is not None else _build_run_matrix(df)
 
     # Determine the best target horizon to optimize for (defaulting to 3d, fallback to 1d)
     if not fixed_horizon and matrix[target_col].isnull().sum() > len(matrix) * 0.7:
@@ -204,24 +221,31 @@ def optimize_combinations():
     print(f"[LiveScreenerOptimizer] Starting optimization run at {datetime.datetime.now()}")
 
     q = """
-        SELECT o.appearance_id, o.symbol, o.filter_key, o.appeared_at, o.entry_price,
-               a.run_id,
-               o.return_1d, o.return_3d, o.return_5d, o.return_intraday
+        SELECT a.run_id, o.symbol,
+               MIN(o.appeared_at)      AS appeared_at,
+               AVG(o.return_1d)        AS return_1d,
+               AVG(o.return_3d)        AS return_3d,
+               AVG(o.return_5d)        AS return_5d,
+               AVG(o.return_intraday)  AS return_intraday,
+               ARRAY_AGG(DISTINCT o.filter_key) AS filters
         FROM live_screener_outcomes o
         JOIN live_screener_appearances a ON a.id = o.appearance_id
         WHERE o.return_1d IS NOT NULL OR o.return_3d IS NOT NULL OR o.return_5d IS NOT NULL
            OR o.return_intraday IS NOT NULL
+        GROUP BY a.run_id, o.symbol
     """
-    df = read_df(q)
+    agg = read_df(q)
 
-    if df.empty or len(df) < 20:
-        print(f"[LiveScreenerOptimizer] Insufficient data ({len(df)} records found). Needs at least 20 records to optimize.")
+    if agg.empty or len(agg) < 20:
+        print(f"[LiveScreenerOptimizer] Insufficient data ({len(agg)} run-symbol groups found). Needs at least 20 to optimize.")
         return
 
-    print(f"[LiveScreenerOptimizer] Loaded {len(df)} historical appearances.")
+    print(f"[LiveScreenerOptimizer] Loaded {len(agg)} (run, symbol) groups.")
 
-    _optimize_for_horizon(df, 'return_3d', 'live_screener_optimal_combinations')
-    _optimize_for_horizon(df, 'return_intraday', 'live_screener_optimal_combinations_intraday', fixed_horizon=True)
+    prebuilt = _matrix_from_aggregates(agg)
+    _optimize_for_horizon(None, 'return_3d', 'live_screener_optimal_combinations', prebuilt=prebuilt)
+    _optimize_for_horizon(None, 'return_intraday', 'live_screener_optimal_combinations_intraday',
+                          fixed_horizon=True, prebuilt=prebuilt)
 
 
 if __name__ == '__main__':
