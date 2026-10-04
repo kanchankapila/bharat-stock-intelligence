@@ -44,7 +44,7 @@ export async function processDLPython(
   return { success: true };
 }
 
-async function processDlMacroFetch(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
+async function processDlMacroFetch(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[]; monitorAlreadyRecorded?: boolean }> {
   // Explicit timeout, not processDLPython's 6h default: this worker's lockDuration is
   // only 5 min, so an unbounded default lets a hang block the lock indefinitely instead
   // of failing cleanly -- exactly what caused a live incident (repeated "could not renew
@@ -62,7 +62,8 @@ async function processDlMacroFetch(_job: Job): Promise<{ success: boolean; skipp
     .catch(e => T.fail('sector_global_corr', e));
   // Bond yields (India G-Sec + US/UK/DE 10yr) are now fetched inside global_macro_fetcher.py.
   const verdict = T.finish();
-  return { success: verdict.ok, failedSteps: verdict.failedSteps };
+  return { success: verdict.ok, failedSteps: verdict.failedSteps,
+    monitorAlreadyRecorded: verdict.monitorAlreadyRecorded };
 }
 
 async function processDlFeatureRefresh(job: Job): Promise<{ success: boolean; skipped?: boolean }> {

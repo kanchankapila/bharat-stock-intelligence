@@ -60,7 +60,7 @@ async function processCorporateActionsIngest(_job: Job): Promise<{ success: bool
   return { success: true };
 }
 
-async function processScreenerPerf(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] } | void> {
+async function processScreenerPerf(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[]; monitorAlreadyRecorded?: boolean } | void> {
   // 2026-08-07: skip entirely on a trading holiday -- every phase here (discovery/enrichment,
   // Bayesian tier scoring, PIT snapshot, live-screener train/backtest) re-derives from
   // screener_appearances/signal_outcomes/stock_ohlcv, none of which gained a new row on a day
@@ -182,7 +182,8 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; skippe
   });
 
   const verdict = T.finish();
-  return { success: verdict.ok, failedSteps: verdict.failedSteps };
+  return { success: verdict.ok, failedSteps: verdict.failedSteps,
+    monitorAlreadyRecorded: verdict.monitorAlreadyRecorded };
 }
 
 async function processCompanyProfilesSync(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
@@ -235,7 +236,7 @@ async function processIndexMembership(_job: Job): Promise<{ success: boolean; sk
   return { success: true };
 }
 
-async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount: number; failedSteps?: string[] }> {
+async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount: number; failedSteps?: string[]; monitorAlreadyRecorded?: boolean }> {
   console.log('[QUEUE] Starting NSE master data sync...');
   // Five backfill sub-steps below were each `(non-blocking)` .catch/try-catch handlers, so the
   // job returned success:true with every one of them dead. Non-blocking is right -- one bad
@@ -313,7 +314,8 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
       console.log(`[QUEUE] nse_stocks fundamentals-fallback backfill: ${updated} rows updated`);
     });
     const verdict = T.finish();
-    return { success: verdict.ok, stockCount, failedSteps: verdict.failedSteps };
+    return { success: verdict.ok, stockCount, failedSteps: verdict.failedSteps,
+      monitorAlreadyRecorded: verdict.monitorAlreadyRecorded };
   } catch (err: any) {
     console.error('[QUEUE] NSE sync failed:', err.message);
     throw err;

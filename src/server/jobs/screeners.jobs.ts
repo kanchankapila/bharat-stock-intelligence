@@ -122,7 +122,7 @@ async function processFundamentalsSync(job: Job): Promise<{ success: boolean; sk
   return { success: true };
 }
 
-async function processQuantScoring(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
+async function processQuantScoring(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[]; monitorAlreadyRecorded?: boolean }> {
   // 2026-08-06: same reasoning as processStockScoring above -- skip entirely, no morning
   // replacement, since quant_scores would just be re-derived from the same unchanged inputs.
   if (await shouldSkipOnTradingHoliday(job)) {
@@ -215,7 +215,8 @@ async function processQuantScoring(job: Job): Promise<{ success: boolean; skippe
       .catch(e => T.fail(`factor_picks_${factor}`, e));
   }
   const verdict = T.finish();
-  return { success: verdict.ok, failedSteps: verdict.failedSteps };
+  return { success: verdict.ok, failedSteps: verdict.failedSteps,
+    monitorAlreadyRecorded: verdict.monitorAlreadyRecorded };
 }
 
 export async function registerScreenerJobs(connection: any) {

@@ -70,7 +70,7 @@ async function processResearchPostclose(_job: Job): Promise<{ success: boolean; 
   return { success: true };
 }
 
-async function processOutcomeResolver(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
+async function processOutcomeResolver(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[]; monitorAlreadyRecorded?: boolean }> {
   // 2026-08-06: skip the standalone 09:30 IST trigger on a trading holiday -- closed-day-early-
   // batch already dispatches a 'closed-day-early'-named run at ~07:10 IST that morning.
   if (await shouldSkipOnTradingHoliday(job)) {
@@ -104,7 +104,8 @@ async function processOutcomeResolver(job: Job): Promise<{ success: boolean; ski
     .catch(err => T.fail('decision_outcome_resolver', err));
 
   const verdict = T.finish();
-  return { success: verdict.ok, failedSteps: verdict.failedSteps };
+  return { success: verdict.ok, failedSteps: verdict.failedSteps,
+    monitorAlreadyRecorded: verdict.monitorAlreadyRecorded };
 }
 
 export const QUEUE_CHATBOT_REINGEST = 'chatbot-reingest';

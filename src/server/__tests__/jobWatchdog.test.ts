@@ -15,7 +15,7 @@ const {
   mockGetSystemStatus: vi.fn(async () => []),
   mockDbGet: vi.fn(async () => undefined),
   mockDbRun: vi.fn(async () => ({ changes: 0, lastInsertRowid: 0 })),
-  mockDbAll: vi.fn(async () => []),
+  mockDbAll: vi.fn(async (_sql?: string) => []),
   mockRunDataQualityChecks: vi.fn(async () => []),
   mockGetLatestDataQualityResults: vi.fn(async () => []),
   // Default: no log file on disk -- getRecentCatchupCounts treats that as "nothing to report",
@@ -283,7 +283,31 @@ describe('buildDailyDigest', () => {
     expect(digest).toContain('Technical Signal Scan');
     // Healthy, never-before-seen "Noncritical Job" isn't spammed into the digest body —
     // first-seen keys are recorded but not diffed/listed until the next run.
-    expect(digest).not.toContain('Noncritical Job');
+    expect(digest).toContain('Noncritical Job');
+  });
+
+  it('lists every job expected on the IST date with its actual daily run status', async () => {
+    mockDbAll.mockImplementation(async (sql?: string) => {
+      if (sql?.includes('daily-job-run-sheet')) {
+        return [{
+          job_name: 'critical-job', total: 2, successes: 1, failures: 1,
+          last_status: 'success', last_ran_at: '2026-07-02T10:12:00.000Z', last_error: null,
+        }];
+      }
+      return [];
+    });
+
+    const digest = await buildDailyDigest(new Date('2026-07-02T10:30:00Z'));
+    expect(digest).toContain('Today’s scheduled jobs (2)');
+    expect(digest).toContain('Critical Job — recovered (1 failed, 1 succeeded)');
+    expect(digest).toContain('Noncritical Job — pending (scheduled later today)');
+    expect(digest).toContain('2026-07-02 IST');
+  });
+
+  it('does not call a due-but-unrecorded job healthy merely because its grace window is open', async () => {
+    const digest = await buildDailyDigest(new Date('2026-07-02T10:30:00Z'));
+    expect(digest).toContain('Critical Job — awaiting completion (within grace)');
+    expect(digest).not.toContain('Critical Job — succeeded');
   });
 
   it('reports a recovery in "Changed since last report" when a previously-stale item turns healthy', async () => {
@@ -346,7 +370,7 @@ describe('buildDailyDigest', () => {
   // rolling-7-day window (a decommissioned job's lifetime ratio was being reported as
   // current health); the mock rows follow the new query shape.
   it('flags a job whose failure rate crosses the warn threshold with enough runs to mean something', async () => {
-    mockDbAll.mockResolvedValue([
+    mockDbAll.mockImplementation(async (sql?: string) => sql?.includes('daily-job-run-sheet') ? [] : [
       { job_name: 'ml-daily-ops', total: 89, fails: 44 },
     ]);
     const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
@@ -356,13 +380,27 @@ describe('buildDailyDigest', () => {
   });
 
   it('does not flag a job below the fail-rate threshold or with too few runs to judge', async () => {
-    mockDbAll.mockResolvedValue([
+    mockDbAll.mockImplementation(async (sql?: string) => sql?.includes('daily-job-run-sheet') ? [] : [
       { job_name: 'healthy-job', total: 40, fails: 2 }, // 5% -- fine
     ]);
     // fewer than MIN_RUNS_FOR_FAIL_RATE total runs is filtered at the query level (the HAVING
     // clause), so only the healthy row reaches the flag logic.
     const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
     expect(digest).not.toContain('Job-runtime health');
+  });
+
+  it('deduplicates only the proven double-recording parents before computing fail rates', async () => {
+    const queries: string[] = [];
+    mockDbAll.mockImplementation(async (sql?: string) => {
+      if (sql) queries.push(sql);
+      return [];
+    });
+    await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    const failRateSql = queries.find(sql => sql.includes("interval '7 days'")) ?? '';
+    expect(failRateSql).toContain('LAG(ran_at)');
+    expect(failRateSql).toContain("interval '1 second'");
+    expect(failRateSql).toContain("job_name NOT IN ('confluence-outcomes', 'outcome-resolver', 'quant-scoring'");
+    expect(failRateSql).not.toContain("'news-sentiment'");
   });
 
   it('flags a job with more than one real catch-up queued in the last 24h', async () => {

@@ -1,6 +1,8 @@
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import eps_surprise_fetcher as esf
 
@@ -48,6 +50,63 @@ class TestFetchBulkDegradesGracefully:
         features, history = esf.fetch_bulk({"SCID1": "RELIANCE"})
         assert features == {}
         assert history == []
+
+    def test_http_204_is_legitimate_no_content_not_an_error(self, monkeypatch, capsys):
+        monkeypatch.setattr(esf, "cffi_req", _FakeCffi(
+            _FakeResp(status_code=204, raise_on_json=True),
+        ))
+        features, history = esf.fetch_bulk({"SCID1": "RELIANCE"})
+        assert features == {}
+        assert history == []
+        assert capsys.readouterr().err == ""
+
+    def test_main_finishes_cleanly_then_fails_the_step_when_bulk_feed_is_unavailable(self, monkeypatch):
+        class _Rows:
+            def fetchall(self):
+                return [("RELIANCE", "RI")]
+
+        class _Conn:
+            closed = False
+
+            def execute(self, _sql):
+                return _Rows()
+
+            def close(self):
+                self.closed = True
+
+        con = _Conn()
+        monkeypatch.setattr(sys, "argv", ["eps_surprise_fetcher.py"])
+        monkeypatch.setattr(esf, "connect", lambda: con)
+        monkeypatch.setattr(esf, "ensure_schema", lambda _con: None)
+        monkeypatch.setattr(esf, "_fetch_bulk_result", lambda _mapping: ({}, [], False))
+        monkeypatch.setattr(esf, "_write_history", lambda _rows: None)
+        monkeypatch.setattr(esf, "enrich_from_history", lambda features, *_args: (features, []))
+        monkeypatch.setattr(esf, "_write_technical_signals", lambda _con, _features: 0)
+
+        with pytest.raises(RuntimeError, match="bulk actual-estimate feed returned no usable data"):
+            esf.main()
+        assert con.closed, "the DB connection must be closed before the scheduled step is failed"
+
+    def test_main_accepts_legitimate_no_content(self, monkeypatch):
+        class _Rows:
+            def fetchall(self):
+                return [("RELIANCE", "RI")]
+
+        class _Conn:
+            def execute(self, _sql):
+                return _Rows()
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(sys, "argv", ["eps_surprise_fetcher.py"])
+        monkeypatch.setattr(esf, "connect", _Conn)
+        monkeypatch.setattr(esf, "ensure_schema", lambda _con: None)
+        monkeypatch.setattr(esf, "_fetch_bulk_result", lambda _mapping: ({}, [], True))
+        monkeypatch.setattr(esf, "_write_history", lambda _rows: None)
+        monkeypatch.setattr(esf, "enrich_from_history", lambda features, *_args: (features, []))
+        monkeypatch.setattr(esf, "_write_technical_signals", lambda _con, _features: 0)
+        esf.main()
 
 
 _GOOD_PAYLOAD = {"data": {"list": [

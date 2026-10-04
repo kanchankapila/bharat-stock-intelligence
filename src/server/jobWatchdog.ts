@@ -9,6 +9,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { CronExpressionParser } from 'cron-parser';
 import {
   getLateJobs,
   wasAlreadyAlerted,
@@ -31,6 +32,14 @@ import { runDataQualityChecks, getLatestDataQualityResults } from './dataQuality
 const FAIL_RATE_WARN = 0.25;
 const MIN_RUNS_FOR_FAIL_RATE = 5;
 
+// These are the only parents proven to have received a second history row from both
+// StepTracker.finish() and registerRepeatableJob's completed handler. Keep the historical
+// cleanup deliberately narrow: high-frequency jobs such as news-sentiment can legitimately
+// finish two independent runs inside one second.
+const DOUBLE_RECORDED_STEP_JOBS_SQL =
+  "'confluence-outcomes', 'outcome-resolver', 'quant-scoring', " +
+  "'screener-performance', 'nse-sync', 'dl-macro-fetch'";
+
 /** job-runtime-audit (2026-08-19) found ml-daily-ops failing ~49% of runs and traced it to
  *  addJobWithCatchup queuing a duplicate full pipeline run behind the still-active real one on
  *  restart -- fixed in registerJob.ts, but nothing was watching for this SHAPE of problem
@@ -47,11 +56,24 @@ const MIN_RUNS_FOR_FAIL_RATE = 5;
  *  and the percentage means "is this job failing NOW". */
 async function getJobFailRateFlags(): Promise<string[]> {
   const rows = await dbAll<{ job_name: string; total: number; fails: number }>(
-    `SELECT job_name,
+    `WITH ordered AS (
+       SELECT job_name, status, ran_at,
+              LAG(ran_at) OVER (PARTITION BY job_name ORDER BY ran_at) AS prev_ran_at,
+              LAG(status) OVER (PARTITION BY job_name ORDER BY ran_at) AS prev_status
+       FROM job_run_history
+       WHERE ran_at > now() - interval '7 days'
+     ), deduped AS (
+       SELECT job_name, status
+     FROM ordered
+     WHERE prev_ran_at IS NULL
+          OR job_name NOT IN (${DOUBLE_RECORDED_STEP_JOBS_SQL})
+          OR ran_at - prev_ran_at > interval '1 second'
+          OR status IS DISTINCT FROM prev_status
+     )
+     SELECT job_name,
             COUNT(*) AS total,
             COUNT(*) FILTER (WHERE status <> 'success') AS fails
-     FROM job_run_history
-     WHERE ran_at > now() - interval '7 days'
+     FROM deduped
      GROUP BY job_name
      HAVING COUNT(*) >= ?`,
     [MIN_RUNS_FOR_FAIL_RATE],
@@ -194,6 +216,96 @@ export async function checkAndAlertDataQuality(now: Date = new Date()): Promise<
 
 const DIGEST_STATE_KEY = 'job_digest_last_state';
 
+interface DailyJobRunSummary {
+  job_name: string;
+  total: number | string;
+  successes: number | string;
+  failures: number | string;
+  last_status: string;
+  last_ran_at: string | Date;
+  last_error: string | null;
+}
+
+async function getDailyJobRunSummaries(now: Date): Promise<Map<string, DailyJobRunSummary>> {
+  const istDate = istDateStr(now.getTime());
+  const start = new Date(`${istDate}T00:00:00+05:30`);
+  const end = new Date(start.getTime() + 86_400_000);
+  const rows = await dbAll<DailyJobRunSummary>(
+    `/* daily-job-run-sheet */
+     WITH ordered AS (
+       SELECT job_name, status, ran_at, error,
+              LAG(ran_at) OVER (PARTITION BY job_name ORDER BY ran_at) AS prev_ran_at,
+              LAG(status) OVER (PARTITION BY job_name ORDER BY ran_at) AS prev_status
+       FROM job_run_history
+       WHERE ran_at >= ? AND ran_at < ?
+     ), deduped AS (
+       SELECT job_name, status, ran_at, error
+       FROM ordered
+       WHERE prev_ran_at IS NULL
+          OR job_name NOT IN (${DOUBLE_RECORDED_STEP_JOBS_SQL})
+          OR ran_at - prev_ran_at > interval '1 second'
+          OR status IS DISTINCT FROM prev_status
+     )
+     SELECT job_name,
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE status = 'success') AS successes,
+            COUNT(*) FILTER (WHERE status <> 'success') AS failures,
+            (ARRAY_AGG(status ORDER BY ran_at DESC))[1] AS last_status,
+            MAX(ran_at) AS last_ran_at,
+            (ARRAY_AGG(error ORDER BY ran_at DESC))[1] AS last_error
+       FROM deduped
+      GROUP BY job_name`,
+    [start.toISOString(), end.toISOString()],
+  );
+  return new Map(rows.map(row => [row.job_name, row]));
+}
+
+function scheduledSlotHasElapsed(
+  entry: { cronPattern?: string; everyMs?: number },
+  now: Date,
+): boolean {
+  if (entry.everyMs) return true;
+  if (!entry.cronPattern) return false;
+  try {
+    const previous = CronExpressionParser.parse(entry.cronPattern, {
+      currentDate: now,
+      tz: 'Etc/UTC',
+    }).prev().toDate();
+    return istDateStr(previous.getTime()) === istDateStr(now.getTime());
+  } catch {
+    return true;
+  }
+}
+
+function dailyRunSheetLine(
+  entry: { jobName: string; label: string; cronPattern?: string; everyMs?: number },
+  summary: DailyJobRunSummary | undefined,
+  late: { hoursLate: number; lastError: string | null } | undefined,
+  now: Date,
+): string {
+  const label = sanitizeMarkdown(entry.label);
+  if (late) {
+    const delay = late.hoursLate >= 1
+      ? `${late.hoursLate}h late`
+      : `${Math.max(1, Math.round(late.hoursLate * 60))}m late`;
+    return `❌ ${label} — late/missed (${delay})`;
+  }
+  if (!summary) {
+    return scheduledSlotHasElapsed(entry, now)
+      ? `⏳ ${label} — awaiting completion (within grace)`
+      : `🕒 ${label} — pending (scheduled later today)`;
+  }
+
+  const successes = Number(summary.successes) || 0;
+  const failures = Number(summary.failures) || 0;
+  if (summary.last_status !== 'success') {
+    const detail = summary.last_error ? `: ${sanitizeMarkdown(summary.last_error).slice(0, 140)}` : '';
+    return `❌ ${label} — failed so far (${failures} failed, ${successes} succeeded)${detail}`;
+  }
+  if (failures > 0) return `✅ ${label} — recovered (${failures} failed, ${successes} succeeded)`;
+  return `✅ ${label} — succeeded (${successes} run${successes === 1 ? '' : 's'})`;
+}
+
 async function loadDigestState(): Promise<Record<string, string>> {
   try {
     const row = await dbGet<{ value: string }>('SELECT value FROM app_settings WHERE key = ?', [DIGEST_STATE_KEY]);
@@ -244,6 +356,13 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
 
   // Filter registry jobs to ONLY those supposed to run on this IST date
   const todaysScheduledJobs = scheduledRegistry.filter(j => isJobSupposedToRunOnDate(j, now, isTradingHolidayToday));
+  const dailyRuns = await getDailyJobRunSummaries(now);
+  const runSheet = todaysScheduledJobs.map(j => dailyRunSheetLine(
+    j,
+    dailyRuns.get(j.jobName),
+    lateByName.get(j.jobName),
+    now,
+  ));
 
   // Filter MONITOR_SCRIPTS to those scheduled / supposed to run on this IST date
   const istToday = istDateStr(now.getTime());
@@ -336,6 +455,8 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
 
   const lines = [`📋 *Daily Job Health Digest* — ${now.toISOString().slice(0, 10)}`, ''];
 
+  lines[0] = lines[0].replace(now.toISOString().slice(0, 10), `${istDateStr(now.getTime())} IST`);
+
   if (isTradingHolidayToday) {
     lines.push(
       '🇮🇳 *Trading holiday* — the exchange never opened, so every weekday job was planned ' +
@@ -344,6 +465,8 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
       '',
     );
   }
+
+  lines.push(`*Today’s scheduled jobs (${runSheet.length}):*`, ...runSheet, '');
 
   if (attention.length) {
     lines.push(`*Needs attention (${attention.length}):*`, ...attention, '');

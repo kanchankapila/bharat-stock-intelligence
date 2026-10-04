@@ -188,6 +188,16 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 
 ## Provider identifiers, reverse maps and "the vendor is dead" (2026-09-12 pm2 warn/error sweep)
 
+- **Making a hidden provider failure exit non-zero is observability, not a completed fix.** A
+  truthful red job is better than a false green one, but it still writes no data. Whenever a
+  fetcher logs an HTTP/schema/empty-response failure, follow the mandatory endpoint-discovery
+  sequence below, isolate request method/headers/parameters/TLS fingerprint, probe known sibling
+  routes, and repair or replace the source where contracts are equivalent. Keep the non-zero
+  verdict as a safety net after the root cause is fixed. If resolution requires declaring a
+  vendor dead, changing the data contract, accepting a non-equivalent substitute, credentials,
+  or another owner choice, ask the user with the route-by-route evidence instead of stopping at
+  an alert or silently deleting the feed.
+
 - **A wrapper around a vendor SDK does not inherit this repo's identifier discipline — check
   what identifier the wrapped library actually needs.** `finstack_cashflow_fetcher.py` called an
   MCP tool with the bare NSE symbol; finstack wraps `yfinance`, whose id for an NSE listing is
@@ -316,4 +326,3 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   — it clears EVERY repeatable on its queue before adding its own. The nightly job digest had not
   fired on its cron since a morning digest was added to its queue (2026-09-02); it only ran as a
   boot-time catch-up. 🤖-adjacent: `repeatableQueuesUnique.test.ts`.
-

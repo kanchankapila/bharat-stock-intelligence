@@ -155,7 +155,9 @@ def _compute_features(rows: list[dict]) -> dict:
 
 # ── Pass 1: Bulk endpoint ─────────────────────────────────────────────────────
 
-def fetch_bulk(mc_to_symbol: dict[str, str]) -> tuple[dict[str, dict], list[tuple]]:
+def _fetch_bulk_result(
+    mc_to_symbol: dict[str, str],
+) -> tuple[dict[str, dict], list[tuple], bool]:
     """Fetch the bulk earnings page. Returns:
       - features_by_symbol: {nse_symbol: feature_dict}   (q1 only)
       - history_rows: list of tuples for eps_surprise_history upsert
@@ -167,12 +169,16 @@ def fetch_bulk(mc_to_symbol: dict[str, str]) -> tuple[dict[str, dict], list[tupl
         r = retry_get(cffi_req, BULK_URL, headers=MC_HEADERS, impersonate="chrome110", timeout=30)
     except Exception as e:
         print(f"[EPSSurprise] Bulk endpoint fetch failed after retries: {e}", file=sys.stderr)
-        return {}, []
+        return {}, [], False
+    # Moneycontrol deliberately returns 204 between reporting seasons (confirmed against its
+    # result-dashboard: declaredNSE=0). Do not try to JSON-decode a body that does not exist.
+    if r.status_code == 204:
+        return {}, [], True
     try:
         rows = r.json()["data"]["list"]
     except (ValueError, KeyError, TypeError) as e:
         print(f"[EPSSurprise] Bulk endpoint returned no usable data (status={r.status_code}): {e}", file=sys.stderr)
-        return {}, []
+        return {}, [], False
 
     features_by_symbol: dict[str, dict] = {}
     history_rows: list[tuple] = []
@@ -221,7 +227,13 @@ def fetch_bulk(mc_to_symbol: dict[str, str]) -> tuple[dict[str, dict], list[tupl
             "rev_surprise": rev_s,
         }])
 
-    return features_by_symbol, history_rows
+    return features_by_symbol, history_rows, True
+
+
+def fetch_bulk(mc_to_symbol: dict[str, str]) -> tuple[dict[str, dict], list[tuple]]:
+    """Compatibility wrapper returning the historical two-value public contract."""
+    features, history_rows, _healthy = _fetch_bulk_result(mc_to_symbol)
+    return features, history_rows
 
 
 # ── Pass 2: q2 + beat streak from accumulated history ────────────────────────
@@ -420,7 +432,7 @@ def main() -> None:
 
     # Pass 1: bulk
     print("[EPSSurprise] Pass 1 — fetching bulk earnings from MC...")
-    features, hist1 = fetch_bulk(mc_to_symbol)
+    features, hist1, bulk_feed_healthy = _fetch_bulk_result(mc_to_symbol)
     _write_history(hist1)
     print(f"[EPSSurprise]   Bulk: {len(features)} stocks resolved, {len(hist1)} history rows written")
 
@@ -436,6 +448,8 @@ def main() -> None:
     ts_updated = _write_technical_signals(con, features)
     print(f"[EPSSurprise] Done. {ts_updated} technical_signals rows updated.")
     con.close()
+    if not bulk_feed_healthy:
+        raise RuntimeError("Moneycontrol bulk actual-estimate feed returned no usable data")
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ class _FakeCursor:
     def __init__(self, fetchall_results=None):
         self._fetchall_results = list(fetchall_results or [])
         self.executed = []
+        self.rowcount = 0
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
@@ -45,6 +46,9 @@ class _FakeConn:
 
     def commit(self):
         self.committed = True
+
+    def close(self):
+        pass
 
 
 def _updates(conn):
@@ -104,6 +108,14 @@ class TestBackfillRapidFeaturesUsesLogicalTradingDate:
         assert len(updates) == 1
         for _, params in updates:
             assert params[-1] == "2026-07-31"
+
+    def test_returns_rows_updated_this_run_not_all_time_historical_coverage(self, monkeypatch):
+        monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-07-31")
+        conn = _FakeConn()
+        conn.cur.rowcount = 37
+
+        assert mef._backfill_rapid_features(conn) == 37
+        assert not any("COUNT(*)" in sql for sql, _params in conn.cur.executed)
 
 
 class TestBackfillShockersUsesLogicalTradingDate:
@@ -179,3 +191,41 @@ class TestFetchActualEstimateBeatsBindsValues:
         # 3 per row + 1 trailing date. A mismatch here is the bug that silently shifts
         # every value one column to the left.
         assert sql.count("?") == len(params) == 4
+
+
+class TestEndpointFamilyHealthIsHonest:
+    def test_http_204_is_a_valid_empty_response_not_a_transport_failure(self, monkeypatch):
+        class _NoContent:
+            status_code = 204
+
+            def json(self):
+                raise AssertionError("a 204 response has no JSON body and must not be decoded")
+
+        monkeypatch.setattr(mef.cffi_req, "get", lambda *_args, **_kwargs: _NoContent())
+        assert mef._get("https://example.test/no-content") == {}
+
+    def test_rapid_results_reports_when_every_vendor_call_failed(self, monkeypatch):
+        monkeypatch.setattr(mef, "_get", lambda _url: None)
+        monkeypatch.setattr(mef, "_backfill_rapid_features", lambda _con: 0)
+        assert mef.fetch_rapid_results(_FakeConn()) == 0
+
+    def test_actual_estimate_reports_when_every_vendor_call_failed(self, monkeypatch):
+        monkeypatch.setattr(mef, "_get", lambda _url: None)
+        conn = _FakeConn(fetchall_results=[[('RI', 'RELIANCE')]])
+        assert mef.fetch_actual_estimate_beats(conn) == 0
+
+    def test_main_finishes_independent_feeds_then_fails_on_unavailable_families(self, monkeypatch):
+        conn = _FakeConn()
+        monkeypatch.setattr(sys, "argv", ["mc_earnings_fetcher.py"])
+        monkeypatch.setattr(mef, "connect", lambda: conn)
+        monkeypatch.setattr(mef, "ensure_schema", lambda _con: None)
+        monkeypatch.setattr(mef, "fetch_earnings_dates", lambda _con: None)
+        monkeypatch.setattr(mef, "fetch_rapid_results", lambda _con: 0)
+        monkeypatch.setattr(mef, "fetch_price_shockers", lambda _con: None)
+        monkeypatch.setattr(mef, "fetch_sector_performers", lambda _con: None)
+        monkeypatch.setattr(mef, "fetch_market_dashboard", lambda _con: None)
+        monkeypatch.setattr(mef, "fetch_actual_estimate_beats", lambda _con: 0)
+
+        import pytest
+        with pytest.raises(RuntimeError, match="rapid-results.*actual-estimate"):
+            mef.main()

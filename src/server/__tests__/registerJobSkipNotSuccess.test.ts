@@ -70,6 +70,37 @@ describe('registerRepeatableJob: a skip must not be stamped as a success', () =>
     expect(blanketSuccessIdx).toBeGreaterThan(failedStampIdx);
   });
 
+  it('does not double-write a parent verdict already recorded by StepTracker', () => {
+    const handler = registerJobSrc.slice(
+      registerJobSrc.indexOf("worker.on('completed'"),
+      registerJobSrc.indexOf("worker.on('failed'"),
+    );
+    expect(handler).toMatch(/monitorAlreadyRecorded/);
+    expect(handler).toMatch(/if\s*\(r\?\.monitorAlreadyRecorded\)\s*\{[\s\S]*?return;[\s\S]*?\}/);
+  });
+
+  it('every StepTracker parent routed through the shared handler propagates the marker', () => {
+    const trackedParents = [
+      ['confluence.jobs.ts', 'processConfluenceOutcomes'],
+      ['operations.jobs.ts', 'processOutcomeResolver'],
+      ['screeners.jobs.ts', 'processQuantScoring'],
+      ['sync.jobs.ts', 'processScreenerPerf'],
+      ['sync.jobs.ts', 'processNSESync'],
+      ['dl.jobs.ts', 'processDlMacroFetch'],
+    ] as const;
+
+    for (const [file, functionName] of trackedParents) {
+      const src = readFileSync(resolve(__dirname, `../jobs/${file}`), 'utf-8');
+      const start = src.indexOf(`async function ${functionName}`);
+      expect(start, `${functionName} must still exist`).toBeGreaterThanOrEqual(0);
+      const nextFunction = src.indexOf('\nasync function ', start + 1);
+      const body = src.slice(start, nextFunction < 0 ? src.length : nextFunction);
+      expect(body, `${functionName} must return the StepTracker marker`).toMatch(
+        /return\s*\{[\s\S]*?success:\s*verdict\.ok[\s\S]*?monitorAlreadyRecorded:\s*verdict\.monitorAlreadyRecorded[\s\S]*?\}/,
+      );
+    }
+  });
+
   // The consumer this fix exists for: live_screener_ml_ranker.py --train was a bare .catch,
   // invisible to screener-performance-daily's monitor. Pins that it now reports through
   // StepTracker instead of silently swallowing the failure.

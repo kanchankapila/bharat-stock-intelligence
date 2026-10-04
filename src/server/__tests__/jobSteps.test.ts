@@ -92,6 +92,12 @@ describe('StepTracker', () => {
     expect(job?.message).toBe('2 steps failed: bad-1,bad-2');
   });
 
+  it('marks its verdict as already recorded so an outer worker does not write it twice', async () => {
+    const T = new StepTracker('job');
+    await T.runQuiet('bad', async () => { throw new Error('boom'); });
+    expect(T.finish().monitorAlreadyRecorded).toBe(true);
+  });
+
   // 2026-09-04, scheduler-review finding: _exec() already computed `ms` per step but
   // finish() discarded it before this fix -- job_run_history could never answer "which
   // step got slower." Asserts the 4th positional arg (opaque to the `calls` mock above,

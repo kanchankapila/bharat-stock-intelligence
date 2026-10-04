@@ -643,8 +643,21 @@ export async function registerRepeatableJob(
     // for this in 2026-08-12 each hand-rolled this guard in queues.ts's own completed handlers;
     // every job routed through THIS helper was still missing it. Skip paths return
     // { skipped: true } and must leave the heartbeat (and onCompleted's result logging) alone.
-    const r = result as { skipped?: boolean; success?: boolean; failedSteps?: string[] } | null | undefined;
+    const r = result as {
+      skipped?: boolean;
+      success?: boolean;
+      failedSteps?: string[];
+      monitorAlreadyRecorded?: boolean;
+    } | null | undefined;
     if (r?.skipped) return;
+    // StepTracker has already persisted both the parent verdict and its measured duration.
+    // Writing again here creates two job_run_history rows for one BullMQ execution and doubles
+    // its contribution to the digest's failure-rate calculation. Keep onCompleted semantics,
+    // but leave the single-writer parent monitor alone.
+    if (r?.monitorAlreadyRecorded) {
+      cfg.onCompleted?.(result);
+      return;
+    }
     // Sibling bug, same shape (ml-promotion-gate-review, 2026-08-19): a processor that already
     // tracks its own internal steps via StepTracker and returns { success, failedSteps } (the
     // ml-daily-ops/ml-weekly-retrain pattern, hand-rolled outside this helper specifically to

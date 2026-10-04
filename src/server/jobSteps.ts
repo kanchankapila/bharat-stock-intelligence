@@ -95,7 +95,7 @@ export class StepTracker {
    *  same run (ACTION_ITEMS #16). Deliberately returned rather than thrown: these are
    *  multi-hour jobs, and throwing would hand them to BullMQ's retry machinery and re-run the
    *  whole chain over one failed step. */
-  finish(): { ok: boolean; failedSteps: string[] } {
+  finish(): { ok: boolean; failedSteps: string[]; monitorAlreadyRecorded: true } {
     const failed = this.recs.filter(r => !r.ok);
     // Quiet steps deliberately get no per-step heartbeat (see runQuiet's docstring) but DO
     // count toward the failed list and the job-level verdict below.
@@ -120,6 +120,6 @@ export class StepTracker {
       failed.length ? `${failed.length} steps failed: ${names.join(',')}` : undefined,
       totalMs,
     );
-    return { ok: failed.length === 0, failedSteps: names };
+    return { ok: failed.length === 0, failedSteps: names, monitorAlreadyRecorded: true };
   }
 }

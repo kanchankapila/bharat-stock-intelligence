@@ -44,5 +44,6 @@ This file used to hold every class (~127 KB) and loaded on the first `.py`/`.ts`
 | "Not measured" reported as "measured and found nothing" (2026-09-29) | `bugs-monitoring.md` |
 | A cleanup keyed on a label another writer overwrites (2026-09-30) | `bugs-data-layer.md` (Writes & keys) |
 | Everyday memory contention: pinned-host leak, stale weight table, unbounded latest-per-symbol on a compressed hypertable (2026-09-30) | `bugs-jobs-runtime.md` |
+| Making a hidden provider failure loud is observability, not a root-cause fix (2026-10-04) | `bugs-data-layer.md` |
 
 When you add a class, put it in the area file whose `paths:` cover the code it bites, and add its row here.

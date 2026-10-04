@@ -64,6 +64,11 @@ def _get(url: str):
     """Fetch a MC API URL via curl_cffi. Returns data dict or None on failure."""
     try:
         r = cffi_req.get(url, headers=HEADERS, impersonate="chrome110", timeout=12)
+        # Earnings list routes return 204 between reporting seasons. That is a successful,
+        # explicitly empty response, not malformed JSON or a provider outage.
+        if r.status_code == 204:
+            return {}
+        r.raise_for_status()
         d = r.json()
         if d.get("success") != 1:
             return None
@@ -277,8 +282,14 @@ def _backfill_days_to_results(con, as_of: str | None = None) -> None:
 
 # ── API 2: Rapid results categories ─────────────────────────────────────────────
 
-def fetch_rapid_results(con) -> None:
+def fetch_rapid_results(con) -> int:
+    """Fetch categories and return the number of valid API responses.
+
+    A valid response may truthfully contain an empty list or HTTP 204. Zero means every vendor call failed
+    before a response could be decoded, which the scheduled parent must report as degraded.
+    """
     total = 0
+    successful_responses = 0
     category_counts = {t: 0 for t in RAPID_TYPES}
     # Accumulate best row per (scid, sub_type) keyed by category priority
     # Store all rows and upsert; last write wins per PRIMARY KEY
@@ -292,8 +303,9 @@ def fetch_rapid_results(con) -> None:
                     f"?limit=10000&page={page}&type={rtype}&subType={sub_type}"
                 )
                 data = _get(url)
-                if not data:
+                if data is None:
                     break
+                successful_responses += 1
 
                 items = data.get("list") or []
                 if not items:
@@ -383,6 +395,7 @@ def fetch_rapid_results(con) -> None:
 
     counts_str = ", ".join(f"{t}:{category_counts[t]}" for t in RAPID_TYPES)
     print(f"[EarningsFetcher] Rapid: {total} total ({counts_str}) -> {mapped} mapped to NSE symbols")
+    return successful_responses
 
 
 # Vendor result_date format guard: "Month DD, YYYY", zero-padded day (confirmed live: "August
@@ -463,12 +476,9 @@ def _backfill_rapid_features(con) -> int:
         WHERE ts.symbol = yoy.symbol
           AND ts.date = ?
     """, (today,))
+    updated = cur.rowcount
     con.commit()
-
-    # Count how many technical_signals rows got a non-null yoy category
-    cur.execute("SELECT COUNT(*) FROM technical_signals WHERE earnings_category_yoy IS NOT NULL")
-    row = cur.fetchone()
-    return row[0] if row else 0
+    return updated
 
 
 # ── API 3: Price shockers ────────────────────────────────────────────────────────
@@ -697,7 +707,7 @@ def fetch_market_dashboard(con) -> None:
 
 # ── API 6: Actual vs Estimate — beat/miss label + % vs consensus ─────────────────
 
-def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
+def fetch_actual_estimate_beats(con, max_pages: int = 25) -> int:
     """
     Paginates actual-estimate across three types for maximum stock coverage:
       type=all (25p, ~521 stocks), type=con (24p, ~466), type=std (23p, ~483)
@@ -716,6 +726,7 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
     # symbol → (beat_label, beat_pct, type_priority)
     # type_priority: con=3 > std=2 > all=1 (prefer consolidated)
     rows_by_symbol: dict = {}
+    successful_responses = 0
 
     # limit=10000 returns all results in a single request per type
     TYPES = [("all", 1), ("con", 3), ("std", 2)]  # (type_code, priority)
@@ -726,8 +737,9 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
             f"?page=1&limit=10000&sortBy=all&search=&indexId=N&sector=&type={type_code}"
         )
         data = _get(url)
-        if not data:
+        if data is None:
             continue
+        successful_responses += 1
         items = data.get("list") or []
 
         for item in items:
@@ -754,7 +766,7 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
 
     if not rows_by_symbol:
         print("[EarningsFetcher] actual-estimate: no matched symbols")
-        return
+        return successful_responses
 
     # Stamp today's ts row per symbol (strip priority from tuple).
     # date = today guard added 2026-07-19 instead of MAX(date) -- see
@@ -785,6 +797,7 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
         f"[EarningsFetcher] actual-estimate: {len(rows_by_symbol)} stocks stamped "
         f"(Beats={beats}, Meets={meets}, Missed={misses})"
     )
+    return successful_responses
 
 
 # ── Utilities ────────────────────────────────────────────────────────────────────
@@ -837,13 +850,15 @@ def main():
 
     con = connect()
     ensure_schema(con)
+    unavailable_families = []
 
-    print("[EarningsFetcher] Fetching upcoming results (next 14 days)...")
+    print(f"[EarningsFetcher] Fetching upcoming results (next {UPCOMING_WINDOW_DAYS} days)...")
     fetch_earnings_dates(con)
 
     if not args.skip_rapid:
         print("[EarningsFetcher] Fetching rapid results categories (all 10 type×subtype)...")
-        fetch_rapid_results(con)
+        if fetch_rapid_results(con) == 0:
+            unavailable_families.append("rapid-results")
     else:
         print("[EarningsFetcher] Skipping rapid results (--skip-rapid)")
 
@@ -858,11 +873,16 @@ def main():
 
     if not args.skip_beats:
         print("[EarningsFetcher] Fetching actual-estimate beat/miss (25 pages)...")
-        fetch_actual_estimate_beats(con)
+        if fetch_actual_estimate_beats(con) == 0:
+            unavailable_families.append("actual-estimate")
     else:
         print("[EarningsFetcher] Skipping actual-estimate beats (--skip-beats)")
 
     con.close()
+    if unavailable_families:
+        raise RuntimeError(
+            "Moneycontrol endpoint families unavailable: " + ", ".join(unavailable_families)
+        )
 
 
 if __name__ == "__main__":

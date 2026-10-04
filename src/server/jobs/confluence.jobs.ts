@@ -104,7 +104,7 @@ async function processConfluenceCompute(job: Job): Promise<{ computed: number; e
   return result;
 }
 
-async function processConfluenceOutcomes(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] } | void> {
+async function processConfluenceOutcomes(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[]; monitorAlreadyRecorded?: boolean } | void> {
   // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- confluence
   // outcomes/reliability are graded against price action that didn't happen (exchange never
   // opened), and confluence_ml_engine --train would just refit on an unchanged dataset.
@@ -143,7 +143,8 @@ async function processConfluenceOutcomes(job: Job): Promise<{ success: boolean; 
   await runPython('confluence_ml_engine.py', ['--train'], 15 * 60_000)
     .catch(e => T.fail('confluence_ml_engine_train', e));
   const verdict = T.finish();
-  return { success: verdict.ok, failedSteps: verdict.failedSteps };
+  return { success: verdict.ok, failedSteps: verdict.failedSteps,
+    monitorAlreadyRecorded: verdict.monitorAlreadyRecorded };
 }
 
 export async function registerConfluenceJobs() {
