@@ -95,6 +95,23 @@ This section is a dated status board, not a verdict list. A claim carrying an ol
 in this file is not wrong, it is *unrefreshed* — check the date before quoting it, and re-run
 rather than assume. Full narrative for anything here: `docs/measurement-history.md`.
 
+### 2026-10-04 — Trendlyne technical-analysis snapshot (`trendlyne_adv_tech_daily`, AF-20261003-02)
+
+Graded for the first time through `factor_edge.py --entry open` (read-only, not persisted): 49 daily
+dates 2026-06-30..10-01, 2,261 symbols, 100% fresh. **`momentum_score`: 1d +0.007/0.505 (45 dates, no
+edge), 5d +0.047/0.523 (eff 8.2, LOW-DATA, top-50 +1.30% vs universe, not a median-beater), 21d
++0.106/0.556 (eff 1.2, anecdote).** `ma_bull/ma_bear/osc_*/rsi/adx/mfi/roc_21` all no edge or LOW-DATA at
+|IC|<0.07. **Rank persistence** (mean Spearman between sessions t and t+k): `momentum_score` 0.87@5,
+0.69@21, 0.65@30; `ma_net` 0.64/0.38/0.32; `rsi` 0.71/0.28/0.17 — so a 30-day-old composite still carries
+trend information but its oscillator/RSI parts are mostly gone. **Parity with the TS-written
+`technical_composite_scores`** on 1,362 same-day symbols: `momentum_score` vs the Python one 0.90,
+`trend_score` vs `ma_bull-ma_bear` 0.97, `composite_score` vs RSI 0.84 / ma_net 0.83 — related, not
+interchangeable. The composite itself has one gradeable cohort (2026-07-16, 105 liquid names): 5d
++0.057, 21d +0.197 — an anecdote. **Verdict: no evidence for zeroing stale composites or substituting
+the Python features, and no evidence against; the score path is unchanged, and staleness is now
+visible via the `technical-composite-age` DQ check (warn at >=15% of rows 30+ days old, live 27.4%).**
+Re-grade the Python history at ~20 effective 5d dates (~mid-December).
+
 ### 2026-09-26 refresh — backtests RE-RUN, not just panels re-counted
 
 - **The ranker, re-graded live today** (`--entry open --persist`, panel 35 dates 2026-08-10..09-28,

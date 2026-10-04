@@ -1526,6 +1526,35 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'technical-composite-age',
+    label: 'technical_composite_scores rows older than 30 days (scoring_engine consumes them with no age guard)',
+    category: 'scoring',
+    critical: false,
+    // AF-20261003-02: the TS Trendlyne TA writer is throttled by the vendor's cumulative request
+    // allowance (HTTP 405), so each run refreshes only ~130 of ~1,860 symbols and 549/2,002 rows were
+    // 30+ days old (as old as 2026-07-15) while `scoring_engine.py` adds up to 20 points from them.
+    // MEASURED 2026-10-04 before choosing monitoring over a score change: Trendlyne's momentum rank
+    // persists (Spearman 0.65 at 30 sessions) but its RSI/trend components decay to 0.17-0.32, and there
+    // is no return evidence either way (1d no edge, 5d/21d LOW-DATA on the Python daily history), so
+    // zeroing or substituting stale rows is not justified -- but the exposure must be visible.
+    sql: `SELECT COUNT(*) AS total,
+                 COUNT(*) FILTER (WHERE last_updated < NOW() - INTERVAL '30 days') AS stale
+          FROM technical_composite_scores`,
+    evaluate: (row) => {
+      const total = Number(row?.total) || 0;
+      const stale = Number(row?.stale) || 0;
+      if (total === 0) return { status: 'warn', detail: 'technical_composite_scores is empty' };
+      const share = stale / total;
+      const pct = (share * 100).toFixed(1);
+      if (share >= 0.15) return {
+        status: 'warn',
+        detail: `${stale}/${total} (${pct}%) composite rows are 30+ days old but still feed scoring_engine's ` +
+                `technical factor; the Trendlyne TA refresh is allowance-limited (AF-20261003-02)`,
+      };
+      return { status: 'pass', detail: `${stale}/${total} (${pct}%) composite rows are 30+ days old` };
+    },
+  },
+  {
     id: 'unified-recommendations-liquid-coverage',
     label: 'unified_recommendations coverage of the liquid (>=Rs 1cr ADT) universe',
     category: 'scoring',

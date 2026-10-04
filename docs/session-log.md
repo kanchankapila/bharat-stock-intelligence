@@ -11060,3 +11060,19 @@ Fixed by schema-qualifying the test and making `testsDoNotDropProductionTables` 
 (AF-20261004-02); tables restored by `high_flyer_retrospective.py --backfill 10`. Full vitest then left `schema:drift` clean.
 Gates: vitest 1,626 passed (one earlier run had 3-8 transient failures that pass in isolation - load-dependent);
 pytest 3,281 passed / 259 skipped; findings:check and doc:numbers:check pass.
+
+## 2026-10-04 (evening) — The three big jobs run end to end
+
+Run against production through BullMQ (`scripts/trigger_job.mjs`), one at a time because the host is memory-tight:
+`dl-retrain-weekly` (the scheduled 10:30 IST run, 195.5 min, success; new BiLSTM registered at cv 0.518, not promoted),
+`ml-daily-ops` 17:10 IST (171 min wall, success, 0 failed steps), `ml-weekly-retrain` 19:05 IST (115 min, success, 0 failed
+steps), `screener-performance` 19:54 IST (49 min, success, 0 failed steps - its optimizer/backtest/features-fetcher failures
+of the last week did not recur). **Lessons:** (1) a manual trigger on a weekend is silently SKIPPED by
+`shouldSkipOnTradingHoliday` (the job completes in ~2 min with `{skipped:true}` and no `job_run_history` row) unless the job is
+named `closed-day-early` - that cost an hour; (2) a 10-hour overnight gap (00:xx-10:xx IST) with no job rows at all, while pm2
+showed the services "online", was a host sleep and is what failed `confluence-signals-freshness`; (3) `bharat-server` was
+restarted at ~20:00 IST only after confirming zero active BullMQ jobs, to load the `technical-composite-age` check.
+**AF-20261003-02 closed (ACCEPT + monitoring):** Trendlyne TA composite staleness was MEASURED (parity 0.67-0.97 against the
+Python daily snapshot, no return evidence either way, momentum rank persistence 0.65 at 30 sessions, RSI 0.17), so the score path
+is unchanged and a warn-level DQ check makes the 27.4% stale share visible. Recorded in `measurement.md`. Gates: tsc 0, vitest
+1,633 passed, schema:drift clean, findings:check and doc:numbers:check pass; pytest unchanged since the last full run (3,281).

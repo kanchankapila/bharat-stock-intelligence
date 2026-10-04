@@ -1083,6 +1083,17 @@ describe('audit regression guards (2026-08-11)', () => {
     expect(c.sql).toContain('COALESCE(s.is_suspect, 0) = 0');
   });
 
+  it('technical-composite-age warns on the real 2026-10-04 shape and stays quiet on a refreshed table (AF-20261003-02)', () => {
+    const c = find('technical-composite-age');
+    const warn = c.evaluate({ total: 2002, stale: 549 }, now);       // live 27.4%
+    expect(warn.status).toBe('warn');
+    expect(warn.detail).toContain('549/2002');
+    expect(c.evaluate({ total: 2002, stale: 40 }, now).status).toBe('pass');
+    expect(c.evaluate({ total: 0, stale: 0 }, now).status).toBe('warn');
+    expect(c.critical).toBe(false);          // monitoring only: no score change is justified yet
+    expect(c.sql).toContain('technical_composite_scores');
+  });
+
   it('liquid-coverage check fails when the ranker universe diverges from the tradeable one', () => {
     const c = find('unified-recommendations-liquid-coverage');
     // The real 2026-07-29 shape: 8 of 1,534 liquid names ranked while the table held 2,301 rows.
