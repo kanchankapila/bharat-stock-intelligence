@@ -450,6 +450,48 @@ def test_niftytrader_screener_calls_use_a_plain_requests_session(monkeypatch, wa
     assert type(seen[0]) is msf.requests.Session
 
 
+# 2026-10-05: the --intraday slot path built its OWN curl_cffi Chrome session, so the 09-11 fix above
+# (which only covered fetch_live) never reached it: every hourly slot got HTTP 403, logged
+# "fetch failed", persisted 0 rows and exited 0. ntlive_<HHMM>_* last existed on 2026-09-03.
+def test_intraday_slot_capture_uses_a_plain_requests_session(monkeypatch):
+    seen = []
+    monkeypatch.setattr(msf, "fetch_nt_live_screener", lambda session, *a, **k: seen.append(session) or [])
+    monkeypatch.setattr(msf, "_nt_bearer_token", lambda: "token")
+    monkeypatch.setattr(msf, "persist", lambda con, rows, now: len(rows))
+    assert msf.capture_intraday_slot(None, "2026-10-05", "2026-10-05T11:30:00", "1130") == 0
+    assert len(seen) == 1 and type(seen[0]) is msf.requests.Session
+
+
+def test_intraday_mode_exits_nonzero_when_nothing_was_captured(monkeypatch):
+    class _Con:
+        def close(self):
+            pass
+    monkeypatch.setattr(msf, "connect", lambda: _Con())
+    monkeypatch.setattr(msf, "ensure_schema", lambda con: None)
+    monkeypatch.setattr(msf, "resolve_trade_date", lambda con: "2026-10-01")
+    monkeypatch.setattr(msf, "capture_intraday_slot", lambda *a, **k: 0)
+    monkeypatch.setattr(sys, "argv", ["mover_screener_fetcher.py", "--intraday"])
+    with pytest.raises(SystemExit) as e:
+        msf.main()
+    assert e.value.code == 1
+
+
+def test_intraday_slot_is_dated_today_not_the_previous_session(monkeypatch):
+    got = {}
+    class _Con:
+        def close(self):
+            pass
+    monkeypatch.setattr(msf, "connect", lambda: _Con())
+    monkeypatch.setattr(msf, "ensure_schema", lambda con: None)
+    monkeypatch.setattr(msf, "resolve_trade_date", lambda con: "2026-10-01")   # last bar in stock_ohlcv
+    monkeypatch.setattr(msf, "capture_intraday_slot",
+                        lambda con, trade_date, now_iso, hhmm: got.setdefault("d", trade_date) and 5)
+    monkeypatch.setattr("as_of.logical_trading_date", lambda *a, **k: "2026-10-05")
+    monkeypatch.setattr(sys, "argv", ["mover_screener_fetcher.py", "--intraday"])
+    msf.main()
+    assert got["d"] == "2026-10-05"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 

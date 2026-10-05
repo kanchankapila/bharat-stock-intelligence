@@ -908,6 +908,14 @@ def resolve_trade_date(con) -> str:
 
 # ---------------------------------------------------------------------------
 
+def capture_intraday_slot(con, trade_date: str, now_iso: str, hhmm: str) -> int:
+    """One NT live cross-section -> slot-stamped rows. Plain requests session, like the other
+    NiftyTrader calls in fetch_live(): the API 403s curl_cffi's Chrome impersonation (AF-20260911-10)."""
+    rows = fetch_nt_live_screener(requests.Session(), _nt_bearer_token(), hhmm)
+    # direct call bypasses fetch_live's uniform date-append
+    return persist(con, [r + (trade_date,) for r in rows], now_iso)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Persist ground-truth mover screener lists")
     ap.add_argument("--backfill-days", type=int, default=0,
@@ -941,15 +949,20 @@ def main():
         if args.intraday:
             hhmm = datetime.datetime.now().strftime("%H%M")
             try:
-                session = cffi_requests.Session(impersonate="chrome")
-                rows = fetch_nt_live_screener(session, _nt_bearer_token(), hhmm)
-                # direct call bypasses fetch_live's uniform date-append
-                total[f"live@{hhmm}"] = persist(
-                    con, [r + (trade_date,) for r in rows], now_iso)
+                # Today's session, not resolve_trade_date(): stock_ohlcv has no bar for today until
+                # the EOD fetch, so that returned the PREVIOUS session and mislabelled every slot.
+                from as_of import logical_trading_date
+                n = capture_intraday_slot(con, logical_trading_date(), now_iso, hhmm)
             except Exception as e:
                 print(f"[live] intraday slot capture failed: {e}", file=sys.stderr)
+                n = 0
+            total[f"live@{hhmm}"] = n
             con.close()
             print(f"[mover] done: {dict(total)} rows persisted to mover_snapshots")
+            # The slot is this mode's ONLY output, so an empty capture is a failed run. It exited 0
+            # (and the job logged success) from 2026-09-08 to 2026-10-05 while writing nothing.
+            if n == 0:
+                sys.exit(1)
             return
         calc_wanted = bool(wanted and (wanted & set(CALC_SOURCES)))
         # Prefix-aware: LIVE_SOURCES holds both exact names ("mojo_gainers") and

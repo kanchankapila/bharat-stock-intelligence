@@ -566,7 +566,8 @@ def score():
     X = matrix[feature_names]
 
     proba = model.predict_proba(X)[:, 1]
-    now = datetime.datetime.now().isoformat()
+    # tz-aware UTC: a naive local-time string is read as UTC by the timestamptz column (+5.5h in IST)
+    now = datetime.datetime.now(datetime.timezone.utc)
     version = art.get("trained_at", "unknown")
     rows = [(run_id, sym, float(round(p, 4)), version, now) for sym, p in zip(matrix.index, proba)]
 
