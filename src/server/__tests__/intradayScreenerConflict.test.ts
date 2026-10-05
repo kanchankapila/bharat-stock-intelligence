@@ -57,3 +57,23 @@ describe('SCREENER_CONFIRM_SQL (AF-20261001-16)', () => {
     expect(setList).not.toMatch(/entry_price|target_price|stop_loss/);
   });
 });
+
+// AF-20261001-17: the screener scan hard-coded target +5% / stop -3% for every name, but the median
+// daily range is ~3.8%, so the 3% stop sat inside an ordinary day for ~74% of names and 68% of h5
+// outcomes were STOP_LOSS. Levels now come from the name's own ATR (same function the technical scan
+// uses); the fixed percentages remain only as the fallback when there is too little history.
+import { screenerGeometry } from '../trendlyneScreener';
+describe('screenerGeometry', () => {
+  it('uses the ATR-scaled barriers when available', () => {
+    const g = screenerGeometry(100, 'BUY', { entryPrice: 100, targetPrice: 110, stopLoss: 94 });
+    expect(g).toEqual({ target: 110, stopLoss: 94 });
+  });
+  it('a wide-range name gets a wider stop than the old fixed 3%', () => {
+    const g = screenerGeometry(100, 'BUY', { entryPrice: 100, targetPrice: 107.5, stopLoss: 95.5 });
+    expect(100 - g.stopLoss).toBeGreaterThan(3);
+  });
+  it('falls back to +5% / -3% (BUY) and the mirror (SELL) without ATR history', () => {
+    expect(screenerGeometry(200, 'BUY', null)).toEqual({ target: 210, stopLoss: 194 });
+    expect(screenerGeometry(200, 'SELL', null)).toEqual({ target: 190, stopLoss: 206 });
+  });
+});

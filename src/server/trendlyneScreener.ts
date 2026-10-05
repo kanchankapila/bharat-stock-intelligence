@@ -11,6 +11,7 @@
 import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { getStockMapping, getStockMappingByTLId, getStockMappingByName } from './stockMapping';
 import { delay } from './lib/async';
+import { getAtrBarriers, type Barriers } from './atrBarriers';
 
 const TRENDLYNE_BASE_URL = 'https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/';
 
@@ -1405,6 +1406,17 @@ export function screenerHitAction(
   return existing.signal_type === newType ? 'confirm' : 'invalidate_only';
 }
 
+// Levels for a screener-scan signal. ATR-scaled when the name has enough clean history (the same
+// barriers the technical scan publishes); the old fixed +5% / -3% only as the no-history fallback.
+export function screenerGeometry(
+  entry: number, type: 'BUY' | 'SELL', atr: Barriers | null,
+): { target: number; stopLoss: number } {
+  if (atr && atr.targetPrice > 0 && atr.stopLoss > 0) return { target: atr.targetPrice, stopLoss: atr.stopLoss };
+  return type === 'BUY'
+    ? { target: parseFloat((entry * 1.05).toFixed(2)), stopLoss: parseFloat((entry * 0.97).toFixed(2)) }
+    : { target: parseFloat((entry * 0.95).toFixed(2)), stopLoss: parseFloat((entry * 1.03).toFixed(2)) };
+}
+
 export function formatIntradayScanSummary(summary: {
   screenersScanned: number;
   activeScreeners: number;
@@ -1526,8 +1538,8 @@ export async function runIntradayScreenerScan(): Promise<{
         // 4. Handle active signal deduplication, confluence upgrades, and conflict resolution (TODAY only)
         const todayIso = new Date().toISOString().split('T')[0];
         const entry = stock.ltp || 0;
-        const target = newType === 'BUY' ? parseFloat((entry * 1.05).toFixed(2)) : parseFloat((entry * 0.95).toFixed(2));
-        const stopLoss = newType === 'BUY' ? parseFloat((entry * 0.97).toFixed(2)) : parseFloat((entry * 1.03).toFixed(2));
+        const { target, stopLoss } = screenerGeometry(
+          entry, newType, entry > 0 ? await getAtrBarriers(symbol, entry, newType === 'BUY' ? 'long' : 'short') : null);
 
         let existingActiveSignal: any = null;
         try {

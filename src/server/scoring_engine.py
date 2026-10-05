@@ -18,6 +18,12 @@ from exit_labeler import compute_atr
 # recommendation_log.horizon_days per scoring timeframe, in trading sessions (the resolver
 # counts sessions). Was a flat 15, so an 'intraday' rec was graded over three weeks.
 REC_LOG_HORIZON_SESSIONS = {'intraday': 1, 'long_term': 15}
+
+# Weight of the frozen per-signal-type Beta posterior blended into win_probability. 0.0 since
+# 2026-10-05 (AF-20261001-47): the priors carry no information about realized return (Spearman
+# +0.24 at h5, -0.20 at h15, both insignificant) -- see measurement.md. Re-enable only with a fresh
+# prior learned on cost-aware labels that clears the same test.
+SIGNAL_TYPE_PRIOR_WEIGHT = 0.0
 from indian_market_costs import round_trip_cost_bps
 
 
@@ -800,10 +806,10 @@ class AlphaQuantScoringEngine:
         except Exception as e:
             print(f"[SCORING] signal-quality map unavailable (defaulting to neutral): {e}")
 
-        # Blend win_probability with Beta-Bernoulli signal-type priors (15% prior weight)
+        # Blend win_probability with Beta-Bernoulli signal-type priors (weight: SIGNAL_TYPE_PRIOR_WEIGHT, off)
         # Priors encode each signal type's historical win-rate; prevents overconfidence on
         # rare setups with few observations while preserving ensemble signal for common ones.
-        if win_prob_map and sym_signal_types:
+        if SIGNAL_TYPE_PRIOR_WEIGHT > 0 and win_prob_map and sym_signal_types:
             try:
                 with self.engine.connect() as conn:
                     pr_row = conn.execute(text(
@@ -812,7 +818,7 @@ class AlphaQuantScoringEngine:
                 if pr_row:
                     _priors = json.loads(pr_row[0])
                     from signal_type_priors import get_posterior_mean
-                    prior_weight = 0.15
+                    prior_weight = SIGNAL_TYPE_PRIOR_WEIGHT
                     blended = 0
                     for sym, types in sym_signal_types.items():
                         if sym not in win_prob_map or not types:
