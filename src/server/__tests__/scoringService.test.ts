@@ -7,7 +7,7 @@ const scoringServiceModule = await import('../scoringService');
 const { getTopRatedStocks, clearTopRatedCache } = scoringServiceModule;
 
 beforeEach(async () => {
-  for (const table of ['screener_runs', 'timeframe_scores', 'quant_scores', 'technical_composite_scores', 'stock_fundamentals', 'stock_ohlcv', 'backtesting_runs', 'unified_recommendations', 'intraday_recommendations', 'stock_scores']) {
+  for (const table of ['screener_runs', 'quant_scores', 'technical_composite_scores', 'stock_fundamentals', 'stock_ohlcv', 'backtesting_runs', 'unified_recommendations', 'intraday_recommendations', 'stock_scores']) {
 
     await dbExec(`DELETE FROM ${table}`);
 
