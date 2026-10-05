@@ -1555,6 +1555,32 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'synthetic-neutral-outcomes',
+    label: 'unified_signal_outcomes rows fabricated as 0% NEUTRAL with no exit price (priceable symbols, last 7 days)',
+    category: 'scoring',
+    critical: false,
+    // AF-20261005-03: the resolver stopped fabricating these on 2026-10-03, but `ml-api` had imported the
+    // OLD outcome_resolver at startup and kept writing them (7,847 rows on 10-04, 768 on 10-05) until it was
+    // restarted -- a real outcome has an exit price, SUSPECT_DATA has a NULL return. ~14 unrepairable
+    // rows (no canonical bar) always remain, hence a threshold rather than any-row.
+    sql: `SELECT COUNT(*) AS synthetic
+          FROM unified_signal_outcomes x
+          WHERE x.outcome = 'NEUTRAL' AND x.return_pct = 0 AND x.exit_price IS NULL AND x.exit_reason IS NULL
+            AND x.computed_at > NOW() - INTERVAL '7 days'
+            AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE o.symbol = x.symbol
+                        AND o.date > CAST(x.signal_date AS date) AND COALESCE(o.is_suspect, 0) = 0)`,
+    evaluate: (row) => {
+      const n = Number(row?.synthetic) || 0;
+      if (n > 100) return {
+        status: 'warn',
+        detail: `${n} priceable outcomes were written as fabricated 0% NEUTRAL in the last 7 days — a long-running ` +
+                `service is probably still running a pre-fix outcome_resolver (restart ml-api), then ` +
+                `python data_integrity_repair.py --zero-neutral-outcomes`,
+      };
+      return { status: 'pass', detail: `${n} synthetic NEUTRAL outcomes in the last 7 days (unrepairable residue only)` };
+    },
+  },
+  {
     id: 'unified-recommendations-liquid-coverage',
     label: 'unified_recommendations coverage of the liquid (>=Rs 1cr ADT) universe',
     category: 'scoring',

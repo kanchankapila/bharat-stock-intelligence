@@ -739,6 +739,28 @@ def repair_dl_performance_sentinels(conn: ConnWrapper, dry: bool) -> None:
     _log(f"dl-performance-sentinels: nulled {total} rows.")
 
 
+def repair_conflict_signal_outcomes(conn: ConnWrapper, dry: bool) -> None:
+    """Delete outcomes graded for signals the scan itself withdrew (AF-20260930-33).
+
+    A screener scan that flips BUY -> SELL on the same symbol the same day marks the earlier signal
+    INVALIDATED_CONFLICT. The resolver skips those now, but the rows it wrote before the fix (31k at
+    3.3% win vs 6.5% for live signals) still enter every screener win rate. Select by the parent
+    signal's status, not by outcome text; a NULL status is a live signal and is never touched.
+    """
+    where = ("unified_signal_id IN (SELECT id FROM unified_signals WHERE status = 'INVALIDATED_CONFLICT')")
+    total = int(conn.execute(f"SELECT COUNT(*) AS c FROM unified_signal_outcomes WHERE {where}").fetchone()['c'] or 0)
+    if total == 0:
+        _log("conflict-signal-outcomes: none found -- clean.")
+        return
+    _log(f"  {total} unified_signal_outcomes rows grade INVALIDATED_CONFLICT signals")
+    if dry:
+        _log(f"conflict-signal-outcomes: would delete {total} rows (dry run).")
+        return
+    conn.execute(f"DELETE FROM unified_signal_outcomes WHERE {where}")
+    conn.commit()
+    _log(f"conflict-signal-outcomes: deleted {total} rows.")
+
+
 # ── 12. fabricated closed-session bars ───────────────────────────────────────
 
 # Above this share of a day's universe being flat AND zero-volume, the exchange never opened.
@@ -827,6 +849,7 @@ TASKS = {
     'zero_neutral_outcomes': repair_zero_neutral_outcomes,
     'delivery_trades': repair_delivery_trades,
     'dl_performance_sentinels': repair_dl_performance_sentinels,
+    'conflict_signal_outcomes': repair_conflict_signal_outcomes,
 }
 
 

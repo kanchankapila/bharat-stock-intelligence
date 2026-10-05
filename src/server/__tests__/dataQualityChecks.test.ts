@@ -1094,6 +1094,20 @@ describe('audit regression guards (2026-08-11)', () => {
     expect(c.sql).toContain('technical_composite_scores');
   });
 
+  it('synthetic-neutral-outcomes warns on the real 2026-10-05 shape and stays quiet on the residue (AF-20261005-03)', () => {
+    const c = find('synthetic-neutral-outcomes');
+    // ml-api held the pre-fix outcome_resolver in memory and wrote 8,615 fake 0% NEUTRAL rows in 24h.
+    const warn = c.evaluate({ synthetic: 8615 }, now);
+    expect(warn.status).toBe('warn');
+    expect(warn.detail).toContain('8615');
+    expect(warn.detail).toContain('restart ml-api');
+    expect(warn.detail).toContain('--zero-neutral-outcomes');
+    expect(c.evaluate({ synthetic: 14 }, now).status).toBe('pass');    // unrepairable residue
+    expect(c.evaluate({ synthetic: 0 }, now).status).toBe('pass');
+    expect(c.sql).toContain('unified_signal_outcomes');
+    expect(c.sql).toContain('exit_price IS NULL');
+  });
+
   it('liquid-coverage check fails when the ranker universe diverges from the tradeable one', () => {
     const c = find('unified-recommendations-liquid-coverage');
     // The real 2026-07-29 shape: 8 of 1,534 liquid names ranked while the table held 2,301 rows.
