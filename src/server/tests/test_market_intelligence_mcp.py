@@ -19,7 +19,9 @@ def test_inspect_ingestion_health_returns_dict(pg_db_conn):
     assert "result" in res
     result = res["result"]
     assert "heartbeats" in result
-    assert "dlq_new_counts" in result
+    # AF-20261003-07: data_ingestion_dlq had readers and no writer, so this always reported "no dead
+    # letters". Failures live per step in job_run_history; the empty report is gone, not zero.
+    assert "dlq_new_counts" not in result
     assert "data_quality_issues" in result
 
 

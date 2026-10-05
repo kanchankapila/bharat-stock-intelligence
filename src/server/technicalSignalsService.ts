@@ -1106,7 +1106,7 @@ export function scanSignalWrites(r: SignalResult): {
   };
 }
 
-export async function getTradingSetup(r: SignalResult): Promise<{
+export async function getTradingSetup(r: SignalResult, asOf?: string): Promise<{
   aiInsight: string; entryZone: string; stopLoss: string;
   targets: string; setupQuality: string; timeHorizon: string;
 }> {
@@ -1114,7 +1114,7 @@ export async function getTradingSetup(r: SignalResult): Promise<{
   if (r.signals.length === 0) return empty;
 
   const direction = inferSetupDirection(r.signals);
-  const barriers = await getAtrBarriers(r.symbol, r.cmp, direction);
+  const barriers = await getAtrBarriers(r.symbol, r.cmp, direction, asOf);
   if (!barriers) return empty;
 
   const money = (n: number) => `₹${n.toFixed(2)}`;
@@ -1374,7 +1374,7 @@ export async function runTechnicalSignalScan(options: {
     const aiLimit = Math.min(aiInsightsLimit, realSetups);
     if (aiLimit > 0) {
       for (let i = 0; i < aiLimit; i++) {
-        const setup = await getTradingSetup(results[i]);
+        const setup = await getTradingSetup(results[i], scanDate);
         Object.assign(results[i], setup);
       }
     }

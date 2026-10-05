@@ -404,81 +404,32 @@ def get_active_symbols(con, limit: int | None = None) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fetch NSE insider/promoter transactions")
-    parser.add_argument("--symbol", help="Single stock symbol to fetch (test mode)")
+    """Compute the technical_signals insider features for every active symbol.
+
+    AF-20260926-09: this used to pull NSE corporates-pit per symbol and upsert insider_transactions
+    first, and computed the features only when that pull succeeded. The endpoint ignores its own
+    from/to params (no row after 2026-05-02) and nothing reads the table, while the features come
+    from insider_trades -- so an NSE refusal needlessly stopped a live feature. The pull helpers
+    (fetch_nse_insider, upsert_transactions) are kept for the live-datasource tests.
+    """
+    parser = argparse.ArgumentParser(description="Compute insider features from insider_trades")
+    parser.add_argument("--symbol", help="Single stock symbol (test mode)")
     parser.add_argument("--days", type=int, default=90, help="Lookback window in days (default 90)")
     parser.add_argument("--limit", type=int, default=None, help="Process only first N stocks")
     args = parser.parse_args()
 
-    today = date.today()
-    to_date = today.strftime(NSE_DATE_FMT)
-    from_date = (today - timedelta(days=args.days)).strftime(NSE_DATE_FMT)
-
-    print(
-        f"[INSIDER] Fetching insider transactions | from={from_date} to={to_date} | days={args.days}"
-    )
-
     con = connect()
     ensure_schema(con)
-
-    sess = _nse_session()
-
-    if args.symbol:
-        symbols = [args.symbol.upper()]
-    else:
-        symbols = get_active_symbols(con, limit=args.limit)
-
-    print(f"[INSIDER] Processing {len(symbols)} symbol(s)")
-
-    total_rows = 0
-    consecutive_fails = 0
-    rebuilds = 0
-    failed_symbols = 0
+    symbols = [args.symbol.upper()] if args.symbol else get_active_symbols(con, limit=args.limit)
+    print(f"[INSIDER] Computing insider features for {len(symbols)} symbol(s) | days={args.days}")
 
     for i, symbol in enumerate(symbols, 1):
-        raw = fetch_nse_insider(sess, symbol, from_date, to_date)
-
-        if raw is None:
-            failed_symbols += 1
-            consecutive_fails += 1
-            if consecutive_fails >= CONSECUTIVE_FAIL_LIMIT:
-                if rebuilds >= MAX_SESSION_REBUILDS:
-                    print(
-                        f"[INSIDER] Aborting at {symbol} ({i}/{len(symbols)}): "
-                        f"{consecutive_fails} consecutive failures after "
-                        f"{rebuilds} session rebuilds — NSE is refusing this run.",
-                        file=sys.stderr,
-                    )
-                    break
-                rebuilds += 1
-                new_sess = _rebuild_session(rebuilds)
-                if new_sess is not None:
-                    sess = new_sess
-                    consecutive_fails = 0
-            continue
-
-        consecutive_fails = 0
-        parsed = [p for p in (_parse_record(symbol, r) for r in raw) if p]
-        if parsed:
-            n = upsert_transactions(con, parsed)
-            total_rows += n
-            print(f"[INSIDER] {symbol}: {n} transaction(s) stored")
         compute_and_write_features(con, symbol, days=args.days)
-
         if i % BATCH_SIZE == 0:
             print(f"[INSIDER] Progress: {i}/{len(symbols)} symbols done")
 
-        if i < len(symbols):
-            time.sleep(SLEEP_BETWEEN)
-
     con.close()
-    # Report the failure count explicitly: an aggregate-only "N rows upserted" line made a run
-    # that died at "E" and skipped 70% of the universe look identical to a healthy one.
-    print(
-        f"[INSIDER] Done. {total_rows} total rows upserted across {len(symbols)} symbol(s); "
-        f"{failed_symbols} symbol(s) failed, {rebuilds} session rebuild(s)."
-    )
-
+    print(f"[INSIDER] Done. Features written for {len(symbols)} symbol(s).")
 
 if __name__ == "__main__":
     main()

@@ -71,3 +71,24 @@ describe('wilderATR', () => {
     expect(atr).toBeLessThan(5); // gap+range stays modest
   });
 });
+
+// AF-20261001-19: getAtrBarriers read the newest 30 bars with no upper bound, so a historical
+// technical-scan rescan sized its stop/target from bars AFTER the scan date.
+describe('getAtrBarriers as-of bound', () => {
+  it('a historical asOf ignores bars dated after it', async () => {
+    const { dbExec, dbRun } = await import('../dbAsync');
+    const { getAtrBarriers } = await import('../atrBarriers');
+    await dbExec("DELETE FROM stock_ohlcv WHERE symbol = 'ASOFTEST'");
+    const ins = 'INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)';
+    const day = (n: number) => new Date(Date.UTC(2026, 0, 1 + n)).toISOString().slice(0, 10);
+    for (let n = 0; n < 20; n++) await dbRun(ins, ['ASOFTEST', day(n), 100, 101, 99, 100, 1000]);        // calm: ATR ~2
+    for (let n = 20; n < 40; n++) await dbRun(ins, ['ASOFTEST', day(n), 100, 130, 80, 100, 1000]);       // later wild bars
+    const bounded = await getAtrBarriers('ASOFTEST', 100, 'long', day(19));
+    const live = await getAtrBarriers('ASOFTEST', 100, 'long');
+    expect(bounded).not.toBeNull();
+    expect(live).not.toBeNull();
+    // calm window -> tight stop; unbounded read sees the wild bars -> wider stop
+    expect(100 - bounded!.stopLoss).toBeLessThan(100 - live!.stopLoss);
+    await dbExec("DELETE FROM stock_ohlcv WHERE symbol = 'ASOFTEST'");
+  });
+});

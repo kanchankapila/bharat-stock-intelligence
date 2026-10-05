@@ -59,12 +59,15 @@ export function wilderATR(
  *  when there is too little clean history to compute an ATR. */
 export async function getAtrBarriers(
   symbol: string, entryPrice: number | null | undefined, direction: 'long' | 'short',
+  asOf?: string,
 ): Promise<Barriers | null> {
+  // asOf bounds a historical rescan to the bars that existed on the scan date (AF-20261001-19);
+  // live callers omit it and read the newest 30 bars as before.
   const rows = await dbAll<{ high: number; low: number; close: number }>(
     `SELECT high, low, close FROM stock_ohlcv
-     WHERE symbol = ? AND COALESCE(is_suspect, 0) = 0
+     WHERE symbol = ? AND COALESCE(is_suspect, 0) = 0${asOf ? ' AND date <= ?' : ''}
      ORDER BY date DESC LIMIT 30`,
-    [symbol],
+    asOf ? [symbol, asOf] : [symbol],
   );
   if (!rows || rows.length < 15) return null;
   const bars = rows

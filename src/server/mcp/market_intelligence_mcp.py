@@ -96,15 +96,12 @@ def get_semantic_decision_evidence(symbol: str, decision: Optional[str] = None) 
 
 
 def inspect_ingestion_health() -> Dict[str, Any]:
-    """Queries pipeline health, recent data quality checks, job heartbeats, and DLQ errors."""
+    """Queries pipeline health: recent data quality checks and job heartbeats (fetch failures are per step in job_run_history)."""
     conn = connect()
     try:
         heartbeats = conn.execute(
             "SELECT job_name, last_status, last_success_at, last_error FROM job_heartbeat "
             "ORDER BY last_run_at DESC NULLS LAST LIMIT 15"
-        ).fetchall()
-        dlq_summary = conn.execute(
-            "SELECT fetcher_name, COUNT(*) as count FROM data_ingestion_dlq WHERE status = 'NEW' GROUP BY fetcher_name"
         ).fetchall()
         dq_fails = conn.execute(
             "SELECT check_id, status, detail, checked_at FROM data_quality_history WHERE status != 'PASS' ORDER BY checked_at DESC LIMIT 10"
@@ -112,7 +109,6 @@ def inspect_ingestion_health() -> Dict[str, Any]:
 
         return {
             "heartbeats": [dict(r) for r in heartbeats],
-            "dlq_new_counts": [dict(r) for r in dlq_summary],
             "data_quality_issues": [dict(r) for r in dq_fails],
         }
     finally:
@@ -457,7 +453,7 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]},
     },
     "inspect_ingestion_health": {
-        "description": "Job heartbeats, DLQ depth, and open data-quality issues.",
+        "description": "Job heartbeats and open data-quality issues.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     "run_fetcher": {

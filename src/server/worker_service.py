@@ -84,19 +84,6 @@ def get_risk_summary(req: RiskAnalysisRequest):
     return analyze_stock_risk(req.symbol)
 
 
-@app.get("/ingestion/dlq")
-def get_dlq_entries(limit: int = 20):
-    """Returns recent entries from data_ingestion_dlq."""
-    conn = connect()
-    try:
-        rows = conn.execute(
-            "SELECT id, fetcher_name, domain, payload_sample, error_message, created_at, status FROM data_ingestion_dlq ORDER BY created_at DESC LIMIT ?",
-            [limit],
-        ).fetchall()
-        return {"entries": [dict(r) for r in rows]}
-    finally:
-        conn.close()
-
 if __name__ == "__main__":
     # Without this block the module only DEFINES `app` and exits 0 immediately -- which
     # under ecosystem.config.cjs's `common` (autorestart, min_uptime 10s, max_restarts 10)

@@ -75,8 +75,6 @@ def test_risk_summary_endpoint():
     assert data["symbol"] == "TATAMOTORS"
 
 
-def test_dlq_endpoint():
-    response = client.get("/ingestion/dlq?limit=5")
-    assert response.status_code == 200
-    data = response.json()
-    assert "entries" in data
+def test_dlq_endpoint_is_retired():
+    # AF-20261003-07: the table had no writer, so the endpoint could only ever answer "no entries".
+    assert client.get("/ingestion/dlq?limit=5").status_code == 404

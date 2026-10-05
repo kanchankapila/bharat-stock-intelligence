@@ -332,3 +332,25 @@ class TestComputeAndWriteFeaturesReadsInsiderTrades:
         _seed_trade(conn, "OTHERSYM", "BUY", 100_000_000, "Promoter", 5)
         row = self._run(monkeypatch, conn)
         assert row["promoter_buy_90d_cr"] == 0.0
+
+
+# AF-20260926-09: main() pulled NSE corporates-pit per symbol and upserted a table nothing reads (that
+# endpoint ignores from/to, so insider_transactions has had no row after 2026-05-02), and only computed the
+# LIVE technical_signals insider features (from insider_trades) for symbols whose NSE pull succeeded -- so
+# an NSE refusal silently stopped a feature that has nothing to do with NSE.
+class TestMainComputesFeaturesWithoutTheDeadNsePull:
+    def test_every_symbol_gets_features_and_nse_is_never_contacted(self, monkeypatch):
+        class _Con:
+            def close(self):
+                pass
+        computed = []
+        monkeypatch.setattr(itf, "connect", lambda: _Con())
+        monkeypatch.setattr(itf, "ensure_schema", lambda con: None)
+        monkeypatch.setattr(itf, "get_active_symbols", lambda con, limit=None: ["AAA", "BBB", "CCC"])
+        monkeypatch.setattr(itf, "compute_and_write_features", lambda con, sym, days=90: computed.append(sym))
+        monkeypatch.setattr(itf, "_nse_session", lambda: (_ for _ in ()).throw(AssertionError("NSE session built")))
+        monkeypatch.setattr(itf, "fetch_nse_insider", lambda *a, **k: (_ for _ in ()).throw(AssertionError("NSE pulled")))
+        monkeypatch.setattr(itf, "SLEEP_BETWEEN", 0)
+        monkeypatch.setattr(sys, "argv", ["insider_transactions_fetcher.py"])
+        itf.main()
+        assert computed == ["AAA", "BBB", "CCC"]
