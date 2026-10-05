@@ -1449,6 +1449,67 @@ def _summarize(df: pd.DataFrame, factor: str, rebalance_days: int, top_k: int,
     }
 
 
+def pit_regimes(close: pd.Series) -> pd.Series:
+    """Rule-based, point-in-time market regime per date from an index close series.
+
+    Trend: UP when the close is above its 200-session mean, else DOWN. Volatility: HV when 20-session
+    realised vol is above its trailing-252-session median, else LV. Every input on date d uses data on
+    or before d, and the first 199 sessions (200-mean warm-up) get no label rather than a guess.
+    NOT the stored `market_regimes` labels: 681 of those 729 rows were written by one 2026-08-09
+    backfill from an HMM fitted on the whole history, so using them to condition a historical result
+    leaks the future (AF-20261003-08).
+    """
+    close = close.astype(float)
+    trend = np.where(close > close.rolling(200, min_periods=200).mean(), 'UP', 'DOWN')
+    rv = close.pct_change().rolling(20, min_periods=20).std() * math.sqrt(252)
+    med = rv.rolling(252, min_periods=120).median()
+    vol = np.where(rv > med, 'HV', 'LV')
+    ok = close.rolling(200, min_periods=200).mean().notna() & rv.notna() & med.notna()
+    out = pd.Series([f"{t}-{v}" for t, v in zip(trend, vol)], index=close.index)
+    return out.where(ok)
+
+
+def load_nifty_close(start: str, end: str | None = None) -> pd.Series:
+    """NIFTY50 close from stock_ohlcv, loaded with ~2y of lead-in so the 200/252-session windows are warm."""
+    lead = (pd.Timestamp(start) - pd.Timedelta(days=500)).strftime('%Y-%m-%d')
+    df = read_df(
+        "SELECT date, close FROM stock_ohlcv WHERE symbol = 'NIFTY50' AND date >= ? "
+        "AND COALESCE(is_suspect, 0) = 0" + (" AND date <= ?" if end else "") + " ORDER BY date",
+        [lead] + ([end] if end else []))
+    return pd.Series(df['close'].astype(float).values, index=pd.DatetimeIndex(pd.to_datetime(df['date'])))
+
+
+def regime_breakdown(periods: pd.DataFrame, labels: pd.Series, min_periods: int = 12) -> list[dict]:
+    """Net excess vs the universe grouped by the regime in force at each rebalance date.
+
+    `periods` is run_backtest's `_periods_df` (disjoint holding periods, so each regime's mean is an
+    independent sample and `periods` here is an honest N). A regime with fewer than `min_periods`
+    periods is LOW-DATA and is not evidence in either direction. Periods whose rebalance date has no
+    label (index warm-up) are reported as '(unlabelled)', never silently dropped.
+    """
+    d = pd.to_datetime(periods['date'])
+    lab = labels.sort_index().reindex(pd.DatetimeIndex(d), method='ffill')
+    ex = (periods['net_pct'] - periods['universe_pct']).reset_index(drop=True)
+    df = pd.DataFrame({'regime': lab.values, 'excess': ex.values})
+    df['regime'] = df['regime'].fillna('(unlabelled)')
+    out = []
+    for reg, g in df.groupby('regime'):
+        e = g['excess'].dropna()
+        n = len(e)
+        t = float(e.mean() / (e.std() / math.sqrt(n))) if n >= 2 and e.std() > 0 else float('nan')
+        if reg == '(unlabelled)':
+            verdict = 'n/a'
+        elif n < min_periods:
+            verdict = 'LOW-DATA'
+        else:
+            verdict = 'edge' if (np.isfinite(t) and t >= 2) else ('negative' if (np.isfinite(t) and t <= -2) else 'no edge')
+        out.append({'regime': reg, 'periods': int(n), 'mean_excess_pct': round(float(e.mean()), 4) if n else float('nan'),
+                    't_stat': round(t, 2) if np.isfinite(t) else float('nan'),
+                    'pct_beating': round(float((e > 0).mean() * 100), 1) if n else float('nan'),
+                    'verdict': verdict})
+    return sorted(out, key=lambda r: r['regime'])
+
+
 def _print(r: dict) -> None:
     ls = ' [LONG/SHORT]' if r['long_short'] else ''
     print(f"\n{'='*78}\n{r['factor']}{ls}  |  rebalance {r['rebalance_days']}d  |  "
@@ -1653,6 +1714,9 @@ def main() -> None:
     p.add_argument('--no-survivorship-fill', action='store_true',
                    help='measure the survivorship bias by leaving delisted names out')
     p.add_argument('--json', action='store_true')
+    p.add_argument('--by-regime', action='store_true',
+                   help='also print net excess grouped by a point-in-time Nifty trend/volatility regime '
+                        '(rule-based; NOT the stored market_regimes labels, which are a retrospective backfill)')
     p.add_argument('--picks', action='store_true',
                    help="print today's top-K names for --factor instead of backtesting")
     p.add_argument('--persist-picks', action='store_true',
@@ -1728,6 +1792,11 @@ def main() -> None:
         out.append(r)
         if not a.json:
             _print(r)
+            if a.by_regime:
+                labels = pit_regimes(load_nifty_close(a.start, a.end))
+                print(f"\n  by point-in-time regime (Nifty 200-session trend x 20d vol vs trailing median; "
+                      f"disjoint {a.rebalance}-session periods):")
+                print(pd.DataFrame(regime_breakdown(r['_periods_df'], labels)).to_string(index=False))
 
     if a.json:
         print(json.dumps([{k: v for k, v in r.items() if not k.startswith('_')} for r in out],

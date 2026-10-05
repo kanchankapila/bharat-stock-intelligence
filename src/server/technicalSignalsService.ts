@@ -1467,9 +1467,11 @@ export async function runTechnicalSignalScan(options: {
 
     // Pre-fetch latest PCR per symbol in one windowed query (was one lookup per result).
     const pcrRows = symbolsInScan.length
+      // pcr_vol is deliberately NULL: stock_options_oi.market_pcr equals pcr (no volume ratio exists in that
+      // source), so reading it as pcr_vol double-counted the OI PCR under a false name (AF-20261005-07).
       ? (await dbAll(
-          `SELECT symbol, pcr AS pcr_oi, market_pcr AS pcr_vol FROM (
-             SELECT symbol, pcr, market_pcr,
+          `SELECT symbol, pcr AS pcr_oi, CAST(NULL AS DOUBLE PRECISION) AS pcr_vol FROM (
+             SELECT symbol, pcr,
                     ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
              FROM stock_options_oi
              WHERE date <= ? AND symbol IN (${symbolsInScan.map(() => '?').join(',')})

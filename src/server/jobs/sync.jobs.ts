@@ -125,9 +125,7 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; skippe
   await runPython('screener_sector_rotation.py', [], 10 * 60_000)
     .catch(e => T.fail('screener_sector_rotation', e));
 
-  // 6. Generate screener surfacing alerts → unified_signals
-  await runPython('screener_signal_generator.py', [], 3 * 60_000)
-    .catch(e => T.fail('screener_signal_generator', e));
+  // 6. (screener_signal_generator.py intentionally not run - AF-20261001-18; see queues.ts)
 
   // 7. Resolve live screener outcomes (needs ohlcv data to be fresh first)
   await runPython('live_screener_resolver.py', [], 20 * 60_000)

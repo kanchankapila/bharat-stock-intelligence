@@ -1069,9 +1069,8 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   await runPython('screener_sector_rotation.py', [], 2 * 60_000)
     .catch(e => T.fail('screener_sector_rotation', e));
 
-  // Screener surfacing alerts: new screener entries → unified_signals
-  await runPython('screener_signal_generator.py', [], 3 * 60_000)
-    .catch(e => T.fail('screener_signal_generator', e));
+  // screener_signal_generator.py is deliberately NOT scheduled (AF-20261001-18): no output since
+  // 2026-08-13, its gate refuses Unranked screeners; screener signals come from the intraday scan.
 
   // Per-stock option chain: expected move + GEX proxy + BS-derived ATM IV + next-month IV
   // term structure → stock_option_features + stock_options_oi + technical_signals.
