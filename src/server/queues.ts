@@ -487,12 +487,12 @@ async function processMoverCapture(_job: Job): Promise<{ skipped: boolean }> {
   // every rejection reaching BullMQ, and this .catch's own throw always reaches it, so logging
   // here too would double-write job_heartbeat/job_run_history for every real failure (same class
   // as quant-eod-sync's double-log, fixed 2026-09-10 — see dual-failure-log in repo-doctor).
-  await runPython('mover_screener_fetcher.py', [], 5 * 60_000)
-    .then(() => recordHeartbeat('mover-screener-capture', 'success'))
-    .catch(e => {
-      console.warn('[QUEUE] mover_screener_fetcher failed:', (e as Error).message);
-      throw e;
-    });
+  try {
+    await runPython('mover_screener_fetcher.py', [], 5 * 60_000);
+  } catch (e) {
+    console.warn('[QUEUE] mover_screener_fetcher failed:', (e as Error).message);
+    throw e;
+  }
   return { skipped: false };
 }
 
@@ -3710,6 +3710,5 @@ export async function getAIQueueStats(): Promise<QueueStats> {
     available: true,
   };
 }
-
 
 

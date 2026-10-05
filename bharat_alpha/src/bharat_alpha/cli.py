@@ -297,6 +297,14 @@ def scheduler():
 
 
 @app.command()
+def preopen_scheduler():
+    """Run only the NSE pre-open capture loop; the heavy daily DAG remains separately scheduled."""
+    from bharat_alpha.pipeline.scheduler import run_preopen_forever
+
+    run_preopen_forever()
+
+
+@app.command()
 def serve(host: str = "127.0.0.1", port: int = 8010):
     """Serve the read-only API."""
     import uvicorn

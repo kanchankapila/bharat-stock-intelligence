@@ -52,4 +52,19 @@ describe('queues.ts: a skipped run is not stamped as a success', () => {
       });`;
     expect(scanSkipStamping(preFix).offenders).toEqual(['w']);
   });
+
+  it('mover capture has one success writer: the completed handler', () => {
+    // AF-20261005: processMoverCapture stamped success after runPython and moverWorker's
+    // completed handler stamped it again 81 ms later. That made one real run look like two.
+    const processorAt = src.indexOf('async function processMoverCapture');
+    const processorEnd = src.indexOf('/**\n * Overall execution budget', processorAt);
+    expect(processorAt).toBeGreaterThanOrEqual(0);
+    expect(processorEnd).toBeGreaterThan(processorAt);
+    expect(src.slice(processorAt, processorEnd)).not.toContain("recordHeartbeat('mover-screener-capture', 'success'");
+
+    const workerAt = src.indexOf('moverWorker = new Worker');
+    const workerEnd = src.indexOf('Mover INTRADAY slot capture', workerAt);
+    const workerBlock = src.slice(workerAt, workerEnd);
+    expect(workerBlock.match(/recordHeartbeat\('mover-screener-capture', 'success'/g)).toHaveLength(1);
+  });
 });

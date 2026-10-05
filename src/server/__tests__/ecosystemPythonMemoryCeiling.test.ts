@@ -21,12 +21,19 @@ const { apps } = require(path.join(ROOT, 'ecosystem.config.cjs')) as { apps: any
 const PY_APPS = apps.filter(a => /python(\.exe)?$/i.test(String(a.interpreter ?? '')));
 
 describe('ecosystem.config.cjs Python services', () => {
+  it('keeps the Bharat Alpha scheduler online for bounded catch-up and pre-open capture', () => {
+    const scheduler = apps.find(a => a.name === 'bqa-scheduler');
+    expect(scheduler, 'bqa-scheduler missing from ecosystem.config.cjs').toBeDefined();
+    expect(scheduler.args).toBe('preopen-scheduler');
+    expect(scheduler.autorestart).toBe(true);
+  });
+
   it('finds every Python app by interpreter, not by a hand-kept list', () => {
     // Guard the guard: if this ever reads 0, the filter broke and every assertion below
     // vacuously passes. Independent floor -- the four long-running services plus bqa-daily.
-    expect(PY_APPS.length).toBeGreaterThanOrEqual(5);
+    expect(PY_APPS.length).toBeGreaterThanOrEqual(6);
     expect(PY_APPS.map(a => a.name)).toEqual(
-      expect.arrayContaining(['alphaquant-api', 'ml-api', 'chatbot', 'engine-worker', 'bqa-daily']));
+      expect.arrayContaining(['alphaquant-api', 'ml-api', 'chatbot', 'engine-worker', 'bqa-daily', 'bqa-scheduler']));
   });
 
   it.each(PY_APPS.map(a => a.name))('%s runs with the pyboot memory ceiling', (name) => {

@@ -150,6 +150,28 @@ module.exports = {
       interpreter: VENV_PY,
     },
 
+    // Bharat Alpha needs an always-on loop for the six-minute NSE pre-open capture window.
+    // Keep this process pre-open-only: the full scheduler would start its heavy daily DAG at
+    // 19:00 IST on top of ml-daily-ops; the isolated 06:00 one-shot below owns that DAG.
+    {
+      ...common,
+      name: 'bqa-scheduler',
+      interpreter: BQA_PY,
+      script: path.resolve(BQA_DIR, 'src', 'bharat_alpha', 'cli.py'),
+      args: 'preopen-scheduler',
+      cwd: BQA_DIR,
+      env: {
+        ...dotenvVars,
+        PYTHONUNBUFFERED: '1',
+        BQA_DATABASE_URL: (dotenvVars.POSTGRES_URL || '').replace(/\/bharat_intel(\?|$)/, '/bharat_alpha$1'),
+        PYTHONPATH: [path.resolve(__dirname, 'src', 'server', 'pyboot'), dotenvVars.PYTHONPATH]
+          .filter(Boolean).join(path.delimiter),
+        BHARAT_PY_MEM_LIMIT_MB: '8192',
+      },
+      out_file: path.resolve(__dirname, 'logs', 'bqa-scheduler-out.log'),
+      error_file: path.resolve(__dirname, 'logs', 'bqa-scheduler-err.log'),
+    },
+
     // (The 11 greenfield `gf-*` cron_restart apps were deregistered 2026-09-10 and the
     // greenfield/ tree removed 2026-10-03; both are recoverable from git history.)
 

@@ -87,3 +87,23 @@ def run_forever() -> None:
         except Exception:
             log.exception("scheduler tick failed")
         time.sleep(POLL_SECONDS)
+
+
+def preopen_tick(now: dt.datetime | None = None) -> dict | None:
+    """Run only the time-sensitive pre-open capture, never the heavy daily DAG."""
+    now = (now or ist_now()).astimezone(IST)
+    with connect() as conn:
+        return capture_preopen(conn, now)
+
+
+def run_preopen_forever() -> None:
+    """Keep the six-minute pre-open window covered without competing with evening jobs."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    while True:
+        try:
+            result = preopen_tick()
+            if result is not None:
+                log.info("preopen -> %s", result)
+        except Exception:
+            log.exception("preopen scheduler tick failed")
+        time.sleep(POLL_SECONDS)

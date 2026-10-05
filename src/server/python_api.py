@@ -31,6 +31,12 @@ app = FastAPI(title="Bharat Stock Intelligence - ML Orchestration API")
 _executor = ThreadPoolExecutor(max_workers=4)
 
 
+@app.get("/health")
+def health():
+    """Cheap liveness probe shared with the other PM2 Python services."""
+    return {"status": "ok", "service": "ml-api"}
+
+
 async def run_in_thread(fn, *args, **kwargs):
     """Run a blocking function in the thread pool without blocking the event loop."""
     loop = asyncio.get_event_loop()
