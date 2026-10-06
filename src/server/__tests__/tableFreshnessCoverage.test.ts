@@ -70,7 +70,6 @@ const EXCLUDED_TABLES: Record<string, string> = {
   kg_vocabulary: 'ontology knowledge graph; internal metadata',
   _migrations: 'node-pg-migrate bookkeeping table',
   job_sweep_results: 'dev/runJobSweep.ts artifact',
-  data_ingestion_dlq: 'DLQ queue table; monitored by inspect_ingestion_health MCP count, not freshness',
   todos: 'user-managed todo table',
   users: 'auth/user table',
   watchlist: 'user-managed watchlist',
