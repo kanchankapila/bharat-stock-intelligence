@@ -4,10 +4,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // established pattern this file follows.
 const { mockSendSignalNotification, mockWebSocketServer } = vi.hoisted(() => ({
   mockSendSignalNotification: vi.fn(async () => true),
-  mockWebSocketServer: vi.fn(() => ({
+  mockWebSocketServer: vi.fn(function () { return {
     on: vi.fn(),
     close: vi.fn(),
-  })),
+  }; }),
 }));
 
 vi.mock('../telegramService', () => ({
