@@ -1108,6 +1108,80 @@ describe('audit regression guards (2026-08-11)', () => {
     expect(c.sql).toContain('exit_price IS NULL');
   });
 
+  it('stock-options-oi-pcr-bounds reports the population it checked and warns when there is none (AF-20261006-01)', () => {
+    const c = find('stock-options-oi-pcr-bounds');
+    // The old detail was the literal "No PCR outliers in the last 5 days" on every run, so the
+    // dq-uninformative-checks meta check read it as a frozen input - and "0 bad of 0 rows" passed.
+    const a = c.evaluate({ bad: 0, total: 3620, pcr_min: 0.21, pcr_max: 4.8 }, now);
+    const b = c.evaluate({ bad: 0, total: 3611, pcr_min: 0.22, pcr_max: 4.9 }, now);
+    expect(a.status).toBe('pass');
+    expect(a.detail).toContain('3620');
+    expect(a.detail).not.toBe(b.detail);                       // moves with the data it reads
+    expect(c.evaluate({ bad: 0, total: 0, pcr_min: null, pcr_max: null }, now).status).toBe('warn');
+    expect(c.evaluate({ bad: 3, total: 3620, pcr_min: -1, pcr_max: 80 }, now).status).toBe('warn');
+    expect(c.sql).toContain('MIN(pcr)');
+  });
+
+  // AF-20261006-02: six freshness warnings in the 2026-10-06 daily report were cadence mismatches, not outages.
+  describe('freshness thresholds match each source real cadence (AF-20261006-02)', () => {
+    const day = 86_400_000;
+    const ago = (d: number) => new Date(now.getTime() - d * day);
+
+    it('mc_earnings_* pass while the vendor is quiet IF the writer ran, and still fail when the writer is dead', () => {
+      for (const id of ['mc-earnings-rapid-freshness', 'mc-sector-earnings-freshness']) {
+        const c = find(id);
+        expect(c.sql).toContain("job_name = 'ml-daily-ops'");
+        // 9 days since the vendor last returned a row, but ml-daily-ops succeeded 12h ago: results-season gap.
+        const quiet = c.evaluate({ last_date: ago(9), writer_ran_at: ago(0.5) }, now);
+        expect(quiet.status).toBe('pass');
+        expect(quiet.detail).toContain('ml-daily-ops');
+        // Table old AND the writer's parent job has not succeeded for 9 days: a dead writer, not a quiet vendor.
+        expect(c.evaluate({ last_date: ago(9), writer_ran_at: ago(9) }, now).status).toBe('fail');
+        // No heartbeat row at all: fall back to the table's own age.
+        expect(c.evaluate({ last_date: ago(9), writer_ran_at: null }, now).status).toBe('fail');
+        expect(c.evaluate({ last_date: ago(1), writer_ran_at: null }, now).status).toBe('pass');
+      }
+    });
+
+    it('index_option_oi allows the vendor one-session publication lag (warn at 3d, not 1d)', () => {
+      const c = find('index-option-oi-freshness');
+      expect(c.evaluate({ last_date: ago(1.7) }, now).status).toBe('pass');   // the 2026-10-06 report: 1.7d
+      // trading-day aware: `now` is a Tuesday, so ~2 weekend days are subtracted from these calendar ages
+      expect(c.evaluate({ last_date: ago(6) }, now).status).toBe('warn');
+      expect(c.evaluate({ last_date: ago(9) }, now).status).toBe('fail');
+    });
+
+    it('stock_mf_holdings is a monthly source: 12 days is normal, 45+ is not', () => {
+      const c = find('stock-mf-holdings-recency');
+      expect(c.evaluate({ last_date: ago(12) }, now).status).toBe('pass');
+      expect(c.evaluate({ last_date: ago(60) }, now).status).toBe('warn');
+      expect(c.evaluate({ last_date: ago(90) }, now).status).toBe('fail');
+    });
+
+    it('mf_sector_allocation tolerates the monthly publication lag (47d passes, 90d warns)', () => {
+      const c = find('mf-sector-allocation-recency');
+      expect(c.evaluate({ last_date: ago(47) }, now).status).toBe('pass');
+      expect(c.evaluate({ last_date: ago(90) }, now).status).toBe('warn');
+    });
+
+    it('forward-test snapshot warns then fails when the nightly report stops (AF-20261006-03)', () => {
+      const c = find('forward-test-report-freshness');
+      expect(c.sql).toContain("key = 'forward_test_report'");
+      expect(c.evaluate({ last_date: ago(1) }, now).status).toBe('pass');
+      expect(c.evaluate({ last_date: ago(6) }, now).status).toBe('warn');
+      expect(c.evaluate({ last_date: ago(12) }, now).status).toBe('fail');
+      expect(c.evaluate({ last_date: null }, now).status).toBe('warn');   // never run yet
+    });
+
+    it('request-driven MC caches (swot, consolidated) only warn after a month with no panel opens', () => {
+      for (const id of ['mc-swot-history-freshness', 'mc-consolidated-metrics-freshness']) {
+        const c = find(id);
+        expect(c.evaluate({ last_date: ago(16) }, now).status).toBe('pass');
+        expect(c.evaluate({ last_date: ago(45) }, now).status).toBe('warn');
+      }
+    });
+  });
+
   it('liquid-coverage check fails when the ranker universe diverges from the tradeable one', () => {
     const c = find('unified-recommendations-liquid-coverage');
     // The real 2026-07-29 shape: 8 of 1,534 liquid names ranked while the table held 2,301 rows.

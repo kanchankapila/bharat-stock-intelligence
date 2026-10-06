@@ -154,6 +154,11 @@ interface TableFreshnessConfig {
    *  instead of restating "empty" every morning -- an alert that repeats an already-triaged fact
    *  is the kind people learn to skim past, which is how a real one gets missed. */
   emptyDetail?: string;
+  /** A parent job whose job_heartbeat.last_success_at proves the WRITER ran even when the source had
+   *  nothing new to return (a results-season gap). Staleness is then the freshest of the table and the
+   *  writer, so a quiet vendor passes while a dead writer (parent job not succeeding) still fails. Only
+   *  valid when the parent reports failure if any of its steps fails, as ml-daily-ops does (AF-20261006-02). */
+  writerJob?: string;
 }
 
 function makeFreshnessCheck(cfg: TableFreshnessConfig): DataQualityCheck {
@@ -164,19 +169,32 @@ function makeFreshnessCheck(cfg: TableFreshnessConfig): DataQualityCheck {
     label: cfg.label,
     category: cfg.category,
     critical: cfg.critical,
-    sql: `SELECT MAX(${col}) AS last_date FROM ${cfg.table}`,
+    sql: cfg.writerJob
+      ? `SELECT MAX(${col}) AS last_date,
+                (SELECT to_timestamp(last_success_at / 1000.0) FROM job_heartbeat WHERE job_name = '${cfg.writerJob}') AS writer_ran_at
+         FROM ${cfg.table}`
+      : `SELECT MAX(${col}) AS last_date FROM ${cfg.table}`,
     evaluate: (row, now) => {
-      const stale = (useTradingDays ? tradingDaysStale : daysStale)(row?.last_date, now);
+      const staleFn = useTradingDays ? tradingDaysStale : daysStale;
+      let stale = staleFn(row?.last_date, now);
+      let viaWriter = '';
+      if (cfg.writerJob) {
+        const ranStale = staleFn(row?.writer_ran_at, now);
+        if (ranStale != null && (stale == null || ranStale < stale)) {
+          viaWriter = ` (table ${stale == null ? 'empty' : fmtDays(stale)} old, but ${cfg.writerJob} succeeded ${fmtDays(ranStale)} ago - the source had nothing new)`;
+          stale = ranStale;
+        }
+      }
       if (stale == null) return { status: cfg.critical ? 'fail' : 'warn', detail: cfg.emptyDetail ?? `${cfg.table} is empty` };
       if (cfg.failDays == null) {
         if (stale > cfg.warnDays) {
           return { status: 'warn', detail: `Latest ${cfg.table} row is ${fmtDays(stale)} old (sparse by nature, so a soft warn)` };
         }
-        return { status: 'pass', detail: `Latest ${cfg.table} row ${fmtDays(stale)} old` };
+        return { status: 'pass', detail: `Latest ${cfg.table} row ${fmtDays(stale)} old${viaWriter}` };
       }
       if (stale > cfg.failDays) return { status: 'fail', detail: `Latest ${cfg.table} row is ${fmtDays(stale)} old` };
       if (stale > cfg.warnDays) return { status: 'warn', detail: `Latest ${cfg.table} row is ${fmtDays(stale)} old` };
-      return { status: 'pass', detail: `Latest ${cfg.table} row ${fmtDays(stale)} old` };
+      return { status: 'pass', detail: viaWriter ? `Latest ${cfg.table} row${viaWriter}` : `Latest ${cfg.table} row ${fmtDays(stale)} old` };
     },
   };
 }
@@ -223,8 +241,12 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // write-time. Threshold kept at 1/3 trading days -- a full session plus a day of grace for a
   // Monday/holiday gap, which tradingDayAware handles by not counting the weekend at all.
   { id: 'index-option-oi-freshness', label: 'index_option_oi (MC index OI/max-pain)',
+    // 2026-10-06: warn 1 / fail 3 -> 3 / 5. MoneyControl publishes a session's OI only the NEXT morning
+    // (~07:30 IST) and the only scheduled run is the evening ml-daily-ops, so the newest rows are
+    // structurally ~1.5 trading days old at the 07:25 report, and a holiday + weekend adds to that: it read
+    // 1.7d warn on Tuesday after a Friday holiday with every job healthy. 3d still catches a real outage.
     category: 'options', critical: false, table: 'index_option_oi', dateColumn: 'fetched_at',
-    warnDays: 1, failDays: 3 },
+    warnDays: 3, failDays: 5 },
   { id: 'nt-index-pcr-ts-freshness', label: 'nt_index_pcr_ts (NiftyTrader PCR/VIX)',
     category: 'options', critical: false, table: 'nt_index_pcr_ts', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
   { id: 'stock-option-features-freshness', label: 'stock_option_features (per-stock option chain features)',
@@ -309,7 +331,7 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // DownloadSchemeData_Po.aspx feed (now returns the scheme MASTER list, no holdings). Monthly
   // cadence -- `month` is the latest disclosed holding month, so warnDays 45 covers the lag.
   { id: 'mf-sector-allocation-recency', label: 'mf_sector_allocation (MF sector flow)',
-    category: 'flows', critical: false, table: 'mf_sector_allocation', dateColumn: 'month', warnDays: 45,
+    category: 'flows', critical: false, table: 'mf_sector_allocation', dateColumn: 'month', warnDays: 60,  // month-start label, published ~10th of the NEXT month: legit age peaks ~41d (2026-10-06 report: 46.9d on a healthy table)
     emptyDetail: 'mf_sector_allocation is empty — its writer is mf_sector_allocation_fetcher.py (ET/mcxlivefeeds, ml-daily-ops). Check that step\'s last run; the old AMFI source is dead and is not the cause.' },
   // 2026-08-06 urls.txt data analysis (docs/url_explorer) -- see institutional_deals_fetcher.py.
   { id: 'institutional-deal-signals-recency', label: 'institutional_deal_signals (MC ranked topInvestor buy/sell)',
@@ -357,7 +379,10 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // standard ET companyid -- also fixed a hard LIMIT 200 in the old bse/nse-code ID resolution.
   // Live-verified against RELIANCE/HDFCBANK/BEL/360ONE/3MINDIA before landing.
   { id: 'stock-mf-holdings-recency', label: 'stock_mf_holdings (per-stock MF ownership %, quarterly disclosure)',
-    category: 'flows', critical: false, table: 'stock_mf_holdings', dateColumn: 'date', warnDays: 10, failDays: 16 },
+    // Monthly: mf_stock_holdings_fetcher runs in trendlyne-weekly's MONTHLY block (AMFI publishes portfolio
+    // disclosures monthly) and `date` is the disclosure date, so the old weekly 10/16-day bars warned on
+    // every healthy month (2026-10-06 report: 11.9d). 40/60 = one missed month, then two.
+    category: 'flows', critical: false, table: 'stock_mf_holdings', dateColumn: 'date', warnDays: 40, failDays: 60 },
 
   // fundamentals
   { id: 'tl-financial-quality-freshness', label: 'tl_financial_quality (weekly ET ratios)',
@@ -423,7 +448,10 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // (not shared with another writer), so the generic factory's bare MAX(fetched_at) is safe
   // here unlike mc_general_metrics, which needed the hand-rolled WHERE filter.
   { id: 'mc-swot-history-freshness', label: 'mc_swot_history (per-stock strengths/weaknesses/opportunities/threats)',
-    category: 'fundamentals', critical: false, table: 'mc_swot_history', dateColumn: 'fetched_at', warnDays: 10 },
+    // Request-driven (2026-10-06): written by persistMcConsolidatedMetrics() when a stock panel is opened,
+    // on the same days as mc_consolidated (identical write dates 09-03..09-20), so "old" means nobody opened a
+    // panel, not that a pipeline broke. 30 trading days of silence is the soft bar, not 10.
+    category: 'fundamentals', critical: false, table: 'mc_swot_history', dateColumn: 'fetched_at', warnDays: 30 },
   // 2026-08-06 urls.txt data analysis (docs/url_explorer) -- see investsights_concall_fetcher.py.
   // Sparse by nature: the source's own "recent" window only has content when companies are
   // actively holding earnings calls, so a quiet week outside results season is not a failure.
@@ -457,11 +485,16 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // Found 2026-08-13 (fetcher-accuracy-review sweep, batch 2): 3 more mc_earnings_fetcher.py
   // tables (siblings of stock-earnings-dates-freshness above, same daily fetcher/schedule).
   { id: 'mc-earnings-rapid-freshness', label: 'mc_earnings_rapid (MC results-calendar rapid categories)',
-    category: 'fundamentals', critical: false, table: 'mc_earnings_rapid', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+    // writerJob (2026-10-06): the vendor returns "Rapid: 0 total" / "Sectors: no data" between results
+    // seasons (mc_earnings_fetcher run live 2026-10-06 07:2x), so the table is legitimately old for weeks while
+    // ml-daily-ops - which runs the fetcher and fails if any step fails - succeeds nightly.
+    category: 'fundamentals', critical: false, table: 'mc_earnings_rapid', dateColumn: 'fetched_at', warnDays: 3, failDays: 5,
+    writerJob: 'ml-daily-ops' },
   { id: 'mc-price-shockers-freshness', label: 'mc_price_shockers (post-results price reaction)',
     category: 'fundamentals', critical: false, table: 'mc_price_shockers', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
   { id: 'mc-sector-earnings-freshness', label: 'mc_sector_earnings (sector-level results aggregation)',
-    category: 'fundamentals', critical: false, table: 'mc_sector_earnings', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+    category: 'fundamentals', critical: false, table: 'mc_sector_earnings', dateColumn: 'fetched_at', warnDays: 3, failDays: 5,
+    writerJob: 'ml-daily-ops' },
   // mc_pricefeed_fetcher.py is the SOLE writer (confirmed live 2026-08-13: trendlyne_
   // fundamentals_fetcher.py only ever SELECTs from these two tables to compute percentile-rank
   // features -- see its own comment above ensure_schema, "PE/PB dropped: MC's daily fetch
@@ -1526,6 +1559,22 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'forward-test-report-freshness',
+    label: 'forward_test_report snapshot (frozen forward test + selective accuracy, written by ml-daily-ops)',
+    category: 'scoring',
+    critical: false,
+    // The forward test only has value if it accumulates every trading day; a step that silently stops
+    // leaves a plausible-looking stale snapshot. The detail carries the snapshot's own age so it moves.
+    sql: `SELECT "updatedAt" AS last_date FROM app_settings WHERE key = 'forward_test_report'`,
+    evaluate: (row, now) => {
+      const stale = tradingDaysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'No forward_test_report snapshot yet - run forward_test_report.py --persist (ml-daily-ops does this nightly)' };
+      if (stale > 6) return { status: 'fail', detail: `forward_test_report snapshot is ${fmtDays(stale)} old - the forward test has stopped accumulating` };
+      if (stale > 3) return { status: 'warn', detail: `forward_test_report snapshot is ${fmtDays(stale)} old` };
+      return { status: 'pass', detail: `forward_test_report snapshot ${fmtDays(stale)} old` };
+    },
+  },
+  {
     id: 'technical-composite-age',
     label: 'technical_composite_scores rows older than 30 days (scoring_engine consumes them with no age guard)',
     category: 'scoring',
@@ -1777,12 +1826,19 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'stock_options_oi PCR sanity bounds',
     category: 'options',
     critical: false,
-    sql: `SELECT COUNT(*) AS bad FROM stock_options_oi
-          WHERE date >= current_date - 5 AND pcr IS NOT NULL AND (pcr < 0 OR pcr > 50)`,
+    // The detail carries the population and observed range (2026-10-06): the bare 'No PCR outliers'
+    // string was byte-identical every run, so dq-uninformative-checks classed this as a frozen input,
+    // and a table with zero recent rows passed it ("0 bad of 0 checked").
+    sql: `SELECT COUNT(*) FILTER (WHERE pcr IS NOT NULL AND (pcr < 0 OR pcr > 50)) AS bad,
+                 COUNT(pcr) AS total, MIN(pcr) AS pcr_min, MAX(pcr) AS pcr_max
+          FROM stock_options_oi WHERE date >= current_date - 5`,
     evaluate: (row) => {
       const bad = Number(row?.bad) || 0;
-      if (bad > 0) return { status: 'warn', detail: `${bad} rows have a PCR outside [0, 50] (last 5d) — check for a divide-by-zero` };
-      return { status: 'pass', detail: 'No PCR outliers in the last 5 days' };
+      const total = Number(row?.total) || 0;
+      if (total === 0) return { status: 'warn', detail: 'No PCR values in stock_options_oi over the last 5 days - nothing was checked' };
+      const range = `${Number(row?.pcr_min).toFixed(2)}..${Number(row?.pcr_max).toFixed(2)}`;
+      if (bad > 0) return { status: 'warn', detail: `${bad} of ${total} rows have a PCR outside [0, 50] (observed ${range}, last 5d) — check for a divide-by-zero` };
+      return { status: 'pass', detail: `0 of ${total} PCR values outside [0, 50] (observed ${range}, last 5d)` };
     },
   },
 
@@ -2184,7 +2240,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     evaluate: (row, now) => {
       const stale = tradingDaysStale(row?.last_date, now);
       if (stale == null) return { status: 'warn', detail: 'No mc_consolidated rows written yet — expected until a stock panel has been opened at least once.' };
-      if (stale > 10) return { status: 'warn', detail: `Latest mc_consolidated metric row is ${fmtDays(stale)} old (sparse by nature, so a soft warn)` };
+      if (stale > 30) return { status: 'warn', detail: `Latest mc_consolidated metric row is ${fmtDays(stale)} old (request-driven: no stock panel opened since; a soft warn)` };
       return { status: 'pass', detail: `Latest mc_consolidated metric row ${fmtDays(stale)} old` };
     },
   },

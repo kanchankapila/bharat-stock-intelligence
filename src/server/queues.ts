@@ -1334,6 +1334,13 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // already-monitored tables (news_sentiment_items, nse_stocks), not a new external datasource.
   await T.run('news-symbol-link', () => runPython('data_integrity_repair.py', ['--news-link'], 5 * 60_000));
 
+  // Frozen forward test + selective-accuracy report (2026-10-06): grades the published ranking after costs
+  // against the equal-weight liquid universe per coverage tier, on independent windows. Read-only apart from
+  // the app_settings snapshot; exits 2 on protocol drift so a changed rule is reported, not blended in.
+  // Last because it grades calls whose forward windows closed with today's prices.
+  await runPython('forward_test_report.py', ['--persist'], 10 * 60_000)
+    .catch(e => T.fail('forward_test_report', e));
+
   // Surface the real per-step outcomes (and a degraded job state if any failed) instead of the
   // old blanket 'success' the completed handler used to stamp on all of these.
   //
