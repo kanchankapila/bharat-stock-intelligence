@@ -300,6 +300,14 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // re-create the race whenever the ranker runs long or the host wakes late.
   { jobName: 'recommendations-digest', label: 'Daily Stock Recommendations (Telegram)', cronPattern: '10 17 * * 1-5', graceMinutes: 90, critical: true },
 
+  // Pre-open brief (digests.jobs.ts '50 2 * * 1-5' = 08:20 IST): last night's ranking plus the
+  // end-of-day accuracy scorecard and the frozen forward test's verdict. Critical for the same
+  // reason as the evening digest — it is the user-facing output, and its predecessor channel
+  // went silent for two weeks unnoticed. Own heartbeat so lateness is judged per schedule.
+  // grace 45: the processor does no poll-waiting (its input is last night's ranking, already
+  // committed), so a send that has not happened 45 min after the slot is a real failure.
+  { jobName: 'morning-brief', label: 'Pre-Open Stock Brief (Telegram)', cronPattern: '50 2 * * 1-5', graceMinutes: 45, critical: true },
+
   // Formal daily wrapper around dataQualityChecks.ts's 25-check suite (2026-08-01).
   { jobName: 'data-quality-daily', label: 'Daily Data-Integrity Report (Telegram)', cronPattern: '30 21 * * *', graceMinutes: 90, critical: true }, // 03:00 IST — moved out of the post-close peak (AF-20260917-24)
 ];

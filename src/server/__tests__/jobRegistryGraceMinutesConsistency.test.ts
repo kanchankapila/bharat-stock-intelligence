@@ -183,6 +183,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'job-digest': "jobName: 'job-digest-daily'",
     'job-digest-morning': "jobName: 'job-digest-morning'",
     'recommendations-digest': "jobName: 'recommendations-digest-daily'",
+    'morning-brief': "jobName: 'morning-brief-daily'",
     'data-quality-daily': "'data-quality-daily-run'",
   };
 

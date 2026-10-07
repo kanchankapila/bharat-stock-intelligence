@@ -67,6 +67,8 @@ def ensure_schema(con) -> None:
             new_52w_high INTEGER DEFAULT 0,
             predicted_by TEXT,
             precursors   TEXT,
+            open_to_close_pct REAL,
+            adt_20d      DOUBLE PRECISION,
             computed_at  TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (symbol, date)
         )
@@ -79,6 +81,9 @@ def ensure_schema(con) -> None:
     safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT 'up'")
     safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS wrong_call INTEGER DEFAULT 0")
     safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS prior_classification TEXT")
+    # AF-20261007-06: the capturable half of the move, and the liquidity to judge it by.
+    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS open_to_close_pct REAL")
+    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS adt_20d DOUBLE PRECISION")
     cur.execute(translate("""
         CREATE TABLE IF NOT EXISTS high_flyer_daily_stats (
             date                  DATE PRIMARY KEY,
@@ -152,6 +157,40 @@ def detect_divers(close: pd.DataFrame, volume: pd.DataFrame, day) -> pd.DataFram
         "new_52w_high": new_low.astype(int),   # column name kept for schema reuse; means "new low" here
     })
     return out[is_diver.reindex(close.columns).fillna(False).values].reset_index(drop=True)
+
+
+def entry_metrics(close: pd.DataFrame, volume: pd.DataFrame,
+                  open_px: pd.DataFrame, day) -> pd.DataFrame:
+    """The part of `day`'s move a reader of this report could actually have bought, plus the
+    liquidity needed to judge whether the name is tradeable at all. AF-20261007-06.
+
+    `return_pct` is close(D-1) -> close(D). A call published the evening before can be entered
+    no earlier than D's OPEN, so the overnight gap is not capturable — and measured live
+    2026-10-07 the gap is where the whole apparent edge of `high_flyer_candidates` sits
+    (close-to-close +0.254% = gap +0.515% + open-to-close -0.253%). Storing open(D) -> close(D)
+    beside it makes that visible every day instead of once, in a session.
+
+    `adt_20d` is the trailing 20 sessions BEFORE `day` (close x volume), exclusive — a mover's
+    own volume spike must not inflate the liquidity figure used to judge it. The flyer
+    definition has a price floor and no ADT floor, which is why the report's population is
+    microcap-dominated (`measurement.md`'s panel spec wants both).
+    """
+    cols = ["symbol", "open_to_close_pct", "adt_20d"]
+    if day not in close.index:
+        return pd.DataFrame(columns=cols)
+    c_day = close.loc[day]
+    o_day = open_px.loc[day] if day in open_px.index else pd.Series(index=close.columns, dtype=float)
+    o_day = o_day.reindex(close.columns)
+    # .where(> 0) rather than a guard per symbol: a 0 or NaN open yields NaN, never an inf.
+    o2c = (c_day / o_day.where(o_day > 0) - 1.0) * 100
+    hist_c = close.loc[:day].iloc[:-1].tail(20)
+    hist_v = volume.loc[:day].iloc[:-1].tail(20)
+    adt = (hist_c * hist_v).mean()
+    return pd.DataFrame({
+        "symbol": close.columns,
+        "open_to_close_pct": o2c.round(2).values,
+        "adt_20d": adt.reindex(close.columns).values,
+    })
 
 
 def ohlcv_precursor_flags(close: pd.DataFrame, volume: pd.DataFrame, asof) -> pd.DataFrame:
@@ -279,7 +318,7 @@ def run(target_date: str | None = None, backfill: int = 0) -> dict:
     ensure_schema(con)
 
     ohlcv = read_df(
-        "SELECT symbol, date, close, volume FROM stock_ohlcv "
+        "SELECT symbol, date, open, close, volume FROM stock_ohlcv "
         "WHERE date >= ? AND COALESCE(is_suspect, 0) = 0 ORDER BY date",
         ((pd.Timestamp.today() - pd.Timedelta(days=420)).strftime("%Y-%m-%d"),))
     if ohlcv.empty:
@@ -288,6 +327,9 @@ def run(target_date: str | None = None, backfill: int = 0) -> dict:
     ohlcv["date"] = pd.to_datetime(ohlcv["date"]).dt.strftime("%Y-%m-%d")
     close = ohlcv.pivot_table(index="date", columns="symbol", values="close").sort_index()
     volume = ohlcv.pivot_table(index="date", columns="symbol", values="volume").sort_index()
+    # Reindexed onto `close`'s axes so entry_metrics always aligns, even for a symbol/day with
+    # no open (a NULL open must read as "not capturable", never as a 0 that divides).
+    open_px = ohlcv.pivot_table(index="date", columns="symbol", values="open")         .reindex(index=close.index, columns=close.columns)
 
     day = target_date or close.index[-1]
     if day not in close.index:
@@ -301,7 +343,7 @@ def run(target_date: str | None = None, backfill: int = 0) -> dict:
     days = close.index[max(1, day_pos - backfill): day_pos + 1]
     result = {}
     for d in days:
-        result = _process_day(con, close, volume, d, close.index[close.index.get_loc(d) - 1])
+        result = _process_day(con, close, volume, open_px, d, close.index[close.index.get_loc(d) - 1])
     con.close()
     return result
 
@@ -310,10 +352,21 @@ _SELL_CLASSES = {"Sell", "Strong Sell"}
 _BUY_CLASSES = {"Buy", "Strong Buy"}
 
 
-def _process_day(con, close, volume, day, prev_day) -> dict:
+def _entry_row(entry: pd.DataFrame, symbol: str) -> tuple:
+    """(open_to_close_pct, adt_20d) for one symbol, NaN -> None. A missing row is not an error:
+    entry_metrics covers the whole universe, but a symbol with no open that day has neither."""
+    if symbol not in entry.index:
+        return (None, None)
+    r = entry.loc[symbol]
+    return (None if pd.isna(r.open_to_close_pct) else float(r.open_to_close_pct),
+            None if pd.isna(r.adt_20d) else float(r.adt_20d))
+
+
+def _process_day(con, close, volume, open_px, day, prev_day) -> dict:
     # 1. RECALL — today's flyers vs what we had flagged in advance
     flyers = detect_flyers(close, volume, day)
     divers = detect_divers(close, volume, day)
+    entry = entry_metrics(close, volume, open_px, day).set_index("symbol")
     predicted = _load_predicted_sets(con, day, prev_day)
     prior_class = _load_prior_classification(con, day)
 
@@ -338,16 +391,18 @@ def _process_day(con, close, volume, day, prev_day) -> dict:
         cur.execute(translate(
             "INSERT INTO high_flyer_retrospective "
             "(symbol, date, return_pct, volume_ratio, new_52w_high, predicted_by, precursors, "
-            "direction, wrong_call, prior_classification) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?) "
+            "direction, wrong_call, prior_classification, open_to_close_pct, adt_20d) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT (symbol, date) DO UPDATE SET return_pct = excluded.return_pct, "
             "volume_ratio = excluded.volume_ratio, new_52w_high = excluded.new_52w_high, "
             "predicted_by = excluded.predicted_by, precursors = excluded.precursors, "
             "direction = excluded.direction, wrong_call = excluded.wrong_call, "
-            "prior_classification = excluded.prior_classification"),
+            "prior_classification = excluded.prior_classification, "
+            "open_to_close_pct = excluded.open_to_close_pct, adt_20d = excluded.adt_20d"),
             (r.symbol, day, float(r.return_pct),
              None if pd.isna(r.volume_ratio) else float(r.volume_ratio),
-             int(r.new_52w_high), ",".join(srcs), active, "up", int(wrong), pc))
+             int(r.new_52w_high), ",".join(srcs), active, "up", int(wrong), pc,
+             *_entry_row(entry, r.symbol)))
 
     # WRONG-DIRECTION (bullish miss): today's divers that were classified Buy/Strong Buy
     # the session before — crashed right after our own bullish call.
@@ -360,16 +415,18 @@ def _process_day(con, close, volume, day, prev_day) -> dict:
         cur.execute(translate(
             "INSERT INTO high_flyer_retrospective "
             "(symbol, date, return_pct, volume_ratio, new_52w_high, predicted_by, precursors, "
-            "direction, wrong_call, prior_classification) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?) "
+            "direction, wrong_call, prior_classification, open_to_close_pct, adt_20d) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT (symbol, date) DO UPDATE SET return_pct = excluded.return_pct, "
             "volume_ratio = excluded.volume_ratio, new_52w_high = excluded.new_52w_high, "
             "predicted_by = excluded.predicted_by, precursors = excluded.precursors, "
             "direction = excluded.direction, wrong_call = excluded.wrong_call, "
-            "prior_classification = excluded.prior_classification"),
+            "prior_classification = excluded.prior_classification, "
+            "open_to_close_pct = excluded.open_to_close_pct, adt_20d = excluded.adt_20d"),
             (r.symbol, day, float(r.return_pct),
              None if pd.isna(r.volume_ratio) else float(r.volume_ratio),
-             int(r.new_52w_high), "", active, "down", int(wrong), pc))
+             int(r.new_52w_high), "", active, "down", int(wrong), pc,
+             *_entry_row(entry, r.symbol)))
 
     n_fly = len(flyers)
     recall = {k: round(v / n_fly, 3) if n_fly else None for k, v in recall_hits.items()}

@@ -9,10 +9,12 @@ import sys
 
 import numpy as np
 import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from high_flyer_retrospective import (
     detect_flyers,
+    entry_metrics,
     detect_divers,
     ohlcv_precursor_flags,
     ts_precursor_flags,
@@ -219,3 +221,63 @@ class TestScoreCandidates:
     def test_no_prev_flags_keeps_old_behaviour(self):
         flags = pd.DataFrame({"a": [True]}, index=["X"])
         assert not score_candidates(flags, self._lifts()).empty
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AF-20261007-06: the report's return_pct is close-to-close, which for a mover
+# detected on day D includes the overnight gap nobody could have bought. These
+# cover the capturable split that is now stored beside it.
+# ─────────────────────────────────────────────────────────────────────────────
+class TestEntryMetrics:
+    @staticmethod
+    def _frames_with_open(gap_pct=2.0, o2c_pct=3.0, px=100.0, vol=1000.0, n_days=30):
+        dates = pd.date_range("2026-01-01", periods=n_days, freq="B").strftime("%Y-%m-%d")
+        close = pd.DataFrame({"A": np.full(n_days, px)}, index=dates)
+        open_px = pd.DataFrame({"A": np.full(n_days, px)}, index=dates)
+        # Last day: open gaps up `gap_pct` from the prior close, then runs `o2c_pct` more.
+        last_open = px * (1 + gap_pct / 100.0)
+        open_px.iloc[-1, 0] = last_open
+        close.iloc[-1, 0] = last_open * (1 + o2c_pct / 100.0)
+        volume = pd.DataFrame({"A": np.full(n_days, vol)}, index=dates)
+        return close, volume, open_px, dates[-1]
+
+    def test_splits_the_move_into_the_gap_and_the_capturable_part(self):
+        close, volume, open_px, day = self._frames_with_open(gap_pct=2.0, o2c_pct=3.0)
+        m = entry_metrics(close, volume, open_px, day).set_index("symbol")
+        # close-to-close is 1.02*1.03 - 1 = 5.06%, of which only 3.0 was buyable at the open.
+        assert m.loc["A", "open_to_close_pct"] == pytest.approx(3.0, abs=0.01)
+
+    def test_a_pure_gap_leaves_nothing_to_capture(self):
+        close, volume, open_px, day = self._frames_with_open(gap_pct=5.0, o2c_pct=0.0)
+        m = entry_metrics(close, volume, open_px, day).set_index("symbol")
+        assert m.loc["A", "open_to_close_pct"] == pytest.approx(0.0, abs=0.01)
+
+    def test_a_gap_that_fades_is_negative_from_the_open(self):
+        close, volume, open_px, day = self._frames_with_open(gap_pct=6.0, o2c_pct=-2.0)
+        m = entry_metrics(close, volume, open_px, day).set_index("symbol")
+        assert m.loc["A", "open_to_close_pct"] < 0
+
+    def test_adt_excludes_the_move_day_itself(self):
+        # No look-ahead: ADT is the trailing window BEFORE `day`, so a volume spike on
+        # `day` must not inflate it. 20 sessions at 100 x 1000 = 100,000.
+        close, volume, open_px, day = self._frames_with_open(px=100.0, vol=1000.0)
+        volume.iloc[-1, 0] = 1_000_000.0
+        m = entry_metrics(close, volume, open_px, day).set_index("symbol")
+        assert m.loc["A", "adt_20d"] == pytest.approx(100_000.0, rel=0.01)
+
+    def test_missing_open_is_null_not_zero(self):
+        close, volume, open_px, day = self._frames_with_open()
+        open_px.iloc[-1, 0] = np.nan
+        m = entry_metrics(close, volume, open_px, day).set_index("symbol")
+        assert pd.isna(m.loc["A", "open_to_close_pct"])
+
+    def test_zero_open_does_not_divide(self):
+        close, volume, open_px, day = self._frames_with_open()
+        open_px.iloc[-1, 0] = 0.0
+        m = entry_metrics(close, volume, open_px, day).set_index("symbol")
+        v = m.loc["A", "open_to_close_pct"]
+        assert pd.isna(v) or math.isfinite(v)
+
+    def test_missing_day_returns_empty(self):
+        close, volume, open_px, _ = self._frames_with_open()
+        assert entry_metrics(close, volume, open_px, "2099-01-01").empty

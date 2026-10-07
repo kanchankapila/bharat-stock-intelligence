@@ -224,6 +224,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
 
     { jobName: 'job-digest-morning', marker: "jobName: 'job-digest-morning'", label: 'digests.jobs.ts (morning send)' },
     { jobName: 'recommendations-digest', marker: "jobName: 'recommendations-digest-daily'", label: 'digests.jobs.ts' },
+    { jobName: 'morning-brief', marker: "jobName: 'morning-brief-daily'", label: 'digests.jobs.ts' },
 
     // ml-daily-ops / ml-weekly-retrain StepTracker sub-steps -- share the parent's schedule.
     ...mlDailyOpsSubsteps.map(jobName => ({ jobName, marker: "'ml-daily-ops'", label: 'mlDailyOpsQueue (StepTracker sub-step)' })),

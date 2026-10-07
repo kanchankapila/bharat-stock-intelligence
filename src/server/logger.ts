@@ -81,16 +81,16 @@ const log = {
 };
 
 // Every `console.log`/`error`/`warn` call across the ~90 server files that still contain one
-// bypasses `log` above entirely (709 raw call sites, re-measured 2026-10-03; the previously
+// bypasses `log` above entirely (717 raw call sites, re-measured 2026-10-07; the previously
 // quoted "611 call sites / ~140 files" was a 2026-08-05 audit figure that had itself gone
 // stale — run `node scripts/docNumbers.mjs` to re-derive) -- no level, no JSON file
-// persistence, no rotation. Rewriting 709 call sites by hand is its own multi-session project;
+// persistence, no rotation. Rewriting 717 call sites by hand is its own multi-session project;
 // this instead routes the *existing* console.* API through the real logger, so every call site
 // gets structured JSON output (logs/app-*.log, logs/error-*.log) and a real level for free,
 // with zero code changes required at any of them. New code should still prefer calling `log`
 // directly when the event is worth structured fields beyond a formatted string (see the
 // server.ts internalAuth gate-rejection calls for the pattern) -- this shim's job is to stop
-// the other 709 sites from being invisible to log-level filtering, not to be the final form of
+// the other 717 sites from being invisible to log-level filtering, not to be the final form of
 // logging in this codebase.
 type ConsoleTarget = Pick<typeof logger, 'info' | 'warn' | 'error' | 'debug'>;
 

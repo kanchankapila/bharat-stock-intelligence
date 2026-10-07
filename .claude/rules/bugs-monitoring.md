@@ -262,6 +262,40 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   and only showing the misses". The digest now buckets every mover by prior call (correct/wrong/neutral) and lists the top confirmed
   as-recommended calls next to the worst wrong calls. **Tell:** an accuracy report whose only named examples are failures cannot
   separate a directional bug from a low-but-real hit rate.
+## A reported number with no null beside it (2026-10-07)
+
+Three instances in one report, all in the Signal Accuracy digest, all found by querying the live
+value behind a line rather than reading its code (AF-20261007-01/02/03). The class: **a metric
+printed without the thing it must be compared against is unfalsifiable, and it reads as
+information either way.**
+
+- **A union metric is pinned by its widest member.** `Flagged in advance: 100%` was
+  `recall.any` over four prediction sources; one of them (`signals` = DISTINCT symbols in
+  `unified_signals` over a trailing 5 sessions) held **2,101 of 2,424** ranked names at precision
+  0.075. `recall.any` therefore read **1.000 on all seven days** of its own trend line, while the
+  one source we control moved 0.139-0.219 and was never shown. **Tell:** a rate at exactly its
+  maximum on every row of a trend. Before reporting a union/OR/ANY aggregate, print each member's
+  own denominator — if one member covers most of the population, the aggregate is a constant.
+  Sibling of `dq-uninformative-checks` (a check whose detail never moves) in metric form.
+- **A count of failures with no chance expectation is a daily false alarm.** `Wrong-direction
+  calls: 15` named 14 Sell-rated names that rallied. The prior run rated 298 names Sell/Strong
+  Sell, and the day's own flyer base rate was 158/2,424 = 6.5%, so **~24 were expected wrong by
+  chance** — the observed 15 was *better* than chance and was being reported as a defect. Any
+  count a report presents as a failure carries its null (rated-bucket size x the population base
+  rate) on the same line, and only an excess gets the alarm marker.
+- **A bucket labelled "no opinion" that is mostly an opinion sends you to the wrong fix.**
+  `unrated 114 (72%)` was 77 rated **Hold** plus 37 with no row at all. Calibration and coverage
+  need opposite work, so they cannot share a bucket; the rendered label had quietly merged them.
+
+**And the measurement twin, same date (AF-20261007-05/-06): a bucket spread is not skill until
+you print median ADT per bucket.** Hold minus Strong Sell read +20.9 bps/day at t 3.86 on the
+repo's Rs 1cr floor — and Strong Sell's **median ADT is Rs 1.3cr**, i.e. the only significant leg
+sat at the floor. At Rs 10cr the whole table collapses to t -0.66 / 1.61, at Rs 50cr to t -0.01.
+Likewise **decompose any forward return into overnight gap and open-to-close before believing a
+hit rate**: `high_flyer_candidates` reads close-to-close +0.254% = gap +0.515% + o2c -0.253%, so
+its headline 0.60 flyer precision (~10x base) is unharvestable by construction — the list is
+generated after the close.
+
 ## Noise floors, and metrics that overflow into a plausible wrong number
 
 - **A log-level classifier that recognises exactly ONE logging format reports ordinary progress

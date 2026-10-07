@@ -864,6 +864,8 @@ CREATE TABLE IF NOT EXISTS "high_flyer_retrospective" (
   "direction" TEXT DEFAULT 'up'::text,
   "wrong_call" INTEGER DEFAULT 0,
   "prior_classification" TEXT,
+  "open_to_close_pct" REAL,
+  "adt_20d" DOUBLE PRECISION,
   PRIMARY KEY ("symbol", "date")
 );
 

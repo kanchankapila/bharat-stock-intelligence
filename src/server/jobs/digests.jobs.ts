@@ -19,6 +19,7 @@ import { dbGet, dbRun } from '../dbAsync';
 export const QUEUE_JOB_DIGEST = 'job-digest';
 export const QUEUE_JOB_DIGEST_MORNING = 'job-digest-morning';
 export const QUEUE_RECOMMENDATIONS_DIGEST = 'recommendations-digest';
+export const QUEUE_MORNING_BRIEF = 'morning-brief';
 
 async function processJobDigest(): Promise<void> {
   const digest = await buildDailyDigest();
@@ -148,6 +149,57 @@ export async function processRecommendationsDigest(job?: { data?: { force?: bool
   }
 }
 
+/**
+ * Pre-open brief (08:20 IST). Deliberately does NOT reuse `unifiedRankingIsFresh()`: that gate
+ * demands a ranking generated TODAY or within 6h of the current session, which is correct for
+ * the 22:40 send and structurally impossible at 08:20 — nothing re-ranks overnight, so the
+ * morning brief's input is *supposed* to be last night's 22:30 ranking. What it must refuse is a
+ * ranking from the session BEFORE that, i.e. the evening ranker having failed outright.
+ *
+ * 20h: a Tue 08:20 send accepts Mon 22:30 (~10h) and rejects Fri 22:30 read on Mon (~58h).
+ * After a long weekend Monday's own 08:20 slot legitimately has no fresh ranking — the brief
+ * records a named skip rather than shipping a 3-day-old pick list as if it were today's.
+ */
+const MORNING_BRIEF_MAX_RANKING_AGE_MS = 20 * 60 * 60 * 1000;
+const MORNING_BRIEF_LAST_SENT_KEY = 'morning_brief_last_sent_ranking';
+
+export async function processMorningBrief(job?: { data?: { force?: boolean } }): Promise<void> {
+  const ur = await dbGet<{ g: string | null }>(
+    `SELECT MAX(generated_at)::text AS g FROM unified_recommendations`);
+  if (!ur?.g) {
+    const msg = 'SKIPPED: unified_recommendations is empty — no ranking to brief on';
+    console.warn('[QUEUE] morning-brief', msg);
+    return { success: false, failedSteps: [msg] } as unknown as void;
+  }
+  const ageMs = Date.now() - new Date(ur.g.endsWith('Z') ? ur.g : `${ur.g}Z`).getTime();
+  if (!(ageMs >= 0) || ageMs > MORNING_BRIEF_MAX_RANKING_AGE_MS) {
+    const msg = `SKIPPED: newest ranking is ${Math.round(ageMs / 3_600_000)}h old `
+      + `(limit ${MORNING_BRIEF_MAX_RANKING_AGE_MS / 3_600_000}h) — last night's unified-ranker `
+      + 'did not produce one; see its heartbeat';
+    console.warn('[QUEUE] morning-brief', msg);
+    return { success: false, failedSteps: [msg] } as unknown as void;
+  }
+  // Same recurrence this queue already has a ledger row for (AF-20261002-01): a server restart
+  // replays the boot catch-up and re-fires this job, and re-sending an identical brief carries
+  // no information. Its OWN key — sharing recommendations-digest's would make the evening send
+  // suppress the morning one, which is the entire point of having both.
+  if (!job?.data?.force) {
+    const last = await dbGet<{ value: string }>(
+      `SELECT value FROM app_settings WHERE key = ?`, [MORNING_BRIEF_LAST_SENT_KEY]);
+    if (last?.value === ur.g) {
+      console.log(`[QUEUE] morning-brief: ranking ${ur.g} already briefed — not re-sending`);
+      return;
+    }
+  }
+  const { sendMorningBrief } = await import('../morningBrief');
+  const res = await sendMorningBrief();
+  if (!res.sent) throw new Error('morning brief failed to send to Telegram');
+  await dbRun(
+    `INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+    [MORNING_BRIEF_LAST_SENT_KEY, ur.g],
+  );
+}
+
 export async function registerDigestJobs(connection: any) {
   const jobDigest = await registerRepeatableJob({
     connection,
@@ -211,5 +263,24 @@ export async function registerDigestJobs(connection: any) {
     onCompleted: () => console.log('[QUEUE] recommendations-digest sent'),
   });
 
-  return { jobDigest, jobDigestMorning, recommendationsDigest };
+  // The pre-open stock-recommendation send the evening digest cannot be (see processMorningBrief).
+  // 02:50 UTC = 08:20 IST — after job-digest-morning's 08:15 slot so the two Telegram sends do
+  // not land in the same minute, and 55 min before the 09:15 open. Mon-Fri only: there is no
+  // session to brief for on a weekend.
+  const morningBrief = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_MORNING_BRIEF,
+    jobName: 'morning-brief-daily',
+    repeat: { pattern: '50 2 * * 1-5' },
+    jobId: 'morning-brief-daily-repeatable',
+    removeOnComplete: 3,
+    removeOnFail: 3,
+    processor: processMorningBrief,
+    monitorName: 'morning-brief',
+    concurrency: 1,
+    lockDuration: 5 * 60_000,
+    onCompleted: () => console.log('[QUEUE] morning-brief sent'),
+  });
+
+  return { jobDigest, jobDigestMorning, recommendationsDigest, morningBrief };
 }
