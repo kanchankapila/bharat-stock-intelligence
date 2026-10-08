@@ -102,6 +102,11 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
           {p.timeframe && (
             <span className="text-[9px] text-slate-500 uppercase">{p.timeframe.replace('_', ' ')}</span>
           )}
+          {p.planStatus === 'EXPIRED' && (
+            <span className="text-[9px] text-amber-400 uppercase" title="This plan's validity window has ended; the stop and target no longer apply">
+              plan expired
+            </span>
+          )}
           {p.engine_coverage_count != null && (
             <span
               className="text-[9px] text-slate-500"
@@ -513,7 +518,7 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
             <button
               key={c}
               onClick={() => setConviction(c)}
-              title={c === 'TOP' ? 'S_ELITE + A_HIGH only — the most accurate tier' : undefined}
+              title={c === 'TOP' ? 'S_ELITE + A_HIGH only. These tiers mirror the Buy / Strong Buy classification; they are not a graded accuracy scale (no forward edge is verified yet).' : undefined}
               className={cn('px-3 py-1.5 transition-colors', conviction === c ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white')}
             >
               {c === 'TOP' ? 'Top ★' : c === 'ALL' ? 'All' : c === 'S_ELITE' ? 'S' : c === 'A_HIGH' ? 'A' : 'B'}

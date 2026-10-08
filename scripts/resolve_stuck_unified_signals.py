@@ -66,11 +66,11 @@ WITH stuck AS (
       {age_filter}
 ),
 touch AS (
-    SELECT s.id, s.symbol, s.signal_source, s.is_long, t.date AS touch_date,
-           t.hit_target, t.hit_stop
+    SELECT s.id, s.symbol, s.signal_source, s.is_long, s.target, s.stop,
+           t.date AS touch_date, t.bar_open, t.hit_target, t.hit_stop
     FROM stuck s
     CROSS JOIN LATERAL (
-        SELECT o.date,
+        SELECT o.date, o.open AS bar_open,
                (CASE WHEN s.is_long THEN o.high >= s.target ELSE o.low  <= s.target END) AS hit_target,
                (CASE WHEN s.is_long THEN o.low  <= s.stop   ELSE o.high >= s.stop   END) AS hit_stop
         FROM stock_ohlcv o
@@ -86,7 +86,19 @@ touch AS (
 )
 SELECT id, symbol, signal_source,
        -- Same-bar ambiguity resolves to FAILED; see the module docstring.
-       CASE WHEN hit_stop THEN 'FAILED' ELSE 'COMPLETED' END AS new_status
+       CASE WHEN hit_stop THEN 'FAILED' ELSE 'COMPLETED' END AS new_status,
+       touch_date,
+       -- exit_reason/exit_price mirror signal_lifecycle.close_swing EXACTLY (AF-20261008-08), so
+       -- the two closers can never describe the same event differently: the published level,
+       -- unless the bar OPENED through it, in which case the fill is that open. Without this the
+       -- resolver books a price that was never available on a gap day.
+       CASE WHEN hit_stop THEN 'STOP' ELSE 'TARGET' END AS exit_reason,
+       CASE WHEN hit_stop THEN
+                 CASE WHEN is_long THEN (CASE WHEN bar_open <= stop THEN bar_open ELSE stop END)
+                      ELSE             (CASE WHEN bar_open >= stop THEN bar_open ELSE stop END) END
+            ELSE CASE WHEN is_long THEN (CASE WHEN bar_open >= target THEN bar_open ELSE target END)
+                      ELSE             (CASE WHEN bar_open <= target THEN bar_open ELSE target END) END
+       END AS exit_price
 FROM touch
 """
 
@@ -165,10 +177,15 @@ def main() -> None:
         return
 
     updated = 0
-    for rid, _sym, _src, new_status in targeted:
+    for rid, _sym, _src, new_status, touch_date, exit_reason, exit_price in targeted:
+        # All four columns, not status alone (AF-20261008-08): this resolver already knows the
+        # exit date, the level touched and the fill, and writing only `status` is what left 44,909
+        # terminal rows with no exit price -- making an honest win percentage impossible to
+        # compute from the price a signal actually exited at.
         conn.execute(
-            "UPDATE unified_signals SET status = ? WHERE id = ? AND status = 'ACTIVE'",
-            (new_status, rid),
+            "UPDATE unified_signals SET status = ?, closed_at = ?, exit_price = ?, "
+            "exit_reason = ? WHERE id = ? AND status = 'ACTIVE'",
+            (new_status, touch_date, exit_price, exit_reason, rid),
         )
         updated += 1
     conn.commit()

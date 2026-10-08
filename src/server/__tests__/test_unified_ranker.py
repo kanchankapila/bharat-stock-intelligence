@@ -108,6 +108,9 @@ def make_db():
             symbol TEXT, signal_date TEXT, signal_source TEXT, signal_type TEXT,
             entry_price REAL, target_price REAL, stop_loss REAL,
             confidence_score REAL, reasoning TEXT,
+            -- Production default is 'ACTIVE' (information_schema, 2026-10-08). Mirrored here so
+            -- a fixture that omits status gets the same value production would give it.
+            status TEXT DEFAULT 'ACTIVE',
             signal_generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE quant_scores (
@@ -263,7 +266,10 @@ class TestUnifiedRankerRun:
         conn.execute("INSERT INTO stock_scores VALUES ('WEAK','long_term',35)")
 
         # Give INFY and WEAK a positive track record so they pass RL gate
-        conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) VALUES ('INFY','2026-05-01',5.0,date('now','-10 days'))")
+        conn.execute("INSERT INTO recommendation_log "
+                     "(symbol, signal_date, actual_return_pct, generated_at, entry_price, "
+                     "stop_loss, target_1, timeframe) VALUES "
+                     "('INFY','2026-05-01',5.0,date('now','-10 days'),100.0,90.0,120.0,'SWING')")
         conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) VALUES ('WEAK','2026-05-01',1.0,date('now','-10 days'))")
 
         # ml scores
@@ -353,9 +359,10 @@ class TestUnifiedRankerRun:
             assert scores['INFY'] > scores['WEAK']
         os.unlink(csv_path)
 
-    def test_rl_gate_excludes_negative_track_record_with_enough_samples(self):
-        """A REAL track record of losing money -- MIN_RL_GATE_SAMPLES-or-more resolved
-        outcomes, consistently negative -- still excludes a symbol."""
+    def test_negative_track_record_is_measured_but_does_not_erase_the_current_candidate(self):
+        """The legacy condition remains measurable, but recommendation_log is dominated by
+        universe-wide non-setup labels and has no demonstrated exclusion edge. It must not act
+        as a hard universe filter."""
         import os
         ranker, conn, csv_path = self._setup()
         conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','LOSER','LOSER')")
@@ -367,9 +374,10 @@ class TestUnifiedRankerRun:
                 "VALUES ('LOSER', ?, -8.0, date('now','-10 days'))",
                 (f'2026-05-{i+1:02d}',))
         conn.commit()
+        assert ranker._passes_rl_gate('LOSER', ranker._get_rl_gate_map()) is False
         results = ranker.run()
         symbols = [r['symbol'] for r in results]
-        assert 'LOSER' not in symbols
+        assert 'LOSER' in symbols
         os.unlink(csv_path)
 
     def test_rl_gate_does_not_veto_on_a_thin_sample(self):
@@ -428,11 +436,9 @@ class TestUnifiedRankerRun:
         )
         os.unlink(csv_path)
 
-    def test_rl_gate_still_excludes_a_consistent_zero_variance_loser(self):
-        """Guards the significance test's own edge case: every resolved outcome identical and
-        negative gives stddev == 0. That is maximally significant (t -> -inf), NOT untestable,
-        and must still exclude -- reading a zero stddev as 'cannot establish significance'
-        would silently disable the gate for its most clear-cut case."""
+    def test_zero_variance_loser_is_still_flagged_but_not_hard_excluded(self):
+        """Zero variance is maximally significant for the advisory calculation, but even that
+        legacy condition is not a production veto until published-trade outcomes show edge."""
         import os
         ranker, conn, csv_path = self._setup()
         conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','FLATLOSER','FLATLOSER')")
@@ -444,8 +450,9 @@ class TestUnifiedRankerRun:
                 "VALUES ('FLATLOSER', ?, -8.0, date('now','-10 days'))",
                 (f'2026-05-{i+1:02d}',))
         conn.commit()
+        assert ranker._passes_rl_gate('FLATLOSER', ranker._get_rl_gate_map()) is False
         results = ranker.run()
-        assert 'FLATLOSER' not in [r['symbol'] for r in results]
+        assert 'FLATLOSER' in [r['symbol'] for r in results]
         os.unlink(csv_path)
 
     def test_quality_gate_demotes_weak_fundamentals(self):
@@ -510,8 +517,10 @@ class TestUnifiedRankerRun:
         conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','HICONV','HICONV')")
         conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('fund1','HICONV','HICONV')")
         conn.execute("INSERT INTO stock_scores VALUES ('HICONV', 'long_term', 95)")
-        conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) "
-                     "VALUES ('HICONV', '2026-05-01', 5.0, date('now','-10 days'))")
+        conn.execute("INSERT INTO recommendation_log "
+                     "(symbol, signal_date, actual_return_pct, generated_at, entry_price, "
+                     "stop_loss, target_1, timeframe) VALUES "
+                     "('HICONV', '2026-05-01', 5.0, date('now','-10 days'),100.0,90.0,120.0,'SWING')")
         conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) "
                      "VALUES ('HICONV', date('now'), 0.80, 95)")
         conn.execute("INSERT INTO quant_scores VALUES ('HICONV', 7, 15.0, 20.0)")
@@ -659,9 +668,8 @@ class TestIncompleteGeometryIsNotPublishedAsATradePlan:
             )
             assert et['stop_loss'] == pytest.approx(92.0), et
             assert et['target_1'] == pytest.approx(120.0), et
-            # rr = (120-100)/(100-92) = 2.5. Asserted from the formula rather than a literal so the
-            # test states the R:R contract instead of a number that could drift with rounding.
-            assert et['risk_reward'] == pytest.approx((120.0 - 100.0) / (100.0 - 92.0), abs=0.01), et
+            # Worst-fill rr = (120-101)/(101-92), using the high edge of the published zone.
+            assert et['risk_reward'] == pytest.approx((120.0 - 101.0) / (101.0 - 92.0), abs=0.01), et
             assert et['entry_zone_low'] is not None
         finally:
             os.unlink(csv_path)
@@ -712,6 +720,39 @@ class TestIncompleteGeometryIsNotPublishedAsATradePlan:
                          "and row['target_1'] is not None") == 1
         assert src.count("row['entry'] is not None and row['stopLoss'] is not None "
                          "and row['target'] is not None") == 1
+
+    def test_inverted_confluence_geometry_falls_through(self):
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        ranker = UnifiedRanker(conn=conn, csv_path=None)
+        bad = {
+            'BAD': {
+                'entry_zone_low': 79.31, 'entry_zone_high': 80.91,
+                'stop_loss': 82.96, 'target_1': 82.51,
+                'target_2': None, 'target_3': None, 'risk_reward': None,
+                'timeframe': 'POSITIONAL', 'trade_reasoning': 'inverted', 'sector': 'Pharma',
+            }
+        }
+        et = ranker._get_entry_targets('BAD', bad, {}, {}, {'BAD': 'Pharma'})
+        assert et['entry_zone_low'] is None
+        assert et['stop_loss'] is None
+        assert et['target_1'] is None
+        assert et['risk_reward'] is None
+
+    def test_confluence_rr_is_recomputed_from_published_prices(self):
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        ranker = UnifiedRanker(conn=conn, csv_path=None)
+        good = {
+            'GOOD': {
+                'entry_zone_low': 99.0, 'entry_zone_high': 101.0,
+                'stop_loss': 90.0, 'target_1': 120.0,
+                'target_2': None, 'target_3': None, 'risk_reward': 99.0,
+                'timeframe': 'SWING', 'trade_reasoning': 'valid', 'sector': 'IT',
+            }
+        }
+        et = ranker._get_entry_targets('GOOD', good, {}, {}, {})
+        assert et['risk_reward'] == 1.73
 
 
 class TestConfluenceAndCostReadsAreTimeBounded:
@@ -816,6 +857,19 @@ class TestTimeframeVocabularyIsCanonical:
             assert a == b
             # SWING is a shorter window than POSITIONAL on the same day.
             assert valid_until_for('SWING', '2026-10-01T09:00:00') < a
+        finally:
+            ur._holiday_cache, ur._holiday_cache_tried = None, False
+
+    def test_intraday_validity_ends_at_the_next_session_close(self):
+        """The nightly ranker publishes for the next session. An INTRADAY row must not remain
+        actionable after that session's 15:30 IST square-off just because the ranker ran at
+        22:30."""
+        from unified_ranker import valid_until_for
+        import unified_ranker as ur
+        ur._holiday_cache, ur._holiday_cache_tried = set(), True
+        try:
+            due = valid_until_for('INTRADAY', '2026-10-05T22:30:00+05:30')
+            assert due.isoformat() == '2026-10-06T15:30:00+05:30'
         finally:
             ur._holiday_cache, ur._holiday_cache_tried = None, False
 
@@ -1019,24 +1073,31 @@ class TestUnifiedSignalsDirectionFilter:
         # a SELL, a naive "most recent row regardless of direction" would either surface the
         # SELL's inverted geometry or (if filtered wrong) drop the symbol entirely instead of
         # falling back to its own most recent BUY row.
+        #
+        # Both stamps are RELATIVE to now (2026-10-08, AF-20261008-01): this tier gained the
+        # same 30-day window the other two already had, and the original fixture's hardcoded
+        # '2026-08-01' had quietly aged out of it, turning a direction-filter test into a
+        # calendar-drift failure. What it actually asserts is the ORDERING of two rows, so the
+        # dates only need to be ordered and both inside the window.
+        from datetime import datetime, timedelta
         from unified_ranker import UnifiedRanker
         conn = make_db()
         ranker = UnifiedRanker(conn=conn, csv_path=None)
+        older = (datetime.now() - timedelta(days=9)).isoformat(sep=' ')
+        newer = (datetime.now() - timedelta(days=5)).isoformat(sep=' ')
 
         conn.execute("""
             INSERT INTO unified_signals
             (symbol, signal_date, signal_source, signal_type, entry_price, target_price,
              stop_loss, reasoning, signal_generated_at)
-            VALUES ('FLIP', '2026-08-01', 'test', 'BUY', 100.0, 120.0, 90.0, 'older buy',
-                    '2026-08-01 09:00:00')
-        """)
+            VALUES ('FLIP', '2026-08-01', 'test', 'BUY', 100.0, 120.0, 90.0, 'older buy', ?)
+        """, (older,))
         conn.execute("""
             INSERT INTO unified_signals
             (symbol, signal_date, signal_source, signal_type, entry_price, target_price,
              stop_loss, reasoning, signal_generated_at)
-            VALUES ('FLIP', '2026-08-05', 'test', 'SELL', 500.0, 450.0, 550.0, 'newer sell',
-                    '2026-08-05 09:00:00')
-        """)
+            VALUES ('FLIP', '2026-08-05', 'test', 'SELL', 500.0, 450.0, 550.0, 'newer sell', ?)
+        """, (newer,))
         conn.commit()
 
         m = ranker._get_unified_signals_latest_map()
@@ -1089,7 +1150,7 @@ class TestRiskRewardFloor:
         et = ranker._get_entry_targets('GOODRR', {}, rec_log_map, {}, {})
         assert et['stop_loss'] == 90.0
         assert et['target_1'] == 120.0
-        assert et['risk_reward'] == 2.0
+        assert et['risk_reward'] == 1.73
 
     def test_unified_signals_sub_one_rr_falls_through_to_default(self):
         # Matches the live PAR row exactly: production stored entry_zone_low=89.46,
@@ -1141,7 +1202,7 @@ class TestRiskRewardFloor:
         et = ranker._get_entry_targets('CASCADE', {}, rec_log_map, unified_map, {})
         assert et['stop_loss'] == 45.0
         assert et['target_1'] == 60.0
-        assert et['risk_reward'] == 2.0
+        assert et['risk_reward'] == 1.73
 
 
 class TestConfluenceUrlSymbolGuard:
@@ -1958,3 +2019,266 @@ class TestBuyFloorSelectivityReporting:
         before = [dict(r) for r in rows]
         self._ur()._report_buy_floor_selectivity(rows)
         assert rows == before, "reporting must never change a score, label or size"
+
+
+class TestTier3IsBoundedAndLive:
+    """AF-20261008-01. `_get_entry_targets`'s 3rd geometry tier (unified_signals) was the only
+    one with NEITHER a date window (AF-20260930-11 / AF-20261001-07 gave confluence and rec_log
+    theirs) NOR a status filter -- so a CLOSED signal's levels were published as a live Buy plan.
+
+    Measured live 2026-10-08 before the fix: of 316 Buy/Strong Buy rows, 50 took their geometry
+    from this tier and 3 of those came from a signal whose own status was FAILED. The worst case
+    was MODINATUR -- published Buy with zone 387.44-395.26, stop 362.93, target 438.71, every
+    number copied from a 2026-08-07 `AI` signal that had already FAILED, while the stock closed
+    at 299.60 (23% below the zone, and below the stop). Of the 96,440 long-type rows then
+    eligible to supply geometry, only 7,160 were ACTIVE."""
+
+    def _insert(self, conn, symbol, status, generated_at):
+        conn.execute(
+            "INSERT INTO unified_signals (symbol, signal_date, signal_source, signal_type, "
+            "entry_price, target_price, stop_loss, reasoning, status, signal_generated_at) "
+            "VALUES (?, '2026-10-01', 'technical', 'Bullish', 100.0, 120.0, 90.0, 'setup', ?, ?)",
+            (symbol, status, generated_at))
+        conn.commit()
+
+    def test_closed_status_rows_never_surface(self):
+        from datetime import datetime
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        ranker = UnifiedRanker(conn=conn, csv_path=None)
+        closed = ('FAILED', 'COMPLETED', 'EXPIRED', 'INVALIDATED_CONFLICT')
+        for status in closed:
+            self._insert(conn, 'DEAD' + status, status, datetime.now().isoformat(sep=' '))
+        self._insert(conn, 'LIVE', 'ACTIVE', datetime.now().isoformat(sep=' '))
+
+        m = ranker._get_unified_signals_latest_map()
+        assert 'LIVE' in m, 'an ACTIVE signal must still supply geometry'
+        for status in closed:
+            assert 'DEAD' + status not in m, \
+                "a " + status + " signal's levels must never be published as a live trade plan"
+
+    def test_tier3_is_bounded_to_30_days(self):
+        from datetime import datetime, timedelta
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        ranker = UnifiedRanker(conn=conn, csv_path=None)
+        self._insert(conn, 'STALE', 'ACTIVE',
+                     (datetime.now() - timedelta(days=45)).isoformat(sep=' '))
+        self._insert(conn, 'FRESH', 'ACTIVE',
+                     (datetime.now() - timedelta(days=3)).isoformat(sep=' '))
+
+        m = ranker._get_unified_signals_latest_map()
+        assert 'FRESH' in m
+        assert 'STALE' not in m, \
+            'tier 3 must carry the same 30-day window as the confluence and rec_log tiers'
+
+    def test_bound_is_pinned_at_the_sql(self):
+        """Mirrors test_rec_log_geometry_source_is_bounded_to_30_days: pinned at the SQL so the
+        window and the status filter cannot be dropped without this failing."""
+        import inspect
+        from unified_ranker import UnifiedRanker
+        sql = inspect.getsource(UnifiedRanker._get_unified_signals_latest_map)
+        assert "INTERVAL '30 days'" in sql
+        assert "status = 'ACTIVE'" in sql
+
+
+class TestPlanIsCurrent:
+    """AF-20261008-01, price-sanity half. A published plan asserts a trade that is still
+    available: an entry between a stop below and a target above. Once the market has closed
+    THROUGH either level the plan is arithmetically dead -- at that entry you would already be
+    stopped out, or already past the target -- yet the ranker published it unchanged because no
+    tier ever compared its levels against the current price.
+
+    Threshold-free on purpose. The gate uses only the plan's OWN stop and target, so it needs no
+    calibration and is not a scoring change. How far the close may drift from the entry ZONE
+    while still inside stop..target IS a threshold, and is deliberately left to AF-20261008-02's
+    measurement rather than guessed at here."""
+
+    def test_close_inside_the_plan_passes(self):
+        from unified_ranker import plan_is_current
+        assert plan_is_current(100.0, 90.0, 120.0) is True
+
+    def test_close_through_the_stop_is_dead(self):
+        from unified_ranker import plan_is_current
+        # The live MODINATUR row, exactly: close 299.60 against stop 362.93 / target 438.71.
+        assert plan_is_current(299.60, 362.93, 438.71) is False
+
+    def test_close_through_the_target_is_dead(self):
+        from unified_ranker import plan_is_current
+        assert plan_is_current(130.0, 90.0, 120.0) is False
+
+    def test_close_exactly_at_a_level_is_dead(self):
+        from unified_ranker import plan_is_current
+        assert plan_is_current(90.0, 90.0, 120.0) is False
+        assert plan_is_current(120.0, 90.0, 120.0) is False
+
+    def test_missing_or_nonfinite_price_fails_open(self):
+        """No price is not evidence against a plan -- every other missing-data path in this
+        ranker fails open (see the high-vol veto), and a stock_ohlcv gap must not silently
+        empty the Buy list."""
+        from unified_ranker import plan_is_current
+        assert plan_is_current(None, 90.0, 120.0) is True
+        assert plan_is_current(float('nan'), 90.0, 120.0) is True
+        assert plan_is_current(0.0, 90.0, 120.0) is True
+        assert plan_is_current(100.0, None, 120.0) is True
+
+
+class TestEveryGeometryTierIsPriceChecked:
+    """The gate has to hold at all three tiers; a guard present in one path and missing from
+    another is this repo's most-recurring class (bugs-data-layer.md records 3 instances on the
+    TS/Python boundary alone). Each tier is driven through `_get_entry_targets` with a dead
+    price, and a source-derived count pins the call sites so a fourth tier cannot be added
+    without one."""
+
+    def _conn_with_close(self, symbol, close):
+        conn = make_db()
+        conn.execute("INSERT INTO stock_ohlcv (symbol, date, close, is_suspect) VALUES (?, ?, ?, 0)",
+                     (symbol, '2026-10-07', close))
+        conn.commit()
+        return conn
+
+    def _live_plan(self):
+        return {
+            'entry_zone_low': 99.0, 'entry_zone_high': 101.0,
+            'stop_loss': 90.0, 'target_1': 120.0,
+            'target_2': None, 'target_3': None, 'risk_reward': 2.0,
+            'timeframe': 'SWING', 'trade_reasoning': 'valid', 'sector': 'IT',
+        }
+
+    def test_tier1_confluence_plan_below_its_own_stop_falls_through(self):
+        from unified_ranker import UnifiedRanker
+        conn = self._conn_with_close('C1', 80.0)   # below the 90.0 stop
+        ranker = UnifiedRanker(conn=conn, csv_path=None)
+        et = ranker._get_entry_targets('C1', {'C1': self._live_plan()}, {}, {},
+                                       {'C1': 'IT'}, ranker._get_last_close_map())
+        assert et['stop_loss'] is None and et['target_1'] is None
+        assert et['sector'] == 'IT', 'sector is informational and must survive the fall-through'
+
+    def test_tier1_confluence_plan_still_live_is_returned(self):
+        from unified_ranker import UnifiedRanker
+        conn = self._conn_with_close('C2', 100.0)  # inside 90..120
+        ranker = UnifiedRanker(conn=conn, csv_path=None)
+        et = ranker._get_entry_targets('C2', {'C2': self._live_plan()}, {}, {}, {},
+                                       ranker._get_last_close_map())
+        assert et['stop_loss'] == 90.0 and et['target_1'] == 120.0
+
+    def test_tier2_rec_log_plan_below_its_own_stop_falls_through(self):
+        from unified_ranker import UnifiedRanker
+        conn = self._conn_with_close('R1', 80.0)
+        ranker = UnifiedRanker(conn=conn, csv_path=None)
+        conn.execute("INSERT INTO recommendation_log (symbol, signal_date, entry_price, generated_at) "
+                     "VALUES ('R1', '2026-10-01', 100.0, datetime('now'))")
+        conn.execute("UPDATE recommendation_log SET stop_loss=90.0, target_1=120.0 WHERE symbol='R1'")
+        conn.commit()
+        et = ranker._get_entry_targets('R1', {}, ranker._get_rec_log_latest_map(), {}, {},
+                                       ranker._get_last_close_map())
+        assert et['stop_loss'] is None and et['target_1'] is None
+
+    def test_tier3_unified_signals_plan_below_its_own_stop_falls_through(self):
+        from unified_ranker import UnifiedRanker
+        conn = self._conn_with_close('U1', 80.0)
+        ranker = UnifiedRanker(conn=conn, csv_path=None)
+        conn.execute(
+            "INSERT INTO unified_signals (symbol, signal_date, signal_source, signal_type, "
+            "entry_price, target_price, stop_loss, reasoning, status, signal_generated_at) "
+            "VALUES ('U1', '2026-10-01', 'technical', 'Bullish', 100.0, 120.0, 90.0, 's', "
+            "'ACTIVE', datetime('now'))")
+        conn.commit()
+        et = ranker._get_entry_targets('U1', {}, {}, ranker._get_unified_signals_latest_map(), {},
+                                       ranker._get_last_close_map())
+        assert et['stop_loss'] is None and et['target_1'] is None
+
+    def test_all_three_tiers_call_the_gate(self):
+        import inspect
+        from unified_ranker import UnifiedRanker
+        src = inspect.getsource(UnifiedRanker._get_entry_targets)
+        assert src.count('plan_is_current(') == 3, \
+            'each of the three geometry tiers must price-check its plan'
+
+    def test_run_passes_the_price_map_to_every_lookup(self):
+        """The gate is only live if run() supplies the map -- an optional argument nobody passes
+        is the registered-but-never-delivered class. Pinned at the call site."""
+        import inspect
+        from unified_ranker import UnifiedRanker
+        src = inspect.getsource(UnifiedRanker.run)
+        assert 'last_close_map' in src
+        assert '_get_last_close_map()' in src
+
+
+class TestValidUntilAnchorsOnTheEntrySession:
+    """AF-20261008-07. `valid_until_for` anchored on `generated_at.date()` and added the full
+    horizon in sessions AFTER it. That is correct only when the ranker publishes POST-CLOSE, where
+    `generated_at.date()` is the session before the entry session. It is wrong for a pre-open or
+    holiday-batch run, where generation happens ON the entry session -- the deadline then lands one
+    session too late and an INTRADAY idea stays 'live' through the whole of the next day.
+
+    Measured live 2026-10-08: 1,622 of 6,509 stamped rows (25%) were generated on or after their own
+    computed_at date. Concrete case, the 2026-10-06 grid: generated 06:33 IST on 2026-10-06,
+    computed_at 2026-10-06, yet valid_until read 2026-10-07 15:30 IST -- a full extra session.
+
+    The correct statement of the window: it is the `h` sessions BEGINNING WITH the entry session
+    (`computed_at`), and the deadline is the close of the last of them. For the post-close case this
+    is arithmetically identical to the old formula, so no measurement window is re-based -- that
+    equivalence is asserted below, because a fix that silently moved the SWING/POSITIONAL windows
+    would invalidate every comparison against earlier gradings."""
+
+    SESSIONS = frozenset()   # no holidays needed: the dates below are plain weekdays
+
+    def test_intraday_published_post_close_is_valid_until_the_next_session_close(self):
+        from datetime import date, datetime, timezone, timedelta
+        from unified_ranker import valid_until_for
+        ist = timezone(timedelta(hours=5, minutes=30))
+        # The normal 22:30 IST run on Tue 2026-10-06, for the Wed 2026-10-07 session.
+        gen = datetime(2026, 10, 6, 22, 30, tzinfo=ist)
+        vu = valid_until_for('INTRADAY', gen, session_date=date(2026, 10, 7))
+        assert vu.date() == date(2026, 10, 7)
+        assert vu.strftime('%H:%M') == '15:30'
+
+    def test_intraday_published_pre_open_closes_the_SAME_session(self):
+        """The defect. A 06:33 IST run on Tue 2026-10-06 is actionable for THAT day's open, so it
+        must expire at 2026-10-06's close -- not 2026-10-07's."""
+        from datetime import date, datetime, timezone, timedelta
+        from unified_ranker import valid_until_for
+        ist = timezone(timedelta(hours=5, minutes=30))
+        gen = datetime(2026, 10, 6, 6, 33, tzinfo=ist)
+        vu = valid_until_for('INTRADAY', gen, session_date=date(2026, 10, 6))
+        assert vu.date() == date(2026, 10, 6), \
+            'a pre-open intraday idea must not stay live into the next session'
+        assert vu.strftime('%H:%M') == '15:30'
+
+    def test_post_close_multi_session_windows_are_UNCHANGED_by_the_fix(self):
+        """Equivalence guard: for the post-close case the new anchor must reproduce the old
+        deadline exactly, or every SWING/POSITIONAL measurement window silently shifts."""
+        from datetime import date, datetime, timezone, timedelta
+        from unified_ranker import valid_until_for, add_sessions
+        ist = timezone(timedelta(hours=5, minutes=30))
+        gen = datetime(2026, 10, 7, 22, 30, tzinfo=ist)   # for the 2026-10-08 session
+        for tf, h in (('SWING', 5), ('POSITIONAL', 15)):
+            legacy = add_sessions(date(2026, 10, 7), h)           # old: h sessions after gen-date
+            vu = valid_until_for(tf, gen, session_date=date(2026, 10, 8))
+            assert vu.date() == legacy, f'{tf} window moved: {vu.date()} != {legacy}'
+
+    def test_swing_window_is_h_sessions_beginning_with_the_entry_session(self):
+        from datetime import date, datetime, timezone, timedelta
+        from unified_ranker import valid_until_for
+        ist = timezone(timedelta(hours=5, minutes=30))
+        gen = datetime(2026, 10, 7, 22, 30, tzinfo=ist)
+        vu = valid_until_for('SWING', gen, session_date=date(2026, 10, 8))
+        # 2026-10-08 Thu is session 1; 09 Fri, 12 Mon, 13 Tue, 14 Wed -> 5th is Wed 2026-10-14.
+        assert vu.date() == date(2026, 10, 14)
+
+    def test_absent_session_date_keeps_the_legacy_post_close_formula(self):
+        """Back-compatible on purpose: the only caller passes a session, and the source test below
+        pins that. An omitted anchor must not change any previously-stamped deadline."""
+        from datetime import date, datetime, timezone, timedelta
+        from unified_ranker import valid_until_for, add_sessions
+        ist = timezone(timedelta(hours=5, minutes=30))
+        gen = datetime(2026, 10, 7, 22, 30, tzinfo=ist)
+        assert valid_until_for('SWING', gen).date() == add_sessions(date(2026, 10, 7), 5)
+
+    def test_run_anchors_valid_until_on_the_logical_session(self):
+        import inspect
+        from unified_ranker import UnifiedRanker
+        src = inspect.getsource(UnifiedRanker.run)
+        assert 'session_date=' in src, \
+            'run() must anchor valid_until on the session the ranking is FOR, not on wall-clock'

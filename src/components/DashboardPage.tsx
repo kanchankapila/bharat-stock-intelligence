@@ -540,8 +540,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       </button>
 
       {/* ── Top Picks entry point ────────────────────────────────────────
-          One canonical "most accurate signals only" page (S_ELITE/A_HIGH conviction,
-          Buy-classified only) instead of navigating through the many screener/scanner
+          One canonical Buy-classified page (S_ELITE/A_HIGH conviction mirrors the
+          classification and is not a graded accuracy scale, AF-20261008-05) instead of navigating through the many screener/scanner
           pages to find what's actually worth acting on. Also surfaces same-day intraday
           picks with an honest gate-open/closed status, previously not shown anywhere. */}
       <button
@@ -558,7 +558,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           <TrendingUp size={16} color="#34d399" />
           <div>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>
-              View Top Picks — highest-conviction signals only
+              View Top Picks — Buy-rated names (conviction mirrors the rating)
             </div>
             <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>
               S/A-tier Buy calls plus gated intraday picks, instead of scanning every screener page

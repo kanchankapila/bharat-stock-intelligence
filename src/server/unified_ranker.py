@@ -304,13 +304,30 @@ def add_sessions(start, n, holidays=None):
     return None
 
 
-def valid_until_for(raw_timeframe, generated_at, conn=None):
+def valid_until_for(raw_timeframe, generated_at, conn=None, session_date=None):
     """Deadline for a recommendation, derived from its canonical horizon label.
 
     Returns None when the label is absent or unknown. 68,520 of 74,180 historical rows have
     timeframe IS NULL (measured 2026-10-01): inventing a deadline for those would assert a
     horizon the data never declared, and would let an expiry sweep close rows on a made-up
     deadline. NULL means "validity unknown", which is the truth about them.
+
+    ANCHOR (2026-10-08, AF-20261008-07). The window is the `h` sessions BEGINNING WITH the entry
+    session -- `session_date`, the logical session this ranking is FOR (`computed_at`) -- and the
+    deadline is the close of the last of them. It used to be anchored on `generated_at.date()`
+    plus the full horizon in sessions AFTER it, which is the same thing ONLY when the ranker
+    publishes post-close (where generated_at.date() is the session before the entry session).
+    For a pre-open or holiday-batch run, generation happens ON the entry session, so that formula
+    landed one session late: measured live, 1,622 of 6,509 stamped rows (25%) were generated on or
+    after their own computed_at, and the 2026-10-06 grid (generated 06:33 IST that morning) was
+    stamped valid until 2026-10-07's close -- a whole extra session of apparent validity for an
+    INTRADAY idea.
+
+    The two formulations agree exactly in the post-close case, so no SWING/POSITIONAL measurement
+    window is re-based by this change (asserted by
+    test_post_close_multi_session_windows_are_UNCHANGED_by_the_fix). With `session_date` omitted
+    the legacy post-close formula is kept, so a caller that cannot name the session gets the old
+    behaviour rather than a silently different deadline; `run()` always passes it.
     """
     tf = _normalize_timeframe(raw_timeframe)
     if tf not in HORIZON_SESSIONS or generated_at is None:
@@ -322,13 +339,72 @@ def valid_until_for(raw_timeframe, generated_at, conn=None):
             return None
     if generated_at.tzinfo is not None:
         generated_at = generated_at.astimezone(timezone(timedelta(hours=5, minutes=30)))
-    start = generated_at.date()
-    due = add_sessions(start, HORIZON_SESSIONS[tf], _nse_holidays(conn))
+    if session_date is not None:
+        if isinstance(session_date, str):
+            try:
+                session_date = date.fromisoformat(session_date[:10])
+            except ValueError:
+                return None
+        elif isinstance(session_date, datetime):
+            session_date = session_date.date()
+        # h sessions counting the entry session itself as the first, so h=1 (INTRADAY) is that
+        # session's own close and h-1 = 0 needs no calendar walk.
+        steps = HORIZON_SESSIONS[tf] - 1
+        due = (session_date if steps == 0
+               else add_sessions(session_date, steps, _nse_holidays(conn)))
+    else:
+        due = add_sessions(generated_at.date(), HORIZON_SESSIONS[tf], _nse_holidays(conn))
     if due is None:
         return None
-    # Same wall-clock time of day, IST. The session count decides the DATE; keeping the clock
-    # time means an expiry sweep can compare against generated_at without timezone drift.
-    return datetime.combine(due, generated_at.time(), tzinfo=timezone(timedelta(hours=5, minutes=30)))
+    # INTRADAY ideas are for the next trading session because this ranker publishes post-close.
+    # They stop being actionable at that session's NSE close, not at the ranker's 22:30 wall
+    # clock. Keeping 22:30 made a same-day setup appear live for seven hours after square-off.
+    # Multi-session horizons retain the generation clock so their existing measurement windows
+    # are unchanged.
+    deadline_time = datetime.strptime('15:30', '%H:%M').time() if tf == 'INTRADAY' else generated_at.time()
+    return datetime.combine(due, deadline_time, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+
+
+def long_geometry_rr(entry, stop, target):
+    """Return long-side reward/risk, or None for inverted/non-finite geometry."""
+    try:
+        entry, stop, target = float(entry), float(stop), float(target)
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) and v > 0 for v in (entry, stop, target)):
+        return None
+    risk = entry - stop
+    reward = target - entry
+    if risk <= 0 or reward <= 0:
+        return None
+    return round(reward / risk, 2)
+
+
+def plan_is_current(last_close, stop, target) -> bool:
+    """Is a published long plan still available at the current price? (AF-20261008-01)
+
+    A plan asserts an entry between a stop below and a target above. Once the market has closed
+    THROUGH either level the plan is arithmetically dead -- at that entry you would already be
+    stopped out, or already past the target -- but no geometry tier compared its levels against
+    the current price, so the ranker published them unchanged. Live 2026-10-08: MODINATUR was a
+    Buy with stop 362.93 / target 438.71 copied from a 2026-08-07 signal, while the stock closed
+    at 299.60.
+
+    Threshold-free on purpose: it reads only the plan's OWN stop and target, so there is nothing
+    to calibrate and this is not a scoring change. How far the close may drift from the entry
+    ZONE while still inside stop..target IS a threshold and belongs to AF-20261008-02's
+    measurement, not to a guess here.
+
+    Fails OPEN on missing/non-finite data, like every other missing-input path in this ranker
+    (see the high-vol veto) -- a stock_ohlcv gap must not silently empty the Buy list.
+    """
+    try:
+        c, s, t = float(last_close), float(stop), float(target)
+    except (TypeError, ValueError):
+        return True
+    if not all(math.isfinite(v) for v in (c, s, t)) or c <= 0:
+        return True
+    return s < c < t
 
 
 REGIME_WEIGHTS = {
@@ -593,6 +669,23 @@ CONVICTION_TIERS = [
 # score >= FLOOR, Sell needs score <= 100-FLOOR) so the long and short sides cannot drift
 # apart -- an asymmetry between the two is precisely the class of bug this is fixing.
 DIRECTIONAL_AGREEMENT_FLOOR = 45.0
+
+# A percentile-normalized blend over one engine is just that engine's rank, not corroboration.
+# It also has much higher variance than the multi-engine population, so its score is not
+# cross-sectionally comparable: measured 2026-08-24, the coverage/score rank correlation was
+# +0.2799 after normalization and the repository's measurement record explicitly leaves this
+# cross-universe comparability defect unresolved (measurement-history.md:1913-1923). Keep the
+# row and score visible, but require one independent corroborating engine before publishing a
+# directional recommendation. Two is the smallest defensible threshold; raising it further
+# would be a strategy change and needs a point-in-time, cost-aware backtest.
+MIN_ACTIONABLE_ENGINE_COVERAGE = 2
+
+
+def coverage_safe_classification(classification, coverage):
+    """Demote an uncorroborated directional label without hiding its diagnostic score."""
+    if classification != 'Hold' and coverage < MIN_ACTIONABLE_ENGINE_COVERAGE:
+        return 'Hold'
+    return classification
 
 # Position-size confidence coupling (2026-08-10). Sizing was bet/vol only, so the final score,
 # conviction and engine coverage did not reach the allocation at all: a marginal Buy could be
@@ -2319,12 +2412,12 @@ class UnifiedRanker:
         """Pre-load per-symbol (avg realized return, sample count, stddev) over the trailing
         90d, once for the whole universe (was one query per symbol inside the run() loop).
 
-        A sample stddev is carried so _passes_rl_gate can require the negative average to be
+        A sample stddev is carried so _passes_rl_gate can flag whether the negative average is
         statistically distinguishable from zero rather than merely negative -- see
         RL_GATE_MAX_T. It is derived here from SUM/SUM-of-squares/COUNT rather than SQL's
         STDDEV: STDDEV is Postgres-only and does not exist in the SQLite dev/test fallback,
         where it fails the whole query and silently returns an empty map -- i.e. it would
-        disable the gate entirely instead of erroring. These three aggregates are portable.
+        disable the diagnostic entirely instead of erroring. These three aggregates are portable.
         sd is None for a single sample (no sample variance defined)."""
         cutoff = (date.today() - timedelta(days=90)).isoformat()
         try:
@@ -2357,10 +2450,12 @@ class UnifiedRanker:
             return {}
 
     def _passes_rl_gate(self, symbol, rl_gate_map):
-        """A track record of losing money (negative average realized return over the trailing
-        90d) removes a symbol from the ranked universe entirely -- but only once there's enough
-        history to trust the average. Without MIN_RL_GATE_SAMPLES this silently, permanently
-        excluded symbols on as few as 1-2 stale outcomes with no log line anywhere: confirmed
+        """Return False when the trailing realized-track-record diagnostic is significantly
+        negative. This is advisory: callers record the condition but do not remove the symbol.
+
+        Before 2026-10-05 this was a hard universe gate. Without MIN_RL_GATE_SAMPLES it silently,
+        permanently excluded symbols on as few as 1-2 stale outcomes with no log line anywhere:
+        confirmed
         live (2026-08-06) 825 symbols platform-wide were excluded, 352 of them (43%) on fewer
         than 5 samples -- e.g. KECL, gated out on exactly 2 technical_scan misses from 2026-05
         (-5.25% avg) despite currently-strong scores across every other engine (cs_ranker 84.5,
@@ -2373,12 +2468,12 @@ class UnifiedRanker:
             return True
         if avg_r >= 0:
             return True
-        # Negative average -- but only exclude if it is distinguishable from zero.
+        # Negative average -- but only flag if it is distinguishable from zero.
         # sd is None only when a single sample survived the COUNT filter, which
         # MIN_RL_GATE_SAMPLES already precludes; there is nothing to test against, so pass.
         # sd == 0 is the opposite case and must NOT be read as "untestable": a perfectly
         # consistent negative (every resolved outcome identical and losing) is maximally
-        # significant, t -> -inf, so it excludes.
+        # significant, t -> -inf, so it is flagged.
         if sd is None:
             return True
         if sd > 0:
@@ -2387,7 +2482,7 @@ class UnifiedRanker:
                 return True
         else:
             t_stat = float('-inf')
-        print(f"[UnifiedRanker] RL gate excluded {symbol}: "
+        print(f"[UnifiedRanker] track-record advisory flagged {symbol}: "
               f"avg_return={avg_r:.2f}% over {cnt} resolved outcomes (90d), t={t_stat:.2f}",
               file=sys.stderr)
         return False
@@ -2471,6 +2566,22 @@ class UnifiedRanker:
         # Measured coverage effect: symbols with a usable row in this tier go 2,335 -> 2,393.
         # Not a scoring change (no score, weight, threshold or classification is touched) --
         # see the matching entry in .claude/rules/measurement.md.
+        #
+        # ACTIVE-only + 30-day bound (2026-10-08, AF-20261008-01). This was the ONLY geometry
+        # tier with neither guard -- AF-20260930-11 gave confluence its 30-day window and
+        # AF-20261001-07 gave rec_log the same, and this one was missed both times (the
+        # guard-present-in-one-of-N-paths class, bugs-data-layer.md). Consequences, measured
+        # live before the fix: of the 96,440 long-type rows eligible to supply geometry only
+        # **7,160 were ACTIVE** -- 48,601 FAILED, 27,752 COMPLETED, 10,954 EXPIRED, 9,133
+        # INVALIDATED_CONFLICT -- and 3 of the 50 Buy rows this tier was feeding took their
+        # levels from a signal whose own status was FAILED. A closed signal's geometry describes
+        # a trade that is over: COMPLETED means the move already happened, FAILED means it was
+        # stopped out, EXPIRED means the window passed, INVALIDATED_CONFLICT means it was
+        # cancelled. ACTIVE is the only status under which the plan is still live.
+        # The date bound is kept as well as the status filter, not instead of it: ACTIVE is a
+        # lifecycle-maintained value, and 90,755 rows once sat ACTIVE back to June when nothing
+        # closed them (signal_lifecycle.py's own docstring). If that closer breaks again the
+        # window is the backstop, and it makes all three tiers read identically.
         try:
             rows = self.conn.execute("""
                 SELECT * FROM (
@@ -2479,11 +2590,34 @@ class UnifiedRanker:
                            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY signal_generated_at DESC) AS rn
                     FROM unified_signals
                     WHERE signal_type IN ('BUY', 'Bullish')
+                      AND status = 'ACTIVE'
+                      AND signal_generated_at >= NOW() - INTERVAL '30 days'
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}
         except Exception as e:
             self._degraded(f"[UnifiedRanker] _get_unified_signals_latest_map failed: {e}")
+            self.conn.rollback()
+            return {}
+
+    def _get_last_close_map(self):
+        """{symbol: last clean close} for the most recent session, for `plan_is_current`.
+
+        One query over a single date (~2,400 rows), not a per-symbol lookup: the price-sanity
+        gate runs for every symbol in `_get_entry_targets`, and the 4-tier chain was already
+        pre-loaded into maps for exactly this reason (see run()'s comment on the 5-queries-per-
+        symbol it replaced). `is_suspect` is quarantined the same way `_get_recent_returns` and
+        backtester.py do, so a flagged impossible-move bar cannot kill a sound plan.
+        """
+        try:
+            rows = self.conn.execute(
+                "SELECT symbol, close FROM stock_ohlcv "
+                "WHERE date = (SELECT MAX(date) FROM stock_ohlcv) "
+                "AND close > 0 AND COALESCE(is_suspect, 0) = 0"
+            ).fetchall()
+            return {r['symbol']: float(r['close']) for r in rows}
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_last_close_map failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -2554,22 +2688,42 @@ class UnifiedRanker:
                 out[sym] = rets
         return out
 
-    def _get_entry_targets(self, symbol, confluence_map, rec_log_map, unified_map, sector_map):
+    def _get_entry_targets(self, symbol, confluence_map, rec_log_map, unified_map, sector_map,
+                           last_close_map=None):
+        # `last_close_map` drives the price-sanity gate (`plan_is_current`, AF-20261008-01) and
+        # is applied at EVERY tier below -- a guard in one path and missing from another is this
+        # repo's most-recurring class. It defaults to {} rather than being required so the
+        # existing geometry tests that drive one tier directly keep working; run() always
+        # supplies it, and test_run_passes_the_price_map_to_every_lookup pins that.
+        last_close = (last_close_map or {}).get(symbol)
+
         # Fallback 1: confluence_signals (best source with entry zones, atr, risk-reward, etc.)
         row = confluence_map.get(symbol)
-        if row and (row['entry_zone_low'] is not None or row['stop_loss'] is not None):
-            return {
-                'entry_zone_low':  float(row['entry_zone_low'])  if row['entry_zone_low']  is not None else None,
-                'entry_zone_high': float(row['entry_zone_high']) if row['entry_zone_high'] is not None else None,
-                'stop_loss':       float(row['stop_loss'])       if row['stop_loss']       is not None else None,
-                'target_1':        float(row['target_1'])        if row['target_1']        is not None else None,
-                'target_2':        float(row['target_2'])        if row['target_2']        is not None else None,
-                'target_3':        float(row['target_3'])        if row['target_3']        is not None else None,
-                'risk_reward':     float(row['risk_reward'])     if row['risk_reward']     is not None else None,
-                'timeframe':       _normalize_timeframe(row['timeframe']),
-                'trade_reasoning': row['trade_reasoning'],
-                'sector':          row['sector'],
-            }
+        if row and all(row[k] is not None for k in
+                       ('entry_zone_low', 'entry_zone_high', 'stop_loss', 'target_1')):
+            lo, hi = sorted((float(row['entry_zone_low']), float(row['entry_zone_high'])))
+            sl, t1 = float(row['stop_loss']), float(row['target_1'])
+            # The entire entry zone must sit between stop and target. Use its midpoint for a
+            # reproducible R:R instead of trusting a source value that can disagree with the
+            # prices (live 2026-10-05: LYKALABS had stop 82.96 above entry 79.31-80.91 and
+            # target 82.51, yet was published as Buy).
+            # A trader may fill anywhere in the stated zone. For a long, the high edge is the
+            # worst executable price (least reward, most risk), so that is the honest R:R shown.
+            rr = long_geometry_rr(hi, sl, t1)
+            if (sl < lo and t1 > hi and rr is not None and rr >= 1.0
+                    and plan_is_current(last_close, sl, t1)):
+                return {
+                    'entry_zone_low':  lo,
+                    'entry_zone_high': hi,
+                    'stop_loss':       sl,
+                    'target_1':        t1,
+                    'target_2':        float(row['target_2']) if row['target_2'] is not None else None,
+                    'target_3':        float(row['target_3']) if row['target_3'] is not None else None,
+                    'risk_reward':     rr,
+                    'timeframe':       _normalize_timeframe(row['timeframe']),
+                    'trade_reasoning': row['trade_reasoning'],
+                    'sector':          row['sector'],
+                }
 
         # Fallback 2: recommendation_log
         # rr floor (2026-08-05): unlike fallback 1 (confluence_signals), whose own
@@ -2596,13 +2750,13 @@ class UnifiedRanker:
             ep = float(row['entry_price'])
             sl = float(row['stop_loss']) if row['stop_loss'] is not None else None
             t1 = float(row['target_1']) if row['target_1'] is not None else None
-            rr = None
-            if sl is not None and ep - sl > 0 and t1 is not None:
-                rr = round((t1 - ep) / (ep - sl), 2)
-            if rr is None or rr >= 1.0:
+            lo, hi = round(ep * 0.99, 2), round(ep * 1.01, 2)
+            rr = long_geometry_rr(hi, sl, t1)
+            if (sl < lo and t1 > hi and rr is not None and rr >= 1.0
+                    and plan_is_current(last_close, sl, t1)):
                 return {
-                    'entry_zone_low':  round(ep * 0.99, 2),
-                    'entry_zone_high': round(ep * 1.01, 2),
+                    'entry_zone_low':  lo,
+                    'entry_zone_high': hi,
                     'stop_loss':       sl,
                     'target_1':        t1,
                     'target_2':        float(row['target_2']) if row['target_2'] is not None else None,
@@ -2628,13 +2782,13 @@ class UnifiedRanker:
             ep = float(row['entry'])
             sl = float(row['stopLoss']) if row['stopLoss'] is not None else None
             t1 = float(row['target']) if row['target'] is not None else None
-            rr = None
-            if sl is not None and ep - sl > 0 and t1 is not None:
-                rr = round((t1 - ep) / (ep - sl), 2)
-            if rr is None or rr >= 1.0:
+            lo, hi = round(ep * 0.99, 2), round(ep * 1.01, 2)
+            rr = long_geometry_rr(hi, sl, t1)
+            if (sl < lo and t1 > hi and rr is not None and rr >= 1.0
+                    and plan_is_current(last_close, sl, t1)):
                 return {
-                    'entry_zone_low':  round(ep * 0.99, 2),
-                    'entry_zone_high': round(ep * 1.01, 2),
+                    'entry_zone_low':  lo,
+                    'entry_zone_high': hi,
                     'stop_loss':       sl,
                     'target_1':        t1,
                     'target_2':        None,
@@ -2725,12 +2879,13 @@ class UnifiedRanker:
         avg_track         = self._get_avg_track_record()
 
         # Pre-loaded once for the whole universe (was up to 5 queries PER symbol inside
-        # the loop below — _passes_rl_gate + the 4-tier _get_entry_targets fallback chain).
+        # the loop below — track-record diagnostic + the 4-tier _get_entry_targets fallback chain).
         rl_gate_map    = self._get_rl_gate_map()
         confluence_map = self._get_confluence_latest_map()
         rec_log_map    = self._get_rec_log_latest_map()
         unified_map    = self._get_unified_signals_latest_map()
         sector_map     = self._get_sector_map()
+        last_close_map = self._get_last_close_map()
         mf_map         = self._get_multi_factor_map()
 
         # smart_money_scores deliberately excluded from this union: it should raise the
@@ -2814,14 +2969,22 @@ class UnifiedRanker:
         # too many layers" is an opinion until you can say which of them touch anything: a layer
         # that never fires is removable at zero risk, and one that fires constantly deserves
         # evidence it helps. Printed once per run; costs an integer increment per symbol.
-        fired = {k: 0 for k in ('rl_gate_skip', 'nonfinite_or_tiny_skip', 'quality_gate',
+        fired = {k: 0 for k in ('track_record_advisory', 'nonfinite_or_tiny_skip', 'quality_gate',
                                 'red_flag_veto', 'high_vol_veto', 'factor_crowding',
                                 'ml_bet_nonzero', 'breakout_computed',
-                                'breakout_ACTUALLY_BINDS', 'size_confidence_haircut')}
+                                'breakout_ACTUALLY_BINDS', 'size_confidence_haircut',
+                                'thin_engine_coverage_veto', 'actionable_without_plan_veto')}
         for sym in all_symbols:
             if not self._passes_rl_gate(sym, rl_gate_map):
-                fired['rl_gate_skip'] += 1
-                continue
+                # Advisory only (2026-10-05). recommendation_log is dominated by universe-wide
+                # technical labels, not published setups: since Sep-01, 36,506 h5 rows had
+                # signal_score 0-1 and none reached the actionable score>=5 bar. The prior hard
+                # gate therefore acted as a broad trend-negative filter, excluding 36.1% of
+                # today's tradeable universe. Its own point-in-time counterfactual found the
+                # excluded set did NOT underperform kept names (+0.098%, t=1.22; significant-
+                # negative subset +0.148%, t=1.23). Keep counting the condition so it remains
+                # measurable, but do not erase a stock from an unrelated current ranking.
+                fired['track_record_advisory'] += 1
 
             # Reporting view: every engine, so the persisted *_score columns stay complete.
             engine_scores = {e: m.get(sym, 0.0) for e, m in engine_maps_all.items()}
@@ -2895,6 +3058,24 @@ class UnifiedRanker:
             classification = _classify(unified, bull, bear)
             if red_flagged or high_vol_vetoed:
                 classification = veto_classification(classification)
+            pre_coverage_classification = classification
+            classification = coverage_safe_classification(classification, len(present))
+            thin_coverage_vetoed = classification != pre_coverage_classification
+            if thin_coverage_vetoed:
+                fired['thin_engine_coverage_veto'] += 1
+            et = self._get_entry_targets(sym, confluence_map, rec_log_map, unified_map, sector_map,
+                                         last_close_map)
+            if classification in ('Strong Buy', 'Buy'):
+                has_actionable_plan = (
+                    all(et.get(k) is not None for k in
+                        ('entry_zone_low', 'entry_zone_high', 'stop_loss', 'target_1', 'risk_reward'))
+                    and et.get('timeframe') in CANONICAL_TIMEFRAMES
+                )
+                if not has_actionable_plan:
+                    # A score may remain high, but without executable long geometry and a
+                    # declared validity horizon it is a watchlist candidate, not a Buy signal.
+                    classification = 'Hold'
+                    fired['actionable_without_plan_veto'] += 1
             strength = _directional_strength(unified, classification)
 
             # #6 position size: back the stronger of the two validated edges — the López de Prado
@@ -2945,10 +3126,11 @@ class UnifiedRanker:
                 f"{bull} bullish / {bear} bearish screener signals ({classification}); "
                 f"regime {regime}" + (f"; drivers: {', '.join(cats[:4])}" if cats else "")
                 + ("; RED-FLAG VETO" if red_flagged else "")
+                + (f"; THIN-COVERAGE HOLD ({len(present)}/{MIN_ACTIONABLE_ENGINE_COVERAGE} engines)"
+                   if thin_coverage_vetoed else "")
                 + (f"; FACTOR-CROWDED ({crowd_factor})" if crowd_mult < 1.0 else "")
             )
 
-            et = self._get_entry_targets(sym, confluence_map, rec_log_map, unified_map, sector_map)
             # `trade_reasoning`'s fallback sources (confluence_signals, recommendation_log) are
             # looked up by bare symbol and narrate THEIR OWN, independently-timed bull/bear read
             # -- same mismatch already fixed for entry/stop/target above, just in text form.
@@ -3036,7 +3218,11 @@ class UnifiedRanker:
                 # AF-20261001-04: derived from the canonical label in `et`, which is the same
                 # value normalized at _get_entry_targets. Kept beside it (not recomputed from a
                 # second source) so the deadline can never disagree with the horizon it claims.
-                'valid_until':            valid_until_for(et.get('timeframe'), generated_at),
+                # `today` is the logical session this grid is FOR (same value as computed_at), so
+                # the deadline is anchored on the entry session rather than on the wall clock of
+                # whichever run produced it -- AF-20261008-07.
+                'valid_until':            valid_until_for(et.get('timeframe'), generated_at,
+                                                          session_date=today),
                 'trade_reasoning':         None,
                 'sector':                  None,
                 'position_size_pct':       0.0,

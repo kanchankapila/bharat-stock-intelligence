@@ -448,8 +448,25 @@ CHANDELIER_ATR_MULT = 3.0   # trailing stop = highest-high-since-entry − 3×AT
 
 def simulate_exit(bars, entry, initial_stop, target, atr,
                   scale_frac: float = SCALE_OUT_FRAC,
-                  chandelier_mult: float = CHANDELIER_ATR_MULT):
-    """Bar-by-bar long-trade exit simulation over the holding window.
+                  chandelier_mult: float = CHANDELIER_ATR_MULT,
+                  direction: str = 'long'):
+    """Bar-by-bar trade exit simulation over the holding window, long or short.
+
+    DIRECTION (2026-10-08, AF-20261008-10). This was long-only -- its docstring said so -- and
+    `_resolve_unified_batch` called it for every `unified_signals` row regardless of direction. A
+    short signal has its target BELOW and its stop ABOVE entry, so the long logic read both levels
+    inverted and booked the wrong sign: measured live, Bearish STOP_LOSS held 115,731 rows at an
+    average **+4.427%** (a stopped-out short recorded as a gain) against Bullish STOP_LOSS's
+    correct -5.866%.
+
+    `direction='long'` is the default so the two genuinely long-only callers (the
+    `signal_outcomes` technical path and the `recommendation_log` path) are unchanged; the long
+    branch below is byte-for-byte the original policy and
+    `test_simulate_exit_direction.TestLongBehaviourIsUnchanged` pins that.
+
+    For a short every comparison mirrors: profit is `(entry - exit)/entry`, the hard stop triggers
+    on a bar's HIGH, the chandelier ratchets DOWN from the lowest low, the target is booked on a
+    bar's LOW, and the favorable/adverse excursions swap which extreme they read.
 
     `bars`: list of (date, high, low, close) ascending, position already open at `entry`.
     Returns (exit_date, exit_price, exit_reason, gross_return_pct, mfe_pct, mae_pct) where the
@@ -470,47 +487,58 @@ def simulate_exit(bars, entry, initial_stop, target, atr,
     if not bars:
         return None, None, 'PENDING', None, None, None
 
-    highest = lowest = entry
-    # mfe_high tracks the true max favorable excursion, INCLUDING the exiting bar's own high --
-    # deliberately separate from `highest` (which the chandelier stop calc reads and must stay
-    # updated only after the check, to avoid folding this bar's own high into this bar's own
-    # stop level -- a real anti-look-ahead property of the exit LOGIC). MFE/MAE are a pure
-    # descriptive statistic computed after the fact and feed no decision, so no such constraint
-    # applies to them; mirrors `lowest`, which was already being updated before the check.
-    mfe_high = entry
+    is_long = direction != 'short'
+    # One sign factor carries every return in this function, so a short's profit cannot disagree
+    # with its label: +1 means "price up is profit", -1 means "price down is profit".
+    sgn = 1.0 if is_long else -1.0
+
+    def leg_of(px):
+        return sgn * (px - entry) / entry * 100
+
+    # `anchor` is the chandelier's reference extreme and is updated only AFTER this bar's check,
+    # so a bar's own extreme can never set its own stop (a real anti-look-ahead property of the
+    # exit LOGIC, not a cosmetic one). mfe_px/mae_px are pure descriptive statistics that feed no
+    # decision, so they include the exiting bar and are updated BEFORE the check -- the original
+    # code's `mfe_high`/`lowest` behaviour, preserved exactly.
+    anchor = mfe_px = mae_px = entry
     partial_taken = False
     partial_return = 0.0
-    has_target = target is not None and target > entry
+    has_target = target is not None and ((target > entry) if is_long else (target < entry))
 
     for d, high, low, close in bars:
-        # Effective stop for THIS bar uses only prior bars' highs (no look-ahead).
+        # The bar extreme that can breach a stop, and the one that can reach a target: a long is
+        # stopped on the LOW and targets the HIGH; a short is the mirror.
+        stop_px, target_px = (low, high) if is_long else (high, low)
+
         eff_stop = initial_stop
-        if atr and atr > 0 and initial_stop is not None:
-            eff_stop = max(initial_stop, highest - chandelier_mult * atr)
-        elif atr and atr > 0:
-            eff_stop = highest - chandelier_mult * atr
+        if atr and atr > 0:
+            trail = anchor - chandelier_mult * atr if is_long else anchor + chandelier_mult * atr
+            # Tighten only: a trailing stop never gives back ground it has taken.
+            eff_stop = (max(initial_stop, trail) if is_long else min(initial_stop, trail)) \
+                if initial_stop is not None else trail
 
-        lowest = min(lowest, low)
-        mfe_high = max(mfe_high, high)
+        mae_px = min(mae_px, low) if is_long else max(mae_px, high)
+        mfe_px = max(mfe_px, high) if is_long else min(mfe_px, low)
 
-        if eff_stop is not None and low <= eff_stop:
+        breached = eff_stop is not None and (stop_px <= eff_stop if is_long else stop_px >= eff_stop)
+        if breached:
             reason = 'STOP_LOSS' if (initial_stop is not None and eff_stop == initial_stop) else 'TRAILING_STOP'
-            leg = (eff_stop - entry) / entry * 100
+            leg = leg_of(eff_stop)
             gross = scale_frac * partial_return + (1 - scale_frac) * leg if partial_taken else leg
-            mfe_pct = (mfe_high - entry) / entry * 100
-            mae_pct = (lowest - entry) / entry * 100
-            return d, eff_stop, reason, gross, mfe_pct, mae_pct
+            return d, eff_stop, reason, gross, leg_of(mfe_px), leg_of(mae_px)
 
-        if has_target and not partial_taken and high >= target:
+        reached = has_target and not partial_taken and \
+            (target_px >= target if is_long else target_px <= target)
+        if reached:
             partial_taken = True
-            partial_return = (target - entry) / entry * 100
+            partial_return = leg_of(target)
 
-        highest = max(highest, high)
+        anchor = max(anchor, high) if is_long else min(anchor, low)
 
     last_d, _, _, last_close = bars[-1]
-    leg = (last_close - entry) / entry * 100
-    mfe_pct = (mfe_high - entry) / entry * 100
-    mae_pct = (lowest - entry) / entry * 100
+    leg = leg_of(last_close)
+    mfe_pct = leg_of(mfe_px)
+    mae_pct = leg_of(mae_px)
     if partial_taken:
         gross = scale_frac * partial_return + (1 - scale_frac) * leg
         return last_d, last_close, 'TIME_EXIT_PARTIAL', gross, mfe_pct, mae_pct
@@ -1185,8 +1213,17 @@ def _resolve_unified_batch(
             outcome = 'PENDING'
         else:
             initial_stop = stop_loss if (stop_loss and stop_loss > 0) else None
+            # Direction from the row's OWN GEOMETRY (target below stop = short), the same rule
+            # signals.ts's resolveSignalOutcome and resolve_stuck_unified_signals.py use -- never
+            # a signal_type string list, which is the defect those two were written to repair
+            # (this column has grown a new spelling twice). Absent either level there is no
+            # direction to read, so it stays long, which is what this code already assumed.
+            # AF-20261008-10.
+            sim_direction = ('short' if (target is not None and initial_stop is not None
+                                         and target < initial_stop) else 'long')
             check_date, exit_price, exit_reason, gross, mfe_pct, mae_pct = simulate_exit(
-                bars, entry=entry, initial_stop=initial_stop, target=target, atr=atr)
+                bars, entry=entry, initial_stop=initial_stop, target=target, atr=atr,
+                direction=sim_direction)
             # exit_time (timestamptz) only gets real precision when the intraday 15m path was
             # used above -- `check_date` is then already a full datetime string; on the daily-
             # bar fallback it's a bare date, so exit_time stays NULL rather than fabricating a

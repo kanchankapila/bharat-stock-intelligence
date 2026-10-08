@@ -739,6 +739,146 @@ def repair_dl_performance_sentinels(conn: ConnWrapper, dry: bool) -> None:
     _log(f"dl-performance-sentinels: nulled {total} rows.")
 
 
+def repair_signal_exit_evidence(conn: ConnWrapper, dry: bool) -> None:
+    """Stamp closed_at/exit_price/exit_reason on signals closed before any writer recorded one
+    (AF-20261008-08).
+
+    The scheduled `stuck-signal-resolver` wrote only `status` until 2026-10-08, so 44,909 terminal
+    `unified_signals` rows inside the trailing 45-day window carry a COMPLETED/FAILED/EXPIRED
+    verdict with no exit at all -- and a win percentage over them cannot use the price the signal
+    actually exited at. Fixing the writer does not clean what it already wrote.
+
+    PURE REPAIR, NEVER A RE-GRADE. The first touch is re-derived from stock_ohlcv with the same
+    geometry the resolver and signal_lifecycle.close_swing use, and the evidence is stamped ONLY
+    where the re-derived verdict MATCHES the stored one. Measured live 2026-10-08: 44,211 of
+    44,238 agree (99.94%) -- those statuses came from the same path-based logic -- and the 27 that
+    disagree are left alone and reported. Recording the evidence for a verdict and changing the
+    verdict are different decisions, and only the first one is safe to automate.
+
+    Exit pricing mirrors signal_lifecycle.close_swing exactly: the published level, unless the bar
+    OPENED through it, in which case the fill is that open. An EXPIRED row never touched a level,
+    so it exits at the last clean close in its own window (TIME_EXIT) -- its real exit price.
+    `is_suspect` bars are excluded throughout (panel spec).
+    """
+    # Horizon in TRADING SESSIONS per source, from signal_lifecycle.HORIZON_SESSIONS. Kept as a
+    # literal CASE rather than imported so this repair cannot start writing a window the closer
+    # does not use; if they ever diverge, test_repair_signal_exit_evidence pins the behaviour.
+    horizon_case = ("CASE u.signal_source WHEN 'screener' THEN 0 "
+                    "WHEN 'technical_scan' THEN 5 ELSE 15 END")
+
+    touched_sql = f"""
+        WITH term AS (
+            SELECT u.id, u.symbol, u.signal_date, u.status,
+                   u.target_price AS target, u.stop_loss AS stop,
+                   (u.target_price > u.stop_loss) AS is_long
+            FROM unified_signals u
+            WHERE u.status IN ('COMPLETED', 'FAILED')
+              AND u.closed_at IS NULL AND u.exit_price IS NULL
+              AND u.target_price IS NOT NULL AND u.stop_loss IS NOT NULL
+              AND u.target_price <> u.stop_loss
+        )
+        SELECT t.id, t.status AS stored, x.date AS touch_date,
+               CASE WHEN x.hit_stop THEN 'FAILED' ELSE 'COMPLETED' END AS rederived,
+               CASE WHEN x.hit_stop THEN 'STOP' ELSE 'TARGET' END AS exit_reason,
+               CASE WHEN x.hit_stop THEN
+                    CASE WHEN t.is_long THEN (CASE WHEN x.bar_open <= t.stop THEN x.bar_open ELSE t.stop END)
+                         ELSE (CASE WHEN x.bar_open >= t.stop THEN x.bar_open ELSE t.stop END) END
+                    ELSE
+                    CASE WHEN t.is_long THEN (CASE WHEN x.bar_open >= t.target THEN x.bar_open ELSE t.target END)
+                         ELSE (CASE WHEN x.bar_open <= t.target THEN x.bar_open ELSE t.target END) END
+               END AS exit_price
+        FROM term t
+        CROSS JOIN LATERAL (
+            SELECT o.date, o.open AS bar_open,
+                   (CASE WHEN t.is_long THEN o.low <= t.stop ELSE o.high >= t.stop END) AS hit_stop
+            FROM stock_ohlcv o
+            WHERE o.symbol = t.symbol AND o.date > t.signal_date::date
+              AND COALESCE(o.is_suspect, 0) = 0
+              AND o.high IS NOT NULL AND o.low IS NOT NULL
+              AND ((CASE WHEN t.is_long THEN o.high >= t.target ELSE o.low  <= t.target END)
+                OR (CASE WHEN t.is_long THEN o.low  <= t.stop   ELSE o.high >= t.stop   END))
+            ORDER BY o.date LIMIT 1
+        ) x
+    """
+    rows = conn.execute(touched_sql).fetchall()
+    agree = [r for r in rows if r['stored'] == r['rederived']]
+    disagree = [r for r in rows if r['stored'] != r['rederived']]
+
+    # EXPIRED: no level was ever touched, so the honest exit is the last clean close inside the
+    # signal's own window. The window is bounded by session COUNT, never by `today - h days`
+    # (bugs-data-layer.md's short-calendar-cutoff class).
+    expired_sql = f"""
+        WITH term AS (
+            SELECT u.id, u.symbol, u.signal_date, u.target_price AS target, u.stop_loss AS stop,
+                   (u.target_price > u.stop_loss) AS is_long, {horizon_case} AS horizon
+            FROM unified_signals u
+            WHERE u.status = 'EXPIRED'
+              AND u.closed_at IS NULL AND u.exit_price IS NULL
+              AND u.target_price IS NOT NULL AND u.stop_loss IS NOT NULL
+              AND u.target_price <> u.stop_loss
+        )
+        SELECT t.id, w.last_date AS touch_date, w.last_close AS exit_price
+        FROM term t
+        CROSS JOIN LATERAL (
+            -- Aggregate over the WINDOWED subquery, never a `bool_or(...) OVER ()` beside
+            -- ORDER BY/LIMIT: Postgres evaluates a window function BEFORE ORDER BY and LIMIT at
+            -- the same query level, so that form tests the whole post-signal history instead of
+            -- this signal's own window and suppresses every legitimate time exit (shipped once,
+            -- caught by the live dry run reading 0 of 621; pinned by
+            -- test_a_touch_AFTER_the_window_does_not_block_the_time_exit).
+            SELECT bool_or(CASE WHEN t.is_long THEN b.high >= t.target ELSE b.low  <= t.target END) AS any_target,
+                   bool_or(CASE WHEN t.is_long THEN b.low  <= t.stop   ELSE b.high >= t.stop   END) AS any_stop,
+                   (array_agg(b.close ORDER BY b.date DESC))[1] AS last_close,
+                   (array_agg(b.date  ORDER BY b.date DESC))[1] AS last_date,
+                   count(*) AS n_bars
+            FROM (
+                SELECT o.date, o.high, o.low, o.close
+                FROM stock_ohlcv o
+                WHERE o.symbol = t.symbol AND o.date > t.signal_date::date
+                  AND COALESCE(o.is_suspect, 0) = 0 AND o.close IS NOT NULL
+                  AND o.high IS NOT NULL AND o.low IS NOT NULL
+                ORDER BY o.date
+                LIMIT GREATEST(t.horizon, 1)
+            ) b
+        ) w
+        WHERE NOT w.any_target AND NOT w.any_stop AND w.n_bars > 0
+    """
+    expired_last = {r['id']: r for r in conn.execute(expired_sql).fetchall()}
+
+    total = len(agree) + len(expired_last)
+    if total == 0 and not disagree:
+        _log("signal-exit-evidence: none found -- every closed signal records its exit.")
+        return
+    _log(f"  {len(agree)} touched rows agree with their stored verdict and can be stamped")
+    _log(f"  {len(expired_last)} EXPIRED rows can be priced at their window's last close")
+    if disagree:
+        _log(f"  {len(disagree)} rows DISAGREE with their stored verdict -- left untouched "
+             f"(re-grading a verdict is a separate decision): ids "
+             f"{[r['id'] for r in disagree][:10]}{' ...' if len(disagree) > 10 else ''}")
+    if dry:
+        _log(f"signal-exit-evidence: would stamp {total} rows (dry run).")
+        return
+
+    payload = [(r['touch_date'], r['exit_price'], r['exit_reason'], r['id']) for r in agree]
+    payload += [(r['touch_date'], r['exit_price'], 'TIME_EXIT', r['id'])
+                for r in expired_last.values()]
+    # Chunked: >10,922 rows at 4 bind params each exceeds Postgres' 65,535-parameter statement
+    # limit (the same cap signal_lifecycle.py chunks for).
+    # `unified_signals` is NOT a Timescale hypertable (checked live 2026-10-08 -- only
+    # stock_ohlcv and confluence_signals are), so this needs no safe_keyed_update; it is still
+    # keyed on the primary key so no predicate-wide write is ever issued. Committed per chunk
+    # rather than once at the end: 114k single-row updates in one transaction holds it open for
+    # minutes against a table every live reader touches.
+    CHUNK = 1_000
+    for i in range(0, len(payload), CHUNK):
+        conn.executemany(
+            "UPDATE unified_signals SET closed_at = ?, exit_price = ?, exit_reason = ? "
+            "WHERE id = ? AND closed_at IS NULL AND exit_price IS NULL", payload[i:i + CHUNK])
+        conn.commit()
+    _log(f"signal-exit-evidence: stamped {len(payload)} rows "
+         f"({len(agree)} touched / {len(expired_last)} time-exit).")
+
+
 def repair_conflict_signal_outcomes(conn: ConnWrapper, dry: bool) -> None:
     """Delete outcomes graded for signals the scan itself withdrew (AF-20260930-33).
 
@@ -850,6 +990,7 @@ TASKS = {
     'delivery_trades': repair_delivery_trades,
     'dl_performance_sentinels': repair_dl_performance_sentinels,
     'conflict_signal_outcomes': repair_conflict_signal_outcomes,
+    'signal_exit_evidence': repair_signal_exit_evidence,
 }
 
 

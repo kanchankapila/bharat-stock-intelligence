@@ -4,6 +4,7 @@ import { router, publicProcedure, adminProcedure } from '../trpc';
 import { runPython } from '../pythonRunner';
 import { cacheGet } from '../cacheService';
 import { latestComputedAt, invalidateLatestComputedAt } from '../latestComputedAt';
+import { planStatus } from '../planLifecycle';
 
 // Shared TTL probe (consolidated 2026-09-02 from the per-router copies) — 5-min TTL so new
 // ranker runs are picked up; CAST-to-TEXT semantics preserved.
@@ -36,7 +37,7 @@ export const commandCenterRouter = router({
                avg_engine_track_record, classification, stop_loss, target_1, target_2,
                entry_zone_low, entry_zone_high, risk_reward, screener_stock_score,
                ml_score, confluence_score, technical_score, dl_score, trade_reasoning,
-               engine_coverage_count, computed_at
+               engine_coverage_count, computed_at, valid_until
         FROM unified_recommendations
         WHERE CAST(computed_at AS TEXT) = ?
       `;
@@ -90,7 +91,8 @@ export const commandCenterRouter = router({
         const realizedReturnPct = (livePrice && row.entry_zone_low)
           ? parseFloat(((livePrice - row.entry_zone_low) / row.entry_zone_low * 100).toFixed(2))
           : null;
-        return { ...row, livePrice, realizedReturnPct, changePercent: live?.changePercent ?? null };
+        return { ...row, livePrice, realizedReturnPct, changePercent: live?.changePercent ?? null,
+                 planStatus: planStatus(row.valid_until) };
       });
 
       let intradaySignals: any[] = [];
@@ -177,7 +179,7 @@ export const commandCenterRouter = router({
           ur.classification, ur.stop_loss, ur.target_1, ur.target_2,
           ur.entry_zone_low, ur.entry_zone_high, ur.risk_reward,
           ur.ml_score, ur.confluence_score, ur.technical_score, ur.dl_score,
-          ur.trade_reasoning, ur.engine_coverage_count, ur.computed_at,
+          ur.trade_reasoning, ur.engine_coverage_count, ur.computed_at, ur.valid_until,
           -- technical_signals feature columns (signal_strength removed -- not a real column,
           -- always threw and 500'd this endpoint; found via CI smoke test)
           ts.win_probability, ts.signal_type,
@@ -242,6 +244,7 @@ export const commandCenterRouter = router({
           ...r,
           livePrice:    live?.price ?? live?.lastPrice ?? r.cmp ?? null,
           changePercent: live?.changePercent ?? r.change_pct ?? null,
+          planStatus: planStatus(r.valid_until),
         };
       });
 
