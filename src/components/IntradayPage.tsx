@@ -249,12 +249,12 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
             <div>
               <div className="v1-data-label">Avg P&amp;L / trade</div>
               <div className={cn('v1-data-value tabular-nums', pos ? 'text-emerald-300' : 'text-rose-300')}>{pos ? '+' : ''}{avgPnl.toFixed(2)}%</div>
-              <div className="text-[10px] text-slate-600">paper, entry→exit</div>
+              <div className="text-[10px] text-slate-600">paper, net of cost, entry→exit</div>
             </div>
             <div>
-              <div className="v1-data-label">Cumulative P&amp;L</div>
+              <div className="v1-data-label">Sum of trade %</div>
               <div className={cn('v1-data-value tabular-nums', totalPnl >= 0 ? 'text-emerald-300' : 'text-rose-300')}>{totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(1)}%</div>
-              <div className="text-[10px] text-slate-600">sum of resolved trades</div>
+              <div className="text-[10px] text-slate-600">paper, net of cost, not compounded</div>
             </div>
             <div>
               <div className="v1-data-label">Resolved Trades</div>
@@ -372,7 +372,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
 
       <p className="text-[11px] text-slate-600 flex items-center gap-1.5">
         <TrendingUp className="w-3 h-3" /> Intraday ranking refreshes every 15&nbsp;min during market hours ·
-        entries/stops are intraday-scaled ATR barriers · sized on the validated breakout edge.
+        entries/stops are intraday-scaled ATR barriers · emission is gated on the engine's own trailing paper P&amp;L.
       </p>
     </div>
   );

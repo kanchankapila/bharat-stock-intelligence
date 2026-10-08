@@ -79,7 +79,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
             Strategy Builder Hub
           </h2>
           <p className="text-slate-400 text-sm mt-1 max-w-2xl">
-            Multi-screener confluence engine. We cross-reference ET Now, MoneyControl, and Trendlyne scanners to find high-probability setups.
+            Multi-screener confluence engine. We cross-reference ET Now, MoneyControl, and Trendlyne scanners to find names several screeners agree on. Agreement is not a measured edge.
           </p>
         </div>
         

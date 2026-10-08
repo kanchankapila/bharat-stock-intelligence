@@ -13,10 +13,10 @@ import { cn } from '../lib/utils';
 export function CanonicalBadge() {
   return (
     <span
-      className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-      title="This page reads the unified ranker's canonical cross-source score (unified_recommendations) -- the platform's single most-blended, regime-aware prediction."
+      className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-500/15 text-slate-300 border border-slate-500/30"
+      title="This page reads the unified ranker's canonical cross-source rank (unified_recommendations). It is a rank, not a probability, and no forward-return edge has been demonstrated yet."
     >
-      <ShieldCheck size={11} /> Canonical model
+      <ShieldCheck size={11} /> Canonical ranker
     </span>
   );
 }

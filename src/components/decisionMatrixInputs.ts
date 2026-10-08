@@ -35,7 +35,7 @@ export interface MatrixItem {
   changePct: number | null;
   action: string | null;
   score: number | null;
-  confidence: number | null;   // a win probability %, only where the source has one
+  confidence: number | null;   // a CALIBRATED win probability %, else null -- never raw (V-08)
   rrRatio: string | null;
   entryZone: string | null;
   target1: number | null;
@@ -66,7 +66,9 @@ export function buildMatrixItems(candidates: any[], picks: any[]): MatrixItem[] 
       changePct: num(p.change_pct),
       action: p.classification ? String(p.classification).toUpperCase() : null,
       score: score == null ? null : Math.round(score),
-      confidence: num(p.win_probability),
+      // getBuyRecommendations carries only technical_signals' RAW win_probability (0-1, ~8pp
+      // above calibrated) -- not shown (V-08, 2026-10-08).
+      confidence: null,
       rrRatio: rr == null ? null : `1:${rr}`,
       entryZone: lo != null && hi != null ? (Math.round(lo) === Math.round(hi) ? inr(lo) : `${inr(lo)}–${inr(hi)}`) : null,
       target1: num(p.target_1),
@@ -88,7 +90,7 @@ export function buildMatrixItems(candidates: any[], picks: any[]): MatrixItem[] 
       changePct: num(c.changePct),
       action: c.advice ?? c.actionAdvice ?? null,
       score: score == null ? null : Math.round(score),
-      confidence: num(c.mlWinProbability),
+      confidence: c.winProbSource === 'calibrated' ? num(c.mlWinProbability) : null,
       rrRatio: null,
       entryZone: entry == null ? null : inr(entry),
       target1: num(c.targetPrice),

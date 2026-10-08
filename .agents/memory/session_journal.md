@@ -314,3 +314,7 @@ network policy (AF-20260928-10), so no connector in this batch has seen a live r
   while the TypeScript composite writer is blocked and its stale scores are consumed by scoring.
   Do not disable or substitute the composite without point-in-time predictive measurement.
 
+
+## 2026-10-08 (evening) - expert review
+- Read `docs/expert-review-2026-10-08.md` first. Ledger AF-20261008-11..28. Fixes are in the working tree, uncommitted and undeployed (frontend build + `pm2 restart bharat-server` needed; Python writers pick up on next run).
+- The ranking edge is thin and unproven (one falling tape); the plan layer loses money; the calibrated probability is a rank. Do not reweight; shadow arms are the arbiter (2027-02-26).

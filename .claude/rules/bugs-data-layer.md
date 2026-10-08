@@ -78,6 +78,19 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   explicit `math.isfinite` check, and write NULL — never 0.0, which fabricates a real-looking
   reading (see the sentinel-instead-of-NULL entry above).
 
+## Fresh but meaningless: a feature that is written daily and wrong (2026-10-08)
+
+- **A forward-fill or default that turns a point-in-time countdown or flag into a standing state.** `densify_feature_matrix.py` filled
+  `days_to_next_results` (a countdown) for up to 120 sessions: 92% of stored values had no source row, 74% of the universe read "reports in
+  2 days", and the freshness check stayed green because rows landed daily. Signature: a sparse numeric column that is a countdown, an event flag
+  or an age, not in `NEVER_FILL`. Check by recomputing the value from its source table, not by counting rows.
+- **A latest-day join on `MAX(date)` over a table that is written in partial scans.** The day's first scan can hold 18% of the universe with
+  NULL model outputs; readers then show blanks or fall to a heuristic. Use `technicalSignalsDate.ts` (`LATEST_COMPLETE_TS_DATE_SQL`).
+- **`mcsymbol` joins in SQL form.** The dict-comprehension guard misses `JOIN nse_stocks ns ON ns.mcsymbol = ...`; use `MC_TO_SYMBOL_SQL`.
+- **`pd.DataFrame(rows, columns=[...])` where `rows` are dict rows** selects keys by name and returns all-NaN for any label that is not a key.
+  Build the frame from the rows, then rename.
+- **A fix applied to a component no route imports.** Grep the import before editing a UI file.
+
 ## SQL dialect (`db_compat` / `sqlTranslate`)
 
 | Signature | Why it breaks |

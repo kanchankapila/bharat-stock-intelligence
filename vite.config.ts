@@ -121,7 +121,8 @@ export default defineConfig(({mode}) => {
           // regression against) than this pass's git-history commitment can safely verify.
           manualChunks: {
             'vendor-firebase': ['firebase/app', 'firebase/auth'],
-            'vendor-charts': ['recharts', 'lightweight-charts', 'd3'],
+            'vendor-charts': ['recharts'],
+            'vendor-lwcharts': ['lightweight-charts'],
             'vendor-motion': ['motion'],
           },
         },

@@ -47,5 +47,6 @@ This file used to hold every class (~127 KB) and loaded on the first `.py`/`.ts`
 | Making a hidden provider failure loud is observability, not a root-cause fix (2026-10-04) | `bugs-data-layer.md` |
 | Provider RetryInfo longer than the job budget; provider failure persisted as factual defaults (2026-10-06) | `bugs-jobs-runtime.md` |
 | Split monitoring registries/evidence sources; polling cron broader than the worker's real-work window (2026-10-06) | `bugs-monitoring.md` |
+| Fresh-but-meaningless features: forward-filled countdowns, partial-day `MAX(date)` joins, `mcsymbol` SQL joins, dict-row DataFrame NaN, fixes in unrouted components (2026-10-08) | `bugs-data-layer.md` |
 
 When you add a class, put it in the area file whose `paths:` cover the code it bites, and add its row here.

@@ -228,11 +228,11 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
 
               <div className="grid grid-cols-2 gap-2 bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
                 <div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase block">AI SCORE</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase block">RANK SCORE</span>
                   <div className="text-lg font-mono font-black text-emerald-400">{pick.score ?? '—'}<span className="text-xs text-slate-500">/100</span></div>
                 </div>
                 <div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase block">CONVICTION</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase block" title="Calibrated hit probability; no calibrated value above ~50% has been observed. Raw model probabilities are not shown.">CAL. HIT-PROB</span>
                   <div className="text-lg font-mono font-black text-cyan-400">{pick.confidence != null ? `${Math.round(pick.confidence)}%` : '—'}</div>
                 </div>
               </div>
@@ -351,7 +351,7 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
                       <th className="py-3.5 px-4">SYMBOL & COMPANY</th>
                       <th className="py-3.5 px-3">PRICE / CHG</th>
                       <th className="py-3.5 px-3">VERDICT</th>
-                      <th className="py-3.5 px-3 text-center">AI SCORE</th>
+                      <th className="py-3.5 px-3 text-center">RANK SCORE</th>
                       <th className="py-3.5 px-3 text-center">R:R RATIO</th>
                       <th className="py-3.5 px-3">TARGET / STOP</th>
                       <th className="py-3.5 px-4">AI REASONING</th>

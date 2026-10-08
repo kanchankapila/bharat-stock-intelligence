@@ -301,7 +301,7 @@ export function SignalIntelligence() {
             <Zap className="w-5 h-5 text-amber-400" />
             Signal Intelligence Engine
           </h1>
-          <p className="text-slate-400 text-xs mt-0.5">Multi-screener confluence • AI conviction scoring • Breakout probability</p>
+          <p className="text-slate-400 text-xs mt-0.5">Multi-screener confluence • model scores (no demonstrated forward-return edge)</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-slate-500 flex items-center gap-1">

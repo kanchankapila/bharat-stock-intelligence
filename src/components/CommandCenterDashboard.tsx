@@ -24,6 +24,7 @@ const CONVICTION_STYLE: Record<string, { bg: string; border: string; text: strin
   D_MARGINAL: { bg: 'bg-zinc-800/60',    border: 'border-zinc-700/40',    text: 'text-zinc-500',    dot: 'bg-zinc-500',    label: 'D — Marginal', card: 'v1-card-accent', badge: 'v1-badge bg-zinc-800/60 border-zinc-700/40 text-zinc-500' },
 };
 
+const NEUTRAL_REGIME_STYLE = { color: 'text-slate-400', icon: '·', bg: 'bg-slate-500/10 border-slate-500/30' };
 const REGIME_STYLE: Record<string, { color: string; icon: string; bg: string }> = {
   BULL:     { color: 'text-emerald-400', icon: '▲', bg: 'bg-emerald-500/10 border-emerald-500/30' },
   BEAR:     { color: 'text-rose-400',    icon: '▼', bg: 'bg-rose-500/10 border-rose-500/30'       },
@@ -97,9 +98,37 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
         <div>
           <div className="flex items-center gap-2">
             <span className="text-white font-bold text-sm">{pick.symbol}</span>
-            <span className={cn('text-[10px] font-black', style.badge)}>
+            <span
+              className={cn('text-[10px] font-black', style.badge)}
+              title="Tier mirrors the Buy/Strong Buy rating, not a graded accuracy scale"
+            >
               {style.label}
             </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[10px]">
+            {pick.classification && (
+              <span className={cn('px-1.5 py-0.5 rounded border',
+                /Buy/.test(pick.classification) ? 'text-emerald-400 border-emerald-500/30' : 'text-slate-400 border-slate-600/40')}>
+                {pick.classification}
+              </span>
+            )}
+            {pick.timeframe && (
+              <span className="px-1.5 py-0.5 rounded border border-slate-600/40 text-slate-300"
+                title="Heuristic horizon label, not a model output">
+                {pick.timeframe}
+              </span>
+            )}
+            {pick.planStatus === 'EXPIRED' && (
+              <span className="px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-400"
+                title="Validity window has ended; stop/target no longer apply">
+                plan expired
+              </span>
+            )}
+            {pick.planStatus === 'ACTIVE' && pick.valid_until && (
+              <span className="text-slate-500" title="Plan validity (IST)">
+                valid till {formatISTWithLocal(pick.valid_until)}
+              </span>
+            )}
           </div>
           {pick.sector && <div className="text-[10px] text-slate-500 mt-0.5">{pick.sector}</div>}
         </div>
@@ -142,7 +171,7 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
         <span className="text-rose-400 font-medium">↓{pick.bearish_screener_count ?? 0} bearish</span>
         {pick.realizedReturnPct != null && (
           <span className={cn('ml-auto font-bold', pctColor(pick.realizedReturnPct))}>
-            {pct(pick.realizedReturnPct)} since rec
+            {pct(pick.realizedReturnPct)} vs entry-zone low, gross
           </span>
         )}
       </div>
@@ -204,33 +233,12 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
   );
 }
 
-function IntradayCard({ sig, onSelect }: { sig: any; onSelect: (sym: string) => void }) {
-  return (
-    <div
-      className="v1-card p-3 cursor-pointer hover:border-slate-600 transition-colors"
-      onClick={() => onSelect(sig.symbol)}
-    >
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-white font-bold text-sm">{sig.symbol}</span>
-        <span className="text-[10px] bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded font-bold">HIGH</span>
-      </div>
-      <div className="text-[10px] text-slate-400 mb-2">{sig.signal_type?.replace(/_/g, ' ')}</div>
-      <div className="flex items-center justify-between text-[11px]">
-        <span className={cn('font-medium', pctColor(sig.change_pct))}>{pct(sig.change_pct)}</span>
-        <span className="text-sky-400">
-          Win P: {sig.win_probability != null ? `${(sig.win_probability * 100).toFixed(0)}%` : '—'}
-        </span>
-        {sig.time_horizon && <span className="text-slate-500">{sig.time_horizon}</span>}
-      </div>
-    </div>
-  );
-}
 
 export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym: string) => void }) {
   const [conviction, setConviction] = useState<ConvictionFilter>('ALL');
   const [horizon, setHorizon] = useState<HorizonFilter>('ALL');
 
-  const { data, isLoading, refetch, isRefetching, dataUpdatedAt } =
+  const { data, isLoading, isError, refetch, isRefetching, dataUpdatedAt } =
     trpc.getCommandCenter.useQuery(
       { conviction, horizon, limit: 30 },
       { refetchInterval: 5 * 60_000, refetchOnWindowFocus: true },
@@ -240,7 +248,7 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
     trpc.runUnifiedRanker.useMutation({ onSuccess: () => refetch() });
 
   const regime = data?.regime;
-  const regStyle = REGIME_STYLE[regime?.name ?? 'BULL'] ?? REGIME_STYLE.BULL;
+  const regStyle = REGIME_STYLE[regime?.name ?? ''] ?? NEUTRAL_REGIME_STYLE;
 
   const CONVICTIONS: ConvictionFilter[] = ['ALL', 'S_ELITE', 'A_HIGH', 'B_MEDIUM', 'C_LOW', 'D_MARGINAL'];
   const HORIZONS: { val: HorizonFilter; label: string }[] = [
@@ -260,7 +268,7 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
             <div>
               <div className={cn('text-sm font-black', regStyle.color)}>{regime?.name ?? '—'} REGIME</div>
               {regime?.confidence != null && (
-                <div className="text-[10px] text-slate-400">{(regime.confidence * 100).toFixed(0)}% confidence</div>
+                <div className="text-[10px] text-slate-400" title="Hidden-Markov-model posterior for today's label. It is not a measure of how often the label is right.">{(regime.confidence * 100).toFixed(0)}% HMM posterior</div>
               )}
             </div>
           </div>
@@ -270,7 +278,7 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
           {data?.avgEngineTrackRecord != null && (
             <div className="flex items-center gap-1.5 text-[11px]">
               <BarChart2 className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-slate-400">90d track record:</span>
+              <span className="text-slate-400" title="Average realised return of past recommendations across all engines, gross of costs, long and short mixed.">90d avg past-signal return (gross):</span>
               <span className={cn('font-bold', pctColor(data.avgEngineTrackRecord))}>
                 {pct(data.avgEngineTrackRecord)}
               </span>
@@ -280,7 +288,7 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
           <div className="flex items-center gap-2 ml-auto">
             {data?.lastComputedAt && (
               <span className="text-[10px] text-slate-500">
-                Model run {formatISTWithLocal(data.lastComputedAt)}
+                Ranker date {String(data.lastComputedAt).slice(0, 10)}
                 {dataUpdatedAt > 0 && <span className="ml-1.5 text-slate-600">· fetched {relativeFromNow(dataUpdatedAt)}</span>}
               </span>
             )}
@@ -293,6 +301,13 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
               {isRunning ? 'Running…' : 'Re-run'}
             </button>
           </div>
+        </div>
+
+        <div className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-[11px] text-amber-200/90" role="note">
+          <span className="font-semibold text-amber-300">Read as a ranking, not a forecast.</span>{' '}
+          Scores are ranks, not probabilities. No forward-return edge has been demonstrated on liquid names yet, and closed
+          Buy plans have lost money net of costs. Tiers mirror the rating. Plans expire at their validity time; check the
+          tag before acting. The measured record is on the Signal Report Card.
         </div>
 
         <div className="flex items-center gap-3 mt-3 flex-wrap">
@@ -337,10 +352,15 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
             <section>
               <div className="flex items-center gap-2 mb-3">
                 <Shield className="w-4 h-4 text-violet-400" />
-                <h2 className="v1-title-section">EOD Swing Picks</h2>
+                <h2 className="v1-title-section">Ranked plans (EOD)</h2>
                 <span className="text-[10px] text-slate-500 ml-auto">{data?.eodPicks?.length ?? 0} stocks</span>
               </div>
-              {(data?.eodPicks?.length ?? 0) === 0 ? (
+              {isError ? (
+                <div className="text-center py-12 text-rose-400 text-sm" role="alert">
+                  Could not load the ranking. This is a fetch error, not an empty ranking.
+                  <button onClick={() => refetch()} className="ml-2 underline">Retry</button>
+                </div>
+              ) : (data?.eodPicks?.length ?? 0) === 0 ? (
                 <div className="text-center py-12 text-slate-500 text-sm">
                   No picks yet — run unified_ranker after market close
                 </div>
@@ -354,27 +374,14 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
             </section>
 
             <section>
-              <div className="flex items-center gap-2 mb-3">
+              <div className="flex items-center gap-2 mb-1">
                 <Zap className="w-4 h-4 text-amber-400" />
-                <h2 className="v1-title-section">Intraday Live</h2>
-                <span className="text-[10px] text-slate-500 ml-auto">
-                  {data?.intradaySignals?.length ?? 0} HIGH-strength signals
-                </span>
+                <h2 className="v1-title-section">Intraday</h2>
               </div>
-              {regime?.name === 'CRASH' ? (
-                <div className="flex items-center gap-2 p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm">
-                  <AlertTriangle className="w-4 h-4 flex-none" />
-                  Intraday signals disabled — CRASH regime active. Preserve capital.
-                </div>
-              ) : (data?.intradaySignals?.length ?? 0) === 0 ? (
-                <div className="text-center py-8 text-slate-500 text-sm">No HIGH-strength intraday signals today</div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-                  {data!.intradaySignals.map((sig: any, i: number) => (
-                    <IntradayCard key={`${sig.symbol}-${i}`} sig={sig} onSelect={onSelectStock} />
-                  ))}
-                </div>
-              )}
+              <p className="text-[11px] text-slate-500">
+                Intraday picks and their emission gate (open or closed, with the trailing record) are on the Intraday page.
+                This panel no longer lists signals: the old filter never matched any row.
+              </p>
             </section>
           </>
         )}

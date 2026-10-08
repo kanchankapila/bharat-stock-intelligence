@@ -582,13 +582,13 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                   <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3 space-y-2">
                     <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-wider">Factor Breakdown</p>
                     {[
-                      { label: 'ML Win Prob', v: selectedCand.mlProbability, color: 'bg-indigo-500', isModel: true },
+                      { label: selectedCand.winProbSource === 'heuristic' ? 'Win Prob (heuristic, not a model)' : 'ML Win Prob (rank-like, overstates hit rate)', v: selectedCand.mlProbability, color: 'bg-indigo-500', isModel: selectedCand.winProbSource !== 'heuristic' },
                       { label: 'Technical Signals (derived)', v: Math.min(100, (selectedCand.techSignalCount ?? 0) * 25), color: 'bg-emerald-500', isModel: false },
                       { label: 'Quant Rank (derived)', v: Math.max(0, 100 - (selectedCand.quantRank ?? 100)), color: 'bg-amber-500', isModel: false },
                       { label: 'Smart Money (derived)', v: Math.min(100, Math.max(0, 50 + (selectedCand.smartMoneyCr ?? 0) * 5)), color: 'bg-pink-500', isModel: false },
                       { label: 'News Sentiment (derived)', v: Math.min(100, Math.max(0, 50 + (selectedCand.newsSentiment ?? 0) * 50)), color: 'bg-indigo-500', isModel: false },
                     ].map((f, i) => (
-                      <div key={i} title={f.isModel ? 'Validated ML model output' : 'Client-side heuristic, not a calibrated model score'}>
+                      <div key={i} title={f.isModel ? 'Model output. Not validated as a probability: realised hit rates have run well below it.' : 'Rule-of-thumb or client-side heuristic, not a model score'}>
                         <div className="flex justify-between text-[9px] font-bold mb-0.5">
                           <span className={f.isModel ? "text-slate-300" : "text-slate-500"}>{f.label}</span>
                           <span className="text-slate-300 tabular-nums">{f.v != null ? `${Math.round(f.v)}%` : '—'}</span>

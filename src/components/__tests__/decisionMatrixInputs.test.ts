@@ -6,7 +6,7 @@ import { parseDecisionMatrixInputs, buildMatrixItems } from '../decisionMatrixIn
 // and the canonical picks were never displayed; with both empty it showed 6 made-up STRONG BUYs.
 const candidate = {
   symbol: 'ABBOTINDIA', name: 'Abbott India', advice: 'STRONG BUY', compositeScore: 86,
-  mlWinProbability: 79, factors: { technical: 90, fundamental: 100, momentum: 100, sentiment: 50, smartMoney: 50 },
+  mlWinProbability: 79, winProbSource: 'calibrated', factors: { technical: 90, fundamental: 100, momentum: 100, sentiment: 50, smartMoney: 50 },
   entryPrice: 27270, targetPrice: null, stopLoss: 26412.33, rsi: 59.14, cmp: 27270, changePct: 1.98, aiInsight: null,
 };
 const pick = {
@@ -38,6 +38,18 @@ describe('buildMatrixItems', () => {
     const items = buildMatrixItems([{ ...candidate, symbol: 'BOSCH-HCIL' }], [pick]);
     expect(items).toHaveLength(1);
     expect(items[0].source).toBe('canonical');
+  });
+
+  // V-08 (2026-10-08): the canonical pick's win_probability is technical_signals' RAW 0-1 value
+  // (~8pp above calibrated) and rendered as "1%"; a cockpit raw/heuristic value is not calibrated
+  // either. Only a calibrated probability may fill `confidence`.
+  it('never shows a raw or heuristic win probability as confidence', () => {
+    const [canon] = buildMatrixItems([], [{ ...pick, win_probability: 0.553 }]);
+    expect(canon.confidence).toBeNull();
+    for (const src of ['raw', 'heuristic', undefined]) {
+      const [c] = buildMatrixItems([{ ...candidate, winProbSource: src }], []);
+      expect(c.confidence).toBeNull();
+    }
   });
 
   it('invents nothing when both sources are empty', () => {

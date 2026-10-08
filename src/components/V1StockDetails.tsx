@@ -832,7 +832,7 @@ export const V1StockDetails: React.FC<{
                         ))}
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[8px] font-black text-slate-400 uppercase">Confidence</span>
+                        <span className="text-[8px] font-black text-slate-400 uppercase" title="The language model's own stated confidence. It is not a measured hit rate.">LLM self-rated</span>
                         <div className="flex-1 bg-slate-900 rounded-full h-1.5 overflow-hidden">
                           <div className="bg-indigo-500 h-full rounded-full" style={{ width: `${aiAnalysis.confidence}%` }} />
                         </div>

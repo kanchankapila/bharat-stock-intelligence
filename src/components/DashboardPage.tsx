@@ -599,10 +599,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           accent={isGenerating ? amber : '#e2e8f0'}
           icon={<Radio size={9} />}
         />
+        {/* V-09: LONG only, 15d, WIN/(WIN+LOSS+STOP) -- NEUTRAL shown beside it, never in the
+            denominator; return_pct is gross of costs. */}
         <KpiChip
-          label="Win Rate"
-          value={accuracyMetrics && accuracyMetrics.resolvedSignals > 0 ? `${accuracyMetrics.profitHitRate.toFixed(0)}%` : '—'}
-          sub={accuracyMetrics && accuracyMetrics.resolvedSignals > 0 ? `${accuracyMetrics.resolvedSignals.toLocaleString('en-IN')} signals resolved` : 'No resolved signals yet'}
+          label="Long Win Rate · 15d"
+          value={accuracyMetrics && accuracyMetrics.decisiveSignals > 0 ? `${accuracyMetrics.profitHitRate.toFixed(1)}%` : '—'}
+          sub={accuracyMetrics && accuracyMetrics.decisiveSignals > 0
+            ? `n=${accuracyMetrics.decisiveSignals.toLocaleString('en-IN')} decisive · ${accuracyMetrics.neutralSignals.toLocaleString('en-IN')} neutral · avg ${accuracyMetrics.avgGrossReturnPct == null ? '—' : `${accuracyMetrics.avgGrossReturnPct.toFixed(2)}%`} gross${accuracyMetrics.asOf ? ` · as of ${String(accuracyMetrics.asOf).slice(0, 10)}` : ''}`
+            : 'No decisive long outcomes yet'}
           up={(accuracyMetrics?.profitHitRate ?? 0) >= 50}
           accent={emerald}
           icon={<TrendingUp size={9} />}
@@ -937,20 +941,25 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 
       {/* ── Row 2.6: Quant Performance — see the query block above for provenance. ─────────── */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        {/* V-10: strategy_performance 'overall' = every technical signal_outcomes row (path_barrier
+            label), NEUTRAL in the denominator, gross -- not an ensemble. */}
         <KpiChip
-          label="Ensemble Win Rate"
+          label={`All-Signal Win Rate · ${perfDashboard?.overall?.horizon_days ?? '—'}d`}
           value={perfDashboard?.overall?.win_rate != null ? `${(perfDashboard.overall.win_rate * 100).toFixed(1)}%` : '—'}
+          sub={perfDashboard?.overall?.total_signals != null
+            ? `n=${Number(perfDashboard.overall.total_signals).toLocaleString('en-IN')} · all sides · incl. neutral · gross${perfDashboard.overall.last_computed ? ` · as of ${String(perfDashboard.overall.last_computed).slice(0, 10)}` : ''}`
+            : undefined}
           accent={emerald}
           icon={<Gauge size={11} />}
         />
         <KpiChip
-          label="Sharpe Ratio (1Y Ann.)"
+          label={`Sharpe · ${perfDashboard?.overall?.horizon_days ?? '—'}d trades, ×√(252/h)`}
           value={perfDashboard?.overall?.sharpe_ratio != null ? perfDashboard.overall.sharpe_ratio.toFixed(2) : '—'}
           accent={amber}
           icon={<TrendingUp size={11} />}
         />
         <KpiChip
-          label="Active Trading Signals"
+          label="Graded Signals"
           value={perfDashboard?.overall?.total_signals != null ? String(perfDashboard.overall.total_signals) : '—'}
           accent="#64748b"
           icon={<Radio size={11} />}
