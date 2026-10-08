@@ -45,6 +45,7 @@ import ta
 from db_compat import connect, read_df, use_postgres, ConnWrapper
 from as_of import read_as_of_history, logical_write_floor
 from insider_features import insider_buy_pct_series
+from mc_symbol_map import MC_TO_SYMBOL_SQL
 
 # Quarterly results are usable only once published: SEBI allows 45 days after a quarter and 60
 # after Q4, and the deep tables are stamped at period END -- so a value becomes visible 60 days
@@ -874,9 +875,9 @@ class FeatureEngineer:
             feat[c] = np.nan
 
         ed = read_df(
-            """SELECT e.result_date
+            f"""SELECT e.result_date
                FROM stock_earnings_dates e
-               LEFT JOIN nse_stocks n ON n.mcsymbol = e.scid
+               LEFT JOIN {MC_TO_SYMBOL_SQL} n ON n.mcsymbol = e.scid
                LEFT JOIN mc_scid_map m ON m.scid = e.scid
                WHERE COALESCE(n.symbol, m.symbol) = ? AND e.result_date IS NOT NULL
                ORDER BY e.result_date""",

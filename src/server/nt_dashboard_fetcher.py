@@ -40,7 +40,7 @@ from datetime import date
 import requests
 
 from db_compat import connect, translate
-from as_of import logical_write_floor
+from as_of import is_trading_session, logical_write_floor
 import sys
 
 DASHBOARD_URL = "https://www.niftytrader.in/api/niftytrader/Option/dashboard-data"
@@ -248,10 +248,15 @@ def main() -> None:
     parser.add_argument("--symbol", default=None)
     args = parser.parse_args()
 
+    today = date.today().isoformat()
+    # Closed-day runs re-stamped the last session's dashboard under a calendar date (audit C-04).
+    if not is_trading_session(today):
+        print(f"[NTDashboard] {today} is not an NSE session -- nothing written")
+        return
+
     con = connect()
     ensure_schema(con)
 
-    today = date.today().isoformat()
     ts_floor = logical_write_floor(fallback=today)
     data = _fetch_all()
     if data is None:

@@ -52,6 +52,10 @@ class TestNsePreopenFetcherLiveDataSource:
         are usable: identifiers look like real tickers, numeric columns are real finite
         numbers, and total_traded_volume specifically is populated (not just carried through
         as a column with no data -- the reason this test file exists)."""
+        import datetime
+        today = datetime.date.today().isoformat()
+        if not pf.is_trading_session(today):
+            pytest.skip(f"{today} is not an NSE session -- the writer deliberately writes nothing")
         conn = _make_test_conn()
         n = pf.fetch_nse_preopen(conn)
         assert n > 500, f"fetch_nse_preopen() upserted only {n} rows -- expected 2,000+"

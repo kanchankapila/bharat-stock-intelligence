@@ -74,6 +74,11 @@ NEVER_FILL = {
     # outcome than the zeros the migration just removed. Verified live: both columns appeared
     # in sparse_columns() immediately after the migration.
     'call_wall_dist_pct', 'put_wall_dist_pct', 'near_expiry_gamma',
+    # Event clocks and flags (AF-20261008-A01/A02). days_to_next_results is a COUNTDOWN: carrying
+    # "0 = reporting today" forward for 120 sessions made 1,676 of 1,816 live values fictional and
+    # flagged 74% of the universe as reporting within 2 days. earnings_shocker_flag is a
+    # point-in-time vendor flag, not a standing state.
+    'days_to_next_results', 'earnings_shocker_flag',
     'close', 'cmp', 'open', 'high', 'low', 'volume', 'change_pct',
     'entry_zone', 'stop_loss', 'targets', 'setup_quality', 'time_horizon',
     'enrichment_ffill_age_days',   # this script's own bookkeeping column

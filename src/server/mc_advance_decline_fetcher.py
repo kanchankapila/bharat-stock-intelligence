@@ -20,6 +20,7 @@ import time
 import requests
 
 from db_compat import execute, executemany
+from as_of import is_trading_session
 import sys
 
 BASE_URL = "https://api.moneycontrol.com/mcapi/v1/indices/chart/exchange-advdec"
@@ -186,6 +187,11 @@ def main() -> None:
         rec = fetch_adv_dec(session, ex_code)
         if rec is None:
             print(f"[A/D] {ex_name}: skipped (fetch failed)")
+            continue
+        # A closed day's tick carries no date, so it was stamped today: market_breadth got
+        # carried-forward 0.2219 rows on 10-02 and 10-04 (audits B-05/C-04).
+        if not is_trading_session(rec["date"]):
+            print(f"[A/D] {ex_name}: {rec['date']} is not an NSE session -- nothing written")
             continue
 
         upsert_adv_dec(ex_name, rec)

@@ -20,6 +20,7 @@ import requests
 from curl_cffi import requests as cffi_req
 
 from db_compat import connect, translate, use_postgres
+from as_of import is_trading_session
 import sys
 
 MC_HEADERS = {
@@ -208,6 +209,13 @@ def fetch_nse_preopen(con) -> int:
 
     Returns count of stocks upserted.
     """
+    snapshot_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    # No pre-open auction on a closed day: NSE still serves the last session's book, which was
+    # being stored under the closed date (audit C-04).
+    if not is_trading_session(snapshot_date):
+        print(f"[NSE PreOpen] {snapshot_date} is not an NSE session -- nothing written")
+        return 0
+
     ensure_preopen_stock_schema(con)
 
     sess = _nse_session()
@@ -235,7 +243,6 @@ def fetch_nse_preopen(con) -> int:
         print("[NSE PreOpen] No data returned — skipping IEP backfill")
         return 0
 
-    snapshot_date = datetime.datetime.now().strftime("%Y-%m-%d")
     fetched_at    = datetime.datetime.now().isoformat()
 
     rows = []

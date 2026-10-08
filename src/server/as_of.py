@@ -177,6 +177,38 @@ def logical_session_date(cutoff_hour: int = 4, now=None,
     return d.isoformat()
 
 
+def is_trading_session(date_str: str, conn=None) -> bool:
+    """True iff `date_str` is an NSE session: a weekday not in `market_holidays`.
+
+    For writers that stamp a run's calendar date onto session-keyed rows (audit C-04,
+    2026-10-08): the daily chain also runs on closed days, and the F&O/pre-open/breadth writers
+    stamped Saturdays, Sundays and holidays with copies of the previous session's numbers.
+    Reuses logical_session_date's calendar (asked at 04:00 on that date, so neither the
+    midnight cutoff nor the open-passed roll applies). Weekends need no DB. With no `conn` it
+    opens one; if `market_holidays` cannot be read it fails OPEN (weekday = session), i.e. the
+    pre-fix behaviour, rather than blocking a real session's write.
+    """
+    import datetime
+    d = datetime.date.fromisoformat(str(date_str)[:10])
+    if d.weekday() >= 5:
+        return False
+    at = datetime.datetime.combine(d, datetime.time(4))
+    own = None
+    try:
+        if conn is None:
+            from db_compat import connect
+            conn = own = connect()
+        return logical_session_date(now=at, conn=conn) == d.isoformat()
+    except Exception:
+        return True
+    finally:
+        if own is not None:
+            try:
+                own.close()
+            except Exception:
+                pass
+
+
 def logical_write_floor(conn=None, *, fallback: str = None) -> str:
     """The reference date for a "CASE WHEN date >= floor THEN val ELSE NULL END" point-in-time
     write guard -- the ISO date of the most recent session actually present in stock_ohlcv.

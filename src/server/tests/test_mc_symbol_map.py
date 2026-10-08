@@ -94,6 +94,52 @@ def test_no_call_site_rebuilds_the_map_by_dict_comprehension():
         + "\n  ".join(offenders))
 
 
+# The SQL shape of the same class: `JOIN nse_stocks ns ON ns.mcsymbol = x.scid` FANS OUT one
+# provider row to every symbol sharing the code (A-03, 2026-10-08: Bajaj Finance's result date
+# was written to BAJAJST, Adani Power's to EMPOWER). The dict scan above cannot see it.
+# Ceiling: catches a JOIN on nse_stocks whose ON clause reads that alias's mcsymbol on the same
+# line; a comma-join with the predicate in WHERE would slip past.
+import re  # noqa: E402
+
+_SQL_FANOUT = re.compile(
+    r"JOIN\s+nse_stocks\s+(?:AS\s+)?(\w+)\s+ON\s+[^\n]*\b\1\.mcsymbol\b", re.IGNORECASE)
+
+
+def test_sql_fanout_scan_matches_the_shape_it_guards():
+    assert _SQL_FANOUT.search("JOIN nse_stocks ns ON ns.mcsymbol = sed.scid")
+    assert _SQL_FANOUT.search("LEFT JOIN nse_stocks n ON e.scid = n.mcsymbol")
+    assert not _SQL_FANOUT.search("JOIN nse_stocks ns ON ns.symbol = ts.symbol")
+
+
+def test_no_sql_joins_nse_stocks_on_mcsymbol():
+    root = pathlib.Path(__file__).resolve().parents[1]
+    offenders = []
+    for path in sorted(root.glob("*.py")):
+        if path.name == "mc_symbol_map.py":
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for m in _SQL_FANOUT.finditer(text):
+            offenders.append(f"{path.name}:{text.count(chr(10), 0, m.start()) + 1}: {m.group(0)}")
+    assert not offenders, (
+        "SQL joins nse_stocks on the ambiguous mcsymbol, fanning one MoneyControl row out to "
+        "every symbol sharing the code. Join mc_symbol_map.MC_TO_SYMBOL_SQL instead:\n  "
+        + "\n  ".join(offenders))
+
+
+def test_sql_map_drops_exactly_what_build_mc_to_symbol_drops():
+    """The SQL twin must be the same rule as the Python builder, not a second mapping."""
+    from pg_test_support import pg_memory_conn
+    from mc_symbol_map import MC_TO_SYMBOL_SQL
+
+    conn = pg_memory_conn()
+    conn.execute("CREATE TABLE nse_stocks (symbol TEXT, mcsymbol TEXT)")
+    for sym, code in ROWS + [("BLANK", ""), ("NOCODE", None)]:
+        conn.execute("INSERT INTO nse_stocks VALUES (?, ?)", (sym, code))
+    got = dict((r[0], r[1]) for r in conn.execute(
+        f"SELECT mcsymbol, symbol FROM {MC_TO_SYMBOL_SQL} m").fetchall())
+    assert got == build_mc_to_symbol(ROWS) == {"RI": "RELIANCE", "TCS": "TCS"}
+
+
 def test_the_scan_above_is_not_vacuous():
     """The scan must be reaching the two files it was written for."""
     root = pathlib.Path(__file__).resolve().parents[1]

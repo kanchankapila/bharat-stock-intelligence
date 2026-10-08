@@ -28,6 +28,7 @@ from curl_cffi import requests as cffi_req
 
 from db_compat import connect
 from as_of import logical_trading_date
+from mc_symbol_map import MC_TO_SYMBOL_SQL, build_mc_to_symbol
 
 # ── Constants ────────────────────────────────────────────────────────────────────
 
@@ -260,18 +261,28 @@ def _backfill_days_to_results(con, as_of: str | None = None) -> None:
 
     `as_of` overrides logical_trading_date() for a one-off historical repair pass (see
     backfill_days_to_next_results.py) -- the daily scheduled call always passes None.
+
+    A-07 (2026-10-08): a rescheduled date leaves the old (scid, result_date) row behind, and
+    MIN() counted down to it (63 of 64 measured reschedules: the later date was real). The
+    upsert refreshes fetched_at on every row the vendor still returns, so only dates seen in a
+    scid's latest fetch (within an hour of its newest fetched_at) count as current.
     """
     cur = con.cursor()
     today = as_of or logical_trading_date()
-    cur.execute("""
+    cur.execute(f"""
         UPDATE technical_signals ts
         SET days_to_next_results = subq.days
         FROM (
             SELECT ns.symbol,
                    (MIN(sed.result_date::date) - CAST(? AS date)) AS days
-            FROM stock_earnings_dates sed
-            JOIN nse_stocks ns ON ns.mcsymbol = sed.scid
-            WHERE sed.result_date >= ?
+            FROM (
+                SELECT scid, result_date, fetched_at::timestamptz AS seen,
+                       MAX(fetched_at::timestamptz) OVER (PARTITION BY scid) AS last_seen
+                FROM stock_earnings_dates
+                WHERE result_date >= ?
+            ) sed
+            JOIN {MC_TO_SYMBOL_SQL} ns ON ns.mcsymbol = sed.scid
+            WHERE sed.seen >= sed.last_seen - INTERVAL '1 hour'
             GROUP BY ns.symbol
         ) subq
         WHERE ts.symbol = subq.symbol
@@ -459,7 +470,7 @@ def _backfill_rapid_features(con) -> int:
                 r.category_score,
                 r.np_growth
             FROM mc_earnings_rapid r
-            JOIN nse_stocks ns ON ns.mcsymbol = r.scid
+            JOIN {MC_TO_SYMBOL_SQL} ns ON ns.mcsymbol = r.scid
             WHERE r.sub_type = 'yoy'
             ORDER BY ns.symbol, {_pg_sort_date} DESC NULLS LAST, ABS(r.category_score) DESC
         ) yoy
@@ -469,7 +480,7 @@ def _backfill_rapid_features(con) -> int:
                 r.category_score,
                 r.np_growth
             FROM mc_earnings_rapid r
-            JOIN nse_stocks ns ON ns.mcsymbol = r.scid
+            JOIN {MC_TO_SYMBOL_SQL} ns ON ns.mcsymbol = r.scid
             WHERE r.sub_type = 'qoq'
             ORDER BY ns.symbol, {_pg_sort_date} DESC NULLS LAST, ABS(r.category_score) DESC
         ) qoq ON qoq.symbol = yoy.symbol
@@ -543,26 +554,35 @@ def _backfill_shockers(con) -> None:
     _backfill_days_to_results above (PG had MAX(date), SQLite had no date guard at all).
 
     logical_trading_date(), not date.today() (2026-08-01) -- see _backfill_days_to_results
-    above for why (ml-daily-ops crosses midnight IST)."""
+    above for why (ml-daily-ops crosses midnight IST).
+
+    A-02 (2026-10-08): mc_price_shockers is keyed on scid and never purged, so it holds every
+    stock that was EVER a shocker (2,821 rows, 10 from the current list) and the flag read 1 on
+    89% of the universe. Only the latest fetch -- rows within an hour of the newest fetched_at --
+    is the vendor's current list."""
     cur = con.cursor()
     today = logical_trading_date()
-    cur.execute("""
+    current = f"""
+        SELECT ns.symbol, s.gain_since_result
+        FROM mc_price_shockers s
+        JOIN {MC_TO_SYMBOL_SQL} ns ON ns.mcsymbol = s.scid
+        WHERE s.fetched_at::timestamptz >=
+              (SELECT MAX(fetched_at::timestamptz) FROM mc_price_shockers) - INTERVAL '1 hour'
+    """
+    cur.execute(f"""
         UPDATE technical_signals ts
         SET
             earnings_shocker_flag = 1,
-            earnings_shocker_gain = s.gain_since_result
-        FROM mc_price_shockers s
-        JOIN nse_stocks ns ON ns.mcsymbol = s.scid
-        WHERE ts.symbol = ns.symbol
+            earnings_shocker_gain = cur.gain_since_result
+        FROM ({current}) cur
+        WHERE ts.symbol = cur.symbol
           AND ts.date = ?
     """, (today,))
-    cur.execute("""
+    cur.execute(f"""
         UPDATE technical_signals ts
         SET earnings_shocker_flag = 0
         WHERE NOT EXISTS (
-            SELECT 1 FROM mc_price_shockers s
-            JOIN nse_stocks ns ON ns.mcsymbol = s.scid
-            WHERE ns.symbol = ts.symbol
+            SELECT 1 FROM ({current}) cur WHERE cur.symbol = ts.symbol
         ) AND ts.date = ?
     """, (today,))
     con.commit()
@@ -720,8 +740,8 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> int:
       mc_eps_vs_cons   — % vs analyst consensus (positive=beat, negative=miss)
     """
     cur = con.cursor()
-    cur.execute("SELECT mcsymbol, symbol FROM nse_stocks WHERE mcsymbol IS NOT NULL AND mcsymbol != ''")
-    scid_map = {row[0]: row[1] for row in cur.fetchall()}
+    cur.execute("SELECT symbol, mcsymbol FROM nse_stocks WHERE mcsymbol IS NOT NULL AND mcsymbol != ''")
+    scid_map = build_mc_to_symbol(cur.fetchall(), log=print)
 
     # symbol → (beat_label, beat_pct, type_priority)
     # type_priority: con=3 > std=2 > all=1 (prefer consolidated)

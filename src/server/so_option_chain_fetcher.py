@@ -35,6 +35,7 @@ from datetime import date as _date, timedelta
 import requests
 
 from db_compat import execute, executemany, query_all
+from as_of import is_trading_session
 import sys
 
 SO_HEADERS = {
@@ -390,6 +391,10 @@ def run(
     delay: float = 0.3,
 ) -> None:
     today = _date.today().isoformat()
+    # Closed-day runs re-stamped the last session's chain under a calendar date (audit C-04).
+    if not is_trading_session(today):
+        print(f"[so_chain] {today} is not an NSE session -- nothing written")
+        return
 
     if target_symbol:
         symbols = [target_symbol.upper()]

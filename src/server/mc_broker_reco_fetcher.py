@@ -27,6 +27,7 @@ import pandas as pd
 
 from db_compat import connect, translate, read_df, executemany
 from fetch_utils import retry_get
+from mc_symbol_map import MC_TO_SYMBOL_SQL
 
 try:
     from curl_cffi import requests as cffi_req
@@ -233,7 +234,7 @@ def backfill_technical_signals(days: int) -> int:
                r.target,
                r.entry_date
         FROM mc_broker_reco r
-        JOIN nse_stocks p ON p.mcsymbol = r.scid
+        JOIN {MC_TO_SYMBOL_SQL} p ON p.mcsymbol = r.scid
         WHERE r.entry_date >= CAST({_date_offset_expr(days)} AS TEXT)
     """)
     df = read_df(reco_sql)

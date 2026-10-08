@@ -67,6 +67,20 @@ def build_mc_to_symbol(rows: Iterable, *, log=None) -> dict[str, str]:
     return unambiguous
 
 
+# The same rule as build_mc_to_symbol, for call sites that join in SQL. `JOIN nse_stocks ON
+# mcsymbol = scid` does not clobber like the dict comprehension -- it FANS OUT, writing one
+# MoneyControl row to every symbol sharing the code (A-03, 2026-10-08: Bajaj Finance -> BAJAJST,
+# Adani Power -> EMPOWER). Join this derived table instead: columns (mcsymbol, symbol).
+# test_mc_symbol_map.py asserts it drops exactly what build_mc_to_symbol drops.
+MC_TO_SYMBOL_SQL = """(
+    SELECT TRIM(mcsymbol) AS mcsymbol, MIN(TRIM(symbol)) AS symbol
+    FROM nse_stocks
+    WHERE TRIM(mcsymbol) <> '' AND TRIM(symbol) <> ''
+    GROUP BY TRIM(mcsymbol)
+    HAVING COUNT(DISTINCT TRIM(symbol)) = 1
+)"""
+
+
 def ambiguous_mc_codes(rows: Iterable) -> dict[str, list[str]]:
     """The codes `build_mc_to_symbol` drops, for reporting/diagnostics."""
     by_code: dict[str, set[str]] = {}

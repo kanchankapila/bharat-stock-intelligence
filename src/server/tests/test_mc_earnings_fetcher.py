@@ -136,7 +136,7 @@ class TestFetchActualEstimateBeatsUsesLogicalTradingDate:
         monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-07-31")
         monkeypatch.setattr(mef.time, "sleep", lambda *_: None)
         # One well-known scid -> symbol mapping, and one matching "Beats" row per API call.
-        conn = _FakeConn(fetchall_results=[[("RI", "RELIANCE")]])
+        conn = _FakeConn(fetchall_results=[[("RELIANCE", "RI")]])
         item = ["RI", "", "", "", "", "", "", "Beats Estimate", "5.2"]
         monkeypatch.setattr(mef, "_get", lambda url: {"list": [item]})
 
@@ -167,7 +167,7 @@ class TestFetchActualEstimateBeatsBindsValues:
     def _run(self, monkeypatch, symbol):
         monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-07-31")
         monkeypatch.setattr(mef.time, "sleep", lambda *_: None)
-        conn = _FakeConn(fetchall_results=[[("RI", symbol)]])
+        conn = _FakeConn(fetchall_results=[[(symbol, "RI")]])
         item = ["RI", "", "", "", "", "", "", "Beats Estimate", "5.2"]
         monkeypatch.setattr(mef, "_get", lambda url: {"list": [item]})
         mef.fetch_actual_estimate_beats(conn, max_pages=1)
@@ -211,7 +211,7 @@ class TestEndpointFamilyHealthIsHonest:
 
     def test_actual_estimate_reports_when_every_vendor_call_failed(self, monkeypatch):
         monkeypatch.setattr(mef, "_get", lambda _url: None)
-        conn = _FakeConn(fetchall_results=[[('RI', 'RELIANCE')]])
+        conn = _FakeConn(fetchall_results=[[('RELIANCE', 'RI')]])
         assert mef.fetch_actual_estimate_beats(conn) == 0
 
     def test_main_finishes_independent_feeds_then_fails_on_unavailable_families(self, monkeypatch):

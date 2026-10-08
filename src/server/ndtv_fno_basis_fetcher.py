@@ -61,7 +61,7 @@ from curl_cffi import requests as cffi_req
 
 from db_compat import connect, ConnWrapper, query_all
 from fetch_utils import retry_get
-from as_of import logical_trading_date
+from as_of import is_trading_session, logical_trading_date
 
 # One HTTP session per worker thread -- curl_cffi's Session is not guaranteed safe for
 # concurrent requests on a single handle (documented gotcha, see intraday_fetcher.py's
@@ -224,6 +224,10 @@ def run(max_workers: int = MAX_WORKERS) -> int:
 
 
 def main() -> int:
+    today = logical_trading_date()
+    if not is_trading_session(today):
+        _log(f"{today} is not an NSE session -- nothing written (audit C-04)")
+        return 0
     n = run()
     if n == 0:
         _log("nothing stored this run")

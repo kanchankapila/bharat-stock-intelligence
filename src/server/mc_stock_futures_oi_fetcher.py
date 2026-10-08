@@ -34,7 +34,7 @@ import logging
 import time
 import urllib.request
 
-from as_of import logical_trading_date
+from as_of import is_trading_session, logical_trading_date
 from db_compat import execute, executemany, query_all
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -232,9 +232,15 @@ def fetch_symbol(sc_id: str, max_expiries: int = 1, as_of: str | None = None) ->
     return out
 
 
-def run(symbols: list[str] | None = None, dry_run: bool = False, sleep: float = 0.25) -> int:
+def run(symbols: list[str] | None = None, dry_run: bool = False, sleep: float = 0.25,
+        now=None) -> int:
+    as_of = logical_trading_date(now=now)
+    # The chain also runs on closed days; a weekend/holiday fetch is the last session's book
+    # re-stamped (10-02 and 10-04 were byte-identical copies of 10-01, audit C-04).
+    if not is_trading_session(as_of):
+        log.info("%s is not an NSE session -- nothing written", as_of)
+        return 0
     ensure_schema()
-    as_of = logical_trading_date()
     mapping = load_mc_symbol_map(symbols)
     if not mapping:
         log.warning("no symbols with an mcsymbol -- nothing to fetch")
