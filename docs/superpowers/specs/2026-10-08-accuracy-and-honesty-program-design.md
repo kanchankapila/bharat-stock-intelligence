@@ -126,3 +126,36 @@ F&O bhavcopy history already exist; the ranker's engine inputs do not before 202
 ## 5. Out of scope
 Any live score, weight, veto or threshold change before its evidence; new engines or signal tables; deleting tables or files;
 production data repair; migrations; a third frontend.
+
+## 6. Data-source review results (sub-project G, read-only, 2026-10-08)
+
+Report: `audit_G_data_gaps.md` (session scratchpad). Verdict: **the best next step needs no new vendor.** [Likely]
+
+**Already in the database, unused or under-used** [Certain]: `nse_universe_history` has delivery % for 3,995 symbols since 2021
+(`stock_delivery_data` starts 2025-06); `dalalos_financial_trends_history` has 26 quarters for 1,206 symbols (used with a fixed lag
+because it has no filing date); `mc_estimates_hits_misses` (2021-12 to 2025-09) and `investsights_pe_band_history` have no reader;
+1,214 bhavcopy symbols are missing from `stock_ohlcv` (218 averaging Rs10cr+/day; many are renames).
+
+**Probed, returns dated history** [Certain] (NSE needs a browser user-agent; bare requests drop): the results-filings API
+(broadcast timestamp and XBRL link per filing), old-format F&O bhavcopy (62k stock-option rows/day in 2022), the shareholding master
+(20 quarters with submission and broadcast dates), the market-wide insider (PIT) API with disclosure timestamps, participant OI
+(2021), daily price-band files and the delisted list. **No free history** for analyst revisions, bid-ask spreads, index
+constituents or ASM/GSM lists. NiftyTrader per-stock IV starts 2025-07.
+
+**Skip** as ranker inputs: news, macro and global series, index-constituent and ASM history, more futures OI/basis/PCR history,
+vendor scores and screeners (all null or untestable in the record).
+
+### What this changes in the plan
+1. **New sub-project H, "multi-regime replay panel" (read-only, file-based, no DB write):** rebuild 2021-2026 point-in-time inputs
+   for the ranker's price, delivery and fundamentals engines from existing tables (bhavcopy incl. delivery %, survivorship-reduced and
+   corporate-action checked), stored as a parquet file under the scratchpad/data directory, then replay the ranking across bull and bear
+   regimes. This answers the main open question: is IC ~0.05 only a falling-tape artifact? It also turns E's levers from
+   "calendar-blocked to 2027" into testable now where an input is reconstructible. Engines that cannot be reconstructed
+   (confluence ML, screeners) are reported as untestable, not assumed.
+2. **Cost and capacity model by turnover bucket** from bhavcopy, plus a circuit-limit filter. Adds no IC; it decides whether any IC is
+   tradeable. Built in C's scorecard.
+3. **Filing-date backfill, options backfill (2021-2024), shareholding and disclosure-dated insider backfills** are database writes
+   plus external requests. They are **NEEDS-APPROVAL and not part of the authorised scope**; the plan prepares dry-run fetch scripts
+   and a request budget only. Pre-registered hypotheses if approved: growth / earnings surprise / Piotroski over about 20 results
+   seasons, implied-minus-realised volatility, put-call skew (two signals only, to limit multiple testing). Expect nulls.
+4. Analyst revisions can only be collected going forward; start a forward collector only with approval.
