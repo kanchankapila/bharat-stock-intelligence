@@ -26,6 +26,15 @@ const check = (id, lane, status, detail) => {
   console.log(`${icon} [${lane}] ${id} — ${detail}`);
 };
 const read = (p) => { try { return fs.readFileSync(path.join(ROOT, p), 'utf8'); } catch { return ''; } };
+const persistedPm2EnvHas = (name) => {
+  try {
+    const home = process.env.USERPROFILE || process.env.HOME;
+    if (!home) return false;
+    const apps = JSON.parse(fs.readFileSync(path.join(home, '.pm2', 'dump.pm2'), 'utf8'));
+    return apps.some(app => app?.name === 'bharat-server'
+      && String(app?.pm2_env?.[name] || app?.[name] || '').trim());
+  } catch { return false; }
+};
 
 // ───────────────────────── A. CODEBASE static checks ─────────────────────────
 console.log('\n━━━ A. Codebase ━━━');
@@ -35,6 +44,14 @@ const tg = read('src/server/telegramService.ts');
 check('tg-429-retry', 'code',
   tg.includes('postWithRateLimitRetry') ? 'PASS' : 'FAIL',
   tg.includes('postWithRateLimitRetry') ? '429 retry helper present in telegramService' : 'postWithRateLimitRetry MISSING — 429s would silently drop digests again');
+
+const gemini = read('src/services/geminiService.ts');
+const geminiResilient = gemini.includes('GEMINI_MIN_INTERVAL_MS')
+  && gemini.includes('GEMINI_MAX_RETRY_DELAY_MS')
+  && gemini.includes('providerBlockedUntil');
+check('gemini-quota-circuit', 'code', geminiResilient ? 'PASS' : 'FAIL',
+  geminiResilient ? 'Gemini calls are paced, bounded, and circuit-break on long quota/provider outages'
+    : 'Gemini pacing/retry-delay ceiling/provider circuit is missing');
 
 // AF-20260909-11 follow-up: unmocked test sends must be impossible
 check('tg-vitest-guard', 'code',
@@ -77,25 +94,38 @@ check('vite-watch-ignored', 'code',
 
 // Recurring class "notification gate reads a field its pipeline never populates" (heuristic)
 const suspectGates = new Set();
+const gateFieldWriters = new Set();
 try {
   for (const f of fs.readdirSync(path.join(ROOT, 'src/server'))) {
-    if (!f.endsWith('.ts') || f.endsWith('.test.ts')) continue;
-    if (/\.winProbability\b/.test(read(path.join('src/server', f)))) suspectGates.add(f);
+    if ((!f.endsWith('.ts') && !f.endsWith('.py')) || f.endsWith('.test.ts')) continue;
+    const body = read(path.join('src/server', f));
+    if (f.endsWith('.ts') && /\.winProbability\b/.test(body)) suspectGates.add(f);
+    if (/\bSET\s+(?:calibrated_)?win_probability\s*=|\bwin_probability\s*=\s*\?/i.test(body)) gateFieldWriters.add(f);
   }
 } catch { /* ignore */ }
-check('gate-field-writers', 'code', suspectGates.size ? 'WARN' : 'PASS',
-  suspectGates.size ? `.winProbability readers exist in ${[...suspectGates].join(', ')} — verify the pipeline POPULATES each gated field (grep the WRITER, not the reader)` : 'no suspicious never-populated gate fields (winProbability class)');
+const unwrittenGate = suspectGates.size > 0 && gateFieldWriters.size === 0;
+check('gate-field-writers', 'code', unwrittenGate ? 'WARN' : 'PASS',
+  unwrittenGate
+    ? `.winProbability readers exist in ${[...suspectGates].join(', ')} but no win_probability writer was found`
+    : suspectGates.size
+      ? `.winProbability readers backed by writers in ${[...gateFieldWriters].join(', ')}`
+      : 'no suspicious never-populated gate fields (winProbability class)');
 
 // SQLite-ism guard: SQLite-only SQL in server TS (pgClient may translate — flag for a read)
 const sqliteisms = [];
 try {
   for (const f of fs.readdirSync(path.join(ROOT, 'src/server'))) {
     if (!f.endsWith('.ts') || f.endsWith('.test.ts')) continue;
-    if (/datetime\('now'\)|strftime\(/.test(read(path.join('src/server', f)))) sqliteisms.push(f);
+    if (f === 'sqlTranslate.ts') continue; // translator implementation/docs are not a SQL call site
+    const body = read(path.join('src/server', f));
+    const unsupported = /strftime\(/.test(body);
+    const translatedDatetime = /datetime\('now'\)/.test(body) &&
+      (f === 'sqlTranslate.ts' || /from\s+['"]\.\/dbAsync['"]/.test(body));
+    if (unsupported || (/datetime\('now'\)/.test(body) && !translatedDatetime)) sqliteisms.push(f);
   }
 } catch { /* ignore */ }
 check('sqlite-isms', 'code', sqliteisms.length ? 'WARN' : 'PASS',
-  sqliteisms.length ? `SQLite-only SQL in ${sqliteisms.join(', ')} — confirm pgClient translates or convert` : 'no SQLite-only SQL in server TS');
+  sqliteisms.length ? `untranslated SQLite-only SQL in ${sqliteisms.join(', ')} — route through dbAsync or convert` : 'SQLite-compatible SQL is translated through dbAsync; no bypasses found');
 
 // AF-20260909-14: classification colour mappings must never be inverted relative to
 // direction. The Grafana "top losers" panel once mapped Strong Sell → dark-green / Strong
@@ -307,18 +337,25 @@ if (client) {
     check('telegram-settings', 'db', enabled && hasTok ? 'PASS' : 'WARN',
       tgset.map(r => `${r.key}=${r.v}`).join(', '));
   } catch (e) { check('telegram-settings', 'db', 'WARN', e.message); }
+  // The interactive shell may intentionally omit secrets while the persisted PM2 service
+  // environment contains them. Check the deployed process configuration without printing it.
+  if (!String(process.env.GEMINI_API_KEY || '').trim() && persistedPm2EnvHas('GEMINI_API_KEY')) {
+    process.env.GEMINI_API_KEY = '__present_in_pm2__';
+  }
   check('gemini-key', 'db', process.env.GEMINI_API_KEY ? 'PASS' : 'WARN',
     process.env.GEMINI_API_KEY ? 'GEMINI_API_KEY present' : 'GEMINI_API_KEY empty — AI features degrade honestly (user action, AF-20260828-24)');
 }
 // ───────────────────────── D. LOGS (today + yesterday) ─────────────────────────
 console.log('\n━━━ D. Logs ━━━');
 const BENIGN_LOG = [
+  [/(?:^|[\s\\/])__tests__[\\/]fixtures[\\/]mem_hog\.py\b/i, 'intentional Python memory-ceiling test fixture'],
   [/waf|captcha/i, 'Trendlyne WAF captcha (vendor block, self-clears)'],
   [/niftytrader.*(unauthorized|403|timeout)|execution budget/i, 'NiftyTrader vendor block/budget (self-clears)'],
   [/marketsmojo/i, 'MarketsMojo crawl (progressive 7-day skip cache)'],
   [/EBUSY.*audit-files/i, 'vite watcher EBUSY (ignored since AF-10)'],
   [/error_code:? ?429|retry after/i, 'Telegram 429 (retried since AF-07)'],
   [/timeout exceeded when trying to connect/i, 'DB connect blip (documented transient family — verify it did not persist)'],
+  [/GenAI (?:Profile )?API Error:.*(?:429|503)/i, 'legacy pre-circuit Gemini quota/high-demand error (current code logs bounded WARN; doctor enforces the circuit)'],
   [/Error fetching /i, 'fetcher vendor error (verify the next scheduled run succeeded)'],
 ];
 try {

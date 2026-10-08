@@ -24,6 +24,15 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 > slicing) moved to **`.claude/rules/ml-model-bugs.md`** on 2026-08-27 — load that when touching
 > a model, a gate, or a measurement harness.
 
+- **Signal-lifecycle classes (2026-10-08, AF-20261008-01..10).** (1) A guard added to one of N
+  fallback tiers (`unified_ranker._get_entry_targets`) while the others stay unguarded: grep every
+  tier, and test each. (2) A closer that computes the exit and writes only `status` leaves the win
+  rate unmeasurable; assert the evidence columns (`closed_at`/`exit_price`/`exit_reason`) in the
+  closer's test. (3) A long-only simulation (`simulate_exit`) applied to every direction: derive
+  direction from geometry (target < stop), never a `signal_type` list. (4) A deadline anchored on
+  `generated_at.date()` is a session late whenever generation happens ON the entry session. (5) A
+  window function (`bool_or(...) OVER ()`) beside `ORDER BY/LIMIT` is evaluated BEFORE the limit.
+
 - **Omitting `runPython`'s third argument silently gives the step a 5-minute budget, and the step stays green until data growth puts it past exactly 300s — then the whole parent job DEGRADES on a number nobody ever chose.** 2026-09-26 (AF-20260927-12): `ml-weekly-retrain`'s `performance_tracker.py --horizon 15` call had no timeout arg; the step died at exactly 300,000ms (114k outcome rows) while the daily chain's identical calls already passed `15 * 60_000` explicitly — the sibling budget was right there to copy. Standalone re-run: 550s under load, 3m14s–4m32s clean, so the default was wrong by 2-3x at current data size. Same latent shape found in `ml-weekly-data`'s `outcome_resolver.py` calls (fixed the same day; `<60s` today but batch-capped, so pinned). **Fix shape:** every `runPython` call whose script reads a growing table gets an EXPLICIT budget, sized off a measured standalone run (the exit-policy-train comment protocol in queues.ts: re-time standalone, compare against contention, then pick) or copied from the sibling caller that already runs the same workload. **Tell:** `runPython(` call sites with only two arguments in `queues.ts` / `jobs/*.ts` — scan them whenever you touch a chain, and never "just leave the default" for a step whose input grows.
 - **The same per-item computation implemented twice — a single-item path and a batched/parallel path — drifts the moment a feature or fix lands on only one of them, and the scheduled job almost always runs the batched one.** 2026-09-14 (AF-20260914-01): `feature_engineering.py`'s worker `_compute_symbol_unscaled` (the ONLY compute path the nightly full-universe `dl-feature-refresh` job runs) carried 8 of `process_symbol`'s 13 merges, so the nightly `ON CONFLICT DO UPDATE` upsert rewrote NULL over the analyst/earnings-clock/delivery/options/block-deal columns every day while each merge's own unit test stayed green — they test the merge, not the wiring into both paths. One day earlier, same class on the model side: `load_inference_sequence` missing the scaler step `load_symbol_sequences` got (AF-20260913-01, recorded in `.claude/rules/ml-model-bugs.md`). **Guard shape that worked: a source-level parity test** — `inspect.getsource()` both call sites, extract the call sequence, assert equal (`test_feature_wiring.py::TestWorkerPathMergeParity`), plus a per-item presence test for the symmetric-drop shape that equality alone cannot see. When you add a step to one path, the parity test fails until it lands in the other.
 - **A processor's own `catch`/`.catch()` block that logs `'failed'` to `job_heartbeat`/`recordHeartbeat`/`updateMonitorState` and then rethrows will ALWAYS be followed by the worker's `.on('failed', ...)` handler logging the SAME failure again, if that handler also calls the same logger.** `withJobTimeout` is `Promise.race([fn(), timeout])` — a rethrow from inside `fn()` propagates through the race exactly like an outer timeout does, so BOTH reach BullMQ's rejection path and fire `.on('failed')` regardless of which one already logged. Found 2026-09-10 in `quant-eod-sync` (confirmed: two `job_run_history` rows 9ms apart, identical error text, for one real budget-timeout failure — inflating its 7-day fail-rate metric) and, by the same shape, latent in `mover-screener-capture` (not yet manifested in observed history). The worker's `.on('failed')` handler is a strict superset of "the processor's own catch already logged it" — it fires for BOTH the inner-rethrow case AND a true outer-timeout the processor's own catch can never see, so it alone is sufficient; the processor's own catch should `console.error` + `throw`, never also call the logger. **Tell:** a job name appearing in more than one call site logging `'failed'` with a literal string in the same file/module — `check_recurring_bugs.py`-adjacent, immunized by repo-doctor's `dual-failure-log` check (scans for a job name logged `'failed'` from 2+ literal call sites).
@@ -348,3 +357,15 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   command line names the script -> `pm2 start <app> --update-env` -> confirm `restart_time` holds
   steady for a minute. **Tell:** `waiting restart` plus a climbing restart count while the port
   still answers 200.
+
+## Provider retry budgets must fit the owning job
+
+- **A provider's RetryInfo is not automatically a safe sleep duration.** Gemini can return a
+  10-30 second per-minute delay or a 16-hour per-day reset using the same HTTP 429 shape. Never
+  sleep blindly: pace request starts, cap retry waits below the caller's timeout, and open a
+  process-wide circuit for long quota resets or repeatedly exhausted 429/503 retries. Otherwise
+  `Promise.race` times out the visible call while its uncancelled retry remains alive, and a
+  ten-stock report can turn one quota response into ten minutes of serial timeouts.
+- **Provider failure is not a conservative factual classification.** Do not persist fallback
+  zeros/false flags or advance freshness after an AI/API error. Preserve the prior row, report
+  the enrichment as unavailable, and stop a batch when the error applies to every remaining item.

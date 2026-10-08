@@ -253,20 +253,22 @@ def main():
              'covered': sorted(s for s in symbols if s in et_map),
              'missing': sorted(s for s in symbols if s not in et_map)})
 
-    # --- Track-record gate (post-RL removal, 2026-08-31) --------------------------------------
+    # --- Track-record advisory (post-RL removal, 2026-08-31) ----------------------------------
     # The rl:q_table / rl:episodes stages were removed with rl_agent.py (no demonstrated
     # edge; tables dropped). rk._passes_rl_gate below is UNRELATED to that Q-table: it is a
-    # realized-track-record veto over recommendation_log and stays.
+    # realized-track-record diagnostic over recommendation_log. It is advisory because the
+    # source corpus is dominated by universe-wide non-setup labels and exclusion has no measured
+    # forward edge; unified_ranker still records how often the condition fires.
     before = rk._degraded_count
     try:
         rl_map = rk._get_rl_gate_map()
-        _record({'stage': 'rl:gate', 'kind': 'engine',
+        _record({'stage': 'risk:track-record advisory', 'kind': 'engine',
                  'alive': rk._degraded_count == before and len(rl_map) >= MIN_UNIVERSE,
                  'universe': len(rl_map),
                  'verdicts': {s: bool(rk._passes_rl_gate(s, rl_map)) for s in symbols}})
     except Exception as e:
         conn.rollback()
-        _record({'stage': 'rl:gate', 'kind': 'engine', 'alive': False, 'error': str(e)[:200]})
+        _record({'stage': 'risk:track-record advisory', 'kind': 'engine', 'alive': False, 'error': str(e)[:200]})
 
     # --- reward engine / outcome resolution / other scoring authorities ---------------------
     sql_stage('reward:signal_type_weights',
@@ -387,7 +389,7 @@ def main():
             cov += '  ' + st['note']
         if 'verdicts' in st:
             blocked = [s for s, ok in st['verdicts'].items() if not ok]
-            cov = 'rl-blocked=' + (','.join(blocked) if blocked else 'none')
+            cov = 'track-record-flagged=' + (','.join(blocked) if blocked else 'none')
         status = 'SKIP' if st.get('disabled') else ('ok' if st['alive'] else 'FAIL')
         print('%-46s %-6s %7s  %s%s' % (
             st['stage'], status, st.get('universe', ''), cov,

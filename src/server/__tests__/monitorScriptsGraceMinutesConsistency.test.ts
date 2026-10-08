@@ -129,6 +129,7 @@ describe('MONITOR_SCRIPTS.graceMinutes consistency', () => {
     'dl-engine-infer': [{ jobKey: 'dl-feature-daily', marker: "jobName: 'dl-feature-daily'" }],
     'signal-type-stats': [{ jobKey: 'ml-daily-ops', marker: 'mlDailyOpsWorker = new Worker' }],
     'screener-performance': [{ jobKey: 'screener-performance-daily', marker: "jobName: 'screener-performance-daily'" }],
+    'company-profiles-sync': [{ jobKey: 'sync-company-profiles', marker: "jobName: 'sync-company-profiles'" }],
     'trendlyne-midweek': [{ jobKey: 'trendlyne-midweek-batch', marker: "jobName: 'trendlyne-midweek-batch'" }],
     // Added 2026-08-03 alongside the new MONITOR_SCRIPTS entry. Marker updated 2026-08-04:
     // the GNews (3 cycles) + MC stock-news jobs added between the 'news-sentiment-refresh'

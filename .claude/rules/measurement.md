@@ -763,6 +763,91 @@ any row: `docs/measurement-history.md`.
   measured: `atr` is ~50% NULL, so an unbounded `atr IS NOT NULL ORDER BY computed_at DESC LIMIT 1`
   per symbol walked the full compressed history for every always-NULL symbol.
 
+- **2026-10-08 — the first honest win rate on published signal geometry, computed from real exit
+  prices (AF-20261008-08/-10).** Previously impossible: the scheduled `stuck-signal-resolver` wrote
+  `status` alone, so 114,749 terminal `unified_signals` rows carried a COMPLETED/FAILED verdict
+  with **no `exit_price`, `closed_at` or `exit_reason`** — only 3,700 of ~119,000 (3.2%) had been
+  closed by `signal_lifecycle.py`, which stamps all four. The resolver now records the exit it
+  already computes, and `data_integrity_repair.py --signal-exit-evidence` back-stamped the rest
+  (99.73% of re-derived verdicts matched the stored one, so this recorded evidence rather than
+  re-grading; 307 disagreed and were left alone).
+  **Measured live over 125,675 closed signals with real exit prices, direction-aware, net of the
+  0.30% round trip (`ROUND_TRIP_COST_PCT`):**
+
+      side                          n       win%    avg net ret   target   stop    time
+      LONG  (tradeable)        90,653     35.86%     -0.739%      34.0%   62.0%    4.0%
+      SHORT (not tradeable)    35,022     47.31%     -0.038%      39.4%   50.0%   10.6%
+
+  - **The tradeable long book wins 35.9% of the time and loses 0.74% per signal after costs.**
+    This is the platform's own published stop/target geometry graded on the prices it actually
+    exited at — not a factor IC, and not a proxy label.
+  - It **independently agrees with the ranker-plan replay** taken the same day (AF-20261008-02:
+    −0.62% per plan, 26.5% target / 62.1% stop, over the 4,866 plans `unified_recommendations`
+    published). Two different corpora, two different methods, same conclusion — which is the
+    reason to believe either.
+  - The SHORT side is reported only to show it was being measured; this is a cash-equity
+    long-only platform (`unified_ranker.py`'s "longs only"), so those 35,022 rows are not a
+    tradeable result.
+  - **Not a factor verdict and not date-corrected**: these are overlapping windows across ~4
+    months, so no t-statistic is quoted and `factor_edge`'s effective-date gate is not cleared.
+    What it does establish is the SHAPE — stops are hit ~1.8x as often as targets on the long
+    side — which is a property of the geometry, not an estimate of forward return.
+
+- **2026-10-08 — `unified_signal_outcomes.return_pct` is a LONG-only simulation applied to every
+  signal, so 139,579 short-direction rows carry the wrong sign (AF-20261008-10).**
+  `outcome_resolver.simulate_exit`'s own docstring reads "Bar-by-bar **long-trade** exit
+  simulation", and `_resolve_unified_batch` calls it for every row regardless of direction. A
+  Bearish signal has its target BELOW and its stop ABOVE entry, so the long logic reads both
+  levels inverted. Measured live:
+
+      signal_type  outcome      n         avg return_pct
+      Bullish      STOP_LOSS   32,253        -5.866     <- correct for a stopped-out long
+      Bearish      STOP_LOSS  115,731        +4.427     <- a LOSS recorded as a +4.4% gain
+      Bearish      WIN          3,571        +7.405
+
+  `return_pct` tracks the raw price move in every bucket (±0.3pp), confirming no direction
+  adjustment and no cost netting anywhere in the column.
+  **Blast radius is contained and that is why this is a finding rather than an incident:** grep
+  across `.ts`/`.py` finds no trainer, scorer, ranker or report reading this table — the only
+  references are two `dataQualityChecks.ts` checks and the ontology bindings. `ml_ensemble.py`
+  trains on `signal_outcomes`, a different table. So this is a corrupt measurement store, not a
+  live decision input. **Fixed and re-graded the same day:** `simulate_exit(direction=...)` mirrors the short side and
+  `_resolve_unified_batch` derives direction from geometry (target < stop). After the `ml-api` restart the whole
+  table was re-graded; live: Bearish STOP_LOSS avg `return_pct` +3.05/+4.4 -> **-5.25** (Bullish -5.87), short-geometry
+  rows h1 +0.07 / h5 +1.49 / h15 +2.63 (were ~+5.0). Rows are still gross of the 0.30% cost beyond `net_return_pct`'s
+  own netting and overlapping across horizons, so quote the `unified_signals` exit-price table above for win rates.
+
+- **2026-10-08 — `unified_ranker` tier-3 geometry bound + the price-sanity gate (AF-20261008-01):
+  measured score-neutral, label-affecting on 2.8% of published Buys.** `_get_entry_targets`'s third
+  geometry tier (`unified_signals`) was the only one with neither a 30-day window nor a status
+  filter, and no tier compared its levels against the current price. **No score, weight, threshold
+  or engine input is touched** — `plan_is_current` reads only the plan's own stop and target, so
+  there is nothing calibrated here and `unified_score` cannot move. What changes is the
+  CLASSIFICATION of rows whose plan is dead, via the existing `actionable_without_plan_veto`
+  (Buy → Hold).
+  Measured live on the published 2026-10-08 grid (read-only replay of the old and new SQL plus the
+  real `plan_is_current`, `scratchpad/verify_af01.py`):
+  - tier-3 eligible symbols **2,438 → 1,123** (1,315 dropped). Of the 96,440 long-type
+    `unified_signals` rows previously eligible to supply geometry, only **7,160 were ACTIVE**
+    (48,601 FAILED / 27,752 COMPLETED / 10,954 EXPIRED / 9,133 INVALIDATED_CONFLICT).
+  - **9 of 316** Buy/Strong Buy rows with a plan lose it and become Hold (**2.8%**); 307 unchanged
+    (confluence 228, rec_log 34, unified_signals 43).
+  - 7 lost to the status/date bound, all tier 3: PYRAMID, ZSARACOM, MODINATUR, CAPITALSFB
+    (**Strong Buy, score 94.52**), NAHARSPING, PARKHOSPS, TINNARUBR.
+  - 2 lost to the price gate, both tier 2 (rec_log): SURAKSHA close 321.70 vs stop 328.21,
+    UNOMINDA close 1,104.80 vs stop 1,116.36 — both already through their own stop.
+  - The worst pre-fix case, MODINATUR: published Buy, zone 387.44-395.26 / stop 362.93 / target
+    438.71, every number copied from a 2026-08-07 `AI` signal whose status was already **FAILED**,
+    while the stock closed at **299.60**.
+  **2.8% is the honest size of this and it is not an edge claim**: whether those 9 rows would have
+  lost money is a different question, and the plan-outcome panel that could answer it does not exist
+  yet (AF-20261008-02). The gate is justified by arithmetic, not by a backtest — a plan whose stop
+  the market has already closed through is not available at the price it quotes.
+  **Deliberately NOT changed here:** how far the last close may drift from the entry ZONE while
+  still inside stop..target. That is a threshold and needs the measurement in AF-20261008-02; live,
+  21% of confluence-tier Buys close outside their own ±0.25-ATR zone at a mean drift of 0.39%, which
+  is the zone being narrow, not the plan being stale.
+
 - **2026-10-04 re-grade batch (`factor_edge`, open-entry panels, persisted to `factor_edge_history`, run_at 2026-10-04T20:28-20:29).
   Supersedes the 2026-09-26 `basis` reading above — `basis` is NO LONGER `USABLE`.**
   - `basis` 1d on the 25-date panel (eff 25.0): rank_IC **+0.064**, AUC 0.532, top-50 excess +0.129%, t_eff 1.84 → verdict **`no edge`**. The
@@ -787,3 +872,22 @@ any row: `docs/measurement-history.md`.
 
 - **2026-10-06 — FROZEN FORWARD TEST and selective-accuracy report started (`forward_test_report.py`, AF-20261006-03).** Protocol hash `13210b4e2c3ae688`, frozen in `app_settings['forward_test_protocol']` on 2026-10-06 (the script exits 2 on drift; change a rule only by starting a new protocol version). Rules: calls = each symbol's LATEST `unified_recommendations_history` row published before the entry open (pre-09:15 IST publications enter that morning); entry next session open, exit N sessions later at the open; horizons 5/10/21; ranked names with >= Rs 1cr trailing-20d ADT; per-date 1/99 winsorised forward returns; 25 bps per side charged to every call; benchmark = equal-weight mean of the same universe on the same dates; coverage tiers top 1/2/5/10/25/50/100% by `unified_score` plus the calls as published (Buy/Strong Buy); uncertainty = dates/h independent windows, LOW-DATA below `MIN_DATES_RELIABLE`. A "hit" is a call that beat the universe mean AFTER costs; `lift` is hit rate minus a random pick's hit rate (right-skewed returns put chance near 38%, not 50%). Runs nightly as the last step of `ml-daily-ops`; snapshot in `app_settings['forward_test_report']`, watched by `forward-test-report-freshness`. **No call dated on or after 2026-10-06 has a closed window yet; nothing here is evidence.** When it can speak: 5d reaches 20 independent windows at ~100 sessions (about late Feb 2027), 10d at ~200 (mid 2027), 21d at ~420 (2028) - so judge the ranker on the 5d horizon first and do not wait for 21d.
   **Retrospective block (informational, NOT the forward test; since 2026-09-01, 22 sessions, 42,347 calls, every row LOW-DATA, eff 3.4 / 1.2 / 0.0):** 5d, top 5% (63 calls/day): hit 0.462 vs random-pick 0.382, lift +0.080 +-0.071, net excess +0.10%/period (t_eff 0.29); top 1%: hit 0.448, lift +0.066, excess +0.00%; as-published Buy/Strong Buy (171 calls/day): hit 0.451, lift +0.069 +-0.037, excess -0.04%. 10d top 1%: hit 0.519, lift +0.136, excess +1.10% (eff 1.2, anecdote). Reading: the top of the ranking picks winners more often than chance (lift +0.07 to +0.14) but the margin is about what 50 bps of round-trip cost absorbs at 5d; holding everything returns exactly -cost by construction. Consistent with the ranker's IC ~0.05 and with `factor_edge`'s LOW-DATA verdicts; it moves nothing until the windows accumulate.
+
+- **2026-10-08 — the plan geometry is a null lever: moving the intraday target, or rescaling the swing
+  and positional stops and targets, changes the hit rate but not the net return (AF-20261008-03/-04).**
+  Both replays are cost-aware (0.30% round trip), stop-first when one bar touches both, and were first
+  checked against stored outcomes: `intraday_target_replay.py` reproduces LONG target 5.5% / stop 14.5%
+  against the stored 5.6% / 14.2%.
+  - **Intraday, 13,168 LONG / 2,165 SHORT trades (2026-07-17..10-07).** `intraday_ranker` uses 1.0 daily-ATR
+    target and 0.6 stop (the ledger's earlier "2.5 / 1.5" was wrong). Target at x1.0 / x0.75 / x0.5 / x0.25 of
+    its distance: hit 5.5 / 10.4 / 20.8 / 42.8%, net **-0.407 / -0.406 / -0.407 / -0.452%** (LONG);
+    SHORT -0.449 / -0.445 / -0.456 / -0.503%. A nearer target wins more often and earns less per win, so
+    expectancy does not move. The loss comes from the entries and the cost.
+  - **Swing / positional plans (`plan_outcome_report.py`, 2026-08-01.., overlapping, no ADT floor).**
+    SWING net -0.595% as published; stop and target x0.866 -0.619, x0.75 -0.585, x1.25 -0.594, target x0.5
+    -0.556. POSITIONAL -0.634% as published; x0.866 (what aligning HOLDING_SESSIONS 20 -> 15 would do) -0.643,
+    x0.75 -0.685, x1.25 -0.521 (n=665). Every variant sits between -0.52% and -0.69%.
+  - **Consequence.** No stop or target multiple, and not the 20-vs-15 session mismatch, has evidence behind
+    changing it; none was changed. Both are shapes on overlapping dates and are not edge claims. The only
+    thing the replays do show is that a Buy plan loses roughly 0.6% net per plan at every geometry tried, which
+    is `unified_score`'s standing verdict seen through the trade plan.

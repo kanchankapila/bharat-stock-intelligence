@@ -46,9 +46,15 @@ const routers = readdirSync(join(ROOT, 'src', 'server', 'routers')).filter((f) =
 const rules = readdirSync(join(ROOT, '.claude', 'rules')).filter((f) => f.endsWith('.md'));
 const rulesBytes = rules.reduce((n, f) => n + statSync(join(ROOT, '.claude', 'rules', f)).size, 0);
 
-// jobRegistry entries: count the `jobName:` keys in the registry array.
+// jobRegistry entries: count only the `jobName:` keys inside the registry array. A repo-wide
+// match also counts JobRegistryEntry.jobName in the interface and overstated the inventory by 1.
 const registrySrc = readFileSync(join(ROOT, 'src', 'server', 'jobRegistry.ts'), 'utf8');
-const jobRegistry = (registrySrc.match(/jobName:/g) || []).length;
+const registryStart = registrySrc.indexOf('export const JOB_REGISTRY');
+const registryEnd = registrySrc.indexOf('];', registryStart);
+const registryBlock = registryStart >= 0 && registryEnd >= 0
+  ? registrySrc.slice(registryStart, registryEnd + 2)
+  : '';
+const jobRegistry = (registryBlock.match(/jobName:/g) || []).length;
 
 // Raw console.* call sites under src/server (the logger.ts shim's blast radius).
 let consoleSites = 0;

@@ -16,6 +16,11 @@ import { analyzeCompanyProfile } from '../services/aiService';
 // needed.
 const SHARD_COUNT = 7;
 
+function configuredPositiveInt(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
 /**
  * Job verdict for a profile-sync run.
  *
@@ -61,11 +66,11 @@ export async function syncAndAnalyzeCompanyProfiles() {
     70 * 60_000,
   );
 
-  // Only (re-)analyze profiles that are missing entirely or haven't been AI-analyzed in the
-  // last SHARD_COUNT days — otherwise daily runs would re-run Ollama analysis over the whole
-  // universe every day instead of just the stocks the scrape actually refreshed. Cutoff is
-  // computed in JS (not SQL INTERVAL) to stay portable across the Postgres/SQLite backends.
-  const reanalysisCutoff = new Date(Date.now() - SHARD_COUNT * 24 * 60 * 60 * 1000).toISOString();
+  // Descriptions change slowly. This default needs about 13 calls/day for a 2,350-name
+  // universe, fitting the observed 20-call/day free quota while leaving retry headroom.
+  const reanalysisDays = configuredPositiveInt('COMPANY_PROFILE_REANALYSIS_DAYS', 180);
+  const dailyLimit = configuredPositiveInt('COMPANY_PROFILE_AI_DAILY_LIMIT', 15);
+  const reanalysisCutoff = new Date(Date.now() - reanalysisDays * 24 * 60 * 60 * 1000).toISOString();
   // AF-20260920-01: this used to read tsp.company_description off the row at MAX(date), which
   // is wrong whenever the most recent scrape failed to extract the description (a transient
   // vendor-page miss, not a sync failure) -- company_description is near-static, so a symbol
@@ -86,7 +91,14 @@ export async function syncAndAnalyzeCompanyProfiles() {
     LEFT JOIN company_profiles cp ON cp.symbol = tsp.symbol
     WHERE tsp.date = (SELECT MAX(date) FROM trendlyne_stock_profile tsp2 WHERE tsp2.symbol = tsp.symbol)
       AND (cp.last_updated IS NULL OR cp.last_updated < ?)
-  `, [reanalysisCutoff]);
+      AND EXISTS (
+        SELECT 1 FROM trendlyne_stock_profile tsp3
+        WHERE tsp3.symbol = tsp.symbol AND tsp3.company_description IS NOT NULL
+      )
+    ORDER BY CASE WHEN cp.last_updated IS NULL THEN 0 ELSE 1 END,
+             cp.last_updated ASC, tsp.symbol ASC
+    LIMIT ?
+  `, [reanalysisCutoff, dailyLimit]);
 
   console.log(`[PROFILE SYNC] Shard ${shardIndex}/${SHARD_COUNT}. Found ${stocks.length} stocks due for (re-)analysis.`);
 
@@ -97,7 +109,7 @@ export async function syncAndAnalyzeCompanyProfiles() {
     const stock = stocks[i];
 
     if (!stock.company_description) {
-      failCount++;
+      console.warn(`[PROFILE SYNC] No source description for ${stock.symbol}; leaving it pending.`);
       continue;
     }
 
@@ -106,7 +118,15 @@ export async function syncAndAnalyzeCompanyProfiles() {
       const analysis = await analyzeCompanyProfile(stock.symbol, stock.company_description);
 
       if (analysis.error) {
-        console.warn(`[PROFILE SYNC] AI Analysis failed for ${stock.symbol}. Storing default.`);
+        // Never turn provider failure into a factual zero-growth classification or advance
+        // last_updated. That made quota outages look like successful fresh analysis and kept the
+        // affected stock out of later retries for seven days.
+        console.warn(`[PROFILE SYNC] AI analysis unavailable for ${stock.symbol}; preserving prior profile.`);
+        failCount++;
+        // A per-day quota reset applies to every remaining symbol, so fail the job honestly
+        // after the first response instead of spending minutes issuing hundreds of doomed calls.
+        if (analysis.error === 'QUOTA_EXCEEDED' || analysis.error === 'PROVIDER_UNAVAILABLE') break;
+        continue;
       }
 
       await dbRun(`

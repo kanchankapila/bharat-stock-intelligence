@@ -82,7 +82,7 @@ describe('MONITOR_SCRIPTS cronPatterns mirror consistency', () => {
   // registered '*/15 3-10 * * 1-5' (which is hour-boundary-rounded through 10:45 UTC and
   // caused a real daily false "stale" alert -- see the entry's own comment in
   // monitorScripts.ts). None of the 3 sub-patterns will ever appear verbatim in source.
-  it.each(withCron.filter(s => s.id !== 'news-sentiment' && s.id !== 'intraday-breadth-capture').flatMap(s => s.cronPatterns.map((p: string) => ({ id: s.id, pattern: p }))))(
+  it.each(withCron.filter(s => !['news-sentiment', 'intraday-breadth-capture', 'technical-scan'].includes(s.id)).flatMap(s => s.cronPatterns.map((p: string) => ({ id: s.id, pattern: p }))))(
     '$id: cronPattern "$pattern" exists as a real repeat pattern somewhere in source',
     ({ pattern }) => {
       // A pattern that exists nowhere in source is definitely stale -- this alone would have
@@ -180,6 +180,7 @@ describe('MONITOR_SCRIPTS cronPatterns mirror consistency', () => {
     { id: 'regime-detector', marker: "jobName: 'dl-regime-daily'", label: 'dl-regime-daily (dl.jobs.ts)' },
     { id: 'dl-engine-infer', marker: "jobName: 'dl-feature-daily'", label: 'dl-feature-daily chain driver (dl.jobs.ts; 2026-09-22 repointed off the fallback dl-infer-daily slot -- see monitorScripts.ts)' },
     { id: 'screener-performance', marker: "jobName: 'screener-performance-daily'", label: 'screener-performance-daily (sync.jobs.ts)' },
+    { id: 'company-profiles-sync', marker: "jobName: 'sync-company-profiles'", label: 'sync-company-profiles (sync.jobs.ts)' },
   ];
 
   it.each(pinned)('$id matches its driving job: $label', ({ id, marker }) => {
@@ -193,11 +194,20 @@ describe('MONITOR_SCRIPTS cronPatterns mirror consistency', () => {
   // technical-scan and performance-tracker are driven by queues declared inline in queues.ts
   // (not yet migrated to the jobs/*.jobs.ts + registerRepeatableJob pattern), so their repeat
   // pattern sits near the Queue() construction rather than a `jobName:` line.
-  it('technical-scan matches technicalSignalsQueue (queues.ts)', () => {
-    const real = patternNear(src, 'technicalSignalsQueue = new Queue', 2000);
-    expect(real).not.toBeNull();
+  it('technical-scan deadlines cover only slots where isMarketOpen permits real work', () => {
     const entry = (MONITOR_SCRIPTS as readonly any[]).find(s => s.id === 'technical-scan');
-    expect(entry?.cronPatterns).toContain(real);
+    expect(entry?.cronPatterns).toEqual(['0,30 4-9 * * 1-5', '0 10 * * 1-5']);
+  });
+
+  it('technical-scan is green after the 15:30 IST close when its final real scan succeeded', () => {
+    const entry = (MONITOR_SCRIPTS as readonly any[]).find(s => s.id === 'technical-scan');
+    const lastSuccess = new Date('2026-10-06T10:00:10Z').getTime();
+    const checkedAt = new Date('2026-10-06T12:00:00Z');
+    expect(computeCronLateness(entry.cronPatterns, entry.graceMinutes, lastSuccess, checkedAt).late).toBe(false);
+
+    // Negative control: the registered coarse cron expects a 10:30 UTC job that the handler
+    // deliberately skips outside market hours, creating a permanent false late verdict.
+    expect(computeCronLateness(['*/30 3-10 * * 1-5'], entry.graceMinutes, lastSuccess, checkedAt).late).toBe(true);
   });
 
   it('performance-tracker matches ml-daily-ops (mlDailyOpsQueue, queues.ts)', () => {

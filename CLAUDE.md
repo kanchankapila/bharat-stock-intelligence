@@ -1,7 +1,7 @@
 # Bharat Stock Intelligence — Claude Instructions
 
 Real-time Indian stock market (NSE/BSE) research and decision-support platform. Express + tRPC
-backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, 296 non-test Python modules
+backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, 298 non-test Python modules
 in `src/server/` (82 `*_fetcher.py` plus ML engines, jobs and helpers; 704 `.py` files including tests).
 
 **What the product is for, and the contracts a change must preserve: `CONTEXT.md`.** This file is the
@@ -109,7 +109,7 @@ usually behind. `graph.html` is not emitted (over the 5,000-node cap); `query`/`
 
 ## Services
 
-Five processes run concurrently (`npm start`, or pm2 in production). `.ts` is not hot-reloaded: a change to one
+Production pm2 runs six long-lived processes (the main five are also started by `npm start`). `.ts` is not hot-reloaded: a change to one
 service is not live in another until that service restarts.
 
 | pm2 name | Entry point | Port (env var) | Purpose |
@@ -119,8 +119,9 @@ service is not live in another until that service restarts.
 | `chatbot` | `src/server/chatbot/app.py` | 8001 (`CHATBOT_PORT`) | LangGraph RAG agent, ChromaDB |
 | `alphaquant-api` | `backend-python/main.py` | 8002 (`PYTHON_PORT`) | Backtesting, scoring, TV bridge, optimisation |
 | `engine-worker` | `src/server/worker_service.py` | 8005 | MCP tool dispatch + ingestion health/risk endpoints |
+| `bqa-scheduler` | `bharat_alpha/src/bharat_alpha/cli.py preopen-scheduler` | none | Persistent Bharat Alpha pre-open scheduler |
 
-`ecosystem.config.cjs` registers **7** pm2 apps: these five plus the `cron_restart` jobs `pg-backup-nightly` and
+`ecosystem.config.cjs` registers **8** pm2 apps: these six plus the `cron_restart` jobs `pg-backup-nightly` and
 `bqa-daily` (the `bharat_alpha` daily run). A `cron_restart` app at `stopped`/`pid 0` looks identical whether idle
 or dormant after a failed first launch — see `recurring-bugs.md`. `bharat_alpha/` is a from-scratch, self-grading
 rewrite with its own README; the live app does not import it and it is not yet serving users, so editing it

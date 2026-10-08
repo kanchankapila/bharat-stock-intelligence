@@ -305,7 +305,7 @@ class TestDroppedEngineStillReports:
 class TestLayerFiringInstrumentation:
     """Counters that turn "this ranker is over-engineered" from an opinion into a measurement.
 
-    Measured live on 2,362 candidates (2026-08-10): rl_gate_skip 21.9%, quality_gate 27.8%,
+    Measured live on 2,362 candidates (2026-08-10): track-record condition 21.9%, quality_gate 27.8%,
     factor_crowding 77.9%, high_vol_veto 14.2%, ml_bet 72.1%, breakout_ACTUALLY_BINDS 7.5%,
     nonfinite_skip 0.1%, red_flag_veto 0.0%.
 
@@ -323,7 +323,7 @@ class TestLayerFiringInstrumentation:
 
     def test_every_scoring_layer_has_a_counter(self):
         src = self._src()
-        for k in ('rl_gate_skip', 'nonfinite_or_tiny_skip', 'quality_gate', 'red_flag_veto',
+        for k in ('track_record_advisory', 'nonfinite_or_tiny_skip', 'quality_gate', 'red_flag_veto',
                   'high_vol_veto', 'factor_crowding', 'ml_bet_nonzero',
                   'breakout_computed', 'breakout_ACTUALLY_BINDS'):
             assert f"'{k}'" in src, f'layer counter {k} missing -- a layer with no counter is invisible'

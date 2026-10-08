@@ -174,7 +174,7 @@ describe('classifyStderr', () => {
 
   it("classifies a script's own not-a-failure notice as benign, but keeps its real errors real", () => {
     expect(classifyStderr('[UnifiedRanker] universe filter: kept 2362, dropped 2396 non-tradeable/unpriced symbols')).toBe('benign_warning');
-    expect(classifyStderr('[UnifiedRanker] RL gate excluded HAPPSTMNDS: avg_return=-0.96% over 33 resolved outcomes (90d), t=-2.40')).toBe('benign_warning');
+    expect(classifyStderr('[UnifiedRanker] track-record advisory flagged HAPPSTMNDS: avg_return=-0.96% over 33 resolved outcomes (90d), t=-2.40')).toBe('benign_warning');
     expect(classifyStderr('[StockOptionChain] 2/214 symbol(s) have no chain in ANY surviving source and are NOT counted as fetch failures.')).toBe('benign_warning');
     // The narrowness is the point: a sibling line from the SAME scripts that reports an
     // actual fetch failure must still classify as a real error.

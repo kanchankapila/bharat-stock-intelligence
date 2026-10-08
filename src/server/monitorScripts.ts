@@ -29,7 +29,10 @@ export const MONITOR_SCRIPTS = [
     // alert) for roughly 38 hours every single weekend. cronPatterns makes this cron-aware like
     // its true siblings (fii-dii-fetcher etc.) instead of relying on the flat threshold.
     staleLimitHours: 26,
-    cronPatterns: ['*/30 3-10 * * 1-5'],
+    // The queue is registered across 08:30-16:00 IST, but its isMarketOpen() guard skips
+    // pre-open and the 16:00 post-close slot without stamping success. Judge only the real
+    // 09:30-15:30 scan slots or every healthy day becomes falsely late after 16:45.
+    cronPatterns: ['0,30 4-9 * * 1-5', '0 10 * * 1-5'],
     graceMinutes: 45,
   },
   {
@@ -373,6 +376,8 @@ export const MONITOR_SCRIPTS = [
     pyScript: null,
     queueName: 'company-profiles-sync',
     staleLimitHours: 360,
+    cronPatterns: ['30 15 * * *'],
+    graceMinutes: 100,
   },
   {
     id: 'trendlyne-fundamentals',

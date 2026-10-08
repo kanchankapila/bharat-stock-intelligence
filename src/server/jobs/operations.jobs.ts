@@ -267,16 +267,17 @@ export async function registerOperationsJobs(connection: any) {
   // signal_lifecycle.py handles both path-based exits and time-based expiry. The older
   // resolve_stuck_unified_signals.py repair script is a one-off backfill, not the live lifecycle.
   //
-  // 20:30 UTC = 02:00 IST next day, after ml-daily-ops (13:20 UTC) has finished its
-  // outcome work and after confluence-outcomes (15:40 UTC): this resolves STATUS on the signal
-  // rows, which is independent of outcome grading but must not compete with it for the table.
+  // 11:00 UTC = 16:30 IST on the same trading day: intraday signals must be squared off after
+  // the 15:30 close, not left ACTIVE until 02:00 the next morning. This is before ml-daily-ops
+  // (13:20 UTC) and confluence-outcomes (15:40 UTC), so it still does not compete with their
+  // outcome grading work on the same tables.
   // --max-age-days 90 (the script's own default) keeps the LATERAL scan off the ~26k historical
   // rows that are legitimately still open; the pre-existing backlog was cleared once by hand.
   const stuckSignalResolver = await registerRepeatableJob({
     connection,
     queueName: QUEUE_STUCK_SIGNAL_RESOLVER,
     jobName: 'stuck-signal-resolver',
-    repeat: { pattern: '30 20 * * 1-5' },
+    repeat: { pattern: '0 11 * * 1-5' },
     jobId: 'stuck-signal-resolver',
     removeOnComplete: 3,
     removeOnFail: 3,

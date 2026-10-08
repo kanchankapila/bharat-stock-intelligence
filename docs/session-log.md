@@ -11117,3 +11117,61 @@ Closed: AF-20261001-19 (`getAtrBarriers` as-of bound, scan passes the scan date)
 ## 2026-10-06 — Daily-report warnings traced to cadence, and the frozen forward test
 
 **Warnings (AF-20261006-01/-02):** `stock-options-oi-pcr-bounds` had a literal detail string (frozen input; a table with 0 rows passed) - now carries population and range. The six staleness warnings were each a cadence mismatch found by tracing the writer: the earnings tables are empty because the VENDOR returns nothing between results seasons (fetcher run live: "Rapid: 0 total"), `index_option_oi` is structurally ~1.5 sessions behind (MoneyControl publishes next morning; only the evening run exists), `stock_mf_holdings` is monthly under weekly thresholds, `mc_swot_history`/`mc_consolidated` fill only when a user opens a stock panel. Fix = a `writerJob` option on the freshness factory (freshest of table and parent-job heartbeat) plus thresholds matched to measured cadence; a dead writer still fails (tested). **Forward test (AF-20261006-03):** `forward_test_report.py` freezes a protocol (hash 13210b4e2c3ae688) and grades the published ranking per coverage tier after 25 bps/side against the equal-weight liquid universe on dates/h independent windows; last step of `ml-daily-ops`, snapshot + freshness check. First retrospective read: every tier LOW-DATA, lift +0.07..+0.14 over a random pick but ~break-even after costs; the 5d forward block can first speak around late Feb 2027. **Bugs the tests found in my own code:** two `date` columns after a merge (only a DB-backed test sees it) and `DataFrame(rows, columns=[...])` over name-keyed rows silently producing NaN when the SQL column names differ from the list - alias the SQL, do not rename in pandas. **Left open / needs you:** `bharat-server` restart (watcher gave up: other sessions had uncommitted `.ts` edits for 4h), the DLQ table drop migration.
+
+## 2026-10-06 (trading-day full audit) — lifecycle, ranker, scheduling, mover study, and provider resilience
+
+Audited the production trading-day path rather than trusting green heartbeats. Signal lifecycle now closes intraday
+positions at the session close and uses trading sessions for expiry (`signal_lifecycle.py:44-151`). The canonical ranker
+requires at least two independent engines for an actionable direction, applies symmetric direction/geometry invariants,
+and treats the weak RL statistic as advisory instead of a universe-killing gate (`unified_ranker.py:622-628,2399-2424`).
+The live E2E ten-stock trace passed; ranker and lifecycle jobs completed after deployment.
+
+The F&O rollover was green but stale because `trading_days_back()` stopped at the first non-empty source. It now merges
+the exchange history with OHLCV (`as_of.py:217-261`), the scheduled fetch catches up three sessions, every requested
+session is propagated into `technical_signals`, and a missing expected-session file fails honestly
+(`fno_rollover_fetcher.py:300-328`). A production three-session run updated about 2,160 rows per session. Two DQ clocks
+were corrected to their real writer timestamps (`dataQualityChecks.ts:303,819`); the live snapshot is 191/191 pass.
+
+The 90-day mover study was repaired to use point-in-time universes/factors, real assessable sessions, deduped predictions,
+and honest unmatched/opposite counts (`reverse_engineering_study.py:181-248,306-407,517-554`). On 36 assessable dates,
+directional precision is 53.17%, but 79.63% of actual movers were not flagged; top-20 hit rates remain 0.88-1.76%.
+That is diagnostic evidence, not a claim of predictive accuracy. Strongest measured same-day ICs were cost of carry
+0.1873, pre-open gap 0.1483, imbalance 0.1032, PCR 0.0555 and RSI 0.0539.
+
+AF-20261006-04 closed a live report/provider failure. Gemini requests are paced and bounded, long daily-quota RetryInfo
+opens a process-wide circuit, and exhausted 429/503 retries open a cooldown (`geminiService.ts:17-112`). The profile sync
+no longer writes provider failures as zero-growth facts or advances freshness (`companyProfileSyncService.ts:112-116`).
+Production proof: the same premarket queue went from about ten minutes under quota exhaustion to 19 seconds, persisted a
+READY report with ten explicit unavailable annotations, and returned BullMQ success. Repo-doctor now enforces the circuit
+and reads the persisted PM2 environment without exposing secrets.
+
+Final live state: 554 successful runs across 32 jobs on 2026-10-06 IST, zero non-success; 70/70 scheduled registry jobs
+ready, two intentionally event-driven; no active/stuck BullMQ queues. BullMQ remains the right scheduler for now—the
+incidents were timeout/vendor/monitoring/application defects, not evidence that replacing the queue would solve them.
+Gates: TypeScript clean; Vite production build clean; Vitest 1,663 passed / 44 skipped; Pytest 3,290 passed / 259 skipped;
+repo-doctor 34 pass / 2 historical warnings / 0 fail; `git diff --check` clean apart from CRLF notices.
+
+## 2026-10-08 — Signal lifecycle audit and fixes (AF-20261008-01..10)
+
+End-to-end audit of signal generation → scoring → plan geometry → horizon → expiry/closure → win-rate reporting.
+Fixed with tests written first (each shown failing on the unfixed code):
+- **-01** ranker tier-3 geometry fallback was unbounded (no status/age filter) and no tier checked the plan against the
+  last close; now `status='ACTIVE'` + 30-day bound and `plan_is_current` at all three tiers. 9 of 316 Buys demoted to Hold.
+- **-07** `valid_until_for` anchored on `generated_at.date()`, so pre-open/holiday grids stayed live one session late
+  (1,622 of 6,509 rows); now anchored on the entry session (`computed_at`), identical for post-close grids.
+- **-08** `resolve_stuck_unified_signals.py` computed the exit and wrote only `status`; now stamps closed_at/exit_price/
+  exit_reason (same convention as `signal_lifecycle.close_swing`). `data_integrity_repair.py --signal-exit-evidence`
+  back-stamped 114,749 rows (307 disagreements left untouched).
+- **-09** two lifecycle checks in `dataQualityChecks.ts`: expiry-overdue (critical) and exit-evidence share.
+- **-10** `simulate_exit` was long-only but graded every unified signal; now direction-aware from geometry.
+  Historical re-grade of 111,665 short-geometry `unified_signal_outcomes` rows NOT run (production rewrite needs the
+  user's go-ahead); `ml-api` and `bharat-server` restarts also pending, so the code fixes are committed-to-tree, not live.
+- Honest win rate from real exit prices: LONG 90,653 closed, 35.86% win, −0.739% net per signal (see measurement.md).
+- Open: -02..-05 (EVIDENCE), -06 item 4 (ranker status — needs a user decision).
+
+### 2026-10-08 (later) — the remaining lifecycle rows
+- **-02** `plan_outcome_report.py`: read-only replay of the ranker's published plans (close_swing rules, cost netted, ATR-matched control). SWING -0.60% vs control -0.75%.
+- **-03 / -04** measured, not changed: moving the intraday target or rescaling swing/positional stops leaves net flat (about -0.41% intraday, -0.52..-0.69% positional). `intraday_target_replay.py` added; the ledger's "2.5/1.5 ATR" was wrong (code is 1.0/0.6).
+- **-05** UI/dashboard copy no longer calls the top conviction tier "the most accurate"; the redefinition stays calendar-blocked to 2027-02-26.
+- **-06 item 4** `planLifecycle.planStatus` derives ACTIVE/EXPIRED from `valid_until`; both Command Center pick readers return it; the Top Picks page tags expired plans. No schema change.
+- Re-graded `unified_signal_outcomes` (run by the user) and verified live: Bearish STOP_LOSS +3..+4% -> -5.25%.

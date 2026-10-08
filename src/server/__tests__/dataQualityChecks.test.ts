@@ -126,6 +126,20 @@ describe('DATA_QUALITY_CHECKS registry', () => {
     }
   });
 
+  it('measures label and intraday freshness from write timestamps, not logical dates', () => {
+    const excursions = DATA_QUALITY_CHECKS.find(c => c.id === 'signal-excursions-freshness')!;
+    const breadth = DATA_QUALITY_CHECKS.find(c => c.id === 'intraday-breadth-snapshots-freshness')!;
+    expect(excursions.sql).toMatch(/MAX\(computed_at::text\).*signal_excursions/is);
+    expect(excursions.sql).not.toMatch(/MAX\(signal_date/);
+    expect(breadth.sql).toMatch(/MAX\(snapshot_at\).*intraday_breadth_snapshots/is);
+    expect(breadth.sql).not.toMatch(/MAX\(date::text\)/);
+
+    // At 08:00 IST, yesterday's 15:30 close snapshot is <1 day old and must remain green.
+    const premarket = new Date('2026-10-06T02:30:00Z');
+    expect(breadth.evaluate({ last_date: '2026-10-05T10:00:06.351Z' }, premarket).status).toBe('pass');
+    expect(excursions.evaluate({ last_date: '2026-10-05T15:20:06.060Z' }, premarket).status).toBe('pass');
+  });
+
   it('every check has a non-empty label and sql', () => {
     for (const c of DATA_QUALITY_CHECKS) {
       expect(c.label.length).toBeGreaterThan(0);

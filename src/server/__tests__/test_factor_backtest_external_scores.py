@@ -159,6 +159,17 @@ class TestIdentifierGuard:
             fb._add_external_scores(_panel(), table, col, ts)
 
 
+class TestAllFactorSelection:
+    def test_bare_all_excludes_the_external_factor_that_was_not_loaded(self):
+        """`python factor_backtest.py` must not print a fake FAILED line for an optional input."""
+        selected = fb._select_factors('all', external_score_loaded=False)
+        assert 'external_score' not in selected
+
+    def test_all_includes_external_score_when_the_caller_loaded_it(self):
+        selected = fb._select_factors('all', external_score_loaded=True)
+        assert 'external_score' in selected
+
+
 def _priced_panel(rising: str = 'SYM00') -> pd.DataFrame:
     """Flat 100.0 for every symbol except `rising`, which compounds +1% per session, so a
     selection that includes it is visibly different from one that does not."""

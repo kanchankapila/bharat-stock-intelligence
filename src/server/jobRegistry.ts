@@ -140,7 +140,7 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'trendlyne-catchup', label: 'Trendlyne Catch-up Slice', cronPattern: '*/15 0-15,20-23 * * *', graceMinutes: 60, critical: false }, // 21:30-01:29 IST excluded: post-close peak (AF-20260917-24)
   { jobName: 'agent-data-scientist', label: 'Agent: Data Scientist', cronPattern: '30 1 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-strategist', label: 'Agent: Strategist', cronPattern: '20 3 * * 1-5', graceMinutes: 60, critical: false },
-  { jobName: 'agent-auditor', label: 'Agent: Auditor', cronPattern: '0 11 * * 1-5', graceMinutes: 60, critical: false },
+  { jobName: 'agent-auditor', label: 'Agent: Auditor', cronPattern: '10 11 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-optimizer', label: 'Agent: Optimizer', cronPattern: '0 12 * * 1-5', graceMinutes: 60, critical: false },
   // graceMinutes 45 -> 75 (AF-20260917-20): the Worker's lockDuration is now 55 min
   // (covering the raised 45-min runPython budget), and jobRegistryGraceMinutesConsistency
@@ -168,11 +168,12 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // Mirror of operations.jobs.ts's ontology-refresh-daily (added 2026-09-30).
   { jobName: 'ontology-refresh', label: 'Semantic Ontology/Identity Refresh', cronPattern: '50 21 * * *', graceMinutes: 60, critical: false },
   // AF-20261001-03: the path-based resolver for unified_signals rows that can never leave ACTIVE
-  // (106,980 measured). 20:30 UTC = 02:00 IST, after ml-daily-ops and confluence-outcomes have
-  // finished their outcome work, so it never competes with grading for the same tables.
+  // (106,980 measured). 11:00 UTC = 16:30 IST on the same session: after the market close and
+  // before ml-daily-ops/confluence-outcomes, so intraday status is honest without competing with
+  // grading for the same tables.
   // critical:true — without it signals accumulate in ACTIVE forever, which is exactly the
   // failure that left 106,980 of them, and nothing noticed because no monitor tracked this job.
-  { jobName: 'stuck-signal-resolver', label: 'Stuck Signal Resolver (path-based)', cronPattern: '30 20 * * 1-5', graceMinutes: 90, critical: true },
+  { jobName: 'stuck-signal-resolver', label: 'Stuck Signal Resolver (path-based)', cronPattern: '0 11 * * 1-5', graceMinutes: 90, critical: true },
   // graceMinutes 60 -> 270: the Worker's own lockDuration is 4h (240min, "covers the full
   // daily ops run" per queues.ts's own comment) and processMlDailyOps is wrapped in
   // withJobTimeout(..., 3.5h) -- 60min grace flagged 'late' (critical: true, real Telegram

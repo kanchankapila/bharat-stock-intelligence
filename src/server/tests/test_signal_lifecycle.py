@@ -127,6 +127,46 @@ def test_intraday_screener_signal_closes_within_its_own_session():
     assert tuple(r) == ('COMPLETED', '2026-09-01', 105.0, 'TARGET', 0)
 
 
+def test_intraday_signal_closes_after_market_close_without_waiting_for_tomorrows_bar():
+    """A 16:30 resolver must close today's signal; requiring sessions[-1] > sig_day kept it
+    ACTIVE until the following night's run."""
+    conn = _db()
+    day = dt.date(2026, 9, 1)
+    conn.execute("INSERT INTO stock_ohlcv VALUES ('SCR',?,100,101,99,100,0)", (day.isoformat(),))
+    ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
+    generated = dt.datetime(2026, 9, 1, 14, 0, tzinfo=ist)
+    conn.execute("INSERT INTO intraday_ohlcv VALUES ('SCR',?,'15m',100,101,99,100.5)",
+                 (dt.datetime(2026, 9, 1, 15, 15, tzinfo=ist).isoformat(),))
+    conn.execute("INSERT INTO unified_signals (id,symbol,signal_date,signal_generated_at,signal_source,"
+                 "signal_type,entry_price,target_price,stop_loss,status) VALUES "
+                 "(1,'SCR','2026-09-01',?,'screener','BUY',100,105,97,'ACTIVE')",
+                 (generated.isoformat(),))
+    conn.commit()
+
+    sl.run(conn, now=dt.datetime(2026, 9, 1, 16, 30, tzinfo=ist))
+
+    assert tuple(conn.execute(
+        "SELECT status, closed_at::text, exit_price, exit_reason FROM unified_signals").fetchone()) \
+        == ('EXPIRED', '2026-09-01', 100.5, 'TIME_EXIT')
+
+
+def test_intraday_signal_stays_active_before_market_close():
+    conn = _db()
+    day = dt.date(2026, 9, 1)
+    conn.execute("INSERT INTO stock_ohlcv VALUES ('SCR',?,100,101,99,100,0)", (day.isoformat(),))
+    ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
+    generated = dt.datetime(2026, 9, 1, 11, 0, tzinfo=ist)
+    conn.execute("INSERT INTO unified_signals (id,symbol,signal_date,signal_generated_at,signal_source,"
+                 "signal_type,entry_price,target_price,stop_loss,status) VALUES "
+                 "(1,'SCR','2026-09-01',?,'screener','BUY',100,105,97,'ACTIVE')",
+                 (generated.isoformat(),))
+    conn.commit()
+
+    sl.run(conn, now=dt.datetime(2026, 9, 1, 15, 0, tzinfo=ist))
+
+    assert conn.execute("SELECT status FROM unified_signals").fetchone()[0] == 'ACTIVE'
+
+
 def test_migration_adds_the_lifecycle_columns_idempotently():
     path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'migrations',
                         '20261001120000_unified-signals-lifecycle.sql')
@@ -164,3 +204,11 @@ def test_recommendation_log_rows_past_their_horizon_stop_being_active():
     assert {r[0]: r[1] for r in conn.execute(
         "SELECT id, status FROM recommendation_log").fetchall()} == {
         1: 'EXPIRED', 2: 'ACTIVE', 3: 'EXPIRED'}
+
+
+def test_module_docstring_names_every_status_a_reader_can_see():
+    """AF-20261008-06: INVALIDATED_CONFLICT (written by trendlyneScreener.ts when a symbol-day
+    fires both BUY and SELL) is a live unified_signals.status that this module's docstring, the
+    reader's map of the lifecycle, did not list -- 18,230 screener rows sat in it unexplained."""
+    for status in ('ACTIVE', 'COMPLETED', 'FAILED', 'EXPIRED', 'INVALIDATED_CONFLICT'):
+        assert status in sl.__doc__, status

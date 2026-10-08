@@ -15,10 +15,12 @@ from unified_ranker import (  # noqa: E402
     CONVICTION_TIERS,
     DIRECTIONAL_AGREEMENT_FLOOR,
     FULL_ENGINE_COVERAGE,
+    MIN_ACTIONABLE_ENGINE_COVERAGE,
     SIZE_CONFIDENCE_FLOOR,
     _classify,
     _conviction,
     _directional_strength,
+    coverage_safe_classification,
     size_confidence_multiplier,
 )
 
@@ -123,6 +125,23 @@ class TestSizeConfidenceMultiplier:
 
     def test_full_confidence_is_exactly_one(self):
         assert size_confidence_multiplier(100, FULL_ENGINE_COVERAGE) == pytest.approx(1.0)
+
+
+class TestMinimumActionableEngineCoverage:
+    def test_one_engine_cannot_publish_any_directional_call(self):
+        """The live JHS failure shape was a 74-score Buy backed by DL alone. The same
+        variance/comparability defect applies to the short tail, so the guard is symmetric."""
+        for label in ('Strong Buy', 'Buy', 'Sell', 'Strong Sell'):
+            assert coverage_safe_classification(label, 1) == 'Hold'
+
+    def test_two_engines_can_still_publish_a_directional_call(self):
+        """Negative control: this is a corroboration floor, not a blanket signal shutdown."""
+        assert MIN_ACTIONABLE_ENGINE_COVERAGE == 2
+        for label in ('Strong Buy', 'Buy', 'Sell', 'Strong Sell'):
+            assert coverage_safe_classification(label, 2) == label
+
+    def test_hold_is_unchanged_even_with_no_engine(self):
+        assert coverage_safe_classification('Hold', 0) == 'Hold'
 
 
 if __name__ == '__main__':

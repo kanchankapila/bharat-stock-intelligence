@@ -29,10 +29,20 @@ export interface StockPick {
   entry_note: string;
   stop_loss_pct: number;
   target_1_pct: number;
-  target_2_pct: number;
+  target_2_pct: number | null;
   risk_reward: number;
   layers_confirmed: number;
   flags: string[];
+  classification?: string;
+  regime?: string;
+  timeframe?: string;
+  valid_until?: string | null;
+  trade_reasoning?: string | null;
+  entry_zone_low?: number;
+  entry_zone_high?: number;
+  stop_loss?: number;
+  target_1?: number;
+  target_2?: number | null;
 }
 
 export interface ResearchReport {
@@ -62,239 +72,184 @@ async function getMarketContext(): Promise<{
     FROM market_sentiment_snapshots
     ORDER BY snapshot_at DESC LIMIT 1
   `) as any;
-
   const fiiRows = await dbAll(`
     SELECT fii_net, dii_net FROM fii_dii_flow
     ORDER BY date DESC LIMIT 5
   `) as any[];
 
-  const fii_net_5d = fiiRows.reduce((sum: number, r: any) => sum + (r.fii_net || 0), 0);
-  const dii_net_5d = fiiRows.reduce((sum: number, r: any) => sum + (r.dii_net || 0), 0);
-
+  const fiiNet5d = fiiRows.reduce((sum: number, row: any) => sum + Number(row.fii_net || 0), 0);
+  const diiNet5d = fiiRows.reduce((sum: number, row: any) => sum + Number(row.dii_net || 0), 0);
   let regime = 'SIDEWAYS';
-  if (fii_net_5d > 3000 && (sentiment?.overall_score ?? 0) > 20) regime = 'BULL';
-  else if (fii_net_5d < -3000 || (sentiment?.overall_score ?? 0) < -20) regime = 'BEAR';
-  else if (fii_net_5d > 1000 && dii_net_5d > 1000) regime = 'TRANSITIONAL_BULL';
+  if (fiiNet5d > 3000 && (sentiment?.overall_score ?? 0) > 20) regime = 'BULL';
+  else if (fiiNet5d < -3000 || (sentiment?.overall_score ?? 0) < -20) regime = 'BEAR';
+  else if (fiiNet5d > 1000 && diiNet5d > 1000) regime = 'TRANSITIONAL_BULL';
 
-  const themes = (() => {
-    try { return JSON.parse(sentiment?.key_themes_json || '[]'); } catch { return []; }
-  })();
+  let themes: string[] = [];
+  try {
+    const parsed = JSON.parse(sentiment?.key_themes_json || '[]');
+    if (Array.isArray(parsed)) themes = parsed.map(String);
+  } catch { /* malformed optional vendor context stays empty */ }
 
   return {
     regime,
-    sentiment_score: sentiment?.overall_score ?? 0,
-    fii_net_5d,
+    sentiment_score: Number(sentiment?.overall_score ?? 0),
+    fii_net_5d: fiiNet5d,
     global_cue: sentiment?.global_cue ?? 'Mixed',
     hot_themes: themes,
   };
 }
 
-async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: string; reason: string }[] }> {
-  const quantRows = await dbAll(`
-    SELECT symbol, rank_composite, rank_momentum, momentum_score, screener_net_score,
-           bullish_screener_count, bearish_screener_count, trailing_pe, return_on_equity,
-           debt_to_equity, piotroski_f_score, return_1m, return_3m, above_sma200,
-           max_drawdown_1y, annualized_vol, sharpe_ratio
-    FROM quant_scores
-    WHERE composite_class IN ('Strong Buy','Buy') AND ohlcv_days >= 60
-  `) as any[];
-
-  const quantMap = new Map<string, any>(quantRows.map((q: any) => [q.symbol, q]));
-
-  const techMap = new Map<string, any>();
-  (await dbAll(`
-    SELECT ts.symbol, ts.signal_score, ts.win_probability, ts.calibrated_win_probability, ts.rsi, ts.adx,
-           ts.volume_ratio, ts.above_sma200, ts.signals_json, ts.news_sentiment_score
-    FROM technical_signals ts
-    INNER JOIN (
-      SELECT symbol, MAX(date) as max_date FROM technical_signals GROUP BY symbol
-    ) latest ON ts.symbol = latest.symbol AND ts.date = latest.max_date
-    WHERE ts.signal_score >= 5
-  `) as any[]).forEach(r => techMap.set(r.symbol, r));
-
-  const unifiedMap = new Map<string, any>();
-  try {
-    const unifiedRows = await dbAll(`
-      SELECT symbol, unified_score, conviction_level, screener_stock_score,
-             ml_score, confluence_score, technical_score, dl_score,
-             avg_engine_track_record, fundamental_score
-      FROM unified_recommendations
-      WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
-    `) as any[];
-    unifiedRows.forEach(r => unifiedMap.set(r.symbol, r));
-  } catch { /* unified engine may not have run yet */ }
-
-  const confluenceMap = new Map<string, number>();
-  try {
-    (await dbAll(`
-      SELECT symbol, confluence_score
-      FROM confluence_signals
-      WHERE computed_at = (SELECT MAX(computed_at) FROM confluence_signals)
-    `) as any[]).forEach(r => confluenceMap.set(r.symbol, r.confluence_score ?? 0));
-  } catch { /* confluence engine may not have run yet */ }
-
-  const dlMap = new Map<string, number>();
-  try {
-    // 4 calendar days, not 1: prediction_date is written on the weekday EOD cycle, so a
-    // 1-day cutoff on Monday finds Sunday (nothing) instead of Friday's rows — the same
-    // "calendar days cannot span a trading-day gap" class documented throughout
-    // unified_ranker.py. 4 days covers Fri->Mon and long weekends.
-    const dlCutoff = new Date(Date.now() - 4 * 86400000).toISOString().slice(0, 10);
-    (await dbAll(`
-      SELECT symbol, prob_up_5d as probability
-      FROM deep_learning_predictions
-      WHERE prediction_date >= ?
-    `, [dlCutoff]) as any[]).forEach(r => dlMap.set(r.symbol, (r.probability ?? 0) * 100));
-  } catch { /* DL predictions may not be available */ }
-
-  const newsMap = new Map<string, number>();
-  (await dbAll(`
-    SELECT symbols_json, sentiment_score, impact
-    FROM news_sentiment_items
-    WHERE impact IN ('HIGH','MEDIUM')
-      AND published_at >= datetime('now', '-2 days')
-      AND sentiment IN ('BULLISH')
-  `) as any[]).forEach((r: any) => {
-    try {
-      const syms: string[] = JSON.parse(r.symbols_json || '[]');
-      syms.forEach(s => newsMap.set(s, (newsMap.get(s) || 0) + (r.impact === 'HIGH' ? 1 : 0.5)));
-    } catch {}
-  });
-
-  const avoidList: { symbol: string; reason: string }[] = [];
-  const scored: StockPick[] = [];
-
-  const allSymbols = new Set<string>();
-  quantRows.forEach(q => allSymbols.add(q.symbol));
-  techMap.forEach((_, symbol) => allSymbols.add(symbol));
-  unifiedMap.forEach((_, symbol) => allSymbols.add(symbol));
-  confluenceMap.forEach((_, symbol) => allSymbols.add(symbol));
-  dlMap.forEach((_, symbol) => allSymbols.add(symbol));
-  newsMap.forEach((_, symbol) => allSymbols.add(symbol));
-
-  for (const symbol of allSymbols) {
-    const q = quantMap.get(symbol);
-    const tech = techMap.get(symbol);
-    const u = unifiedMap.get(symbol);
-    const newsScore = newsMap.get(symbol) || 0;
-
-    const flags: string[] = [];
-    if (tech?.rsi > 80) flags.push('RSI_OVERBOUGHT');
-    if ((q?.debt_to_equity ?? 0) > 100) flags.push('HIGH_LEVERAGE');
-    if ((q?.max_drawdown_1y ?? 0) > 40) flags.push('HIGH_DRAWDOWN');
-    if ((q?.piotroski_f_score ?? 5) < 4) flags.push('WEAK_FUNDAMENTALS');
-
-    if (flags.length >= 2 && !u) {
-      avoidList.push({ symbol, reason: flags.join(', ') });
-      continue;
-    }
-
-    const confluenceScore = u?.confluence_score ?? confluenceMap.get(symbol) ?? 0;
-    const dlScore = u?.dl_score ?? dlMap.get(symbol) ?? 0;
-
-    let layers_confirmed = 0;
-    if (q) layers_confirmed++;
-    if (tech) layers_confirmed++;
-    if (newsScore > 0) layers_confirmed++;
-    if (u) layers_confirmed++;
-    if (!u && confluenceScore > 0) layers_confirmed++;
-    if (!u && dlScore > 0) layers_confirmed++;
-
-    if (layers_confirmed < 2 && !u) continue;
-
-    const unified_component    = u ? Math.min(u.unified_score / 100, 1) * 50 : 0;
-    const quant_component      = q ? (q.rank_composite / 100) * 20 : 0;
-    const tech_component       = tech ? (tech.signal_score / 10) * 15 : (u?.technical_score ? Math.min(u.technical_score / 10, 1) * 10 : 0);
-    const confluence_component = confluenceScore ? Math.min(confluenceScore / 100, 1) * 10 : 0;
-    // Falls back to COALESCE(calibrated_win_probability, win_probability) when there's no
-    // unified_recommendations row for this symbol — was raw win_probability unconditionally
-    // (2026-07-18 gating follow-up).
-    const techWinProb          = tech?.calibrated_win_probability ?? tech?.win_probability;
-    const ml_component         = u?.ml_score ? Math.min(u.ml_score / 100, 1) * 10 : (techWinProb ? Math.min(techWinProb, 1) * 10 : 0);
-    const screener_component   = u?.screener_stock_score ? Math.min(u.screener_stock_score / 100, 1) * 10 : Math.min((q?.screener_net_score || 0) / 50, 1) * 10;
-    const news_component       = Math.min(newsScore / 3, 1) * 10;
-
-    // xgboost_component removed 2026-08-31 with the dead xgboost_predictions table (no
-    // writer since 2026-05-20; the standalone job was superseded by ml_ensemble).
-    let conviction_score =
-      unified_component + quant_component + tech_component + confluence_component + ml_component + screener_component + news_component;
-    conviction_score = Math.min(Math.max(conviction_score, 0), 100);
-
-    if (flags.includes('RSI_OVERBOUGHT'))    conviction_score *= 0.75;
-    if (flags.includes('HIGH_LEVERAGE'))     conviction_score *= 0.80;
-    if (flags.includes('HIGH_DRAWDOWN'))     conviction_score *= 0.85;
-    if (flags.includes('WEAK_FUNDAMENTALS')) conviction_score *= 0.70;
-
-    if (conviction_score < 25) continue;
-
-    const vol           = q?.annualized_vol || 30;
-    const stop_loss_pct = Math.round(Math.max(6, Math.min(15, vol * 0.4)));
-    const target_1_pct  = stop_loss_pct * 2.5;
-    const target_2_pct  = stop_loss_pct * 4;
-    const risk_reward   = parseFloat((target_1_pct / stop_loss_pct).toFixed(1));
-
-    scored.push({
-      symbol:               symbol,
-      conviction_score:     parseFloat(conviction_score.toFixed(1)),
-      quant_rank:           q?.rank_composite ?? 0,
-      signal_score:         tech?.signal_score ?? u?.technical_score ?? 0,
-      screener_net:         q?.screener_net_score ?? 0,
-      news_boost:           newsScore,
-      unified_score:        u?.unified_score,
-      conviction_level:     u?.conviction_level,
-      confluence_score:     confluenceScore,
-      ml_score:             u?.ml_score ?? (techWinProb ? techWinProb * 100 : 0),
-      technical_score:      u?.technical_score ?? (tech?.signal_score ?? 0),
-      dl_score:             dlScore,
-      screener_stock_score: u?.screener_stock_score ?? Math.min((q?.screener_net_score || 0) / 50, 1) * 100,
-      avg_engine_track_record: u?.avg_engine_track_record,
-      fundamental_score:    u?.fundamental_score ?? q?.return_on_equity ?? null,
-      rsi:                  tech?.rsi ?? null,
-      adx:                  tech?.adx ?? null,
-      trailing_pe:          q?.trailing_pe,
-      roe:                  q?.return_on_equity,
-      debt_to_equity:       q?.debt_to_equity,
-      piotroski:            q?.piotroski_f_score,
-      bullish_screeners:    q?.bullish_screener_count ?? 0,
-      return_1m:            q?.return_1m,
-      return_3m:            q?.return_3m,
-      above_sma200:         q?.above_sma200 ?? 0,
-      entry_note:           tech?.rsi > 65 ? 'Wait for pullback' : 'CMP entry acceptable',
-      stop_loss_pct:        -stop_loss_pct,
-      target_1_pct,
-      target_2_pct,
-      risk_reward,
-      layers_confirmed,
-      flags,
-    });
-  }
-
-  scored.sort((a, b) => b.conviction_score - a.conviction_score);
-  return { picks: scored, avoid: avoidList };
+function finiteNumber(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
-async function generateBlurbs(
-  picks: StockPick[],
-  regime: string
-): Promise<Record<string, { bull: string; bear: string; risk: string }>> {
-  const blurbs: Record<string, { bull: string; bear: string; risk: string }> = {};
+function pctFromEntry(level: number | null, entry: number): number | null {
+  if (level == null || entry <= 0) return null;
+  return Number((((level / entry) - 1) * 100).toFixed(1));
+}
 
-  // Dynamically import AI service to avoid circular issues
-  let aiService: any = null;
+/**
+ * Read the canonical ranker and add display-only facts. This report used to build a second
+ * hand-weighted final score and fixed targets, allowing it to disagree with the actual engine.
+ */
+export async function loadCanonicalStockResearch(): Promise<{
+  picks: StockPick[];
+  avoid: { symbol: string; reason: string }[];
+}> {
+  const rows = await dbAll<any>(`
+    SELECT u.*,
+           q.rank_composite, q.screener_net_score, q.trailing_pe, q.return_on_equity,
+           q.debt_to_equity, q.piotroski_f_score, q.return_1m, q.return_3m, q.above_sma200,
+           ts.rsi, ts.adx
+    FROM unified_recommendations u
+    LEFT JOIN quant_scores q ON q.symbol = u.symbol
+    LEFT JOIN LATERAL (
+      SELECT rsi, adx FROM technical_signals t
+      WHERE t.symbol = u.symbol ORDER BY t.date DESC LIMIT 1
+    ) ts ON TRUE
+    WHERE u.generated_at = (SELECT MAX(generated_at) FROM unified_recommendations)
+    ORDER BY u.unified_score DESC
+  `);
+  if (!rows.length) throw new Error('Canonical recommendations unavailable; research report not generated');
+
+  const picks: StockPick[] = [];
+  const avoid: { symbol: string; reason: string }[] = [];
+  for (const row of rows) {
+    if (row.classification === 'Sell' || row.classification === 'Strong Sell') {
+      avoid.push({
+        symbol: row.symbol,
+        reason: row.trade_reasoning || `${row.classification}; canonical score ${Number(row.unified_score).toFixed(1)}/100`,
+      });
+      continue;
+    }
+    if (row.classification !== 'Buy' && row.classification !== 'Strong Buy') continue;
+
+    const entryLow = finiteNumber(row.entry_zone_low);
+    const entryHigh = finiteNumber(row.entry_zone_high);
+    const stopLoss = finiteNumber(row.stop_loss);
+    const target1 = finiteNumber(row.target_1);
+    const riskReward = finiteNumber(row.risk_reward);
+    if (entryLow == null || entryHigh == null || stopLoss == null || target1 == null || riskReward == null) continue;
+
+    const stopLossPct = pctFromEntry(stopLoss, entryHigh);
+    const target1Pct = pctFromEntry(target1, entryHigh);
+    if (stopLossPct == null || target1Pct == null) continue;
+
+    const flags: string[] = [];
+    if (Number(row.rsi) > 80) flags.push('RSI_OVERBOUGHT');
+    if (row.debt_to_equity != null && Number(row.debt_to_equity) > 100) flags.push('HIGH_LEVERAGE');
+    if (row.piotroski_f_score != null && Number(row.piotroski_f_score) < 4) flags.push('WEAK_FUNDAMENTALS');
+
+    const target2 = finiteNumber(row.target_2);
+    const validUntil = row.valid_until instanceof Date
+      ? row.valid_until.toISOString()
+      : row.valid_until == null ? null : String(row.valid_until);
+
+    picks.push({
+      symbol: row.symbol,
+      conviction_score: Number(row.unified_score),
+      quant_rank: Number(row.rank_composite ?? 0),
+      signal_score: Number(row.technical_score ?? 0),
+      screener_net: Number(row.screener_net_score ?? 0),
+      news_boost: 0,
+      unified_score: Number(row.unified_score),
+      conviction_level: row.conviction_level,
+      confluence_score: Number(row.confluence_score ?? 0),
+      ml_score: Number(row.ml_score ?? 0),
+      technical_score: Number(row.technical_score ?? 0),
+      dl_score: Number(row.dl_score ?? 0),
+      screener_stock_score: Number(row.screener_stock_score ?? 0),
+      avg_engine_track_record: finiteNumber(row.avg_engine_track_record) ?? undefined,
+      fundamental_score: finiteNumber(row.fundamental_score),
+      rsi: finiteNumber(row.rsi),
+      adx: finiteNumber(row.adx),
+      trailing_pe: finiteNumber(row.trailing_pe),
+      roe: finiteNumber(row.return_on_equity),
+      debt_to_equity: finiteNumber(row.debt_to_equity),
+      piotroski: finiteNumber(row.piotroski_f_score),
+      bullish_screeners: Number(row.bullish_screener_count ?? 0),
+      return_1m: finiteNumber(row.return_1m),
+      return_3m: finiteNumber(row.return_3m),
+      above_sma200: Number(row.above_sma200 ?? 0),
+      entry_note: `${entryLow.toFixed(2)}-${entryHigh.toFixed(2)}`,
+      stop_loss_pct: stopLossPct,
+      target_1_pct: target1Pct,
+      target_2_pct: pctFromEntry(target2, entryHigh),
+      risk_reward: riskReward,
+      layers_confirmed: Number(row.engine_coverage_count ?? 0),
+      flags,
+      classification: row.classification,
+      regime: row.regime,
+      timeframe: row.timeframe,
+      valid_until: validUntil,
+      trade_reasoning: row.trade_reasoning,
+      entry_zone_low: entryLow,
+      entry_zone_high: entryHigh,
+      stop_loss: stopLoss,
+      target_1: target1,
+      target_2: target2,
+    });
+  }
+  return { picks, avoid };
+}
+
+export function buildDeterministicBlurbs(
+  picks: StockPick[],
+  regime: string,
+): Record<string, string> {
+  const blurbs: Record<string, string> = {};
+  for (const pick of picks.slice(0, 10)) {
+    const plan = `entry ${pick.entry_note}, stop ${pick.stop_loss?.toFixed(2) ?? `${pick.stop_loss_pct.toFixed(1)}%`}, `
+      + `first target ${pick.target_1?.toFixed(2) ?? `+${pick.target_1_pct.toFixed(1)}%`}, R:R ${pick.risk_reward.toFixed(2)}`;
+    const risk = pick.flags.length ? ` Risk flags: ${pick.flags.join(', ')}.` : '';
+    blurbs[pick.symbol] = `Canonical ${pick.classification ?? 'ranked'} score ${pick.conviction_score.toFixed(1)}/100 `
+      + `with ${pick.layers_confirmed} active engines and ${pick.bullish_screeners} bullish screeners. `
+      + `${regime} regime; ${pick.timeframe ?? 'unspecified'} plan: ${plan}.${risk}`;
+  }
+  return blurbs;
+}
+
+export async function generateBlurbs(
+  picks: StockPick[],
+  regime: string,
+): Promise<Record<string, string>> {
+  const blurbs = buildDeterministicBlurbs(picks, regime);
+  if (process.env.RESEARCH_AI_BLURBS_ENABLED !== 'true') return blurbs;
+
+  let aiService: any;
   try {
     aiService = await import('../services/aiService');
   } catch {
     return blurbs;
   }
-
-  // aiService exports generateStockAnalysis(symbol, data) -> StockAnalysis
-  const generateFn = aiService.generateStockAnalysis;
-  if (typeof generateFn !== 'function') return blurbs;
+  if (typeof aiService.generateStockAnalysis !== 'function') return blurbs;
 
   for (const pick of picks.slice(0, 10)) {
     try {
       const result = await Promise.race([
-        generateFn(pick.symbol, {
+        aiService.generateStockAnalysis(pick.symbol, {
           regime,
           trailing_pe: pick.trailing_pe,
           roe: pick.roe,
@@ -305,124 +260,114 @@ async function generateBlurbs(
           rsi: pick.rsi,
           adx: pick.adx,
         }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 20000)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 60_000)),
       ]) as any;
-
-      if (result && typeof result === 'object' && result.reasoning) {
-        blurbs[pick.symbol] = {
-          bull: result.sentiment === 'Bullish' ? result.reasoning : '',
-          bear: result.sentiment === 'Bearish' ? result.reasoning : '',
-          risk: result.error ? result.reasoning : `Confidence: ${result.confidence ?? 0}%`,
-        };
+      if (result?.reasoning && !result.error) {
+        blurbs[pick.symbol] += ` Optional AI context: ${result.reasoning}`;
+      } else if (result?.error) {
+        blurbs[pick.symbol] += ' AI enrichment unavailable; quantitative evidence shown.';
       }
     } catch {
-      // AI unavailable or timeout — skip gracefully
+      blurbs[pick.symbol] += ' AI enrichment unavailable; quantitative evidence shown.';
     }
-
-    await new Promise(r => setTimeout(r, 500));
   }
-
   return blurbs;
 }
 
 async function getSectorRankings(): Promise<{ sector: string; score: number; momentum: string }[]> {
   return (await dbAll(`
-    SELECT n.sector,
-           AVG(q.rank_composite) as score,
-           AVG(q.return_1m) as avg_1m
+    SELECT n.sector, AVG(q.rank_composite) as score, AVG(q.return_1m) as avg_1m
     FROM quant_scores q
     JOIN nse_stocks n ON q.symbol = n.symbol
-    WHERE q.composite_class IN ('Strong Buy','Buy')
-      AND n.sector IS NOT NULL
-    GROUP BY n.sector
-    HAVING COUNT(*) >= 3
-    ORDER BY score DESC
-    LIMIT 10
-  `) as any[]).map((r: any) => ({
-    sector:   r.sector,
-    score:    parseFloat((r.score || 0).toFixed(1)),
-    momentum: (r.avg_1m || 0) > 5 ? 'STRONG' : (r.avg_1m || 0) > 0 ? 'MODERATE' : 'WEAK',
+    WHERE q.composite_class IN ('Strong Buy','Buy') AND n.sector IS NOT NULL
+    GROUP BY n.sector HAVING COUNT(*) >= 3
+    ORDER BY score DESC LIMIT 10
+  `) as any[]).map((row: any) => ({
+    sector: row.sector,
+    score: Number(Number(row.score || 0).toFixed(1)),
+    momentum: Number(row.avg_1m || 0) > 5 ? 'STRONG' : Number(row.avg_1m || 0) > 0 ? 'MODERATE' : 'WEAK',
   }));
 }
 
 function buildExecutiveSummary(
   regime: string,
-  fii_net_5d: number,
+  fiiNet5d: number,
   sentimentScore: number,
   topPick: StockPick | undefined,
-  topSector: string | undefined
+  topSector: string | undefined,
 ): string {
-  const fiiDir = fii_net_5d > 0 ? 'net buyers' : 'net sellers';
-  const fiiAmt = Math.abs(fii_net_5d / 100).toFixed(0);
+  const fiiDir = fiiNet5d > 0 ? 'net buyers' : 'net sellers';
+  const fiiAmt = Math.abs(fiiNet5d / 100).toFixed(0);
   const sentDir = sentimentScore > 10 ? 'bullish' : sentimentScore < -10 ? 'bearish' : 'neutral';
-  const pickStr = topPick ? `Top conviction pick is ${topPick.symbol} with score ${topPick.conviction_score}/100.` : '';
+  const pickStr = topPick ? `Top canonical pick is ${topPick.symbol} with score ${topPick.conviction_score}/100.` : '';
   const sectorStr = topSector ? `${topSector} leads sector momentum.` : '';
   return `Market regime is ${regime} with FIIs being ${fiiDir} (₹${fiiAmt}Cr over 5 days) and overall sentiment ${sentDir}. ${pickStr} ${sectorStr}`.trim();
 }
 
 export async function generateDailyReport(
-  report_date: string,
-  report_type: 'PRE_MARKET' | 'POST_CLOSE'
+  reportDate: string,
+  reportType: 'PRE_MARKET' | 'POST_CLOSE',
 ): Promise<void> {
   await dbRun(`
     INSERT INTO daily_research_reports (report_date, report_type, status)
     VALUES (?, ?, 'GENERATING')
     ON CONFLICT(report_date, report_type) DO UPDATE SET status = 'GENERATING', error_message = NULL
-  `, [report_date, report_type]);
+  `, [reportDate, reportType]);
 
   try {
-    const ctx    = await getMarketContext();
-    const { picks, avoid } = await scoreStocks();
-    const top10  = picks.slice(0, 10);
-    const watch10 = picks.slice(10, 20).map(p => ({
-      symbol:           p.symbol,
-      conviction_score: p.conviction_score,
-      layers_confirmed: p.layers_confirmed,
+    const context = await getMarketContext();
+    const { picks, avoid } = await loadCanonicalStockResearch();
+    const top10 = picks.slice(0, 10);
+    const watch10 = picks.slice(10, 20).map(pick => ({
+      symbol: pick.symbol,
+      conviction_score: pick.conviction_score,
+      layers_confirmed: pick.layers_confirmed,
     }));
+    const canonicalRegime = top10[0]?.regime || context.regime;
     const sectors = await getSectorRankings();
-    const blurbs  = await generateBlurbs(top10, ctx.regime);
-
+    const blurbs = await generateBlurbs(top10, canonicalRegime);
     const report: ResearchReport = {
-      report_date,
-      report_type,
-      market_regime:     ctx.regime,
-      sentiment_score:   ctx.sentiment_score,
-      fii_net_5d:        ctx.fii_net_5d,
-      global_cue:        ctx.global_cue,
-      hot_themes:        ctx.hot_themes,
-      top_picks:         top10,
-      watchlist:         watch10,
-      avoid_list:        avoid.slice(0, 10),
-      sector_rankings:   sectors,
-      executive_summary: buildExecutiveSummary(ctx.regime, ctx.fii_net_5d, ctx.sentiment_score, top10[0], sectors[0]?.sector),
+      report_date: reportDate,
+      report_type: reportType,
+      market_regime: canonicalRegime,
+      sentiment_score: context.sentiment_score,
+      fii_net_5d: context.fii_net_5d,
+      global_cue: context.global_cue,
+      hot_themes: context.hot_themes,
+      top_picks: top10,
+      watchlist: watch10,
+      avoid_list: avoid.slice(0, 10),
+      sector_rankings: sectors,
+      executive_summary: buildExecutiveSummary(
+        canonicalRegime,
+        context.fii_net_5d,
+        context.sentiment_score,
+        top10[0],
+        sectors[0]?.sector,
+      ),
     };
 
     await dbRun(`
       UPDATE daily_research_reports SET
-        status          = 'READY',
-        generated_at    = datetime('now'),
-        market_regime   = ?,
-        sentiment_score = ?,
-        fii_net_5d      = ?,
-        top_picks_json  = ?,
-        report_json     = ?,
-        ai_blurbs_json  = ?
+        status = 'READY', generated_at = datetime('now'), market_regime = ?,
+        sentiment_score = ?, fii_net_5d = ?, top_picks_json = ?, report_json = ?,
+        ai_blurbs_json = ?
       WHERE report_date = ? AND report_type = ?
     `, [
-      ctx.regime,
-      ctx.sentiment_score,
-      ctx.fii_net_5d,
+      canonicalRegime,
+      context.sentiment_score,
+      context.fii_net_5d,
       JSON.stringify(top10),
       JSON.stringify(report),
       JSON.stringify(blurbs),
-      report_date,
-      report_type,
+      reportDate,
+      reportType,
     ]);
-  } catch (err: any) {
+  } catch (error: any) {
     await dbRun(`
       UPDATE daily_research_reports SET status = 'FAILED', error_message = ?
       WHERE report_date = ? AND report_type = ?
-    `, [String(err?.message ?? err), report_date, report_type]);
-    throw err;
+    `, [String(error?.message ?? error), reportDate, reportType]);
+    throw error;
   }
 }

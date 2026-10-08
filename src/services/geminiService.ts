@@ -12,11 +12,105 @@ import { GoogleGenAI, Type } from "@google/genai";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 
 let _ai: GoogleGenAI | null = null;
+let requestGate: Promise<void> = Promise.resolve();
+let nextRequestAt = 0;
+let providerBlockedUntil = 0;
+let providerBlockedError: any = null;
+
 function getAiClient() {
   if (!_ai) {
     _ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   }
   return _ai;
+}
+
+function configuredNumber(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function transientStatus(error: any): number | null {
+  const direct = Number(error?.status);
+  if (Number.isFinite(direct)) return direct;
+  const match = String(error?.message ?? error).match(/\b(429|503)\b/);
+  return match ? Number(match[1]) : null;
+}
+
+function retryDelayMs(error: any, attempt: number): number {
+  const text = String(error?.message ?? error);
+  const serverDelay = text.match(/retryDelay["']?\s*:\s*["']?(\d+(?:\.\d+)?)s/i)
+    ?? text.match(/retry in\s+(\d+(?:\.\d+)?)s/i);
+  if (serverDelay) return Math.ceil(Number(serverDelay[1]) * 1000);
+  return configuredNumber('GEMINI_RETRY_BASE_MS', 5_000) * attempt;
+}
+
+/** Serialize request starts so the default Gemini free-tier 5 RPM limit is respected across
+ * research reports, ad-hoc analysis, and company-profile jobs. The interval is configurable for
+ * paid quotas, but the safe default is 13s (4.6 RPM). */
+async function rateLimitedGenerateContent(args: any): Promise<any> {
+  const previous = requestGate;
+  let release!: () => void;
+  const turn = new Promise<void>(resolve => { release = resolve; });
+  requestGate = previous.then(() => turn);
+  await previous;
+  try {
+    const waitMs = Math.max(0, nextRequestAt - Date.now());
+    if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
+    nextRequestAt = Date.now() + configuredNumber('GEMINI_MIN_INTERVAL_MS', 13_000);
+    return await getAiClient().models.generateContent(args);
+  } finally {
+    release();
+  }
+}
+
+async function generateContentWithRetry(args: any): Promise<any> {
+  if (providerBlockedUntil > Date.now()) {
+    throw providerBlockedError ?? Object.assign(new Error('429 provider quota circuit open'), { status: 429 });
+  }
+  providerBlockedUntil = 0;
+  providerBlockedError = null;
+
+  const maxAttempts = Math.max(1, Math.floor(configuredNumber('GEMINI_MAX_ATTEMPTS', 3)));
+  let lastError: any;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await rateLimitedGenerateContent(args);
+    } catch (error: any) {
+      lastError = error;
+      const status = transientStatus(error);
+      if ((status !== 429 && status !== 503) || attempt >= maxAttempts) break;
+      const delayMs = retryDelayMs(error, attempt);
+      const maxRetryDelayMs = configuredNumber('GEMINI_MAX_RETRY_DELAY_MS', 30_000);
+      // A long RetryInfo value is normally a daily quota reset, not momentary contention.
+      // Sleeping for hours would outlive the report/job timeout and leave an orphaned promise
+      // holding work in this process. Fail fast and let the caller publish an honest
+      // "AI unavailable" annotation while retaining the quantitative report.
+      if (delayMs > maxRetryDelayMs) {
+        providerBlockedUntil = Date.now() + delayMs;
+        providerBlockedError = error;
+        console.warn(`[GEMINI] HTTP ${status} retry delay ${delayMs}ms exceeds ${maxRetryDelayMs}ms ceiling; not retrying`);
+        break;
+      }
+      console.warn(`[GEMINI] transient HTTP ${status}; retry ${attempt + 1}/${maxAttempts} in ${delayMs}ms`);
+      if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  const finalStatus = transientStatus(lastError);
+  if (finalStatus === 429 || finalStatus === 503) {
+    const cooldownMs = configuredNumber('GEMINI_TRANSIENT_COOLDOWN_MS', 60_000);
+    providerBlockedUntil = Math.max(providerBlockedUntil, Date.now() + cooldownMs);
+    providerBlockedError = lastError;
+  }
+  throw lastError;
+}
+
+/** Test-only reset for module-level pacing/client state. */
+export function _resetGeminiStateForTests(): void {
+  _ai = null;
+  requestGate = Promise.resolve();
+  nextRequestAt = 0;
+  providerBlockedUntil = 0;
+  providerBlockedError = null;
 }
 
 // DATA below can contain untrusted third-party text (news titles/summaries). Clamping every
@@ -62,8 +156,7 @@ export async function generateStockAnalysis(symbol: string, data: any) {
   `;
 
   try {
-    const ai = getAiClient();
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithRetry({
       model: GEMINI_MODEL,
       contents: prompt,
       config: {
@@ -88,20 +181,27 @@ export async function generateStockAnalysis(symbol: string, data: any) {
 
     return { error: "Failed to parse AI response" };
   } catch (error: any) {
-    console.error("GenAI API Error:", error);
+    const status = transientStatus(error);
+    console.warn(`[GEMINI] stock analysis unavailable after retries${status ? ` (HTTP ${status})` : ''}: ${error?.message ?? error}`);
 
     // Specifically handle 429 Resource Exhausted
     if (error?.message?.includes('429') || error?.message?.includes('RESOURCE_EXHAUSTED')) {
       return {
         error: "QUOTA_EXCEEDED",
-        reasoning: "AI analysis is temporarily unavailable due to high demand. Please try again in 60 seconds.",
+        reasoning: "AI analysis remained unavailable after bounded retries; the quantitative report is still available.",
         sentiment: "Neutral",
         signal: "HOLD",
         confidence: 0
       };
     }
 
-    return { error: "AI Analysis failed" };
+    return {
+      error: status === 503 ? "PROVIDER_UNAVAILABLE" : "AI_ANALYSIS_FAILED",
+      reasoning: "AI analysis remained unavailable after bounded retries; the quantitative report is still available.",
+      sentiment: "Neutral",
+      signal: "HOLD",
+      confidence: 0,
+    };
   }
 }
 
@@ -122,8 +222,7 @@ export async function analyzeCompanyProfile(symbol: string, description: string)
 Determine if the company has high growth scope and whether it is in the news for growth.`;
 
   try {
-    const ai = getAiClient();
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithRetry({
       model: GEMINI_MODEL,
       contents: prompt,
       config: {
@@ -154,7 +253,8 @@ Determine if the company has high growth scope and whether it is in the news for
 
     return { error: "Failed to parse AI response" };
   } catch (error: any) {
-    console.error("GenAI Profile API Error:", error);
+    const status = transientStatus(error);
+    console.warn(`[GEMINI] profile analysis unavailable after retries${status ? ` (HTTP ${status})` : ''}: ${error?.message ?? error}`);
 
     if (error?.message?.includes('429') || error?.message?.includes('RESOURCE_EXHAUSTED')) {
       return {
@@ -162,10 +262,16 @@ Determine if the company has high growth scope and whether it is in the news for
         high_growth_scope: false,
         in_news_for_growth: false,
         growth_score: 0,
-        reasoning: "AI analysis is temporarily unavailable due to high demand. Please try again in 60 seconds.",
+        reasoning: "AI analysis remained unavailable after bounded retries; profile fields were left conservative.",
       };
     }
 
-    return { error: "Profile Analysis failed" };
+    return {
+      error: status === 503 ? "PROVIDER_UNAVAILABLE" : "PROFILE_ANALYSIS_FAILED",
+      high_growth_scope: false,
+      in_news_for_growth: false,
+      growth_score: 0,
+      reasoning: "AI profile analysis remained unavailable after bounded retries; prior profile fields were preserved.",
+    };
   }
 }

@@ -125,7 +125,7 @@ export function classifyStderr(stderr: string | null | undefined): 'clean' | 'be
     // Kept deliberately NARROW -- a blanket "bracketed prefix = benign" rule would mask the
     // genuine `[DeliveryTrend] Fetch error ...` / `[FCH] ... rate-limited` lines that must
     // keep firing.
-    /^\[UnifiedRanker\] (?:universe filter|RL gate excluded)/im,
+    /^\[UnifiedRanker\] (?:universe filter|track-record advisory flagged)/im,
     /^\[StockOptionChain\] \d+\/\d+ symbol\(s\) have no chain in ANY surviving source/im,
   ];
   const REAL = [

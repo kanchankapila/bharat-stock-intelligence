@@ -18,21 +18,52 @@ close. A window that has not finished stays ACTIVE. Win rates are NOT computed f
 outcome_resolver grades the same signals in unified_signal_outcomes with costs; this is the
 lifecycle a reader sees.
 
+Statuses a reader can meet: ACTIVE (open), COMPLETED / FAILED / EXPIRED (written here), and
+INVALIDATED_CONFLICT -- written by trendlyneScreener.ts when the same symbol-day fires both a BUY
+and a SELL (the screener scan carries no direction). That row is withdrawn, not a trade: this
+module never reopens it and outcome_resolver skips it.
+
 Run: python signal_lifecycle.py [--dry-run]
 """
 import bisect
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from db_compat import connect
 from intraday_outcome_resolver import _load_bars, paper_trade
 
 HORIZON_SESSIONS = {'screener': 0, 'technical_scan': 5}
 DEFAULT_HORIZON = 15
+IST = timezone(timedelta(hours=5, minutes=30))
+MARKET_CLOSE = datetime.strptime('15:30', '%H:%M').time()
 
 
 def horizon_for(source: str) -> int:
     return HORIZON_SESSIONS.get(source, DEFAULT_HORIZON)
+
+
+def session_is_finished(sig_day: str, sessions, now=None) -> bool:
+    """True once a signal's own NSE session has ended.
+
+    A later OHLCV session is definitive. For today's session, the old code waited for that later
+    row, so intraday signals stayed ACTIVE until the next night. The post-close resolver can use
+    the clock once today's daily bar exists in ``sessions``; it still cannot close a future or
+    absent session by assumption.
+    """
+    if not sessions:
+        return False
+    latest = sessions[-1]
+    if latest > sig_day:
+        return True
+    if latest < sig_day:
+        return False
+    current = now or datetime.now(IST)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=IST)
+    else:
+        current = current.astimezone(IST)
+    today = current.date().isoformat()
+    return today > sig_day or (today == sig_day and current.time().replace(tzinfo=None) >= MARKET_CLOSE)
 
 
 def _is_long(entry, target, stop):
@@ -79,7 +110,7 @@ def _close_intraday(fwd, target, stop, daily_close, entry):
     return 'EXPIRED', daily_close, 'TIME_EXIT_DAILY'
 
 
-def run(conn, dry_run: bool = False) -> dict:
+def run(conn, dry_run: bool = False, now=None) -> dict:
     rows = conn.execute("""
         SELECT id, symbol, (signal_date AT TIME ZONE 'Asia/Kolkata')::date AS sig_day,
                signal_generated_at, signal_source, entry_price, target_price, stop_loss
@@ -106,7 +137,7 @@ def run(conn, dry_run: bool = False) -> dict:
             stop = float(stop) if stop is not None else None
             h = horizon_for(source)
             if h == 0:
-                if sessions and sessions[-1] > sig_day:     # that session is over
+                if session_is_finished(sig_day, sessions, now):
                     intraday[sig_day].append((rid, sym, gen_at, entry, target, stop))
                 continue
             i0 = bisect.bisect_right(sessions, sig_day)

@@ -29,10 +29,18 @@ interface StockPick {
   entry_note: string;
   stop_loss_pct: number;
   target_1_pct: number;
-  target_2_pct: number;
+  target_2_pct: number | null;
   risk_reward: number;
   layers_confirmed: number;
   flags: string[];
+  classification?: string;
+  timeframe?: string;
+  valid_until?: string | null;
+  entry_zone_low?: number;
+  entry_zone_high?: number;
+  stop_loss?: number;
+  target_1?: number;
+  target_2?: number | null;
 }
 
 interface ResearchReport {
@@ -205,29 +213,31 @@ function StockDeepDive({
             </table>
           </div>
 
-          {/* Column 3: AI Blurb + Trade Setup */}
+          {/* Column 3: Evidence summary + canonical trade setup */}
           <div className="space-y-3">
             <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 flex items-center gap-1">
-              <Eye className="w-3 h-3" /> AI Insight
+              <Eye className="w-3 h-3" /> Evidence Summary
             </p>
             {blurbs?.[pick.symbol] ? (
               <p className="text-xs text-slate-300 leading-relaxed">{blurbs[pick.symbol]}</p>
             ) : (
-              <p className="text-xs text-slate-500 italic">{pick.entry_note || 'No AI insight available.'}</p>
+              <p className="text-xs text-slate-500 italic">{pick.entry_note || 'No evidence summary available.'}</p>
             )}
 
             <div className="mt-3 pt-3 border-t border-slate-800/30 space-y-1">
               <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400">Trade Setup</p>
               <div className="flex gap-2 flex-wrap">
                 <span className="px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-black">
-                  SL {pick.stop_loss_pct.toFixed(1)}%
+                  SL {pick.stop_loss?.toFixed(2) ?? `${pick.stop_loss_pct.toFixed(1)}%`}
                 </span>
                 <span className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-black">
-                  T1 +{pick.target_1_pct.toFixed(1)}%
+                  T1 {pick.target_1?.toFixed(2) ?? `+${pick.target_1_pct.toFixed(1)}%`}
                 </span>
-                <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-black">
-                  T2 +{pick.target_2_pct.toFixed(1)}%
-                </span>
+                {pick.target_2_pct != null && (
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-black">
+                    T2 {pick.target_2?.toFixed(2) ?? `+${pick.target_2_pct.toFixed(1)}%`}
+                  </span>
+                )}
                 <span className="px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-black">
                   R:R {pick.risk_reward.toFixed(1)}
                 </span>
@@ -323,8 +333,8 @@ function TopPicksTable({
         <span className="text-right">Score</span>
         <span className="text-center">L</span>
         <span className="text-right">Entry</span>
-        <span className="text-right">SL%</span>
-        <span className="text-right">T1%</span>
+        <span className="text-right">SL</span>
+        <span className="text-right">T1</span>
         <span className="text-right">R:R</span>
         <span className="text-right">DL↑</span>
         <span className="text-center">Regime</span>
@@ -349,9 +359,9 @@ function TopPicksTable({
               </div>
               <span className="text-right text-xs font-black text-indigo-400">{pick.conviction_score.toFixed(0)}</span>
               <span className="flex justify-center"><LayerBadge layers={pick.layers_confirmed} /></span>
-              <span className="text-right text-[10px] text-slate-300 font-bold truncate">{pick.entry_note?.slice(0, 8) || '—'}</span>
-              <span className="text-right text-[10px] font-black text-rose-400">{pick.stop_loss_pct.toFixed(1)}%</span>
-              <span className="text-right text-[10px] font-black text-emerald-400">+{pick.target_1_pct.toFixed(1)}%</span>
+              <span className="text-right text-[10px] text-slate-300 font-bold truncate">{pick.entry_zone_high?.toFixed(2) ?? pick.entry_note?.slice(0, 8) ?? '—'}</span>
+              <span className="text-right text-[10px] font-black text-rose-400">{pick.stop_loss?.toFixed(2) ?? `${pick.stop_loss_pct.toFixed(1)}%`}</span>
+              <span className="text-right text-[10px] font-black text-emerald-400">{pick.target_1?.toFixed(2) ?? `+${pick.target_1_pct.toFixed(1)}%`}</span>
               <span className="text-right text-[10px] font-black text-slate-300">{pick.risk_reward.toFixed(1)}</span>
               <span className="text-right text-[10px] font-black">
                 {(() => {
@@ -610,7 +620,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
           </div>
           <div>
             <h1 className="v1-title-page">Hedge Fund Research</h1>
-            <p className="text-[10px] text-slate-400 font-bold uppercase italic">AI-Driven Daily Intelligence</p>
+            <p className="text-[10px] text-slate-400 font-bold uppercase italic">Canonical Daily Intelligence</p>
           </div>
         </div>
 

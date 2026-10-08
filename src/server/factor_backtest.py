@@ -407,6 +407,19 @@ def _z(s: pd.Series) -> pd.Series:
     return (s - s.mean()) / sd
 
 
+def _select_factors(requested: str, external_score_loaded: bool) -> list[str]:
+    """Return runnable factors without presenting an optional input as a failed factor.
+
+    `external_score` exists in the registry so an explicitly supplied canonical score can use
+    the same harness. A bare `--factor all` has no external column to evaluate, however, and
+    should omit it rather than catch the resulting KeyError and print a misleading FAILED line.
+    """
+    if requested != 'all':
+        return [requested]
+    return [name for name in sorted(FACTORS)
+            if name != 'external_score' or external_score_loaded]
+
+
 # A sector needs this many scorable names on a date before its within-sector z-score means
 # anything. With 2 names the z-scores are +-0.707 by construction whatever the inputs, so a
 # thin sector would inject pure noise into the top-K sort at full weight. Such groups score
@@ -1778,7 +1791,7 @@ def main() -> None:
     by_date = index_by_date(panel)          # grouped once, reused by every factor
     exit_by_date = index_exit_prices(panel)  # full-panel exit prices, likewise
     last_alive = index_last_alive(panel)     # survival map, likewise
-    factors = sorted(FACTORS) if a.factor == 'all' else [a.factor]
+    factors = _select_factors(a.factor, external_score_loaded=bool(a.scores_col))
 
     out = []
     for f in factors:

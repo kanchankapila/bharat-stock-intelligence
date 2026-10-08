@@ -258,7 +258,15 @@ Overall Probability: ${Math.min(100, Math.max(0, scores.composite)).toFixed(0)}%
   }
 }
 
-export async function syncTrendlyneTechnicals() {
+// Trendlyne's advanced-technical endpoint has a cumulative per-session WAF allowance of roughly
+// 131-150 requests. Attempting the whole universe is therefore not "more complete": it guarantees
+// one HTTP 405 and marks the entire quant job failed after useful rows have already been written.
+// Stay below the measured floor and rotate stalest-first. At 110 names/trading day, the current
+// 1,860-name mapped universe completes a full refresh cycle in about 17 trading sessions, inside
+// the 30-day age guard on technical_composite_scores.
+export const DEFAULT_TRENDLYNE_TA_DAILY_SLICE = 110;
+
+export async function syncTrendlyneTechnicals(maxSymbols?: number) {
   const { getAllStocks } = await import('./stockMapping');
   // Stalest-first (2026-09-30). A 405 means the cumulative WAF allowance is spent and the run
   // aborts by design -- but in fixed list order that pinned every run to the same head of the
@@ -275,7 +283,17 @@ export async function syncTrendlyneTechnicals() {
   }
   const stocks = [...getAllStocks()].sort(
     (a, b) => (lastSynced.get(a.symbol) ?? 0) - (lastSynced.get(b.symbol) ?? 0));
-  console.log(`[TRENDLYNE TECHNICALS] Starting sync for ${stocks.length} symbols (stalest first)...`);
+  const configuredLimit = maxSymbols ?? Number(
+    process.env.TRENDLYNE_TA_DAILY_SLICE || DEFAULT_TRENDLYNE_TA_DAILY_SLICE,
+  );
+  const dailyLimit = Number.isFinite(configuredLimit) && configuredLimit > 0
+    ? Math.floor(configuredLimit)
+    : DEFAULT_TRENDLYNE_TA_DAILY_SLICE;
+  const plannedStocks = stocks.slice(0, dailyLimit);
+  console.log(
+    `[TRENDLYNE TECHNICALS] Starting bounded stalest-first slice: ` +
+    `${plannedStocks.length}/${stocks.length} symbols (daily limit ${dailyLimit})...`,
+  );
   
   const baseDelay = Number(process.env.TRENDLYNE_BASE_DELAY_MS || '500');
   const jitterPercent = Number(process.env.TRENDLYNE_JITTER_PERCENT || '15');
@@ -289,7 +307,7 @@ export async function syncTrendlyneTechnicals() {
   // spamming the same log line hundreds of times without getting closer to success.
   let blockedCycles = 0;
   const MAX_BLOCKED_CYCLES = 4; // 4 cycles x 5 fails = 20 straight fails, zero successes -> bail
-  for (const stock of stocks) {
+  for (const stock of plannedStocks) {
     try {
       const result = await fetchAndProcessTechnicalData(stock.symbol, 'D');
       if (!result) {
@@ -300,7 +318,7 @@ export async function syncTrendlyneTechnicals() {
           const state = getTrendlyneTaCircuitState();
           throw new Error(
             `[TRENDLYNE] TA vendor block (HTTP ${state.reason}); aborting after ${count} synced ` +
-            `of ${stocks.length} without further requests`
+            `of ${plannedStocks.length} planned (${stocks.length} universe) without further requests`
           );
         }
         consecutiveFailures++;
@@ -313,7 +331,10 @@ export async function syncTrendlyneTechnicals() {
               `Aborting early after ${count} synced (of ${stocks.length}) rather than grinding ` +
               `through the rest at 30s+/cooldown.`
             );
-            return;
+            throw new Error(
+              `[TRENDLYNE] sustained fetch failures; synced ${count}/${plannedStocks.length} ` +
+              `planned symbols after ${blockedCycles} cooldown cycles`,
+            );
           }
           // Escalating cooldown (30s/60s/120s/240s): a fixed 30s retries a blocked vendor at
           // the same rate forever; backing off further each cycle is both faster to detect a
@@ -342,5 +363,8 @@ export async function syncTrendlyneTechnicals() {
     const ms = Math.random() * (max - min) + min;
     await new Promise(r => setTimeout(r, ms));
   }
-  console.log(`[TRENDLYNE TECHNICALS] Synced ${count} stocks.`);
+  console.log(
+    `[TRENDLYNE TECHNICALS] Synced ${count}/${plannedStocks.length} planned stocks ` +
+    `(${stocks.length} universe; rotation resumes with the stalest rows next run).`,
+  );
 }

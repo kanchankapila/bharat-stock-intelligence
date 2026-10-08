@@ -848,7 +848,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // 3min → 6min (AF-20260917-24): the highest-consequence failure of the 2026-09-17 pool
   // collapse — this step dying left fno_rollover max(date) at 09-16 while every sibling table
   // was 09-17, so unified_ranker consumed a one-day-stale rollover for that session's ranking.
-  await runPython('fno_rollover_fetcher.py', ['--days', '1'], 6 * 60_000)
+  // Revisit three sessions so a vendor publication delay cannot create a permanent hole after
+  // the calendar advances. Existing dates are skipped cheaply by the fetcher.
+  await runPython('fno_rollover_fetcher.py', ['--days', '3'], 6 * 60_000)
     .catch(e => T.fail('fno_rollover_fetcher', e));
 
   // Cash market delivery % from NSE MTO DAT → stock_delivery_volume → technical_signals.
@@ -3716,5 +3718,4 @@ export async function getAIQueueStats(): Promise<QueueStats> {
     available: true,
   };
 }
-
 

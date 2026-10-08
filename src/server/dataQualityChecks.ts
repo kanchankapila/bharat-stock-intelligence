@@ -298,8 +298,11 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // feature-completeness finding): a dead exit_labeler.py would silently freeze both models'
   // training data on stale history with nothing flagging it, same "looks healthy, quietly
   // stalled" shape as engine_composite_scores above. Thresholds match that sibling entry.
+  // signal_date is intentionally old until the forward horizon matures. Freshness is when the
+  // labeler last recomputed the table, not the newest signal it was safe to label.
   { id: 'signal-excursions-freshness', label: 'signal_excursions (exit_policy training labels: MFE/MAE/tb_label)',
-    category: 'ml', critical: false, table: 'signal_excursions', dateColumn: 'signal_date', warnDays: 3, failDays: 5 },
+    category: 'ml', critical: false, table: 'signal_excursions', dateColumn: 'computed_at',
+    nativeDateColumn: true, warnDays: 3, failDays: 5 },
 
   // flows
   // Watches insider_trades (Tickertape), NOT insider_transactions (NSE corporates-pit).
@@ -814,8 +817,8 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // level-1/level-2 capture every 15 min during market hours, 1,173 rows). Same cadence as its
   // checked sibling market_breadth (date column native DATE).
   { id: 'intraday-breadth-snapshots-freshness', label: 'intraday_breadth_snapshots (intraday breadth scan)',
-    category: 'reference', critical: false, table: 'intraday_breadth_snapshots', dateColumn: 'date',
-    nativeDateColumn: true, tradingDayAware: true, warnDays: 1, failDays: 2 },
+    category: 'reference', critical: false, table: 'intraday_breadth_snapshots', dateColumn: 'snapshot_at',
+    tradingDayAware: true, warnDays: 1, failDays: 2 },
   // ── semantic control plane (added 2026-09-25) ───────────────────────────────
   // These are not external datasources; they are the semantic/decision layer itself
   // (ontology build -> contracts, identity sync -> issuer/instrument/listing, ranker
@@ -1601,6 +1604,101 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
                 `technical factor; the Trendlyne TA refresh is allowance-limited (AF-20261003-02)`,
       };
       return { status: 'pass', detail: `${stale}/${total} (${pct}%) composite rows are 30+ days old` };
+    },
+  },
+  {
+    // AF-20261008-09. Nothing reported whether the signal lifecycle was WORKING. The only
+    // unified_signals monitoring was `unified-signals-freshness`, a table-freshness check -- it
+    // sees that rows are being WRITTEN and is structurally blind to whether they are ever CLOSED
+    // (bugs-monitoring.md: "a table-freshness check cannot see whether the FEATURE that table
+    // exists to produce ever landed"). Before signal_lifecycle.py existed, 90,755 technical
+    // signals sat ACTIVE back to June and were shown as live to every reader for months with
+    // every check green.
+    //
+    // The window is each source's own horizon in TRADING SESSIONS (signal_lifecycle.py's
+    // HORIZON_SESSIONS: screener 0 = same session, technical_scan 5, everything else 15), and the
+    // cutoff is the h-th most recent session -- never `today - h days`, which on any long weekend
+    // names a date with no session (bugs-data-layer.md's short-calendar-cutoff class, and the same
+    // shape expire_stale_recommendations already uses).
+    //
+    // Calibrated live 2026-10-08: reads 0 overdue (the closer is working). Negative-controlled by
+    // running the identical query at horizons 2/3 instead of 5/15, which returns 12,129 -- so a
+    // zero here is the closer working, not the query matching nothing.
+    id: 'unified-signals-expiry-overdue',
+    label: 'unified_signals ACTIVE past their own validity window (the closer is running)',
+    category: 'signals',
+    critical: true,
+    sql: `WITH sess AS (
+            SELECT date, row_number() OVER (ORDER BY date DESC) AS rn
+            FROM (SELECT DISTINCT date FROM stock_ohlcv WHERE date >= CURRENT_DATE - 200) d),
+          cut AS (
+            SELECT 0 AS horizon, (SELECT max(date) FROM sess) AS cutoff
+            UNION ALL SELECT 5,  (SELECT date FROM sess WHERE rn = 5)
+            UNION ALL SELECT 15, (SELECT date FROM sess WHERE rn = 15))
+          SELECT COUNT(*) AS overdue
+          FROM unified_signals u
+          JOIN cut c ON c.horizon = CASE u.signal_source
+                                      WHEN 'screener' THEN 0
+                                      WHEN 'technical_scan' THEN 5 ELSE 15 END
+          WHERE u.status = 'ACTIVE'
+            AND (u.signal_date AT TIME ZONE 'Asia/Kolkata')::date < c.cutoff`,
+    evaluate: (row) => {
+      const n = Number(row?.overdue) || 0;
+      // A floor, not any-row: a handful can legitimately sit between the window closing and the
+      // next signal-lifecycle run. Sized well under the 12,129 the negative control produced.
+      if (n > 500) return {
+        status: 'fail',
+        detail: `${n} ACTIVE unified_signals are past their own validity window — signal_lifecycle.py ` +
+                `is not closing them, so expired signals are being shown as live ` +
+                `(python src/server/signal_lifecycle.py --dry-run to see what it would close)`,
+      };
+      if (n > 0) return {
+        status: 'warn',
+        detail: `${n} ACTIVE unified_signals are past their validity window (a run is probably pending)`,
+      };
+      return { status: 'pass', detail: 'no ACTIVE signal is past its own validity window' };
+    },
+  },
+  {
+    // AF-20261008-08. A terminal status with no exit price is an un-auditable verdict: the win
+    // percentage it feeds cannot be computed from the price the signal actually exited at.
+    // signal_lifecycle.py stamps status/closed_at/exit_price/exit_reason together; the scheduled
+    // `stuck-signal-resolver` wrote only `status` until 2026-10-08, which is why 44,909 of 58,393
+    // terminal rows from the trailing 45 days carry no exit at all (43,236 of them `technical`,
+    // against 3 for `technical_scan`).
+    //
+    // Scoped to rows whose signal_date is INSIDE the trailing window so the historical
+    // manual-backfill population (which predates every closer and cannot be re-derived without
+    // re-grading history) does not pin this at fail forever -- that backlog is tracked as its own
+    // ledger row, not as a permanently-red check. INVALIDATED_CONFLICT is excluded on purpose: it
+    // is a same-day cancellation by trendlyneScreener.ts, not an exit, so it has no price by
+    // design.
+    id: 'unified-signals-exit-evidence',
+    label: 'unified_signals closed in the last 45 days record the price they exited at',
+    category: 'outcomes',
+    critical: false,
+    sql: `SELECT COUNT(*) AS terminal,
+                 COUNT(*) FILTER (WHERE exit_price IS NULL OR exit_reason IS NULL
+                                     OR closed_at IS NULL) AS unevidenced
+          FROM unified_signals
+          WHERE status IN ('COMPLETED', 'FAILED', 'EXPIRED')
+            AND signal_date >= NOW() - INTERVAL '45 days'`,
+    evaluate: (row) => {
+      const terminal = Number(row?.terminal) || 0;
+      const bad = Number(row?.unevidenced) || 0;
+      if (terminal === 0) return { status: 'pass', detail: 'no signals closed in the last 45 days' };
+      const share = bad / terminal;
+      const pct = (share * 100).toFixed(1);
+      // A SHARE against a floor sized to the real defect's magnitude, not a bare count
+      // (bugs-data-layer.md: "a check that fires on a bare count > 0 will fail on correct data").
+      // The defect this guards measured 76.9%; the legacy backlog ages out of the window.
+      if (share >= 0.20) return {
+        status: 'warn',
+        detail: `${bad}/${terminal} (${pct}%) signals closed in the last 45 days have no exit price, ` +
+                `date or reason — a win rate over them cannot use the price they exited at ` +
+                `(check every unified_signals status writer stamps all four columns)`,
+      };
+      return { status: 'pass', detail: `${bad}/${terminal} (${pct}%) recent closes lack exit evidence` };
     },
   },
   {

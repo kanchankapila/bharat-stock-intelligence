@@ -34,8 +34,9 @@ class _Rows:
 class _Conn:
     """Minimal stand-in exposing only what the helper uses."""
 
-    def __init__(self, dates=None, fail_tables=()):
+    def __init__(self, dates=None, fail_tables=(), dates_by_table=None):
         self._dates = dates or []
+        self._dates_by_table = dates_by_table or {}
         self._fail = set(fail_tables)
         self.rolled_back = False
 
@@ -43,7 +44,12 @@ class _Conn:
         for t in self._fail:
             if t in sql:
                 raise RuntimeError(f"no such table: {t}")
-        return _Rows([(d,) for d in self._dates])
+        dates = self._dates
+        for table, table_dates in self._dates_by_table.items():
+            if table in sql:
+                dates = table_dates
+                break
+        return _Rows([(d,) for d in dates])
 
     def rollback(self):
         self.rolled_back = True
@@ -88,6 +94,18 @@ class TestTradingDaysBack:
         assert len(got) == 2
         assert conn.rolled_back, "a failed statement must be rolled back or Postgres poisons the tx"
 
+    def test_merges_both_tables_when_stock_ohlcv_lags_the_exchange_universe(self):
+        """The evening NSE universe can advance before stock_ohlcv. The first non-empty table
+        must not hide the fresher authoritative session from downstream bhavcopy fetchers."""
+        older = [_iso_back(i) for i in (2, 3, 4)]
+        newest = _iso_back(1)
+        conn = _Conn(dates_by_table={
+            "stock_ohlcv": older,
+            "nse_universe_history": [newest, *older],
+        })
+        got = trading_days_back(3, conn)
+        assert [d.isoformat() for d in got] == [newest, *older[:2]]
+
     def test_falls_back_to_weekdays_when_no_table_is_readable(self):
         """A fetcher should still run (slightly over-broad, 404ing on a holiday) rather than
         failing outright because the calendar could not be read."""
@@ -130,3 +148,27 @@ class TestFetchMtoContract:
             assert dvf.fetch_mto(datetime.date(2026, 4, 3), None) is None
         finally:
             dvf.retry_get = orig
+
+
+class TestFnoRolloverRunHonesty:
+    def test_expected_session_with_no_bhavcopy_fails_instead_of_exiting_green(self, monkeypatch):
+        import fno_rollover_fetcher as frf
+
+        class _Conn:
+            def cursor(self):
+                return self
+
+            def close(self):
+                pass
+
+        session_date = datetime.date.today() - datetime.timedelta(days=1)
+        monkeypatch.setattr(frf, "connect", lambda: _Conn())
+        monkeypatch.setattr(frf, "ensure_schema", lambda _con: None)
+        monkeypatch.setattr(frf, "make_session", lambda: object())
+        monkeypatch.setattr(frf, "_trading_days_back", lambda _n: [session_date])
+        monkeypatch.setattr(frf, "fetch_bhavcopy", lambda _d, _s: None)
+        monkeypatch.setattr(frf, "backfill_technical_signals", lambda _d, _con: 0)
+        monkeypatch.setattr(sys, "argv", ["fno_rollover_fetcher.py", "--days", "1", "--force"])
+
+        with pytest.raises(RuntimeError, match="expected trading session"):
+            frf.main()

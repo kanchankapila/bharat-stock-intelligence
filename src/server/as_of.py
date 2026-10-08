@@ -223,8 +223,11 @@ def trading_days_back(n: int, conn=None) -> list:
     than 30 real sessions whenever a holiday fell in range -- and India has ~15 a year, so
     a month-long window routinely lost one or two days of data with nothing reporting it.
 
-    The exchange's own record is authoritative and always current, so the session list comes
-    from stock_ohlcv (falling back to nse_universe_history). Deliberately NOT market_holidays:
+    The exchange's own record is authoritative, so the session list merges stock_ohlcv with
+    nse_universe_history. It must not stop at the first non-empty table: the evening bhavcopy
+    job can advance nse_universe_history before stock_ohlcv advances, and doing so caused the
+    2026-10-05 F&O job to silently select 2026-10-01 and leave the new session unprocessed.
+    Deliberately NOT market_holidays:
     that table is built from observed gaps and currently stops at 2026-04-14, so it cannot
     answer questions about recent dates -- exactly the range these callers ask about.
 
@@ -254,7 +257,7 @@ def trading_days_back(n: int, conn=None) -> list:
             return _weekday_fallback()
 
     try:
-        rows = None
+        session_dates = set()
         for table in ("stock_ohlcv", "nse_universe_history"):
             try:
                 rows = conn.execute(
@@ -267,17 +270,17 @@ def trading_days_back(n: int, conn=None) -> list:
                     conn.rollback()
                 except Exception:
                     pass
-                rows = None
-            if rows:
-                break
-        if not rows:
+                rows = []
+            for r in rows:
+                v = r[0]
+                d = v if isinstance(v, datetime.date) else datetime.date.fromisoformat(str(v)[:10])
+                session_dates.add(d)
+        if not session_dates:
             return _weekday_fallback()
 
         out = []
         today = datetime.date.today()
-        for r in rows:
-            v = r[0]
-            d = v if isinstance(v, datetime.date) else datetime.date.fromisoformat(str(v)[:10])
+        for d in sorted(session_dates, reverse=True):
             # Exclude today: the session may still be open or its file not yet published,
             # which is the same reason the weekday version started at today-1.
             if d < today:

@@ -1,10 +1,10 @@
 /**
- * One-screen readiness report for every registered job: has it run, did it succeed, how long ago.
+ * One-screen readiness report for every monitored job: has it run, did it succeed, is it late.
  *
  * Answers the question a pre-trading-day check actually asks -- "which of these will I regret on
- * Monday" -- which no existing view answers on its own. `job_heartbeat` knows the last verdict but
- * not the schedule; JOB_REGISTRY knows the schedule but not the outcome; `queueState.ts` knows what
- * is running right now but nothing historical. This joins them.
+ * Monday" -- which no existing view answers on its own. JOB_REGISTRY jobs use their heartbeat plus
+ * the same holiday/runtime-aware `getLateJobs()` calculation as production alerts. MONITOR_SCRIPTS
+ * jobs use `getSystemStatus()`, which combines output-table freshness, app state and heartbeats.
  *
  * Deliberately reports NEVER-RUN separately from FAILED. A job with no heartbeat row at all is the
  * more dangerous state -- it looks clean in every "show me the failures" view precisely because it
@@ -15,7 +15,10 @@
 import { Pool } from 'pg';
 import fs from 'fs';
 import path from 'path';
-import { JOB_REGISTRY } from '../src/server/jobRegistry';
+import { getLateJobs } from '../src/server/jobHeartbeat';
+import { buildJobReadinessRegistry, type JobReadinessEntry } from '../src/server/jobReadinessRegistry';
+import { closePool as closeSharedPool } from '../src/server/pgClient';
+import { getSystemStatus } from '../src/server/routers/monitor.router';
 
 function loadEnv(): Record<string, string> {
   const p = path.resolve(process.cwd(), '.env');
@@ -37,13 +40,19 @@ const days = Number(process.argv.includes('--days')
 
 type Row = {
   job: string; label: string; critical: boolean; scheduled: boolean;
-  status: string | null; hSinceOk: number | null; runs: number; fails: number; err: string | null;
+  status: string | null; hSinceOk: number | null; lastSuccessMs: number | null;
+  runs: number; fails: number; err: string | null; schedule: JobReadinessEntry;
+  monitorState: 'never' | 'running' | 'success' | 'failed' | 'stale' | null;
 };
 
 (async () => {
+  const [monitorStatuses, lateJobs] = await Promise.all([getSystemStatus(), getLateJobs()]);
+  const monitorById = new Map(monitorStatuses.map(status => [status.id, status]));
+  const lateSet = new Set(lateJobs.map(job => job.job));
+
   const hb = new Map<string, any>();
   for (const r of (await pool.query(
-    `SELECT job_name, last_status, run_count, fail_count,
+    `SELECT job_name, last_status, run_count, fail_count, last_success_at,
             round((extract(epoch from now())*1000 - last_success_at)/3600000.0, 1) h_ok,
             left(coalesce(last_error,''), 120) err
        FROM job_heartbeat`)).rows) hb.set(r.job_name, r);
@@ -56,28 +65,57 @@ type Row = {
        FROM job_run_history WHERE ran_at > now() - ($1 || ' days')::interval
       GROUP BY job_name`, [days])).rows) recent.set(r.job_name, { ok: Number(r.ok), bad: Number(r.bad) });
 
-  const rows: Row[] = JOB_REGISTRY.map((j: any) => {
+  const rows: Row[] = buildJobReadinessRegistry().map(j => {
+    if (j.source === 'MONITOR_SCRIPTS') {
+      const monitor = monitorById.get(j.jobName);
+      const lastSuccess = monitor?.lastSuccessAt ?? monitor?.lastRunAt ?? null;
+      const lastSuccessMs = lastSuccess == null ? null : Date.parse(lastSuccess);
+      return {
+        job: j.jobName, label: j.label, critical: !!j.critical,
+        scheduled: j.scheduled,
+        status: monitor?.runState ?? null,
+        hSinceOk: lastSuccessMs == null || !Number.isFinite(lastSuccessMs)
+          ? null
+          : Math.round(((Date.now() - lastSuccessMs) / 3_600_000) * 10) / 10,
+        lastSuccessMs: lastSuccessMs != null && Number.isFinite(lastSuccessMs) ? lastSuccessMs : null,
+        runs: Number(monitor?.runCount ?? 0), fails: Number(monitor?.failCount ?? 0),
+        err: monitor?.error || null,
+        schedule: j,
+        monitorState: monitor?.runState ?? 'never',
+      };
+    }
+
     const h = hb.get(j.jobName);
     return {
       job: j.jobName, label: j.label, critical: !!j.critical,
-      scheduled: !!(j.cronPattern || j.everyMs),
+      scheduled: j.scheduled,
       status: h?.last_status ?? null,
       hSinceOk: h?.h_ok == null ? null : Number(h.h_ok),
+      lastSuccessMs: h?.last_success_at == null ? null : Number(h.last_success_at),
       runs: Number(h?.run_count ?? 0), fails: Number(h?.fail_count ?? 0),
       err: h?.err || null,
+      schedule: j,
+      monitorState: null,
     };
   });
 
   const bucket = (r: Row) => {
     if (!r.scheduled) return 'event-driven';
+    if (r.monitorState) {
+      if (r.monitorState === 'never') return 'NEVER RUN';
+      if (r.monitorState === 'failed') return 'FAILING';
+      if (r.monitorState === 'stale') return 'LATE';
+      if (r.monitorState === 'running') return 'RUNNING';
+      return 'ok';
+    }
     if (!hb.has(r.job)) return 'NEVER RUN';
     if (r.status === 'failed') return 'FAILING';
     if (r.hSinceOk == null) return 'NEVER SUCCEEDED';
-    if (r.hSinceOk > 24 * 8) return 'stale >8d';
+    if (lateSet.has(r.job)) return 'LATE';
     return 'ok';
   };
 
-  const order = ['FAILING', 'NEVER RUN', 'NEVER SUCCEEDED', 'stale >8d', 'ok', 'event-driven'];
+  const order = ['FAILING', 'NEVER RUN', 'NEVER SUCCEEDED', 'LATE', 'RUNNING', 'ok', 'event-driven'];
   const groups = new Map<string, Row[]>();
   for (const r of rows) {
     const b = bucket(r);
@@ -85,7 +123,7 @@ type Row = {
     groups.get(b)!.push(r);
   }
 
-  console.log(`\nJOB READINESS — ${rows.length} registry entries, ${days}d run window\n${'='.repeat(78)}`);
+  console.log(`\nJOB READINESS — ${rows.length} monitored entries, ${days}d run window\n${'='.repeat(78)}`);
   for (const b of order) {
     const g = groups.get(b);
     if (!g?.length) continue;
@@ -94,15 +132,23 @@ type Row = {
       const rc = recent.get(r.job);
       const win = rc ? `${rc.ok}ok/${rc.bad}fail in ${days}d` : `no runs in ${days}d`;
       const age = r.hSinceOk == null ? 'never' : `${r.hSinceOk}h`;
-      console.log(`  ${r.critical ? '!' : ' '} ${r.job.padEnd(28)} last_ok=${age.padStart(8)}  ${win.padEnd(20)} ${r.err ? '— ' + r.err.replace(/\s+/g, ' ').slice(0, 70) : ''}`);
+      const showCurrentError = ['FAILING', 'NEVER SUCCEEDED', 'LATE'].includes(b) && r.err;
+      console.log(`  ${r.critical ? '!' : ' '} ${r.job.padEnd(28)} last_ok=${age.padStart(8)}  ${win.padEnd(20)} ${showCurrentError ? '— ' + r.err!.replace(/\s+/g, ' ').slice(0, 70) : ''}`);
     }
   }
   const bad = (groups.get('FAILING')?.length ?? 0) + (groups.get('NEVER RUN')?.length ?? 0)
-            + (groups.get('NEVER SUCCEEDED')?.length ?? 0);
+            + (groups.get('NEVER SUCCEEDED')?.length ?? 0) + (groups.get('LATE')?.length ?? 0);
   console.log(`\n${'='.repeat(78)}\n${bad} job(s) need attention before a trading day.\n`);
   await pool.end();
+  await closeSharedPool();
+  // This CLI imports the production monitor router, whose dependency graph includes long-lived
+  // service modules. All resources owned by this report are closed above; end the one-shot
+  // process explicitly so an unrelated service handle cannot keep an operator command alive.
+  process.exit(0);
 })().catch(async e => {
   console.error('fatal:', e?.message ?? e);
   process.exitCode = 1;
   await pool.end().catch(() => {});
+  await closeSharedPool().catch(() => {});
+  process.exit(1);
 });

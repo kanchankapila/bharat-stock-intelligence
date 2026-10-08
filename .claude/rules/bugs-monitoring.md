@@ -14,6 +14,18 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 
 ## Monitoring blind spots
 
+- **One operations page can have multiple registries and multiple sources of run evidence.**
+  `JOB_REGISTRY` jobs are schedule/holiday/runtime judged from heartbeats, while
+  `MONITOR_SCRIPTS` also contains table-backed probes whose successful output may be newer than
+  (or exist without) a heartbeat. A readiness report that enumerates only one registry has blind
+  spots; one that unions the names but applies one evidence source to all of them creates false
+  “never run” failures. Build a de-duplicated union, then preserve each entry's authoritative
+  evaluator (`getLateJobs()` for registry jobs, `getSystemStatus()` for monitor probes). Also
+  mirror the processor's *real-work window*, not a broader BullMQ polling cron whose tail slots
+  deliberately return `skipped`; otherwise the last valid market-hours success becomes late
+  after the first post-close no-op. Immunized by `jobReadinessRegistry.test.ts` and the
+  technical-scan negative control in `monitorScriptsCronMirror.test.ts` (AF-20261006-06).
+
 - **An inline wrapper that declares fewer parameters than its caller passes silently drops the
   extras.** `registerJob` calls `monitorFn(name, status, detail, durationMs)`; three wrappers in
   `dl.jobs.ts` were written `(_name, status, detail) => updateMonitorState(...)`, so

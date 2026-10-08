@@ -140,7 +140,10 @@ export async function registerAgentJobs(connection: any) {
     connection,
     queueName: QUEUE_AGENT_AUDITOR,
     jobName: 'agent-audit-daily',
-    repeat: { pattern: '0 11 * * 1-5' }, // 16:30 IST
+    // 16:40 IST. The stuck-signal resolver owns 16:30 because it must close intraday signals
+    // immediately after the session; starting this non-critical analysis job on the same minute
+    // needlessly competed for Python/DB capacity at the close.
+    repeat: { pattern: '10 11 * * 1-5' },
     jobId: 'agent-audit-daily',
     removeOnComplete: 3,
     removeOnFail: 3,

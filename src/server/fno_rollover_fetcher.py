@@ -281,6 +281,7 @@ def main() -> None:
 
     cur = con.cursor()
     total_rows = 0
+    unavailable_dates = []
     for i, trade_date in enumerate(dates):
         d_str = trade_date.isoformat()
         if not args.force:
@@ -295,7 +296,12 @@ def main() -> None:
         print(f"[Rollover] Fetching {trade_date} ({i+1}/{len(dates)})…")
         raw = fetch_bhavcopy(trade_date, session)
         if raw is None:
-            print(f"[Rollover] {trade_date}: skipped (holiday or not yet published)")
+            # `dates` comes from the exchange-backed session calendar, so this is not an
+            # ordinary holiday. Keep the run red until the expected file is actually available;
+            # a green no-op here left the table frozen at 2026-10-01 while ml-daily-ops claimed
+            # success on 2026-10-05.
+            unavailable_dates.append(d_str)
+            print(f"[Rollover] {trade_date}: expected-session file unavailable", file=sys.stderr)
             continue
 
         rows = compute_rollover(raw, trade_date)
@@ -307,14 +313,21 @@ def main() -> None:
         if i < len(dates) - 1:
             time.sleep(RATE_LIMIT_SEC)
 
-    # Back-fill technical_signals for today / most recent date
-    most_recent = dates[0].isoformat() if dates else None
-    if most_recent:
-        updated = backfill_technical_signals(most_recent, con)
-        print(f"[Rollover] Updated {updated} technical_signals rows for {most_recent}")
+    # Back-fill every requested session. With the scheduled three-session catch-up window, only
+    # updating dates[0] would repair fno_rollover while leaving a previously-missed historical
+    # technical_signals row NULL forever.
+    for trade_date in dates:
+        d_str = trade_date.isoformat()
+        updated = backfill_technical_signals(d_str, con)
+        print(f"[Rollover] Updated {updated} technical_signals rows for {d_str}")
 
     print(f"[Rollover] Done. Total rows: {total_rows}")
     con.close()
+    if unavailable_dates:
+        raise RuntimeError(
+            "F&O bhavcopy unavailable for expected trading session(s): "
+            + ", ".join(unavailable_dates)
+        )
 
 
 if __name__ == "__main__":
