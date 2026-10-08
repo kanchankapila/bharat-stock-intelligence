@@ -5,6 +5,7 @@ import { runPython } from '../pythonRunner';
 import { cacheGet } from '../cacheService';
 import { latestComputedAt, invalidateLatestComputedAt } from '../latestComputedAt';
 import { planStatus } from '../planLifecycle';
+import { LATEST_COMPLETE_TS_DATE_SQL } from '../technicalSignalsDate';
 
 // Shared TTL probe (consolidated 2026-09-02 from the per-router copies) — 5-min TTL so new
 // ranker runs are picked up; CAST-to-TEXT semantics preserved.
@@ -22,13 +23,14 @@ export const commandCenterRouter = router({
       limit:      z.number().min(1).max(100).default(30),
     }))
     .query(async ({ input }) => {
-      const regimeRow = await dbGet<{ regime: string; regime_prob: number }>(
-        'SELECT regime, regime_prob FROM market_regimes ORDER BY date DESC LIMIT 1'
+      const regimeRow = await dbGet<{ regime: string; regime_prob: number; date: string }>(
+        'SELECT regime, regime_prob, CAST(date AS TEXT) AS date FROM market_regimes ORDER BY date DESC LIMIT 1'
       );
+      // V-12: no row means no regime -- never an invented BULL/0.5 stamped "now".
       const regime = {
-        name:       regimeRow?.regime ?? 'BULL',
-        confidence: regimeRow?.regime_prob ?? 0.5,
-        updated_at: new Date().toISOString(),
+        name:       regimeRow?.regime ?? 'UNKNOWN',
+        confidence: regimeRow?.regime_prob ?? null,   // HMM posterior, not accuracy
+        updated_at: regimeRow?.date ?? null,
       };
 
       const latest = await urLatestAt();
@@ -105,8 +107,10 @@ export const commandCenterRouter = router({
           // was silently swallowed by the catch below, so intradaySignals was always []) --
           // signal_score (real, 0-10 composite) is this codebase's actual strength measure;
           // >=7 matches the "HIGH" tier threshold used elsewhere. Found via CI smoke test.
+          // V-05: calibrated only -- the raw win_probability runs ~8pp above it and was shown
+          // as "Win P". (signal_score >= 7 has not occurred live; max is 4.)
           intradaySignals = await dbAll<any>(`
-            SELECT symbol, signal_type, win_probability,
+            SELECT symbol, signal_type, calibrated_win_probability,
                    signal_score, rsi, cmp, change_pct, ai_insight,
                    entry_zone, stop_loss, targets, time_horizon
             FROM technical_signals
@@ -224,7 +228,7 @@ export const commandCenterRouter = router({
                  hv_20d, iv_hv_ratio,
                  days_to_next_results
           FROM technical_signals
-          WHERE date = (SELECT MAX(date) FROM technical_signals)
+          WHERE date = ${LATEST_COMPLETE_TS_DATE_SQL}
         ) ts ON ts.symbol = ur.symbol
         WHERE ur.computed_at = ?
         ${convFilter}${horizonFilter}${sectorFilter}

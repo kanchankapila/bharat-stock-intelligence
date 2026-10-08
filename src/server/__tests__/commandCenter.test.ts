@@ -96,6 +96,29 @@ describe('getCommandCenter', () => {
     expect(result.regime.confidence).toBe(0.75);
   });
 
+  // V-12 (2026-10-08): with no market_regimes row the procedure used to invent BULL / 0.5 and
+  // stamp updated_at = now, so an outage read as a confident bull market.
+  it('reports UNKNOWN, not an invented BULL, when no regime row exists', async () => {
+    const result = await caller.getCommandCenter({});
+    expect(result.regime.name).toBe('UNKNOWN');
+    expect(result.regime.confidence).toBeNull();
+    expect(result.regime.updated_at).toBeNull();
+  });
+
+  // V-05 (2026-10-08): intraday cards printed technical_signals' RAW win_probability as "Win P"
+  // (raw avg 0.553 vs calibrated 0.472). Only the calibrated value may leave the server.
+  it('never returns the raw win_probability on intraday signals', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    await dbRun(`DELETE FROM technical_signals WHERE symbol = 'CC_INTRA'`);
+    await dbRun(`INSERT INTO technical_signals (symbol, date, signal_score, win_probability, calibrated_win_probability)
+      VALUES ('CC_INTRA', ?, 8, 0.9, 0.45)`, [today]);
+    const result = await caller.getCommandCenter({});
+    const sig = result.intradaySignals.find((s: any) => s.symbol === 'CC_INTRA');
+    expect(sig).toBeDefined();
+    expect(sig.win_probability).toBeUndefined();
+    expect(sig.calibrated_win_probability).toBe(0.45);
+  });
+
   // AF-20261001-06: this router's `horizon` enum is the screener catalog's vocabulary
   // (intraday/swing/long_term) while unified_recommendations.timeframe is written as the
   // ranker's canonical INTRADAY/SWING/POSITIONAL. The filter used to push the raw uppercased
@@ -183,6 +206,26 @@ describe('getBuyRecommendations', () => {
     const symbols = result.picks.map((p: any) => p.symbol);
     expect(symbols).not.toContain('TOPSELL');
     expect(symbols).toContain('REALBUY');
+  });
+
+  // 2026-10-08: the day's first partial technical scan (392 rows, all NULL win_probability) made
+  // MAX(date) the join day, so every pick's confidence was blank all session.
+  it('joins technical_signals on the latest COMPLETE day, not a newer partial one', async () => {
+    const ts = '2026-08-03T00:00:00.000Z';
+    await dbExec('DELETE FROM technical_signals');
+    await dbRun(`INSERT INTO unified_recommendations
+      (symbol, computed_at, regime, unified_score, conviction_level, classification)
+      VALUES ('JOINME', ?, 'BULL', 90.0, 'S_ELITE', 'Strong Buy')`, [ts]);
+    const day = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+    await dbRun(`INSERT INTO technical_signals (symbol, date, win_probability) VALUES ('JOINME', ?, 0.61)`, [day(1)]);
+    for (let i = 0; i < 12; i++) {
+      await dbRun(`INSERT INTO technical_signals (symbol, date) VALUES (?, ?)`, [`FILL${i}`, day(1)]);
+    }
+    await dbRun(`INSERT INTO technical_signals (symbol, date) VALUES ('JOINME', ?)`, [day(0)]);
+
+    const result = await caller.getBuyRecommendations({ conviction: 'ALL' });
+    const pick = result.picks.find((p: any) => p.symbol === 'JOINME') as any;
+    expect(pick.win_probability).toBeCloseTo(0.61);
   });
 
   it("'TOP' conviction (the default) includes S_ELITE and A_HIGH, excludes B_MEDIUM", async () => {

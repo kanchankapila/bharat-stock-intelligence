@@ -74,19 +74,37 @@ export const signalsRouter = router({
 
   getAccuracyMetrics: publicProcedure
     .query(async () => {
-      const stats = (await dbGet<{ total: number; profit: number; resolved: number }>(`
+      // V-09 (2026-10-08): LONG geometry only (target > stop, the resolver's own direction rule),
+      // one horizon, WIN / (WIN+LOSS+STOP_LOSS) per measurement.md. Short rows were graded by a
+      // LONG-only simulation (AF-20261008-10) and NEUTRAL is not a decisive outcome. return_pct is
+      // GROSS of costs.
+      const HORIZON = 15;
+      const s = (await dbGet<any>(`
         SELECT
           COUNT(*) AS total,
-          SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS profit,
-          SUM(CASE WHEN outcome IN ('WIN','LOSS','STOP_LOSS','NEUTRAL') THEN 1 ELSE 0 END) AS resolved
-        FROM unified_signal_outcomes
-      `))!;
+          SUM(CASE WHEN o.outcome = 'WIN' THEN 1 ELSE 0 END) AS wins,
+          SUM(CASE WHEN o.outcome IN ('WIN','LOSS','STOP_LOSS') THEN 1 ELSE 0 END) AS decisive,
+          SUM(CASE WHEN o.outcome = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutral,
+          AVG(CASE WHEN o.outcome IN ('WIN','LOSS','STOP_LOSS','NEUTRAL') THEN o.return_pct END) AS avg_ret,
+          MAX(o.check_date) AS as_of
+        FROM unified_signal_outcomes o
+        JOIN unified_signals s ON s.id = o.unified_signal_id
+        WHERE o.horizon_days = ? AND s.target_price > s.stop_loss
+      `, [HORIZON]))!;
+      const wins = Number(s.wins) || 0, decisive = Number(s.decisive) || 0, neutral = Number(s.neutral) || 0;
+      const rate = decisive > 0 ? (wins / decisive) * 100 : 0;
       return {
-        precision:     stats.resolved > 0 ? (stats.profit / stats.resolved) * 100 : 0,
-        profitHitRate: stats.resolved > 0 ? (stats.profit / stats.resolved) * 100 : 0,
-        totalSignals:  Number(stats.total) || 0,
-        // The hit rate's denominator. totalSignals also counts PENDING rows (AF-20260930-40).
-        resolvedSignals: Number(stats.resolved) || 0,
+        side: 'LONG' as const,
+        horizonDays: HORIZON,
+        precision: rate,
+        profitHitRate: rate,
+        wins,
+        decisiveSignals: decisive,
+        neutralSignals: neutral,
+        resolvedSignals: decisive + neutral,
+        totalSignals: Number(s.total) || 0,   // includes PENDING (AF-20260930-40)
+        avgGrossReturnPct: s.avg_ret == null ? null : Number(s.avg_ret),
+        asOf: s.as_of ?? null,
       };
     }),
 

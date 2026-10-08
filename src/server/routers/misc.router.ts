@@ -18,6 +18,7 @@ import {
 } from "../marketIntelService";
 import { router, publicProcedure, expensiveProcedure } from "../trpc";
 import { latestComputedAt } from "../latestComputedAt";
+import { LATEST_COMPLETE_TS_DATE_SQL } from "../technicalSignalsDate";
 
 // Shared TTL probe (consolidated 2026-09-02 from the per-router copies this comment used to
 // document) — same 5-minute TTL and CAST-to-TEXT semantics.
@@ -435,6 +436,7 @@ export const miscRouter = router({
                    ROW_NUMBER() OVER (PARTITION BY ts.symbol ORDER BY ts.date DESC) AS rn
             FROM technical_signals ts
             LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
+            WHERE ts.date <= ${LATEST_COMPLETE_TS_DATE_SQL}
           ) t
           WHERE rn = 1 AND cmp IS NOT NULL AND cmp > 0
           ORDER BY date DESC, signal_score DESC, symbol ASC
@@ -530,6 +532,7 @@ export const miscRouter = router({
           avgSentiment: number;
           sector: string;
           winProb: number;
+          winProbSource: 'calibrated' | 'raw' | 'heuristic';
         }>();
 
         for (const sig of signals) {
@@ -541,7 +544,10 @@ export const miscRouter = router({
           // calibrated_win_probability, it just wasn't selected here (2026-07-18 gating follow-up).
           const dbWinProb = (sig.calibrated_win_probability as number | null) ?? (sig.win_probability as number | null);
           const winProb = dbWinProb != null ? Math.max(0.35, Math.min(0.95, dbWinProb)) : heuristicWinProb(sig);
+          const winProbSource: 'calibrated' | 'raw' | 'heuristic' =
+            sig.calibrated_win_probability != null ? 'calibrated' : sig.win_probability != null ? 'raw' : 'heuristic';
           symbolMap.set(sym, {
+            winProbSource,
             sig,
             quant: quantMap.get(sym),
             avgSentiment: scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0,
@@ -551,7 +557,7 @@ export const miscRouter = router({
         }
 
         const candidates = Array.from(symbolMap.entries()).map(([symbol, data]) => {
-          const { sig, quant, winProb } = data;
+          const { sig, quant, winProb, winProbSource } = data;
           const cmp = sig.cmp as number;
 
           const techScore  = quant ? (quant.technical_score  as number) || 0 : winProb * 100;
@@ -590,6 +596,7 @@ export const miscRouter = router({
             unifiedConvictionLevel: ur?.conviction_level ?? null,
             mlWinProbability: parseFloat((winProb * 100).toFixed(1)),
             mlProbability:    parseFloat((winProb * 100).toFixed(1)),
+            winProbSource,
             techSignalCount: 1,
             quantRank: Math.round(100 - fundScore),
             smartMoneyCr: 0,

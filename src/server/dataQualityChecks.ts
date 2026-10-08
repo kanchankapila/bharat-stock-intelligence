@@ -2028,6 +2028,55 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'macro-series-freshness',
+    label: 'macro_asset_prices per-series freshness (HMM inputs: close + ret_5d)',
+    category: 'macro',
+    critical: false,
+    // Audit B-05 (2026-10-08): macro-asset-prices-freshness reads MAX(date) over the WHOLE table
+    // (~8 writers), so it stayed green through a 22-day NULL ret_5d hole on US10Y/DXY/SP500
+    // (08-06..09-04). Judge each series the regime HMM reads on its newest row carrying BOTH
+    // close and ret_5d. INDIA_VIX is deliberately absent: its ret_5d is never written by design.
+    sql: `SELECT json_agg(json_build_object('symbol', s.symbol, 'last_ok', (
+              SELECT MAX(m.date)::text FROM macro_asset_prices m
+              WHERE m.symbol = s.symbol AND m.date >= CURRENT_DATE - 60
+                AND m.close IS NOT NULL AND m.ret_5d IS NOT NULL))) AS series
+          FROM (VALUES ('INDIAVIX'), ('US10Y'), ('DXY'), ('SP500')) AS s(symbol)`,
+    evaluate: (row, now) => {
+      const raw = row?.series;
+      const series: Array<{ symbol: string; last_ok: string | null }> =
+        typeof raw === 'string' ? JSON.parse(raw) : (raw ?? []);
+      const ages = series.map(s => ({ symbol: s.symbol, stale: tradingDaysStale(s.last_ok, now) }));
+      const missing = ages.filter(a => a.stale == null).map(a => a.symbol);
+      if (missing.length) return { status: 'fail', detail: `No usable close+ret_5d in 60d for: ${missing.join(', ')}` };
+      const fmt = (xs: typeof ages) => xs.map(a => `${a.symbol} ${fmtDays(a.stale!)}`).join(', ');
+      const failing = ages.filter(a => a.stale! > 10);
+      if (failing.length) return { status: 'fail', detail: `Stale series: ${fmt(failing)}` };
+      const warning = ages.filter(a => a.stale! > 3);
+      if (warning.length) return { status: 'warn', detail: `Stale series (NULL ret_5d run or no rows): ${fmt(warning)}` };
+      return { status: 'pass', detail: `All HMM series fresh: ${fmt(ages)}` };
+    },
+  },
+  {
+    id: 'market-breadth-trading-day',
+    label: 'market_breadth rows dated to real NSE sessions',
+    category: 'reference',
+    critical: false,
+    // Audit B-05/C-04 (2026-10-08): rows on 2026-10-02 (holiday) and 10-04 (Sunday), both
+    // adv_decline_ratio 0.2219 carried forward, which the HMM ffills. mc_advance_decline_fetcher
+    // now skips closed days; this catches a regression or another writer. 30-day window so a
+    // repaired history ages out instead of warning forever.
+    sql: `SELECT COUNT(*) AS bad, string_agg(b.date::text, ', ' ORDER BY b.date) AS dates
+          FROM market_breadth b
+          WHERE b.date >= CURRENT_DATE - 30
+            AND (EXTRACT(ISODOW FROM b.date) IN (6, 7)
+                 OR EXISTS (SELECT 1 FROM market_holidays h WHERE h.exchange = 'NSE' AND h.date = b.date))`,
+    evaluate: (row) => {
+      const bad = Number(row?.bad) || 0;
+      if (bad > 0) return { status: 'warn', detail: `${bad} row(s) on non-trading days: ${row?.dates}` };
+      return { status: 'pass', detail: 'No market_breadth rows on weekends/holidays in 30d' };
+    },
+  },
+  {
     // Found 2026-08-14 (job-runtime-audit): confluence_outcome_tracker.py had silently failed
     // its 5-min budget every scheduled run for 11 consecutive days (2026-08-03 through 08-14) --
     // its own .catch() in confluence.jobs.ts only console.warns, so BullMQ kept reporting

@@ -244,7 +244,7 @@ interface StockScreenerData {
   screenerClasses: ScreenerClass[];
 }
 
-function scoreStock(
+export function scoreStock(
   data: StockScreenerData,
   technical: any,
   quant: any,
@@ -319,7 +319,9 @@ function scoreStock(
   else if (volRatio > 1.2) volScore = 2;
   volScore = Math.round(volScore * rw.vol * 100) / 100;
 
-  // D. Sector strength (0–8)
+  // D. "Sector" slot (0–8) -- MISNAMED: this is the stock's OWN momentum_score, no sector input
+  // (corr 1.000 with quant_scores.momentum_score, audit C-01 2026-10-08). The value is an
+  // EVIDENCE item (needs measurement before change); only the reasoning text was corrected.
   let sectorScore = quant
     ? Math.max(0, Math.min(8, (quant.momentum_score ?? 50) / 100 * 8))
     : 4;
@@ -351,7 +353,7 @@ function scoreStock(
   }
   if (quant?.above_sma200 === 1) parts.push('above 200-day SMA');
   if (volRatio > 1.5) parts.push(`${volRatio.toFixed(1)}x relative volume`);
-  if (sectorScore > 5) parts.push('strong sector momentum');
+  if (sectorScore > 5) parts.push('strong own price momentum');
   if (fundScore > 7) parts.push('strong fundamentals');
   // netBearish: the score-floor above hides this from confluenceScore, so say it in words --
   // "weak confluence" previously described both "no signal either way" and "actively flagged
