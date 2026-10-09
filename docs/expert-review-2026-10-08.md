@@ -250,3 +250,14 @@ the ordered architecture plan and any pause/retire (-27); whether to stop publis
   reconstruction correlates only about 0.5-0.64 with the stored score. The direction is [Likely], the magnitudes are [Guessing].
 - Agents ran the data-family, frontend and architecture audits; their reports sit in the review scratchpad. Their conclusions were spot-checked against
   live SQL where they changed a decision (calibration, engine ablation, survivorship counts, partial-day join), not re-derived in full.
+
+## 11. Update 2026-10-09: the regime question, answered for the rebuildable part
+
+A multi-regime replay (2021-2026, survivorship-reduced, next-open, non-overlapping windows; ledger AF-20261008-29, `measurement.md` 2026-10-09)
+changes three statements above:
+- **Section 1/4:** the published IC of ~+0.05 is mostly a property of its falling-tape window. The price-only proxy reads +0.073 in that window
+  and +0.003..+0.014 at 5d over 2022-2026. Treat the edge as "unproven, regime-dependent".
+- **Section 1 (beta tilt):** low beta is a bet on the market falling (IC +0.072 when it fell, -0.050 when it rose), not an edge.
+- **Section 2 item 4 (overlays):** the high-vol overlay is a small consistent plus over 5 years (IC +0.008, t 3.9). The -0.013 seen in the
+  40-session window was the falling-tape exception. Keep it; the red-flag and crowding overlays remain unmeasured.
+- Delivery trend (5d minus 20d) is the only rebuildable input positive in every regime and year, but it is too weak to survive costs alone.
