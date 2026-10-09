@@ -180,3 +180,13 @@ def test_regime_backfilled_dry_run_then_apply(pg_conn, dump, capsys):
     assert m.main(['--apply', '--dump-path', dump], conn=pg_conn) == 0
     assert [tuple(r) for r in _q(pg_conn, "SELECT date, backfilled FROM market_regimes ORDER BY date")] == \
         [('2026-08-01', True), ('2026-08-12', None)]
+
+
+def test_event_clock_ctes_are_materialized():
+    """A non-materialized CTE referenced from a correlated subquery is re-run per technical_signals row
+    (the live dry-run did not finish in 12 minutes; MATERIALIZED makes the one-day count take 2 s)."""
+    import importlib.util
+    import pathlib
+    p = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "repair" / "repair_event_clocks.py"
+    text = p.read_text(encoding="utf-8")
+    assert "WITH k AS MATERIALIZED" in text and "pit AS MATERIALIZED" in text and "WITH s AS MATERIALIZED" in text

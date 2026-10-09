@@ -38,12 +38,12 @@ from mc_symbol_map import MC_TO_SYMBOL_SQL  # noqa: E402
 SINCE = "2026-06-30"   # stock_earnings_dates coverage starts here
 UNTIL = "2026-10-07"   # last date before the densify fix landed
 
-PIT_DAYS = f"""WITH k AS (
+PIT_DAYS = f"""WITH k AS MATERIALIZED (
     SELECT TRIM(scid) AS scid, result_date, fetched_at::timestamptz AS seen,
            MAX(fetched_at::timestamptz) OVER (PARTITION BY TRIM(scid)) AS last_seen
     FROM stock_earnings_dates
     WHERE result_date >= CAST(? AS date) AND fetched_at::timestamptz < CAST(? AS date) + 1
-), pit AS (
+), pit AS MATERIALIZED (
     SELECT ns.symbol, MIN(k.result_date) - CAST(? AS date) AS days
     FROM k JOIN {MC_TO_SYMBOL_SQL} ns ON ns.mcsymbol = k.scid
     WHERE k.seen >= k.last_seen - INTERVAL '1 hour'
@@ -52,7 +52,7 @@ PIT_DAYS = f"""WITH k AS (
 DAYS = "(SELECT p.days FROM pit p WHERE p.symbol = ts.symbol)"
 DAYS_WHERE = f"ts.date = CAST(? AS date) AND ts.days_to_next_results IS DISTINCT FROM {DAYS}"
 
-PIT_SHOCK = f"""WITH s AS (
+PIT_SHOCK = f"""WITH s AS MATERIALIZED (
     SELECT ns.symbol, MAX(sh.gain_since_result) AS gain
     FROM mc_price_shockers sh JOIN {MC_TO_SYMBOL_SQL} ns ON ns.mcsymbol = TRIM(sh.scid)
     WHERE sh.fetched_at::timestamptz >= CAST(? AS date)
