@@ -938,3 +938,13 @@ any row: `docs/measurement-history.md`.
   - **Best-of combination (first-half winner: 21-session holding + 40% buffer + hedge):** second half +0.30% (t 0.38) at Rs10cr, +0.20% (t 0.32) at Rs50cr, negative in bull markets, below simply hedging the universe.
   - **By regime:** weakly defensive (negative in bull, positive in sideways/bear, nothing significant); no calendar year has |t| above 1.4. Selection rank vs same-day return -0.086 (Rs10cr) / -0.214 (Rs50cr) by construction (the signal includes short-term reversal to that day's close, entry is the next open); vs the overnight gap -0.02 / -0.06.
   - **Conclusion [Likely]:** the limit is signal strength, not cost structure: an IC of +0.05 gives a +0.03..+0.15% gross spread per period, about the size of any realistic cost.
+
+- **2026-10-09 — PRE-REGISTERED hypotheses for the backfilled data (written BEFORE any of it was analysed; AF-20261008-33).**
+  Data: `nse_results_filings` (broadcast timestamps from 2021), `stock_option_features_history` (2021-01..2024-07), `nse_shareholding_history`, `nse_pit_disclosures` (to 2026-05). Universe: ADT >= Rs10cr primary, Rs50cr secondary. Entry next-session OPEN after the knowable time (filing broadcast / bhavcopy day), non-overlapping windows, 0.30% round trip charged on actual turnover, per-date winsorised, benchmark equal-weight mean of the eligible set, survivorship-reduced panel (`h_panel.parquet`), regimes by NIFTY50 vs its 200-session mean.
+  Primary tests (5, so the Bonferroni bar is two-sided |t| >= 2.58 at alpha 0.01; everything else is descriptive):
+  - **H1** PIT revenue growth YoY (latest filing known at the decision date, not the period end): positive rank IC at 21 sessions.
+  - **H2** PIT PAT growth YoY: positive rank IC at 21 sessions.
+  - **H3** PIT Piotroski F-score: positive rank IC at 21 sessions.
+  - **H4** ATM implied volatility minus trailing 20-day realised volatility (options history): NEGATIVE rank IC at 5 sessions (rich option premium predicts lower returns).
+  - **H5** put-call skew `skew_95_105` (OTM put IV minus OTM call IV): NEGATIVE rank IC at 5 sessions (downside demand predicts lower returns).
+  Not tested as primary (descriptive only, no verdict): promoter-holding change and pledge from the shareholding history, insider PIT net buying (its source stops serving data after 2026-05-02), put-call ratio, straddle size. A hypothesis that fails the bar is recorded as failed here; none is re-run with a different construction to rescue it.
