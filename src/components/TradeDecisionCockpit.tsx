@@ -43,7 +43,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
   // (fiiRows.slice(0, 5)). Standardized on days:10 (2026-08-02 perf pass) to match every other
   // current-flow caller of getFiiDiiFlow, so React Query shares one cache entry across them.
   const { data: fiiRes } =
-    trpc.getFiiDiiFlow.useQuery({ days: 10 }, { refetchInterval: 300000, refetchOnWindowFocus: false });
+    trpc.getFiiDiiFlow.useQuery({ days: 10 }, { staleTime: 30 * 60_000, refetchOnWindowFocus: false }); // one row per day
 
   const { data: sentimentRes } =
     trpc.getMarketSentiment.useQuery(undefined, { refetchInterval: 120000, refetchOnWindowFocus: false });

@@ -25,6 +25,7 @@ import { FinologyPanel } from './FinologyPanel';
 // as-is; genuinely absent from both this page and the separate Stock Intelligence Hub page.
 import { AiInsightsTab } from '../components/v2/views/stock-analysis/AiInsightsTab';
 import { V1PeadConcallWidget } from './V1PeadConcallWidget';
+import { PlanTimeline } from './PlanTimeline';
 import { V1TradeRiskCalculatorWidget } from './V1TradeRiskCalculatorWidget';
 
 // Same O(1) lookup maps App.tsx builds at module scope for the same purpose (avoids O(n)
@@ -584,6 +585,8 @@ export const V1StockDetails: React.FC<{
                     </ResponsiveContainer>
                 </div>
               </Card>
+
+              <PlanTimeline symbol={symbol} />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <V1PeadConcallWidget symbol={symbol} />

@@ -40,4 +40,12 @@ describe('buildStockBadges', () => {
     const badges = buildStockBadges({ eps_surprise_q1: 7.2 });
     expect(badges.map(b => b.label)).toContain('EPS beat');
   });
+
+  // Event-risk chip (2026-10-08 spec 2.D): results within 10 sessions, never for a missing clock.
+  it('shows a results-proximity chip only for a real 0..10 countdown', () => {
+    expect(buildStockBadges({ days_to_next_results: 3 }).map(b => b.label)).toContain('Results in 3d');
+    expect(buildStockBadges({ days_to_next_results: 0 }).map(b => b.label)).toContain('Results in 0d');
+    expect(buildStockBadges({ days_to_next_results: 25 }).find(b => b.label.startsWith('Results'))).toBeUndefined();
+    expect(buildStockBadges({ days_to_next_results: null }).find(b => b.label.startsWith('Results'))).toBeUndefined();
+  });
 });

@@ -29,6 +29,7 @@ import { alertsRouter }         from "./routers/alerts.router";
 import { aiRouter }         from "./routers/ai.router";
 import { portfolioRouter }      from "./routers/portfolio.router";
 import { sectorsRouter }        from "./routers/sectors.router";
+import { edgeRouter }           from "./routers/edge.router";
 
 export const appRouter = mergeRouters(
   userRouter,
@@ -60,6 +61,7 @@ export const appRouter = mergeRouters(
   aiRouter,
   portfolioRouter,
   sectorsRouter,
+  edgeRouter,
 );
 
 export type AppRouter = typeof appRouter;

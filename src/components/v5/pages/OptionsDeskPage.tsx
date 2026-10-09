@@ -5,6 +5,7 @@ import { fmtFixed, fmtINR, n, numOrNull, s } from '../utils';
 import { V5KpiStrip } from '../components/V5KpiStrip';
 import { V5DecisionSummaryStrip, V5InsightPanel, V5MiniBarChart } from '../components/V5Visuals';
 import { stockDisplayName } from '../stockIdentity';
+import { AsOfLine } from '../../AsOfLine';
 
 export function OptionsDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: string) => void }) {
   const [symbol, setSymbol] = useState('nifty');
@@ -92,6 +93,7 @@ export function OptionsDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
           <div className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-[var(--v5-positive)]" />
             <h2 className="v5-title text-lg font-semibold">Options Desk</h2>
+            <AsOfLine source="option chain (MoneyControl), stock_options_oi, max-pain and rollover tables" fetchedAt={chainQ.dataUpdatedAt || optionsQ.dataUpdatedAt} />
           </div>
           <input
             value={symbol}

@@ -19,6 +19,7 @@ interface SectorIntelligencePageProps {
 }
 
 import { SectorIntelTab } from './SectorIntelTab';
+import { AsOfLine } from '../AsOfLine';
 
 type DeskTab = 'overview' | 'rotation' | 'derivatives' | 'deepdive' | 'intel';
 type Timeframe = '1d' | '5d' | '1m' | '3m' | '6m' | '1y';
@@ -403,6 +404,7 @@ export const SectorIntelligencePage: React.FC<SectorIntelligencePageProps> = ({
     isLoading: isLoadingOverview,
     refetch: refetchOverview,
     isFetching: isFetchingOverview,
+    dataUpdatedAt: overviewUpdatedAt,
   } = trpc.getSectorsOverview.useQuery(undefined, {
     refetchInterval: 30000,
     refetchOnWindowFocus: false,
@@ -535,6 +537,7 @@ export const SectorIntelligencePage: React.FC<SectorIntelligencePageProps> = ({
               Cross-sectional sector rotation analysis, Relative Rotation Graph (RRG), constituent breadth momentum,
               options sentiment (PCR), and expert Indian market trading analyst stances.
             </p>
+            <AsOfLine className="text-[10px] text-slate-500 mt-1" source="sector tables (screener_sector_rotation, sector_fo_sentiment, stock_ohlcv)" fetchedAt={overviewUpdatedAt} />
           </div>
 
           {/* Quick Metrics & Refresh */}

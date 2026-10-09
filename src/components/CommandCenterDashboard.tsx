@@ -6,7 +6,9 @@ import {
   Shield, Zap, ChevronDown, ChevronUp, BarChart2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
+import { formatISTWithLocal, relativeFromNow, marketHoursRefetchInterval } from '../lib/timeFormat';
+import { EdgeCallBanner, WhatChangedCard, MarketPulseStrip } from './AlphaHonesty';
+import { StockTagRow, type TaggableStock } from './StockTagRow';
 import { CanonicalBadge } from './CanonicalSourceNote';
 import { V4QuickNav } from './v4/components/V4QuickNav';
 
@@ -83,7 +85,7 @@ function ScoreBar({ label, value, color = 'bg-sky-500' }: {
   );
 }
 
-function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) => void }) {
+function EodPickCard({ pick, onSelect, flags }: { pick: any; onSelect: (sym: string) => void; flags?: TaggableStock }) {
   const [expanded, setExpanded] = useState(false);
   const style = CONVICTION_STYLE[pick.conviction_level] ?? CONVICTION_STYLE.C_LOW;
   const explanation = pickExplanation(pick);
@@ -93,6 +95,10 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
       layout
       className={cn(style.card, 'p-4 cursor-pointer hover:brightness-110')}
       onClick={() => onSelect(pick.symbol)}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${pick.symbol} in the trade cockpit`}
+      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onSelect(pick.symbol); } }}
     >
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
@@ -131,6 +137,7 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
             )}
           </div>
           {pick.sector && <div className="text-[10px] text-slate-500 mt-0.5">{pick.sector}</div>}
+          {flags && <StockTagRow p={{ days_to_next_results: flags.days_to_next_results, eps_surprise_q1: flags.eps_surprise_q1, eps_beat_streak: flags.eps_beat_streak }} className="mt-1" />}
         </div>
         <div className="text-right">
           <div className="text-white font-bold text-sm">
@@ -241,8 +248,13 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
   const { data, isLoading, isError, refetch, isRefetching, dataUpdatedAt } =
     trpc.getCommandCenter.useQuery(
       { conviction, horizon, limit: 30 },
-      { refetchInterval: 5 * 60_000, refetchOnWindowFocus: true },
+      // The ranking is nightly; only the live-price overlay moves, and only in session.
+      { refetchInterval: marketHoursRefetchInterval(5 * 60_000), staleTime: 5 * 60_000, refetchOnWindowFocus: false },
     );
+  const symbols = (data?.eodPicks ?? []).map((p: any) => p.symbol as string);
+  const { data: earnings } = trpc.getEarningsFlags.useQuery(
+    { symbols }, { enabled: symbols.length > 0, staleTime: 30 * 60_000, refetchOnWindowFocus: false });
+  const flagsBySymbol = new Map<string, TaggableStock>((earnings?.rows ?? []).map((r: any) => [r.symbol, r]));
 
   const { mutate: triggerRanker, isPending: isRunning } =
     trpc.runUnifiedRanker.useMutation({ onSuccess: () => refetch() });
@@ -303,6 +315,9 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
           </div>
         </div>
 
+        <MarketPulseStrip />
+        <EdgeCallBanner />
+
         <div className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-[11px] text-amber-200/90" role="note">
           <span className="font-semibold text-amber-300">Read as a ranking, not a forecast.</span>{' '}
           Scores are ranks, not probabilities. No forward-return edge has been demonstrated on liquid names yet, and closed
@@ -349,11 +364,16 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
           </div>
         ) : (
           <>
+            <WhatChangedCard />
+
             <section>
               <div className="flex items-center gap-2 mb-3">
                 <Shield className="w-4 h-4 text-violet-400" />
                 <h2 className="v1-title-section">Ranked plans (EOD)</h2>
-                <span className="text-[10px] text-slate-500 ml-auto">{data?.eodPicks?.length ?? 0} stocks</span>
+                <span className="text-[10px] text-slate-500 ml-auto">
+                  {data?.eodPicks?.length ?? 0} stocks · source unified_recommendations · score 0-100 is a rank
+                  {earnings?.asOf ? ` · results dates from technical_signals ${earnings.asOf}` : ''}
+                </span>
               </div>
               {isError ? (
                 <div className="text-center py-12 text-rose-400 text-sm" role="alert">
@@ -367,7 +387,7 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {data!.eodPicks.map((pick: any) => (
-                    <EodPickCard key={pick.symbol} pick={pick} onSelect={onSelectStock} />
+                    <EodPickCard key={pick.symbol} pick={pick} onSelect={onSelectStock} flags={flagsBySymbol.get(pick.symbol)} />
                   ))}
                 </div>
               )}

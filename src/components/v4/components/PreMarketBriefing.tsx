@@ -3,6 +3,7 @@ import { Globe2, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { trpc } from '../../../lib/trpc';
 import { Card } from '../../../components/Card';
 import { cn } from '../../../lib/utils';
+import { AsOfLine } from '../../AsOfLine';
 
 interface MacroTile {
   symbol: string;
@@ -80,7 +81,7 @@ function buildBriefing(tiles: Record<string, MacroTile>): string[] {
 }
 
 export const PreMarketBriefing: React.FC = () => {
-  const { data, isLoading } = trpc.getMacroSnapshot.useQuery();
+  const { data, isLoading, dataUpdatedAt } = trpc.getMacroSnapshot.useQuery();
 
   const tiles = useMemo(() => {
     const map: Record<string, MacroTile> = {};
@@ -97,6 +98,7 @@ export const PreMarketBriefing: React.FC = () => {
 
   return (
     <Card title="Pre-Market Briefing" icon={Globe2}>
+      <AsOfLine className="text-[10px] text-slate-500 mb-2" source="getMacroSnapshot (latest close per macro series, pre-open snapshot)" fetchedAt={dataUpdatedAt} />
       {isLoading ? (
         <div className="text-xs text-slate-500">Loading macro tape…</div>
       ) : (

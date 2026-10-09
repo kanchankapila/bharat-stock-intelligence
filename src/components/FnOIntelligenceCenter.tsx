@@ -13,6 +13,7 @@ import { MaxPainAlerts } from './MaxPainAlerts';
 import { EarningsPlaybook } from './EarningsPlaybook';
 import { RolloverPositioningPanel } from './RolloverPositioningPanel';
 import { isNseMarketOpen } from '../lib/timeFormat';
+import { AsOfLine } from './AsOfLine';
 
 interface FnOScannerProps {
   onSelectStock: (symbol: string) => void;
@@ -302,7 +303,7 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
   const [activeScanner, setActiveScanner] = useState<string>('long-build-up');
   const [instType, setInstType] = useState<'all' | 'index' | 'stock'>('all');
 
-  const { data: scannerData, isLoading } = trpc.getTrendlyneFnoScanners.useQuery({
+  const { data: scannerData, isLoading, dataUpdatedAt: scannerUpdatedAt } = trpc.getTrendlyneFnoScanners.useQuery({
     mtype: (activeTab === 'futures' || activeTab === 'options') ? activeTab : 'futures',
     screenType: activeScanner,
     instType: instType === 'all' ? undefined : instType,
@@ -400,6 +401,7 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
           <h1 className="v1-title-page">F&O Intelligence Center</h1>
+          <AsOfLine source="Trendlyne F&O scanners (pass-through)" fetchedAt={scannerUpdatedAt} />
           <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mt-1 italic">Real-time derivative analytics — {scannerData?.expiry ? `Expiry: ${scannerData.expiry}` : 'Live'}</p>
         </div>
 

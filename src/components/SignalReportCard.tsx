@@ -2,6 +2,7 @@ import React from 'react';
 import { trpc } from '../lib/trpc';
 import { Card } from './Card';
 import { LiveHitRates } from './LiveHitRates';
+import { ForwardTestPanel, ReliabilityPanel } from './EdgeEvidence';
 import { Loader2, ChartLine, TrendingUp, ArrowUpRight, ArrowDownRight, Activity, BarChart2, Target } from 'lucide-react';
 
 const formatPct = (value?: number | null) => {
@@ -71,6 +72,8 @@ export function SignalReportCard() {
         <p className="mt-2 text-sm text-slate-400">Overview of current engine performance, confidence, and source signal health.</p>
       </div>
 
+      <ForwardTestPanel />
+      <ReliabilityPanel />
       <LiveHitRates />
       <div className="grid gap-4 xl:grid-cols-3">
         <Card title="Signal Coverage" icon={ChartLine}>

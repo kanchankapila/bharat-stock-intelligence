@@ -614,7 +614,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       </div>
 
       {/* ── Row 2: Main 3-Column Body ────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr 280px', gap: 10, marginBottom: 12 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr_280px] gap-2.5 mb-3 [&>*]:min-w-0">
 
         {/* LEFT: Breadth + Movers */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -972,7 +972,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10, marginBottom: 12 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-2.5 mb-3 [&>*]:min-w-0">
         <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '14px 16px' }}>
           <SectionLabel>FII &amp; DII Daily Flow</SectionLabel>
           {fiiDiiFlowData.length > 0 ? (
@@ -1008,7 +1008,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mb-3 [&>*]:min-w-0">
         <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '14px 16px' }}>
           <SectionLabel>Active Model Registry</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1052,7 +1052,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       </div>
 
       {/* ── Row 3: Index Overview + Global Markets ────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mb-3 [&>*]:min-w-0">
         <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '14px 16px' }}>
           <SectionLabel>Index Overview</SectionLabel>
           <IndexOverview onSelectIndex={onSelectIndex} />

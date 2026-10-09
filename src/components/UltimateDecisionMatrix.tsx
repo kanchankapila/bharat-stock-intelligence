@@ -56,10 +56,10 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
 
   // tRPC Procedures
   const { data: cockpitRes } = trpc.getTradeDecisionCockpitData.useQuery(undefined, { refetchInterval: 60000, refetchOnWindowFocus: false });
-  const { data: recsRes } = trpc.getBuyRecommendations.useQuery({ limit: 30 }, { refetchInterval: 120000, refetchOnWindowFocus: false });
+  const { data: recsRes } = trpc.getBuyRecommendations.useQuery({ limit: 30 }, { refetchInterval: 15 * 60_000, staleTime: 15 * 60_000, refetchOnWindowFocus: false }); // nightly ranking
   const { data: overviewRes } = trpc.getAllIndices.useQuery(undefined, { refetchInterval: 30000, refetchOnWindowFocus: false });
   const { data: adRes } = trpc.getAdvanceDecline.useQuery(undefined, { refetchInterval: 60000, refetchOnWindowFocus: false });
-  const { data: fiiRes } = trpc.getFiiDiiFlow.useQuery({ days: 10 }, { refetchInterval: 300000, refetchOnWindowFocus: false });
+  const { data: fiiRes } = trpc.getFiiDiiFlow.useQuery({ days: 10 }, { staleTime: 30 * 60_000, refetchOnWindowFocus: false }); // one row per day
   const { data: sentimentRes } = trpc.getMarketSentiment.useQuery(undefined, { refetchInterval: 120000, refetchOnWindowFocus: false });
   const { data: regimeRes } = trpc.getRegimeSummary.useQuery(undefined, { refetchInterval: 300000, refetchOnWindowFocus: false });
   const { data: buildupRes } = trpc.getFuturesBuildupMatrix.useQuery({ perBucket: 5 }, { refetchInterval: 300000, refetchOnWindowFocus: false });

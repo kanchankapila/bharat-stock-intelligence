@@ -32,6 +32,7 @@ function Tag({ label, color = 'bg-slate-700 text-slate-300' }: { label: string; 
 /** Row-shape accepted from either getBuyRecommendations picks or getUnifiedScoreForSymbol. */
 export interface TaggableStock {
   eps_beat_streak?: number | null;
+  days_to_next_results?: number | null;
   eps_surprise_q1?: number | null;
   eps_miss_after_streak?: boolean | number | null;
   insider_buy_flag?: boolean | number | null;
@@ -64,6 +65,10 @@ export function buildStockBadges(p: TaggableStock): Array<{ label: string; color
 
   if (p.eps_beat_streak != null && p.eps_beat_streak >= 3) badges.push({ label: `EPS ×${p.eps_beat_streak}`, color: 'bg-emerald-500/20 text-emerald-300' });
   else if (p.eps_surprise_q1 != null && p.eps_surprise_q1 > 5) badges.push({ label: 'EPS beat', color: 'bg-emerald-500/15 text-emerald-400' });
+  // Event risk, not a direction signal.
+  if (p.days_to_next_results != null && p.days_to_next_results >= 0 && p.days_to_next_results <= 10) {
+    badges.push({ label: `Results in ${p.days_to_next_results}d`, color: 'bg-amber-500/20 text-amber-300' });
+  }
   if (p.eps_miss_after_streak) badges.push({ label: 'PEAD', color: 'bg-rose-500/20 text-rose-300' });
 
   if (p.insider_buy_flag) badges.push({ label: 'Insider buy', color: 'bg-violet-500/20 text-violet-300' });

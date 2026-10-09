@@ -158,7 +158,7 @@ const OverviewTab: React.FC<{ symbol: string; sector?: string | null }> = ({ sym
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <Card title="Composite Score" icon={LayoutGrid} className="lg:col-span-1">
+      <Card title="Screener/news input score" icon={LayoutGrid} className="lg:col-span-1">
         <div className="flex flex-col items-center py-2">
           <span className={cn(
             'text-4xl font-black font-mono',
@@ -169,13 +169,14 @@ const OverviewTab: React.FC<{ symbol: string; sector?: string | null }> = ({ sym
           <span className="text-[10px] text-slate-500 uppercase tracking-widest mt-1">
             {score?.classification ?? 'No score yet'}
           </span>
+          <span className="text-[10px] text-slate-500 mt-1 text-center">stock_scores, long-term; an input to the ranker, not the canonical rank. A rank, not a probability.</span>
           {score?.confidence != null && (
             // confidence is already a 5-95 integer (scoring_engine.py caps it there directly),
             // not a 0-1 fraction. This is stock_scores' OWN calibrated confidence, which is a
             // different field from unified_recommendations.unified_score -- TopRatedStocks.tsx
             // used to render that score as a confidence % and stopped (AF-20260917-10), so do
             // not restore a cross-reference to it as if the two were the same quantity.
-            <span className="text-[10px] text-slate-600 mt-0.5">{Math.round(score.confidence)}% confidence</span>
+            <span className="text-[10px] text-slate-600 mt-0.5" title="A 5-95 heuristic cap from scoring_engine.py, not a probability or a measured hit rate">score certainty (heuristic) {Math.round(score.confidence)}/100</span>
           )}
         </div>
         {factors && (
