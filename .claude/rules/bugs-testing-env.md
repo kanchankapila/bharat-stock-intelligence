@@ -34,6 +34,11 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 - **A schema DDL file that qualifies some statements to a schema but not others (e.g. indexes but not `CREATE TABLE`) creates tables where you point it and then indexes production's copy** when applied anywhere but the default schema. Schema-qualify everything or assert nothing outside the target schema was touched.
 
 ## Automated bulk-edit passes
+- **A Python `open(p,'w')` rewrite of a source file on Windows turns LF into CRLF (2026-10-09).** Source-scanning tests that anchor on `'
+'`
+  (e.g. `queuesSkipNotStampedAsSuccess.test.ts` searching `'/**
+ * Overall execution budget'`) then fail locally while CI, which checks out LF, stays green.
+  Edit with the Edit tool, or read/write in binary mode (`open(p,'rb')`/`'wb'`), and rerun the full vitest after any scripted rewrite.
 
 - **A script that injects the same lines into hundreds of files will land them in the wrong
   place in a handful, and the wrong place is not distributed evenly -- it clusters on the files
