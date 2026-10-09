@@ -58,8 +58,14 @@ def _read_dated(sql: str, params: tuple) -> pd.DataFrame:
     return df.set_index("date")
 
 
+MACRO_RET_FLAG = "regime_macro_ret_from_close"
+MACRO_COLS = (("US10Y", "us10y_chg5d"), ("DXY", "dxy_ret_5d"), ("SP500", "sp500_ret_5d"))
+
+
 def _load_hmm_features(lookback_days: int = 756,
-                        as_of_date: str = None) -> pd.DataFrame:
+                        as_of_date: str = None,
+                        macro_from_close: bool = None,
+                        zero_fill_counts: dict = None) -> pd.DataFrame:
     """Build 8-feature market-level matrix for HMM training/inference."""
     anchor = as_of_date or datetime.today().strftime("%Y-%m-%d")
     anchor_dt = datetime.strptime(anchor, "%Y-%m-%d")
@@ -109,16 +115,67 @@ def _load_hmm_features(lookback_days: int = 756,
     else:
         df["advance_decline_ratio"] = 0.5
 
-    # Global macro from macro_asset_prices
-    for sym, col in [("US10Y", "us10y_chg5d"), ("DXY", "dxy_ret_5d"), ("SP500", "sp500_ret_5d")]:
-        macro = _read_dated(
-            "SELECT date, ret_5d FROM macro_asset_prices WHERE symbol=? AND date>=? AND date<=? ORDER BY date",
-            (sym, cutoff_d, anchor_d),
-        )
-        df[col] = macro["ret_5d"].reindex(df.index, method="ffill").fillna(0.0)
+    # Global macro from macro_asset_prices. Stored ret_5d has NULL holes (a 22-day one in one
+    # series, AF-20261008-23) that used to read as "flat market" via fillna(0). Behind the
+    # default-OFF flag the return is computed from the close series instead (same pct_change(5)
+    # global_macro_fetcher uses), with a 30-calendar-day warm-up so the window's first rows have
+    # 5 prior closes. It changes labels, so enabling it is an EVIDENCE decision.
+    if macro_from_close is None:
+        macro_from_close = _flag_on(MACRO_RET_FLAG)
+    for sym, col in MACRO_COLS:
+        if macro_from_close:
+            macro = _read_dated(
+                "SELECT date, close FROM macro_asset_prices WHERE symbol=? AND date>=? AND date<=? "
+                "AND close IS NOT NULL ORDER BY date",
+                (sym, cutoff_d - timedelta(days=30), anchor_d),
+            )
+            ret = macro["close"].astype(float).pct_change(5)
+        else:
+            macro = _read_dated(
+                "SELECT date, ret_5d FROM macro_asset_prices WHERE symbol=? AND date>=? AND date<=? ORDER BY date",
+                (sym, cutoff_d, anchor_d),
+            )
+            ret = macro["ret_5d"]
+        df[col] = ret.reindex(df.index, method="ffill")
 
     # Drop only rows where core Nifty features are NaN (rolling window warmup)
-    return df.dropna(subset=["nifty_ret_21d", "nifty_vol_21d"])
+    df = df.dropna(subset=["nifty_ret_21d", "nifty_vol_21d"])
+    macro_cols = [c for _, c in MACRO_COLS]
+    if zero_fill_counts is not None:
+        zero_fill_counts["rows"] = len(df)
+        zero_fill_counts.update({c: int(df[c].isna().sum()) for c in macro_cols})
+    df[macro_cols] = df[macro_cols].fillna(0.0)
+    return df
+
+
+def zero_fill_report(lookback_days: int = 756, as_of_date: str = None,
+                     macro_from_close: bool = None) -> dict:
+    """How many feature rows had each macro return zero-filled (no value to carry forward)."""
+    counts: dict = {}
+    _load_hmm_features(lookback_days, as_of_date, macro_from_close=macro_from_close,
+                       zero_fill_counts=counts)
+    return counts
+
+
+def _flag_on(key: str) -> bool:
+    """app_settings boolean; any read failure means OFF (today's behaviour)."""
+    try:
+        df = read_df("SELECT value FROM app_settings WHERE key = ?", (key,))
+    except Exception:
+        return False
+    return (not df.empty) and str(df.iloc[0]["value"]).strip().lower() in ("1", "true", "on", "yes")
+
+
+def _has_column(table: str, column: str) -> bool:
+    try:
+        df = read_df(
+            "SELECT 1 AS x FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?",
+            (table, column),
+        )
+    except Exception:
+        return False
+    return not df.empty
 
 
 def _assign_state_labels(model) -> dict[int, str]:
@@ -270,11 +327,15 @@ def train_hmm(lookback_days: int = 1260, holdout_days: int = 60, force: bool = F
     return {"state_labels": state_labels, "n_samples": len(train_df), "promotion": decision}
 
 
-def _label_day(model, scaler, state_labels: dict, date: str, publish_live: bool = True) -> str:
+def _label_day(model, scaler, state_labels: dict, date: str, publish_live: bool = True,
+               backfilled: bool = None) -> str:
     """Causal single-day regime label: Viterbi over a trailing 120-day window ending at
     `date`, and only `date`. Shared by update_regime (live) and backfill_regimes (looped
     per day) so both paths use identical, leak-free logic -- neither ever lets a later
     date's observations influence an earlier date's label.
+
+    `backfilled` is written only when not None, i.e. when the caller found a
+    market_regimes.backfilled column (AF-20261008-13(f)); None keeps the pre-column statement.
     """
     df = _load_hmm_features(lookback_days=120, as_of_date=date)  # recent 6 months for inference
     if df.empty:
@@ -292,18 +353,33 @@ def _label_day(model, scaler, state_labels: dict, date: str, publish_live: bool 
 
     features_dict = df.iloc[-1].to_dict()
 
-    execute(
-        """INSERT INTO market_regimes
-           (date, regime, regime_prob, hmm_state, viterbi_path_json, features_json, computed_at)
-           VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)
-           ON CONFLICT(date) DO UPDATE SET
-             regime=excluded.regime, regime_prob=excluded.regime_prob,
-             hmm_state=excluded.hmm_state, viterbi_path_json=excluded.viterbi_path_json,
-             features_json=excluded.features_json, computed_at=CURRENT_TIMESTAMP""",
-        (date, today_regime, today_prob, today_state,
-         json.dumps(viterbi_path), json.dumps({k: float(v) if pd.notna(v) else None
-                                               for k, v in features_dict.items()})),
-    )
+    params = (date, today_regime, today_prob, today_state,
+              json.dumps(viterbi_path), json.dumps({k: float(v) if pd.notna(v) else None
+                                                    for k, v in features_dict.items()}))
+    if backfilled is None:
+        execute(
+            """INSERT INTO market_regimes
+               (date, regime, regime_prob, hmm_state, viterbi_path_json, features_json, computed_at)
+               VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)
+               ON CONFLICT(date) DO UPDATE SET
+                 regime=excluded.regime, regime_prob=excluded.regime_prob,
+                 hmm_state=excluded.hmm_state, viterbi_path_json=excluded.viterbi_path_json,
+                 features_json=excluded.features_json, computed_at=CURRENT_TIMESTAMP""",
+            params,
+        )
+    else:
+        execute(
+            """INSERT INTO market_regimes
+               (date, regime, regime_prob, hmm_state, viterbi_path_json, features_json, computed_at,
+                backfilled)
+               VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,?)
+               ON CONFLICT(date) DO UPDATE SET
+                 regime=excluded.regime, regime_prob=excluded.regime_prob,
+                 hmm_state=excluded.hmm_state, viterbi_path_json=excluded.viterbi_path_json,
+                 features_json=excluded.features_json, computed_at=CURRENT_TIMESTAMP,
+                 backfilled=excluded.backfilled""",
+            params + (bool(backfilled),),
+        )
 
     if publish_live:
         # Publish live regime to app_settings so ML ensemble, queues, and the technical-signals
@@ -336,7 +412,8 @@ def update_regime(date: str = None) -> str:
 
     with open(HMM_PATH, "rb") as f:
         bundle = pickle.load(f)
-    return _label_day(bundle["model"], bundle["scaler"], bundle["state_labels"], date, publish_live=True)
+    return _label_day(bundle["model"], bundle["scaler"], bundle["state_labels"], date, publish_live=True,
+                      backfilled=False if _has_column("market_regimes", "backfilled") else None)
 
 
 def backfill_regimes(start_date: str, end_date: str) -> int:
@@ -366,10 +443,11 @@ def backfill_regimes(start_date: str, end_date: str) -> int:
 
     n = 0
     skipped = 0
+    backfilled = True if _has_column("market_regimes", "backfilled") else None
     for ts in trading_days:
         d = ts.strftime("%Y-%m-%d")
         try:
-            _label_day(model, scaler, state_labels, d, publish_live=False)
+            _label_day(model, scaler, state_labels, d, publish_live=False, backfilled=backfilled)
             n += 1
         except NoRegimeData:
             # Unlike update_regime()'s live daily path, a single date missing its trailing
@@ -382,16 +460,31 @@ def backfill_regimes(start_date: str, end_date: str) -> int:
     return n
 
 
+def retrain_standalone(force: bool = False) -> dict:
+    """HMM retrain not tied to the DL trainer. dl_trainer.py only runs `--mode train` after a
+    successful scheduled DL retrain, so a failing DL run also skips the regime retrain. This is a
+    separate entry point (`--mode retrain`); the existing schedule is unchanged. Unlike `--mode
+    train`, a not-enough-data result raises, so a job running it fails instead of exiting 0."""
+    result = train_hmm(force=force)
+    if "error" in result:
+        raise RuntimeError(f"[HMM] retrain failed: {result['error']}")
+    return result
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["train", "update", "backfill"], default="update")
+    parser.add_argument("--mode", choices=["train", "retrain", "update", "backfill", "zero-fill-report"], default="update")
     parser.add_argument("--date", help="Date to classify (default: today)")
     parser.add_argument("--start", help="Backfill start date (YYYY-MM-DD)")
     parser.add_argument("--end", help="Backfill end date (YYYY-MM-DD)")
     parser.add_argument("--force", action="store_true", help="Skip the promotion gate")
     args = parser.parse_args()
 
-    if args.mode == "train":
+    if args.mode == "retrain":
+        print(f"[HMM] Retrain result: {retrain_standalone(force=args.force)}")
+    elif args.mode == "zero-fill-report":
+        print(json.dumps(zero_fill_report(as_of_date=args.date)))
+    elif args.mode == "train":
         result = train_hmm(force=args.force)
         print(f"[HMM] Train result: {result}")
     elif args.mode == "backfill":

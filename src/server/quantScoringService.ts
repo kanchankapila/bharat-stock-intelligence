@@ -180,11 +180,24 @@ async function loadScreenerConfluence(): Promise<Map<string, {
 
 // ─── Fundamentals lookup (one-shot) ──────────────────────────────────────────
 
-async function loadFundamentals(): Promise<Map<string, any>> {
+// Yahoo's returnOnEquity decayed to ~6% coverage (AF-20260917-07). Behind this default-OFF flag
+// the gaps are filled from investsights_fundamentals_history (Pearson 0.96 vs yfinance, same
+// fraction scale; same SQL as fundamentals_snapshot.py). A present value is never overwritten.
+const ROE_FALLBACK_FLAG = 'quant_roe_investsights_fallback';
+
+export async function loadFundamentals(): Promise<Map<string, any>> {
+  const flag = await dbGet('SELECT value FROM app_settings WHERE key = ?', [ROE_FALLBACK_FLAG]) as { value: string } | undefined;
+  const fallback = ['1', 'true', 'on', 'yes'].includes(String(flag?.value ?? '').trim().toLowerCase());
+  const roe = fallback
+    ? `COALESCE(sf.return_on_equity, (
+         SELECT isf.return_on_equity FROM investsights_fundamentals_history isf
+         WHERE isf.symbol = sf.symbol AND isf.return_on_equity IS NOT NULL
+         ORDER BY isf.fetched_date DESC LIMIT 1)) AS return_on_equity`
+    : 'sf.return_on_equity';
   const rows = await dbAll(`
-    SELECT symbol, trailing_pe, forward_pe, debt_to_equity, return_on_equity,
-           operating_margins, revenue_growth, piotroski_f_score, earnings_growth
-    FROM stock_fundamentals
+    SELECT sf.symbol, sf.trailing_pe, sf.forward_pe, sf.debt_to_equity, ${roe},
+           sf.operating_margins, sf.revenue_growth, sf.piotroski_f_score, sf.earnings_growth
+    FROM stock_fundamentals sf
   `) as any[];
   return new Map(rows.map(r => [r.symbol, r]));
 }

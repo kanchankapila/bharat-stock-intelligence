@@ -43,6 +43,17 @@ NSE_PREOPEN_ALL   = "https://www.nseindia.com/api/market-data-pre-open?key=ALL"
 NSE_PREOPEN_FO    = "https://www.nseindia.com/api/market-data-pre-open?key=FO"
 NSE_PREOPEN_NIFTY = "https://www.nseindia.com/api/market-data-pre-open?key=NIFTY"
 
+# The pre-open call auction runs 09:00-09:08 IST and the book is final by 09:15. A run outside
+# 09:00-09:20 (a restart catch-up, a manual trigger at 11:00) would stamp a later book -- or the
+# live market -- as that day's pre-open; AF-20261008-23 found 26 of 68 dates written that way.
+# datetime.now() is IST on this host, as everywhere else in this module.
+PREOPEN_WINDOW = (datetime.time(9, 0), datetime.time(9, 20))
+
+
+def in_preopen_window(now: datetime.datetime) -> bool:
+    return PREOPEN_WINDOW[0] <= now.time() <= PREOPEN_WINDOW[1]
+
+
 MI_URL = "https://api.moneycontrol.com/mcapi/v1/premarket/get-global-marketdata?section=mi"
 II_URL = "https://api.moneycontrol.com/mcapi/v1/premarket/get-global-marketdata?section=ii"
 
@@ -201,7 +212,7 @@ def _fetch_nse_preopen_url(sess, url: str) -> list[dict]:
         return []
 
 
-def fetch_nse_preopen(con) -> int:
+def fetch_nse_preopen(con, now: datetime.datetime | None = None) -> int:
     """Fetch NSE pre-open IEP data for the entire market (2,150+ equities in 1 call).
 
     Writes to preopen_stock_snapshot and backfills the most recent
@@ -209,7 +220,12 @@ def fetch_nse_preopen(con) -> int:
 
     Returns count of stocks upserted.
     """
-    snapshot_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    now = now or datetime.datetime.now()
+    if not in_preopen_window(now):
+        print(f"[NSE PreOpen] {now:%H:%M} is outside the 09:00-09:20 IST pre-open window -- nothing written",
+              file=sys.stderr)
+        return 0
+    snapshot_date = now.strftime("%Y-%m-%d")
     # No pre-open auction on a closed day: NSE still serves the last session's book, which was
     # being stored under the closed date (audit C-04).
     if not is_trading_session(snapshot_date):
@@ -243,7 +259,7 @@ def fetch_nse_preopen(con) -> int:
         print("[NSE PreOpen] No data returned — skipping IEP backfill")
         return 0
 
-    fetched_at    = datetime.datetime.now().isoformat()
+    fetched_at    = now.isoformat()
 
     rows = []
     for sym, item in merged.items():
@@ -337,8 +353,12 @@ def fetch_nse_preopen(con) -> int:
 # Main
 # ---------------------------------------------------------------------------
 
-def run() -> None:
-    now = datetime.datetime.now()
+def run(now: datetime.datetime | None = None) -> None:
+    now = now or datetime.datetime.now()
+    if not in_preopen_window(now):
+        print(f"[PreOpen] {now:%H:%M} is outside the 09:00-09:20 IST pre-open window -- nothing written",
+              file=sys.stderr)
+        return
     snapshot_date = now.strftime("%Y-%m-%d")
     snapshot_time = now.strftime("%H:%M:%S")
 
@@ -433,7 +453,7 @@ def run() -> None:
     con.commit()
 
     # ── NSE per-stock IEP pre-open data ─────────────────────────────────────
-    fetch_nse_preopen(con)
+    fetch_nse_preopen(con, now=now)
 
     con.close()
 

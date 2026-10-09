@@ -128,7 +128,9 @@ def test_preopen_stock_snapshot_skips_non_trading_day(monkeypatch):
     class _Con:
         def cursor(self):
             raise AssertionError("writer wrote on a non-trading day")
-    assert m.fetch_nse_preopen(_Con()) == 0
+    import datetime
+    # inside the 09:00-09:20 window, so only the trading-day check can be what skips the write
+    assert m.fetch_nse_preopen(_Con(), now=datetime.datetime(2026, 10, 4, 9, 10)) == 0
 
 
 def test_advance_decline_skips_non_trading_day(monkeypatch):

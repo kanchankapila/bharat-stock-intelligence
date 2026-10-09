@@ -57,7 +57,8 @@ class TestNsePreopenFetcherLiveDataSource:
         if not pf.is_trading_session(today):
             pytest.skip(f"{today} is not an NSE session -- the writer deliberately writes nothing")
         conn = _make_test_conn()
-        n = pf.fetch_nse_preopen(conn)
+        # the writer refuses outside 09:00-09:20 IST; the live book is served all day, so pin the clock inside the window
+        n = pf.fetch_nse_preopen(conn, now=datetime.datetime.combine(datetime.date.today(), datetime.time(9, 10)))
         assert n > 500, f"fetch_nse_preopen() upserted only {n} rows -- expected 2,000+"
 
         cur = conn.cursor()
