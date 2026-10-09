@@ -261,3 +261,7 @@ changes three statements above:
 - **Section 2 item 4 (overlays):** the high-vol overlay is a small consistent plus over 5 years (IC +0.008, t 3.9). The -0.013 seen in the
   40-session window was the falling-tape exception. Keep it; the red-flag and crowding overlays remain unmeasured.
 - Delivery trend (5d minus 20d) is the only rebuildable input positive in every regime and year, but it is too weak to survive costs alone.
+- **Correction (same day, sub-project E):** the "-0.16% net" quoted for the combination charged the full round trip on every rebalance. On actual
+  turnover it is -0.022%/period (t -0.38), about zero. No structural lever (rank buffer, longer holding, beta hedge, liquidity weighting, their
+  best-of combination) creates an edge: 58 variants, none beyond t 2 out-of-sample. The binding limit is signal strength, not cost structure
+  (AF-20261008-31). A rank buffer remains a sensible execution rule (turnover 0.54 -> 0.17).
