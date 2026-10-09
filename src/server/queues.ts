@@ -1343,6 +1343,12 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   await runPython('forward_test_report.py', ['--persist'], 10 * 60_000)
     .catch(e => T.fail('forward_test_report', e));
 
+  // Shadow arms + objective-regime scorecard + alerts (2026-10-09, AF-20261008-16/-17). Same contract as the
+  // forward test: read-only apart from one app_settings snapshot, never changes a score, watched by
+  // `accuracy-scorecard-freshness`. ~50 s measured against the live DB.
+  await runPython('accuracy_scorecard.py', ['--persist'], 10 * 60_000)
+    .catch(e => T.fail('accuracy_scorecard', e));
+
   // Surface the real per-step outcomes (and a degraded job state if any failed) instead of the
   // old blanket 'success' the completed handler used to stamp on all of these.
   //

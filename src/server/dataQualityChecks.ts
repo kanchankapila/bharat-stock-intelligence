@@ -1578,6 +1578,26 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'accuracy-scorecard-freshness',
+    label: 'accuracy_scorecard snapshot (shadow arms, objective-regime scorecard and alerts, written by ml-daily-ops)',
+    category: 'scoring',
+    critical: false,
+    // Same cadence contract as the frozen forward test. A warn also carries any alert the scorecard raised
+    // (Brier worse than the base rate, dispersion collapse, a published-tier lift band that includes zero),
+    // so a degrading ranking surfaces here instead of only inside a JSON blob.
+    sql: `SELECT "updatedAt" AS last_date, value FROM app_settings WHERE key = 'accuracy_scorecard'`,
+    evaluate: (row, now) => {
+      const stale = tradingDaysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'No accuracy_scorecard snapshot yet - run accuracy_scorecard.py --persist (ml-daily-ops does this nightly)' };
+      if (stale > 6) return { status: 'fail', detail: `accuracy_scorecard snapshot is ${fmtDays(stale)} old - the scorecard has stopped accumulating` };
+      let codes: string[] = [];
+      try { codes = (JSON.parse(String(row?.value ?? '{}')).alerts ?? []).map((a: { code: string }) => a.code); } catch { /* unreadable value: age alone decides */ }
+      if (stale > 3) return { status: 'warn', detail: `accuracy_scorecard snapshot is ${fmtDays(stale)} old` };
+      if (codes.length) return { status: 'warn', detail: `accuracy_scorecard alerts: ${codes.join(', ')}` };
+      return { status: 'pass', detail: `accuracy_scorecard snapshot ${fmtDays(stale)} old, no alerts` };
+    },
+  },
+  {
     id: 'technical-composite-age',
     label: 'technical_composite_scores rows older than 30 days (scoring_engine consumes them with no age guard)',
     category: 'scoring',

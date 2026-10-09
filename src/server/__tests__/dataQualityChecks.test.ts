@@ -1187,6 +1187,18 @@ describe('audit regression guards (2026-08-11)', () => {
       expect(c.evaluate({ last_date: null }, now).status).toBe('warn');   // never run yet
     });
 
+    it('accuracy scorecard snapshot warns then fails when the nightly step stops, and surfaces alerts', () => {
+      const c = find('accuracy-scorecard-freshness');
+      expect(c.sql).toContain("key = 'accuracy_scorecard'");
+      expect(c.evaluate({ last_date: ago(1), value: JSON.stringify({ alerts: [] }) }, now).status).toBe('pass');
+      expect(c.evaluate({ last_date: ago(6), value: JSON.stringify({ alerts: [] }) }, now).status).toBe('warn');
+      expect(c.evaluate({ last_date: ago(12), value: JSON.stringify({ alerts: [] }) }, now).status).toBe('fail');
+      expect(c.evaluate({ last_date: null }, now).status).toBe('warn');
+      const alerted = c.evaluate({ last_date: ago(1), value: JSON.stringify({ alerts: [{ code: 'brier_worse_than_base', message: 'x' }] }) }, now);
+      expect(alerted.status).toBe('warn');
+      expect(alerted.detail).toContain('brier_worse_than_base');
+    });
+
     it('request-driven MC caches (swot, consolidated) only warn after a month with no panel opens', () => {
       for (const id of ['mc-swot-history-freshness', 'mc-consolidated-metrics-freshness']) {
         const c = find(id);

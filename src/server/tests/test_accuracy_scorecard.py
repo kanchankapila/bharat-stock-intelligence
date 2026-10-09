@@ -96,3 +96,12 @@ def test_end_to_end_on_a_throwaway_schema_and_persist_writes_one_row():
     got = con.execute("SELECT key, value FROM app_settings").fetchall()
     assert len(got) == 1 and got[0]["key"] == "accuracy_scorecard" and json.loads(got[0]["value"])["rows"]
     con.close()
+
+
+def test_attach_alerts_puts_the_evaluated_alerts_into_the_snapshot():
+    sc = {"rows": [], "calibration": {"5": {"n": 100, "brier": 0.27, "brier_base": 0.22}}}
+    S.attach_alerts(sc)
+    assert [a["code"] for a in sc["alerts"]] == ["brier_worse_than_base"]
+    clean = {"rows": [], "calibration": {"5": {"n": 100, "brier": 0.20, "brier_base": 0.22}}}
+    S.attach_alerts(clean)
+    assert clean["alerts"] == []

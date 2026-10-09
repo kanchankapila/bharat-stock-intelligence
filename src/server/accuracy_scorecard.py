@@ -231,6 +231,12 @@ def _clean(o):
     return o
 
 
+def attach_alerts(out: dict) -> dict:
+    from accuracy_alerts import evaluate
+    out["alerts"] = evaluate(out)
+    return out
+
+
 def persist_snapshot(con, out: dict) -> None:
     con.execute('INSERT INTO app_settings (key, value, "updatedAt") VALUES (?, ?, now()) '
                 'ON CONFLICT (key) DO UPDATE SET value = excluded.value, "updatedAt" = excluded."updatedAt"',
@@ -268,7 +274,7 @@ def main() -> int:
     from db_compat import connect
     con = connect()
     try:
-        out = build_scorecard(con, a.since)
+        out = attach_alerts(build_scorecard(con, a.since))
         if a.json:
             print(json.dumps(_clean(out), indent=2, default=str))
         else:
