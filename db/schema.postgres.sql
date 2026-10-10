@@ -2450,6 +2450,24 @@ CREATE TABLE IF NOT EXISTS "niftytrader_live_screener_snapshots" (
 );
 CREATE INDEX idx_nt_live_screener_filter_date ON public.niftytrader_live_screener_snapshots USING btree (filter_name, trade_date, captured_at);
 
+-- ── nse_bulk_block_deals ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "nse_bulk_block_deals" (
+  "deal_type" TEXT NOT NULL,
+  "trade_date" DATE NOT NULL,
+  "symbol" TEXT NOT NULL,
+  "client_name" TEXT NOT NULL,
+  "buy_sell" TEXT,
+  "quantity" DOUBLE PRECISION,
+  "price" DOUBLE PRECISION,
+  "security_name" TEXT,
+  "value_cr" DOUBLE PRECISION,
+  "remarks" TEXT,
+  "source" TEXT NOT NULL DEFAULT 'nse_archive'::text,
+  "fetched_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE ("deal_type", "trade_date", "symbol", "client_name", "buy_sell", "quantity", "price")
+);
+CREATE INDEX idx_nbbd_sym_date ON public.nse_bulk_block_deals USING btree (symbol, trade_date DESC);
+
 -- ── nse_filed_corporate_actions ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "nse_filed_corporate_actions" (
   "source_url" TEXT NOT NULL PRIMARY KEY,

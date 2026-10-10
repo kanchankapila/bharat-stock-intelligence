@@ -173,6 +173,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'trendlyne-intraday', marker: "'trendlyne-intraday-scan'", label: 'trendlyneIntradayQueue' },
     { jobName: 'intraday-fetcher', marker: "'intraday-fetcher'", label: 'intradayFetcherQueue' },
     { jobName: 'preopen-snapshot', marker: "'preopen-daily'", label: 'preopenQueue' },
+    { jobName: 'nse-bulk-block', marker: "'nse-bulk-block-daily'", label: 'nseBulkBlockQueue' },
     { jobName: 'market-regime-refresh', marker: "'regime-intraday'", label: 'regimeQueue' },
     { jobName: 'intraday-ranker', marker: "'regime-intraday'", label: 'regimeQueue (shared with market-regime-refresh)' },
     { jobName: 'closed-day-early-batch', marker: "'closed-day-early-batch'", label: 'closedDayQueue' },

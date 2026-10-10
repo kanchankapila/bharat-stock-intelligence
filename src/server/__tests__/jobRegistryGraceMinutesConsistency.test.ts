@@ -143,6 +143,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'research-postclose': "jobName: 'research-postclose-daily'",
     'dl-macro-fetch': "jobName: 'dl-macro-daily'",
     'preopen-snapshot': "'preopen-daily'",
+    'nse-bulk-block': "'nse-bulk-block-daily'",
     // Own queue + Worker (lockDuration 75min), registered 2026-09-04. Uses the Worker-variable
     // marker for the same reason as the group above -- a long scheduling-rationale comment sits
     // between the job-name literal and the lockDuration.

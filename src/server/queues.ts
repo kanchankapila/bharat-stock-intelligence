@@ -2855,6 +2855,31 @@ export async function initQueues(): Promise<boolean> {
       { connection, concurrency: 1, lockDuration: 3 * 60_000 });
     console.log('[QUEUE] Pre-open snapshot scheduled at 9:10 AM IST (weekdays)');
 
+    // ── NSE bulk/block deal archive (14:30 UTC = 20:00 IST, weekdays) ──────────────────────
+    // AF-20261008-38. archives.nseindia.com's bulk.csv/block.csv hold ONLY the latest trading
+    // day (09-Oct was published 19:07 IST) and are overwritten the next evening, so a missed day
+    // is lost for good. Not folded into ml-daily-ops (18:50 IST): that fires before NSE publishes.
+    // addJobWithCatchup's boot catch-up re-runs a missed slot; the file stays readable until the
+    // next evening, so a morning restart still recovers it. A holiday run re-reads the last
+    // trading day and upserts no-ops. The fetcher exits 2 on block/404/HTML, which rejects
+    // runPython; the run is then thrown so BullMQ records it failed, not an empty success.
+    const nseBulkBlockQueue = new Queue('nse-bulk-block', { connection });
+    await addJobWithCatchup(nseBulkBlockQueue, 'nse-bulk-block-daily', {}, {
+      repeat: { pattern: '30 14 * * 1-5', tz: 'Etc/UTC' },
+      jobId: 'nse-bulk-block-daily',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    new Worker('nse-bulk-block',
+      async () => {
+        const T = new StepTracker('nse-bulk-block');
+        await T.runQuiet('nse_bulk_block_fetcher', () => runPython('nse_bulk_block_fetcher.py', [], 3 * 60_000));
+        const verdict = T.finish();
+        if (!verdict.ok) throw new Error(`nse-bulk-block failed: ${verdict.failedSteps.join(',')}`);
+        return { success: true };
+      },
+      { connection, concurrency: 1, lockDuration: 5 * 60_000 });
+    console.log('[QUEUE] NSE bulk/block deal archive scheduled at 8:00 PM IST (weekdays)');
+
     // ── Intraday regime refresh: VIX + USDINR + Nifty basis, every 15 min ──
     // '*/15 3-10 * * 1-5' = 03:00-10:45 UTC = 08:30-16:15 IST weekdays. Corrected 2026-08-30:
     // the old comment said '3:45-10:00 UTC = 9:15-15:30 IST', which is the NSE session, not what

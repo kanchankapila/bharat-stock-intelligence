@@ -318,6 +318,11 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'flows', critical: false, table: 'insider_trades', dateColumn: 'date_iso', warnDays: 14 },
   { id: 'bulk-block-deals-recency', label: 'bulk_block_deals (delivery-trend NSE bulk/block feed)',
     category: 'flows', critical: false, table: 'bulk_block_deals', dateColumn: 'deal_date', warnDays: 14 },
+  // NSE daily bulk.csv/block.csv archives (nse_bulk_block_fetcher.py, AF-20261008-38). bulk.csv had
+  // 155 rows on 2026-10-09, so a quiet week means the fetch broke, not that nobody traded in bulk.
+  // block.csv is often "NO RECORDS", so it is not checked separately. Warn-only (sparse-by-nature style).
+  { id: 'nse-bulk-block-deals-recency', label: 'nse_bulk_block_deals (NSE archive bulk/block files)',
+    category: 'flows', critical: false, table: 'nse_bulk_block_deals', dateColumn: 'trade_date', warnDays: 3 },
   // Tightened from 3/5 to 1/3 on 2026-08-25: this table froze at 2026-08-21 through three
   // consecutive "successful" runs (mc_index_oi-style backdated upserts on the TS side are
   // impossible here, but a fetcher can still exit 0 without advancing THIS table -- NSE
