@@ -195,7 +195,8 @@ const SECTOR_KEYWORDS: Record<string, string> = {
 
 // ─── RSS XML Parser ───────────────────────────────────────────────────────────
 
-interface RawNewsItem { title: string; link: string; pubDate: string; description: string }
+/** `key`: a provider's stable per-item id, used for the row id instead of `link` when the link is not item-specific. */
+interface RawNewsItem { title: string; link: string; pubDate: string; description: string; key?: string }
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
@@ -338,7 +339,7 @@ function processNewsItem(
     ? Array.from(new Set([forceSymbol, ...extractSymbols(text)])).slice(0, 5)
     : extractSymbols(text);
 
-  const id = crypto.createHash('sha1').update(`${srcName}:${raw.link || raw.title}`).digest('hex');
+  const id = crypto.createHash('sha1').update(`${srcName}:${raw.key || raw.link || raw.title}`).digest('hex');
 
   let pubAt: string | null = null;
   try { pubAt = raw.pubDate ? new Date(raw.pubDate).toISOString() : null; } catch { /* skip */ }
@@ -577,7 +578,12 @@ export async function runBseAnnouncementsCycle(): Promise<{ fetched: number; ins
     const raw: RawNewsItem = {
       title: `${company}: ${cat}`.slice(0, 300),
       description: (a.HEADLINE || a.NEWSSUB || cat).slice(0, 1000),
-      link: a.NSURL || `https://www.bseindia.com/corporates/ann.html?newsid=${a.NEWSID}`,
+      // NSURL is the company's stock page, shared by every filing; keying on it collapsed each
+      // company to one row whose title/published_at froze at its first sighting (AF-20261008-36).
+      link: a.ATTACHMENTNAME
+        ? `https://www.bseindia.com/xml-data/corpfiling/AttachLive/${a.ATTACHMENTNAME}`
+        : a.NSURL || `https://www.bseindia.com/corporates/ann.html?newsid=${a.NEWSID}`,
+      key: a.NEWSID ? `newsid:${a.NEWSID}` : undefined,
       pubDate: a.NEWS_DT,
     };
     processNewsItem(raw, 'BSE Announcements', 'INDIAN', sentRows, legacyRows, syms[0]);

@@ -25,7 +25,7 @@ import { describe, it, expect } from 'vitest';
 const RUN_LIVE = process.env.RUN_LIVE_DATASOURCE_TESTS === '1';
 if (RUN_LIVE) await import('dotenv/config');
 
-const { runNewsSentimentCycle, getLatestSentimentSnapshot } = await import('../newsSentimentService');
+const { runNewsSentimentCycle, runBseAnnouncementsCycle, getLatestSentimentSnapshot } = await import('../newsSentimentService');
 const { dbGet } = await import('../dbAsync');
 
 describe.runIf(RUN_LIVE)('newsSentimentService [live]', () => {
@@ -43,5 +43,22 @@ describe.runIf(RUN_LIVE)('newsSentimentService [live]', () => {
     const snapshot = await getLatestSentimentSnapshot();
     expect(snapshot, 'buildMarketSentimentSnapshot produced nothing').toBeTruthy();
     expect(Number.isFinite(snapshot!.overall_score)).toBe(true);
+  }, 60000);
+
+  // AF-20261008-36: each BSE filing must be its own row (keyed on NEWSID, url = the filing's PDF),
+  // not one row per company keyed on the shared stock page.
+  it('BSE announcements land one row per filing', async () => {
+    const { fetched, inserted } = await runBseAnnouncementsCycle();
+    expect(fetched, 'BSE AnnSubCategoryGetData returned nothing').toBeGreaterThan(0);
+    expect(inserted).toBeGreaterThan(0);
+    const r = await dbGet<{ n: number; stock_pages: number }>(
+      `SELECT COUNT(*)::int AS n,
+              COUNT(*) FILTER (WHERE url LIKE '%/stock-share-price/%')::int AS stock_pages
+       FROM news_sentiment_items
+       WHERE source = 'BSE Announcements' AND fetched_at > now() - interval '10 minutes'`,
+    );
+    expect(r!.n).toBeGreaterThan(0);
+    // a filing without an attachment falls back to the stock page, so not strictly 0
+    expect(r!.stock_pages).toBeLessThan(r!.n);
   }, 60000);
 });

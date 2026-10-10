@@ -1,0 +1,61 @@
+{
+ "_source": "AnnSubCategoryGetData/w pageno=1 strPrevDate=strToDate=20261009, recorded 2026-10-10, trimmed to 2 companies x 2 filings",
+ "Table": [
+  {
+   "NEWSID": "47c41588-764b-4962-8f67-f02be8785670",
+   "SCRIP_CD": 539006,
+   "NEWSSUB": "PTC Industries Ltd - 539006 - Announcement under Regulation 30 (LODR)-Allotment",
+   "NEWS_DT": "2026-10-09T23:45:14.643",
+   "CRITICALNEWS": "0",
+   "ATTACHMENTNAME": "a29039e7-90e1-47d1-a6b1-d3ec009c2272.pdf",
+   "HEADLINE": "As enclosed.",
+   "CATEGORYNAME": "Company Update",
+   "NSURL": "https://www.bseindia.com/stock-share-price/ptc-industries-ltd/ptcil/539006/",
+   "SLONGNAME": "PTC Industries Ltd",
+   "DissemDT": "2026-10-09T23:45:14.643",
+   "SUBCATNAME": "Allotment of Equity Shares"
+  },
+  {
+   "NEWSID": "af792cae-a2d7-4b73-963a-283334965129",
+   "SCRIP_CD": 532755,
+   "NEWSSUB": "Tech Mahindra Ltd - 532755 - Announcement under Regulation 30 (LODR)-Restructuring",
+   "NEWS_DT": "2026-10-09T23:31:27.07",
+   "CRITICALNEWS": "0",
+   "ATTACHMENTNAME": "f4ba50f5-6a90-4086-a296-e7e3987d41b0.pdf",
+   "HEADLINE": "Intimation under Regulation 30 of Securities and Exchange Board of India (Listing Obligations and Disclosure Requirements) Regulations 2015- Liquidation of a step-down subsidiary of the Company",
+   "CATEGORYNAME": "Company Update",
+   "NSURL": "https://www.bseindia.com/stock-share-price/tech-mahindra-ltd/techm/532755/",
+   "SLONGNAME": "Tech Mahindra Ltd",
+   "DissemDT": "2026-10-09T23:31:27.07",
+   "SUBCATNAME": "Restructuring"
+  },
+  {
+   "NEWSID": "934af8c1-291d-4c6d-9a9a-8d4fe77cac32",
+   "SCRIP_CD": 539006,
+   "NEWSSUB": "PTC Industries Ltd - 539006 - Announcement under Regulation 30 (LODR)-Qualified Institutional Placement",
+   "NEWS_DT": "2026-10-09T22:46:23.763",
+   "CRITICALNEWS": "0",
+   "ATTACHMENTNAME": "7cdef459-74c1-4df7-8cb9-c332b3e926f8.pdf",
+   "HEADLINE": "As enclosed",
+   "CATEGORYNAME": "Company Update",
+   "NSURL": "https://www.bseindia.com/stock-share-price/ptc-industries-ltd/ptcil/539006/",
+   "SLONGNAME": "PTC Industries Ltd",
+   "DissemDT": "2026-10-09T22:46:23.763",
+   "SUBCATNAME": "Qualified Institutional Placement"
+  },
+  {
+   "NEWSID": "06953035-3e51-4940-867f-f95f2aa55e6f",
+   "SCRIP_CD": 532755,
+   "NEWSSUB": "Tech Mahindra Ltd - 532755 - Announcement under Regulation 30 (LODR)-Restructuring",
+   "NEWS_DT": "2026-10-09T22:26:38.673",
+   "CRITICALNEWS": "0",
+   "ATTACHMENTNAME": "d60a12b0-00e8-4fa5-a5ad-f021802799d8.pdf",
+   "HEADLINE": "Intimation under Regulation 30 of Securities and Exchange Board of India (Listing Obligations and Disclosure Requirements ) Regulations, 2015- Liquidation of a step-down subsidiary of the Company",
+   "CATEGORYNAME": "Company Update",
+   "NSURL": "https://www.bseindia.com/stock-share-price/tech-mahindra-ltd/techm/532755/",
+   "SLONGNAME": "Tech Mahindra Ltd",
+   "DissemDT": "2026-10-09T22:26:38.673",
+   "SUBCATNAME": "Restructuring"
+  }
+ ]
+}
