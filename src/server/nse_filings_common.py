@@ -125,6 +125,13 @@ class NseClient:
         return self._session
 
     def get_json(self, url: str):
+        return self._get(url, lambda r: r.json())
+
+    def get_text(self, url: str) -> str:
+        """Same politeness/stop rules as get_json, for the nsearchives CSV files."""
+        return self._get(url, lambda r: r.text)
+
+    def _get(self, url: str, decode):
         for attempt in range(1, self.max_attempts + 1):
             sess = self._ensure_session()
             self._spend()
@@ -144,9 +151,9 @@ class NseClient:
             elif status == 200:
                 self._consecutive_blocks = 0
                 try:
-                    return r.json()
+                    return decode(r)
                 except ValueError:
-                    print(f"{self.prefix} {url}: 200 but non-JSON body ({r.text[:120]!r})", file=sys.stderr)
+                    print(f"{self.prefix} {url}: 200 but undecodable body ({r.text[:120]!r})", file=sys.stderr)
             elif status is not None and status < 500:
                 raise NseFetchError(f"HTTP {status} on {url}")
             if attempt < self.max_attempts:
