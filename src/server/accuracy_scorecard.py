@@ -245,7 +245,7 @@ def persist_snapshot(con, out: dict) -> None:
 
 
 def print_report(out: dict, floor: float = FLOORS[0], tiers=("published", 0.10)) -> None:
-    f = lambda x, fmt: "n/a" if x is None or x != x else format(x, fmt)
+    f = lambda x, fmt: "n/a" if x is None or (isinstance(x, float) and math.isnan(x)) else format(x, fmt)
     print(f"accuracy scorecard since {out['since']}  calls={out['calls']}  sessions={out['sessions']}  "
           f"(retrospective; the frozen forward test {out['forward_test_protocol_hash']} is the arbiter)")
     print(f"floor Rs {floor / 1e7:.0f}cr ADT | hit = beat the equal-weight universe mean after 0.50% | lift = hit - random pick")
