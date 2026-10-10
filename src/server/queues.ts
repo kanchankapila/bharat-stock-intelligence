@@ -2855,7 +2855,7 @@ export async function initQueues(): Promise<boolean> {
       { connection, concurrency: 1, lockDuration: 3 * 60_000 });
     console.log('[QUEUE] Pre-open snapshot scheduled at 9:10 AM IST (weekdays)');
 
-    // ── NSE bulk/block deal archive (14:30 UTC = 20:00 IST, weekdays) ──────────────────────
+    // ── NSE bulk/block deal archive (14:40 UTC = 20:10 IST, weekdays; 14:30 collides with trendlyne-weekly on Tuesdays) ──────────────────────
     // AF-20261008-38. archives.nseindia.com's bulk.csv/block.csv hold ONLY the latest trading
     // day (09-Oct was published 19:07 IST) and are overwritten the next evening, so a missed day
     // is lost for good. Not folded into ml-daily-ops (18:50 IST): that fires before NSE publishes.
@@ -2865,7 +2865,7 @@ export async function initQueues(): Promise<boolean> {
     // runPython; the run is then thrown so BullMQ records it failed, not an empty success.
     const nseBulkBlockQueue = new Queue('nse-bulk-block', { connection });
     await addJobWithCatchup(nseBulkBlockQueue, 'nse-bulk-block-daily', {}, {
-      repeat: { pattern: '30 14 * * 1-5', tz: 'Etc/UTC' },
+      repeat: { pattern: '40 14 * * 1-5', tz: 'Etc/UTC' },
       jobId: 'nse-bulk-block-daily',
       removeOnComplete: 3, removeOnFail: 3,
     });

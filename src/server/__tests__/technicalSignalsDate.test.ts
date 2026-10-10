@@ -6,9 +6,11 @@ const { latestCompleteSignalDate } = await import('../technicalSignalsDate');
 const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
 
 async function seed(date: string, rows: number) {
-  for (let i = 0; i < rows; i++) {
-    await dbRun(`INSERT INTO technical_signals (symbol, date) VALUES (?, ?) ON CONFLICT DO NOTHING`, [`S${i}`, date]);
-  }
+  // one statement: 20 round trips per seed exceeded the 5 s test timeout while pytest loaded the database
+  await dbRun(
+    `INSERT INTO technical_signals (symbol, date) SELECT 'S' || g, CAST(? AS date) FROM generate_series(0, ?) g ON CONFLICT DO NOTHING`,
+    [date, rows - 1],
+  );
 }
 
 // Live 2026-10-08: the day's first partial scan wrote 392 rows (all with NULL win_probability)
