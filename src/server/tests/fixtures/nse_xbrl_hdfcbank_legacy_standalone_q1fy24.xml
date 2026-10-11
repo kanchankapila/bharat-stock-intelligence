@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xbrli:xbrl xmlns:in-bse-fin="http://www.bseindia.com/xbrl/fin/2019-09-30/in-bse-fin" xmlns:in-bse-fin-roles="http://www.bseindia.com/xbrl/fin/2019-09-30/in-bse-fin-roles" xmlns:in-bse-fin-ent="http://www.bseindia.com/xbrl/fin/2019-09-30/in-bse-fin/in-bse-fin-ent" xmlns:in-bse-fin-type="http://www.bseindia.com/xbrl/fin/2019-09-30/in-bse-fin-types" xmlns:xbrldt="http://xbrl.org/2005/xbrldt" xmlns:nonnum="http://www.xbrl.org/dtr/type/non-numeric" xmlns:link="http://www.xbrl.org/2003/linkbase" xmlns:net="http://www.xbrl.org/2009/role/net" xmlns:num="http://www.xbrl.org/dtr/type/numeric" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:iso4217="http://www.xbrl.org/2003/iso4217" xmlns:negated="http://www.xbrl.org/2009/role/negated" xmlns:xbrldi="http://xbrl.org/2006/xbrldi" xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:xl="http://www.xbrl.org/2003/XLink">
+<link:schemaRef xlink:type="simple" xlink:href="banking_entry_point_2019-09-30.xsd"/>
+
+<xbrli:context id="OneReportableSegmentRevenue01D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">HDFCBANK</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-04-01</xbrli:startDate><xbrli:endDate>2023-06-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:OneReportableSegmentRevenue01Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="OneReportableSegmentRevenue02D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">HDFCBANK</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-04-01</xbrli:startDate><xbrli:endDate>2023-06-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:OneReportableSegmentRevenue02Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="OneReportableSegmentRevenue03D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">HDFCBANK</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-04-01</xbrli:startDate><xbrli:endDate>2023-06-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:OneReportableSegmentRevenue03Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="OneReportableSegmentRevenue04D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">HDFCBANK</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-04-01</xbrli:startDate><xbrli:endDate>2023-06-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:OneReportableSegmentRevenue04Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="OneReportableSegmentRevenue05D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">HDFCBANK</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-04-01</xbrli:startDate><xbrli:endDate>2023-06-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:OneReportableSegmentRevenue05Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:unit id="INR"><xbrli:measure>iso4217:INR</xbrli:measure></xbrli:unit>
+<xbrli:unit id="pure"><xbrli:measure>xbrli:pure</xbrli:measure></xbrli:unit>
+<xbrli:unit id="shares"><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unit>
+<xbrli:unit id="INRPerShare"><xbrli:divide><xbrli:unitNumerator><xbrli:measure>iso4217:INR</xbrli:measure></xbrli:unitNumerator><xbrli:unitDenominator><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unitDenominator></xbrli:divide></xbrli:unit>
+<in-bse-fin:Symbol contextRef="OneD">HDFCBANK</in-bse-fin:Symbol>
+<in-bse-fin:ReportingQuarter contextRef="OneD">First quarter</in-bse-fin:ReportingQuarter>
+<in-bse-fin:DateOfEndOfReportingPeriod contextRef="OneD">2023-06-30</in-bse-fin:DateOfEndOfReportingPeriod>
+<in-bse-fin:WhetherResultsAreAuditedOrUnaudited contextRef="OneD">Unaudited</in-bse-fin:WhetherResultsAreAuditedOrUnaudited>
+<in-bse-fin:NatureOfReportStandaloneConsolidated contextRef="OneD">Standalone</in-bse-fin:NatureOfReportStandaloneConsolidated>
+<in-bse-fin:InterestEarned contextRef="OneD" unitRef="INR" decimals="-5">485868100000.00</in-bse-fin:InterestEarned>
+<in-bse-fin:Income contextRef="OneD" unitRef="INR" decimals="-5">578166700000.00</in-bse-fin:Income>
+<in-bse-fin:InterestExpended contextRef="OneD" unitRef="INR" decimals="-5">249877400000.00</in-bse-fin:InterestExpended>
+<in-bse-fin:ProfitLossFromOrdinaryActivitiesBeforeTax contextRef="OneD" unitRef="INR" decimals="-5">159119900000.00</in-bse-fin:ProfitLossFromOrdinaryActivitiesBeforeTax>
+<in-bse-fin:TaxExpense contextRef="OneD" unitRef="INR" decimals="-5">39602200000.00</in-bse-fin:TaxExpense>
+<in-bse-fin:ProfitLossForThePeriod contextRef="OneD" unitRef="INR" decimals="-5">119517700000.00</in-bse-fin:ProfitLossForThePeriod>
+<in-bse-fin:ProfitLossAfterTaxesMinorityInterestAndShareOfProfitLossOfAssociates contextRef="OneD" unitRef="INR" decimals="-5">119517700000.00</in-bse-fin:ProfitLossAfterTaxesMinorityInterestAndShareOfProfitLossOfAssociates>
+<in-bse-fin:BasicEarningsPerShareBeforeExtraordinaryItems contextRef="OneD" unitRef="INRPerShare" decimals="INF">21.40</in-bse-fin:BasicEarningsPerShareBeforeExtraordinaryItems>
+<in-bse-fin:BasicEarningsPerShareAfterExtraordinaryItems contextRef="OneD" unitRef="INRPerShare" decimals="INF">21.40</in-bse-fin:BasicEarningsPerShareAfterExtraordinaryItems>
+<in-bse-fin:SegmentRevenue contextRef="OneReportableSegmentRevenue01D" unitRef="INR" decimals="-5">69500900000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="OneReportableSegmentRevenue02D" unitRef="INR" decimals="-5">429394800000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="OneReportableSegmentRevenue03D" unitRef="INR" decimals="-5">105378700000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="OneReportableSegmentRevenue04D" unitRef="INR" decimals="-5">13990200000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="OneReportableSegmentRevenue05D" unitRef="INR" decimals="-5">283328900000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="OneD" unitRef="INR" decimals="-5">901593500000.00</in-bse-fin:SegmentRevenue>
+</xbrli:xbrl>

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xbrli:xbrl xmlns:in-bse-fin="http://www.bseindia.com/xbrl/fin/2020-03-31/in-bse-fin" xmlns:in-bse-fin-roles="http://www.bseindia.com/xbrl/fin/2020-03-31/in-bse-fin-roles" xmlns:in-bse-fin-ent="http://www.bseindia.com/xbrl/fin/2020-03-31/in-bse-fin/in-bse-fin-ent" xmlns:in-bse-fin-type="http://www.bseindia.com/xbrl/fin/2020-03-31/in-bse-fin-types" xmlns:xbrldt="http://xbrl.org/2005/xbrldt" xmlns:nonnum="http://www.xbrl.org/dtr/type/non-numeric" xmlns:link="http://www.xbrl.org/2003/linkbase" xmlns:net="http://www.xbrl.org/2009/role/net" xmlns:num="http://www.xbrl.org/dtr/type/numeric" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:iso4217="http://www.xbrl.org/2003/iso4217" xmlns:negated="http://www.xbrl.org/2009/role/negated" xmlns:xbrldi="http://xbrl.org/2006/xbrldi" xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:xl="http://www.xbrl.org/2003/XLink">
+<link:schemaRef xlink:type="simple" xlink:href="Ind-AS_entry_point_2020-03-31.xsd"/>
+
+<xbrli:context id="OneD"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period></xbrli:context>
+<xbrli:context id="FourD"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period></xbrli:context>
+<xbrli:context id="OneI"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:instant>2023-09-30</xbrli:instant></xbrli:period></xbrli:context>
+<xbrli:context id="OneReportableSegmentRevenue01D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:OneReportableSegmentRevenue01Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="OneReportableSegmentRevenue02D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:OneReportableSegmentRevenue02Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="OneReportableSegmentRevenue03D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:OneReportableSegmentRevenue03Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="OneReportableSegmentRevenue04D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:OneReportableSegmentRevenue04Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="OneReportableSegmentRevenue05D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:OneReportableSegmentRevenue05Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="OneReportableSegmentRevenue06D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:OneReportableSegmentRevenue06Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="FourReportableSegmentRevenue01D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:FourReportableSegmentRevenue01Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="FourReportableSegmentRevenue02D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:FourReportableSegmentRevenue02Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="FourReportableSegmentRevenue03D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:FourReportableSegmentRevenue03Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="FourReportableSegmentRevenue04D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:FourReportableSegmentRevenue04Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="FourReportableSegmentRevenue05D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:FourReportableSegmentRevenue05Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:context id="FourReportableSegmentRevenue06D"><xbrli:entity><xbrli:identifier scheme="http://www.nseindia.com/NSESymbol">TCS</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2023-07-01</xbrli:startDate><xbrli:endDate>2023-09-30</xbrli:endDate></xbrli:period><xbrli:scenario><xbrldi:explicitMember dimension="in-bse-fin:ReportableSegmentsAxis">in-bse-fin:FourReportableSegmentRevenue06Member</xbrldi:explicitMember></xbrli:scenario></xbrli:context>
+<xbrli:unit id="INR"><xbrli:measure>iso4217:INR</xbrli:measure></xbrli:unit>
+<xbrli:unit id="pure"><xbrli:measure>xbrli:pure</xbrli:measure></xbrli:unit>
+<xbrli:unit id="shares"><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unit>
+<xbrli:unit id="INRPerShare"><xbrli:divide><xbrli:unitNumerator><xbrli:measure>iso4217:INR</xbrli:measure></xbrli:unitNumerator><xbrli:unitDenominator><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unitDenominator></xbrli:divide></xbrli:unit>
+<in-bse-fin:Symbol contextRef="OneD">TCS</in-bse-fin:Symbol>
+<in-bse-fin:LevelOfRoundingUsedInFinancialStatements contextRef="OneD">Crores</in-bse-fin:LevelOfRoundingUsedInFinancialStatements>
+<in-bse-fin:ReportingQuarter contextRef="OneD">Half yearly</in-bse-fin:ReportingQuarter>
+<in-bse-fin:DateOfStartOfReportingPeriod contextRef="OneD">2023-07-01</in-bse-fin:DateOfStartOfReportingPeriod>
+<in-bse-fin:DateOfEndOfReportingPeriod contextRef="OneD">2023-09-30</in-bse-fin:DateOfEndOfReportingPeriod>
+<in-bse-fin:WhetherResultsAreAuditedOrUnaudited contextRef="OneD">Audited</in-bse-fin:WhetherResultsAreAuditedOrUnaudited>
+<in-bse-fin:NatureOfReportStandaloneConsolidated contextRef="OneD">Consolidated</in-bse-fin:NatureOfReportStandaloneConsolidated>
+<in-bse-fin:RevenueFromOperations contextRef="OneD" unitRef="INR" decimals="-7">596920000000.00</in-bse-fin:RevenueFromOperations>
+<in-bse-fin:Income contextRef="OneD" unitRef="INR" decimals="-7">606980000000.00</in-bse-fin:Income>
+<in-bse-fin:FinanceCosts contextRef="OneD" unitRef="INR" decimals="-7">1590000000.00</in-bse-fin:FinanceCosts>
+<in-bse-fin:ProfitBeforeTax contextRef="OneD" unitRef="INR" decimals="-7">153300000000.00</in-bse-fin:ProfitBeforeTax>
+<in-bse-fin:TaxExpense contextRef="OneD" unitRef="INR" decimals="-7">39500000000.00</in-bse-fin:TaxExpense>
+<in-bse-fin:ProfitLossForPeriodFromContinuingOperations contextRef="OneD" unitRef="INR" decimals="-7">113800000000.00</in-bse-fin:ProfitLossForPeriodFromContinuingOperations>
+<in-bse-fin:ProfitLossForPeriod contextRef="OneD" unitRef="INR" decimals="-7">113800000000.00</in-bse-fin:ProfitLossForPeriod>
+<in-bse-fin:ProfitOrLossAttributableToOwnersOfParent contextRef="OneD" unitRef="INR" decimals="-7">113420000000.00</in-bse-fin:ProfitOrLossAttributableToOwnersOfParent>
+<in-bse-fin:BasicEarningsLossPerShareFromContinuingOperations contextRef="OneD" unitRef="INRPerShare" decimals="INF">31.00</in-bse-fin:BasicEarningsLossPerShareFromContinuingOperations>
+<in-bse-fin:BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations contextRef="OneD" unitRef="INRPerShare" decimals="INF">31.00</in-bse-fin:BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations>
+<in-bse-fin:DateOfStartOfReportingPeriod contextRef="FourD">2023-04-01</in-bse-fin:DateOfStartOfReportingPeriod>
+<in-bse-fin:DateOfEndOfReportingPeriod contextRef="FourD">2023-09-30</in-bse-fin:DateOfEndOfReportingPeriod>
+<in-bse-fin:WhetherResultsAreAuditedOrUnaudited contextRef="FourD">Audited</in-bse-fin:WhetherResultsAreAuditedOrUnaudited>
+<in-bse-fin:NatureOfReportStandaloneConsolidated contextRef="FourD">Consolidated</in-bse-fin:NatureOfReportStandaloneConsolidated>
+<in-bse-fin:RevenueFromOperations contextRef="FourD" unitRef="INR" decimals="-7">1190730000000.00</in-bse-fin:RevenueFromOperations>
+<in-bse-fin:Income contextRef="FourD" unitRef="INR" decimals="-7">1214760000000.00</in-bse-fin:Income>
+<in-bse-fin:FinanceCosts contextRef="FourD" unitRef="INR" decimals="-7">3220000000.00</in-bse-fin:FinanceCosts>
+<in-bse-fin:ProfitBeforeTax contextRef="FourD" unitRef="INR" decimals="-7">303190000000.00</in-bse-fin:ProfitBeforeTax>
+<in-bse-fin:TaxExpense contextRef="FourD" unitRef="INR" decimals="-7">78190000000.00</in-bse-fin:TaxExpense>
+<in-bse-fin:ProfitLossForPeriodFromContinuingOperations contextRef="FourD" unitRef="INR" decimals="-7">225000000000.00</in-bse-fin:ProfitLossForPeriodFromContinuingOperations>
+<in-bse-fin:ProfitLossForPeriod contextRef="FourD" unitRef="INR" decimals="-7">225000000000.00</in-bse-fin:ProfitLossForPeriod>
+<in-bse-fin:ProfitOrLossAttributableToOwnersOfParent contextRef="FourD" unitRef="INR" decimals="-7">224160000000.00</in-bse-fin:ProfitOrLossAttributableToOwnersOfParent>
+<in-bse-fin:BasicEarningsLossPerShareFromContinuingOperations contextRef="FourD" unitRef="INRPerShare" decimals="INF">61.26</in-bse-fin:BasicEarningsLossPerShareFromContinuingOperations>
+<in-bse-fin:BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations contextRef="FourD" unitRef="INRPerShare" decimals="INF">61.26</in-bse-fin:BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations>
+<in-bse-fin:Assets contextRef="OneI" unitRef="INR" decimals="-7">1549400000000.00</in-bse-fin:Assets>
+<in-bse-fin:SegmentRevenue contextRef="OneReportableSegmentRevenue01D" unitRef="INR" decimals="-7">228400000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="OneReportableSegmentRevenue02D" unitRef="INR" decimals="-7">95720000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="OneReportableSegmentRevenue03D" unitRef="INR" decimals="-7">97730000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="OneReportableSegmentRevenue04D" unitRef="INR" decimals="-7">66250000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="OneReportableSegmentRevenue05D" unitRef="INR" decimals="-7">57870000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="OneReportableSegmentRevenue06D" unitRef="INR" decimals="-7">50950000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="FourReportableSegmentRevenue01D" unitRef="INR" decimals="-7">455020000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="FourReportableSegmentRevenue02D" unitRef="INR" decimals="-7">191680000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="FourReportableSegmentRevenue03D" unitRef="INR" decimals="-7">196490000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="FourReportableSegmentRevenue04D" unitRef="INR" decimals="-7">132610000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="FourReportableSegmentRevenue05D" unitRef="INR" decimals="-7">114230000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="FourReportableSegmentRevenue06D" unitRef="INR" decimals="-7">100700000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="OneD" unitRef="INR" decimals="-7">596920000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:SegmentRevenue contextRef="FourD" unitRef="INR" decimals="-7">1190730000000.00</in-bse-fin:SegmentRevenue>
+<in-bse-fin:CashFlowsFromUsedInOperatingActivities contextRef="FourD" unitRef="INR" decimals="-7">220010000000.00</in-bse-fin:CashFlowsFromUsedInOperatingActivities>
+</xbrli:xbrl>
