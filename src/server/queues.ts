@@ -2880,6 +2880,40 @@ export async function initQueues(): Promise<boolean> {
       { connection, concurrency: 1, lockDuration: 5 * 60_000 });
     console.log('[QUEUE] NSE bulk/block deal archive scheduled at 8:00 PM IST (weekdays)');
 
+    // ── Results filings -> XBRL financials -> Q2 drift shadow arm (16:05 UTC = 21:35 IST, weekdays) ──
+    // AF-20261008-42 (measurement.md 2026-10-11 pre-registration + 2026-10-12 amendment). 16:00 UTC is
+    // dl-infer-daily's minute (jobPipelineOrdering.test.ts forbids a shared start), so this takes 16:05. Year-round, not season-gated: off-season the
+    // listing finds few filings, the XBRL step has nothing to fetch and the grader re-grades closing
+    // cohorts. The XBRL step parses filings broadcast in the last 10 days (its default window) that are
+    // not yet in nse_filing_financials, at 1.5 s spacing and at most 600 GETs a run (backlog resumes next
+    // day). Steps are T.run: a nonzero exit fails the run after the remaining steps have still run, so
+    // the grader re-grades on what landed. No skip path exists, so no skip can be stamped as success.
+    const q2DriftQueue = new Queue('q2-drift-shadow-arm', { connection });
+    await addJobWithCatchup(q2DriftQueue, 'q2-drift-shadow-arm-daily', {}, {
+      repeat: { pattern: '5 16 * * 1-5', tz: 'Etc/UTC' },
+      jobId: 'q2-drift-shadow-arm-daily',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    const q2DriftWorker = new Worker('q2-drift-shadow-arm',
+      async () => {
+        const T = new StepTracker('q2-drift-shadow-arm');
+        await T.run('nse-results-filings', () => runPython('nse_results_filings_fetcher.py', ['--daily'], 10 * 60_000));
+        await T.run('nse-xbrl-financials', () => runPython('nse_xbrl_fundamentals_fetcher.py',
+          ['--only-latest-per-symbol-period', '--max-requests', '600', '--min-interval', '1.5'], 35 * 60_000));
+        await T.run('q2-drift-grader', () => runPython('q2_drift_shadow_arm.py', ['--persist'], 10 * 60_000));
+        const verdict = T.finish();
+        if (!verdict.ok) throw new Error(`q2-drift-shadow-arm failed: ${verdict.failedSteps.join(',')}`);
+        return { success: true };
+      },
+      { connection, concurrency: 1, lockDuration: 60 * 60_000 });
+    q2DriftWorker.on('completed', (job) => {
+      recordHeartbeat('q2-drift-shadow-arm', 'success', undefined, bullJobDurationMs(job));
+    });
+    q2DriftWorker.on('failed', (job, err) => {
+      recordHeartbeat('q2-drift-shadow-arm', 'failed', err?.message, bullJobDurationMs(job));
+    });
+    console.log('[QUEUE] Results filings + XBRL + Q2 drift shadow arm scheduled at 9:35 PM IST (weekdays)');
+
     // ── Intraday regime refresh: VIX + USDINR + Nifty basis, every 15 min ──
     // '*/15 3-10 * * 1-5' = 03:00-10:45 UTC = 08:30-16:15 IST weekdays. Corrected 2026-08-30:
     // the old comment said '3:45-10:00 UTC = 9:15-15:30 IST', which is the NSE session, not what

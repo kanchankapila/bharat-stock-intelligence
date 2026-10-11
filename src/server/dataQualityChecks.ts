@@ -1583,6 +1583,22 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'q2-drift-shadow-arm-freshness',
+    label: 'q2_drift_shadow_arm snapshot (pre-registered post-results drift arm, written by q2-drift-shadow-arm)',
+    category: 'scoring',
+    critical: false,
+    // AF-20261008-42. The grader re-runs every weekday; a stale snapshot means the pending cohorts stopped
+    // being graded or the filings/XBRL steps ahead of it stopped landing new filers.
+    sql: `SELECT "updatedAt" AS last_date FROM app_settings WHERE key = 'q2_drift_shadow_arm'`,
+    evaluate: (row, now) => {
+      const stale = tradingDaysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'No q2_drift_shadow_arm snapshot yet - run q2_drift_shadow_arm.py --persist (the q2-drift-shadow-arm job does this nightly)' };
+      if (stale > 6) return { status: 'fail', detail: `q2_drift_shadow_arm snapshot is ${fmtDays(stale)} old - the shadow arm has stopped being graded` };
+      if (stale > 3) return { status: 'warn', detail: `q2_drift_shadow_arm snapshot is ${fmtDays(stale)} old` };
+      return { status: 'pass', detail: `q2_drift_shadow_arm snapshot ${fmtDays(stale)} old` };
+    },
+  },
+  {
     id: 'ranker-input-snapshot-freshness',
     label: 'ranker_input_snapshot archive (immutable point-in-time ranker inputs, trailing step of unified-ranker)',
     category: 'scoring',
