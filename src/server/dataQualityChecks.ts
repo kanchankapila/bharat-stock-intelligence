@@ -1583,6 +1583,22 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'ranker-input-snapshot-freshness',
+    label: 'ranker_input_snapshot archive (immutable point-in-time ranker inputs, trailing step of unified-ranker)',
+    category: 'scoring',
+    critical: false,
+    // A day the archive misses is lost for good (the inputs are overwritten). The step is runQuiet so it
+    // never fails the ranker; this check is its only alarm.
+    sql: `SELECT "updatedAt" AS last_date, value FROM app_settings WHERE key = 'ranker_input_snapshot_last'`,
+    evaluate: (row, now) => {
+      const stale = tradingDaysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'No ranker input snapshot yet - run ranker_input_snapshot.py --persist (unified-ranker does this nightly)' };
+      if (stale > 6) return { status: 'fail', detail: `ranker input snapshot is ${fmtDays(stale)} old - point-in-time inputs are being lost every day` };
+      if (stale > 3) return { status: 'warn', detail: `ranker input snapshot is ${fmtDays(stale)} old` };
+      return { status: 'pass', detail: `ranker input snapshot ${fmtDays(stale)} old` };
+    },
+  },
+  {
     id: 'accuracy-scorecard-freshness',
     label: 'accuracy_scorecard snapshot (shadow arms, objective-regime scorecard and alerts, written by ml-daily-ops)',
     category: 'scoring',

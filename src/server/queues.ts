@@ -3290,6 +3290,11 @@ export async function initQueues(): Promise<boolean> {
         // post-close cluster + nightly memory squeeze (AF-20260928-03). 75min ~ 2x worst success.
         await runPython('unified_ranker.py', [], 75 * 60_000);
 
+        // Immutable input archive; never fails the run (alarm: ranker-input-snapshot-freshness DQ).
+        // 118s measured; 75+5 min stays inside the 85-min lock.
+        await new StepTracker('unified-ranker').runQuiet('ranker_input_snapshot',
+          () => runPython('ranker_input_snapshot.py', ['--persist'], 5 * 60_000));
+
         // Push today's highest-conviction canonical picks over WebSocket (2026-08-05 fix --
         // see unifiedSignalBroadcast.ts's header for the gap this closes). Best-effort: the
         // ranker's own DB write already succeeded above, so a broadcast failure here must

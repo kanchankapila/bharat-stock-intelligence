@@ -1187,6 +1187,16 @@ describe('audit regression guards (2026-08-11)', () => {
       expect(c.evaluate({ last_date: null }, now).status).toBe('warn');   // never run yet
     });
 
+    it('ranker input snapshot warns then fails when the nightly archive stops', () => {
+      const c = find('ranker-input-snapshot-freshness');
+      expect(c.sql).toContain("key = 'ranker_input_snapshot_last'");
+      expect(c.critical).toBe(false);
+      expect(c.evaluate({ last_date: ago(1) }, now).status).toBe('pass');
+      expect(c.evaluate({ last_date: ago(6) }, now).status).toBe('warn');
+      expect(c.evaluate({ last_date: ago(12) }, now).status).toBe('fail');
+      expect(c.evaluate({ last_date: null }, now).status).toBe('warn');   // never run yet
+    });
+
     it('accuracy scorecard snapshot warns then fails when the nightly step stops, and surfaces alerts', () => {
       const c = find('accuracy-scorecard-freshness');
       expect(c.sql).toContain("key = 'accuracy_scorecard'");

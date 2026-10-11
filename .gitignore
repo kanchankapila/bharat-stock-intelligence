@@ -130,3 +130,6 @@ db.sqlite3
 /tmp_*.txt
 /fix_*.py
 stock-dashboard.html*
+
+# Immutable nightly ranker input snapshots (ranker_input_snapshot.py): ~3.5 MB/day of parquet, not source
+data/ranker_snapshots/
