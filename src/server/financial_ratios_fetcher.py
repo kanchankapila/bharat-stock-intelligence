@@ -65,6 +65,7 @@ import requests
 from db_compat import connect
 from as_of import logical_write_floor
 from et_stats_client import HEADERS, fetch_et_stats, load_companyid_map, as_of_floor
+from fetch_utils import FetchTracker
 import sys
 
 DEBT_COVERAGE_RISK_THRESHOLD = 1.5
@@ -137,6 +138,14 @@ def ensure_schema(con) -> None:
         "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS asset_turnover REAL",
         "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cfo_growth     REAL",
         "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_yield_approx   REAL",
+        # 2026-10-11 quant audit: label recording WHICH FCF definition produced the row's
+        # fcf_yield_approx -- "capex" (four quarters of real CFO - CapEx) or
+        # "cfo_cfi_proxy" (the CFO+CFI fallback). Without it the two bases are silently
+        # mixed in one column and a capex-heavy grower reads as a cash burner.
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fcf_basis        TEXT",
+        "ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fcf_ttm_as_of    TEXT",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_basis            TEXT",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_ttm_as_of        TEXT",
         "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS interest_coverage  REAL",
         "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_positive       INTEGER",
         "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS debt_coverage_risk INTEGER",
@@ -239,6 +248,107 @@ def _cagr(latest: float | None, base: float | None, years: int) -> float | None:
         return round(((latest / base) ** (1.0 / years) - 1.0) * 100, 2)
     except (ValueError, ZeroDivisionError):
         return None
+
+
+# ── Free cash flow ─────────────────────────────────────────────────────────────
+#
+# FCF = CFO − CapEx. It is NOT CFO + CFI. CFI nets capex against asset sales,
+# acquisitions, disposals of subsidiaries, purchases/sales of investments and
+# (for banks/NBFCs) securities-books movement, so "CFO + CFI" answers "how much
+# did cash flow after ALL investing activity", which is a different — and for a
+# company that just sold a business unit, wildly optimistic — number. Measured
+# live 2026-10-11 on the ~2,000-name universe: 395 symbols had CFO > 0 but
+# CFO+CFI <= 0 (capex-heavy growth cos. reported as cash-burning) and 104 had
+# CFO < 0 but CFO+CFI > 0 (financing-like investing inflows booked as "free"
+# cash). Both directions fed `fcf_positive`, `fcf_yield_approx`, the "FCF x%"
+# badge and ml_ensemble's quality_score.
+#
+# Since finstack_cashflow_fetcher.py landed, the platform has REAL quarterly
+# capex (finstack_cashflow_history.capex, yfinance-sourced, stored as a NEGATIVE
+# number — live-verified: ocf + capex reproduces the vendor's own fcf column
+# exactly on every row checked). So TTM FCF is now computed from four quarters of
+# true capex wherever that history exists, and CFO+CFI survives only as an
+# explicitly-labelled fallback for names Yahoo has no quarterly cash flow for.
+# Every row records which of the two it used in `fcf_basis`, so a consumer can
+# tell a real FCF from a proxy instead of silently mixing them in one column.
+
+FCF_BASIS_CAPEX = "capex"           # sum of 4 quarters of (CFO − CapEx) — the real thing
+FCF_BASIS_PROXY = "cfo_cfi_proxy"   # CFO + CFI — fallback, overstates/understates materially
+
+TTM_QUARTERS = 4
+# Consecutive quarterly period-ends sit ~90-95d apart. Allow up to 150d so a
+# missing/holiday-shifted quarter in the vendor's series doesn't silently make a
+# 3-quarter sum masquerade as a 12-month one.
+MAX_QUARTER_GAP_DAYS = 150
+
+
+def _ttm_fcf_from_quarters(rows, as_of: str | None = None, n_quarters: int = TTM_QUARTERS):
+    """TTM FCF from quarterly cash-flow rows: newest-first is not required.
+
+    `rows` is an iterable of mappings/dicts with `period_end` (ISO date str),
+    `ocf` and `capex` (capex NEGATIVE, as finstack_cashflow_fetcher stores it).
+    Returns (fcf_ttm, latest_period_end) or (None, None) when a genuine
+    n-quarter window cannot be established — no partial-sum fabrication, no
+    annualising a 3-quarter sum.
+
+    `as_of` (ISO date) restricts the window to periods already published, so a
+    point-in-time caller never sees a quarter that hadn't been reported yet.
+    Pure function: no DB, no network.
+    """
+    parsed = []
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        pe = r.get("period_end")
+        ocf = r.get("ocf")
+        capex = r.get("capex")
+        if not pe or ocf is None or capex is None:
+            continue
+        try:
+            d = date.fromisoformat(str(pe)[:10])
+        except (ValueError, TypeError):
+            continue
+        if as_of and str(pe)[:10] > as_of:
+            continue
+        parsed.append((d, float(ocf), float(capex)))
+    if len(parsed) < n_quarters:
+        return None, None
+    parsed.sort(key=lambda t: t[0], reverse=True)
+    window = parsed[:n_quarters]
+    # Contiguity: the oldest and newest of the window must span ~n_quarters-1 quarters,
+    # and no adjacent gap inside it may be implausibly wide.
+    for older, newer in zip(window[1:], window[:-1]):
+        if (newer[0] - older[0]).days > MAX_QUARTER_GAP_DAYS:
+            return None, None
+    fcf_ttm = round(sum(ocf + capex for _, ocf, capex in window), 2)
+    return fcf_ttm, window[0][0].isoformat()
+
+
+def finstack_ttm_fcf(con, symbol: str, as_of: str | None = None):
+    """Read finstack_cashflow_history for `symbol` and return (fcf_ttm, latest_period_end).
+
+    (None, None) when the vendor has no usable quarterly window for this name —
+    which is the majority of the universe today (Yahoo covers a subset of NSE
+    names, see finstack_cashflow_fetcher.py's docstring). That is an honest
+    no-data, not a zero: the caller falls back to the CFO+CFI proxy and labels it.
+    """
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT period_end, ocf, capex FROM finstack_cashflow_history "
+            "WHERE symbol = ? ORDER BY period_end DESC",
+            (symbol,),
+        )
+        rows = [{"period_end": r[0], "ocf": r[1], "capex": r[2]} for r in cur.fetchall()]
+    except Exception:
+        return None, None
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+    return _ttm_fcf_from_quarters(rows, as_of=as_of)
+
 
 
 def compute_ratios(
@@ -432,7 +542,8 @@ _HARVEST_COLUMNS = [
 def upsert_quality(symbol: str, today: str, row: dict, con) -> None:
     cur = con.cursor()
     columns = ["symbol", "as_of_date", "cfo_ttm", "cfi_ttm", "fcf_ttm_approx",
-               "interest_coverage", "market_cap", "fcf_yield_approx"] + _HARVEST_COLUMNS
+               "interest_coverage", "market_cap", "fcf_yield_approx",
+               "fcf_basis", "fcf_ttm_as_of"] + _HARVEST_COLUMNS
     placeholders = ",".join(["?"] * len(columns))
     update_clause = ",\n            ".join(
         f"{c} = excluded.{c}" for c in columns if c not in ("symbol", "as_of_date")
@@ -474,7 +585,8 @@ def update_technical_signals(symbol: str, features: dict, con, today: str | None
     # tl_financial_quality; technical_signals only carries the value from its knowable date on.
     floor = as_of_floor(features.get("year_ending"), fallback=today)
     cur = con.cursor()
-    base_columns = ["fcf_yield_approx", "interest_coverage", "fcf_positive", "debt_coverage_risk"] + _HARVEST_COLUMNS
+    base_columns = ["fcf_yield_approx", "interest_coverage", "fcf_positive", "debt_coverage_risk",
+                    "fcf_basis", "fcf_ttm_as_of"] + _HARVEST_COLUMNS
     set_clause = ",\n            ".join(
         f"{c} = CASE WHEN date >= ? THEN COALESCE(?, {c}) ELSE NULL END" for c in base_columns
     )
@@ -503,9 +615,45 @@ def process_stock(symbol: str, company_id: str, today: str,
                    session: requests.Session, con) -> dict:
     cashflow = fetch_et_stats(company_id, "CashFlow", session, last=6)  # 6 periods -> 5Y CAGR possible
     ratio = fetch_et_stats(company_id, "Ratio", session)
+    # fetch_et_stats returns None for an HTTP error as well as an empty payload. Previously that
+    # flowed into compute_ratios(), wrote an all/partly-NULL row, and counted the stock as a
+    # success. A total ET outage could therefore overwrite useful features across the universe
+    # while BullMQ reported a clean job. Both slices are expected for every mapped company (live
+    # coverage: 1,969/1,971 latest rows have each family), so reject an incomplete response before
+    # any write. The run-level FetchTracker below decides whether isolated misses or an outage
+    # should fail the scheduled job.
+    missing = [name for name, rows in (("CashFlow", cashflow), ("Ratio", ratio)) if not rows]
+    if missing:
+        if len(missing) == 2:
+            raise RuntimeError("ET_Stats returned no CashFlow or Ratio data")
+        raise RuntimeError(f"ET_Stats returned no {missing[0]} data")
     market_cap = get_market_cap(symbol, con)
 
     features = compute_ratios(balance=None, cashflow=cashflow, ratio=ratio, market_cap=market_cap)
+
+    # ── Prefer REAL TTM FCF over the CFO+CFI proxy wherever it exists ─────────────
+    # compute_ratios() has no DB access, so the quarterly-capex upgrade happens here,
+    # after the row is built. `as_of` is the FISCAL YEAR END of the annual figures
+    # above, which is strictly conservative: the window may only use quarters that
+    # were already inside the reported fiscal year, so this can never pull a quarter
+    # published after the annual results this fetcher is stamping. When year_ending is
+    # unavailable (ET omitted it) fall back to `today` so a late quarter cannot leak in.
+    as_of = features.get("year_ending") or today
+    fcf_ttm, latest_period = finstack_ttm_fcf(con, symbol, as_of=as_of)
+    if fcf_ttm is not None:
+        features["fcf_ttm_approx"] = fcf_ttm
+        features["fcf_positive"] = 1 if fcf_ttm > 0 else 0
+        features["fcf_yield_approx"] = (
+            round(fcf_ttm / market_cap * 100, 4) if market_cap and market_cap > 0 else None
+        )
+        features["fcf_basis"] = FCF_BASIS_CAPEX
+        features["fcf_ttm_as_of"] = latest_period
+    else:
+        # Honest no-data: leave the proxy labelled as a proxy rather than silently
+        # presenting CFO+CFI as free cash flow. Both keys are always present so a
+        # reader never has to distinguish "no capex basis" from "column absent".
+        features["fcf_ttm_as_of"] = None
+        features["fcf_basis"] = FCF_BASIS_PROXY if features.get("fcf_ttm_approx") is not None else None
 
     upsert_quality(symbol, today, features, con)
     upsert_cashflow_history(symbol, parse_cashflow_series(cashflow), con)
@@ -572,11 +720,18 @@ def main() -> None:
     ok = 0
     fcf_positive_count = 0
     distress_count = 0
+    tracker = FetchTracker(
+        "financial_ratios_fetcher",
+        fail_threshold=0.15,
+        min_total_for_threshold=10,
+        abort_after_consecutive_fails=20,
+    )
 
     for i, (symbol, company_id) in enumerate(stocks, 1):
         try:
             features = process_stock(symbol, company_id, today, session, con)
             ok += 1
+            tracker.record(symbol, ok=True)
 
             if features.get("fcf_positive"):
                 fcf_positive_count += 1
@@ -593,6 +748,7 @@ def main() -> None:
                 con.rollback()
             except Exception:
                 pass
+            tracker.record(symbol, ok=False)
             print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}", file=sys.stderr)
 
     fcf_pct = round(fcf_positive_count / ok * 100) if ok else 0
@@ -602,6 +758,7 @@ def main() -> None:
         f"Interest coverage distress (<{DEBT_COVERAGE_RISK_THRESHOLD}x): {distress_count} stocks."
     )
     con.close()
+    tracker.finish()
 
 
 if __name__ == "__main__":

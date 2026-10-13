@@ -848,12 +848,14 @@ def _resolve_outcomes_batch(
         INSERT INTO signal_outcomes
             (symbol, signal_date, horizon_days, entry_price,
              check_date, exit_price, return_pct, outcome,
-             signal_score, signals_json, computed_at,
+             signal_score, signals_json, max_return_pct, computed_at,
              signal_source, label_definition)
-        VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,'technical','path_barrier')
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,'technical','path_barrier')
         ON CONFLICT(symbol, signal_date, horizon_days, signal_source) DO UPDATE SET
             check_date=excluded.check_date, exit_price=excluded.exit_price,
             return_pct=excluded.return_pct, outcome=excluded.outcome,
+            signal_score=excluded.signal_score, signals_json=excluded.signals_json,
+            max_return_pct=excluded.max_return_pct,
             computed_at=excluded.computed_at, label_definition=excluded.label_definition
     """
 
@@ -878,6 +880,7 @@ def _resolve_outcomes_batch(
         [(r['symbol'], r['_exit'], 'GEQ_CLOSE') for r in rows],
     )
     _sl_quads = []
+    _bar_triples = []
     for r in rows:
         _sl = r.get('stop_loss')
         if _sl is None or float(_sl) <= 0:
@@ -887,8 +890,22 @@ def _resolve_outcomes_batch(
         _ntd = _norm_iso(_hit[0]) if _hit else (
             datetime.date.fromisoformat(_sd) + datetime.timedelta(days=1)).isoformat()
         _etd = r['_exit']
+        _bar_triples.append((r['symbol'], _ntd, _etd))
         _sl_quads.append((r['symbol'], _ntd, _etd, float(_sl)))
     _sl_map = _prefetch_sl_hits(conn, _sl_quads)
+    # `max_return_pct` existed in the outcome/report contract but had no writer. Reuse the
+    # same clean holding-window prefetch as the unified resolver, rather than adding one query
+    # per signal. It is an outcome-side MFE label (gross peak excursion), never a model input.
+    # Include rows without a stop too: they still need their excursion measured.
+    for r in rows:
+        _sd = str(r['signal_date'])[:10]
+        _hit = _np_map.get((str(r['symbol']), _sd, 'AFTER_OPEN'))
+        _ntd = _norm_iso(_hit[0]) if _hit else (
+            datetime.date.fromisoformat(_sd) + datetime.timedelta(days=1)).isoformat()
+        triple = (r['symbol'], _ntd, r['_exit'])
+        if triple not in _bar_triples:
+            _bar_triples.append(triple)
+    _bars_map = _prefetch_bar_windows(conn, _bar_triples)
 
     for row in rows:
         sym          = row['symbol']
@@ -931,6 +948,7 @@ def _resolve_outcomes_batch(
         exit_price   = None
         check_date   = None
         return_pct   = None
+        max_return_pct = None
 
         # PHASE 1 FIX: Check SL on next trading day first (it has priority in intraday)
         if stop_loss and stop_loss > 0:
@@ -982,6 +1000,17 @@ def _resolve_outcomes_batch(
                 outcome    = 'PENDING'
                 return_pct = None
 
+        # Peak favourable excursion only through the actual exit/check date. Looking through
+        # the full horizon after a stop would credit price action that the trade never owned.
+        if check_date and entry > 0:
+            start_key = _norm_iso(next_trading_day)
+            end_key = _norm_iso(exit_target_date)
+            holding_bars = _bars_map.get((sym, start_key, end_key), [])
+            eligible_highs = [float(b[1]) for b in holding_bars
+                              if b[1] is not None and _norm_iso(b[0]) <= _norm_iso(check_date)]
+            if eligible_highs:
+                max_return_pct = (max(eligible_highs) - entry) / entry * 100
+
         if dry_run:
             msg = f"  [DRY] {sym} {signal_date} h={sig_horizon}d (entry:{next_trading_day}) -> {outcome}"
             if return_pct is not None:
@@ -995,6 +1024,7 @@ def _resolve_outcomes_batch(
             round(return_pct, 4) if return_pct is not None else None,
             outcome,
             row['signal_score'], row['signals_json'],
+            round(max_return_pct, 4) if max_return_pct is not None else None,
         ))
         if outcome != 'PENDING':
             resolved += 1

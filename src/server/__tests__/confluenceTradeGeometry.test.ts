@@ -40,6 +40,13 @@ import { wilderATR } from '../atrBarriers';
 const COL = { timeframe: 14, stop: 18, t1: 19, t2: 20, rr: 22, price: 25, atr: 28 };
 
 describe('buildTradeSetup', () => {
+  it('uses the same 1/5/15-session horizons as canonical recommendation expiry', () => {
+    // Do not derive this expectation from HOLDING_SESSIONS: the contract lives in
+    // unified_ranker.HORIZON_SESSIONS and signal/outcome grading. A 20-session geometry on a
+    // recommendation that expires after 15 sessions is internally inconsistent.
+    expect(HOLDING_SESSIONS).toEqual({ INTRADAY: 1, SWING: 5, POSITIONAL: 15 });
+  });
+
   it('reports risk_reward to target_1, not target_2', () => {
     for (const tf of ['INTRADAY', 'SWING', 'POSITIONAL']) {
       for (const score of [50, 70, 90]) {

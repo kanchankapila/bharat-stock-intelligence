@@ -51,6 +51,15 @@ describe('nse-sync-weekly sector backfill wiring', () => {
     expect(mcIdx).toBeLessThan(propagateIdx);
   });
 
+  it('runs the independent Yahoo gap fallback after MoneyControl and before propagation', () => {
+    const mcWriteIdx = SOURCE.indexOf("['--write', '--report-unmapped']");
+    const yahooIdx = SOURCE.indexOf("runPython('backfill_sector_industry.py'");
+    const propagateIdx = SOURCE.indexOf("runPython('backfill_sectors.py'");
+    expect(mcWriteIdx).toBeGreaterThan(-1);
+    expect(yahooIdx).toBeGreaterThan(mcWriteIdx);
+    expect(propagateIdx).toBeGreaterThan(yahooIdx);
+  });
+
   it('calls the exported syncMappings() from syncAllStockMappings.ts (provider-mapping backfill)', () => {
     // 544/2366 ACTIVE symbols were missing mcsymbol/tlid entirely and the only fix (npm run
     // sync:mappings) was manual-only -- never scheduled, so newly-added nse_stocks rows

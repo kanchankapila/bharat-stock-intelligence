@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, translate, use_postgres
+from as_of import logical_trading_date
 from model_promotion import decide_promotion_with_nan_guard, file_staleness_override_applies
 from relative_strength import build_sector_features
 import sys
@@ -240,7 +241,7 @@ def _load_ohlcv(cutoff: str) -> pd.DataFrame:
         if missing:
             bt = Backtester()
             try:
-                extra = bt.load_bhavcopy_adjusted(missing, cutoff, datetime.date.today().isoformat())
+                extra = bt.load_bhavcopy_adjusted(missing, cutoff, logical_trading_date())
             finally:
                 bt.close()
             if not extra.empty:
@@ -259,7 +260,7 @@ def _load_ohlcv(cutoff: str) -> pd.DataFrame:
 def load_labeled_features(horizon: int = HORIZON) -> pd.DataFrame:
     """OHLCV-derived features joined to the forward breakout label, over the full
     backfilled history. Only dates with a complete forward window are labelled."""
-    cutoff = (datetime.date.today() - datetime.timedelta(days=TRAIN_LOOKBACK_DAYS)).isoformat()
+    cutoff = (datetime.date.fromisoformat(logical_trading_date()) - datetime.timedelta(days=TRAIN_LOOKBACK_DAYS)).isoformat()
     ohlcv = _load_ohlcv(cutoff)
     if ohlcv.empty:
         return pd.DataFrame()
@@ -541,7 +542,7 @@ def train(report_only: bool = False, leak_check: bool = False) -> dict:
     prod = _make_model(spw)
     prod.fit(X, y)
     payload = {"models": [prod], "feature_names": list(X.columns),
-               "horizon": HORIZON, "trained_at": datetime.date.today().isoformat(),
+               "horizon": HORIZON, "trained_at": logical_trading_date(),
                "oof_auc": auc, "test_auc": test_auc}
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     promoted = _promote_or_reject_breakout(payload, test_auc, auc)
@@ -566,7 +567,7 @@ def score() -> int:
     except Exception:
         conn.rollback()
 
-    cutoff = (datetime.date.today() - datetime.timedelta(days=SCORE_LOOKBACK_DAYS)).isoformat()
+    cutoff = (datetime.date.fromisoformat(logical_trading_date()) - datetime.timedelta(days=SCORE_LOOKBACK_DAYS)).isoformat()
     ohlcv = _load_ohlcv(cutoff)
     if ohlcv.empty:
         return 0
@@ -609,7 +610,7 @@ def sector_ablation() -> dict:
 
     sector_map = _load_sector_map()
     # Recompute sector features straight from OHLCV (df has no close-pivot-ready shape).
-    cutoff = (datetime.date.today() - datetime.timedelta(days=TRAIN_LOOKBACK_DAYS)).isoformat()
+    cutoff = (datetime.date.fromisoformat(logical_trading_date()) - datetime.timedelta(days=TRAIN_LOOKBACK_DAYS)).isoformat()
     ohlcv = _load_ohlcv(cutoff)
     ohlcv_sec = ohlcv[["symbol", "date", "close"]].copy()
     ohlcv_sec["sector"] = ohlcv_sec["symbol"].map(sector_map)

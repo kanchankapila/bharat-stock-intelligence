@@ -25,7 +25,7 @@ def make_db():
             symbol TEXT, signal_date TEXT, horizon_days INTEGER,
             entry_price REAL, check_date TEXT, exit_price REAL,
             return_pct REAL, outcome TEXT, signal_score INTEGER,
-            signals_json TEXT, computed_at TEXT,
+            signals_json TEXT, max_return_pct REAL, computed_at TEXT,
             label_definition TEXT, signal_source TEXT NOT NULL DEFAULT 'unknown',
             PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
         );
@@ -77,6 +77,21 @@ def test_win_outcome():
     conn.commit()
     assert resolve(conn)['resolved'] >= 1
     assert get_row(conn, 'RELIANCE')[0] == 'WIN'
+
+
+def test_signal_outcome_records_peak_return_through_exit():
+    """The ML diagnostics API exposes AVG(max_return_pct); this field had no writer."""
+    conn = make_db()
+    seed_flat_history(conn, 'MFE')
+    add_signal(conn, 'MFE')
+    add_exit_bar(conn, 'MFE', open_=100, high=111, low=99, close=104)
+    conn.commit()
+
+    resolve(conn)
+    peak = conn.execute(
+        "SELECT max_return_pct FROM signal_outcomes WHERE symbol='MFE'"
+    ).fetchone()[0]
+    assert peak == pytest.approx(11.0, abs=0.01)
 
 
 def test_loss_outcome():
@@ -496,7 +511,7 @@ def make_multi_horizon_db():
             symbol TEXT, signal_date TEXT, horizon_days INTEGER,
             entry_price REAL, check_date TEXT, exit_price REAL,
             return_pct REAL, outcome TEXT, signal_score INTEGER,
-            signals_json TEXT, computed_at TEXT,
+            signals_json TEXT, max_return_pct REAL, computed_at TEXT,
             label_definition TEXT, signal_source TEXT NOT NULL DEFAULT 'unknown',
             PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
         );
@@ -851,7 +866,7 @@ def make_db_native_date_outcomes():
             symbol TEXT, signal_date DATE, horizon_days INTEGER,
             entry_price REAL, check_date DATE, exit_price REAL,
             return_pct REAL, outcome TEXT, signal_score INTEGER,
-            signals_json TEXT, computed_at TIMESTAMPTZ DEFAULT now(),
+            signals_json TEXT, max_return_pct REAL, computed_at TIMESTAMPTZ DEFAULT now(),
             label_definition TEXT, signal_source TEXT NOT NULL DEFAULT 'unknown',
             PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
         );

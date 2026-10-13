@@ -35,6 +35,28 @@ def _sessions_between(conn, a: dt.date | None, b: dt.date) -> int | None:
     return int(r.n[0])
 
 
+def latest_unhealthy_ingests(conn: psycopg.Connection, as_of: dt.date):
+    """Latest attempt per source that is still unhealthy.
+
+    Earlier failed attempts remain useful audit evidence, but must not keep the current DQ
+    state failed after a successful retry. An empty payload is unhealthy for dense sources;
+    for event-driven (`sparse`) sources it is an honest no-events result.
+    """
+    dense_sources = [name for name, cls in CONNECTORS.items() if not cls.health.sparse]
+    return read_df(conn, """
+        SELECT source, status, detail
+          FROM (
+            SELECT DISTINCT ON (source) source, status, detail
+              FROM alpha.ingest_run
+             WHERE target_date = %s
+             ORDER BY source, started_at DESC, run_id DESC
+          ) latest
+         WHERE status = 'failed'
+            OR (status = 'empty' AND source = ANY(%s))
+         ORDER BY source
+    """, (as_of, dense_sources))
+
+
 ADJ_LOOKBACK_DAYS = 45
 ADJ_TOLERANCE = 0.02
 
@@ -101,8 +123,7 @@ def run_checks(conn: psycopg.Connection, as_of: dt.date, horizons: tuple[int, ..
                 v = float(fr[c][0]) if fr.n[0] else 0.0
                 out.append(CheckResult(f"fill:{name}:{c}", "pass" if v >= floor else "fail", v,
                                        f"{v:.1%} non-null on {latest} (floor {floor:.0%}, n={int(fr.n[0])})"))
-    runs = read_df(conn, """SELECT source, status, detail FROM alpha.ingest_run
-                            WHERE target_date = %s AND status IN ('failed','empty')""", (as_of,))
+    runs = latest_unhealthy_ingests(conn, as_of)
     out.append(CheckResult("ingest:failed_or_empty", "fail" if len(runs) else "pass", float(len(runs)),
                            "; ".join(f"{r.source}={r.status}" for r in runs.itertuples()) or "none"))
     susp = read_df(conn, "SELECT avg(is_suspect::int) AS s, count(*) AS n FROM alpha.daily_bar WHERE trade_date=%s", (as_of,))

@@ -1803,7 +1803,8 @@ CREATE TABLE IF NOT EXISTS "market_regimes" (
   "hmm_state" BIGINT,
   "viterbi_path_json" TEXT,
   "features_json" TEXT,
-  "computed_at" TIMESTAMPTZ DEFAULT now()
+  "computed_at" TIMESTAMPTZ DEFAULT now(),
+  "backfilled" BOOLEAN NOT NULL DEFAULT false
 );
 
 -- ── market_sentiment_snapshots ─────────────────────────────────────────────
@@ -2486,6 +2487,37 @@ CREATE TABLE IF NOT EXISTS "nse_filed_corporate_actions" (
 CREATE INDEX idx_nfca_filing_date ON public.nse_filed_corporate_actions USING btree (filing_date);
 CREATE INDEX idx_nfca_symbol ON public.nse_filed_corporate_actions USING btree (symbol);
 
+-- ── nse_filing_financials ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "nse_filing_financials" (
+  "symbol" TEXT NOT NULL,
+  "period_end" DATE NOT NULL,
+  "consolidated" BOOLEAN NOT NULL,
+  "broadcast_ts" TIMESTAMPTZ NOT NULL,
+  "filing_period" TEXT NOT NULL,
+  "relating_to" TEXT,
+  "is_original" BOOLEAN NOT NULL,
+  "period_start" DATE,
+  "revenue" DOUBLE PRECISION,
+  "total_income" DOUBLE PRECISION,
+  "pat" DOUBLE PRECISION,
+  "pat_owners" DOUBLE PRECISION,
+  "pbt" DOUBLE PRECISION,
+  "tax_expense" DOUBLE PRECISION,
+  "finance_costs" DOUBLE PRECISION,
+  "eps_basic" DOUBLE PRECISION,
+  "total_assets" DOUBLE PRECISION,
+  "cfo_ytd" DOUBLE PRECISION,
+  "revenue_ytd" DOUBLE PRECISION,
+  "pat_ytd" DOUBLE PRECISION,
+  "unit_scale" TEXT,
+  "xbrl_kind" TEXT,
+  "parse_error" TEXT,
+  "source_url" TEXT NOT NULL,
+  "parsed_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY ("symbol", "period_end", "consolidated", "broadcast_ts", "filing_period")
+);
+CREATE INDEX nse_filing_financials_source_url_idx ON public.nse_filing_financials USING btree (source_url);
+
 -- ── nse_ipo_calendar ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "nse_ipo_calendar" (
   "symbol" TEXT NOT NULL,
@@ -3103,7 +3135,8 @@ CREATE TABLE IF NOT EXISTS "screener_membership_snapshot" (
   "as_of_date" DATE NOT NULL,
   "symbol" TEXT NOT NULL,
   "screener_id" TEXT NOT NULL,
-  PRIMARY KEY ("as_of_date", "symbol", "screener_id")
+  "source" TEXT NOT NULL DEFAULT 'legacy_unknown'::text,
+  PRIMARY KEY ("as_of_date", "symbol", "source", "screener_id")
 );
 CREATE INDEX idx_sms_date ON public.screener_membership_snapshot USING btree (as_of_date);
 
@@ -3633,6 +3666,7 @@ CREATE TABLE IF NOT EXISTS "stock_earnings_dates" (
   "market_cap" DOUBLE PRECISION,
   "exchange" TEXT,
   "fetched_at" TEXT DEFAULT now(),
+  "known_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("scid", "result_date")
 );
 
@@ -4278,6 +4312,8 @@ CREATE TABLE IF NOT EXISTS "technical_signals" (
   "flyer_probability" REAL,
   "win_probability_scored_at" TIMESTAMPTZ,
   "preopen_volume" DOUBLE PRECISION,
+  "fcf_basis" TEXT,
+  "fcf_ttm_as_of" TEXT,
   PRIMARY KEY ("symbol", "date")
 );
 CREATE INDEX idx_technical_signals_created_at ON public.technical_signals USING btree (created_at DESC);
@@ -4298,20 +4334,6 @@ CREATE TABLE IF NOT EXISTS "telegram_report_log" (
   "chars" INTEGER NOT NULL,
   "text" TEXT NOT NULL
 );
-
--- ── tick_data ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS "tick_data" (
-  "symbol" TEXT NOT NULL,
-  "tick_time" TIMESTAMPTZ NOT NULL,
-  "price" DOUBLE PRECISION NOT NULL,
-  "bid" DOUBLE PRECISION,
-  "ask" DOUBLE PRECISION,
-  "volume" BIGINT,
-  "volume_cum" BIGINT,
-  PRIMARY KEY ("symbol", "tick_time")
-);
-CREATE INDEX idx_tick_date ON public.tick_data USING btree (tick_time DESC);
-CREATE INDEX idx_tick_symbol ON public.tick_data USING btree (symbol, tick_time DESC);
 
 -- ── tl_financial_quality ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "tl_financial_quality" (
@@ -4364,6 +4386,8 @@ CREATE TABLE IF NOT EXISTS "tl_financial_quality" (
   "cfo_cagr_5y" REAL,
   "cfi_cagr_5y" REAL,
   "cff_cagr_5y" REAL,
+  "fcf_basis" TEXT,
+  "fcf_ttm_as_of" TEXT,
   PRIMARY KEY ("symbol", "as_of_date")
 );
 CREATE INDEX idx_tlfq_sym ON public.tl_financial_quality USING btree (symbol, as_of_date DESC);
@@ -4483,6 +4507,7 @@ CREATE TABLE IF NOT EXISTS "trendlyne_analyst_targets" (
   "reco_price" REAL,
   "rating" TEXT,
   "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  "known_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "reco_date", "broker")
 );
 
@@ -5029,7 +5054,3 @@ SELECT create_hypertable('macro_asset_prices', 'date', chunk_time_interval => IN
 SELECT create_hypertable('stock_ohlcv', 'date', chunk_time_interval => INTERVAL '90 days', if_not_exists => TRUE, migrate_data => TRUE);
 ALTER TABLE stock_ohlcv SET (timescaledb.compress, timescaledb.compress_segmentby = 'symbol');
 SELECT add_compression_policy('stock_ohlcv', INTERVAL '180 days', if_not_exists => TRUE);
-SELECT create_hypertable('tick_data', 'tick_time', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE, migrate_data => TRUE);
-ALTER TABLE tick_data SET (timescaledb.compress, timescaledb.compress_segmentby = 'symbol');
-SELECT add_compression_policy('tick_data', INTERVAL '7 days', if_not_exists => TRUE);
-SELECT add_retention_policy('tick_data', INTERVAL '30 days', if_not_exists => TRUE);

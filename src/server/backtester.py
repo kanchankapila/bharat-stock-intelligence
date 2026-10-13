@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df
+from risk_free_rate import get_risk_free_annual
 
 NIFTY_SYMBOLS  = ('NIFTY50', 'NIFTY', '^NSEI')
 INITIAL_CAPITAL = 1_000_000   # ₹10L default
@@ -980,13 +981,25 @@ class Backtester:
 
         # Daily returns
         daily_rets = equity_curve.pct_change().dropna()
-        sharpe     = (daily_rets.mean() / daily_rets.std() * math.sqrt(252)
-                      if daily_rets.std() > 0 else 0.0)
+        # Sharpe (2026-10-11 quant audit): sample std (ddof=1), not population (ddof=0),
+        # which biased the ratio high; and subtract the platform's single sourced risk-free
+        # rate (risk_free_rate.get_risk_free_annual) instead of raw mean return, so a
+        # backtest's Sharpe is comparable with quant_scores.sharpe_ratio.
+        risk_free = get_risk_free_annual()
+        rf_daily  = risk_free / 252
+        std_daily = daily_rets.std(ddof=1) if len(daily_rets) > 1 else 0.0
+        sharpe = (((daily_rets.mean() - rf_daily) / std_daily) * math.sqrt(252)
+                  if std_daily > 0 else 0.0)
 
-        # Sortino (downside deviation only)
-        neg_rets  = daily_rets[daily_rets < 0]
-        sortino   = (daily_rets.mean() / neg_rets.std() * math.sqrt(252)
-                     if len(neg_rets) > 1 and neg_rets.std() > 0 else 0.0)
+        # Sortino (downside deviation over the FULL window against the risk-free MAR).
+        # The old `neg_rets = daily_rets[daily_rets < 0]; neg_rets.std()` divided by the
+        # dispersion of the down-days ALONE, which understates downside risk and inflates
+        # the ratio — and contradicted risk_metrics_engine._sortino's own docstring in the
+        # same repo. Downside deviation = RMS of (r - rf) over days where r < rf.
+        excess   = daily_rets - rf_daily
+        downside = excess[excess < 0]
+        dd_std   = math.sqrt((downside ** 2).mean()) if len(downside) > 0 else 0.0
+        sortino  = ((daily_rets.mean() - rf_daily) / dd_std) * math.sqrt(252) if dd_std > 0 else 0.0
 
         # Max drawdown
         peak    = equity_curve.cummax()

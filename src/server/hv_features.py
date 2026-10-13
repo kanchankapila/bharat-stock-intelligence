@@ -48,6 +48,7 @@ import math
 import numpy as np
 import pandas as pd
 
+from as_of import logical_trading_date
 from db_compat import connect, read_df, executemany
 
 LOOKBACK_DAYS = 420          # enough for 60-day HV with a generous buffer
@@ -113,7 +114,13 @@ def run(only_date: str | None = None, only_symbol: str | None = None) -> int:
     """Compute HV features and write onto the most-recent technical_signals row per symbol.
     Returns the number of rows updated."""
 
-    cutoff = (datetime.date.today() - datetime.timedelta(days=LOOKBACK_DAYS)).isoformat()
+    # Logical trading date, not wall-clock today (2026-10-11 quant audit): this runs in
+    # the post-close ml-daily-ops chain, which regularly finishes after IST midnight. A bare
+    # date.today() cutoff there reads OHLCV from the NEXT calendar day — a day whose bhavcopy
+    # is not written yet, so the series silently ends one session early and every HV below is
+    # one-bar short (recurring-bugs.md write-anchor class).
+    today_str = logical_trading_date()
+    cutoff = (datetime.date.fromisoformat(today_str) - datetime.timedelta(days=LOOKBACK_DAYS)).isoformat()
 
     # Fixed 2026-07-30 (Finding #67, full-stack audit): the OHLCV read had a lower date
     # bound but no upper one -- the write side correctly filtered which symbols/dates got
@@ -122,10 +129,7 @@ def run(only_date: str | None = None, only_symbol: str | None = None) -> int:
     # a historical technical_signals row whenever --date targeted the past. Resolve the
     # target date up front (same "today" normalization the write-side filter below already
     # does) and bound the read with it too.
-    upper_bound = (
-        datetime.date.today().isoformat() if not only_date or only_date == "today"
-        else only_date
-    )
+    upper_bound = today_str if not only_date or only_date == "today" else only_date
 
     base_sql = (
         "SELECT symbol, date, close FROM stock_ohlcv "
@@ -187,13 +191,23 @@ def run(only_date: str | None = None, only_symbol: str | None = None) -> int:
         return 0
 
     ts_map: dict[str, str] = {r.symbol: str(r.max_date) for r in ts_df.itertuples(index=False)}
-    if only_date:
-        target_date = datetime.date.today().isoformat() if only_date == "today" else only_date
-        # Only update symbols whose most-recent technical_signals row matches target date
-        ts_map = {sym: d for sym, d in ts_map.items() if d == target_date}
-        if not ts_map:
-            print(f"[HVFeatures] No technical_signals rows with date={target_date}.")
-            return 0
+    if only_date is None:
+        # Default-run guard (2026-10-11 quant audit): the old default updated each
+        # symbol's MAX(date) row whatever date that was — a symbol whose feed had
+        # stopped weeks ago got today's HV written onto an old row, contaminating a
+        # historical feature with a value computed through today. Match the
+        # avwap_features.py convention: the target is the logical trading date, and
+        # only symbols whose latest row IS that date get updated. A stale symbol is
+        # skipped, not poisoned.
+        only_date = today_str
+    # "today" is the SAME logical date the OHLCV read above was bounded by — resolving
+    # them from one variable is what keeps the read and the write anchored to one session.
+    target_date = today_str if only_date == "today" else only_date
+    # Only update symbols whose most-recent technical_signals row matches target date
+    ts_map = {sym: d for sym, d in ts_map.items() if d == target_date}
+    if not ts_map:
+        print(f"[HVFeatures] No technical_signals rows with date={target_date}.")
+        return 0
 
     feats = feats[feats["symbol"].isin(ts_map)].copy()
     if feats.empty:

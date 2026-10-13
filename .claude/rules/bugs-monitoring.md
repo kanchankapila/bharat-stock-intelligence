@@ -14,6 +14,18 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 
 ## Monitoring blind spots
 
+- **A monitor can be false-red and false-green at the same time when it replaces the production
+  schedule with a raw age and replaces failure classification with broad words.** 2026-10-10
+  (AF-20261010-01): repo-doctor warned that an intraday capture was 21.8h old on Saturday even
+  though Friday's 15:30 NSE slot was the latest due occurrence; meanwhile its
+  `/trendlyne|vendor|steps failed/` suppression treated `1 steps failed:
+  sync_tl_index_map` as benign, and its heartbeat loop ignored `last_status='failed'` while an
+  older success remained inside the age limit. Three rules: compare a market-hours job with the
+  latest completed holiday-aware occurrence, not elapsed wall-clock hours; failure status wins
+  independently of freshness; and suppress only a demonstrated transient signature, never a
+  provider name or generic wrapper text. Immunized by repo-doctor's
+  `doctor-lib.test.mjs` schedule and classifier cases.
+
 - **One operations page can have multiple registries and multiple sources of run evidence.**
   `JOB_REGISTRY` jobs are schedule/holiday/runtime judged from heartbeats, while
   `MONITOR_SCRIPTS` also contains table-backed probes whose successful output may be newer than

@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from db_compat import connect
 import as_of
-from indian_market_costs import round_trip_cost_bps
+from indian_market_costs import round_trip_cost_bps, equity_trade_type_for_timeframe
 
 CSV_PATH         = Path(__file__).parent.parent.parent / 'screener_scoring_v2.csv'
 CORRECTIONS_PATH = Path(__file__).parent.parent.parent / 'screener_corrections.csv'
@@ -2080,7 +2080,7 @@ class UnifiedRanker:
             self.conn.rollback()
             return {}
 
-    def _compute_cost_map(self, symbols: list) -> dict:
+    def _compute_cost_map(self, symbols: list, trade_type_by_symbol: dict | None = None) -> dict:
         """Compute round-trip transaction cost for each symbol.
 
         Returns {symbol: round_trip_cost_pct} using the full Indian-market fee schedule
@@ -2123,10 +2123,11 @@ class UnifiedRanker:
                 participation = min(participation, 0.25)  # cap at 25% of ADT
                 # Daily volatility as percentage
                 daily_vol_pct = (atr / cmp_val * 100.0) if cmp_val > 0 else 2.0
+                trade_type = (trade_type_by_symbol or {}).get(sym, 'delivery')
                 cost = round_trip_cost_bps(
                     notional=notional,
                     asset_class='equity',
-                    trade_type='intraday',
+                    trade_type=trade_type,
                     participation_rate=participation,
                     volatility_pct=daily_vol_pct,
                 )
@@ -2134,6 +2135,24 @@ class UnifiedRanker:
         except Exception as e:
             self._degraded(f"[UnifiedRanker] _compute_cost_map failed: {e}")
             self.conn.rollback()
+        # `results` can legitimately contain a stock with no technical_signals row (live
+        # 2026-10-13: 105/2,324). The query above used technical_signals as its base, so those
+        # names received NULL est_cost_bps and, more importantly, escaped the sizing penalty.
+        # Missing market inputs are not zero trading cost: use the same documented neutral
+        # assumptions already applied inside the row loop (1% participation, 2% daily vol).
+        # This also keeps costs conservative and explicit if the best-effort query degrades.
+        missing = [symbol for symbol in symbols if symbol not in cost_map]
+        for sym in missing:
+            cost_map[sym] = round_trip_cost_bps(
+                notional=1_000_000.0,
+                asset_class='equity',
+                trade_type=(trade_type_by_symbol or {}).get(sym, 'delivery'),
+                participation_rate=0.01,
+                volatility_pct=2.0,
+            )
+        if missing:
+            print(f"[UnifiedRanker] cost inputs missing for {len(missing)} symbols; "
+                  "used neutral liquidity/volatility assumptions", file=sys.stderr)
         return cost_map
 
     def _get_cs_scores(self):
@@ -3248,7 +3267,16 @@ class UnifiedRanker:
 
         # Cost-aware position sizing: compute round-trip costs and penalize
         # high-cost symbols (illiquid small-caps, high-slippage names)
-        cost_map = self._compute_cost_map(all_symbols)
+        trade_type_by_symbol = {
+            r['symbol']: equity_trade_type_for_timeframe(r.get('timeframe')) for r in results
+        }
+        cost_map = self._compute_cost_map(all_symbols, trade_type_by_symbol)
+        for r in results:
+            cost = cost_map.get(r['symbol'])
+            # The cost map is a decimal fraction (0.002 == 20 bps); the persisted
+            # reporting field is explicitly basis points.  Store the same estimate
+            # the sizing penalty consumed rather than recomputing it in a reader.
+            r['est_cost_bps'] = round(cost * 10_000, 2) if cost is not None else None
         if cost_map:
             raw_sizes = apply_cost_penalty(raw_sizes, cost_map)
             penalized = sum(1 for s in raw_sizes.values() if s == 0)
@@ -3304,7 +3332,7 @@ class UnifiedRanker:
                  bearish_screener_count,
                  fundamental_score, entry_zone_low, entry_zone_high, stop_loss,
                  target_1, target_2, target_3, risk_reward, timeframe, valid_until,
-                 trade_reasoning, sector, position_size_pct)
+                 trade_reasoning, sector, position_size_pct, est_cost_bps)
                 VALUES (:symbol, :computed_at, :generated_at, :regime, :unified_score,
                         :conviction_level, :classification,
                         :screener_names_json,
@@ -3315,7 +3343,7 @@ class UnifiedRanker:
                         :bearish_screener_count, :fundamental_score, :entry_zone_low,
                         :entry_zone_high, :stop_loss, :target_1, :target_2, :target_3,
                         :risk_reward, :timeframe, :valid_until, :trade_reasoning, :sector,
-                        :position_size_pct)
+                        :position_size_pct, :est_cost_bps)
                 ON CONFLICT(symbol, computed_at) DO UPDATE SET
                     -- Deliberately overwritten, not preserved: this row IS the later run's
                     -- output, so generated_at must describe the run that actually wrote what
@@ -3340,7 +3368,8 @@ class UnifiedRanker:
                     risk_reward=excluded.risk_reward, timeframe=excluded.timeframe,
                     valid_until=excluded.valid_until,
                     trade_reasoning=excluded.trade_reasoning, sector=excluded.sector,
-                    position_size_pct=excluded.position_size_pct
+                    position_size_pct=excluded.position_size_pct,
+                    est_cost_bps=excluded.est_cost_bps
             ''', r)
 
             # Append-only point-in-time snapshot. The upsert above deliberately overwrites the

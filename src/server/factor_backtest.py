@@ -47,8 +47,8 @@ COST MODEL (Indian delivery equity, per side, bps)
     => ~15 bps explicit per side, ~29 bps explicit round trip.
 Default here is 25 bps/side (50 bps round trip), i.e. explicit cost plus ~10 bps/side of
 slippage -- deliberately conservative for a liquid mid/large-cap book. Slippage is ASSUMED, not
-measured: `tick_data` and `order_book_snapshots` are both empty, so no spread data exists in
-this platform to calibrate against. Sweep it with --cost-bps before believing any result that
+measured: the never-written `tick_data` / `order_book_snapshots` placeholders were retired, so
+no spread data exists in this platform to calibrate against. Sweep it with --cost-bps before believing any result that
 sits within a few bps of break-even.
 
 WHAT THIS DOES NOT DO
@@ -571,7 +571,7 @@ def load_price_panel(start: str = DEFAULT_START,
         - gs['deliv_pct'].rolling(63, min_periods=30).mean().reset_index(level=0, drop=True))
     # Average ticket size: turnover per trade. A rise means fewer, larger orders -- the crude
     # public-data proxy for institutional participation, since this platform has no order book
-    # (tick_data and order_book_snapshots are both empty).
+    # (the never-written tick/order-book placeholder tables were retired).
     px['_ticket'] = (px['turnover_lacs'] * 1e5) / px['num_trades'].replace(0, np.nan)
     gt = px.groupby('symbol', sort=False)          # rebuilt: _ticket did not exist when gs was
     px['ticket_ratio'] = px['_ticket'] / (
@@ -1116,7 +1116,13 @@ def _add_beta_and_idio_vol(px: pd.DataFrame) -> pd.DataFrame:
         return px
 
     px = px.merge(mkt, on='date', how='left')
+    # Pairwise-valid product: a stock return with no matching market return contributes
+    # nothing to the covariance sums. `n` below MUST count the same pairwise-valid rows or
+    # the covariance denominator disagrees with its own numerator (2026-10-11 quant audit:
+    # n used to be the count of `_dr`, which includes stock bars whose market return was
+    # missing, so cov/var were scaled by different effective sample sizes).
     px['_xy'] = px['_dr'] * px['_mkt']
+    px['_valid'] = px['_dr'].notna() & px['_mkt'].notna()
 
     # Sample covariance via rolling SUMS rather than .rolling().cov():
     #     cov = (sum(xy) - sum(x)sum(y)/n) / (n-1)
@@ -1126,8 +1132,17 @@ def _add_beta_and_idio_vol(px: pd.DataFrame) -> pd.DataFrame:
         r = px.groupby('symbol', sort=False)[col].rolling(BETA_WINDOW, min_periods=BETA_MIN_OBS)
         return getattr(r, how)().reset_index(level=0, drop=True)
 
-    n = _roll('_dr', 'count')
-    s_xy, s_x, s_y = _roll('_xy', 'sum'), _roll('_dr', 'sum'), _roll('_mkt', 'sum')
+    def _roll_masked(col, how):
+        # Same rolling window, but the series is pre-masked to the pairwise-valid rows so the
+        # count and the sums always describe the identical set of observations.
+        tmp = f"_m_{col}"
+        px[tmp] = px[col].where(px['_valid'])
+        r = px.groupby('symbol', sort=False)[tmp].rolling(BETA_WINDOW, min_periods=BETA_MIN_OBS)
+        return getattr(r, how)().reset_index(level=0, drop=True)
+
+    n = _roll_masked('_dr', 'count')
+    s_xy, s_x, s_y = (_roll_masked('_xy', 'sum'), _roll_masked('_dr', 'sum'),
+                      _roll_masked('_mkt', 'sum'))
     cov = (s_xy - s_x * s_y / n) / (n - 1)
     var_m = _roll('_mkt', 'var')
     var_i = _roll('_dr', 'var')

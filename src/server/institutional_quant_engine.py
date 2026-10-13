@@ -22,8 +22,19 @@ import pandas as pd
 from sqlalchemy import text
 
 from db_compat import get_engine
+from risk_free_rate import get_risk_free_annual
 
-RISK_FREE    = 0.07   # 7% p.a. — Indian 10Y Gsec proxy
+
+def risk_free_annual() -> float:
+    """Annual decimal risk-free rate, resolved once per run (risk_free_rate.py).
+
+    Resolved lazily — NOT at import — so importing this module never touches the DB.
+    Before 2026-10-11 this was a hard-coded 7.0%, against 4.0% in quantScoringWorker.ts and
+    6.5% in risk_metrics_engine.py: three different rates feeding the same
+    quant_scores.sharpe_ratio / sortino_ratio columns, making those values incomparable
+    row-to-row (quant audit finding).
+    """
+    return get_risk_free_annual()
 
 
 class InstitutionalQuantEngine:
@@ -68,6 +79,7 @@ class InstitutionalQuantEngine:
 
     def compute_momentum_features(self, ohlcv: pd.DataFrame) -> pd.DataFrame:
         """Per-symbol returns over standard horizons + above-SMA200 flag."""
+        risk_free_pct = get_risk_free_annual() * 100  # resolved once per run, not per symbol
         records = []
         for symbol, grp in ohlcv.groupby('symbol'):
             closes = grp.sort_values('date')['close'].values
@@ -75,6 +87,10 @@ class InstitutionalQuantEngine:
             last   = closes[-1]
 
             def ret(days):
+                # N-session return = close(t)/close(t-N)-1, so `n > days` is right but the
+                # old `closes[-days]` was the N-th-from-last close — a 251-session span for
+                # return_12m (off-by-one vs. quantScoringWorker's original convention and
+                # vs. the standard). 2026-10-11 quant audit.
                 return (last / closes[-days - 1] - 1) * 100 if n > days else None
 
             # SMA200
@@ -83,15 +99,25 @@ class InstitutionalQuantEngine:
 
             # Daily log returns for vol/Sharpe
             rets = np.diff(np.log(closes[-253:])) if n >= 253 else np.diff(np.log(closes))
-            ann_vol  = float(np.std(rets) * math.sqrt(252) * 100) if len(rets) > 1 else None
+            # ddof=1 (sample std): np.std defaults to the population divisor, which
+            # biases annualised vol low and Sharpe high on 252 observations.
+            ann_vol  = float(np.std(rets, ddof=1) * math.sqrt(252) * 100) if len(rets) > 1 else None
             ann_ret  = float(np.mean(rets) * 252 * 100) if len(rets) > 1 else None
-            sharpe   = (ann_ret - RISK_FREE * 100) / ann_vol if (ann_vol and ann_vol > 0) else None
+            sharpe   = (ann_ret - risk_free_pct) / ann_vol if (ann_vol and ann_vol > 0) else None
 
-            # Max drawdown (1Y)
+            # Max drawdown (1Y) as a POSITIVE magnitude — "fell 12.5%" is 12.5, not -12.5.
+            # The old `np.min(drawdowns)` wrote a NEGATIVE number into quant_scores.
+            # max_drawdown_1y while quantScoringWorker.ts wrote a POSITIVE one, and every
+            # consumer assumes positive-magnitude: `max_drawdown_1y <= ?`
+            # (quantScoringService screener filter), `maxDD / 20` (risk.router risk tiers),
+            # `good="low"` (RiskMetricsDashboard) and `ddRanks` (`higherIsBetter: false`).
+            # Live 2026-10-10: 2,202 positive vs 218 negative rows in the same column — the
+            # negative ones ranked as the LEAST risky names in the universe (2026-10-11
+            # quant audit). This writer is the one that changes, not the consumers.
             window = closes[-253:] if n >= 253 else closes
             peaks  = np.maximum.accumulate(window)
             drawdowns = (window - peaks) / peaks * 100
-            max_dd = float(np.min(drawdowns))
+            max_dd = float(np.max(-drawdowns)) if len(drawdowns) else 0.0
 
             records.append({
                 'symbol':           symbol,

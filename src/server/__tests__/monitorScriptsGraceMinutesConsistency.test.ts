@@ -131,6 +131,7 @@ describe('MONITOR_SCRIPTS.graceMinutes consistency', () => {
     'screener-performance': [{ jobKey: 'screener-performance-daily', marker: "jobName: 'screener-performance-daily'" }],
     'company-profiles-sync': [{ jobKey: 'sync-company-profiles', marker: "jobName: 'sync-company-profiles'" }],
     'trendlyne-midweek': [{ jobKey: 'trendlyne-midweek-batch', marker: "jobName: 'trendlyne-midweek-batch'" }],
+    'financial-ratios': [{ jobKey: 'trendlyne-ratios-monthly-check', marker: "jobName: 'trendlyne-ratios-monthly-check'" }],
     // Added 2026-08-03 alongside the new MONITOR_SCRIPTS entry. Marker updated 2026-08-04:
     // the GNews (3 cycles) + MC stock-news jobs added between the 'news-sentiment-refresh'
     // marker and the Worker's lockDuration pushed that distance to 5378 chars, over

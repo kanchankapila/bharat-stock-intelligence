@@ -107,7 +107,16 @@ export function composeMorningBrief(
 
 export async function buildMorningBrief(): Promise<{ text: string; picks: number }> {
   const digest = await buildRecommendationsDigest();
-  const picks = digest.longTerm.length + digest.intraday.length;
+  // Intraday recommendations expire at that session's close. This pre-open message reads the
+  // latest completed EOD ranking, so any intraday row available here belongs to the PRIOR
+  // session and is unactionable. Today's intraday calls are generated only after market open.
+  const preOpenDigest = {
+    ...digest,
+    intraday: [],
+    intradayGated: true,
+    intradayGateReason: 'today\'s intraday calls are generated after the market opens; prior-session calls have expired',
+  };
+  const picks = preOpenDigest.longTerm.length;
 
   // Neither honesty block may fail the send: a brief without the scorecard is worse than no
   // brief only if it silently LOOKS validated, and formatForwardTestLine's fallback says the
@@ -128,7 +137,12 @@ export async function buildMorningBrief(): Promise<{ text: string; picks: number
   }
 
   return {
-    text: composeMorningBrief(digest.date, renderDigest(digest), scorecard, formatForwardTestLine(forwardRaw)),
+    text: composeMorningBrief(
+      preOpenDigest.date,
+      renderDigest(preOpenDigest),
+      scorecard,
+      formatForwardTestLine(forwardRaw),
+    ),
     picks,
   };
 }

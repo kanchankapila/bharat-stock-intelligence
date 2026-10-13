@@ -182,6 +182,20 @@ def test_regime_backfilled_dry_run_then_apply(pg_conn, dump, capsys):
         [('2026-08-01', True), ('2026-08-12', None)]
 
 
+def test_regime_backfilled_is_a_persistent_schema_contract():
+    """The repair must not remain dormant merely because production lacks its column."""
+    from pathlib import Path
+
+    schema = (Path(REPO) / 'db' / 'schema.postgres.sql').read_text(encoding='utf-8')
+    migration = (Path(REPO) / 'migrations' /
+                 '20261011124500_market-regimes-backfilled.sql').read_text(encoding='utf-8')
+
+    market_regimes = schema.split('CREATE TABLE IF NOT EXISTS "market_regimes"', 1)[1].split(');', 1)[0]
+    assert '"backfilled" BOOLEAN NOT NULL DEFAULT false' in market_regimes
+    assert 'ADD COLUMN IF NOT EXISTS backfilled BOOLEAN NOT NULL DEFAULT FALSE' in migration
+    assert "date < DATE '2026-08-10'" in migration
+
+
 def test_event_clock_ctes_are_materialized():
     """A non-materialized CTE referenced from a correlated subquery is re-run per technical_signals row
     (the live dry-run did not finish in 12 minutes; MATERIALIZED makes the one-day count take 2 s)."""

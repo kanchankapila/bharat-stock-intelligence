@@ -51,7 +51,6 @@ const HYPERTABLES: Record<string, { timeCol: string; chunk: string; compressAfte
   feature_store: { timeCol: "date", chunk: "90 days", compressAfter: "120 days", retainAfter: null },
   confluence_signals: { timeCol: "computed_at", chunk: "7 days", compressAfter: "30 days", retainAfter: "90 days" },
   intraday_ohlcv: { timeCol: "datetime", chunk: "7 days", compressAfter: "30 days", retainAfter: "365 days" },
-  tick_data: { timeCol: "tick_time", chunk: "1 day", compressAfter: "7 days", retainAfter: "30 days" },
   macro_asset_prices: { timeCol: "date", chunk: "365 days", compressAfter: null, retainAfter: null },
 };
 

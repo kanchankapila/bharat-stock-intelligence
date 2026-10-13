@@ -174,10 +174,11 @@ def load_screener_meta(con, as_of: str | None = None) -> dict:
 def ensure_snapshot_schema(con) -> None:
     con.execute("""
         CREATE TABLE IF NOT EXISTS screener_membership_snapshot (
-            as_of_date  TEXT NOT NULL,
+            as_of_date  DATE NOT NULL,
             symbol      TEXT NOT NULL,
+            source      TEXT NOT NULL,
             screener_id TEXT NOT NULL,
-            PRIMARY KEY (as_of_date, symbol, screener_id)
+            PRIMARY KEY (as_of_date, symbol, source, screener_id)
         )
     """)
     con.execute("""CREATE INDEX IF NOT EXISTS idx_sms_date
@@ -203,15 +204,15 @@ def snapshot_membership(con, as_of: str, appearances: dict) -> int:
     ensure_snapshot_schema(con)
     n = 0
     for symbol, ids in appearances.items():
-        # ids is now [(source, screener_id), ...] -- this table has no source column (a
-        # separate, undone follow-up, see load_screener_meta's pit[] comment above), so only
-        # screener_id is recorded here; set() dedupes on the full tuple, which is correct since
-        # the same scan_id from two different sources is two distinct memberships.
+        # Provider identity is part of the fact.  scan_id/screener_id values overlap across
+        # MoneyControl, ETnow and Trendlyne, so dropping source here makes the supposedly
+        # immutable PIT snapshot lossy and lets ON CONFLICT collapse two real memberships.
         for src, sid in set(ids):
             con.execute(
-                "INSERT INTO screener_membership_snapshot (as_of_date, symbol, screener_id) "
-                "VALUES (?,?,?) ON CONFLICT (as_of_date, symbol, screener_id) DO NOTHING",
-                (as_of, symbol, sid))
+                "INSERT INTO screener_membership_snapshot (as_of_date, symbol, source, screener_id) "
+                "VALUES (?,?,?,?) "
+                "ON CONFLICT (as_of_date, symbol, source, screener_id) DO NOTHING",
+                (as_of, symbol, str(src).lower(), sid))
             n += 1
     con.commit()
     return n
@@ -228,7 +229,7 @@ def load_today_appearances(con, as_of: str) -> dict:
     """
     cutoff = (datetime.date.fromisoformat(as_of) - datetime.timedelta(days=3)).isoformat()
     rows = con.execute("""
-        SELECT symbol, screener_id, source
+        SELECT symbol, screener_id, LOWER(source) AS source
         FROM screener_appearances
         WHERE appeared_date >= ?
           AND (exited_date IS NULL OR exited_date >= ?)

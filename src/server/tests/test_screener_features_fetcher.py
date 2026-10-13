@@ -149,3 +149,31 @@ class TestComputeFeaturesSourceDisambiguation:
         result = sff.compute_features("INFY", [("trendlyne", "173")], meta)
         assert result["screener_bull_count"] == 0.0
         assert result["screener_bear_count"] == 0.0
+
+
+class TestMembershipSnapshotSourceDisambiguation:
+    """The immutable input snapshot must preserve the same composite provider identity used
+    by compute_features().  A bare screener_id is not unique across providers."""
+
+    def test_snapshot_schema_and_insert_keep_source_in_the_key(self):
+        conn = _FakeConn()
+
+        sff.snapshot_membership(
+            conn,
+            "2026-10-09",
+            {"INFY": [("moneycontrol", "173"), ("etnow", "173")]},
+        )
+
+        create_sql = next(sql for sql, _ in conn.executed if "CREATE TABLE" in sql)
+        assert "source" in create_sql
+        assert "PRIMARY KEY (as_of_date, symbol, source, screener_id)" in " ".join(
+            create_sql.split()
+        )
+
+        inserts = [(sql, params) for sql, params in conn.executed if "INSERT INTO" in sql]
+        assert len(inserts) == 2
+        assert "source" in inserts[0][0]
+        assert {params for _, params in inserts} == {
+            ("2026-10-09", "INFY", "moneycontrol", "173"),
+            ("2026-10-09", "INFY", "etnow", "173"),
+        }

@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, query_one, query_all
+from as_of import logical_trading_date
 import sys
 
 
@@ -91,35 +92,48 @@ def _build_momentum(df: pd.DataFrame) -> pd.Series:
     """
     Momentum: 12M-minus-1M return (Jegadeesh-Titman skip-1-month momentum).
     Avoids short-term reversal by excluding the most recent month's return.
+
+    NaN-propagating since 2026-10-11 (quant audit): the old `fillna(0) - fillna(0)`
+    scored a stock with a missing 12M return (e.g. a recent listing) as if its
+    12-1 momentum were exactly -1M — a fabricated number entering the cross-
+    sectional ranking. Missing now stays missing; _pct_rank neutral-fills it.
     """
     r12m = df.get("return_12m", pd.Series(dtype=float, name="x"))
     r1m  = df.get("return_1m",  pd.Series(dtype=float, name="x"))
     r12m.index = df.index
     r1m.index  = df.index
-    jt = r12m.fillna(0) - r1m.fillna(0)
+    jt = r12m - r1m
     return _pct_rank(jt, higher_is_better=True)
 
 
 def _build_value(df: pd.DataFrame) -> pd.Series:
     """
-    Value: earnings yield (1/PE) + inverse P/B + ROE as earnings quality proxy.
-    Low P/E + low P/B + high ROE = classic deep value. Non-positive PE/PB (loss-making
-    company or negative book value) is treated as missing, not clamped to a small
-    positive floor -- clamping-then-inverting made a loss-making company's earnings
-    yield look like the BEST in the universe (1/0.1 = 10) instead of undefined.
+    Value: earnings yield (1/PE) + inverse P/B. Low P/E + low P/B = classic deep value.
+
+    KNOWN loss-makers (non-positive but present PE/PB) get the WORST value rank (0),
+    not the median: a company with negative earnings is not "as cheap as the average
+    stock", it is undefined on value metrics and value screens exclude it. The old
+    behaviour — treating non-positive PE as missing and neutral-filling 50 — ranked
+    loss-makers as median-value, masking distress as average pricing (2026-10-11
+    quant audit). Truly MISSING inputs (no data at all) keep the neutral 50: absence
+    of data is not evidence of expense.
     """
     pe  = df.get("trailing_pe", pd.Series(dtype=float, name="x"))
     pb  = df.get("price_to_book", pd.Series(dtype=float, name="x"))
 
     pe.index = df.index
     pb.index = df.index
+    pe_known_bad = pe.notna() & (pe <= 0)
+    pb_known_bad = pb.notna() & (pb <= 0)
     pe = pe.where(pe > 0)
     pb = pb.where(pb > 0)
 
     ey  = _pct_rank(1.0 / pe, higher_is_better=True)   # earnings yield
     pbr = _pct_rank(pb, higher_is_better=False)          # low P/B = cheap
 
-    return (ey + pbr) / 2.0
+    value = (ey + pbr) / 2.0
+    value[pe_known_bad | pb_known_bad] = 0.0
+    return value
 
 
 def _build_risk_adj(df: pd.DataFrame) -> pd.Series:
@@ -221,7 +235,12 @@ def run(symbol: Optional[str] = None, force: bool = False, test: bool = False) -
     Compute multi-factor scores and write to quant_scores.
     Returns summary dict.
     """
-    today = datetime.date.today().isoformat()
+    # Logical trading date, not wall-clock today (2026-10-11 quant audit): the post-close
+    # chain (this runs in ml-daily-ops ~19:30 IST) regularly finishes after IST midnight, so a
+    # naive date.today() targeted the NEXT calendar day, whose grid row does not exist yet —
+    # 0 rows matched, no error, every time the run crossed midnight. This is exactly the
+    # recurring-bugs.md write-anchor class that burned insider_features.py in production.
+    today = logical_trading_date()
     print(f"[MultiFactor] Starting - {today}")
 
     # --- Load quant_scores as universe ---
@@ -271,13 +290,26 @@ def run(symbol: Optional[str] = None, force: bool = False, test: bool = False) -
     macro    = _build_macro(df, macro_state)
 
     # --- Composite (weighted sum of percentile ranks) ---
+    # The MACRO factor is deliberately NOT blended into the composite since
+    # 2026-10-11 (quant audit). _build_macro returns ONE scalar broadcast to every
+    # stock, so it is a universe-constant addend: adding the same number to every
+    # stock's composite cannot change cross-sectional ordering, and after
+    # percentile normalisation downstream (unified_ranker) it carries literally
+    # zero ranking information while consuming 10% of the blend — pure dilution of
+    # the four real factors. Dropping it and renormalising the remaining weights
+    # (/0.90) is a positive monotone transform of the real-factor sum, so the
+    # cross-sectional ORDER of mf_composite_score is provably unchanged; only the
+    # absolute value shifts. mf_macro_score is still computed and written below so
+    # the UI/regime consumers keep their column — it is a regime overlay, not a
+    # stock-differentiating factor, and belongs in no one's per-stock blend.
+    _REAL_WEIGHT_SUM = sum(FACTOR_WEIGHTS[k] for k in ("quality", "momentum", "value", "risk_adj"))
     composite = (
         quality  * FACTOR_WEIGHTS["quality"]  +
         momentum * FACTOR_WEIGHTS["momentum"] +
         value    * FACTOR_WEIGHTS["value"]    +
-        risk_adj * FACTOR_WEIGHTS["risk_adj"] +
-        macro    * FACTOR_WEIGHTS["macro"]
-    ).clip(0, 100).round(2)
+        risk_adj * FACTOR_WEIGHTS["risk_adj"]
+    ) / _REAL_WEIGHT_SUM
+    composite = composite.clip(0, 100).round(2)
 
     # --- Write to quant_scores ---
     rows = []

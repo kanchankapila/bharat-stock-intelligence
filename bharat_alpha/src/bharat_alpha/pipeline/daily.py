@@ -47,7 +47,12 @@ def run_step(conn: psycopg.Connection, job: str, as_of: dt.date, fn: Callable[[]
     conn.commit()
     try:
         detail = fn() or {}
-        status = "success"
+        # Multi-connector steps use `partial` when their critical path completed but one
+        # optional source failed. Keep the failure visible and retryable without suppressing
+        # independent downstream scoring/publishing work.
+        status = detail.pop("_status", "success")
+        if status not in ("success", "partial"):
+            raise ValueError(f"invalid successful step status: {status}")
     except Exception:
         conn.rollback()
         detail, status = {"error": traceback.format_exc(limit=8)}, "failed"
@@ -66,6 +71,8 @@ def step_ingest(conn: psycopg.Connection, as_of: dt.date, client: HttpClient | N
         res[name] = {"status": status, "rows": n}
     if res["nse_bhavcopy"]["status"] not in ("success",):
         raise RuntimeError(f"bhavcopy not ingested for {as_of}: {res['nse_bhavcopy']}")
+    if any(v["status"] == "failed" for v in res.values()):
+        res["_status"] = "partial"
     return res
 
 
@@ -73,8 +80,11 @@ def step_vendor(conn: psycopg.Connection, as_of: dt.date, client: HttpClient | N
     """Per-stock vendor sweeps. Anything they write after the 19:00 IST cutoff is usable from the
     NEXT decision date (features._known_date), in backtests and live alike."""
     client = client or HttpClient()
-    return {name: dict(zip(("status", "rows"), run_connector(conn, CONNECTORS[name](), as_of, client=client)))
-            for name in VENDOR_SEQUENCE}
+    res = {name: dict(zip(("status", "rows"), run_connector(conn, CONNECTORS[name](), as_of, client=client)))
+           for name in VENDOR_SEQUENCE}
+    if any(v["status"] == "failed" for v in res.values()):
+        res["_status"] = "partial"
+    return res
 
 
 def step_quality(conn: psycopg.Connection, as_of: dt.date) -> dict:

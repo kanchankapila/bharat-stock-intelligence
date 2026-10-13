@@ -393,8 +393,15 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'flows', critical: false, table: 'stock_mf_holdings', dateColumn: 'date', warnDays: 40, failDays: 60 },
 
   // fundamentals
-  { id: 'tl-financial-quality-freshness', label: 'tl_financial_quality (weekly ET ratios)',
-    category: 'fundamentals', critical: false, table: 'tl_financial_quality', dateColumn: 'as_of_date', warnDays: 10, failDays: 16 },
+  // The weekly parent invokes financial_ratios_fetcher every Saturday, but the fetcher skips a
+  // symbol while fetched_at is <=20 calendar days old. In weekly increments that means a healthy
+  // row can be almost 21d old immediately before its next refresh. The old 10/16d "weekly" bars
+  // therefore warned/failed by construction during weeks 2-3 (live false job warning 2026-10-09
+  // at 14.5d). Use actual crawl time, calendar age, and allow one missed eligible weekly run:
+  // >23d warns after the due window; >30d fails after the next Saturday also missed.
+  { id: 'tl-financial-quality-freshness', label: 'tl_financial_quality (20-day smart-cadence ET ratios)',
+    category: 'fundamentals', critical: false, table: 'tl_financial_quality', dateColumn: 'fetched_at',
+    tradingDayAware: false, warnDays: 23, failDays: 30 },
   // 2026-08-07: warnDays/failDays were 3/5, but the only writer (trendlyne_fundamentals_
   // fetcher.py) runs weekly (Sunday, inside ml-weekly-retrain) -- flat-out false-alarmed FAIL
   // every Thu/Fri/Sat/Sun-morning, every single week. Matched to tl-financial-quality-
@@ -803,13 +810,13 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // excluded): et_cashflow_history is financial_ratios_fetcher.py's second write target via
   // ET_Stats cash-flow endpoints -- finstack_cashflow_history and tl_financial_quality were both
   // already checked, this one fell through the 2026-08-03 sweep because the same fetcher shares
-  // those tables. Weekly-ish cadence (ET annual data, smart-cadence skip per
-  // AF-20260909-01), so calibrated to the weekly 10/16 pair like its siblings, and warn-only is
+  // those tables. It shares the exact 20-day per-symbol smart cadence above, so it must use
+  // the same 23/30 calendar-day envelope rather than a weekly 10/16 pair. Fail remains critical:
   // NOT acceptable: it was the probe for AF-20260912-01 (the 13 US-listed companies stored under
   // NSE tickers) and would have caught it on 2026-09-01 instead of 11 days later.
   { id: 'et-cashflow-history-recency', label: 'et_cashflow_history (ET Stats cash flow, INR/currency guard)',
     category: 'fundamentals', critical: true, table: 'et_cashflow_history', dateColumn: 'fetched_at',
-    warnDays: 10, failDays: 16 },
+    tradingDayAware: false, warnDays: 23, failDays: 30 },
   // 2026-09-14 coverage gap audit: live_screener_ml_scores (live_screener_ml_ranker.py, model
   // win-probability over the intraday screener universe, 832k rows) -- the ranker ran since
   // 2026-08 with a heartbeat but no landing-table freshness check, so a silent
@@ -989,6 +996,52 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         return { status: 'warn', detail: `${(ratio * 100).toFixed(1)}% of recent bars are malformed (${row?.bad}/${total})${suspectNote}` };
       }
       return { status: 'pass', detail: `${(ratio * 100).toFixed(2)}% malformed (${row?.bad}/${total})${suspectNote}` };
+    },
+  },
+  {
+    id: 'ohlcv-corporate-action-gap',
+    label: 'No new unadjusted split/bonus-shaped OHLCV gaps near corporate actions',
+    category: 'ohlcv',
+    critical: false,
+    // AF-20261008-41. ohlcv_adjust.py writes adjustment FACTORS, not adjusted bars, while
+    // stock_ohlcv's daily writers append raw prices. That left 76 split/bonus-shaped gaps for
+    // technicals, ATR geometry and outcome graders to read as real moves. The repair is an
+    // explicit, backup-gated production rewrite; this monitor deliberately does not automate
+    // it. It detects a recurrence early and names the dry-run-first repair. A 45-day verdict
+    // window prevents already-triaged historical ratio mismatches from warning forever; 70
+    // days of bars gives LAG() enough prior history at the left edge.
+    sql: `WITH recent_bars AS (
+            SELECT symbol, date, close,
+                   LAG(close) OVER (PARTITION BY symbol ORDER BY date) AS prior_close
+            FROM stock_ohlcv
+            WHERE date >= current_date - 70
+          ), candidate_gaps AS (
+            SELECT symbol, date
+            FROM recent_bars
+            WHERE date >= current_date - 45
+              AND prior_close > 0
+              AND ABS(close / prior_close - 1.0) > 0.35
+          ), matched AS (
+            SELECT DISTINCT g.symbol, g.date
+            FROM candidate_gaps g
+            JOIN ohlcv_adjustment_factors a ON a.symbol = g.symbol
+             AND a.ex_date BETWEEN g.date - 5 AND g.date + 5
+          )
+          SELECT COUNT(*) AS gap_count,
+                 COUNT(DISTINCT symbol) AS symbol_count,
+                 MAX(date) AS latest_gap_date
+          FROM matched`,
+    evaluate: (row) => {
+      const gaps = Number(row?.gap_count) || 0;
+      const symbols = Number(row?.symbol_count) || 0;
+      if (gaps === 0) {
+        return { status: 'pass', detail: 'no >35% OHLCV gaps near a split/bonus factor in the last 45d' };
+      }
+      return {
+        status: 'warn',
+        detail: `${gaps} split/bonus-shaped gap(s) across ${symbols} symbol(s), latest ${row?.latest_gap_date ?? 'unknown'}; ` +
+          `dry-run scripts/repair/repair_unadjusted_splits.py, review every ratio, then apply only behind a fresh backup`,
+      };
     },
   },
   {
@@ -1599,6 +1652,56 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'nse-filing-financials-backlog',
+    label: 'nse_filing_financials coverage of recent NSE result-filing XBRL documents',
+    category: 'fundamentals',
+    critical: false,
+    // A timestamp freshness check is wrong here: filings are naturally sparse outside results season.
+    // Instead, mirror the nightly fetcher's rolling window and one-row-per-symbol/period selection,
+    // then ask whether every eligible XBRL URL has either parsed data or an explicit parse_error row.
+    // The date in the result detail moves daily even when the off-season window is empty, so the
+    // meta-monitor can distinguish a live zero from a frozen input.
+    sql: `WITH ranked AS (
+            SELECT r.xbrl_url, r.broadcast_ts,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY r.symbol, r.period_end
+                     ORDER BY (r.relating_to IS DISTINCT FROM 'Revision') DESC,
+                              (r.consolidated = 'Consolidated') DESC,
+                              r.broadcast_ts DESC
+                   ) AS rn
+            FROM nse_results_filings r
+            WHERE r.period IN ('Quarterly', 'Integrated')
+              AND r.broadcast_ts >= (
+                    (date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '10 days')
+                    AT TIME ZONE 'Asia/Kolkata'
+                  )
+              AND r.xbrl_url LIKE 'http%'
+          ), eligible AS (
+            SELECT xbrl_url, broadcast_ts FROM ranked WHERE rn = 1
+          )
+          SELECT COUNT(*) FILTER (WHERE f.source_url IS NULL) AS backlog,
+                 COUNT(*) AS eligible,
+                 MAX(e.broadcast_ts) AS latest_filing,
+                 (now() AT TIME ZONE 'Asia/Kolkata')::date AS as_of
+          FROM eligible e
+          LEFT JOIN nse_filing_financials f ON f.source_url = e.xbrl_url`,
+    evaluate: (row) => {
+      const backlog = Number(row?.backlog) || 0;
+      const eligible = Number(row?.eligible) || 0;
+      const asOf = row?.as_of ? String(row.as_of).slice(0, 10) : 'unknown date';
+      const detail = `${backlog}/${eligible} eligible NSE filing XBRLs remain unparsed in the rolling 10-day window as of ${asOf}`;
+      if (backlog > 600) return {
+        status: 'fail',
+        detail: `${detail}; backlog exceeds the nightly 600-request budget and cannot clear in one run`,
+      };
+      if (backlog > 0) return {
+        status: 'warn',
+        detail: `${detail}; the nightly resumable fetcher should retry them`,
+      };
+      return { status: 'pass', detail };
+    },
+  },
+  {
     id: 'ranker-input-snapshot-freshness',
     label: 'ranker_input_snapshot archive (immutable point-in-time ranker inputs, trailing step of unified-ranker)',
     category: 'scoring',
@@ -1628,9 +1731,18 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (stale == null) return { status: 'warn', detail: 'No accuracy_scorecard snapshot yet - run accuracy_scorecard.py --persist (ml-daily-ops does this nightly)' };
       if (stale > 6) return { status: 'fail', detail: `accuracy_scorecard snapshot is ${fmtDays(stale)} old - the scorecard has stopped accumulating` };
       let codes: string[] = [];
-      try { codes = (JSON.parse(String(row?.value ?? '{}')).alerts ?? []).map((a: { code: string }) => a.code); } catch { /* unreadable value: age alone decides */ }
+      let alertEvidence = '';
+      try {
+        const snapshot = JSON.parse(String(row?.value ?? '{}'));
+        codes = (snapshot.alerts ?? []).map((a: { code: string }) => a.code);
+        const measured = Object.entries(snapshot.calibration ?? {})
+          .filter(([, c]) => Number.isFinite(Number((c as any)?.brier)) && Number.isFinite(Number((c as any)?.brier_base)))
+          .map(([h, c]) => `${h}d Brier ${Number((c as any).brier).toFixed(4)} vs base ${Number((c as any).brier_base).toFixed(4)}`);
+        const parts = [snapshot.generated_at ? `snapshot ${snapshot.generated_at}` : '', ...measured].filter(Boolean);
+        alertEvidence = parts.length ? ` (${parts.join('; ')})` : '';
+      } catch { /* unreadable value: age alone decides */ }
       if (stale > 3) return { status: 'warn', detail: `accuracy_scorecard snapshot is ${fmtDays(stale)} old` };
-      if (codes.length) return { status: 'warn', detail: `accuracy_scorecard alerts: ${codes.join(', ')}` };
+      if (codes.length) return { status: 'warn', detail: `accuracy_scorecard alerts: ${codes.join(', ')}${alertEvidence}` };
       return { status: 'pass', detail: `accuracy_scorecard snapshot ${fmtDays(stale)} old, no alerts` };
     },
   },
@@ -1767,21 +1879,30 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // OLD outcome_resolver at startup and kept writing them (7,847 rows on 10-04, 768 on 10-05) until it was
     // restarted -- a real outcome has an exit price, SUSPECT_DATA has a NULL return. ~14 unrepairable
     // rows (no canonical bar) always remain, hence a threshold rather than any-row.
-    sql: `SELECT COUNT(*) AS synthetic
-          FROM unified_signal_outcomes x
-          WHERE x.outcome = 'NEUTRAL' AND x.return_pct = 0 AND x.exit_price IS NULL AND x.exit_reason IS NULL
-            AND x.computed_at > NOW() - INTERVAL '7 days'
-            AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE o.symbol = x.symbol
-                        AND o.date > CAST(x.signal_date AS date) AND COALESCE(o.is_suspect, 0) = 0)`,
+    sql: `WITH checked_outcomes AS (
+            SELECT x.*
+            FROM unified_signal_outcomes x
+            WHERE x.computed_at > NOW() - INTERVAL '7 days'
+              AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE o.symbol = x.symbol
+                          AND o.date > CAST(x.signal_date AS date) AND COALESCE(o.is_suspect, 0) = 0)
+          )
+          SELECT COUNT(*) FILTER (WHERE outcome = 'NEUTRAL' AND return_pct = 0
+                                  AND exit_price IS NULL AND exit_reason IS NULL) AS synthetic,
+                 COUNT(*) AS checked,
+                 MAX(computed_at) AS latest_computed_at
+          FROM checked_outcomes`,
     evaluate: (row) => {
       const n = Number(row?.synthetic) || 0;
+      const checked = Number(row?.checked);
+      const population = Number.isFinite(checked) ? String(checked) : '?';
+      const latest = row?.latest_computed_at ? `; latest write ${row.latest_computed_at}` : '';
       if (n > 100) return {
         status: 'warn',
-        detail: `${n} priceable outcomes were written as fabricated 0% NEUTRAL in the last 7 days — a long-running ` +
+        detail: `${n}/${population} priceable outcomes were written as fabricated 0% NEUTRAL in the last 7 days${latest} — a long-running ` +
                 `service is probably still running a pre-fix outcome_resolver (restart ml-api), then ` +
                 `python data_integrity_repair.py --zero-neutral-outcomes`,
       };
-      return { status: 'pass', detail: `${n} synthetic NEUTRAL outcomes in the last 7 days (unrepairable residue only)` };
+      return { status: 'pass', detail: `${n}/${population} synthetic NEUTRAL outcomes in the last 7 days${latest} (unrepairable residue only)` };
     },
   },
   {
@@ -3433,6 +3554,27 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   },
 
   // ── Generated from TABLE_FRESHNESS_CHECKS (see the factory + mandate comment above) ──────
+  {
+    id: 'market-endpoint-tick-label-honesty',
+    label: 'Endpoint registry does not call polled HTTP snapshots exchange tick feeds',
+    category: 'reference',
+    critical: false,
+    sql: `SELECT COUNT(*)::int AS bad
+            FROM market_endpoint_registry
+           WHERE update_frequency = 'REALTIME_TICK'
+             AND target_url ~ '^https?://'`,
+    evaluate: (row) => {
+      const bad = Number(row?.bad ?? 0);
+      if (bad > 0) {
+        return {
+          status: 'fail',
+          detail: `${bad} HTTP endpoint(s) are mislabeled REALTIME_TICK; polling a snapshot is not a tick stream.`,
+        };
+      }
+      return { status: 'pass', detail: 'No polled HTTP endpoint is mislabeled as a realtime tick stream.' };
+    },
+  },
+
   ...TABLE_FRESHNESS_CHECKS.map(makeFreshnessCheck),
   {
     id: 'ur-engine-score-zero-not-null',

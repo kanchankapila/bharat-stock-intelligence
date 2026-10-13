@@ -3,7 +3,9 @@
 Corporate-action adjustment is derived from the exchange's own data: on an ex-date NSE
 publishes PREV_CLOSE already adjusted, so factor_d = prev_close_d / close_{previous session
 the instrument traded}. That catches splits, bonuses, rights and any other base-price
-adjustment NSE made, with no dependency on a vendor corporate-actions feed.
+adjustment NSE made. Some bhavcopies keep PREV_CLOSE unadjusted on a bonus ex-date (live
+2026-10-09: AISL, MOLDTECH, MOLDTKPAC); for those, an official NSE ratio is accepted only
+when the observed raw close gap corroborates it.
 
 Suspect bars are FLAGGED, never deleted, and excluded from the tradeable universe on that
 date (legacy: one +127,900% RELIANCE bar produced an 850%-annualised phantom edge).
@@ -22,6 +24,7 @@ from bharat_alpha.db import read_df, upsert
 ADJ_REL_TOL = 0.002          # ignore prev_close/close drift under 0.2% (tick rounding)
 ADJ_ABS_TOL = 0.051          # … or under ~one old tick
 MAX_ABS_DAILY_MOVE = 0.60    # |adjusted close/prev_close - 1| above this is physically implausible for NSE cash
+EVENT_GAP_REL_TOL = 0.20     # allows an ordinary ex-date market move around the official factor
 
 
 def derive_adjustments(conn: psycopg.Connection, start: dt.date | None = None) -> int:
@@ -44,7 +47,41 @@ def derive_adjustments(conn: psycopg.Connection, start: dt.date | None = None) -
     rows = [{"instrument_id": int(r.instrument_id), "ex_date": r.trade_date,
              "factor": float(r.prev_close / r.last_close), "source": "nse_prev_close"}
             for r in df.itertuples()]
-    return upsert(conn, "alpha.adjustment", rows, key=("instrument_id", "ex_date"))
+    written = upsert(conn, "alpha.adjustment", rows, key=("instrument_id", "ex_date"))
+
+    # NSE occasionally leaves PREV_CLOSE on the old share basis even though the ex-date OHLC
+    # is on the new basis. Do not trust the announcement alone: require a non-suspect ex-date
+    # bar whose raw close/previous-close gap agrees with the official unambiguous split/bonus
+    # factor. This preserves the negative case where a declared action did not affect prices.
+    event_df = read_df(conn, """
+        SELECT e.instrument_id, e.event_date,
+               (e.detail->>'expected_factor')::float8 AS factor
+          FROM alpha.corporate_event e
+          JOIN alpha.daily_bar b
+            ON b.instrument_id = e.instrument_id AND b.trade_date = e.event_date
+          JOIN LATERAL (
+            SELECT p.close, p.is_suspect
+              FROM alpha.daily_bar p
+             WHERE p.instrument_id = e.instrument_id AND p.trade_date < e.event_date
+             ORDER BY p.trade_date DESC LIMIT 1
+          ) prev ON true
+         WHERE e.source = 'nse_pr_bc'
+           AND e.detail->>'expected_factor' IS NOT NULL
+           AND (%(start)s::date IS NULL OR e.event_date >= %(start)s::date)
+           AND NOT b.is_suspect AND NOT prev.is_suspect
+           AND b.close > 0 AND prev.close > 0
+           AND ABS((b.close / prev.close) / (e.detail->>'expected_factor')::float8 - 1) <= %(tol)s
+           AND NOT EXISTS (
+             SELECT 1 FROM alpha.adjustment a
+              WHERE a.instrument_id = e.instrument_id AND a.ex_date = e.event_date
+           )
+    """, {"start": start, "tol": EVENT_GAP_REL_TOL})
+    event_rows = [{"instrument_id": int(r.instrument_id), "ex_date": r.event_date,
+                   "factor": float(r.factor), "source": "nse_pr_bc_observed_gap"}
+                  for r in event_df.itertuples()]
+    written += upsert(conn, "alpha.adjustment", event_rows,
+                      key=("instrument_id", "ex_date"), update=())
+    return written
 
 
 def flag_suspect_bars(conn: psycopg.Connection, start: dt.date | None = None) -> int:

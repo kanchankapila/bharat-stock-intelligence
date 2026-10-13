@@ -146,6 +146,28 @@ describe('DATA_QUALITY_CHECKS registry', () => {
       expect(c.sql.length).toBeGreaterThan(0);
     }
   });
+
+  it('fails when an HTTP snapshot is advertised as a realtime tick feed', () => {
+    const check = DATA_QUALITY_CHECKS.find(c => c.id === 'market-endpoint-tick-label-honesty')!;
+    expect(check).toBeDefined();
+    expect(check.sql).toMatch(/update_frequency = 'REALTIME_TICK'/);
+    expect(check.sql).toMatch(/target_url/);
+    expect(check.evaluate({ bad: 1 }, new Date()).status).toBe('fail');
+    expect(check.evaluate({ bad: 0 }, new Date()).status).toBe('pass');
+  });
+
+  it('financial-ratio tables follow the fetcher\'s 20-day smart cadence', () => {
+    const ratios = DATA_QUALITY_CHECKS.find(c => c.id === 'tl-financial-quality-freshness')!;
+    const cashflow = DATA_QUALITY_CHECKS.find(c => c.id === 'et-cashflow-history-recency')!;
+    const now = new Date('2026-10-09T12:00:00Z');
+
+    expect(ratios.sql).toMatch(/MAX\(fetched_at\)/);
+    for (const check of [ratios, cashflow]) {
+      expect(check.evaluate({ last_date: '2026-09-26T00:30:19Z' }, now).status).toBe('pass');
+      expect(check.evaluate({ last_date: '2026-09-15T00:00:00Z' }, now).status).toBe('warn');
+      expect(check.evaluate({ last_date: '2026-09-01T00:00:00Z' }, now).status).toBe('fail');
+    }
+  });
 });
 
 describe('individual evaluate() functions', () => {
@@ -165,6 +187,18 @@ describe('individual evaluate() functions', () => {
   it('ohlcv-freshness-coverage passes for fresh, broad data', () => {
     const r = byId('ohlcv-freshness-coverage').evaluate({ last_date: '2026-07-19T00:00:00Z', symbols: 2000 }, now);
     expect(r.status).toBe('pass');
+  });
+
+  it('ohlcv-corporate-action-gap warns when a new raw split/bonus-shaped gap recurs', () => {
+    const check = byId('ohlcv-corporate-action-gap');
+    expect(check).toBeDefined();
+    expect(check.sql).toMatch(/ohlcv_adjustment_factors/);
+    expect(check.sql).toMatch(/0\.35/);
+    expect(check.evaluate({ gap_count: 0, symbol_count: 0, latest_gap_date: null }, now).status).toBe('pass');
+    const r = check.evaluate({ gap_count: 2, symbol_count: 2, latest_gap_date: '2026-07-18' }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('2');
+    expect(r.detail).toContain('repair_unadjusted_splits.py');
   });
 
   it('ohlcv-exit-carryforward passes when no symbol carries bars past its exchange exit', () => {
@@ -1122,6 +1156,17 @@ describe('audit regression guards (2026-08-11)', () => {
     expect(c.sql).toContain('exit_price IS NULL');
   });
 
+  it('synthetic-neutral-outcomes proves its zero is from a moving live population', () => {
+    const c = find('synthetic-neutral-outcomes');
+    const a = c.evaluate({ synthetic: 0, checked: 8123, latest_computed_at: '2026-10-12T15:00:00Z' }, now);
+    const b = c.evaluate({ synthetic: 0, checked: 8350, latest_computed_at: '2026-10-13T15:00:00Z' }, now);
+    expect(a.status).toBe('pass');
+    expect(a.detail).toContain('0/8123');
+    expect(a.detail).not.toBe(b.detail);
+    expect(c.sql).toMatch(/COUNT\(\*\).*checked/is);
+    expect(c.sql).toMatch(/MAX\(.*computed_at.*latest_computed_at/is);
+  });
+
   it('stock-options-oi-pcr-bounds reports the population it checked and warns when there is none (AF-20261006-01)', () => {
     const c = find('stock-options-oi-pcr-bounds');
     // The old detail was the literal "No PCR outliers in the last 5 days" on every run, so the
@@ -1207,6 +1252,17 @@ describe('audit regression guards (2026-08-11)', () => {
       expect(c.evaluate({ last_date: null }, now).status).toBe('warn');   // never run yet
     });
 
+    it('NSE filing XBRL monitor reports a resumable backlog and fails beyond one run budget', () => {
+      const c = find('nse-filing-financials-backlog');
+      expect(c.sql).toContain('nse_filing_financials');
+      expect(c.sql).toContain('nse_results_filings');
+      expect(c.evaluate({ backlog: 0, eligible: 42, as_of: '2026-10-13' }, now)).toMatchObject({ status: 'pass' });
+      expect(c.evaluate({ backlog: 7, eligible: 42, as_of: '2026-10-13' }, now)).toMatchObject({ status: 'warn' });
+      expect(c.evaluate({ backlog: 601, eligible: 700, as_of: '2026-10-13' }, now)).toMatchObject({ status: 'fail' });
+      expect(c.evaluate({ backlog: 0, eligible: 42, as_of: '2026-10-13' }, now).detail).toContain('0/42');
+      expect(c.evaluate({ backlog: 0, eligible: 42, as_of: '2026-10-13' }, now).detail).toContain('2026-10-13');
+    });
+
     it('accuracy scorecard snapshot warns then fails when the nightly step stops, and surfaces alerts', () => {
       const c = find('accuracy-scorecard-freshness');
       expect(c.sql).toContain("key = 'accuracy_scorecard'");
@@ -1217,6 +1273,19 @@ describe('audit regression guards (2026-08-11)', () => {
       const alerted = c.evaluate({ last_date: ago(1), value: JSON.stringify({ alerts: [{ code: 'brier_worse_than_base', message: 'x' }] }) }, now);
       expect(alerted.status).toBe('warn');
       expect(alerted.detail).toContain('brier_worse_than_base');
+    });
+
+    it('accuracy scorecard alerts include their moving snapshot and measured Brier values', () => {
+      const c = find('accuracy-scorecard-freshness');
+      const value = JSON.stringify({
+        generated_at: '2026-10-13T00:31:14',
+        alerts: [{ code: 'brier_worse_than_base' }],
+        calibration: { '15': { n: 20759, brier: 0.2702, brier_base: 0.2250 } },
+      });
+      const r = c.evaluate({ last_date: ago(1), value }, now);
+      expect(r.status).toBe('warn');
+      expect(r.detail).toContain('2026-10-13T00:31:14');
+      expect(r.detail).toContain('15d Brier 0.2702 vs base 0.2250');
     });
 
     it('request-driven MC caches (swot, consolidated) only warn after a month with no panel opens', () => {

@@ -9,7 +9,10 @@
  *   COMPOSITE — weighted blend of all four pillars
  *
  * All scores are expressed as percentile ranks (0–100) across the eligible universe.
- * Risk-free rate assumed: 4.0% p.a. (Indian T-bill proxy).
+ * Risk-free rate: the latest RBI repo rate from macro_asset_prices, resolved once per run by
+ * getRiskFreeAnnual() and passed into the worker — NOT a hard-coded 4.0% (2026-10-11 quant
+ * audit: 4.0% here vs 6.5% in risk_metrics_engine.py vs 7.0% in institutional_quant_engine.py
+ * made the Sharpe values written into one column non-comparable row-to-row).
  *
  * Runs nightly via BullMQ (QUEUE_QUANT_SCORING). First run is triggered at startup.
  */
@@ -18,6 +21,7 @@ import { Worker } from 'worker_threads';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
+import { getRiskFreeAnnual } from './riskFreeRate';
 
 const MIN_DAYS  = 240; // require ~1 full trading year
 
@@ -319,6 +323,10 @@ export async function runQuantScoring(): Promise<void> {
     // Maps are serialised to plain objects for structured-clone transfer.
 
     console.log('[QUANT] Starting worker thread for metric + rank computation…');
+    // Resolve the risk-free rate ONCE here, in the process that has DB access, and hand it to
+    // the worker (which is deliberately DB-free). Same source as risk_metrics_engine.py and
+    // institutional_quant_engine.py via riskFreeRate.ts / risk_free_rate.py.
+    const riskFreeAnnual = await getRiskFreeAnnual((sql: string) => dbGet(sql));
     const {
       computed,
       momentumPct,
@@ -333,6 +341,7 @@ export async function runQuantScoring(): Promise<void> {
       screenerMap: Object.fromEntries(screenerMap),
       fundMap:     Object.fromEntries(fundMap),
       techMap:     Object.fromEntries(techMap),
+      riskFreeAnnual,
     });
     console.log(`[QUANT] Worker done — ${computed.length} symbols computed`);
 

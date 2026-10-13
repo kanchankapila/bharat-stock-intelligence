@@ -3,7 +3,8 @@ Sector / Industry Backfill
 ==========================
 nse_stocks.sector is 'Unknown' for ~95% of symbols (only ~106 large-caps were ever
 classified). This backfills sector + industry from Yahoo Finance's quoteSummary
-`assetProfile` module, which covers the full NSE universe.
+`assetProfile` module, which covers most of the NSE universe and is used only for
+the gaps left by the primary MoneyControl pass.
 
 Yahoo uses its own sector taxonomy ("Consumer Cyclical", "Basic Materials", ...). We
 map it onto the GICS labels the DB already uses ("Consumer Discretionary", "Materials",
@@ -98,17 +99,21 @@ def _targets(fetch_all: bool, limit: int | None):
     return syms[:limit] if limit else syms
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--all", action="store_true", help="re-fetch every stock, not just Unknown")
-    ap.add_argument("--base-delay", type=float, default=0.35)
-    args = ap.parse_args()
+def run(fetch_all: bool = False, limit: int | None = None,
+        dry_run: bool = False, base_delay: float = 0.35) -> tuple[int, int]:
+    """Classify the remaining gaps and return (updated, missed).
 
-    symbols = _targets(args.all, args.limit)
+    MoneyControl is the primary weekly source. This Yahoo pass is intentionally gap-only,
+    but a broad gap set with zero usable responses is still a provider failure, not a
+    successful no-op.
+    """
+    symbols = _targets(fetch_all, limit)
     print(f"[SECTOR-BACKFILL] {len(symbols)} symbols to process "
-          f"(dry_run={args.dry_run}, all={args.all})")
+          f"(dry_run={dry_run}, all={fetch_all})")
+
+    if not symbols:
+        print("[SECTOR-BACKFILL] No classification gaps remain.")
+        return 0, 0
 
     session = _make_session()
     updated = miss = 0
@@ -132,7 +137,7 @@ def main():
                 continue
             consecutive_fail = 0
 
-            if args.dry_run:
+            if dry_run:
                 print(f"  {sym:14s} -> sector={sector!r:28} industry={industry!r}")
             else:
                 execute(
@@ -144,16 +149,33 @@ def main():
             updated += 1
         except Exception as e:  # noqa: BLE001
             miss += 1
-            print(f"  [warn] {sym}: {e}")
+            print(f"  [warn] {sym}: {e}", file=sys.stderr)
 
         if i % 100 == 0:
             print(f"[SECTOR-BACKFILL] {i}/{len(symbols)} processed "
                   f"({updated} classified, {miss} missed)")
-        time.sleep(args.base_delay * (0.8 + 0.4 * random.random()))
+        time.sleep(base_delay * (0.8 + 0.4 * random.random()))
 
     print(f"[SECTOR-BACKFILL] Done. {updated} classified, {miss} missed.")
+
+    if len(symbols) >= 10 and updated == 0:
+        raise RuntimeError(
+            f"Yahoo sector/industry source returned no usable classifications for "
+            f"{len(symbols)} gap symbols"
+        )
+    return updated, miss
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--all", action="store_true", help="re-fetch every stock, not just Unknown")
+    ap.add_argument("--base-delay", type=float, default=0.35)
+    args = ap.parse_args()
+    run(fetch_all=args.all, limit=args.limit,
+        dry_run=args.dry_run, base_delay=args.base_delay)
 
 
 if __name__ == "__main__":
     main()
-

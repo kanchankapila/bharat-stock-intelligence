@@ -3978,7 +3978,8 @@ def run(do_train: bool = True, do_score: bool = True,
                 PRIMARY KEY (symbol, date, timeframe)
             )""",
             """CREATE TABLE IF NOT EXISTS market_regimes (
-                date TEXT PRIMARY KEY, regime TEXT, regime_prob DOUBLE PRECISION
+                date TEXT PRIMARY KEY, regime TEXT, regime_prob DOUBLE PRECISION,
+                backfilled BOOLEAN NOT NULL DEFAULT FALSE
             )""",
             """CREATE TABLE IF NOT EXISTS historical_fno_sentiment (
                 symbol TEXT, date TEXT, PRIMARY KEY (symbol, date)

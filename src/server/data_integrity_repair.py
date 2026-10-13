@@ -901,6 +901,44 @@ def repair_conflict_signal_outcomes(conn: ConnWrapper, dry: bool) -> None:
     _log(f"conflict-signal-outcomes: deleted {total} rows.")
 
 
+def repair_signal_outcome_mfe(conn: ConnWrapper, dry: bool) -> None:
+    """Backfill signal_outcomes.max_return_pct from clean bars owned by the trade.
+
+    The live resolver now writes this outcome-side MFE label, but the column had no writer for
+    its existing history while the ML diagnostics API exposed AVG(max_return_pct). Bound the
+    window by check_date, not the nominal horizon: a stopped trade cannot claim a rally after
+    it exited. This is deliberately never used as a model feature (future information).
+    """
+    rows = conn.execute("""
+        SELECT so.symbol, so.signal_date::text, so.horizon_days, so.signal_source,
+               ROUND((((MAX(o.high) - so.entry_price) / so.entry_price) * 100)::numeric, 4)::float8 AS mfe
+        FROM signal_outcomes so
+        JOIN stock_ohlcv o ON o.symbol = so.symbol
+                          AND o.date > so.signal_date::date
+                          AND o.date <= so.check_date::date
+                          AND COALESCE(o.is_suspect, 0) = 0
+                          AND o.high IS NOT NULL
+        WHERE so.max_return_pct IS NULL
+          AND so.check_date IS NOT NULL
+          AND so.entry_price IS NOT NULL AND so.entry_price > 0
+          AND so.signal_source = 'technical'
+        GROUP BY so.symbol, so.signal_date, so.horizon_days, so.signal_source, so.entry_price
+    """).fetchall()
+    _log(f"signal-outcome-mfe: {len(rows)} technical outcome rows need a clean-bar MFE")
+    if not rows or dry:
+        return
+    payload = [(float(r['mfe']), str(r['symbol']), str(r['signal_date'])[:10],
+                int(r['horizon_days']), str(r['signal_source'])) for r in rows if r['mfe'] is not None]
+    for i in range(0, len(payload), 1_000):
+        conn.executemany(
+            "UPDATE signal_outcomes SET max_return_pct=? "
+            "WHERE symbol=? AND signal_date=? AND horizon_days=? AND signal_source=? "
+            "AND max_return_pct IS NULL",
+            payload[i:i + 1_000])
+        conn.commit()
+    _log(f"signal-outcome-mfe: populated {len(payload)} rows.")
+
+
 # ── 12. fabricated closed-session bars ───────────────────────────────────────
 
 # Above this share of a day's universe being flat AND zero-volume, the exchange never opened.
@@ -991,6 +1029,7 @@ TASKS = {
     'dl_performance_sentinels': repair_dl_performance_sentinels,
     'conflict_signal_outcomes': repair_conflict_signal_outcomes,
     'signal_exit_evidence': repair_signal_exit_evidence,
+    'signal_outcome_mfe': repair_signal_outcome_mfe,
 }
 
 

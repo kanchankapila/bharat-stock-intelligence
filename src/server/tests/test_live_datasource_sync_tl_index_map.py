@@ -29,10 +29,9 @@ class _CaptureDB:
 @pytest.mark.live_datasource
 class TestSyncTlIndexMapLiveDataSource:
     def test_real_fetch_produces_ml_usable_index_ids(self):
-        """Hits both real Trendlyne endpoints (sector/index analysis + global indices) via
-        the fetcher's own fetch_all()."""
+        """Hits the real Trendlyne global-index endpoint via fetch_all()."""
         rows = sti.fetch_all()
-        assert set(rows.keys()) == {"trendlyne", "trendlyne_sector", "trendlyne_industry"}
+        assert set(rows.keys()) == {"trendlyne"}
         assert rows["trendlyne"], "fetch_all() produced zero 'trendlyne' index rows -- endpoint may be down/changed"
 
         names = {r[0] for r in rows["trendlyne"]}
@@ -41,9 +40,6 @@ class TestSyncTlIndexMapLiveDataSource:
             assert idx_name, "trendlyne index_name is empty"
             assert provider == "trendlyne"
             assert tlid, "trendlyne provider_id (tlid) is empty"
-
-        assert rows["trendlyne_sector"], "fetch_all() produced zero sector rows -- endpoint may be down/changed"
-        assert rows["trendlyne_industry"], "fetch_all() produced zero industry rows -- endpoint may be down/changed"
 
     def test_sync_writes_ml_usable_rows(self):
         """Runs the fetcher's real sync() end-to-end, with executemany()/query_all()

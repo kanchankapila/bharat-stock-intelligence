@@ -2,6 +2,7 @@ import { Queue } from 'bullmq';
 import 'dotenv/config';
 import { execSync } from 'child_process';
 import pg from 'pg';
+import { isSuccessfulWeeklyJob } from './weeklyJobVerdict.mjs';
 
 const REDIS = {
   host: process.env.REDIS_HOST || '127.0.0.1',
@@ -23,7 +24,7 @@ function getMemoryUsage() {
   }
 }
 
-async function runJob(queueName, jobName, timeoutMs = 7200000) {
+async function runJob(queueName, jobName, timeoutMs = 7200000, monitorName = jobName) {
   console.log(`\n======================================================`);
   console.log(`[WEEKLY RUNNER] Starting job '${jobName}' on queue '${queueName}'`);
   console.log(`[WEEKLY RUNNER] Timestamp: ${new Date().toISOString()}`);
@@ -42,6 +43,8 @@ async function runJob(queueName, jobName, timeoutMs = 7200000) {
   const startTime = Date.now();
   let peakMemMb = 0;
   let lastLoggedSec = 0;
+  let returnValue;
+  let completedElapsedSec = 0;
 
   while (true) {
     await new Promise(r => setTimeout(r, 5000));
@@ -56,7 +59,10 @@ async function runJob(queueName, jobName, timeoutMs = 7200000) {
     }
 
     if (state === 'completed') {
-      console.log(`\n[WEEKLY RUNNER] >>> SUCCESS! Job ${jobName} completed in ${elapsedSec}s. Peak Python RAM: ${peakMemMb}MB`);
+      const completedJob = await queue.getJob(job.id);
+      returnValue = completedJob?.returnvalue;
+      completedElapsedSec = elapsedSec;
+      console.log(`\n[WEEKLY RUNNER] BullMQ execution completed in ${elapsedSec}s; verifying semantic result and persisted status...`);
       break;
     }
 
@@ -78,24 +84,40 @@ async function runJob(queueName, jobName, timeoutMs = 7200000) {
   }
 
   // Verify DB heartbeat & run history
+  let heartbeatStatus;
+  let historyStatus;
   try {
     const resHb = await pgPool.query(
       `SELECT job_name, last_status, to_char(to_timestamp(last_run_at / 1000.0) AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI:SS') as last_run, coalesce(last_error, 'None') as last_error FROM job_heartbeat WHERE job_name = $1`,
-      [jobName]
+      [monitorName]
     );
     if (resHb.rows.length > 0) {
+      heartbeatStatus = resHb.rows[0].last_status;
       console.log(`[WEEKLY RUNNER] DB Heartbeat: Status=${resHb.rows[0].last_status}, LastRun=${resHb.rows[0].last_run}, Error=${resHb.rows[0].last_error}`);
     }
 
     const resHist = await pgPool.query(
       `SELECT job_name, status, to_char(ran_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI:SS') as ran_at, round(duration_ms / 1000.0, 1) as duration_s, coalesce(error, 'None') as error FROM job_run_history WHERE job_name = $1 ORDER BY ran_at DESC LIMIT 1`,
-      [jobName]
+      [monitorName]
     );
     if (resHist.rows.length > 0) {
+      historyStatus = resHist.rows[0].status;
       console.log(`[WEEKLY RUNNER] DB Run History: Status=${resHist.rows[0].status}, Duration=${resHist.rows[0].duration_s}s, Error=${resHist.rows[0].error}`);
     }
   } catch (err) {
     console.warn(`[WEEKLY RUNNER] DB verification query warning: ${err.message}`);
+  }
+
+  const succeeded = isSuccessfulWeeklyJob(returnValue, heartbeatStatus, historyStatus);
+  if (succeeded) {
+    console.log(`\n[WEEKLY RUNNER] >>> SUCCESS! Job ${jobName} completed in ${completedElapsedSec}s. Peak Python RAM: ${peakMemMb}MB`);
+  } else {
+    const failedSteps = Array.isArray(returnValue?.failedSteps) ? returnValue.failedSteps : [];
+    console.error(`\n[WEEKLY RUNNER] >>> FAILED! BullMQ completed, but the job's semantic or persisted verdict failed.`);
+    if (failedSteps.length > 0) {
+      console.error(`[WEEKLY RUNNER] Failed steps: ${failedSteps.join(', ')}`);
+    }
+    process.exitCode = 1;
   }
 
   await queue.close();
@@ -109,6 +131,12 @@ const JOB_MAP = {
   'trendlyne-ratios-monthly': { queue: 'trendlyne-ratios-monthly', timeout: 7200000 },
   'ml-weekly-data': { queue: 'ml-weekly-data', timeout: 14400000 },
   'ml-weekly-retrain': { queue: 'ml-weekly-retrain', timeout: 14400000 },
+  'nse-bulk-block': {
+    queue: 'nse-bulk-block',
+    jobName: 'nse-bulk-block-daily',
+    monitorName: 'nse-bulk-block',
+    timeout: 600000,
+  },
 };
 
 if (!targetJob || !JOB_MAP[targetJob]) {
@@ -117,7 +145,13 @@ if (!targetJob || !JOB_MAP[targetJob]) {
   process.exit(1);
 }
 
-runJob(JOB_MAP[targetJob].queue, targetJob, JOB_MAP[targetJob].timeout).catch(err => {
+const target = JOB_MAP[targetJob];
+runJob(
+  target.queue,
+  target.jobName || targetJob,
+  target.timeout,
+  target.monitorName || targetJob,
+).catch(err => {
   console.error(`[WEEKLY RUNNER] Fatal exception:`, err);
   process.exit(1);
 });

@@ -50,6 +50,29 @@ describe('getSystemStatus (extracted)', () => {
     expect(midweek!.runState).not.toBe('stale');
   });
 
+  it('uses the declared parent heartbeat for an always-run child step', async () => {
+    // financial-ratios is executed on every trendlyne-ratios-monthly run, but its output table
+    // deliberately changes only on the fetcher's 20-day smart cadence. Treating table writes as
+    // job executions made a clean no-op week look like a missed job. The parent can be used as
+    // execution evidence because it fails whenever this child step fails.
+    jobHeartbeatRows.length = 0;
+    jobHeartbeatRows.push({
+      job_name: 'trendlyne-ratios-monthly',
+      last_status: 'success',
+      last_run_at: new Date('2026-10-03T00:47:56Z').getTime(),
+      last_success_at: new Date('2026-10-03T00:47:56Z').getTime(),
+      last_error: null,
+      run_count: 21,
+      fail_count: 0,
+    });
+
+    const status = await getSystemStatus(new Date('2026-10-09T12:00:00Z'));
+    const ratios = status.find(s => s.id === 'financial-ratios');
+    expect(ratios).toBeDefined();
+    expect(ratios!.runState).toBe('success');
+    expect(ratios!.lastSuccessAt).toBe('2026-10-03T00:47:56.000Z');
+  });
+
   it('uses schema-scoped, normalized planner estimates for large-table stats', async () => {
     vi.mocked(dbGet).mockClear();
     await getSystemStatus();

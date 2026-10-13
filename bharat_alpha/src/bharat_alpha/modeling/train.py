@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,6 +16,7 @@ import joblib
 import numpy as np
 import pandas as pd
 import psycopg
+import sklearn
 from psycopg.types.json import Jsonb
 from sklearn.isotonic import IsotonicRegression
 
@@ -29,6 +31,33 @@ from bharat_alpha.modeling.members import combine, default_members
 
 LABEL_NAME = "fwd_open_to_open_rankgauss"
 BENCHMARK_FACTOR = "mom_12_1"            # legacy's only near-survivor among price factors
+
+
+def artifact_runtime() -> dict[str, str]:
+    """Versions that determine whether a persisted sklearn estimator is safe to load."""
+    return {
+        "python": platform.python_version(),
+        "sklearn": sklearn.__version__,
+        "numpy": np.__version__,
+        "joblib": joblib.__version__,
+    }
+
+
+def artifact_runtime_tag(runtime: dict[str, str] | None = None) -> str:
+    """Short ID suffix so a compatible rebuild cannot collide with an old artifact row."""
+    payload = json.dumps(runtime or artifact_runtime(), sort_keys=True).encode()
+    return hashlib.sha1(payload).hexdigest()[:8]
+
+
+def dump_bundle(bundle: "ModelBundle", path: Path) -> None:
+    """Persist an estimator and its pre-unpickle compatibility manifest."""
+    runtime = artifact_runtime()
+    bundle.artifact_runtime = runtime
+    joblib.dump(bundle, path)
+    sidecar = path.with_suffix(path.suffix + ".runtime.json")
+    temporary = sidecar.with_suffix(sidecar.suffix + ".tmp")
+    temporary.write_text(json.dumps(runtime, sort_keys=True), encoding="utf-8")
+    temporary.replace(sidecar)
 
 
 def _wide(s: pd.Series) -> pd.DataFrame:
@@ -47,6 +76,7 @@ class ModelBundle:
     abs_residuals: np.ndarray            # OOF |excess - pred_excess|, for conformal intervals
     feature_means: dict[str, float] = field(default_factory=dict)
     feature_sds: dict[str, float] = field(default_factory=dict)
+    artifact_runtime: dict[str, str] = field(default_factory=artifact_runtime)
 
     def member_scores(self, X: pd.DataFrame) -> pd.DataFrame:
         X = X.reindex(columns=self.feature_cols)
@@ -154,8 +184,10 @@ def train_model(conn: psycopg.Connection, ds: Dataset, members_factory=None, reg
                          ds.X.mean().to_dict(), ds.X.std().to_dict())
     chash = config_hash(final, list(ds.X.columns))
     end = ds.dates.max().date()
-    model_id = f"h{ds.horizon}-{end:%Y%m%d}-{chash}"
+    runtime = artifact_runtime()
+    model_id = f"h{ds.horizon}-{end:%Y%m%d}-{chash}-{artifact_runtime_tag(runtime)}"
     report["config_hash"] = chash
+    report["artifact_runtime"] = runtime
     report["n_rows"] = int(len(ds.X))
     report["features"] = list(ds.X.columns)
     recent = ds.X.index.get_level_values("date") >= ds.dates[max(len(ds.dates) - 60, 0)]
@@ -163,19 +195,37 @@ def train_model(conn: psycopg.Connection, ds: Dataset, members_factory=None, reg
     if register:
         path = Path(s.artifacts_dir) / "models" / f"{model_id}.joblib"
         path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(bundle, path)
+        dump_bundle(bundle, path)
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO alpha.model(model_id, horizon, feature_set, label, params, train_start, train_end,
                                         cv_report, status, artifact_path)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'candidate',%s)
                 ON CONFLICT (model_id) DO NOTHING""",
-                (model_id, ds.horizon, FEATURE_SET_VERSION, LABEL_NAME, Jsonb({"config_hash": chash}),
+                (model_id, ds.horizon, FEATURE_SET_VERSION, LABEL_NAME,
+                 Jsonb({"config_hash": chash, "artifact_runtime": runtime}),
                  ds.dates.min().date(), end, Jsonb(jsonable(report)), str(path)))
         conn.commit()
     return TrainResult(model_id, report, bundle, oof)
 
 
 def load_bundle(path: str) -> ModelBundle:
-    return joblib.load(path)
+    artifact = Path(path)
+    sidecar = artifact.with_suffix(artifact.suffix + ".runtime.json")
+    if not sidecar.exists():
+        raise RuntimeError(
+            f"model artifact {artifact.name} has no runtime manifest; retrain it before serving"
+        )
+    recorded = json.loads(sidecar.read_text(encoding="utf-8"))
+    current = artifact_runtime()
+    if recorded.get("sklearn") != current["sklearn"]:
+        raise RuntimeError(
+            f"model artifact {artifact.name} requires scikit-learn {recorded.get('sklearn')}; "
+            f"runtime is {current['sklearn']}; retrain through the promotion gate"
+        )
+    bundle = joblib.load(artifact)
+    embedded = getattr(bundle, "artifact_runtime", None)
+    if embedded != recorded:
+        raise RuntimeError(f"model artifact {artifact.name} runtime manifest does not match its payload")
+    return bundle
 

@@ -43,12 +43,70 @@ def test_rename_merge_repoints_every_table_that_references_the_instrument(conn):
     with conn.cursor() as cur:
         cur.execute("""INSERT INTO alpha.external_fact(source, instrument_id, field, value, observed_date, knowable_at)
                        VALUES ('legacy:x', %s, 'f', 1.0, %s, now())""", (new, D1))
+        # Same logical fact on both rename ids must deduplicate rather than abort the merge's
+        # instrument_id UPDATE on external_fact_pkey.
+        cur.execute("""INSERT INTO alpha.external_fact(source, instrument_id, field, value, observed_date, knowable_at)
+                       SELECT source, %s, field, 2.0, observed_date, knowable_at
+                         FROM alpha.external_fact WHERE instrument_id=%s""", (old, new))
         cur.execute("INSERT INTO alpha.fo_ban_day VALUES (%s, 1, 'nse_fo_secban', now())", (D1,))
         cur.execute("INSERT INTO alpha.fo_ban VALUES (%s, %s)", (D1, new))
     assert apply_symbol_change(conn, "OLDCO", "NEWCO", D1) == old
-    assert read_df(conn, "SELECT instrument_id FROM alpha.external_fact").instrument_id.tolist() == [old]
+    facts = read_df(conn, "SELECT instrument_id, value FROM alpha.external_fact")
+    assert facts.instrument_id.tolist() == [old]
+    assert facts.value.tolist() == [2.0]  # surviving id's row wins
     assert read_df(conn, "SELECT instrument_id FROM alpha.fo_ban").instrument_id.tolist() == [old]
     assert read_df(conn, "SELECT count(*) n FROM alpha.instrument WHERE instrument_id=%s", (new,)).n[0] == 0
+
+
+def test_rename_merge_cascades_resolved_outcome_with_its_prediction(conn):
+    """A resolved prediction is a composite parent of outcome as well as an instrument child.
+
+    This is the exact live ADANIGAS -> ATGL failure: changing prediction.instrument_id before
+    its outcome used to violate the composite FK and roll the whole symbol-change ingest back.
+    """
+    from bharat_alpha.db import read_df
+    from bharat_alpha.reference import SymbolResolver, apply_symbol_change
+
+    res = SymbolResolver(conn)
+    old, new = res.resolve("OLDCO", D0), res.resolve("NEWCO", D1)
+    with conn.cursor() as cur:
+        cur.execute("""INSERT INTO alpha.model
+            (model_id, horizon, feature_set, label, params, train_start, train_end,
+             cv_report, status, artifact_path)
+            VALUES ('rename-test', 5, 'v1', 'y', '{}', %s, %s, '{}', 'candidate', 'none')""",
+                    (D0, D1))
+        cur.execute("""INSERT INTO alpha.prediction
+            (model_id, as_of_date, instrument_id, horizon, score, rank_pct, member_scores)
+            VALUES ('rename-test', %s, %s, 5, 0.1, 0.5, '{}')""", (D1, new))
+        cur.execute("""INSERT INTO alpha.outcome
+            (model_id, as_of_date, instrument_id, horizon, entry_date, exit_date,
+             fwd_return, universe_mean, universe_median, excess_mean, exit_reason)
+            VALUES ('rename-test', %s, %s, 5, %s, %s, 0.01, 0, 0, 0.01, 'horizon')""",
+                    (D1, new, D1, D2))
+
+    assert apply_symbol_change(conn, "OLDCO", "NEWCO", D1) == old
+    assert read_df(conn, "SELECT instrument_id FROM alpha.prediction").instrument_id.tolist() == [old]
+    assert read_df(conn, "SELECT instrument_id FROM alpha.outcome").instrument_id.tolist() == [old]
+
+
+def test_rename_merge_cascades_session_outcome_with_its_pick(conn):
+    """The next-session pick/outcome pair has the same composite-parent identity contract."""
+    from bharat_alpha.db import read_df
+    from bharat_alpha.reference import SymbolResolver, apply_symbol_change
+
+    res = SymbolResolver(conn)
+    old, new = res.resolve("OLDCO", D0), res.resolve("NEWCO", D1)
+    with conn.cursor() as cur:
+        cur.execute("""INSERT INTO alpha.session_pick
+            (strategy, as_of_date, trade_date, instrument_id, score, rank, edge_status)
+            VALUES ('rename-test', %s, %s, %s, 0.1, 1, 'unvalidated')""", (D0, D1, new))
+        cur.execute("""INSERT INTO alpha.session_outcome
+            (strategy, trade_date, instrument_id, oc_return, universe_oc, net_excess)
+            VALUES ('rename-test', %s, %s, 0.01, 0, 0.01)""", (D1, new))
+
+    assert apply_symbol_change(conn, "OLDCO", "NEWCO", D1) == old
+    assert read_df(conn, "SELECT instrument_id FROM alpha.session_pick").instrument_id.tolist() == [old]
+    assert read_df(conn, "SELECT instrument_id FROM alpha.session_outcome").instrument_id.tolist() == [old]
 
 
 def test_master_attaches_isins_and_merges_a_rename_the_symbol_change_file_missed(conn):

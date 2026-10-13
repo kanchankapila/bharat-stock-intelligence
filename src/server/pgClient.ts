@@ -233,7 +233,8 @@ export async function pgEnsureColumns(): Promise<void> {
     `CREATE TABLE IF NOT EXISTS market_regimes (
        date TEXT PRIMARY KEY,
        regime TEXT,
-       regime_prob DOUBLE PRECISION
+       regime_prob DOUBLE PRECISION,
+       backfilled BOOLEAN NOT NULL DEFAULT FALSE
      )`,
     `CREATE TABLE IF NOT EXISTS early_hours_predictions (
        symbol TEXT NOT NULL,

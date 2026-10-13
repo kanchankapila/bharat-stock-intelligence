@@ -11176,9 +11176,83 @@ Fixed with tests written first (each shown failing on the unfixed code):
 - **-06 item 4** `planLifecycle.planStatus` derives ACTIVE/EXPIRED from `valid_until`; both Command Center pick readers return it; the Top Picks page tags expired plans. No schema change.
 - Re-graded `unified_signal_outcomes` (run by the user) and verified live: Bearish STOP_LOSS +3..+4% -> -5.25%.
 
+## 2026-10-09 — live job audit, timeout recovery, and financial-ratio honesty
+
+- Ran the full repo doctor against production: 36 pass, 2 historical/current warnings, 0 fail. The
+  only same-day job incidents were three isolated NiftyTrader filter timeouts; adjacent collection
+  cycles were complete and the two affected filters succeeded on direct live re-probe.
+- Added one timeout/abort-only retry to the 45-filter live screener collector. Authentication and
+  response-contract failures remain non-retryable. The regression test was negative-controlled.
+- Traced the readiness report's sole LATE row, `financial-ratios`, to a monitor-contract mismatch:
+  the parent ran successfully on Saturday, while the child correctly skipped all 1,852 mapped
+  symbols because their `fetched_at` values were within its 20-day cache window. Monitoring now
+  uses the parent heartbeat for execution evidence and 23/30 calendar-day landing-table thresholds.
+- Found and fixed a real hidden failure in that fetcher: missing ET CashFlow/Ratio payloads used to
+  write sparse rows and count as success. Both payloads are now required before any write, and
+  `FetchTracker` fails sustained provider outages while preserving legitimate zero-attempt runs.
+- Fixed an order-dependent Vitest failure caused by explicit positive fixture ids advancing neither
+  the `unified_signals` identity sequence nor its next auto-id; fixtures now use negative ids.
+- Verification: TypeScript clean; Vitest 1,760 passed / 44 skipped; Python 3,487 passed / 263
+  skipped; focused financial-ratio tests 37/37; job readiness 86 healthy + 2 event-driven and
+  **0 needing attention**. Deployment waited for the active `trendlyne-screener-sync` job to
+  finish rather than killing its worker mid-run.
+
+### 2026-10-10 — deployment read-back and newly exposed weekly failure
+
+- Restarted `bharat-server` safely at 13:08 IST after all BullMQ active counts reached zero;
+  saved the pm2 process list and verified `/api/health` returned `status=ok`. The corrected
+  live-screener retry and financial-ratio monitoring paths are now live.
+- Re-ran all 196 data-quality checks: 193 PASS, 3 WARN, 0 critical failures. Both
+  `tl_financial_quality` and `et_cashflow_history` now pass on the corrected 20-day cadence.
+- Verified both 2026-10-09 research reports are READY with 10 picks. Their top-ten symbol order,
+  score, classification, timeframe, entry zone, stop, targets, R:R and validity exactly match the
+  latest canonical `unified_recommendations` batch; AI blurbs are string values, not rendered
+  object artifacts.
+- The post-deploy readiness report exposed a newer Friday failure: `ml-weekly-data` failed only
+  `sync_tl_index_map` because Trendlyne's sector/industry route now returns 404. Its week/month/
+  quarter variants also return 404; the global-index route still returns populated JSON. The
+  registry has no replacement, and a browser DevTools captured fetch was requested per the
+  datasource protocol. Existing mappings remain available (215 index / 29 sector / 124 industry);
+  Saturday's later model retrain succeeded, so Monday's signal pipeline is not blocked.
+- Fixed repo-doctor's contradictory verdicts: raw wall-clock age no longer marks NSE intraday jobs
+  stale over weekends/holidays, `last_status=failed` cannot be hidden by an older fresh success,
+  and generic `steps failed`/vendor-name text is no longer treated as benign. The doctor now
+  reports the real weekly failure and passes both Friday-close intraday heartbeats.
+- Final verification: TypeScript and Vite build clean; Vitest 1,765 passed / 44 skipped; Python
+  3,487 passed / 263 skipped; repo-doctor 36 PASS / 3 honest WARN / 0 FAIL; live health `ok` and
+  no BullMQ job left active. The three warnings are the Trendlyne mapping failure (reported in both
+  heartbeat and failure views) plus the previously documented Oct 3-4 host outage window.
+
 ### 2026-10-08 (evening) — end-to-end expert review (trader + quant + data scientist)
 Full write-up: `docs/expert-review-2026-10-08.md`. Ledger: AF-20261008-11..28 (and AF-20261003-05 closed). Measurements: `measurement.md` 2026-10-08 entry.
 - **Accuracy, measured honestly:** the published rank has IC +0.052 / +0.069 (5d / 10d) at Rs10cr over 40 sessions of ONE falling tape, with a low-beta tilt; top-decile net excess +0.15%/5d at 0.30% RT (-0.05% at the frozen 0.50%). `calibrated_win_probability` is not a probability (0.51 vs 0.32 realised, Brier worse than the base rate). Closed BUY plans: Sep -2.4% net, 68% stopped. Frozen forward test cannot speak before 2027-02-26.
 - **Fixed in tree (deploy pending, nothing committed):** partial-day `technical_signals` join (cockpit showed a heuristic as 'Validated ML'); `days_to_next_results` / `earnings_shocker_flag` forward-fill; ambiguous-`mcsymbol` SQL joins + stale shockers + rescheduled result dates; confluence 'sector strength' label; non-trading-day stamping in six F&O/pre-open/breadth writers; two per-series DQ checks; Alpha/Dashboard/Matrix/Cockpit honesty (plan status, classification, horizon, rank-not-forecast, LONG-only win rate, UNKNOWN regime, dead intraday panel); CLAUDE.md frontend/dead-component rule.
 - **Lessons:** the previous session's honesty fixes sat in `BuyRecommendationsPage.tsx`, imported by nothing - confirm a route renders a component before editing it. Monitoring saw rows, not meaning (a countdown 92% fictional while every freshness check was green). `pd.DataFrame(dict_rows, columns=[renamed])` yields all-NaN silently (cost an hour here): rename after building the frame.
 - **Not done / open:** history repair (production writes), news-sentiment wiring, UI build list and component deletions, the architecture plan (all need the user), and the EVIDENCE shadow arms (calendar-blocked to 2027-02-26). Rate limits cut two agent runs; both were resumed or their logs used.
+
+## 2026-10-11 — weekly recovery, bounded fetching, and honest manual verification
+
+- Closed the Trendlyne mapping failure without inventing a replacement source: consumer tracing proved
+  that only global-index mappings are read at runtime, so `sync_tl_index_map.py` now refreshes the live
+  global endpoint and preserves the historical, unconsumed sector/industry ids. A direct live sync and
+  the subsequent full weekly parent both succeeded.
+- Added a gap-only Yahoo fallback after the primary MoneyControl sector/industry writer. Live coverage is
+  now 2,350/2,353 sectors (99.87%) and 2,345/2,353 industries (99.66%); unresolved/conflicting values stay
+  `Unknown` rather than being guessed.
+- The first full `ml-weekly-data` retry exposed an eager executor submission in
+  `extra_endpoints_fetcher.py`: every stock×endpoint Future was retained at once, host RAM reached 93.8%,
+  and the child reached about 2.5 GB. Replaced it with a bounded `MAX_WORKERS * 4` rolling window and
+  promoted the recurring-bug prose into an executable repository checker. Clean live rerun: 27,101
+  requests over 1,860 stocks, 657 MB peak for the step, parent success in 2,384 seconds.
+- Fixed the single-weekly-job runner's false green. A BullMQ `completed` state is no longer enough: the
+  returned semantic result, failed steps, persisted heartbeat and persisted run-history row must all be
+  successful. Queue job names and monitor ids are modeled separately.
+- Recovered both remaining readiness blockers through their real BullMQ workers. `nse-bulk-block` now
+  records completed/failed heartbeats and succeeded in 16 seconds. `mover-study-weekly` now has a
+  45-minute process budget inside its existing 75-minute lock and succeeded in 1,308 seconds after the
+  prior exact-30-minute completion race. Both read back success from heartbeat and run history.
+- Final operational reads: 89 monitored entries, 0 needing attention before a trading day; DQ 194/197
+  PASS with 0 critical failures; repo-doctor 34 PASS / 5 WARN / 0 FAIL. The warnings are historical
+  failures or weekend/cadence/measurement alerts, not current failed jobs. Tapetide remains the sole
+  owner-decision item: its three promoted routes still hard-404, reproduced again in the weekly crawl;
+  per the datasource rule they are not silently disabled or relabeled as another vendor.

@@ -130,9 +130,10 @@ describe('renderDigest', () => {
     expect(text).toContain('SWING (days to weeks)');
   });
 
-  it('labels a positional pick as long term', () => {
+  it('labels a positional pick with its actual 15-session validity, not a months-scale claim', () => {
     const text = renderDigest(digest({ longTerm: [pick({ horizon: 'POSITIONAL' })] }));
-    expect(text).toContain('LONG TERM (weeks to months)');
+    expect(text).toContain('POSITIONAL (up to 15 sessions)');
+    expect(text).not.toContain('months');
   });
 
   it('includes the selection reason', () => {

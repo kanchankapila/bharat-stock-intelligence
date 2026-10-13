@@ -29,12 +29,13 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, execute, query_one
+from as_of import logical_trading_date
+from risk_free_rate import get_risk_free_annual
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 NIFTY_SYMBOL       = "NIFTY50"
-DEFAULT_RISK_FREE  = 0.065   # Fallback: 6.5% (typical RBI repo range)
 WINDOW_LONG        = 252     # 1-year rolling
 WINDOW_SHORT       = 126     # 6-month rolling (for beta stability check)
 MIN_DAYS           = 63      # Minimum rows needed to compute any metric
@@ -43,24 +44,22 @@ MIN_DAYS           = 63      # Minimum rows needed to compute any metric
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _get_rbi_repo_rate() -> float:
-    """Read the latest RBI repo rate from macro_asset_prices. Falls back to 6.5%."""
-    try:
-        row = query_one(
-            "SELECT close FROM macro_asset_prices WHERE symbol='RBI_REPO_RATE' "
-            "ORDER BY date DESC LIMIT 1"
-        )
-        if row and row[0] is not None:
-            rate = float(row[0])
-            # Stored as percentage (e.g. 6.5) — convert to decimal
-            return rate / 100.0 if rate > 1.0 else rate
-    except Exception:
-        pass
-    return DEFAULT_RISK_FREE
+    """Annual decimal risk-free rate, single-sourced via risk_free_rate (2026-10-11
+    quant audit: this file used a 6.5% fallback, quantScoringWorker.ts 4.0% and
+    institutional_quant_engine.py 7.0% — same table, three incomparable Sharpes)."""
+    return get_risk_free_annual(query_one)
 
 
 def _daily_returns(prices: pd.Series) -> pd.Series:
-    """Simple daily log returns."""
-    return np.log(prices / prices.shift(1)).dropna()
+    """Simple daily returns.
+
+    Log returns were used here until 2026-10-11; simple returns are the convention
+    for every risk metric computed from them (beta covariance, Sharpe/Sortino
+    excess vs an arithmetic risk-free rate, historical VaR percentiles) because
+    only simple returns are directly comparable to the linear risk-free subtraction
+    and to benchmark index returns. Log returns remain correct for multi-period
+    aggregation, which this module never does."""
+    return prices.pct_change().dropna()
 
 
 def _beta(stock_ret: pd.Series, bench_ret: pd.Series, window: int) -> Optional[float]:
@@ -125,7 +124,11 @@ def run(symbol: Optional[str] = None, window_days: int = WINDOW_LONG, test: bool
     nifty_df = nifty_df.set_index("date").sort_index()
     nifty_ret = _daily_returns(nifty_df["close"])
 
-    min_date = (datetime.date.today() - datetime.timedelta(days=int(window_days * 2.2))).isoformat()
+    # Anchor the lookback on the logical trading date, not wall-clock: a post-close
+    # chain that finishes after IST midnight would otherwise widen the window by a day
+    # (date.today() write-anchor class, recurring-bugs.md).
+    min_date = (datetime.date.fromisoformat(logical_trading_date())
+                - datetime.timedelta(days=int(window_days * 2.2))).isoformat()
     if symbol:
         ohlcv_df = read_df(
             "SELECT symbol, date, close FROM stock_ohlcv WHERE symbol=? AND close>0 AND date >= ? ORDER BY date ASC",
@@ -160,8 +163,12 @@ def run(symbol: Optional[str] = None, window_days: int = WINDOW_LONG, test: bool
             s_df = df.set_index("date").sort_index()
             stock_ret = _daily_returns(s_df["close"])
 
-            # Align benchmark to this stock's date range
-            bench = nifty_ret.reindex(stock_ret.index).ffill()
+            # Align benchmark to this stock's date range. NO ffill: a forward-filled
+            # benchmark return duplicates the prior session's return on any date the
+            # stock traded but NIFTY did not, corrupting the covariance denominator
+            # (2026-10-11 quant audit). _beta() intersects the two series and drops
+            # unmatched dates, which is the correct alignment for covariance.
+            bench = nifty_ret.reindex(stock_ret.index)
 
             beta_1y  = _beta(stock_ret, bench, WINDOW_LONG)
             beta_6m  = _beta(stock_ret, bench, WINDOW_SHORT)

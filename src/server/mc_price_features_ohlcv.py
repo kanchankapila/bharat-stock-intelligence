@@ -72,14 +72,27 @@ def compute_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     roll_min = close.rolling(252, min_periods=1).min()
     df["mc_52w_low_dist_pct"] = ((close - roll_min) / roll_min * 100).round(2)
 
-    # Days since the trailing-252d high was made: walk the window, find the argmax offset.
+    # Days since the trailing-252d high was made: walk the window, find the argmax
+    # offset. Ties resolve to the MOST RECENT touch (argmax over the reversed
+    # window): a stock that made its high, fell, and re-touched the same level
+    # yesterday is 1 day off its high, not N (2026-10-11 quant audit).
     def days_since_high(window: np.ndarray) -> float:
-        return float(len(window) - 1 - np.argmax(window))
+        return float(np.argmax(window[::-1]))
     df["mc_days_from_52wh"] = close.rolling(252, min_periods=1).apply(days_since_high, raw=True)
 
-    # YTD return: relative to the last close of the prior calendar year.
+    # YTD return: relative to the LAST close of the prior calendar year, not the
+    # current year's first close (2026-10-11 quant audit — the old baseline skipped
+    # the first session's move and silently re-anchored on data gaps). The earliest
+    # year in the frame has no prior-year close; fall back to that year's first
+    # close, which is the honest "since first available bar" baseline for it.
     df["_year"] = pd.to_datetime(df["date"]).dt.year
-    year_start_close = df.groupby("_year")["close"].transform("first")
+    # NOTE: `transform('last').shift(1)` would align to the PREVIOUS ROW, not the
+    # previous year's end — for every row except a year's first, that is this year's
+    # own eventual last close (look-ahead!). Build the per-year baseline map instead.
+    year_last = df.groupby("_year")["close"].last()
+    prior_year_close = df["_year"].map(lambda y: year_last.get(y - 1))
+    first_close = df.groupby("_year")["close"].transform("first")
+    year_start_close = prior_year_close.fillna(first_close)
     df["mc_ytd_return"] = ((close - year_start_close) / year_start_close * 100).round(2)
 
     # Volume ratio: today's volume vs trailing 20-day average (excluding today).

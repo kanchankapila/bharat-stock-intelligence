@@ -43,6 +43,7 @@ import pandas as pd
 import ta
 
 from db_compat import connect, read_df, use_postgres, ConnWrapper
+from sqlalchemy.exc import OperationalError, PendingRollbackError, InterfaceError
 from as_of import read_as_of_history, logical_write_floor
 from insider_features import insider_buy_pct_series
 from mc_symbol_map import MC_TO_SYMBOL_SQL
@@ -89,7 +90,6 @@ def _quarterly_yoy(q: pd.DataFrame, value_col: str) -> pd.DataFrame:
     ok = m["prev_val"].notna() & (m["prev_val"] != 0)
     m["growth"] = np.where(ok, (m[value_col] - m["prev_val"]) / m["prev_val"].abs(), np.nan)
     return m[["period_end", "growth"]]
-from sqlalchemy.exc import OperationalError, PendingRollbackError, InterfaceError
 
 
 # INSERT OR REPLACE → portable ON CONFLICT for feature_store (PK: symbol, date, timeframe).
@@ -308,20 +308,26 @@ class FeatureEngineer:
         log_ret = np.log(close / close.shift(1))
         out["hist_vol_21d"] = log_ret.rolling(21).std() * np.sqrt(252)
         out["hist_vol_63d"] = log_ret.rolling(63).std() * np.sqrt(252)
-        # vol_regime: LOW / MED / HIGH / SPIKE
-        p33 = out["hist_vol_21d"].quantile(0.33)
-        p67 = out["hist_vol_21d"].quantile(0.67)
-        p90 = out["hist_vol_21d"].quantile(0.90)
-        try:
-            out["vol_regime"] = pd.cut(
-                out["hist_vol_21d"],
-                bins=[-np.inf, p33, p67, p90, np.inf],
-                labels=["LOW", "MED", "HIGH", "SPIKE"],
-                duplicates="drop",
-            ).astype(str).replace("nan", "MED")
-        except ValueError:
-            # All quantiles equal (zero-variance vol) — assign uniform MED
-            out["vol_regime"] = "MED"
+        # vol_regime: LOW / MED / HIGH / SPIKE.
+        # EXPANDING quantiles (2026-10-11 quant audit): the old full-sample quantiles
+        # were computed over the whole loaded history, so a 2022 row's regime label
+        # depended on 2024 volatility — a look-ahead baked into a persisted feature.
+        # expanding() makes each row's thresholds a function of data at or before it.
+        # min_periods=252 keeps the label neutral MED until one year of vol history
+        # exists (a per-row threshold Series cannot go through pd.cut, which wants
+        # static bin edges, so the classification is explicit comparisons).
+        hv = out["hist_vol_21d"]
+        expanding_hv = hv.expanding(min_periods=252)
+        p33 = expanding_hv.quantile(0.33)
+        p67 = expanding_hv.quantile(0.67)
+        p90 = expanding_hv.quantile(0.90)
+        regime = pd.Series("MED", index=out.index, dtype=object)
+        defined = hv.notna() & p33.notna() & p67.notna() & p90.notna()
+        regime[defined & (hv <= p33)] = "LOW"
+        regime[defined & (hv > p33) & (hv <= p67)] = "MED"
+        regime[defined & (hv > p67) & (hv <= p90)] = "HIGH"
+        regime[defined & (hv > p90)] = "SPIKE"
+        out["vol_regime"] = regime
 
         # Volume
         vol_ma5  = vol.rolling(5).mean()
@@ -332,9 +338,16 @@ class FeatureEngineer:
         out["obv_slope"] = out["obv"].rolling(10).apply(
             lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) == 10 else np.nan
         )
-        # VWAP: daily rolling approximation
+        # VWAP: 20-session rolling anchored VWAP.
+        # 2026-10-11 quant audit: this was `(tp*vol).cumsum()/vol.cumsum()` — a
+        # since-inception cumulative anchor, so vwap_dist_pct measured distance from
+        # the stock's ENTIRE history's average trade, which converges toward zero
+        # with age and is not comparable across listings of different lengths (and
+        # crosses the mixed adjustment-basis seam in stock_ohlcv). A rolling 20d
+        # VWAP matches the feature's stated semantics and avwap_features.py's window.
         tp = (high + low + close) / 3
-        out["vwap"] = (tp * vol).cumsum() / vol.cumsum()
+        pv = (tp * vol)
+        out["vwap"] = pv.rolling(20, min_periods=20).sum() / vol.rolling(20, min_periods=20).sum()
         out["vwap_dist_pct"] = (close - out["vwap"]) / out["vwap"]
 
         # Multi-timeframe trend
@@ -841,17 +854,25 @@ class FeatureEngineer:
                     feat["analyst_target_upside_pct"] = (tgt / close.to_numpy() - 1.0) * 100.0
 
         recos = read_df(
-            """SELECT reco_date FROM trendlyne_analyst_targets
+            """SELECT reco_date, known_at FROM trendlyne_analyst_targets
                WHERE symbol=? AND reco_date IS NOT NULL ORDER BY reco_date""",
             (symbol,),
         )
         if not recos.empty:
-            ev = pd.to_datetime(recos["reco_date"], errors="coerce").dropna()
-            ev = ev.sort_values().to_numpy()
-            days = pd.DatetimeIndex(idx).astype("datetime64[ns]").to_numpy()
-            right = np.searchsorted(ev, days, side="right")
-            left90 = np.searchsorted(ev, days - np.timedelta64(90, "D"), side="left")
-            feat["broker_recos_90d"] = (right - left90).astype(float)
+            event_dates = pd.to_datetime(recos["reco_date"], errors="coerce")
+            known_dates = pd.to_datetime(recos["known_at"], utc=True, errors="coerce").dt.tz_localize(None)
+            valid = event_dates.notna() & known_dates.notna()
+            events = event_dates[valid].to_numpy(dtype="datetime64[ns]")
+            known = known_dates[valid].to_numpy(dtype="datetime64[ns]")
+            days = pd.DatetimeIndex(idx).to_numpy(dtype="datetime64[ns]")
+            feat["broker_recos_90d"] = np.asarray([
+                np.count_nonzero(
+                    (events >= day - np.timedelta64(90, "D"))
+                    & (events <= day)
+                    & (known <= day)
+                )
+                for day in days
+            ], dtype=float)
         return feat
 
     def _merge_earnings_clock(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
@@ -875,7 +896,7 @@ class FeatureEngineer:
             feat[c] = np.nan
 
         ed = read_df(
-            f"""SELECT e.result_date
+            f"""SELECT e.result_date, e.known_at, e.fetched_at
                FROM stock_earnings_dates e
                LEFT JOIN {MC_TO_SYMBOL_SQL} n ON n.mcsymbol = e.scid
                LEFT JOIN mc_scid_map m ON m.scid = e.scid
@@ -884,18 +905,30 @@ class FeatureEngineer:
             (symbol,),
         )
         if not ed.empty:
-            ev = pd.to_datetime(ed["result_date"], errors="coerce").dropna()
-            # A mcsymbol collision in nse_stocks could duplicate dates; the event
-            # clock counts distinct dates.
-            ev = ev.dt.normalize().drop_duplicates().sort_values().to_numpy()
-            right = np.searchsorted(ev, days, side="right")
-            safe_right = np.minimum(right, len(ev) - 1)
-            safe_left = np.maximum(right - 1, 0)
-            with np.errstate(invalid="ignore"):
-                d2n = (ev[safe_right] - days).astype("timedelta64[D]").astype(float)
-                dsl = (days - ev[safe_left]).astype("timedelta64[D]").astype(float)
-            feat["days_to_next_earnings"] = np.where(right < len(ev), d2n, np.nan)
-            feat["days_since_last_earnings"] = np.where(right > 0, dsl, np.nan)
+            ed["_event"] = pd.to_datetime(ed["result_date"], errors="coerce").dt.normalize()
+            ed["_known"] = pd.to_datetime(ed["known_at"], utc=True, errors="coerce").dt.tz_localize(None).dt.normalize()
+            ed["_seen"] = pd.to_datetime(ed["fetched_at"], utc=True, errors="coerce").dt.tz_localize(None).dt.normalize()
+            ed = ed.dropna(subset=["_event", "_known", "_seen"]).drop_duplicates(
+                ["_event", "_known", "_seen"]
+            )
+            events = ed["_event"].to_numpy(dtype="datetime64[ns]")
+            known = ed["_known"].to_numpy(dtype="datetime64[ns]")
+            seen = ed["_seen"].to_numpy(dtype="datetime64[ns]")
+            d2n = np.full(len(days), np.nan)
+            dsl = np.full(len(days), np.nan)
+            for i, day in enumerate(days):
+                # A proposal is usable only after first observation. If it disappeared
+                # before its result date, it was rescheduled and stops being valid after
+                # its last sighting. Dates seen through the event remain valid history.
+                valid = (known <= day) & ((day <= seen) | (seen >= events))
+                future = events[valid & (events >= day)]
+                past = events[valid & (events <= day)]
+                if future.size:
+                    d2n[i] = float((future.min() - day) / np.timedelta64(1, "D"))
+                if past.size:
+                    dsl[i] = float((day - past.max()) / np.timedelta64(1, "D"))
+            feat["days_to_next_earnings"] = d2n
+            feat["days_since_last_earnings"] = dsl
             in5 = (feat["days_to_next_earnings"] >= 0) & \
                   (feat["days_to_next_earnings"] <= 5)
             feat["earnings_in_5d"] = np.where(in5, 1.0, np.nan)

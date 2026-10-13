@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 
 import psycopg
+from psycopg import sql
 
 
 def _referencing_tables(cur: psycopg.Cursor) -> list[str]:
@@ -18,6 +19,66 @@ def _referencing_tables(cur: psycopg.Cursor) -> list[str]:
     cur.execute("""SELECT DISTINCT conrelid::regclass::text FROM pg_constraint
                    WHERE contype = 'f' AND confrelid = 'alpha.instrument'::regclass""")
     return sorted(r[0] for r in cur.fetchall())
+
+
+def _instrument_identity_keys(cur: psycopg.Cursor, table: str) -> list[list[str]]:
+    """Primary/unique keys whose identity includes instrument_id.
+
+    A rename merge can find both the historical and current symbol represented on the same
+    logical row (for example one imported external_fact per source/field/timestamp). Updating
+    the duplicate id directly then violates that table's primary key. Catalog discovery keeps
+    this aligned with new instrument-owned tables instead of growing another hand-kept list.
+    """
+    schema, name = table.split(".", 1)
+    cur.execute(
+        """SELECT tc.constraint_name, kcu.column_name
+             FROM information_schema.table_constraints tc
+             JOIN information_schema.key_column_usage kcu
+               USING (constraint_catalog, constraint_schema, constraint_name,
+                      table_catalog, table_schema, table_name)
+            WHERE tc.table_schema=%s AND tc.table_name=%s
+              AND tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
+              AND tc.constraint_name IN (
+                  SELECT tc2.constraint_name
+                    FROM information_schema.table_constraints tc2
+                    JOIN information_schema.key_column_usage kcu2
+                      USING (constraint_catalog, constraint_schema, constraint_name,
+                             table_catalog, table_schema, table_name)
+                   WHERE tc2.table_schema=%s AND tc2.table_name=%s
+                     AND tc2.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
+                   GROUP BY tc2.constraint_name
+                  HAVING bool_or(kcu2.column_name='instrument_id'))
+            ORDER BY tc.constraint_name, kcu.ordinal_position""",
+        (schema, name, schema, name),
+    )
+    grouped: dict[str, list[str]] = {}
+    for constraint, column in cur.fetchall():
+        grouped.setdefault(constraint, []).append(column)
+    return list(grouped.values())
+
+
+def _drop_identity_collisions(cur: psycopg.Cursor, table: str, keep: int, other: int) -> None:
+    """Drop only duplicate-id rows that would collide when `other` is repointed to `keep`.
+
+    The surviving instrument's row wins. All relevant columns are PRIMARY KEY members and
+    therefore non-NULL in the current schema. Composite-parent tables are deliberately left
+    to their ON UPDATE CASCADE relationships (0011/0012); their children must move atomically.
+    """
+    if table in {"alpha.prediction", "alpha.session_pick"}:
+        return
+    schema, name = table.split(".", 1)
+    ident = sql.Identifier(schema, name)
+    for key in _instrument_identity_keys(cur, table):
+        peers = [c for c in key if c != "instrument_id"]
+        same_key = sql.SQL(" AND ").join(
+            sql.SQL("k.{0} = o.{0}").format(sql.Identifier(c)) for c in peers
+        ) if peers else sql.SQL("TRUE")
+        cur.execute(
+            sql.SQL("DELETE FROM {t} o USING {t} k "
+                    "WHERE o.instrument_id=%s AND k.instrument_id=%s AND {same}").format(
+                        t=ident, same=same_key),
+            (other, keep),
+        )
 
 
 class SymbolResolver:
@@ -122,7 +183,13 @@ def apply_symbol_change(conn: psycopg.Connection, old: str, new: str, effective:
                                    SELECT 1 FROM alpha.provider_id q WHERE q.instrument_id = %s AND q.provider = p.provider)""",
                             (other, keep))
                 for t in _referencing_tables(cur):
-                    cur.execute(f"UPDATE {t} SET instrument_id=%s WHERE instrument_id=%s", (keep, other))
+                    _drop_identity_collisions(cur, t, keep, other)
+                    schema, name = t.split(".", 1)
+                    cur.execute(
+                        sql.SQL("UPDATE {} SET instrument_id=%s WHERE instrument_id=%s")
+                           .format(sql.Identifier(schema, name)),
+                        (keep, other),
+                    )
                 cur.execute(
                     "UPDATE alpha.instrument i SET first_seen = LEAST(i.first_seen, o.first_seen), "
                     "last_seen = GREATEST(i.last_seen, o.last_seen) FROM alpha.instrument o "

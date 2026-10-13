@@ -21,7 +21,7 @@ import os
 import sys
 import urllib.request
 import ssl
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime
 from db_compat import connect
 from endpoint_registry import (
@@ -36,6 +36,9 @@ from endpoint_registry import (
 # HTTP fetch is I/O-bound; a bounded thread pool turns ~20k sequential requests
 # (2-3h, overran the queue's 30-min budget) into a run that fits. Override via env.
 MAX_WORKERS = int(os.environ.get("EXTRA_ENDPOINTS_WORKERS", "8"))
+# Four waves keep the network workers busy without retaining the whole stock x endpoint
+# universe (and every completed response) in one all-at-once Future map.
+MAX_IN_FLIGHT = MAX_WORKERS * 4
 
 STOCKLIST_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "stocklist.json")
 
@@ -63,6 +66,43 @@ def fetch_url(url: str) -> str:
     # tapetide_* fetch (confirmed: 0 rows written, no error surfaced beyond a log line).
     with urllib.request.urlopen(req, context=ctx, timeout=20) as response:
         return response.read().decode('utf-8')
+
+
+def iter_fetched_tasks(tasks, fetch_fn=fetch_url, max_workers=MAX_WORKERS,
+                       max_in_flight=MAX_IN_FLIGHT):
+    """Yield fetch results while retaining at most ``max_in_flight`` Futures.
+
+    Items are ``(symbol, endpoint_name, data, error)``. Provider errors remain isolated to
+    their request, matching the fetcher's existing best-effort contract.
+    """
+    if max_workers < 1 or max_in_flight < max_workers:
+        raise ValueError("max_in_flight must be >= max_workers >= 1")
+
+    task_iter = iter(tasks)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        pending = {}
+
+        def fill_window():
+            while len(pending) < max_in_flight:
+                try:
+                    symbol, name, url = next(task_iter)
+                except StopIteration:
+                    return
+                pending[ex.submit(fetch_fn, url)] = (symbol, name)
+
+        fill_window()
+        while pending:
+            completed, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for fut in completed:
+                symbol, name = pending.pop(fut)
+                try:
+                    yield symbol, name, fut.result(), None
+                except Exception as exc:
+                    yield symbol, name, None, exc
+                finally:
+                    # Refill only after the caller has handled the yielded response. This
+                    # bounds both outstanding requests and response objects held by Futures.
+                    fill_window()
 
 def save_response(cur, symbol: str, endpoint_name: str, data: str) -> None:
     """Write one response. Caller owns the cursor and commits (batched)."""
@@ -172,22 +212,18 @@ def main():
     print(f"Fetching {len(tasks)} stock-endpoint requests across {len(stocks)} stocks "
           f"with {MAX_WORKERS} workers...")
 
-    # Fetch concurrently (I/O-bound), write on the main thread with batched commits.
+    # Fetch concurrently (I/O-bound), write on the main thread with batched commits. The
+    # bounded iterator prevents completed Futures from retaining every response until EOF.
     done = 0
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        future_map = {ex.submit(fetch_url, url): (symbol, name)
-                      for (symbol, name, url) in tasks}
-        for fut in as_completed(future_map):
-            symbol, name = future_map[fut]
-            try:
-                data = fut.result()
-                save_response(cur, symbol, name, data)
-            except Exception as e:
-                print(f"  Error fetching {name} for {symbol}: {e}", file=sys.stderr)
-            done += 1
-            if done % 500 == 0:
-                con.commit()
-                print(f"  Progress: {done}/{len(tasks)} requests done")
+    for symbol, name, data, error in iter_fetched_tasks(tasks):
+        if error is None:
+            save_response(cur, symbol, name, data)
+        else:
+            print(f"  Error fetching {name} for {symbol}: {error}", file=sys.stderr)
+        done += 1
+        if done % 500 == 0:
+            con.commit()
+            print(f"  Progress: {done}/{len(tasks)} requests done")
 
     con.commit()
     con.close()

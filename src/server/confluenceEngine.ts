@@ -208,9 +208,11 @@ function toConvictionLevel(score: number): 'ELITE' | 'STRONG' | 'MODERATE' | 'WE
 // Holding horizon (sessions) per suggested timeframe. The stop is the compute_atr_barriers
 // convention (1.5 x daily ATR) at 5 sessions, scaled by sqrt(sessions/5). Measured 2026-10-01
 // (AF-20261001-21; liquid names, 14 non-overlapping dates, 15,601 obs): a FIXED 1.5-ATR stop is
-// touched by noise 2.3% / 20.6% / 57.9% of the time within 1 / 5 / 20 sessions; 0.67 / 1.5 /
-// 3.0 ATR is touched ~20-24% at each horizon. Median adverse excursion 0.31 / 0.84 / 1.78 ATR.
-export const HOLDING_SESSIONS: Record<string, number> = { INTRADAY: 1, SWING: 5, POSITIONAL: 20 };
+// touched increasingly often as the holding window grows, while sqrt(time) scaling keeps the
+// touch rate broadly stable. The original study sampled 1 / 5 / 20 sessions, but canonical
+// recommendation expiry and outcome grading use 1 / 5 / 15. Geometry must use that same
+// contract: a 20-session stop/target on a plan that expires after 15 sessions is not coherent.
+export const HOLDING_SESSIONS: Record<string, number> = { INTRADAY: 1, SWING: 5, POSITIONAL: 15 };
 export function buildTradeSetup(price: number, atr: number, score: number, timeframe: string) {
   const risk = atr * 1.5 * Math.sqrt((HOLDING_SESSIONS[timeframe] ?? 5) / 5);
   const rewardMult = score >= 80 ? 4 : score >= 60 ? 3 : 2;

@@ -260,7 +260,7 @@ same as *"this data is unobtainable."* A vendor that moved, versioned, or re-fro
 indistinguishable from one that revoked access, when observed only from outside. The user has a
 logged-in browser and its network tab holds the answer; asking costs one message and no tokens.
 
-**Two things that are still yours to do, not the user's:**
+**Three things that are still yours to do, not the user's:**
 
 1. **Verify a user-supplied alternative route by route, not in aggregate.** Of NiftyTrader's 19
    routes: 6 were fixed by the move, 8 already worked on both hosts (so no regression risk), and
@@ -271,6 +271,15 @@ logged-in browser and its network tab holds the answer; asking costs one message
    3-week expiry into a plain base-URL change with no credential to rotate. Do not store a
    user-supplied cookie/token in the repo before checking whether the endpoint needs it; if it
    genuinely does, it belongs in `.env`, never in code.
+3. **Trace consumers per payload family before letting one retired sub-route fail a parent job.**
+   A provider page can mix canonical facts with proprietary identifiers and several independently
+   consumed sections. On 2026-10-10, `sync_tl_index_map.py` made the critical weekly data-prep job
+   depend on Trendlyne's retired sector/industry analysis route, even though
+   `trendlyne_sector`/`trendlyne_industry` had no code reader. The consumed `trendlyne` index ids
+   remained available from the healthy global-index endpoint, while canonical stock sector and
+   industry facts already came from MoneyControl/Yahoo. Search every reader first; preserve old
+   provider ids, keep refreshing the live consumed family, and remove an unused dead family from
+   the critical path. Do not substitute another vendor's ids into a proprietary-id namespace.
 
 Related failure shape, different cause: a vendor that answers but *rations* — see
 `trendlyne_waf_request_allowance_2026_08_17` in memory and `so_option_chain_fetcher.py`'s

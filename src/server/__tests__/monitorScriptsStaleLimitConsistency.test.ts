@@ -177,7 +177,6 @@ describe('MONITOR_SCRIPTS.staleLimitHours consistency', () => {
     { id: 'ohlcv-backfill', jobName: "'ohlcv-gap-fill-weekly'" },
     { id: 'dl-trainer', jobName: "jobName: 'dl-retrain-weekly'" },
     { id: 'company-profiles-sync', jobName: "jobName: 'sync-company-profiles'" },
-    { id: 'financial-ratios', jobName: "jobName: 'trendlyne-ratios-monthly-check'" },
     { id: 'working-capital', jobName: "jobName: 'trendlyne-ratios-monthly-check'", monthlyGated: true },
     { id: 'tickertape-scorecard', jobName: "jobName: 'tickertape-scorecard-weekly'" },
     { id: 'confluence-compute', marketHoursSkipGated: true },

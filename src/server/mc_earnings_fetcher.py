@@ -95,6 +95,7 @@ def ensure_schema(con) -> None:
             market_cap   REAL,
             exchange     TEXT,
             fetched_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+            known_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (scid, result_date)
         )
     """)

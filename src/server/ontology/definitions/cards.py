@@ -358,12 +358,13 @@ def cards() -> Tuple[DataCard, ...]:
            "at scoring time, and the model probabilities that fed it.",
            cadence="every_15m", fresh="computed_at", lag=0.5, use="caution",
            writers=("confluence_ml_engine.py",),
-           forbidden=("trade_reasoning", "ai_conclusion"),
+           forbidden=("trade_reasoning",),
            caveats=("The only engine score with a growing positive graded reading on this "
                     "platform — which is what makes it the ranker's load-bearing input.",
                     "`computed_at` here is native TIMESTAMPTZ, unlike the TEXT "
                     "`computed_at` on `unified_recommendations`: cast across the join.",
-                    "`ml_breakout_probability` / `ml_trend_probability` are model outputs.",
+                    "`ml_breakout_probability` is the populated model output; the legacy "
+                    "`ml_trend_probability` schema field has no writer and is not exposed.",
                     "`screener_weights_json` records the weights AT SCORING TIME — applying "
                     "today's weights to an old row is a look-ahead bug.")),
 

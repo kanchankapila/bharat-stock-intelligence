@@ -17,6 +17,13 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import 'dotenv/config';
+import {
+  isKnownTransientFailure,
+  latestExpectedNseDailyRun,
+  latestExpectedNseIntradaySlot,
+  latestNseSessionDate,
+  unrecoveredFailureRows,
+} from './doctor-lib.mjs';
 
 const ROOT = process.cwd();
 const results = [];
@@ -218,18 +225,45 @@ if (client) {
   // job_heartbeat stores naive-UTC epochs: compare epoch ms directly, never AT TIME ZONE.
   // Ages = cadence + documented grace from JOB_REGISTRY (rounded up generously).
   const freshness = [
-    ['ml-daily-ops', 30], ['ml-weekly-retrain', 24 * 9], ['data-quality-daily', 30],
-    ['job-digest', 30], ['job-digest-morning', 30], ['recommendations-digest', 30],
-    ['quant-eod-sync', 30], ['outcome-resolver', 30], ['trendlyne-midweek', 24 * 9],
-    ['nt-live-filter-capture', 20], ['technical-scan', 24 * 3],
+    ['ml-daily-ops', 30, 'nse-daily', { hourUtc: 13, minuteUtc: 20, graceMinutes: 270 }],
+    ['ml-weekly-data', 24 * 9], ['ml-weekly-retrain', 24 * 9],
+    ['data-quality-daily', 30], ['job-digest', 30], ['job-digest-morning', 30],
+    ['recommendations-digest', 30, 'nse-daily', { hourUtc: 17, minuteUtc: 10, graceMinutes: 90 }],
+    ['quant-eod-sync', 30, 'nse-daily', { hourUtc: 16, minuteUtc: 30, graceMinutes: 360 }],
+    ['outcome-resolver', 30, 'nse-daily', { hourUtc: 4, minuteUtc: 0, graceMinutes: 45 }],
+    ['trendlyne-midweek', 24 * 9],
+    ['nt-live-filter-capture', 20, 'nse-intraday'], ['technical-scan', 24 * 3, 'nse-intraday'],
   ];
-  for (const [job, maxAgeH] of freshness) {
+  let nseHolidays = [];
+  try {
+    nseHolidays = (await q(`SELECT to_char(date, 'YYYY-MM-DD') AS day
+      FROM market_holidays
+      WHERE exchange = 'NSE' AND date >= current_date - interval '40 days'`)).map(r => r.day);
+  } catch { /* heartbeat query below remains useful even if the holiday calendar is unavailable */ }
+
+  for (const [job, maxAgeH, schedule, scheduleOptions] of freshness) {
     try {
       const rows = await q(`SELECT last_status, last_success_at FROM job_heartbeat WHERE job_name = '${job}'`);
       if (!rows.length) { check(`hb-${job}`, 'db', 'WARN', 'no heartbeat row (verify the job is heartbeat-less by design)'); continue; }
-      const ageH = (nowMs - Number(rows[0].last_success_at || 0)) / 3_600_000;
-      check(`hb-${job}`, 'db', ageH > maxAgeH ? 'WARN' : 'PASS',
-        `last success ${ageH.toFixed(1)}h ago (tolerates ≤${maxAgeH}h), status ${rows[0].last_status}`);
+      const lastSuccessMs = Number(rows[0].last_success_at || 0);
+      const ageH = (nowMs - lastSuccessMs) / 3_600_000;
+      const lastFailed = rows[0].last_status === 'failed';
+      if (schedule === 'nse-intraday') {
+        const latestDueMs = latestExpectedNseIntradaySlot(new Date(nowMs), nseHolidays);
+        const late = latestDueMs != null && lastSuccessMs < latestDueMs;
+        const due = latestDueMs == null ? 'none' : new Date(latestDueMs).toISOString();
+        check(`hb-${job}`, 'db', lastFailed || late ? 'WARN' : 'PASS',
+          `last success ${ageH.toFixed(1)}h ago; latest completed NSE slot ${due}; status ${rows[0].last_status}`);
+      } else if (schedule === 'nse-daily') {
+        const latestDueMs = latestExpectedNseDailyRun(new Date(nowMs), nseHolidays, scheduleOptions);
+        const late = latestDueMs != null && lastSuccessMs < latestDueMs;
+        const due = latestDueMs == null ? 'none' : new Date(latestDueMs).toISOString();
+        check(`hb-${job}`, 'db', lastFailed || late ? 'WARN' : 'PASS',
+          `last success ${ageH.toFixed(1)}h ago; latest due NSE run ${due}; status ${rows[0].last_status}`);
+      } else {
+        check(`hb-${job}`, 'db', lastFailed || ageH > maxAgeH ? 'WARN' : 'PASS',
+          `last success ${ageH.toFixed(1)}h ago (tolerates ≤${maxAgeH}h), status ${rows[0].last_status}`);
+      }
     } catch (e) { check(`hb-${job}`, 'db', 'WARN', `query failed: ${e.message}`); }
   }
 
@@ -273,16 +307,21 @@ if (client) {
   } catch (e) { check('fail-rates-7d', 'db', 'WARN', e.message); }
 
   // 48h failures not explained by known-benign vendor/retry classes
-  const KNOWN = /niftytrader|trendlyne|marketsmojo|waf|captcha|429|execution budget|vendor|steps failed|failed to send|403 Forbidden|Live Market Screener/i;
   try {
-    const fails48 = await q(`SELECT job_name, ran_at, left(coalesce(error,''),160) AS err
-      FROM job_run_history WHERE ran_at > now() - interval '48 hours' AND status <> 'success'
+    const fails48 = await q(`SELECT f.job_name, f.ran_at, left(coalesce(f.error,''),160) AS err,
+        EXISTS (
+          SELECT 1 FROM job_run_history s
+          WHERE s.job_name = f.job_name AND s.status = 'success' AND s.ran_at > f.ran_at
+        ) AS recovered
+      FROM job_run_history f WHERE f.ran_at > now() - interval '48 hours' AND f.status <> 'success'
       ORDER BY ran_at DESC LIMIT 20`);
-    const unexplained = fails48.filter(r => !KNOWN.test(r.err));
+    const unexplained = unrecoveredFailureRows(fails48);
+    const recovered = fails48.filter(r => r.recovered).length;
+    const transient = fails48.filter(r => !r.recovered && isKnownTransientFailure(r.err)).length;
     check('failures-48h', 'db', unexplained.length ? 'WARN' : 'PASS',
       unexplained.length
         ? `failures needing root-cause: ${unexplained.map(r => `${r.job_name}@${new Date(r.ran_at).toISOString().slice(0, 16)}: ${r.err}`).join(' | ').slice(0, 400)}`
-        : `${fails48.length} failures in 48h, all match known-benign vendor/retry classes`);
+        : `${fails48.length} failures in 48h; ${recovered} recovered by a later success, ${transient} known transient`);
   } catch (e) { check('failures-48h', 'db', 'WARN', e.message); }
 
   // data-quality latest-per-check
@@ -311,8 +350,12 @@ if (client) {
       `engine_composite_scores max computed_at ${ecs[0]?.m ?? 'NULL'} (${ageD.toFixed(1)}d old; producer = ml-weekly-retrain)`);
     const recs = await q(`SELECT 'unified' AS src, MAX(computed_at) AS m FROM unified_recommendations
       UNION ALL SELECT 'intraday', MAX(computed_at) FROM intraday_recommendations`);
+    const latestSessionDay = latestNseSessionDate(new Date(nowMs), nseHolidays);
     for (const r of recs) {
-      const stale = !r.m || r.m.slice(0, 10) < new Date(nowMs - 36 * 3_600_000).toISOString().slice(0, 10);
+      const expectedDay = r.src === 'intraday'
+        ? latestSessionDay
+        : new Date(nowMs - 36 * 3_600_000).toISOString().slice(0, 10);
+      const stale = !r.m || (expectedDay != null && String(r.m).slice(0, 10) < expectedDay);
       check(`recs-${r.src}`, 'db', stale ? 'WARN' : 'PASS', `max computed_at ${r.m}`);
     }
     const reports = await q(`SELECT status, COUNT(*) AS n FROM daily_research_reports

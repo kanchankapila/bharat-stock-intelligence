@@ -45,6 +45,78 @@ PRIORITY = {
     "quant_scores", "confluence_signals", "signal_outcomes", "unified_signals",
 }
 
+# A single-date NULL/constant scan cannot distinguish a broken producer from a field whose
+# lifecycle deliberately does not match the table's daily grid. Keep those exceptions explicit,
+# narrowly keyed and reasoned -- never use a wildcard here. This is reporting suppression only;
+# the cadence/retirement decisions remain covered by their dedicated checks and measurement
+# records. AF-20261004-07 was filed because these expected cases were mixed with genuinely dead
+# live inputs in one red list.
+EXPECTED_DEAD_COLUMNS: dict[tuple[str, str], str] = {
+    ("technical_signals", "cs_score"):
+        "cs_ranker was decommissioned 2026-08-31 after live CV AUC 0.176.",
+    ("technical_signals", "pead_score"):
+        "The nightly PEAD writer was retired 2026-08-20 after no measured edge.",
+    ("technical_signals", "flyer_probability"):
+        "Weekly model output; it is expected to be NULL on six daily grids out of seven.",
+    ("feature_store", "target_ret_5d"):
+        "Forward label, unavailable until the five-session outcome window matures.",
+    ("feature_store", "target_ret_15d"):
+        "Forward label, unavailable until the fifteen-session outcome window matures.",
+    ("feature_store", "pb"):
+        "Retired legacy field; price_to_book replaced it 2026-08-24 and is the live DL input.",
+    ("unified_recommendations", "cs_score"):
+        "cs_ranker was decommissioned 2026-08-31; this retained schema field is not scored.",
+    ("unified_signals", "quant_score"):
+        "Source-specific AI context; AI is event-driven and may have no rows on a daily snapshot.",
+    ("unified_signals", "screener_momentum_score"):
+        "Legacy source-specific copy; technical_signals is the canonical populated feature store.",
+    ("unified_signals", "screener_tier1_count"):
+        "Legacy source-specific copy; technical_signals is the canonical populated feature store.",
+    ("unified_signals", "screener_cat_breadth"):
+        "Legacy source-specific copy; technical_signals is the canonical populated feature store.",
+    ("confluence_signals", "ml_trend_probability"):
+        "Reserved schema field with no current writer or scoring reader.",
+    ("confluence_signals", "ai_conclusion"):
+        "Retired unwritten narrative field; chatbot and ontology explicitly forbid it.",
+}
+
+EXPECTED_FROZEN_COLUMNS: dict[tuple[str, str], str] = {
+    ("feature_store", "target_dir_5d"):
+        "Forward classification label, not a live input; one class may occupy one date.",
+    ("feature_store", "target_dir_15d"):
+        "Forward classification label, not a live input; one class may occupy one date.",
+    ("unified_recommendations", "avg_engine_track_record"):
+        "A batch-level engine reliability snapshot intentionally repeated for every symbol.",
+    ("signal_outcomes", "horizon_days"):
+        "Resolver batches one horizon at a time; a complete signal-date snapshot can be one horizon.",
+}
+
+# Mixed-source tables are not one homogeneous daily grid. `signal_outcomes` receives
+# confluence rows after technical rows, and the confluence source does not own technical-only
+# payload columns (signal_score/signals_json/max_return_pct). Scanning whichever source wrote
+# the wall-clock-latest batch therefore calls healthy source-specific fields dead. Scope the
+# logical table to the writer whose full schema contract this sweep is validating. Keep this
+# separate from EXPECTED_DEAD_COLUMNS: those suppress findings; a row scope measures the right
+# population and can still catch the technical writer failing tomorrow.
+TABLE_ROW_SCOPES: dict[str, tuple[str, str]] = {
+    "signal_outcomes": (
+        "signal_source = 'technical'",
+        "Technical outcomes own signal_score, signals_json and max_return_pct; confluence rows do not.",
+    ),
+}
+
+
+def _partition_expected(table: str, columns: list[str], expected: dict[tuple[str, str], str]):
+    """Split exact, documented exceptions from actionable findings."""
+    actionable, suppressed = [], {}
+    for column in columns:
+        reason = expected.get((table, column))
+        if reason:
+            suppressed[column] = reason
+        else:
+            actionable.append(column)
+    return actionable, suppressed
+
 
 def _enriched_through():
     """The date through which ml-daily-ops has demonstrably had its chance to enrich.
@@ -83,25 +155,39 @@ def latest_date_expr(table: str):
     )
     names = cols["column_name"].tolist()
     cutoff = _enriched_through()
-    for cand in ("date", "computed_at", "as_of_date", "signal_date", "eval_date", "fetched_at"):
+    scope_sql = TABLE_ROW_SCOPES.get(table, (None, ""))[0]
+    scope_and = f" AND ({scope_sql})" if scope_sql else ""
+    scope_where = f" WHERE ({scope_sql})" if scope_sql else ""
+    # Prefer the row's business/session date to a write timestamp. `signal_outcomes`, for
+    # example, is written in separate technical/confluence batches: MAX(computed_at) selects
+    # only the final batch and falsely reports every source-specific column in the other batch
+    # dead. The session date evaluates the complete logical snapshot.
+    for cand in ("date", "as_of_date", "signal_date", "eval_date", "computed_at", "fetched_at"):
         if cand not in names:
             continue
-        if cutoff:
-            row = read_df(
-                f'SELECT MAX("{cand}")::text AS m FROM "{table}" '
-                f"WHERE \"{cand}\"::date < '{cutoff}'"
-            )
-        else:
-            # No heartbeat: second-newest date, never the newest.
-            row = read_df(
-                f'SELECT MAX("{cand}")::text AS m FROM "{table}" '
-                f'WHERE "{cand}" < (SELECT MAX("{cand}") FROM "{table}")'
-            )
+        try:
+            if cutoff:
+                row = read_df(
+                    f'SELECT MAX("{cand}")::text AS m FROM "{table}" '
+                    f"WHERE \"{cand}\"::date < '{cutoff}'{scope_and}"
+                )
+            else:
+                # No heartbeat: second-newest date, never the newest.
+                row = read_df(
+                    f'SELECT MAX("{cand}")::text AS m FROM "{table}" '
+                    f'WHERE "{cand}" < (SELECT MAX("{cand}") FROM "{table}"{scope_where})'
+                    f'{scope_and}'
+                )
+        except Exception:
+            # Some vendor schemas use a generic text `date` for labels such as "Mar 2024" and
+            # also carry a real fetched_at timestamp. One unparsable candidate must not make the
+            # full table disappear from the sweep; try the next date-ish column.
+            continue
         if not row.empty and row["m"][0] is not None:
             return cand, row["m"][0], cols
         # Table has no row older than the anchor (a brand-new or single-date table):
         # fall back to its own newest date rather than skipping it entirely.
-        row = read_df(f'SELECT MAX("{cand}")::text AS m FROM "{table}"')
+        row = read_df(f'SELECT MAX("{cand}")::text AS m FROM "{table}"{scope_where}')
         if not row.empty and row["m"][0] is not None:
             return cand, row["m"][0], cols
     return None
@@ -142,6 +228,9 @@ def sweep_table(table: str, min_rows: int):
     datecol, latest, cols = info
     datecol_type = cols.loc[cols["column_name"] == datecol, "data_type"].iloc[0]
     date_filter = _date_eq_filter(datecol, datecol_type, latest)
+    scope_sql = TABLE_ROW_SCOPES.get(table, (None, ""))[0]
+    if scope_sql:
+        date_filter += f" AND ({scope_sql})"
     n = read_df(f'SELECT COUNT(*) c FROM "{table}" WHERE {date_filter}')["c"][0]
     if n < min_rows:
         return None
@@ -181,8 +270,11 @@ def sweep_table(table: str, min_rows: int):
                     dead.append(col)
                 elif kind == "frozen":
                     frozen.append(col)
+    dead, expected_dead = _partition_expected(table, dead, EXPECTED_DEAD_COLUMNS)
+    frozen, expected_frozen = _partition_expected(table, frozen, EXPECTED_FROZEN_COLUMNS)
     return {"table": table, "date_col": datecol, "latest": latest, "rows": int(n),
-            "dead": dead, "frozen": frozen, "total_cols": len(cols)}
+            "dead": dead, "frozen": frozen, "expected_dead": expected_dead,
+            "expected_frozen": expected_frozen, "total_cols": len(cols)}
 
 
 def main():
@@ -205,7 +297,7 @@ def main():
     # away results for tables it had already swept. Same class as recurring-bugs.md's "a step at
     # the end of a script that routinely gets killed never runs at all", in reporting form.
     # The sorted summary below still prints in full on a clean run; this is additive.
-    findings, swept = [], 0
+    findings, expected_findings, swept = [], [], 0
     total = len(tables)
     for i, t in enumerate(tables, 1):
         try:
@@ -216,6 +308,8 @@ def main():
         if not res:
             continue
         swept += 1
+        if res["expected_dead"] or res["expected_frozen"]:
+            expected_findings.append(res)
         if res["dead"] or res["frozen"]:
             findings.append(res)
             tag = "SCORING-CRITICAL" if t in PRIORITY else "informational"
@@ -226,6 +320,8 @@ def main():
     print(f"\n{'='*78}\nINTEGRITY SWEEP -- {swept} tables with a usable date key and >= {args.min_rows} rows\n{'='*78}")
     if not findings:
         print("No dead or frozen columns found.")
+        if expected_findings:
+            print(f"{len(expected_findings)} table(s) have documented expected single-date findings.")
         return 0
 
     findings.sort(key=lambda r: (r["table"] not in PRIORITY, -len(r["dead"])))
@@ -241,6 +337,9 @@ def main():
             print(f"   FROZEN (one identical value for every row): {', '.join(r['frozen'])}")
     print(f"\n{len(findings)} table(s) with findings. "
           f"Exit 1 if any SCORING-CRITICAL table has a dead column.")
+    if expected_findings:
+        print(f"{len(expected_findings)} table(s) also have documented expected findings suppressed "
+              "from the verdict (see EXPECTED_*_COLUMNS for reasons).")
     return exit_code
 
 

@@ -103,6 +103,25 @@ class TestGetDriftMultiplier:
         monkeypatch.setattr(dd, "query_one", lambda *a, **k: None)
         assert dd.get_drift_multiplier() == 1.0
 
+    def test_metric_only_latest_row_cannot_mask_last_drift_observation(self, monkeypatch):
+        """Training writes today's ROC metrics before the drift step populates drift_score.
+
+        The production defect selected that newer NULL row and temporarily disabled the
+        confidence haircut via the exception fallback. The query must explicitly select the
+        newest non-NULL drift observation instead.
+        """
+        captured = []
+
+        def fake_query_one(sql, *args):
+            captured.append(sql)
+            if "drift_score" in sql:
+                return {"drift_score": dd.DRIFT_AVG_WARN + 0.01}
+            return None
+
+        monkeypatch.setattr(dd, "query_one", fake_query_one)
+        assert dd.get_drift_multiplier() == 0.93
+        assert any("WHERE drift_score IS NOT NULL" in sql for sql in captured)
+
     def test_warn_threshold_applies_moderate_haircut(self, monkeypatch):
         monkeypatch.setattr(dd, "query_one", lambda *a, **k: {"drift_score": dd.DRIFT_AVG_WARN + 0.01})
         assert dd.get_drift_multiplier() == 0.93

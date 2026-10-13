@@ -598,8 +598,6 @@ def _groups() -> Tuple[Tuple[Dict, list], ...]:
         (_g("score", "decimal", "coincident", "platform", unit="probability"), [
             ("ml_breakout_probability", "ML breakout probability",
              "Model probability of a breakout. A model output — not a feature."),
-            ("ml_trend_probability", "ML trend probability",
-             "Model probability of trend continuation. A model output — not a feature."),
         ]),
 
         # ── remaining vendor measures (units set in OVERRIDES) ─────────────────

@@ -24,7 +24,7 @@ REC_LOG_HORIZON_SESSIONS = {'intraday': 1, 'long_term': 15}
 # +0.24 at h5, -0.20 at h15, both insignificant) -- see measurement.md. Re-enable only with a fresh
 # prior learned on cost-aware labels that clears the same test.
 SIGNAL_TYPE_PRIOR_WEIGHT = 0.0
-from indian_market_costs import round_trip_cost_bps
+from indian_market_costs import round_trip_cost_bps, equity_trade_type_for_timeframe
 
 
 # ── Pure functions: regime-edge-adjusted ML win_probability consumption ────────
@@ -1195,7 +1195,7 @@ class AlphaQuantScoringEngine:
         safe_alter(None, "ALTER TABLE recommendation_log ADD COLUMN IF NOT EXISTS cost_adjusted_target_1 DOUBLE PRECISION")
         AlphaQuantScoringEngine._COST_COLS_ENSURED = True
 
-    def _compute_cost_map(self, symbols: list) -> dict:
+    def _compute_cost_map(self, symbols: list, trade_type_by_symbol: dict | None = None) -> dict:
         """Compute round-trip transaction cost for each symbol.
 
         Returns {symbol: round_trip_cost_pct} using the full Indian-market fee schedule
@@ -1238,10 +1238,11 @@ class AlphaQuantScoringEngine:
                     participation = min(participation, 0.25)  # cap at 25% of ADT
                     # Daily volatility as percentage
                     daily_vol_pct = (atr / cmp_val * 100.0) if cmp_val > 0 else 2.0
+                    trade_type = (trade_type_by_symbol or {}).get(sym, 'delivery')
                     cost = round_trip_cost_bps(
                         notional=notional,
                         asset_class='equity',
-                        trade_type='intraday',
+                        trade_type=trade_type,
                         participation_rate=participation,
                         volatility_pct=daily_vol_pct,
                     )
@@ -1328,7 +1329,10 @@ class AlphaQuantScoringEngine:
             print(f"[ScoringEngine] stock_ohlcv price/ATR lookup failed (falling back to technical_signals.cmp): {e}")
 
         # Compute transaction costs for each symbol (STT, fees, slippage)
-        cost_map = self._compute_cost_map(symbols)
+        trade_type_by_symbol = {
+            r['symbol']: equity_trade_type_for_timeframe(r.get('timeframe')) for r in candidates
+        }
+        cost_map = self._compute_cost_map(symbols, trade_type_by_symbol)
 
         rows = []
         for r in candidates:
@@ -1435,4 +1439,3 @@ if __name__ == "__main__":
 
     engine = AlphaQuantScoringEngine()
     engine.process_scoring(force_rebuild=args.rebuild)
-

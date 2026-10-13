@@ -19,6 +19,7 @@ import json
 from datetime import date, timedelta
 
 from db_compat import connect
+from as_of import logical_trading_date
 
 MIN_TRADES = 100        # minimum for a shadow candidate, NOT evidence for promotion
 MIN_BUCKET = 15         # ignore buckets thinner than this when learning weights
@@ -46,7 +47,10 @@ def _bucket_rows(rows):
 
 def run(conn=None, days: int = 60) -> dict:
     conn = conn or connect()
-    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    # Logical trading date, not wall-clock today (2026-10-11 quant audit): a post-close
+    # run crossing IST midnight anchored the cutoff/last_updated to a calendar day the
+    # session data belongs to only nominally (recurring-bugs.md write-anchor class).
+    cutoff = (date.fromisoformat(logical_trading_date()) - timedelta(days=days)).isoformat()
     # Match the resolver's first eligible LONG cycle, never the mutable latest-cycle
     # recommendation. Later regime/news values were unavailable at the resolved entry.
     # Short-side outcomes are deliberately separate; unresolved rows are not losses.
@@ -83,7 +87,7 @@ def run(conn=None, days: int = 60) -> dict:
         a["wins"] += win
         a["pnl"] += pnl
 
-    today = date.today().isoformat()
+    today = logical_trading_date()
     cur = conn.cursor()
     lifts = {}  # dimension -> {bucket: lift}
     for (dim, bucket), a in agg.items():

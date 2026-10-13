@@ -88,7 +88,8 @@ def make_db():
             -- run-test errors on UndefinedColumn -- a schema addition that would otherwise
             -- masquerade as a logic failure.
             valid_until TEXT,
-            trade_reasoning TEXT, position_size_pct REAL, UNIQUE(symbol, computed_at)
+            trade_reasoning TEXT, position_size_pct REAL, est_cost_bps REAL,
+            UNIQUE(symbol, computed_at)
         );
         -- Append-only point-in-time snapshot: keyed on generated_at, so a re-run adds a row
         -- rather than replacing the previous run's ranking (which the table above does).
@@ -791,6 +792,46 @@ class TestConfluenceAndCostReadsAreTimeBounded:
         assert self._has_30d_bound(src), \
             "_compute_cost_map reads confluence_signals.atr unbounded -- the same chunk-" \
             "decompression cost the latest-map bound removed"
+
+    def test_run_prices_costs_by_recommendation_horizon(self):
+        import inspect
+        from unified_ranker import UnifiedRanker
+        src = inspect.getsource(UnifiedRanker.run)
+        assert "equity_trade_type_for_timeframe(r.get('timeframe'))" in src
+        assert "_compute_cost_map(all_symbols, trade_type_by_symbol)" in src
+
+    def test_run_persists_the_cost_it_uses_for_sizing(self):
+        import inspect
+        from unified_ranker import UnifiedRanker
+        src = inspect.getsource(UnifiedRanker.run)
+        assert "r['est_cost_bps']" in src
+        assert "est_cost_bps=excluded.est_cost_bps" in src
+
+    def test_cost_map_never_treats_missing_technical_rows_as_free_trades(self):
+        from unified_ranker import UnifiedRanker
+
+        class EmptyResult:
+            @staticmethod
+            def fetchall():
+                return []
+
+        class EmptyConnection:
+            @staticmethod
+            def execute(*_args, **_kwargs):
+                return EmptyResult()
+
+            @staticmethod
+            def rollback():
+                pass
+
+        costs = UnifiedRanker(conn=EmptyConnection())._compute_cost_map(
+            ['INTRADAY_ONLY', 'DELIVERY_ONLY'],
+            {'INTRADAY_ONLY': 'intraday', 'DELIVERY_ONLY': 'delivery'},
+        )
+
+        assert set(costs) == {'INTRADAY_ONLY', 'DELIVERY_ONLY'}
+        assert costs['INTRADAY_ONLY'] > 0
+        assert costs['DELIVERY_ONLY'] > costs['INTRADAY_ONLY']  # delivery pays STT on both legs
 
     def test_negative_control_bound_stripped_sql_is_rejected(self):
         """Proves the guard discriminates rather than passing on any source. A source-parsing

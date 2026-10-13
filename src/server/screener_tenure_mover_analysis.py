@@ -40,9 +40,9 @@ point-in-time snapshot fix and are not reconstructable exactly as of a historica
 treated here as a coarse 'was this stock a member around this date' signal, not an exact PIT
 record." Tenure built on that column would be measuring a reconstruction artifact.
 
-screener_membership_snapshot IS point-in-time by construction (one row per symbol/screener per
-daily snapshot), so tenure here = the number of CONSECUTIVE prior snapshots a (symbol,
-screener) pair appears in. That is honest but caps observable tenure at the snapshot history
+screener_membership_snapshot IS point-in-time by construction (one row per
+symbol/provider/screener per daily snapshot), so tenure here = the number of CONSECUTIVE prior
+snapshots a (symbol, provider, screener) tuple appears in. That is honest but caps observable tenure at the snapshot history
 (~27 dates from 2026-07-31), and 27 dates is barely above measurement.md's ~20-date
 reliability floor. Every verdict below is therefore LOW-DATA and directional, never a finding.
 
@@ -66,26 +66,31 @@ from screener_name_concepts import decompose  # noqa: E402
 
 
 def load_catalog_tags() -> dict:
-    """screener_id -> (tags, same_day_relevant).
+    """(source, screener_id) -> (tags, same_day_relevant).
 
-    Keyed on screener_id alone because screener_membership_snapshot carries no `source`.
-    screener_catalog's PK is (source, screener_id) and the same id CAN be issued by two
-    providers (data-sources.md's composite-key rule), so where an id is ambiguous we take the
-    UNION of tags and require ALL of its rows to be same-day-relevant before trusting it --
-    the conservative direction: an ambiguous id that might be a quarterly-results screener is
-    excluded rather than silently treated as intraday.
+    New snapshots preserve the provider identity and therefore use the exact catalog row.
+    Historical rows migrated from the old lossy schema carry ``legacy_unknown``; only those
+    use a conservative union of tags across providers and require every candidate catalog row
+    to be same-day-relevant.
     """
     cat = read_df(
         "SELECT screener_id, LOWER(source) AS source, screener_name FROM screener_catalog", ()
     )
-    tags_acc: dict = {}
-    sameday_acc: dict = {}
+    exact: dict = {}
+    legacy_tags: dict = {}
+    legacy_sameday: dict = {}
     for row in cat.itertuples(index=False):
         c = decompose(str(row.screener_name or ""))
+        src = str(row.source or "").lower()
         sid = str(row.screener_id)
-        tags_acc.setdefault(sid, set()).update(c.signal_tags)
-        sameday_acc.setdefault(sid, []).append(bool(c.same_day_relevant))
-    return {sid: (sorted(tags_acc[sid]), all(sameday_acc[sid])) for sid in tags_acc}
+        exact[(src, sid)] = (sorted(c.signal_tags), bool(c.same_day_relevant))
+        legacy_tags.setdefault(sid, set()).update(c.signal_tags)
+        legacy_sameday.setdefault(sid, []).append(bool(c.same_day_relevant))
+    exact.update({
+        ("legacy_unknown", sid): (sorted(legacy_tags[sid]), all(legacy_sameday[sid]))
+        for sid in legacy_tags
+    })
+    return exact
 
 
 def load_panel(min_adt_cr: float) -> pd.DataFrame:
@@ -122,15 +127,12 @@ def load_panel(min_adt_cr: float) -> pd.DataFrame:
 
 
 def load_memberships() -> pd.DataFrame:
-    """Point-in-time membership: one row per (as_of_date, symbol, screener_id).
-
-    screener_membership_snapshot has no `source` column -- screener_id alone is the key here,
-    so the catalog lookup below falls back across sources for the tag set.
-    """
+    """Point-in-time membership: one row per (date, symbol, source, screener_id)."""
     return read_df(
         """
         SELECT as_of_date::date AS as_of_date,
                symbol,
+               LOWER(source) AS source,
                screener_id::text AS screener_id
           FROM screener_membership_snapshot
          WHERE symbol IS NOT NULL AND symbol <> ''
@@ -167,8 +169,9 @@ def analyse(top_n: int, min_adt_cr: float) -> None:
     mem["as_of_date"] = pd.to_datetime(mem["as_of_date"]).dt.date
 
     # Only same-day-relevant screeners carry a tag set worth testing.
-    mem["tags"] = mem["screener_id"].map(lambda k: tags_by_screener.get(str(k), ([], False))[0])
-    mem["same_day"] = mem["screener_id"].map(lambda k: tags_by_screener.get(str(k), ([], False))[1])
+    keys = list(zip(mem["source"].astype(str), mem["screener_id"].astype(str)))
+    mem["tags"] = [tags_by_screener.get(k, ([], False))[0] for k in keys]
+    mem["same_day"] = [tags_by_screener.get(k, ([], False))[1] for k in keys]
     mem = mem[mem["same_day"] & mem["tags"].map(bool)]
     snap_dates = sorted(mem["as_of_date"].unique())
     print(f"[data] panel rows={len(panel):,} dates={panel['date'].nunique()} | "
@@ -178,14 +181,16 @@ def analyse(top_n: int, min_adt_cr: float) -> None:
     # Tenure by CONSECUTIVE presence in prior snapshots -- PIT-correct by construction.
     membership: dict = {}
     for d, grp in mem.groupby("as_of_date"):
-        membership[d] = set(zip(grp["symbol"], grp["screener_id"].astype(str)))
+        membership[d] = set(zip(grp["symbol"], grp["source"].astype(str),
+                                grp["screener_id"].astype(str)))
     tenure: dict = {}
     prev_d = None
     for d in snap_dates:
         prev_t = tenure.get(prev_d, {}) if prev_d is not None else {}
         tenure[d] = {k: (prev_t.get(k, 0) + 1) for k in membership.get(d, set())}
         prev_d = d
-    tags_of = {str(r.screener_id): r.tags for r in mem.itertuples(index=False)}
+    tags_of = {(str(r.source), str(r.screener_id)): r.tags
+               for r in mem.itertuples(index=False)}
 
     dates = sorted(panel["date"].unique())
     per_date_hits = defaultdict(list)     # tag -> [ (p_top, p_universe) ]
@@ -215,9 +220,9 @@ def analyse(top_n: int, min_adt_cr: float) -> None:
 
         sym_tags = defaultdict(set)
         sym_tag_tenure = defaultdict(dict)
-        for (sym, sid) in live_pairs:
-            ten = live_ten.get((sym, sid), 1)
-            for t in tags_of.get(sid, ()):
+        for (sym, src, sid) in live_pairs:
+            ten = live_ten.get((sym, src, sid), 1)
+            for t in tags_of.get((src, sid), ()):
                 sym_tags[sym].add(t)
                 # longest-held wins: "since when" = earliest qualifying appearance
                 sym_tag_tenure[sym][t] = max(sym_tag_tenure[sym].get(t, 0), ten)

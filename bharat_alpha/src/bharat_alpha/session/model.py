@@ -12,7 +12,6 @@ import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
 
-import joblib
 import numpy as np
 import pandas as pd
 import psycopg
@@ -26,7 +25,9 @@ from bharat_alpha.features import cs_rank_gauss
 from bharat_alpha.labels import winsorize_rows
 from bharat_alpha.marketdata import Panel, load_panel
 from bharat_alpha.modeling.members import combine, default_members
-from bharat_alpha.modeling.train import ModelBundle, config_hash, walk_forward_oof
+from bharat_alpha.modeling.train import (
+    ModelBundle, artifact_runtime, artifact_runtime_tag, config_hash, dump_bundle, walk_forward_oof,
+)
 from bharat_alpha.session import (
     capitulation, day_flags, day_level, next_session_oc, preopen_features, session_features, session_universe,
     top_k_selection,
@@ -143,17 +144,20 @@ def train_session_model(conn: psycopg.Connection, ds: SessionDataset, register: 
     bundle = ModelBundle(SESSION_HORIZON, list(ds.X.columns), final, uniform, ce, cp, resid)
     chash = config_hash(final, list(ds.X.columns) + [FEATURE_SET])
     end = ds.dates.max().date()
-    model_id = f"s1-{end:%Y%m%d}-{chash}"
-    report.update({"config_hash": chash, "n_rows": int(len(ds.X)), "features": list(ds.X.columns)})
+    runtime = artifact_runtime()
+    model_id = f"s1-{end:%Y%m%d}-{chash}-{artifact_runtime_tag(runtime)}"
+    report.update({"config_hash": chash, "artifact_runtime": runtime,
+                   "n_rows": int(len(ds.X)), "features": list(ds.X.columns)})
     if register:
         path = Path(s.artifacts_dir) / "models" / f"{model_id}.joblib"
         path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(bundle, path)
+        dump_bundle(bundle, path)
         with conn.cursor() as cur:
             cur.execute("""INSERT INTO alpha.model(model_id, horizon, feature_set, label, params, train_start, train_end,
                                                    cv_report, status, artifact_path)
                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'candidate',%s) ON CONFLICT (model_id) DO NOTHING""",
-                        (model_id, SESSION_HORIZON, FEATURE_SET, LABEL, Jsonb({"config_hash": chash}),
+                        (model_id, SESSION_HORIZON, FEATURE_SET, LABEL,
+                         Jsonb({"config_hash": chash, "artifact_runtime": runtime}),
                          ds.dates.min().date(), end, Jsonb(jsonable(report)), str(path)))
         conn.commit()
     return model_id, report, bundle, oof

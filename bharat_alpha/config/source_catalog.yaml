@@ -66,12 +66,22 @@ families:
       from PREV_CLOSE (marketdata.derive_adjustments)
   - id: nse_archives_fo
     host: "(nsearchives|archives)\\.nseindia\\.com"
-    path: "/content/fo/"
+    path: "/content/fo/|/content/historical/DERIVATIVES/"
     category: derivatives
     pit: true
     verdict: integrated
     connector: nse_fo_bhavcopy
     rationale: OI, basis, rollover per expiry; legacy 1d basis lead IC +0.139 (LOW-DATA, 2026-09-19)
+  - id: nse_bulk_block_deals
+    host: "(nsearchives|archives)\\.nseindia\\.com"
+    path: "/content/equities/(bulk|block|\\{kind\\}|\\{bulk,block\\})\\.csv"
+    category: exchange-reported bulk and block deals
+    pit: forward-only
+    verdict: backlog-medium
+    rationale: >-
+      Primary exchange files already collected by the legacy nse_bulk_block_fetcher; retain as a
+      candidate BQA connector because institutional deal direction can be evaluated point-in-time,
+      but do not claim integration until the connector and admission test exist here.
   - id: nse_archives_indices
     host: "(nsearchives|archives)\\.nseindia\\.com"
     path: "/content/indices/"
@@ -152,6 +162,18 @@ families:
     pit: forward-only
     verdict: backlog-low
     rationale: operational/status endpoints; event notifications overlap board-meeting connector
+
+  # SEBI strings embedded in NSE XBRL instances are XML namespace identifiers, not data endpoints.
+  # Catalog them explicitly so fixture refreshes cannot look like an unevaluated web datasource.
+  - id: sebi_xbrl_taxonomy_namespaces
+    host: "www\\.sebi\\.gov\\.in"
+    path: "^/(xbrl/|in-capmkt/)"
+    category: XBRL taxonomy namespace identifiers
+    pit: false
+    verdict: rejected
+    rationale: >-
+      Namespace URIs and entity-identifier schemes embedded in exchange filing XML; they identify
+      taxonomy concepts but are not dereferenced by the parser and are not standalone market data.
 
   # ── MoneyControl ────────────────────────────────────────────────────────────
   - id: mc_scanners

@@ -1,17 +1,19 @@
 """
 sync_tl_index_map.py
 ====================
-Syncs Trendlyne index tlids into index_provider_map using two live API endpoints:
+Syncs Trendlyne index tlids into index_provider_map using the live endpoint:
 
-  1. https://trendlyne.com/equity/sector-industry-analysis/overall/day-changeP/
-     → body.index.chart + body.index.tableData  (Indian indices, NSE + BSE)
-     → body.sector.chart   (Trendlyne sector IDs → trendlyne_sector provider)
-     → body.industry.chart (Trendlyne industry IDs → trendlyne_industry provider)
-
-  2. https://trendlyne.com/equity/global-indices-analysis/
+  https://trendlyne.com/equity/global-indices-analysis/
      → body.tableData  (global + Indian major indices)
 
 The `id` / `stock_id` field is the tlid used by Trendlyne chart-data APIs.
+
+The former sector-industry-analysis endpoint was retired (HTTP 404, confirmed
+2026-10-10). Its trendlyne_sector/trendlyne_industry rows are historical reference
+data with no code reader. Stock sector/industry classifications are maintained in
+nse_stocks from MoneyControl with Yahoo as a fallback; they are not Trendlyne ids.
+This sync refreshes only the still-live, consumed `trendlyne` id family and does not
+delete the historical provider-specific rows.
 
 Run:
   python sync_tl_index_map.py            # sync all, print diff
@@ -32,7 +34,6 @@ TL_HEADERS = {
     "Referer": "https://trendlyne.com/",
 }
 
-SECTOR_URL = "https://trendlyne.com/equity/sector-industry-analysis/overall/day-changeP/"
 GLOBAL_URL = "https://trendlyne.com/equity/global-indices-analysis/"
 
 # NSEcode → our canonical index_name (used for the 'trendlyne' provider).
@@ -119,65 +120,12 @@ def _canonical(nsecode: str, display_name: str) -> str:
     return nsecode.upper().replace("&", "").replace("-", "").replace(".", "")
 
 
-def _extract_nsecode_from_url(url: str) -> str:
-    m = re.search(r'/equity/\d+/([^/]+)/', url)
-    return m.group(1) if m else ""
-
-
 def fetch_all() -> dict[str, list[tuple[str, str, str]]]:
-    """Fetch both endpoints and return {provider: [(index_name, provider, provider_id)]}."""
-    rows: dict[str, list] = {
-        "trendlyne":          [],
-        "trendlyne_sector":   [],
-        "trendlyne_industry": [],
-    }
+    """Fetch the live global endpoint and return its Trendlyne index ids."""
+    rows: dict[str, list] = {"trendlyne": []}
     seen: set = set()
 
-    # ── Sector/Index analysis page ─────────────────────────────────────────────
-    r = requests.get(SECTOR_URL, headers=TL_HEADERS, timeout=20)
-    r.raise_for_status()
-    body = r.json().get("body", {})
-
-    # Index section (NSE + BSE Indian indices)
-    index_body = body.get("index", {})
-    entries = []
-    for e in index_body.get("chart", []):
-        url = e.get("cell_url", "")
-        nsecode = _extract_nsecode_from_url(url) or e.get("name", "")
-        entries.append({"id": e["id"], "nsecode": nsecode, "name": e["name"], "url": url})
-    for e in index_body.get("tableData", []):
-        sc = e.get("stock_column", e)
-        tlid    = sc.get("stock_id") or sc.get("pk") or sc.get("id")
-        nsecode = sc.get("NSEcode", "")
-        name    = sc.get("stockName") or sc.get("get_full_name") or sc.get("name", "")
-        url     = sc.get("absolute_url", "")
-        if not nsecode:
-            nsecode = _extract_nsecode_from_url(url)
-        entries.append({"id": tlid, "nsecode": nsecode, "name": name, "url": url})
-
-    for e in entries:
-        tlid    = e["id"]
-        if tlid in seen:
-            continue
-        seen.add(tlid)
-        nsecode = e.get("nsecode", "")
-        name    = e.get("name", "")
-        idx_name = _canonical(nsecode, name)
-        rows["trendlyne"].append((idx_name, "trendlyne", str(tlid)))
-
-    # Sector section
-    for e in body.get("sector", {}).get("chart", []):
-        sid  = e["id"]
-        name = re.sub(r'[^A-Za-z0-9]', '', e["name"]).upper()
-        rows["trendlyne_sector"].append((name, "trendlyne_sector", str(sid)))
-
-    # Industry section
-    for e in body.get("industry", {}).get("chart", []):
-        iid  = e["id"]
-        name = re.sub(r'[^A-Za-z0-9]', '', e["name"]).upper()
-        rows["trendlyne_industry"].append((name, "trendlyne_industry", str(iid)))
-
-    # ── Global indices page ─────────────────────────────────────────────────────
+    # Global indices page (the required, consumed provider-id family).
     r2 = requests.get(GLOBAL_URL, headers=TL_HEADERS, timeout=20)
     r2.raise_for_status()
     for entry in r2.json().get("body", {}).get("tableData", []):
@@ -191,11 +139,14 @@ def fetch_all() -> dict[str, list[tuple[str, str, str]]]:
         idx_name = _canonical(nsecode, name)
         rows["trendlyne"].append((idx_name, "trendlyne", str(tlid)))
 
+    if not rows["trendlyne"] or "NIFTY50" not in {row[0] for row in rows["trendlyne"]}:
+        raise RuntimeError("Trendlyne global-index response has no usable NIFTY50 mapping")
+
     return rows
 
 
 def sync(dry_run: bool = False) -> None:
-    print("[sync_tl_index_map] Fetching Trendlyne endpoints ...")
+    print("[sync_tl_index_map] Fetching Trendlyne global-index endpoint ...")
     all_rows = fetch_all()
 
     # Load existing for diff

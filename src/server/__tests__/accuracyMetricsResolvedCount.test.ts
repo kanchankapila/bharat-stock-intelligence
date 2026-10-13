@@ -16,9 +16,14 @@ describe('getAccuracyMetrics', () => {
     await dbRun(`DELETE FROM unified_signal_outcomes`);
     await dbRun(`DELETE FROM unified_signals`);
     // [id, target, stop] -- target > stop is a long, target < stop a short, NULLs unknown side.
+    // Explicit fixture ids must not occupy the positive identity sequence. This file inserts
+    // ids directly (so outcomes can reference them) but does not advance the sequence; using
+    // 1..8 made the next unrelated auto-id insert collide with unified_signals_pkey in the full
+    // suite. Negative ids are valid BIGINT fixture keys and cannot collide with production-like
+    // generated identities.
     const signals: Array<[number, number | null, number | null]> = [
-      [1, 110, 95], [2, 110, 95], [3, 110, 95], [4, 110, 95], [5, 110, 95],
-      [6, 90, 105], [7, 90, 105], [8, null, null],
+      [-1, 110, 95], [-2, 110, 95], [-3, 110, 95], [-4, 110, 95], [-5, 110, 95],
+      [-6, 90, 105], [-7, 90, 105], [-8, null, null],
     ];
     for (const [id, target, stop] of signals) {
       await dbRun(
@@ -28,11 +33,11 @@ describe('getAccuracyMetrics', () => {
       );
     }
     const outcomes: Array<[number, number, string, number | null]> = [
-      [1, 15, 'WIN', 4], [2, 15, 'LOSS', -2], [3, 15, 'STOP_LOSS', -5], [4, 15, 'NEUTRAL', 0],
-      [5, 15, 'PENDING', null],
-      [6, 15, 'WIN', 6], [7, 15, 'STOP_LOSS', 4],   // short side: excluded
-      [8, 15, 'WIN', 3],                             // unknown side: excluded
-      [1, 5, 'WIN', 2], [2, 5, 'WIN', 2],            // other horizon: excluded
+      [-1, 15, 'WIN', 4], [-2, 15, 'LOSS', -2], [-3, 15, 'STOP_LOSS', -5], [-4, 15, 'NEUTRAL', 0],
+      [-5, 15, 'PENDING', null],
+      [-6, 15, 'WIN', 6], [-7, 15, 'STOP_LOSS', 4],   // short side: excluded
+      [-8, 15, 'WIN', 3],                              // unknown side: excluded
+      [-1, 5, 'WIN', 2], [-2, 5, 'WIN', 2],            // other horizon: excluded
     ];
     for (const [id, h, outcome, ret] of outcomes) {
       await dbRun(

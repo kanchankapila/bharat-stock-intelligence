@@ -406,7 +406,7 @@ export const SectorIntelligencePage: React.FC<SectorIntelligencePageProps> = ({
     isFetching: isFetchingOverview,
     dataUpdatedAt: overviewUpdatedAt,
   } = trpc.getSectorsOverview.useQuery(undefined, {
-    refetchInterval: 30000,
+    refetchInterval: 5 * 60_000,
     refetchOnWindowFocus: false,
   });
 

@@ -50,6 +50,34 @@ export const LIVE_SCREENER_FILTERS = [
   "roe20To50"
 ];
 
+const SCREENER_TIMEOUT_RETRY_DELAY_MS = 1_000;
+
+function isTransientScreenerTimeout(error: unknown): boolean {
+  const name = error instanceof Error ? error.name : '';
+  const message = error instanceof Error ? error.message : String(error);
+  return name === 'TimeoutError' || name === 'AbortError' || /aborted|timeout/i.test(message);
+}
+
+/**
+ * Retry one isolated NiftyTrader timeout. The 45-filter collection is intentionally serial and
+ * already rate-limited; live evidence shows rare single-filter 10s timeouts surrounded by clean
+ * runs, so one bounded retry repairs transient gaps without retrying auth or contract failures.
+ */
+export async function fetchLiveScreenerFilterWithRetry(
+  filter: string,
+  fetcher: (filters: Record<string, boolean>) => Promise<any> = fetchLiveMarketScreener,
+  sleep: (ms: number) => Promise<unknown> = (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+): Promise<any> {
+  try {
+    return await fetcher({ [filter]: true });
+  } catch (error) {
+    if (!isTransientScreenerTimeout(error)) throw error;
+    console.warn(`[LIVE-SCREENER-COLLECTOR] Filter ${filter} timed out; retrying once`);
+    await sleep(SCREENER_TIMEOUT_RETRY_DELAY_MS);
+    return fetcher({ [filter]: true });
+  }
+}
+
 export async function runLiveScreenerCollection() {
   const timestamp = new Date().toISOString();
   console.log(`[LIVE-SCREENER-COLLECTOR] Starting run at ${timestamp}`);
@@ -75,8 +103,7 @@ export async function runLiveScreenerCollection() {
       // 2000ms delay to be polite to NiftyTrader Cloudflare API limits
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      const payload = { [filter]: true };
-      const res = await fetchLiveMarketScreener(payload);
+      const res = await fetchLiveScreenerFilterWithRetry(filter);
 
       if (res.result !== 1) {
         throw new Error(res.resultMessage || 'API returned result code != 1');

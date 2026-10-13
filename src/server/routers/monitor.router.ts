@@ -432,13 +432,18 @@ export async function getSystemStatus(now: Date = new Date()) {
     // triggerScript path, so for a cron-driven script the heartbeat is the ONLY non-output-table
     // evidence that exists.
     const storedRanAt = runStates[`monitor_${s.id}_ran_at`] ?? null;
-    const hbRanAt = heartbeatByName.get(s.id)?.lastSuccessAt ?? null;
+    // Some monitor entries describe an always-run child step whose parent is the only BullMQ
+    // heartbeat writer. An explicit alias is safe only when the parent fails if that child fails
+    // (financial-ratios -> trendlyne-ratios-monthly). It prevents a deliberate no-write smart-
+    // cadence pass from being mislabeled as a missed execution.
+    const heartbeatName = (s as any).heartbeatName ?? s.id;
+    const hbRanAt = heartbeatByName.get(heartbeatName)?.lastSuccessAt ?? null;
     const lastRunAt = [dbLastRunAt, storedRanAt, hbRanAt]
       .filter((t): t is string => t != null)
       .sort((a, b) => toComparableMs(b) - toComparableMs(a))[0] ?? null;
     const stateKey = `monitor_${s.id}`;
     const rawState = runStates[stateKey];
-    const hb = heartbeatByName.get(s.id);
+    const hb = heartbeatByName.get(heartbeatName);
     let runState: 'never' | 'running' | 'success' | 'failed' | 'stale' = 'never';
 
     // Fresh DB-freshness evidence (dbLastRunAt/storedRanAt) wins over the app_settings

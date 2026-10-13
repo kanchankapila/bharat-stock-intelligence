@@ -155,11 +155,12 @@ _DDL = {
     "trendlyne_analyst_targets": """
         CREATE TABLE IF NOT EXISTS trendlyne_analyst_targets (
             symbol TEXT, reco_date DATE, broker TEXT, target_price REAL,
-            reco_price REAL, rating TEXT, fetched_at TEXT)""",
+            reco_price REAL, rating TEXT, fetched_at TEXT, known_at TIMESTAMP)""",
     "stock_earnings_dates": """
         CREATE TABLE IF NOT EXISTS stock_earnings_dates (
             scid TEXT, result_date DATE, stock_name TEXT, result_type TEXT,
-            result_time TEXT, market_cap REAL, exchange TEXT, fetched_at TEXT)""",
+            result_time TEXT, market_cap REAL, exchange TEXT, fetched_at TEXT,
+            known_at TIMESTAMP)""",
     "nse_stocks": """
         CREATE TABLE IF NOT EXISTS nse_stocks (
             symbol TEXT, mcsymbol TEXT)""",
@@ -246,12 +247,15 @@ def _seed_analyst(con):
     ], ["symbol", "as_of_date", "n_analysts", "buy_count", "hold_count",
         "sell_count", "target_mean"])
     _ins(con, "trendlyne_analyst_targets", [
-        {"symbol": "TEST", "reco_date": DATES[2], "broker": "A", "target_price": 125.0},
-        {"symbol": "TEST", "reco_date": DATES[5], "broker": "B", "target_price": 130.0},
+        {"symbol": "TEST", "reco_date": DATES[2], "broker": "A", "target_price": 125.0,
+         "known_at": DATES[2]},
+        {"symbol": "TEST", "reco_date": DATES[5], "broker": "B", "target_price": 130.0,
+         "known_at": DATES[5]},
         {"symbol": "TEST", "reco_date": str((pd.Timestamp.today()
                                              - pd.Timedelta(days=120)).date()),
-         "broker": "OLD", "target_price": 99.0},
-    ], ["symbol", "reco_date", "broker", "target_price"])
+         "broker": "OLD", "target_price": 99.0,
+         "known_at": pd.Timestamp.today() - pd.Timedelta(days=120)},
+    ], ["symbol", "reco_date", "broker", "target_price", "known_at"])
 
 
 def _seed_earnings(con):
@@ -269,13 +273,15 @@ def _seed_earnings(con):
         {"scid": "MAP04X", "symbol": "TEST", "source": "autosuggest-name"},
     ], ["scid", "symbol", "source"])
     _ins(con, "stock_earnings_dates", [
-        {"scid": "MC01", "result_date": nxt},
-        {"scid": "MC01", "result_date": prv},
+        {"scid": "MC01", "result_date": nxt, "known_at": D[0], "fetched_at": D[-1]},
+        {"scid": "MC01", "result_date": prv, "known_at": prv, "fetched_at": prv},
         {"scid": "MAP04X", "result_date": (pd.Timestamp.today()
-                                           - pd.Timedelta(days=2)).strftime("%Y-%m-%d")},
+                                           - pd.Timedelta(days=2)).strftime("%Y-%m-%d"),
+         "known_at": D[0], "fetched_at": D[-1]},
         {"scid": "UNMAPPED", "result_date": (pd.Timestamp.today()
-                                             - pd.Timedelta(days=1)).strftime("%Y-%m-%d")},
-    ], ["scid", "result_date"])
+                                             - pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+         "known_at": D[0], "fetched_at": D[-1]},
+    ], ["scid", "result_date", "known_at", "fetched_at"])
     _ins(con, "stock_earnings_beats", [
         {"symbol": "TEST", "quarter_date": prv, "beat_score": 3, "surprise_pct": 7.5},
     ], ["symbol", "quarter_date", "beat_score", "surprise_pct"])
@@ -325,6 +331,20 @@ class TestAnalystConsensus:
         assert out.loc[DATES[6], "broker_recos_90d"] == 2
         assert out.loc[DATES[0], "broker_recos_90d"] == 0
 
+    def test_broker_reco_is_not_visible_before_first_observation(self):
+        con = _make_db("TEST")
+        _seed_analyst(con)
+        con.execute(
+            "UPDATE trendlyne_analyst_targets SET known_at=? WHERE broker='A'",
+            (D[4],),
+        )
+        con.commit()
+
+        out = _run_merge(con, _feat(), "_merge_analyst_consensus")
+
+        assert out.loc[DATES[3], "broker_recos_90d"] == 0
+        assert out.loc[DATES[4], "broker_recos_90d"] == 1
+
 
 class TestEarningsClock:
 
@@ -342,6 +362,22 @@ class TestEarningsClock:
         assert out.loc[DATES[-1], "last_eps_surprise_pct"] == 7.5
         assert out.loc[DATES[-1], "last_beat_score"] == 3
         assert out["earnings_in_5d"].notna().sum() >= 1
+
+    def test_calendar_event_obeys_known_and_last_seen_times(self):
+        con = _make_db("TEST")
+        _seed_earnings(con)
+        # A proposed D[6] result was first observed on D[4] and disappeared on
+        # D[5], before it occurred.  It is knowable on D[4:5], not before, and
+        # must not later masquerade as a completed earnings event.
+        _ins(con, "stock_earnings_dates", [{
+            "scid": "MC01", "result_date": D[6], "known_at": D[4], "fetched_at": D[5],
+        }], ["scid", "result_date", "known_at", "fetched_at"])
+
+        out = _run_merge(con, _feat(), "_merge_earnings_clock")
+
+        assert out.loc[DATES[3], "days_to_next_earnings"] != 3
+        assert out.loc[DATES[4], "days_to_next_earnings"] == 2
+        assert out.loc[DATES[7], "days_since_last_earnings"] != 1
 
 
 class TestDelivery:
@@ -411,4 +447,3 @@ class TestWorkerPathMergeParity:
                       "_merge_earnings_clock", "_merge_delivery",
                       "_merge_options_backfill"):
             assert f"fe.{merge}(" in worker, f"{merge} missing from _compute_symbol_unscaled"
-

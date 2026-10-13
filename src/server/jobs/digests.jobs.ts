@@ -156,26 +156,42 @@ export async function processRecommendationsDigest(job?: { data?: { force?: bool
  * morning brief's input is *supposed* to be last night's 22:30 ranking. What it must refuse is a
  * ranking from the session BEFORE that, i.e. the evening ranker having failed outright.
  *
- * 20h: a Tue 08:20 send accepts Mon 22:30 (~10h) and rejects Fri 22:30 read on Mon (~58h).
- * After a long weekend Monday's own 08:20 slot legitimately has no fresh ranking — the brief
- * records a named skip rather than shipping a 3-day-old pick list as if it were today's.
+ * Freshness is trading-session based, not elapsed-hour based. A Monday 08:20 send accepts
+ * Friday's 22:30 ranking because Friday is still the latest completed NSE session. A seven-day
+ * calendar sanity cap prevents a stale session table from blessing an arbitrarily old ranking.
  */
-const MORNING_BRIEF_MAX_RANKING_AGE_MS = 20 * 60 * 60 * 1000;
+const MORNING_BRIEF_MAX_CALENDAR_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const MORNING_BRIEF_LAST_SENT_KEY = 'morning_brief_last_sent_ranking';
 
 export async function processMorningBrief(job?: { data?: { force?: boolean } }): Promise<void> {
-  const ur = await dbGet<{ g: string | null }>(
-    `SELECT MAX(generated_at)::text AS g FROM unified_recommendations`);
-  if (!ur?.g) {
+  const ur = await dbGet<{ g: string | null; d: string | null }>(
+    `SELECT MAX(generated_at)::text AS g,
+            (MAX(generated_at) AT TIME ZONE 'Asia/Kolkata')::date::text AS d
+       FROM unified_recommendations`);
+  if (!ur?.g || !ur.d) {
     const msg = 'SKIPPED: unified_recommendations is empty — no ranking to brief on';
     console.warn('[QUEUE] morning-brief', msg);
     return { success: false, failedSteps: [msg] } as unknown as void;
   }
+  // MAX across independently written EOD tables prevents one stale source from blessing an
+  // older ranking; excluding today avoids treating a partially written morning as completed.
+  const session = await dbGet<{ d: string | null }>(
+    `SELECT MAX(d)::text AS d
+       FROM (
+         SELECT MAX(date)::date AS d FROM nse_universe_history
+          WHERE date < (now() AT TIME ZONE 'Asia/Kolkata')::date
+         UNION ALL
+         SELECT MAX(date)::date AS d FROM stock_ohlcv
+          WHERE date < (now() AT TIME ZONE 'Asia/Kolkata')::date
+         UNION ALL
+         SELECT MAX(date)::date AS d FROM technical_signals
+          WHERE date < (now() AT TIME ZONE 'Asia/Kolkata')::date
+       ) completed_sessions`);
   const ageMs = Date.now() - new Date(ur.g.endsWith('Z') ? ur.g : `${ur.g}Z`).getTime();
-  if (!(ageMs >= 0) || ageMs > MORNING_BRIEF_MAX_RANKING_AGE_MS) {
-    const msg = `SKIPPED: newest ranking is ${Math.round(ageMs / 3_600_000)}h old `
-      + `(limit ${MORNING_BRIEF_MAX_RANKING_AGE_MS / 3_600_000}h) — last night's unified-ranker `
-      + 'did not produce one; see its heartbeat';
+  if (!(ageMs >= 0) || ageMs > MORNING_BRIEF_MAX_CALENDAR_AGE_MS || ur.d !== session?.d) {
+    const msg = `SKIPPED: ranking session ${ur.d} does not match the latest completed NSE `
+      + `session ${session?.d ?? 'unknown'} (age ${Math.round(ageMs / 3_600_000)}h) — `
+      + 'the latest session has no completed unified ranking; see unified-ranker heartbeat';
     console.warn('[QUEUE] morning-brief', msg);
     return { success: false, failedSteps: [msg] } as unknown as void;
   }

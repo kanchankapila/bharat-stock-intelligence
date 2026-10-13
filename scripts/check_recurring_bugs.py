@@ -65,9 +65,16 @@ aggregates. A check that is ~90% false positive gets ignored within a week and t
 nothing while looking like it does. Catching it needs type information this script does not
 have.
 
- 10. A job sub-step in queues.ts / *.jobs.ts whose only failure handler is a console.* log.
+  10. A job sub-step in queues.ts / *.jobs.ts whose only failure handler is a console.* log.
      The chain stays fault-tolerant but the failure never reaches the job verdict or any
      monitor, so a dead fetcher reads as a healthy job; see check_job_step_catch_console.
+
+  11. A new executor `.submit(...)` comprehension above the explicit per-file debt baseline.
+      Futures retain their completed results, so submitting a full stock universe up front is
+      not streaming and can exhaust host RAM even when the consumer iterates with
+      `as_completed()`. The counted baseline keeps existing sites visible without making the
+      full-tree gate permanently red; adding another site still fails. Use a bounded pending
+      set and refill it with `wait(..., FIRST_COMPLETED)`.
 
   8. A `print()` inside an `except Exception` block ("degraded read" -- a query that falls
      back to an empty/default result instead of raising, because a missing/renamed table
@@ -759,6 +766,67 @@ def check_python_file_parses(path: Path, text: str) -> list[str]:
     return findings
 
 
+_EAGER_SUBMIT_BASELINE_COUNTS = {
+    # Ratchet baseline measured 2026-10-11. These older sites need individual cardinality and
+    # memory review before mechanical rewrites: several submit only a small fixed batch, while
+    # others are genuine debt. A full-tree checker must still pass today, but no file may add
+    # another eager comprehension. Removing one permanently lowers its effective allowance.
+    "src/server/analyst_estimates_snapshot.py": 1,
+    "src/server/earnings_surprise_fetcher.py": 1,
+    "src/server/explore_mc_tl.py": 1,
+    "src/server/feature_engineering.py": 1,
+    "src/server/finstack_cashflow_fetcher.py": 1,
+    "src/server/intraday_fetcher.py": 1,
+    "src/server/investsights_announcement_intel_fetcher.py": 1,
+    "src/server/investsights_fundamentals_fetcher.py": 1,
+    "src/server/marketsmojo_financials_fetcher.py": 1,
+    "src/server/marketsmojo_fintrend_fetcher.py": 1,
+    "src/server/marketsmojo_shareholding_fetcher.py": 1,
+    "src/server/mc_chart_patterns_fetcher.py": 1,
+    "src/server/mc_corporate_actions_fetcher.py": 1,
+    "src/server/mc_ohlcv_backfill.py": 1,
+    "src/server/mc_pricefeed_fetcher.py": 1,
+    "src/server/mc_stockvitals_history_fetcher.py": 1,
+    "src/server/mc_techscanner_fetcher.py": 2,
+    "src/server/moneycontrol_fetcher.py": 1,
+    "src/server/niftytrader_live_screener_job.py": 1,
+    "src/server/pcr_fetcher.py": 1,
+    "src/server/stock_option_chain_fetcher.py": 1,
+    "src/server/tickertape_scorecard_fetcher.py": 1,
+    "src/server/trendlyne_screener_discovery.py": 1,
+}
+
+
+def check_unbounded_executor_submit(path: Path, text: str) -> list[str]:
+    """Flag new all-at-once Future submission shapes above the explicit debt baseline."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    comprehension_types = (ast.DictComp, ast.ListComp, ast.SetComp, ast.GeneratorExp)
+    matches: list[ast.Call] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, comprehension_types):
+            continue
+        for child in ast.walk(node):
+            if (isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "submit"):
+                matches.append(child)
+
+    display_path = _display_path(path).replace("\\", "/")
+    allowance = _EAGER_SUBMIT_BASELINE_COUNTS.get(display_path, 0)
+    matches.sort(key=lambda child: child.lineno)
+    return [
+        f"{_display_path(path)}:{child.lineno}: executor.submit() inside a comprehension "
+        f"exceeds the explicit baseline of {allowance} for this file; it submits the full "
+        f"input eagerly and retains every completed Future/result. Use a bounded pending set "
+        f"and refill it with wait(..., FIRST_COMPLETED)."
+        for child in matches[allowance:]
+    ]
+
+
 def check_missing_live_datasource_test(fetcher_files: list[Path]) -> list[str]:
     tests_dir = SERVER_DIR / "tests"
     existing = {p.name for p in tests_dir.glob("test_live_datasource_*.py")} if tests_dir.exists() else set()
@@ -879,6 +947,7 @@ def main() -> int:
     for path in py_files:
         text = path.read_text(encoding="utf-8", errors="ignore")
         all_findings.extend(check_python_file_parses(path, text))
+        all_findings.extend(check_unbounded_executor_submit(path, text))
         all_findings.extend(check_date_anchor(path, text))
         all_findings.extend(check_short_calendar_lookback(path, text))
         all_findings.extend(check_raw_percent_s(path, text))

@@ -133,7 +133,6 @@ const EXCLUDED_TABLES: Record<string, string> = {
   screener_runs: 'screener run records; app log',
   backtest_strategies: 'backtest strategy config storage; app state',
   news_symbol_link: 'data_integrity_repair.py news-symbol linking scratch; internal',
-  tick_data: '0 rows, no active writer; effectively retired',
   screener_performance_history: 'screener_performance.py performance-calculation history log; app log',
   screener_reliability: 'screener reliability score history (screener_performance.py); app log',
   // Semantic layer (2026-09-25): link table has only (claim_key, evidence_key, relation,
@@ -176,6 +175,10 @@ describe('table-coverage gate: no-producer exclusions expire when a producer app
 });
 
 describe('table-coverage gate: exclusion map', () => {
+  it('does not retain the never-written tick_data placeholder as if it were a live source', () => {
+    expect(schemaTables.has('tick_data')).toBe(false);
+  });
+
   it('every excluded entry names a real public schema table', () => {
     const bogus = Object.keys(EXCLUDED_TABLES).filter(t => !schemaTables.has(t));
     expect(bogus, `EXCLUDED_TABLES references tables not in db/schema.postgres.sql: ${bogus.join(', ')}`).toEqual([]);

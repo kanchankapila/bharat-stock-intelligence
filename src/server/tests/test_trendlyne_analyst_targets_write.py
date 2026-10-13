@@ -72,3 +72,23 @@ class TestWriteAnalystTargetsActuallyPersists:
         write_analyst_targets("TESTSYM", [], "2026-08-20", conn)
         n = conn.execute("SELECT COUNT(*) AS n FROM trendlyne_analyst_targets").fetchone()["n"]
         assert n == 0
+
+    def test_refresh_preserves_first_known_time(self):
+        conn = pg_memory_conn()
+        ensure_schema(conn)
+        report = [BODY["researchReports"]["tableData"][0]]
+        write_analyst_targets("TESTSYM", report, "2026-08-20", conn)
+        conn.execute(
+            "UPDATE trendlyne_analyst_targets SET known_at='2026-08-20 09:00:00+00'"
+        )
+        conn.commit()
+
+        report[0]["targetPrice"] = "175"
+        write_analyst_targets("TESTSYM", report, "2026-08-27", conn)
+        row = conn.execute(
+            "SELECT target_price, CAST(known_at AS TEXT) AS known_at "
+            "FROM trendlyne_analyst_targets"
+        ).fetchone()
+
+        assert row["target_price"] == 175.0
+        assert row["known_at"].startswith("2026-08-20 09:00:00")

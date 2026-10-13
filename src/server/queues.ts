@@ -2742,7 +2742,11 @@ export async function initQueues(): Promise<boolean> {
         // Backfill first so calc_* classes cover everything the study window reads;
         // the study itself is read-only except its own results table.
         await runPython('mover_screener_fetcher.py', ['--backfill-days', '250'], 1_800_000);
-        await runPython('reverse_engineering_study.py', ['--days', '250'], 1_800_000);
+        // The 250-session study reached the old 30-minute wall exactly on 2026-10-10 after
+        // the event universe grew to 116k rows. Prior successful runs were already close to
+        // that ceiling. Give the measured CPU-bound analysis 45 minutes; the combined 30m
+        // backfill + 45m study still fits the worker's 75-minute renewable lock.
+        await runPython('reverse_engineering_study.py', ['--days', '250'], 2_700_000);
         return { skipped: false };
       },
       { connection, concurrency: 1, lockDuration: 75 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 },
@@ -2869,7 +2873,7 @@ export async function initQueues(): Promise<boolean> {
       jobId: 'nse-bulk-block-daily',
       removeOnComplete: 3, removeOnFail: 3,
     });
-    new Worker('nse-bulk-block',
+    const nseBulkBlockWorker = new Worker('nse-bulk-block',
       async () => {
         const T = new StepTracker('nse-bulk-block');
         await T.runQuiet('nse_bulk_block_fetcher', () => runPython('nse_bulk_block_fetcher.py', [], 3 * 60_000));
@@ -2878,6 +2882,12 @@ export async function initQueues(): Promise<boolean> {
         return { success: true };
       },
       { connection, concurrency: 1, lockDuration: 5 * 60_000 });
+    nseBulkBlockWorker.on('completed', (job) => {
+      recordHeartbeat('nse-bulk-block', 'success', undefined, bullJobDurationMs(job));
+    });
+    nseBulkBlockWorker.on('failed', (job, err) => {
+      recordHeartbeat('nse-bulk-block', 'failed', err?.message, bullJobDurationMs(job));
+    });
     console.log('[QUEUE] NSE bulk/block deal archive scheduled at 8:00 PM IST (weekdays)');
 
     // ── Results filings -> XBRL financials -> Q2 drift shadow arm (16:05 UTC = 21:35 IST, weekdays) ──
@@ -3788,4 +3798,3 @@ export async function getAIQueueStats(): Promise<QueueStats> {
     available: true,
   };
 }
-

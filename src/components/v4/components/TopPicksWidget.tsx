@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Zap, ArrowRight } from 'lucide-react';
 import { trpc } from '../../../lib/trpc';
 import { Card } from '../../../components/Card';
-import { cn } from '../../../lib/utils';
 import { ConvictionPill } from '../../../components/StockTagRow';
 import { AddToPortfolioButton } from '../../../components/AddToPortfolioButton';
 import { CanonicalBadge } from '../../../components/CanonicalSourceNote';
@@ -16,7 +15,7 @@ export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void
   const navigate = useNavigate();
   const { data, isLoading } = trpc.getBuyRecommendations.useQuery(
     { conviction: 'ALL', horizon: 'ALL', limit: 6 },
-    { refetchInterval: 5 * 60_000 }
+    { refetchInterval: 30 * 60_000 }
   );
   const picks = data?.picks ?? [];
   // data-honesty-review, 2026-08-14: no as-of indicator anywhere a user could spot a stalled
@@ -47,7 +46,8 @@ export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void
       ) : (
         <div className="space-y-1.5">
           {picks.map((p: any) => {
-            const winPct = p.win_probability != null ? Math.round(p.win_probability * 100) : null;
+            const daysToResults = Number(p.days_to_next_results);
+            const resultsSoon = Number.isFinite(daysToResults) && daysToResults >= 0 && daysToResults <= 7;
             return (
               <div key={p.symbol} className="flex items-center gap-1">
                 <button
@@ -68,8 +68,13 @@ export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void
                         {p.engine_coverage_count}/8
                       </span>
                     )}
-                    {winPct != null && (
-                      <span className={cn('text-[10px] font-semibold', winPct >= 55 ? 'text-emerald-400' : 'text-amber-400')}>{winPct}% win</span>
+                    {resultsSoon && (
+                      <span
+                        className="text-[10px] font-semibold text-amber-400"
+                        title="Upcoming results can invalidate an otherwise attractive setup"
+                      >
+                        {daysToResults === 0 ? 'Results today' : `Results in ${daysToResults}d`}
+                      </span>
                     )}
                     <span className="text-xs font-mono font-bold text-slate-300">{Math.round(p.unified_score ?? 0)}</span>
                   </div>

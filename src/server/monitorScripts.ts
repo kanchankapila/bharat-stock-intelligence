@@ -443,19 +443,20 @@ export const MONITOR_SCRIPTS = [
     // test -- corrected to match its ml-weekly-retrain/trendlyne-fundamentals siblings' convention
     // (168h worst case + margin). working-capital below is genuinely still monthly-gated and
     // keeps its own correct 900h.
-    schedule: 'Weekly Saturday',
-    // 200h was still wrong, found 2026-08-09: `as_of_date` is logical_write_floor()-anchored to
-    // the last completed trading session (Friday), 2 days behind the Sunday run that writes it --
-    // same lag as trendlyne-fundamentals above. True worst case checked right before that week's
-    // ~18:00 IST run: ~228h. Confirmed live-recurring (flagged 'stale' at 216-222h, well under a
-    // genuine break) -- bumped to match trendlyne-fundamentals' 260h.
-    // Same day (2026-08-09): the driving job (trendlyneWeekly.jobs.ts) moved from 18:00 IST to
-    // 06:00 IST -- 12h earlier means ~12h LESS elapsed since Friday's close, so the real gap is
-    // now ~216h, not ~228h. 260h stays a safe (now slightly more generous) margin; no change
-    // needed to the threshold itself.
+    schedule: 'Weekly Saturday 6:00 AM IST',
     pyScript: 'financial_ratios_fetcher.py',
     queueName: 'trendlyne-ratios-monthly',
+    // The table does NOT write weekly: financial_ratios_fetcher.py deliberately skips symbols
+    // fetched within 20 calendar days because these are annual/quarterly figures. The old
+    // MAX(as_of_date)+260h test therefore called healthy week-2 and week-3 no-op runs "late".
+    // This child always runs, and the parent throws if this (or any sibling) step fails, so its
+    // successful heartbeat is honest execution evidence. Data age remains independently gated
+    // by dataQualityChecks.ts at the fetcher's real smart cadence; this does not fake a write.
+    heartbeatName: 'trendlyne-ratios-monthly',
     staleLimitHours: 260,
+    cronPatterns: ['30 0 * * 6'],
+    // Parent heartbeat lands only after the whole batch, whose BullMQ lock is 270 minutes.
+    graceMinutes: 280,
   },
   {
     id: 'working-capital',

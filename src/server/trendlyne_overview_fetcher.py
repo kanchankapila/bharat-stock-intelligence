@@ -92,6 +92,7 @@ def ensure_schema(con) -> None:
             reco_price   REAL,
             rating       TEXT,
             fetched_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+            known_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (symbol, reco_date, broker)
         )
     """)

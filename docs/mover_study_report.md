@@ -1,97 +1,97 @@
 # Mover Reverse-Engineering Study
 
-Run: `2026-10-06T07:45:54`  |  events analyzed: **46,983** across 13 classes
+Run: `2026-10-10T21:40:58`  |  events analyzed: **116,084** across 13 classes
 
 ## Event counts by class
 
 | source                 |   events |
 |:-----------------------|---------:|
-| calc_gap_down          |     1534 |
-| calc_gap_up            |     2662 |
-| calc_intraday_breakout |     2908 |
-| calc_open_eq_high      |    12092 |
-| calc_open_eq_low       |     7972 |
-| calc_volume_shocker    |     5225 |
-| mc_price_shockers      |      764 |
-| mojo_gainers           |     4635 |
-| mojo_losers            |     6192 |
-| nt_top_gainers         |     2051 |
-| nteod_gain5            |      505 |
-| nteod_high_delivery    |      148 |
-| nteod_loss5            |      295 |
+| calc_gap_down          |     8837 |
+| calc_gap_up            |    13679 |
+| calc_intraday_breakout |     9109 |
+| calc_open_eq_high      |    32462 |
+| calc_open_eq_low       |    22491 |
+| calc_volume_shocker    |    12694 |
+| mc_price_shockers      |      766 |
+| mojo_gainers           |     5385 |
+| mojo_losers            |     7125 |
+| nt_top_gainers         |     2350 |
+| nteod_gain5            |      609 |
+| nteod_high_delivery    |      182 |
+| nteod_loss5            |      395 |
 
 ## Factor rank-IC vs realized mover returns (per-date aggregate)
 
 | factor              |   mean_ic |   median_ic |   positive_dates |   dates |   t_stat |   total_n |
 |:--------------------|----------:|------------:|-----------------:|--------:|---------:|----------:|
-| f_cost_of_carry     |    0.1873 |      0.1682 |               50 |      58 |     6.85 |      6601 |
-| f_preopen_gap_pct   |    0.1483 |      0.1534 |               47 |      54 |     6.95 |     16362 |
-| f_preopen_imbalance |    0.1032 |      0.1051 |               42 |      54 |     5.37 |     16256 |
-| f_so_pcr            |    0.0555 |      0.0562 |               35 |      57 |     2.74 |      5825 |
-| f_rsi               |    0.0539 |      0.0535 |               47 |      60 |     5.84 |     35374 |
-| f_rs_vs_nifty       |    0.0439 |      0.0486 |               41 |      60 |     3.84 |     36838 |
-| f_mom_21d           |    0.0439 |      0.0486 |               41 |      60 |     3.84 |     36838 |
-| f_vol_ratio         |    0.0358 |      0.0306 |               42 |      60 |     4.82 |     35370 |
-| f_mom_5d            |    0.0292 |      0.0391 |               40 |      60 |     2.73 |     36867 |
-| f_adx               |    0.0203 |      0.0253 |               39 |      60 |     2.87 |     35374 |
-| f_rollover_pct      |    0.0203 |      0.0123 |               33 |      60 |     1.29 |      6858 |
-| f_news_sent         |    0.0063 |      0.0042 |               33 |      60 |     0.65 |     18620 |
-| f_mf_holding_change |    0.0012 |     -0.0054 |               15 |      31 |     0.11 |     18021 |
-| f_delivery_pct      |   -0.002  |     -0.0024 |               29 |      60 |    -0.18 |     35707 |
-| f_earnings_yield    |   -0.0169 |     -0.0159 |               26 |      60 |    -1.57 |     30108 |
-| f_news_count        |   -0.0223 |     -0.0259 |               23 |      60 |    -1.91 |     18620 |
-| f_mf_holding_pct    |   -0.0317 |     -0.0399 |                9 |      31 |    -1.86 |     18266 |
+| f_cost_of_carry     |    0.1758 |      0.1574 |               58 |      68 |     7.22 |      7752 |
+| f_preopen_gap_pct   |    0.1542 |      0.1676 |               55 |      63 |     7.91 |     19875 |
+| f_preopen_imbalance |    0.1051 |      0.1058 |               49 |      62 |     6.13 |     19704 |
+| f_rsi               |    0.0529 |      0.054  |               62 |      81 |     5.54 |     40700 |
+| f_rs_vs_nifty       |    0.0397 |      0.0414 |              112 |     168 |     4.2  |     94416 |
+| f_so_pcr            |    0.0396 |      0.0399 |               37 |      66 |     2.05 |      6848 |
+| f_mom_21d           |    0.0396 |      0.0414 |              112 |     168 |     4.2  |     94416 |
+| f_mom_5d            |    0.036  |      0.0415 |              113 |     168 |     4.29 |     94793 |
+| f_vol_ratio         |    0.0268 |      0.029  |               56 |      81 |     3.04 |     40699 |
+| f_adx               |    0.02   |      0.025  |               50 |      81 |     2.57 |     40700 |
+| f_rollover_pct      |    0.0121 |      0.0059 |               36 |      70 |     0.81 |      8009 |
+| f_news_sent         |    0.0088 |      0.0032 |               57 |     107 |     0.83 |     23496 |
+| f_mf_holding_change |   -0.0002 |     -0.0009 |               17 |      35 |    -0.02 |     20662 |
+| f_delivery_pct      |   -0.008  |     -0.0122 |               79 |     168 |    -0.99 |     92388 |
+| f_earnings_yield    |   -0.0103 |     -0.0094 |               32 |      69 |    -1    |     35060 |
+| f_mf_holding_pct    |   -0.025  |     -0.0363 |               12 |      35 |    -1.46 |     20939 |
+| f_news_count        |   -0.0443 |     -0.0282 |               40 |     107 |    -3.4  |     23496 |
 
 ## Cohort lift consistency across dates
 
 | class                  | factor              |   median_lift |   mean_lift |   lift_gt_1_dates |   dates |   avg_members |
 |:-----------------------|:--------------------|--------------:|------------:|------------------:|--------:|--------------:|
-| calc_volume_shocker    | f_vol_ratio         |         5.115 |       5.476 |                60 |      60 |          87.1 |
-| calc_volume_shocker    | f_mom_5d            |         3.572 |       3.776 |                60 |      60 |          87.1 |
-| calc_intraday_breakout | f_vol_ratio         |         3.944 |       5.014 |                56 |      56 |          50.7 |
-| calc_intraday_breakout | f_mom_5d            |        20     |      23.346 |                42 |      42 |          52.5 |
-| calc_intraday_breakout | f_rsi               |        24     |      28.115 |                35 |      35 |          51.3 |
-| calc_intraday_breakout | f_mom_21d           |        21.333 |      23.967 |                35 |      35 |          50.7 |
-| calc_intraday_breakout | f_rs_vs_nifty       |        21.333 |      23.966 |                35 |      35 |          50.7 |
-| calc_open_eq_high      | f_mf_holding_pct    |         2.031 |       2.141 |                32 |      32 |         209.7 |
-| mojo_gainers           | f_news_count        |         3.776 |       3.883 |                26 |      26 |         178.3 |
-| mojo_losers            | f_news_count        |         3.666 |       3.799 |                26 |      26 |         238.2 |
-| mojo_losers            | f_mf_holding_change |         1.399 |       1.379 |                26 |      26 |         238.2 |
-| nt_top_gainers         | f_mf_holding_pct    |         2.317 |       2.612 |                25 |      25 |          82   |
-| mojo_losers            | f_news_sent         |         1.76  |       1.833 |                24 |      24 |         231.2 |
-| mojo_gainers           | f_news_sent         |         1.602 |       1.675 |                24 |      24 |         184.2 |
-| mc_price_shockers      | f_mom_5d            |         4.8   |       6.206 |                22 |      22 |          34.7 |
+| calc_intraday_breakout | f_mom_5d            |        16.5   |      19.186 |               109 |     109 |          68.1 |
+| calc_intraday_breakout | f_rs_vs_nifty       |        15.5   |      18.031 |                93 |      93 |          69   |
+| calc_intraday_breakout | f_mom_21d           |        15.25  |      18.032 |                92 |      92 |          69.5 |
+| calc_volume_shocker    | f_vol_ratio         |         5.387 |       6.237 |                80 |      80 |          86   |
+| calc_open_eq_high      | f_mf_holding_pct    |         2.031 |       2.114 |                36 |      36 |         214.7 |
+| mojo_gainers           | f_news_count        |         3.929 |       3.899 |                30 |      30 |         179.5 |
+| mojo_losers            | f_news_count        |         3.666 |       3.787 |                30 |      30 |         237.5 |
+| mojo_losers            | f_mf_holding_change |         1.377 |       1.379 |                30 |      30 |         237.5 |
+| nt_top_gainers         | f_mf_holding_pct    |         2.317 |       2.581 |                29 |      29 |          81   |
+| mojo_losers            | f_news_sent         |         1.804 |       1.933 |                28 |      28 |         231.5 |
+| mojo_gainers           | f_news_sent         |         1.686 |       1.853 |                28 |      28 |         184.7 |
+| mc_price_shockers      | f_mom_5d            |         4.8   |       6.207 |                22 |      22 |          34.7 |
 | mc_price_shockers      | f_mom_21d           |        17.25  |      23.675 |                20 |      20 |          34.8 |
-| mc_price_shockers      | f_rs_vs_nifty       |        17.236 |      23.674 |                20 |      20 |          34.8 |
+| mc_price_shockers      | f_rs_vs_nifty       |        17.25  |      23.675 |                20 |      20 |          34.8 |
 | mc_price_shockers      | f_rsi               |        29     |      26.724 |                18 |      18 |          34.7 |
 | mc_price_shockers      | f_adx               |         7.992 |       9.673 |                16 |      16 |          34.8 |
-| nteod_loss5            | f_news_count        |         1.991 |       2.032 |                 7 |       7 |          33.4 |
-| nteod_loss5            | f_vol_ratio         |         4.514 |       5.281 |                 6 |       6 |          36.5 |
-| nteod_loss5            | f_rsi               |         3.042 |       3.089 |                 6 |       6 |          36.5 |
+| nteod_loss5            | f_news_count        |         1.908 |       1.953 |                 9 |       9 |          36.4 |
+| nteod_loss5            | f_vol_ratio         |         4.514 |       4.981 |                 8 |       8 |          39.1 |
+| nteod_high_delivery    | f_mf_holding_pct    |         6.258 |       6.258 |                 3 |       3 |          11   |
 | nteod_high_delivery    | f_vol_ratio         |         6.86  |       6.86  |                 2 |       2 |          20.5 |
-| nteod_high_delivery    | f_news_count        |         4.133 |       4.133 |                 2 |       2 |          20.5 |
-| nteod_high_delivery    | f_mf_holding_change |         2.412 |       2.412 |                 2 |       2 |          20.5 |
-| nteod_high_delivery    | f_mf_holding_pct    |         6.258 |       6.258 |                 1 |       1 |          10   |
-| nteod_high_delivery    | f_news_sent         |         3.989 |       3.989 |                 1 |       1 |          31   |
 | nteod_high_delivery    | f_rollover_pct      |         2.75  |       2.75  |                 1 |       1 |          31   |
-| nteod_high_delivery    | f_preopen_imbalance |         1.125 |       1.125 |                 1 |       1 |          31   |
-| calc_volume_shocker    | f_mom_21d           |         3     |       3.268 |                59 |      60 |          87.1 |
+| calc_volume_shocker    | f_mom_5d            |         3.194 |       3.318 |               165 |     168 |          75.6 |
+| calc_intraday_breakout | f_rsi               |        22.52  |      23.551 |                51 |      52 |          52.4 |
+| calc_intraday_breakout | f_vol_ratio         |         3.727 |       4.69  |                71 |      73 |          50.8 |
+| calc_volume_shocker    | f_mom_21d           |         2.535 |       2.78  |               163 |     168 |          75.6 |
+| calc_volume_shocker    | f_rs_vs_nifty       |         2.535 |       2.78  |               163 |     168 |          75.6 |
+| mojo_gainers           | f_mf_holding_change |         1.486 |       1.491 |                29 |      30 |         179.5 |
+| nt_top_gainers         | f_news_count        |         1.984 |       1.967 |                28 |      29 |          81   |
+| nteod_gain5            | f_rsi               |         4     |       6.388 |                16 |      17 |          27.5 |
+| calc_volume_shocker    | f_rsi               |         2.789 |       3.359 |                77 |      82 |          86   |
 
 ## Engine top-N hit-rate summary
 
 | engine          |   dates |   top_n |   hits_found |   movers |   mean_hit_rate_pct |   max_hit_rate_pct |
 |:----------------|--------:|--------:|-------------:|---------:|--------------------:|-------------------:|
-| confluence_rank |      60 |      20 |          625 |    36870 |                1.76 |               3.46 |
-| intraday_rank   |      57 |      20 |          361 |    35405 |                1.04 |               2.25 |
-| technical_rank  |      60 |      20 |          293 |    36870 |                0.88 |               2.74 |
+| confluence_rank |      62 |      20 |          654 |    39276 |                1.74 |               3.45 |
+| intraday_rank   |      61 |      20 |          400 |    38710 |                1.05 |               2.37 |
+| technical_rank  |      67 |      20 |          330 |    41623 |                0.87 |               2.51 |
 
 ## Canonical pre-open call accuracy — aggregate
 
 |   dates |   movers |   matched |   opposite |   not_flagged |   matched_all_pct |   opposite_all_pct |   not_flagged_pct |   directional_precision_pct |
 |--------:|---------:|----------:|-----------:|--------------:|------------------:|-------------------:|------------------:|----------------------------:|
-|      36 |    25607 |      2774 |       2443 |         20390 |             10.83 |               9.54 |             79.63 |                       53.17 |
+|      40 |    28908 |      3177 |       2879 |         22852 |             10.99 |               9.96 |             79.05 |                       52.46 |
 
-Historical recommendation snapshots were unavailable for **24** of 60 event dates; those dates are excluded from accuracy rather than being misreported as all Hold/not-flagged.
+Historical recommendation snapshots were unavailable for **128** of 168 event dates; those dates are excluded from accuracy rather than being misreported as all Hold/not-flagged.
 
 ## Canonical pre-open call accuracy — by date
 
@@ -113,11 +113,11 @@ Historical recommendation snapshots were unavailable for **24** of 60 event date
 | 2026-08-28   |        84 |         72 |           669 |        825 |               2132 | 2026-08-27T21:50:40.563016+00:00 |         10.18 |           8.73 |             81.09 |
 | 2026-08-31   |       111 |         57 |           694 |        862 |               2150 | 2026-08-30T11:41:23.975472+00:00 |         12.88 |           6.61 |             80.51 |
 | 2026-09-01   |       104 |        107 |           574 |        785 |               2130 | 2026-08-31T18:10:15.248153+00:00 |         13.25 |          13.63 |             73.12 |
-| 2026-09-02   |       103 |         85 |           594 |        782 |               2111 | 2026-09-01T17:00:01.135758+00:00 |         13.17 |          10.87 |             75.96 |
+| 2026-09-02   |       104 |         85 |           594 |        783 |               2111 | 2026-09-01T17:00:01.135758+00:00 |         13.28 |          10.86 |             75.86 |
 | 2026-09-03   |        88 |        103 |           628 |        819 |               2099 | 2026-09-02T17:20:40.741635+00:00 |         10.74 |          12.58 |             76.68 |
 | 2026-09-04   |        83 |        114 |           634 |        831 |               2084 | 2026-09-03T17:00:02.664803+00:00 |          9.99 |          13.72 |             76.29 |
 | 2026-09-07   |       105 |         82 |           656 |        843 |               2080 | 2026-09-04T17:00:03.150316+00:00 |         12.46 |           9.73 |             77.82 |
-| 2026-09-08   |        67 |         32 |           362 |        461 |               2068 | 2026-09-07T17:00:02.879848+00:00 |         14.53 |           6.94 |             78.52 |
+| 2026-09-08   |        67 |         32 |           363 |        462 |               2068 | 2026-09-07T17:00:02.879848+00:00 |         14.5  |           6.93 |             78.57 |
 | 2026-09-09   |        90 |         82 |           640 |        812 |               2054 | 2026-09-08T17:00:19.005897+00:00 |         11.08 |          10.1  |             78.82 |
 | 2026-09-10   |        97 |         82 |           576 |        755 |               2062 | 2026-09-09T17:00:01.833884+00:00 |         12.85 |          10.86 |             76.29 |
 | 2026-09-11   |        96 |         82 |           682 |        860 |               2040 | 2026-09-10T17:00:01.867380+00:00 |         11.16 |           9.53 |             79.3  |
@@ -133,6 +133,10 @@ Historical recommendation snapshots were unavailable for **24** of 60 event date
 | 2026-09-29   |        94 |         56 |           608 |        758 |               1956 | 2026-09-25T17:00:01.017708+00:00 |         12.4  |           7.39 |             80.21 |
 | 2026-10-01   |        78 |         98 |           625 |        801 |               1972 | 2026-09-30T17:00:02.475451+00:00 |          9.74 |          12.23 |             78.03 |
 | 2026-10-05   |        68 |         76 |           599 |        743 |               1895 | 2026-10-02T08:54:59.639792+00:00 |          9.15 |          10.23 |             80.62 |
+| 2026-10-06   |       132 |         82 |           607 |        821 |               2332 | 2026-10-06T01:03:51.849185+00:00 |         16.08 |           9.99 |             73.93 |
+| 2026-10-07   |        96 |        100 |           599 |        795 |               2331 | 2026-10-06T17:00:02.066905+00:00 |         12.08 |          12.58 |             75.35 |
+| 2026-10-08   |        83 |        161 |           702 |        946 |               2329 | 2026-10-07T17:00:11.320480+00:00 |          8.77 |          17.02 |             74.21 |
+| 2026-10-09   |        91 |         93 |           553 |        737 |               2329 | 2026-10-08T17:00:01.832701+00:00 |         12.35 |          12.62 |             75.03 |
 
 Percentages are reported per date and include all three buckets: matched, opposite, and not flagged. Hold/missing calls are not flagged; only an actionable call in the wrong realized direction is opposite. Directional precision excludes Hold/missing but is shown beside total coverage so it cannot be presented as whole-universe accuracy.
 

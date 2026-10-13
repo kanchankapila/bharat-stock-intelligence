@@ -37,6 +37,18 @@ describe('daily-cadence polling', () => {
     expect(line).not.toMatch(/refetchInterval:\s*120000/);
     expect(line).toMatch(/15 \* 60_000/);
   });
+  it('TopPicksWidget treats the nightly ranking as slow data and never labels raw model output as a win probability', () => {
+    const s = src('src/components/v4/components/TopPicksWidget.tsx');
+    expect(s).toMatch(/refetchInterval:\s*30 \* 60_000/);
+    expect(s).not.toContain('p.win_probability');
+    expect(s).toContain('days_to_next_results');
+    expect(s).toContain('Results');
+  });
+  it('sector overview polling matches its five-minute source cadence', () => {
+    const s = src('src/components/sectors/SectorIntelligencePage.tsx');
+    const query = s.slice(s.indexOf('getSectorsOverview.useQuery'), s.indexOf('getSectorDeepDive.useQuery'));
+    expect(query).toMatch(/refetchInterval:\s*5 \* 60_000/);
+  });
 });
 
 describe('Dashboard layout and Stock Intelligence labels', () => {

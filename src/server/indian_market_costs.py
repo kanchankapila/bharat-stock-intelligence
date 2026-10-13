@@ -6,10 +6,18 @@ from typing import Literal
 STT_RATES = {
     ("equity", "delivery"): 0.001,
     ("equity", "intraday"): 0.00025,
-    ("futures", "intraday"): 0.0001,
-    ("options", "intraday"): 0.0005,
+    # Finance Act 2026, effective 2026-04-01. Futures/options STT is charged on
+    # the sell leg only; round_trip_cost_bps accounts for the taxable-leg count.
+    ("futures", "intraday"): 0.0005,
+    ("options", "intraday"): 0.0015,
 }
-EXCHANGE_TXN_CHARGES = 0.0000345
+# NSE circular FA/73061, effective 2026-03-01: transaction charge + IPFT outflow
+# per side (cash Rs307/crore, futures Rs183/crore, options Rs3,553/crore premium).
+EXCHANGE_TXN_CHARGES = {
+    "equity": 0.0000307,
+    "futures": 0.0000183,
+    "options": 0.0003553,
+}
 SEBI_TURNOVER_FEE = 0.000001
 GST_RATE = 0.18
 STAMP_DUTY_RATES = {
@@ -36,6 +44,16 @@ MARKET_CAP_TIERS = [
     (1000, "smallcap"),
     (0, "microcap"),
 ]
+
+
+def equity_trade_type_for_timeframe(timeframe) -> Literal["intraday", "delivery"]:
+    """Map a recommendation horizon to the cash-market settlement whose charges apply.
+
+    Only a same-session square-off avoids delivery. Unknown/missing horizons use delivery,
+    the conservative cost assumption; treating a multi-session SWING/POSITIONAL plan as
+    intraday materially understates STT.
+    """
+    return "intraday" if str(timeframe or "").strip().upper() == "INTRADAY" else "delivery"
 
 def _market_cap_tier(market_cap_cr):
     if market_cap_cr is None or not math.isfinite(market_cap_cr) or market_cap_cr <= 0:
@@ -67,17 +85,20 @@ def round_trip_cost_bps(
 ):
     key = (asset_class, trade_type)
     stt_rate = STT_RATES.get(key, 0.001)
-    exchange_rate = EXCHANGE_TXN_CHARGES
+    """Return the round-trip cost as a decimal fraction (0.002 == 20 bps).
+
+    The historical function name is retained for callers, but the return value is not a
+    bps integer. STT is applied to the legally taxable legs: both legs for delivery equity,
+    the sell leg only for intraday equity and derivatives.
+    """
+    exchange_rate = EXCHANGE_TXN_CHARGES.get(asset_class, EXCHANGE_TXN_CHARGES["equity"])
     sebi_rate = SEBI_TURNOVER_FEE
     brokerage_rate = BROKERAGE_RATES.get(key, 0.0)
     stamp_rate = STAMP_DUTY_RATES.get(key, 0.0)
     gst_rate = GST_RATE * (brokerage_rate + exchange_rate)
-    per_leg_explicit = stt_rate + exchange_rate + sebi_rate + gst_rate + brokerage_rate
-    if asset_class == "equity" and trade_type == "intraday":
-        stt_adjustment = -stt_rate / 2
-    else:
-        stt_adjustment = 0.0
-    round_trip_explicit = 2 * (per_leg_explicit + stt_adjustment) + stamp_rate
+    per_leg_non_stt = exchange_rate + sebi_rate + gst_rate + brokerage_rate
+    stt_legs = 2 if key == ("equity", "delivery") else 1
+    round_trip_explicit = stt_legs * stt_rate + 2 * per_leg_non_stt + stamp_rate
     if include_slippage:
         one_way_slippage = estimate_slippage_bps(
             participation_rate=participation_rate,
@@ -103,13 +124,15 @@ def minimum_edge_required(round_trip_cost_pct, hit_rate=0.50, avg_win_loss_ratio
 def cost_table(asset_class="equity", trade_type="intraday"):
     key = (asset_class, trade_type)
     stt = STT_RATES.get(key, 0.001)
-    exchange = EXCHANGE_TXN_CHARGES
+    exchange = EXCHANGE_TXN_CHARGES.get(asset_class, EXCHANGE_TXN_CHARGES["equity"])
     sebi = SEBI_TURNOVER_FEE
     brokerage = BROKERAGE_RATES.get(key, 0.0)
     stamp = STAMP_DUTY_RATES.get(key, 0.0)
     gst = GST_RATE * (brokerage + exchange)
-    per_leg = stt + exchange + sebi + gst + brokerage
-    round_trip = 2 * per_leg + stamp
+    per_leg_non_stt = exchange + sebi + gst + brokerage
+    stt_legs = 2 if key == ("equity", "delivery") else 1
+    round_trip = stt_legs * stt + 2 * per_leg_non_stt + stamp
+    per_leg = stt + per_leg_non_stt
     return {
         "stt_bps": stt * 10000,
         "exchange_bps": exchange * 10000,

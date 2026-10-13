@@ -702,3 +702,32 @@ class TestShortCalendarLookbackExemption:
         """ast-based on purpose: this repo's own rule files and docstrings describe the bug."""
         src = 'def f():\n    """Do not use date.today() - timedelta(days=1) here."""\n    return 1\n'
         assert self._run(tmp_path, src) == []
+
+
+class TestUnboundedExecutorSubmit:
+    def test_submit_comprehension_is_flagged(self):
+        text = "future_map = {ex.submit(fetch, url): url for url in urls}\n"
+        findings = crb.check_unbounded_executor_submit(_p(), text)
+        assert len(findings) == 1
+        assert "FIRST_COMPLETED" in findings[0]
+
+    def test_bounded_refill_loop_is_allowed(self):
+        text = (
+            "while len(pending) < max_in_flight:\n"
+            "    item = next(items)\n"
+            "    pending[ex.submit(fetch, item)] = item\n"
+        )
+        assert crb.check_unbounded_executor_submit(_p(), text) == []
+
+    def test_docstring_example_is_not_flagged(self):
+        text = 'def f():\n    """Avoid {ex.submit(fetch, x) for x in xs}."""\n    return 1\n'
+        assert crb.check_unbounded_executor_submit(_p(), text) == []
+
+    def test_known_debt_is_a_counted_ratchet_not_a_blanket_file_exemption(self):
+        path = crb.REPO_ROOT / "src" / "server" / "analyst_estimates_snapshot.py"
+        one = "future_map = {ex.submit(fetch, x): x for x in xs}\n"
+        assert crb.check_unbounded_executor_submit(path, one) == []
+        two = one + "other_map = {ex.submit(fetch, y): y for y in ys}\n"
+        findings = crb.check_unbounded_executor_submit(path, two)
+        assert len(findings) == 1
+        assert "baseline of 1" in findings[0]

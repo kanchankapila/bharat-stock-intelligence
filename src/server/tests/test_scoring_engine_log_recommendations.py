@@ -24,13 +24,15 @@ class _FakeSelf:
     since universe-restriction logic isn't what this test file is checking."""
     def __init__(self, engine):
         self.engine = engine
+        self.last_cost_types = None
 
     def _restrict_to_tradeable_universe(self, candidates):
         return candidates
 
-    def _compute_cost_map(self, symbols):
+    def _compute_cost_map(self, symbols, trade_type_by_symbol=None):
         """Stub: returns empty cost map (cost computation is tested separately in
         test_indian_market_costs.py; this file is verifying target_2/target_3 population)."""
+        self.last_cost_types = trade_type_by_symbol
         return {}
 
     def _ensure_cost_columns(self):
@@ -104,6 +106,7 @@ def test_log_recommendations_populates_target_2_target_3_quant_score_sentiment_s
         "confidence": 80.0, "score": 70.0, "reasons": "strong screener confluence",
     }]
     AlphaQuantScoringEngine._log_recommendations(fake_self, candidates)
+    assert fake_self.last_cost_types == {"RELIANCE": "delivery"}
 
     with engine.begin() as conn:
         row = conn.execute(text(
@@ -144,6 +147,7 @@ def test_log_recommendations_handles_missing_quant_and_sentiment_gracefully():
         "confidence": 90.0, "score": 85.0, "reasons": "breakout",
     }]
     AlphaQuantScoringEngine._log_recommendations(fake_self, candidates)
+    assert fake_self.last_cost_types == {"NEWCO": "delivery"}
 
     with engine.begin() as conn:
         row = conn.execute(text(

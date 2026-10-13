@@ -59,7 +59,9 @@ export interface DigestData {
 const HORIZON_LABEL: Record<Horizon, string> = {
   INTRADAY: 'INTRADAY (same session)',
   SWING: 'SWING (days to weeks)',
-  POSITIONAL: 'LONG TERM (weeks to months)',
+  // Canonical outcome/expiry contracts grade POSITIONAL at 15 trading sessions. Calling this
+  // "months" advertised a horizon the platform neither predicts nor keeps alive.
+  POSITIONAL: 'POSITIONAL (up to 15 sessions)',
 };
 
 /**
@@ -344,7 +346,7 @@ export function renderDigest(d: DigestData): string {
   out.push('📈 *BHARAT STOCK INTELLIGENCE — DAILY PICKS*');
   out.push(`_${d.date}${d.regime ? ` · Market regime: ${sanitizeMarkdown(d.regime)}` : ''}_`);
 
-  out.push('\n━━━━━━━━━━━━━━━━━━━━\n*🗓 LONG TERM / SWING*');
+  out.push('\n━━━━━━━━━━━━━━━━━━━━\n*🗓 POSITIONAL / SWING*');
   if (d.longTerm.length === 0) {
     out.push('_No qualifying multi-day picks today._');
   } else {

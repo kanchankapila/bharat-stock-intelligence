@@ -107,8 +107,17 @@ class TechnicalAnalysisEngine:
         self.engine = get_engine()
 
     def load_ohlcv(self, symbol):
+        # Quality-filtered bars (2026-10-11 quant audit): every other consumer of the price
+        # spine (hv_features, mc_price_features_ohlcv, backtester) masks COALESCE(is_suspect,0)=0
+        # AND volume>0. This engine writes 24K+ unified_signals rows (trend/RSI/MACD/BB/ATR) and
+        # did NOT, so a single 1:10 unadjusted-split seam or zero-volume phantom bar in a symbol's
+        # series flipped its trend/Bollinger state for months. Same mask everywhere now.
         with self.engine.connect() as conn:
-            query = text("SELECT date, open, high, low, close, volume FROM stock_ohlcv WHERE symbol = :symbol ORDER BY date ASC")
+            query = text(
+                "SELECT date, open, high, low, close, volume FROM stock_ohlcv "
+                "WHERE symbol = :symbol AND COALESCE(is_suspect, 0) = 0 AND volume > 0 "
+                "ORDER BY date ASC"
+            )
             df = pd.read_sql(query, conn, params={"symbol": symbol})
             return df
 

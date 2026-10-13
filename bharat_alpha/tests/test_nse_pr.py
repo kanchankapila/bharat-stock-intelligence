@@ -64,6 +64,31 @@ def test_derived_factors_are_checked_against_the_exchange_record(conn):
     run_connector(conn, NsePrBundle(), bonus_day, raw=bc([(other, bonus_day, "BONUS 1:1")]))
     res = {r.check_id: r for r in check_adjustments(conn, last)}
     assert res["adjustments:vs_exchange"].status == "fail" and "no derived factor" in res["adjustments:vs_exchange"].detail
+
+    # Live NSE counterexample (AISL/MOLDTECH/MOLDTKPAC, 2026-10-09): PREV_CLOSE stayed
+    # unadjusted while the raw ex-date OHLC halved. The official ratio may fill that gap only
+    # when the observed price discontinuity corroborates it.
+    corroborated = read_df(conn, """SELECT s.symbol FROM alpha.daily_bar b
+                                     JOIN alpha.symbol_history s USING (instrument_id)
+                                    WHERE b.trade_date=%s AND s.valid_to IS NULL
+                                      AND s.symbol NOT IN (%s,%s)
+                                    ORDER BY s.symbol LIMIT 1""",
+                           (bonus_day, other, split_sym)).symbol[0]
+    iid = int(read_df(conn, "SELECT instrument_id FROM alpha.symbol_history WHERE symbol=%s", (corroborated,)).iloc[0, 0])
+    prior = float(read_df(conn, """SELECT close FROM alpha.daily_bar WHERE instrument_id=%s AND trade_date<%s
+                                   ORDER BY trade_date DESC LIMIT 1""", (iid, bonus_day)).close[0])
+    ex_price = prior * 0.5
+    with conn.cursor() as cur:
+        cur.execute("""UPDATE alpha.daily_bar
+                          SET open=%s, high=%s, low=%s, close=%s, vwap=%s
+                        WHERE instrument_id=%s AND trade_date=%s""",
+                    (ex_price, ex_price * 1.01, ex_price * 0.99, ex_price, ex_price, iid, bonus_day))
+    run_connector(conn, NsePrBundle(), bonus_day, raw=bc([(corroborated, bonus_day, "BONUS 1:1")]))
+    derive_adjustments(conn, bonus_day)
+    filled = read_df(conn, "SELECT factor, source FROM alpha.adjustment WHERE instrument_id=%s AND ex_date=%s",
+                     (iid, bonus_day))
+    assert filled.factor[0] == pytest.approx(0.5)
+    assert filled.source[0] == "nse_pr_bc_observed_gap"
     # and a derived factor the exchange did not record is flagged
     with conn.cursor() as cur:
         cur.execute("DELETE FROM alpha.corporate_event WHERE source='nse_pr_bc' AND event_type='split'")

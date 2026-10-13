@@ -240,7 +240,14 @@ def get_drift_multiplier() -> float:
     """
     try:
         row = query_one(
-            "SELECT drift_score FROM dl_model_performance ORDER BY eval_date DESC LIMIT 1",
+            # Training metrics and feature drift share this table. During the nightly chain,
+            # write_training_metrics() can create today's row before check_feature_drift()
+            # fills drift_score. Without the predicate, that temporary metric-only row wins
+            # ORDER BY and float(NULL) makes scoring silently drop the still-valid prior
+            # session haircut. Read the newest actual drift observation, not merely the
+            # newest row of any kind.
+            "SELECT drift_score FROM dl_model_performance "
+            "WHERE drift_score IS NOT NULL ORDER BY eval_date DESC LIMIT 1",
         )
         if not row:
             return 1.0

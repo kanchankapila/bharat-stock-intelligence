@@ -276,6 +276,13 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
       .catch(err => T.fail('backfill_sector_mc_enumerate', err));
     await runPython('backfill_sector_mc.py', ['--write', '--report-unmapped'], 120_000)
       .catch(err => T.fail('backfill_sector_mc_write', err));
+    // Independent gap fallback: MC classified 2,313/2,353 active symbols on the 2026-10-10
+    // audit; Yahoo classified 38 of the 41 rows that were still Unknown/missing in 25 seconds.
+    // Run gap-only after MC, not --all, so normal weekly cost stays proportional to uncovered
+    // symbols. backfill_sector_industry.py rejects a broad zero-result response rather than
+    // silently treating a provider outage as a successful no-op.
+    await runPython('backfill_sector_industry.py', [], 300_000)
+      .catch(err => T.fail('backfill_sector_industry', err));
     // Backfill canonical nse_stocks.sector from already-resolved confluence data, then
     // propagate to historical signal tables. Keeps sector segmentation healthy over time.
     // Budget 120s -> 600s (2026-09-05). Killed at 120s inside nse-sync on 2026-09-05 (that
@@ -447,8 +454,9 @@ export async function registerSyncJobs(connection: any) {
     // The 20-min value had silently stopped covering the sum: its own comment budgeted
     // "backfill_sectors.py (120s) and index_membership_fetcher.py (60s)", but backfill_sectors
     // was raised to 600s on 2026-09-05 and index_membership to 180s, and neither bump revisited
-    // this lock. Current step budgets sum to ~35 min (sector_mc enumerate 20 + write 2 +
-    // backfill_sectors 10 + index_membership 3) against a 20-min lock, so BullMQ would consider
+    // this lock. Current step budgets sum to ~40 min (sector_mc enumerate 20 + write 2 +
+    // Yahoo gap fallback 5 + backfill_sectors 10 + index_membership 3) against the old 20-min
+    // lock, so BullMQ would consider
     // the worker dead partway through and reclaim a job that was running fine -- the exact
     // failure processScreenerPerf's lockDuration comment above records. 60 min is real margin
     // over the sum, not over the largest single step.

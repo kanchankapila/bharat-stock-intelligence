@@ -306,7 +306,6 @@ class TestFindClosedSessions:
                 "VALUES (?,?,?,?,?,?,?)", (f"ILQ{i}", '2026-05-04', 9.0, 9.0, 9.0, 9.0, 0))
         conn.commit()
         assert dir_mod._find_closed_sessions(conn) == []
-
     def test_flat_bars_with_real_volume_are_a_real_session(self):
         conn = self._conn()
         self._insert(conn, '2026-05-05', 120, flat=True, volume=25_000)
