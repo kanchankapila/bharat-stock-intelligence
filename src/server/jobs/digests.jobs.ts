@@ -188,10 +188,21 @@ export async function processMorningBrief(job?: { data?: { force?: boolean } }):
           WHERE date < (now() AT TIME ZONE 'Asia/Kolkata')::date
        ) completed_sessions`);
   const ageMs = Date.now() - new Date(ur.g.endsWith('Z') ? ur.g : `${ur.g}Z`).getTime();
-  if (!(ageMs >= 0) || ageMs > MORNING_BRIEF_MAX_CALENDAR_AGE_MS || ur.d !== session?.d) {
-    const msg = `SKIPPED: ranking session ${ur.d} does not match the latest completed NSE `
-      + `session ${session?.d ?? 'unknown'} (age ${Math.round(ageMs / 3_600_000)}h) — `
-      + 'the latest session has no completed unified ranking; see unified-ranker heartbeat';
+  // Two legitimate inputs, mirroring unifiedRankingIsFresh's two paths:
+  //  (a) session-match — the evening rank stamped with the latest COMPLETED session's date
+  //      (this is the Monday→Friday case the docstring calls out), or
+  //  (b) calendar-today — an early-morning ranker run that legitimately stamps today's date
+  //      before the session's EOD tables land (2026-10-14 07:11 IST rank stamped 2026-10-14
+  //      while the latest completed session was still 2026-10-13). Judging (b) only against
+  //      session.d skipped the brief on every such morning; the 7-day cap still guards staleness.
+  const istToday = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const sessionMatches = ur.d === session?.d;
+  const generatedToday = ur.d === istToday;
+  if (!(ageMs >= 0) || ageMs > MORNING_BRIEF_MAX_CALENDAR_AGE_MS || (!sessionMatches && !generatedToday)) {
+    const msg = `SKIPPED: ranking session ${ur.d} matches neither the latest completed NSE `
+      + `session ${session?.d ?? 'unknown'} nor calendar-today ${istToday} (age `
+      + `${Math.round(ageMs / 3_600_000)}h) — the latest session has no completed unified `
+      + 'ranking; see unified-ranker heartbeat';
     console.warn('[QUEUE] morning-brief', msg);
     return { success: false, failedSteps: [msg] } as unknown as void;
   }
