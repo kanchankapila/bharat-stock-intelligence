@@ -42,6 +42,7 @@ export interface TaggableStock {
   rating_downgrade_180d?: boolean | number | null;
   fcf_positive?: boolean | number | null;
   fcf_yield?: number | null;
+  fcf_basis?: string | null;
   debt_coverage_risk?: boolean | number | null;
   block_deal_flag?: boolean | number | null;
   block_deal_direction?: number | null;
@@ -78,7 +79,7 @@ export function buildStockBadges(p: TaggableStock): Array<{ label: string; color
   if (p.rating_upgrade_180d) badges.push({ label: 'Rating ↑', color: 'bg-sky-500/20 text-sky-300' });
   if (p.rating_downgrade_180d) badges.push({ label: 'Rating ↓', color: 'bg-rose-500/15 text-rose-400' });
 
-  if (p.fcf_positive && p.fcf_yield != null && p.fcf_yield > 3) badges.push({ label: `FCF ${p.fcf_yield.toFixed(1)}%`, color: 'bg-teal-500/20 text-teal-300' });
+  if (p.fcf_basis === 'capex' && p.fcf_positive && p.fcf_yield != null && p.fcf_yield > 3) badges.push({ label: `FCF ${p.fcf_yield.toFixed(1)}%`, color: 'bg-teal-500/20 text-teal-300' });
   if (p.debt_coverage_risk) badges.push({ label: 'Debt risk', color: 'bg-orange-500/20 text-orange-300' });
 
   if (p.block_deal_flag && p.block_deal_direction != null && p.block_deal_direction > 0) badges.push({ label: 'Block buy', color: 'bg-sky-500/15 text-sky-400' });

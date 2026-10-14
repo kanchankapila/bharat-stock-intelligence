@@ -35,32 +35,50 @@ TRAIN_HISTORY_DAYS = 365 * 6
 
 
 def run_step(conn: psycopg.Connection, job: str, as_of: dt.date, fn: Callable[[], dict | None], force: bool = False) -> dict:
-    if not force:
-        done = read_df(conn, "SELECT 1 FROM alpha.job_run WHERE job=%s AND as_of_date=%s AND status='success' LIMIT 1",
-                       (job, as_of))
-        if len(done):
-            return {"status": "skipped", "reason": "already succeeded"}
-    with conn.cursor() as cur:
-        cur.execute("INSERT INTO alpha.job_run(job, as_of_date, status) VALUES (%s,%s,'running') RETURNING run_id",
-                    (job, as_of))
-        run_id = cur.fetchone()[0]
-    conn.commit()
     try:
-        detail = fn() or {}
-        # Multi-connector steps use `partial` when their critical path completed but one
-        # optional source failed. Keep the failure visible and retryable without suppressing
-        # independent downstream scoring/publishing work.
-        status = detail.pop("_status", "success")
-        if status not in ("success", "partial"):
-            raise ValueError(f"invalid successful step status: {status}")
-    except Exception:
-        conn.rollback()
-        detail, status = {"error": traceback.format_exc(limit=8)}, "failed"
-    with conn.cursor() as cur:
-        cur.execute("UPDATE alpha.job_run SET status=%s, detail=%s, finished_at=now() WHERE run_id=%s",
-                    (status, Jsonb(jsonable(detail)), run_id))
-    conn.commit()
-    return {"status": status, **detail}
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT pg_try_advisory_lock(hashtextextended(%s, 0))",
+                (f"bharat-alpha:{job}:{as_of.isoformat()}",),
+            )
+            locked = bool(cur.fetchone()[0])
+        if not locked:
+            conn.rollback()
+            return {"status": "skipped", "reason": "already running"}
+
+        if not force:
+            done = read_df(conn, "SELECT 1 FROM alpha.job_run WHERE job=%s AND as_of_date=%s AND status='success' LIMIT 1",
+                           (job, as_of))
+            if len(done):
+                return {"status": "skipped", "reason": "already succeeded"}
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO alpha.job_run(job, as_of_date, status) VALUES (%s,%s,'running') RETURNING run_id",
+                        (job, as_of))
+            run_id = cur.fetchone()[0]
+        conn.commit()
+        try:
+            detail = fn() or {}
+            # Optional-source steps use `partial` to remain visible and retryable without
+            # suppressing independent downstream scoring/publishing work.
+            status = detail.pop("_status", "success")
+            if status not in ("success", "partial"):
+                raise ValueError(f"invalid successful step status: {status}")
+        except Exception:
+            conn.rollback()
+            detail, status = {"error": traceback.format_exc(limit=8)}, "failed"
+        with conn.cursor() as cur:
+            cur.execute("UPDATE alpha.job_run SET status=%s, detail=%s, finished_at=now() WHERE run_id=%s",
+                        (status, Jsonb(jsonable(detail)), run_id))
+        conn.commit()
+        return {"status": status, **detail}
+    finally:
+        if locals().get("locked", False):
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
+                    (f"bharat-alpha:{job}:{as_of.isoformat()}",),
+                )
+            conn.commit()
 
 
 def step_ingest(conn: psycopg.Connection, as_of: dt.date, client: HttpClient | None = None) -> dict:
@@ -85,6 +103,20 @@ def step_vendor(conn: psycopg.Connection, as_of: dt.date, client: HttpClient | N
     if any(v["status"] == "failed" for v in res.values()):
         res["_status"] = "partial"
     return res
+
+
+def step_vendor_source(
+    conn: psycopg.Connection,
+    as_of: dt.date,
+    name: str,
+    client: HttpClient | None = None,
+) -> dict:
+    """Run one optional vendor with its own truthful job status and retry boundary."""
+    status, rows = run_connector(conn, CONNECTORS[name](), as_of, client=client or HttpClient())
+    result = {"source_status": status, "rows": rows}
+    if status != "success":
+        result["_status"] = "partial"
+    return result
 
 
 def step_quality(conn: psycopg.Connection, as_of: dt.date) -> dict:
@@ -195,7 +227,16 @@ def run_daily(conn: psycopg.Connection, as_of: dt.date, ingest: bool = True, cli
                                     lambda: build_targets(conn, as_of, s.portfolio_horizon, s.portfolio_capital_inr), force)
     out["session"] = run_step(conn, "session", as_of, lambda: step_session(conn, as_of), force)
     if ingest:
-        out["vendor"] = run_step(conn, "vendor", as_of, lambda: step_vendor(conn, as_of, client), force)
+        vendor_client = client or HttpClient()
+        for name in VENDOR_SEQUENCE:
+            key = f"vendor:{name}"
+            out[key] = run_step(
+                conn,
+                key,
+                as_of,
+                lambda name=name: step_vendor_source(conn, as_of, name, vendor_client),
+                force,
+            )
     checks = run_checks(conn, as_of, s.horizons)
     out["dq"] = {"fail": [c.check_id for c in checks if c.status == "fail"],
                  "warn": [c.check_id for c in checks if c.status == "warn"]}

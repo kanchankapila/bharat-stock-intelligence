@@ -794,9 +794,16 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # feat['eps_momentum']         = feat['eps_surprise_q1'] * feat['eps_beat_streak_norm']  # streak × size — disabled: eps_surprise_q1 unpopulated
 
     # ── Financial quality: FCF + interest coverage (financial_ratios_fetcher.py) ──
-    feat['fcf_yield_norm']    = num('fcf_yield', 0.0).clip(-5, 20) / 20.0
+    # CFO+CFI is only a labelled cash-after-investing proxy; it includes acquisitions,
+    # disposals and securities-book flows and must never masquerade as free cash flow.
+    # Only the four-quarter CFO-CapEx basis may drive FCF model features.
+    if 'fcf_basis' in df.columns:
+        true_fcf = df['fcf_basis'].astype('string').str.lower().eq('capex').fillna(False)
+    else:
+        true_fcf = pd.Series(False, index=df.index)
+    feat['fcf_yield_norm']    = (num('fcf_yield', 0.0).clip(-5, 20) / 20.0).where(true_fcf, 0.0)
     feat['interest_cov']      = num('interest_coverage', 5.0).clip(0, 20) / 20.0
-    feat['fcf_positive']      = num('fcf_positive', 0.0).clip(0, 1)
+    feat['fcf_positive']      = num('fcf_positive', 0.0).clip(0, 1).where(true_fcf, 0.0)
     feat['debt_risk']         = num('debt_coverage_risk', 0.0).clip(0, 1)
     feat['quality_score']     = feat['fcf_positive'] * (1 - feat['debt_risk'])  # FCF+safe = quality
 
@@ -1200,7 +1207,7 @@ def full_feature_train_sql(anchor: str = 'so', date_col: str = 'signal_date') ->
                    ts.expected_move_pct, ts.stock_gex_proxy, ts.iv_term_slope,
                    ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
-                   ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.fcf_yield_approx AS fcf_yield, ts.fcf_basis, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
                    ts.interest_coverage_post_tax, ts.lt_de_ratio,
                    ts.nim, ts.cost_to_income, ts.int_income_earning_assets, ts.non_int_income_earning_assets,
@@ -1459,7 +1466,7 @@ def full_feature_score_sql() -> tuple:
                    ts.expected_move_pct, ts.stock_gex_proxy, ts.iv_term_slope,
                    ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
-                   ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.fcf_yield_approx AS fcf_yield, ts.fcf_basis, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
                    ts.interest_coverage_post_tax, ts.lt_de_ratio,
                    ts.nim, ts.cost_to_income, ts.int_income_earning_assets, ts.non_int_income_earning_assets,
@@ -1734,7 +1741,7 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
                    ts.expected_move_pct, ts.stock_gex_proxy, ts.iv_term_slope,
                    ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
-                   ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.fcf_yield_approx AS fcf_yield, ts.fcf_basis, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
                    ts.interest_coverage_post_tax, ts.lt_de_ratio,
                    ts.nim, ts.cost_to_income, ts.int_income_earning_assets, ts.non_int_income_earning_assets,
@@ -2033,7 +2040,7 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
                    ts.expected_move_pct, ts.stock_gex_proxy, ts.iv_term_slope,
                    ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
-                   ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.fcf_yield_approx AS fcf_yield, ts.fcf_basis, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
                    ts.interest_coverage_post_tax, ts.lt_de_ratio,
                    ts.nim, ts.cost_to_income, ts.int_income_earning_assets, ts.non_int_income_earning_assets,
@@ -2314,7 +2321,7 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.expected_move_pct, ts.stock_gex_proxy, ts.iv_term_slope,
                    ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
-                   ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.fcf_yield_approx AS fcf_yield, ts.fcf_basis, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
                    ts.interest_coverage_post_tax, ts.lt_de_ratio,
                    ts.nim, ts.cost_to_income, ts.int_income_earning_assets, ts.non_int_income_earning_assets,
@@ -2648,7 +2655,7 @@ def load_pending_signals() -> pd.DataFrame:
                    {ts_c('expected_move_pct')}, {ts_c('stock_gex_proxy')}, {ts_c('iv_term_slope')},
                    {ts_c('eps_surprise_q1')}, {ts_c('eps_surprise_q2')}, {ts_c('eps_beat_streak')},
                    {ts_c('eps_miss_after_streak')}, {ts_c('rev_surprise_q1')},
-                   {ts_c('fcf_yield_approx', 'fcf_yield')}, {ts_c('interest_coverage')}, {ts_c('fcf_positive')}, {ts_c('debt_coverage_risk')},
+                   {ts_c('fcf_yield_approx', 'fcf_yield')}, {ts_c('fcf_basis')}, {ts_c('interest_coverage')}, {ts_c('fcf_positive')}, {ts_c('debt_coverage_risk')},
                    {ts_c('roce')}, {ts_c('roce_trend')}, {ts_c('quick_ratio')}, {ts_c('ev_ebitda')}, {ts_c('asset_turnover')}, {ts_c('cfo_growth')},
                    {ts_c('interest_coverage_post_tax')}, {ts_c('lt_de_ratio')},
                    {ts_c('nim')}, {ts_c('cost_to_income')}, {ts_c('int_income_earning_assets')}, {ts_c('non_int_income_earning_assets')},

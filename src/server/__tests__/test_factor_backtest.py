@@ -389,6 +389,57 @@ class TestBetaAndIdioVol:
         assert out['beta'].isna().all() and out['idio_vol'].isna().all()
         assert 'WARNING' in capsys.readouterr().out
 
+    def test_market_data_gap_matches_the_pairwise_valid_hand_computation(self):
+        """AF-20261011-16 — the covariance denominator must count the SAME rows the
+        numerator does. Punch a 30-session index-data gap (NIFTY50 rows absent, stock rows
+        present): the pre-fix code used n = count(_dr) = all 252 stock bars while the sums
+        skipped the gap rows, so cov was divided by 251 instead of 221.
+
+        NEGATIVE-CONTROLLED two ways: the pre-fix beta (stock-only n) is also computed by
+        hand and must differ from the pairwise value by a wide margin — if the fixture ever
+        stops discriminating, the first assertion fails rather than letting the second pass
+        vacuously (the AF-20260817-lesson for derived-expectation tests). The idio≈0 pin
+        additionally requires var_i/var_m to have been masked to the pairwise set too.
+        """
+        n = 260
+        dates = pd.date_range('2022-01-03', periods=n, freq='B').strftime('%Y-%m-%d').tolist()
+        panel = self._mkt_panel(n=n)
+        gap = set(dates[50:80])
+        panel = panel[~((panel['symbol'] == 'NIFTY50')
+                        & (panel['date'].isin(gap)))].reset_index(drop=True)
+
+        out = fb._add_beta_and_idio_vol(panel)
+        got = out.loc[out['symbol'] == 'LEVER', 'beta'].dropna().iloc[-1]
+
+        # Hand computation over the final 252-session window (rolling window of the last row).
+        lever = panel[panel['symbol'] == 'LEVER'].reset_index(drop=True)
+        mkt = panel[panel['symbol'] == 'NIFTY50'].set_index('date')['_dr']
+        win = lever.iloc[-252:]
+        x = win['_dr'].to_numpy()
+        y = mkt.reindex(win['date']).to_numpy()          # NaN exactly on the gap sessions
+        m = np.isfinite(x) & np.isfinite(y)
+        xv, yv = x[m], y[m]
+        nv = len(xv)
+        var = (np.sum(yv * yv) - np.sum(yv) ** 2 / nv) / (nv - 1)
+        cov = (np.sum(xv * yv) - np.sum(xv) * np.sum(yv) / nv) / (nv - 1)
+        beta_pairwise = cov / var
+
+        # Pre-fix shape: n = count(_dr) over the window (stock-only, includes gap sessions)
+        # while Σxy/Σy skip them.
+        n_all = len(x)
+        beta_buggy = ((np.sum(xv * yv) - np.sum(x) * np.sum(yv) / n_all) / (n_all - 1)) / var
+
+        assert abs(beta_pairwise - beta_buggy) > 1e-3, \
+            'fixture does not discriminate: pairwise and stock-only-n beta are indistinguishable'
+        assert got == pytest.approx(beta_pairwise, abs=1e-6)
+        # LEVER is exactly 2x the market by construction, so the true beta is exactly 2.
+        assert got == pytest.approx(2.0, abs=1e-6)
+        # var_i/var_m are masked to the same pairwise set, so an exact-2x series has no
+        # residual variance left. Unmasked var_i (stock-only window) would leave sampling
+        # noise of order 0.1–0.5 here.
+        iv = out.loc[out['symbol'] == 'LEVER', 'idio_vol'].dropna()
+        assert iv.iloc[-1] == pytest.approx(0.0, abs=1e-4)
+
 
 class TestScreenerBreadth:
     """_add_screener_breadth reconstructs a point-in-time membership COUNT from span rows

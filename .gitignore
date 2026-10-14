@@ -73,6 +73,8 @@ graphify-out/
 
 # ML model artifacts (generated at runtime by ml_ensemble.py / online_learner.py)
 src/server/ml_models/
+# Bharat Alpha joblib bundles and runtime manifests are generated/promoted in production.
+/artifacts/
 *.pkl
 
 # Scratch/temp directories and one-off scripts

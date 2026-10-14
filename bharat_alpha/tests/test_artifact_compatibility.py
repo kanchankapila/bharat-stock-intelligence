@@ -3,6 +3,7 @@ import json
 import joblib
 import pytest
 
+from bharat_alpha.modeling import train
 from bharat_alpha.modeling.train import ModelBundle, artifact_runtime, dump_bundle, load_bundle
 
 
@@ -48,3 +49,17 @@ def test_legacy_artifact_without_manifest_is_rejected(tmp_path):
 
     with pytest.raises(RuntimeError, match="has no runtime manifest"):
         load_bundle(str(path))
+
+
+def test_relative_artifact_path_is_anchored_to_repository_not_cwd(tmp_path, monkeypatch):
+    monkeypatch.setattr(train, "REPOSITORY_ROOT", tmp_path)
+    path = tmp_path / "artifacts" / "models" / "model.joblib"
+    path.parent.mkdir(parents=True)
+    dump_bundle(_bundle(), path)
+    elsewhere = tmp_path / "bharat_alpha"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    loaded = load_bundle("artifacts/models/model.joblib")
+
+    assert loaded.artifact_runtime == artifact_runtime()

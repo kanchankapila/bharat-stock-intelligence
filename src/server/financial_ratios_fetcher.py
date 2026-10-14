@@ -12,7 +12,7 @@ ET_Stats mobile endpoint (see et_stats_client.py), keyed by each stock's ET
   Interest Coverage = read directly from ET_Stats Ratio.interestCoverage
                        (ET computes this for us — no manual EBIT/interest
                        derivation needed).
-  FCF Yield (approx) = (CFO + CFI) / market_cap * 100
+  FCF Yield (approx) = ((CFO + CFI) in INR crore * 10^7) / market_cap_in_INR * 100
                        No CAPEX line item was found in MC, Trendlyne, ET, or
                        Tickertape for this platform's stock universe — CFI
                        (net cash used in investing activities, ET_Stats
@@ -69,6 +69,7 @@ from fetch_utils import FetchTracker
 import sys
 
 DEBT_COVERAGE_RISK_THRESHOLD = 1.5
+INR_PER_CRORE = 10_000_000.0
 
 
 # ── Schema ──────────────────────────────────────────────────────────────────────
@@ -434,7 +435,9 @@ def compute_ratios(
 
     fcf_yield_approx: float | None = None
     if fcf_ttm_approx is not None and market_cap and market_cap > 0:
-        fcf_yield_approx = round(fcf_ttm_approx / market_cap * 100, 4)
+        # ET_Stats cash-flow values are INR crore; stock_fundamentals.market_cap is raw INR.
+        # Dividing them directly suppressed every proxy yield by exactly 10^7.
+        fcf_yield_approx = round(fcf_ttm_approx * INR_PER_CRORE / market_cap * 100, 4)
 
     fcf_positive = 1 if (fcf_ttm_approx is not None and fcf_ttm_approx > 0) else (0 if fcf_ttm_approx is not None else None)
     debt_coverage_risk = (
@@ -641,7 +644,9 @@ def process_stock(symbol: str, company_id: str, today: str,
     as_of = features.get("year_ending") or today
     fcf_ttm, latest_period = finstack_ttm_fcf(con, symbol, as_of=as_of)
     if fcf_ttm is not None:
-        features["fcf_ttm_approx"] = fcf_ttm
+        # Finstack/Yahoo is raw INR while the ET proxy and this column's historical contract
+        # are INR crore. Normalise the amount before persistence; use raw INR for the yield.
+        features["fcf_ttm_approx"] = round(fcf_ttm / INR_PER_CRORE, 2)
         features["fcf_positive"] = 1 if fcf_ttm > 0 else 0
         features["fcf_yield_approx"] = (
             round(fcf_ttm / market_cap * 100, 4) if market_cap and market_cap > 0 else None

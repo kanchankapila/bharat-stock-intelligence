@@ -1128,10 +1128,6 @@ def _add_beta_and_idio_vol(px: pd.DataFrame) -> pd.DataFrame:
     #     cov = (sum(xy) - sum(x)sum(y)/n) / (n-1)
     # Identical to pandas' ddof=1 result, but .rolling().cov() builds a MultiIndex covariance
     # matrix per window and then needs an .unstack() over 3M rows -- minutes vs seconds here.
-    def _roll(col, how):
-        r = px.groupby('symbol', sort=False)[col].rolling(BETA_WINDOW, min_periods=BETA_MIN_OBS)
-        return getattr(r, how)().reset_index(level=0, drop=True)
-
     def _roll_masked(col, how):
         # Same rolling window, but the series is pre-masked to the pairwise-valid rows so the
         # count and the sums always describe the identical set of observations.
@@ -1144,8 +1140,14 @@ def _add_beta_and_idio_vol(px: pd.DataFrame) -> pd.DataFrame:
     s_xy, s_x, s_y = (_roll_masked('_xy', 'sum'), _roll_masked('_dr', 'sum'),
                       _roll_masked('_mkt', 'sum'))
     cov = (s_xy - s_x * s_y / n) / (n - 1)
-    var_m = _roll('_mkt', 'var')
-    var_i = _roll('_dr', 'var')
+    # Both variances must describe the SAME pairwise-valid rows as the cov numerator above:
+    # `_roll('_dr','var')` counted stock-only rows (a stock bar with no market return stayed
+    # in var_i but not var_m or cov), so resid_var mixed two windows (2026-10-11 quant audit,
+    # completing AF-20261011-16's contract: "n, sum(xy), sum(x), sum(y) and the variance terms
+    # all describe the identical pairwise-valid observation set"). pandas skipna inside
+    # rolling().var() would still count a market bar whose stock return is missing.
+    var_m = _roll_masked('_mkt', 'var')
+    var_i = _roll_masked('_dr', 'var')
     px['beta'] = cov / var_m.replace(0, np.nan)
     resid_var = var_i - px['beta'] ** 2 * var_m
     px['idio_vol'] = np.sqrt(resid_var.clip(lower=0)) * 100

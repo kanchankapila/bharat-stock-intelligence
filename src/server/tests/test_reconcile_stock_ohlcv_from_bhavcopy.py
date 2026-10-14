@@ -5,10 +5,10 @@ this exists: Yahoo's batch quote fetch can silently drop symbols (RELIANCE, live
 2026-09-03; PAYTM, a second independent instance found comparing 2026-09-02's tables) from
 stock_ohlcv's daily EOD write with no error. This reconciles that day's stock_ohlcv against
 the exchange's own bhavcopy (nse_universe_history, already written daily by
-nse_bhavcopy_fetcher.py) -- filling anything Yahoo missed and correcting anything it got
-wrong, without ever nulling a row that has no bhavcopy counterpart (the recurring
-"ELSE NULL erases history" bug class), and without silently widening stock_ohlcv's universe
-to bhavcopy's ETFs/micro-caps that aren't in nse_stocks (this platform's canonical master).
+nse_bhavcopy_fetcher.py) -- filling anything Yahoo missed, correcting anything it got wrong,
+and quarantining (not deleting/nulling) malformed Yahoo rows absent from the official file,
+without silently widening stock_ohlcv's universe to bhavcopy's ETFs/micro-caps that aren't
+in nse_stocks (this platform's canonical master).
 """
 import os
 import sqlite3
@@ -72,6 +72,7 @@ class TestReconcileFillsMissingSymbol:
         assert row['close'] == 1313.1
         assert row['volume'] == 13497841
         assert row['adjustment_basis'] == 'nse_bhavcopy_raw'
+        assert row['is_suspect'] == 0
 
 
 class TestReconcileCorrectsExistingSymbol:
@@ -95,6 +96,29 @@ class TestReconcileCorrectsExistingSymbol:
         ).fetchone())
         assert row['close'] == 1508.75
         assert row['volume'] == 5123456
+        assert row['is_suspect'] == 0
+
+    def test_yahoo_row_absent_from_all_official_series_is_quarantined(self):
+        """CCAVENUE 2026-10-13 shape: Yahoo stitched stale pre-consolidation fields to a
+        new-scale close while the symbol had no row in NSE's broad official file."""
+        conn = _make_conn()
+        _seed_master(conn, 'INFY', 'CCAVENUE')
+        _seed_bhavcopy(conn, '2026-10-13', 'INFY', 1500.0, 1510.0, 1490.0, 1505.0, 1000)
+        conn.execute(
+            "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume, is_suspect) "
+            "VALUES ('CCAVENUE', '2026-10-13', 14.91, 138.5, 13.61, 138.5, 42600000, 0)"
+        )
+        conn.commit()
+
+        result = rec.reconcile(conn, trade_date='2026-10-13')
+
+        row = dict(conn.execute(
+            "SELECT * FROM stock_ohlcv WHERE symbol='CCAVENUE' AND date::text='2026-10-13'"
+        ).fetchone())
+        assert result['quarantined'] == 1
+        assert row['is_suspect'] == 1
+        assert row['suspect_reason'] == 'absent_from_official_bhavcopy'
+        assert row['close'] == 138.5, "quarantine preserves the source row for forensics"
 
     def test_overwrite_false_never_touches_an_existing_row(self):
         conn = _make_conn()
@@ -112,6 +136,7 @@ class TestReconcileCorrectsExistingSymbol:
             "SELECT * FROM stock_ohlcv WHERE symbol='INFY' AND date::text='2026-09-03'"
         ).fetchone())
         assert row['close'] == 1505.0, "overwrite=False must leave the existing row untouched"
+        assert row['is_suspect'] is None
 
 
 class TestReconcileSeriesFilter:

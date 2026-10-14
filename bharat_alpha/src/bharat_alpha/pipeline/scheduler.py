@@ -13,6 +13,7 @@ import logging
 import time
 
 from bharat_alpha.db import connect, read_df
+from bharat_alpha.ingest.registry import VENDOR_SEQUENCE
 from bharat_alpha.pipeline.daily import run_daily
 from bharat_alpha.timeutil import IST, is_probable_session, ist_now, latest_completed_session
 
@@ -26,9 +27,22 @@ def pending_sessions(conn, today_session: dt.date, horizons: tuple[int, ...]) ->
     out, d = [], today_session
     while len(out) < MAX_CATCHUP_SESSIONS:
         if is_probable_session(d):
-            done = read_df(conn, "SELECT count(DISTINCT job) n FROM alpha.job_run WHERE as_of_date=%s AND status='success' "
-                                 "AND job = ANY(%s)", (d, [f"publish_h{h}" for h in horizons]))
-            if int(done.n[0]) == len(horizons):
+            publish_jobs = [f"publish_h{h}" for h in horizons]
+            vendor_jobs = [f"vendor:{name}" for name in VENDOR_SEQUENCE]
+            done = read_df(
+                conn,
+                """SELECT
+                       count(DISTINCT job) FILTER (
+                           WHERE job = ANY(%s) AND status = 'success'
+                       ) AS publishes,
+                       count(DISTINCT job) FILTER (
+                           WHERE job = ANY(%s) AND status IN ('success', 'partial')
+                       ) AS vendors
+                   FROM alpha.job_run
+                   WHERE as_of_date=%s""",
+                (publish_jobs, vendor_jobs, d),
+            )
+            if int(done.publishes[0]) == len(publish_jobs) and int(done.vendors[0]) == len(vendor_jobs):
                 break
             out.append(d)
         d -= dt.timedelta(days=1)

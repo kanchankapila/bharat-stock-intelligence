@@ -194,6 +194,7 @@ describe('individual evaluate() functions', () => {
     expect(check).toBeDefined();
     expect(check.sql).toMatch(/ohlcv_adjustment_factors/);
     expect(check.sql).toMatch(/0\.35/);
+    expect(check.sql).toContain('COALESCE(is_suspect, 0) = 0');
     expect(check.evaluate({ gap_count: 0, symbol_count: 0, latest_gap_date: null }, now).status).toBe('pass');
     const r = check.evaluate({ gap_count: 2, symbol_count: 2, latest_gap_date: '2026-07-18' }, now);
     expect(r.status).toBe('warn');
@@ -1154,6 +1155,11 @@ describe('audit regression guards (2026-08-11)', () => {
     expect(c.evaluate({ synthetic: 0 }, now).status).toBe('pass');
     expect(c.sql).toContain('unified_signal_outcomes');
     expect(c.sql).toContain('exit_price IS NULL');
+  });
+
+  it('ohlcv-bar-plausibility catches mixed-scale daily ranges', () => {
+    const check = find('ohlcv-bar-plausibility');
+    expect(check.sql).toContain('high / NULLIF(low, 0) > 3');
   });
 
   it('synthetic-neutral-outcomes proves its zero is from a moving live population', () => {

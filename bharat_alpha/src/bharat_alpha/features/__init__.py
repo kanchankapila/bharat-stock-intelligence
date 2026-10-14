@@ -678,6 +678,34 @@ class FeatureFrame:
         return self.stock_features + self.context_features
 
 
+def _stack_eligible_features(
+    raw: dict[str, pd.DataFrame],
+    panel_index: pd.Index,
+    panel_columns: pd.Index,
+    selected_index: pd.Index,
+    mask: pd.DataFrame,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Build the long stock-feature block without materialising then copying the full grid.
+
+    ``future_stack=True`` retains NaNs, so the former implementation first allocated every
+    date x instrument x feature and then ``.loc`` copied the eligible 74-column block. On the
+    production six-year panel that second copy alone needed 1.03 GiB and killed h21 retraining.
+    Select the eligible cells from each wide feature before constructing the DataFrame, and
+    keep rank-gauss features as float32 (ample precision for ranks and LightGBM).
+    """
+    eligible_values = mask.to_numpy(dtype=bool, copy=False)
+    flat_mask = mask.stack(future_stack=True)
+    eligible_index = flat_mask.index[flat_mask.to_numpy(dtype=bool, copy=False)]
+    columns: dict[str, np.ndarray] = {}
+    for name, wide in raw.items():
+        aligned = wide.reindex(index=panel_index, columns=panel_columns)
+        ranked = cs_rank_gauss(aligned.loc[selected_index], mask)
+        if ranked.notna().to_numpy().sum() == 0:
+            continue
+        columns[name] = ranked.to_numpy(copy=False)[eligible_values].astype(np.float32, copy=False)
+    return pd.DataFrame(columns, index=eligible_index), sorted(columns)
+
+
 def build_features(conn: psycopg.Connection, p: Panel, dates: pd.DatetimeIndex | None = None) -> FeatureFrame:
     mask = universe_mask(p)
     raw: dict[str, pd.DataFrame] = {}
@@ -698,21 +726,16 @@ def build_features(conn: psycopg.Connection, p: Panel, dates: pd.DatetimeIndex |
     raw.update(external_panels(conn, p, only_admitted=True))
     sel = dates if dates is not None else p.close.index
     m = mask.loc[sel]
-    stacked = {}
-    for name, w in raw.items():
-        w = w.reindex(index=p.close.index, columns=p.close.columns)
-        z = cs_rank_gauss(w.loc[sel], m)
-        if z.notna().to_numpy().sum() == 0:
-            continue                                   # no coverage at all: not a feature today
-        stacked[name] = z.stack(future_stack=True)
-    long = pd.DataFrame(stacked)
+    long, stock_features = _stack_eligible_features(
+        raw, p.close.index, p.close.columns, sel, m,
+    )
     long.index.names = ["date", "instrument_id"]
-    elig = m.stack(future_stack=True)
-    long = long.loc[elig[elig].index.intersection(long.index)]
     ctx = market_context(conn, p).loc[sel]
     ctx_cols = [c for c in ctx.columns if ctx[c].notna().any()]
-    long = long.join(ctx[ctx_cols], on="date")
-    return FeatureFrame(long.sort_index(), sorted(stacked), ctx_cols, mask)
+    long = long.join(ctx[ctx_cols].astype(np.float32), on="date")
+    if not long.index.is_monotonic_increasing:
+        long = long.sort_index()
+    return FeatureFrame(long, stock_features, ctx_cols, mask)
 
 
 def panel_window(end: dt.date, lookback_sessions: int, conn: psycopg.Connection) -> tuple[dt.date, dt.date]:

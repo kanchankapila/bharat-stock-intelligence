@@ -961,7 +961,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   },
   {
     id: 'ohlcv-bar-plausibility',
-    label: 'OHLCV bar plausibility (high>=low, close>0)',
+    label: 'OHLCV bar plausibility (positive, coherent daily range)',
     category: 'ohlcv',
     critical: true,
     // AF-20260917-22 companion fix: this check's own label and contract are "high>=low,
@@ -979,7 +979,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // >=95%-flat detector below cannot see).
     sql: `SELECT
             (SELECT COUNT(*) FROM stock_ohlcv WHERE date >= current_date - 5
-               AND (close <= 0 OR high < low)) AS bad,
+               AND (close <= 0 OR low <= 0 OR high < low OR high / NULLIF(low, 0) > 3)) AS bad,
             (SELECT COUNT(*) FROM stock_ohlcv WHERE date >= current_date - 5) AS total,
             (SELECT COUNT(*) FROM stock_ohlcv WHERE date >= current_date - 5
                AND COALESCE(is_suspect, 0) = 1) AS suspect`,
@@ -1015,6 +1015,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
                    LAG(close) OVER (PARTITION BY symbol ORDER BY date) AS prior_close
             FROM stock_ohlcv
             WHERE date >= current_date - 70
+              AND COALESCE(is_suspect, 0) = 0
           ), candidate_gaps AS (
             SELECT symbol, date
             FROM recent_bars

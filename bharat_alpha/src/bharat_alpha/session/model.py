@@ -26,7 +26,8 @@ from bharat_alpha.labels import winsorize_rows
 from bharat_alpha.marketdata import Panel, load_panel
 from bharat_alpha.modeling.members import combine, default_members
 from bharat_alpha.modeling.train import (
-    ModelBundle, artifact_runtime, artifact_runtime_tag, config_hash, dump_bundle, walk_forward_oof,
+    ModelBundle, artifact_runtime, artifact_runtime_tag, config_hash, dump_bundle, resolve_artifact_path,
+    walk_forward_oof,
 )
 from bharat_alpha.session import (
     capitulation, day_flags, day_level, next_session_oc, preopen_features, session_features, session_universe,
@@ -149,7 +150,7 @@ def train_session_model(conn: psycopg.Connection, ds: SessionDataset, register: 
     report.update({"config_hash": chash, "artifact_runtime": runtime,
                    "n_rows": int(len(ds.X)), "features": list(ds.X.columns)})
     if register:
-        path = Path(s.artifacts_dir) / "models" / f"{model_id}.joblib"
+        path = resolve_artifact_path(Path(s.artifacts_dir) / "models" / f"{model_id}.joblib")
         path.parent.mkdir(parents=True, exist_ok=True)
         dump_bundle(bundle, path)
         with conn.cursor() as cur:

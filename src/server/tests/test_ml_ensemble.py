@@ -427,6 +427,20 @@ class TestInsiderActivityFeatures:
         assert X['insider_buy_pct_90d'].iloc[1] == pytest.approx(0.1, abs=0.01)
 
 
+class TestFcfBasisHonesty:
+    def test_proxy_cashflow_cannot_drive_true_fcf_features(self):
+        df = _make_feature_df(n=2)
+        df['fcf_yield'] = [10.0, 10.0]
+        df['fcf_positive'] = [1, 1]
+        df['fcf_basis'] = ['cfo_cfi_proxy', 'capex']
+
+        X = build_features(df)
+
+        assert X['fcf_yield_norm'].tolist() == [0.0, 0.5]
+        assert X['fcf_positive'].tolist() == [0.0, 1.0]
+        assert X['quality_score'].iloc[0] == 0.0
+
+
 class TestIntradayMicrostructureFeatures:
     def test_intraday_features_present(self):
         X = build_features(_make_feature_df())

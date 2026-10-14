@@ -22,11 +22,12 @@ class TestComputeRatios:
     def test_fcf_yield_uses_cfi_as_capex_proxy(self):
         cashflow = [_cashflow_row(cfo=1500.0, cfi=-400.0)]
         ratio = [_ratio_row(interest_coverage=12.5)]
-        result = frf.compute_ratios(balance=None, cashflow=cashflow, ratio=ratio, market_cap=50000.0)
+        market_cap_inr = 50_000.0 * frf.INR_PER_CRORE
+        result = frf.compute_ratios(balance=None, cashflow=cashflow, ratio=ratio, market_cap=market_cap_inr)
 
-        # fcf_approx = cfo + cfi = 1500 + (-400) = 1100 (CFI is negative for capex-heavy firms)
+        # ET cash flow is INR crore while market cap is raw INR.
         assert result["fcf_ttm_approx"] == 1100.0
-        assert result["fcf_yield_approx"] == round(1100.0 / 50000.0 * 100, 4)
+        assert result["fcf_yield_approx"] == 2.2
         assert result["interest_coverage"] == 12.5
 
     def test_interest_coverage_read_directly_not_derived(self):
@@ -346,7 +347,7 @@ class TestProcessStockPrefersRealCapexFcf:
                  "netCashFlowFromOperatingActivities": 1500.0,
                  "netCashUsedInInvestingActivities": -400.0}]
 
-    def _run(self, monkeypatch, fcf_ttm, latest_period, market_cap=50000.0):
+    def _run(self, monkeypatch, fcf_ttm, latest_period, market_cap=500_000_000_000.0):
         captured = {}
         monkeypatch.setattr(frf, "fetch_et_stats",
                             lambda cid, family, sess, **kw: self._cashflow() if family == "CashFlow"
@@ -362,16 +363,16 @@ class TestProcessStockPrefersRealCapexFcf:
         return captured["feats"]
 
     def test_real_capex_fcf_replaces_the_proxy(self, monkeypatch):
-        feats = self._run(monkeypatch, fcf_ttm=1942.16, latest_period="2026-06-30")
+        feats = self._run(monkeypatch, fcf_ttm=19_421_600_000.0, latest_period="2026-06-30")
         # proxy would have said 1100.0; the real CFO−CapEx number wins
         assert feats["fcf_ttm_approx"] == 1942.16
         assert feats["fcf_positive"] == 1
-        assert feats["fcf_yield_approx"] == round(1942.16 / 50000.0 * 100, 4)
+        assert feats["fcf_yield_approx"] == round(19_421_600_000.0 / 500_000_000_000.0 * 100, 4)
         assert feats["fcf_basis"] == frf.FCF_BASIS_CAPEX
         assert feats["fcf_ttm_as_of"] == "2026-06-30"
 
     def test_real_negative_capex_fcf_flips_fcf_positive(self, monkeypatch):
-        feats = self._run(monkeypatch, fcf_ttm=-200.0, latest_period="2026-06-30")
+        feats = self._run(monkeypatch, fcf_ttm=-2_000_000_000.0, latest_period="2026-06-30")
         assert feats["fcf_positive"] == 0
         assert feats["fcf_ttm_approx"] == -200.0
 
@@ -427,7 +428,7 @@ class TestProcessStockFcfBasis:
                  "netCashFlowFromOperatingActivities": 1500.0,
                  "netCashUsedInInvestingActivities": -400.0}]
 
-    def _run(self, monkeypatch, fcf_ttm, latest_period, market_cap=50000.0):
+    def _run(self, monkeypatch, fcf_ttm, latest_period, market_cap=500_000_000_000.0):
         captured = {}
 
         def fake_fetch(cid, family, sess, **kw):
@@ -446,16 +447,16 @@ class TestProcessStockFcfBasis:
         return captured["feats"]
 
     def test_real_capex_fcf_replaces_the_proxy(self, monkeypatch):
-        feats = self._run(monkeypatch, fcf_ttm=1942.16, latest_period="2026-06-30")
+        feats = self._run(monkeypatch, fcf_ttm=19_421_600_000.0, latest_period="2026-06-30")
         # the CFO+CFI proxy would have said 1100.0; the real CFO-CapEx number wins
         assert feats["fcf_ttm_approx"] == 1942.16
         assert feats["fcf_positive"] == 1
-        assert feats["fcf_yield_approx"] == round(1942.16 / 50000.0 * 100, 4)
+        assert feats["fcf_yield_approx"] == round(19_421_600_000.0 / 500_000_000_000.0 * 100, 4)
         assert feats["fcf_basis"] == frf.FCF_BASIS_CAPEX
         assert feats["fcf_ttm_as_of"] == "2026-06-30"
 
     def test_real_negative_capex_fcf_flips_fcf_positive(self, monkeypatch):
-        feats = self._run(monkeypatch, fcf_ttm=-200.0, latest_period="2026-06-30")
+        feats = self._run(monkeypatch, fcf_ttm=-2_000_000_000.0, latest_period="2026-06-30")
         assert feats["fcf_ttm_approx"] == -200.0
         assert feats["fcf_positive"] == 0
 

@@ -17,7 +17,11 @@ what actually traded; this script reconciles stock_ohlcv against it every evenin
 anything Yahoo missed and correcting anything it got wrong (overwrite=True is the default,
 matching the same-day case where no split/dividend adjustment gap can yet exist between the
 two sources -- see mc_ohlcv_backfill.py's adjustment_basis discontinuity note for why that
-caveat does NOT apply here, only to older historical rows).
+caveat does NOT apply here, only to older historical rows). An intrinsically malformed Yahoo
+row for a tracked symbol that is also absent from every series in the broad official file is
+retained for forensics but quarantined with is_suspect=1. Requiring both conditions avoids
+quarantining legitimate vendor/canonical aliases while catching suspended/corporate-action
+days where Yahoo stitches stale O/L/V fields to a new-scale close (CCAVENUE, 2026-10-13).
 
 Dual-write validation phase (2026-09-03): this runs ALONGSIDE the existing Yahoo write, not
 in place of it -- see AF-20260903-01. Once proven clean over several sessions, Yahoo's own
@@ -72,11 +76,27 @@ def reconcile(conn: ConnWrapper, trade_date: str | None = None, overwrite: bool 
         return {"trade_date": trade_date, "read": 0, "written": 0,
                  "skipped": f"no EQ-series bhavcopy rows for {trade_date}"}
 
+    quarantined = 0
+    if overwrite:
+        cur = conn.execute(
+            "UPDATE stock_ohlcv SET is_suspect = 1, "
+            "suspect_reason = 'absent_from_official_bhavcopy' "
+            "WHERE date = ? AND symbol IN (SELECT symbol FROM nse_stocks) "
+            "AND (close <= 0 OR low <= 0 OR high < low OR high / NULLIF(low, 0) > 3) "
+            "AND NOT EXISTS (SELECT 1 FROM nse_universe_history n "
+            "                WHERE n.date = ? AND n.symbol = stock_ohlcv.symbol "
+            "                  AND n.close IS NOT NULL AND n.close > 0)",
+            (trade_date, trade_date),
+        )
+        quarantined = max(cur.rowcount, 0)
+
     conflict = ("DO UPDATE SET open=excluded.open, high=excluded.high, low=excluded.low, "
                 "close=excluded.close, volume=excluded.volume, "
-                "adjustment_basis=excluded.adjustment_basis" if overwrite else "DO NOTHING")
-    sql_ohlcv = ("INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume, adjustment_basis) "
-                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (symbol, date) " + conflict)
+                "adjustment_basis=excluded.adjustment_basis, is_suspect=excluded.is_suspect, "
+                "suspect_reason=excluded.suspect_reason" if overwrite else "DO NOTHING")
+    sql_ohlcv = ("INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume, "
+                 "adjustment_basis, is_suspect, suspect_reason) "
+                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (symbol, date) " + conflict)
 
     # Ensure stock_delivery_volume exists
     conn.execute("""
@@ -113,7 +133,7 @@ def reconcile(conn: ConnWrapper, trade_date: str | None = None, overwrite: bool 
     for r in src_full:
         r = dict(r)
         ohlcv_batch.append((r["symbol"], trade_date, r["open"], r["high"], r["low"],
-                            r["close"], r["volume"], "nse_bhavcopy_raw"))
+                            r["close"], r["volume"], "nse_bhavcopy_raw", 0, None))
         if r.get("deliv_pct") is not None:
             deliv_batch.append((r["symbol"], trade_date, r.get("series", "EQ"),
                                 r.get("volume"), r.get("deliv_qty"), r.get("deliv_pct")))
@@ -151,6 +171,7 @@ def reconcile(conn: ConnWrapper, trade_date: str | None = None, overwrite: bool 
         "trade_date": trade_date,
         "read": len(src_full),
         "written": len(ohlcv_batch),
+        "quarantined": quarantined,
         "deliv_written": len(deliv_batch),
         "tech_filled": max(tech_filled, 0),
     }
@@ -175,7 +196,8 @@ def main() -> int:
         return 0
     print(f"[RECONCILE] {result['trade_date']}: {result['written']}/{result['read']} "
           f"stock_ohlcv rows and {result.get('deliv_written', 0)} delivery rows reconciled against nse_universe_history "
-          f"({'overwrite' if overwrite else 'fill-only'}), filled {result.get('tech_filled', 0)} technical_signals.delivery_pct")
+          f"({'overwrite' if overwrite else 'fill-only'}), quarantined {result.get('quarantined', 0)} "
+          f"unverified rows, filled {result.get('tech_filled', 0)} technical_signals.delivery_pct")
     return 0
 
 

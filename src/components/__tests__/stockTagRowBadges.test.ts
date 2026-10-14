@@ -41,6 +41,15 @@ describe('buildStockBadges', () => {
     expect(badges.map(b => b.label)).toContain('EPS beat');
   });
 
+  it('shows FCF only for a real CFO-minus-capex basis, never for the CFO+CFI proxy', () => {
+    expect(buildStockBadges({
+      fcf_positive: 1, fcf_yield: 8.5, fcf_basis: 'cfo_cfi_proxy',
+    }).find(b => b.label.startsWith('FCF'))).toBeUndefined();
+    expect(buildStockBadges({
+      fcf_positive: 1, fcf_yield: 8.5, fcf_basis: 'capex',
+    }).map(b => b.label)).toContain('FCF 8.5%');
+  });
+
   // Event-risk chip (2026-10-08 spec 2.D): results within 10 sessions, never for a missing clock.
   it('shows a results-proximity chip only for a real 0..10 countdown', () => {
     expect(buildStockBadges({ days_to_next_results: 3 }).map(b => b.label)).toContain('Results in 3d');

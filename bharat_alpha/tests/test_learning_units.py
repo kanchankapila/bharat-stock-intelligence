@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
 
+from bharat_alpha.modeling import registry
 from bharat_alpha.learning.adapt import aci_alpha, hedge_weights
 from bharat_alpha.modeling.cv import walk_forward_folds
 from bharat_alpha.modeling.gate import evaluate_gate
+from bharat_alpha.modeling.registry import _evaluate_registry_gate
 
 
 def test_hedge_moves_weight_away_from_a_member_that_keeps_being_wrong():
@@ -58,3 +60,60 @@ def test_gate_paired_test_against_a_different_champion():
     refresh = _report()
     champ_same = _report()
     assert evaluate_gate(refresh, champ_same).checks["vs_champion"]["mode"].startswith("refresh")
+
+
+def test_registry_gate_uses_absolute_bars_only_when_incumbent_cannot_load():
+    candidate = {"model_id": "new", "artifact_path": "new.joblib", "cv_report": _report()}
+    incumbent_report = _report()
+    incumbent_report["config_hash"] = "old-config"
+    incumbent = {"model_id": "old", "artifact_path": "old.joblib", "cv_report": incumbent_report}
+
+    def loader(path):
+        if path == "old.joblib":
+            raise RuntimeError("model artifact has no runtime manifest")
+        return object()
+
+    verdict = _evaluate_registry_gate(candidate, incumbent, loader=loader)
+
+    assert verdict.passed
+    assert "vs_champion" not in verdict.checks
+    assert verdict.checks["incumbent_runtime_failover"] == {
+        "ok": True,
+        "mode": "absolute-gates-only",
+        "incumbent_model_id": "old",
+        "reason": "model artifact has no runtime manifest",
+    }
+
+
+def test_registry_gate_keeps_paired_bar_for_a_loadable_incumbent():
+    candidate_report = _report()
+    candidate_report["config_hash"] = "new-config"
+    candidate = {"model_id": "new", "artifact_path": "new.joblib", "cv_report": candidate_report}
+    incumbent_report = _report()
+    incumbent_report["config_hash"] = "old-config"
+    incumbent = {"model_id": "old", "artifact_path": "old.joblib", "cv_report": incumbent_report}
+
+    verdict = _evaluate_registry_gate(candidate, incumbent, loader=lambda _path: object())
+
+    assert not verdict.passed
+    assert "vs_champion" in verdict.failures
+    assert "incumbent_runtime_failover" not in verdict.checks
+
+
+def test_decide_is_idempotent_for_an_existing_champion(monkeypatch):
+    stored = {"passed": True, "checks": {"incumbent_runtime_failover": {
+        "ok": True, "mode": "absolute-gates-only", "reason": "legacy artifact",
+    }}}
+    monkeypatch.setattr(registry, "model_row", lambda _conn, _model_id: {
+        "model_id": "already-live", "horizon": 1, "status": "champion", "gate_report": stored,
+    })
+    monkeypatch.setattr(
+        registry,
+        "champion",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not compare champion to itself")),
+    )
+
+    verdict = registry.decide(object(), "already-live")
+
+    assert verdict.passed
+    assert verdict.checks == stored["checks"]

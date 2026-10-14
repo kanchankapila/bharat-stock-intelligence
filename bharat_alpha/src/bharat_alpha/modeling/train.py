@@ -31,6 +31,18 @@ from bharat_alpha.modeling.members import combine, default_members
 
 LABEL_NAME = "fwd_open_to_open_rankgauss"
 BENCHMARK_FACTOR = "mom_12_1"            # legacy's only near-survivor among price factors
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+
+
+def resolve_artifact_path(path: str | Path) -> Path:
+    """Make artifact paths independent of the worker's launch directory.
+
+    Historical rows store paths relative to the repository root.  Resolving them against the
+    process CWD made an otherwise valid promoted model unloadable when the CLI, scheduler or a
+    service was launched from a subdirectory.
+    """
+    artifact = Path(path)
+    return artifact if artifact.is_absolute() else REPOSITORY_ROOT / artifact
 
 
 def artifact_runtime() -> dict[str, str]:
@@ -193,7 +205,7 @@ def train_model(conn: psycopg.Connection, ds: Dataset, members_factory=None, reg
     recent = ds.X.index.get_level_values("date") >= ds.dates[max(len(ds.dates) - 60, 0)]
     report["feature_coverage"] = {c: float(v) for c, v in ds.X[recent].notna().mean().items()}
     if register:
-        path = Path(s.artifacts_dir) / "models" / f"{model_id}.joblib"
+        path = resolve_artifact_path(Path(s.artifacts_dir) / "models" / f"{model_id}.joblib")
         path.parent.mkdir(parents=True, exist_ok=True)
         dump_bundle(bundle, path)
         with conn.cursor() as cur:
@@ -210,7 +222,7 @@ def train_model(conn: psycopg.Connection, ds: Dataset, members_factory=None, reg
 
 
 def load_bundle(path: str) -> ModelBundle:
-    artifact = Path(path)
+    artifact = resolve_artifact_path(path)
     sidecar = artifact.with_suffix(artifact.suffix + ".runtime.json")
     if not sidecar.exists():
         raise RuntimeError(
