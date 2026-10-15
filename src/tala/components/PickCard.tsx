@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ShieldAlert, Target, TrendingUp } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { DASH, num, pct, price, prob } from '../lib/format';
+import { DASH, num, pct, price, mlRankLabel, ML_RANK_TOOLTIP } from '../lib/format';
 import {
   buildTradePlan,
   classifyAction,
@@ -121,10 +121,12 @@ export function PickCard({ pick, index = 0 }: { pick: PickRow; index?: number })
 
       {/* Probability + coverage — the two honest caveats. */}
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {num(pick.win_probability) !== null && (
-          <Chip tone={pick.win_probability! > 0.55 ? 'up' : 'warn'}>
-            <TrendingUp size={9} /> {prob(pick.win_probability)} win-prob
-          </Chip>
+        {mlRankLabel(pick.mlRankPct) !== null && (
+          <span title={ML_RANK_TOOLTIP}>
+            <Chip tone={(num(pick.mlRankPct) ?? 0) >= 90 ? 'up' : 'neutral'}>
+              <TrendingUp size={9} /> ML rank: {mlRankLabel(pick.mlRankPct)}
+            </Chip>
+          </span>
         )}
         <Chip tone={cover.tone === 'up' ? 'up' : cover.tone === 'warn' ? 'warn' : 'neutral'}>{cover.text}</Chip>
         {num(pick.rsi) !== null && (

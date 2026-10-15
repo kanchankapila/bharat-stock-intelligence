@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Download, Filter, LayoutGrid, Rows3 } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
-import { DASH, num, pct, price, prob } from '../lib/format';
+import { DASH, num, pct, price, mlRankLabel, ML_RANK_TOOLTIP } from '../lib/format';
 import { classifyAction, convictionTone, type PickRow } from '../lib/insight';
 import { Chip, Panel, SymbolLink } from '../components/Primitives';
 import { DataTable } from '../components/DataTable';
@@ -72,7 +72,7 @@ export default function PicksPage() {
     const head = [
       'symbol', 'classification', 'conviction', 'unified_score', 'sector', 'timeframe',
       'livePrice', 'changePercent', 'entry_zone_low', 'entry_zone_high',
-      'target_1', 'target_2', 'stop_loss', 'risk_reward', 'win_probability',
+      'target_1', 'target_2', 'stop_loss', 'risk_reward', 'win_probability', 'mlRankPct',
     ];
     const body = rows.map((r) => head.map((h) => String((r as any)[h] ?? '')).join(','));
     const blob = new Blob([[head.join(','), ...body].join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -277,11 +277,11 @@ const PICK_COLUMNS = [
     ),
   },
   {
-    key: 'winp',
-    header: 'Win prob',
+    key: 'mlrank',
+    header: 'ML rank',
     align: 'right' as const,
     hideBelow: 'xl' as const,
-    sort: (r: PickRow) => num(r.win_probability),
-    cell: (r: PickRow) => <span className="tnum font-mono text-mark-2">{prob(r.win_probability)}</span>,
+    sort: (r: PickRow) => num(r.mlRankPct),
+    cell: (r: PickRow) => <span className="tnum font-mono text-mark-2" title={ML_RANK_TOOLTIP}>{mlRankLabel(r.mlRankPct) ?? DASH}</span>,
   },
 ];

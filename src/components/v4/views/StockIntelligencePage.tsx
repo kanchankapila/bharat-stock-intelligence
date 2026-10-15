@@ -7,6 +7,7 @@ import {
 import { trpc } from '../../../lib/trpc';
 import { Card } from '../../../components/Card';
 import { cn } from '../../../lib/utils';
+import { mlRankLabel, ML_RANK_TOOLTIP } from '../../../lib/format';
 import { V2LightweightChart } from '../../v2/components/widgets/V2LightweightChart';
 import { OptionChainView } from '../../../components/OptionChainView';
 import IndexFnoOverview from '../../../components/IndexFnoOverview';
@@ -267,7 +268,7 @@ const TechnicalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const indicatorFields: [string, string][] = [
     ['rsi', 'RSI'], ['macd', 'MACD'], ['adx', 'ADX'],
     ['sma50', 'SMA 50'], ['sma200', 'SMA 200'],
-    ['win_probability', 'Win Probability'],
+    ['mlRankPct', 'ML rank pctile (not a probability)'],
   ];
 
   return (
@@ -361,7 +362,7 @@ const TechnicalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
 // Plain-language read on the raw indicator values -- the numbers above tell an analyst
 // something, but "RSI 78" means nothing to someone scanning quickly; the tag does.
 const TechnicalReadTags: React.FC<{ predictions: any }> = ({ predictions }) => {
-  const tags: { label: string; color: string }[] = [];
+  const tags: { label: string; color: string; title?: string }[] = [];
   if (predictions.rsi != null) {
     if (predictions.rsi >= 70) tags.push({ label: 'RSI Overbought', color: 'bg-rose-500/15 text-rose-300 border-rose-500/30' });
     else if (predictions.rsi <= 30) tags.push({ label: 'RSI Oversold', color: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' });
@@ -374,20 +375,19 @@ const TechnicalReadTags: React.FC<{ predictions: any }> = ({ predictions }) => {
   if (predictions.adx != null && predictions.adx >= 25) {
     tags.push({ label: 'Strong Trend (ADX)', color: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30' });
   }
-  if (predictions.win_probability != null) {
-    const wp = predictions.win_probability * 100;
+  const rank = mlRankLabel(predictions.mlRankPct);
+  if (rank) {
     tags.push({
-      label: `Win Prob ${wp.toFixed(0)}%`,
-      color: wp >= 55 ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-        : wp >= 45 ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-        : 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+      label: `ML rank: ${rank}`,
+      title: ML_RANK_TOOLTIP,
+      color: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
     });
   }
   if (tags.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-slate-800/60">
       {tags.map((t, i) => (
-        <span key={i} className={cn('text-[9px] font-semibold px-2 py-0.5 rounded-full border', t.color)}>{t.label}</span>
+        <span key={i} title={t.title} className={cn('text-[9px] font-semibold px-2 py-0.5 rounded-full border', t.color)}>{t.label}</span>
       ))}
     </div>
   );

@@ -6,6 +6,7 @@ import {
   Layers, Calculator, Flame, Eye, Bookmark, Gauge, DollarSign, Scale
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { mlRankLabel, ML_RANK_TOOLTIP } from '../lib/format';
 import { LegacyScoreBanner } from './CanonicalSourceNote';
 import { parseDecisionMatrixInputs, buildMatrixItems } from './decisionMatrixInputs';
 
@@ -232,8 +233,8 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
                   <div className="text-lg font-mono font-black text-emerald-400">{pick.score ?? '—'}<span className="text-xs text-slate-500">/100</span></div>
                 </div>
                 <div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase block" title="Calibrated hit probability; no calibrated value above ~50% has been observed. Raw model probabilities are not shown.">CAL. HIT-PROB</span>
-                  <div className="text-lg font-mono font-black text-cyan-400">{pick.confidence != null ? `${Math.round(pick.confidence)}%` : '—'}</div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase block" title={ML_RANK_TOOLTIP}>ML RANK</span>
+                  <div className="text-lg font-mono font-black text-cyan-400" title={ML_RANK_TOOLTIP}>{mlRankLabel(pick.mlRankPct) ?? '—'}</div>
                 </div>
               </div>
 

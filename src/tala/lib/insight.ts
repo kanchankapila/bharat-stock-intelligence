@@ -148,6 +148,7 @@ export interface PickRow {
   engine_coverage_count?: number | null;
   computed_at?: string | null;
   win_probability?: number | null;
+  mlRankPct?: number | null;
   signal_type?: string | null;
   rsi?: number | null;
   cmp?: number | null;

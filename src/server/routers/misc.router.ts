@@ -18,7 +18,7 @@ import {
 } from "../marketIntelService";
 import { router, publicProcedure, expensiveProcedure } from "../trpc";
 import { latestComputedAt } from "../latestComputedAt";
-import { LATEST_COMPLETE_TS_DATE_SQL } from "../technicalSignalsDate";
+import { LATEST_COMPLETE_TS_DATE_SQL, ML_RANK_PCT_SQL } from "../technicalSignalsDate";
 
 // Shared TTL probe (consolidated 2026-09-02 from the per-router copies this comment used to
 // document) — same 5-minute TTL and CAST-to-TEXT semantics.
@@ -431,15 +431,16 @@ export const miscRouter = router({
         // subquery and window-function query plans picked entirely different 200-symbol
         // sets from the same underlying ties before this tiebreaker was added).
         const signals = await dbAll<Record<string, unknown>>(`
-          SELECT * FROM (
+          SELECT t.*, mr."mlRankPct" FROM (
             SELECT ts.*, ns.sector, ns.industry,
                    ROW_NUMBER() OVER (PARTITION BY ts.symbol ORDER BY ts.date DESC) AS rn
             FROM technical_signals ts
             LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
             WHERE ts.date <= ${LATEST_COMPLETE_TS_DATE_SQL}
           ) t
+          LEFT JOIN ${ML_RANK_PCT_SQL} mr ON mr.symbol = t.symbol
           WHERE rn = 1 AND cmp IS NOT NULL AND cmp > 0
-          ORDER BY date DESC, signal_score DESC, symbol ASC
+          ORDER BY date DESC, signal_score DESC, t.symbol ASC
           LIMIT 200
         `);
 
@@ -597,6 +598,7 @@ export const miscRouter = router({
             mlWinProbability: parseFloat((winProb * 100).toFixed(1)),
             mlProbability:    parseFloat((winProb * 100).toFixed(1)),
             winProbSource,
+            mlRankPct: (sig.mlRankPct as number | null) ?? null,
             techSignalCount: 1,
             quantRank: Math.round(100 - fundScore),
             smartMoneyCr: 0,
@@ -632,8 +634,8 @@ export const miscRouter = router({
           : 0;
         const verdict = top20.length >= 3 && avgWinProbability >= 52 ? 'TRADE' : 'NO TRADE';
         const verdictReason = verdict === 'TRADE'
-          ? `${top20.length} setups · avg win rate ${avgWinProbability}% · ${bullish}/${total} stocks bullish`
-          : top20.length < 3 ? 'Insufficient setups — run Technical Signal Scan first' : 'Win probability below threshold';
+          ? `${top20.length} setups · avg model score ${avgWinProbability} (not a hit rate, AF-20261008-45) · ${bullish}/${total} stocks bullish`
+          : top20.length < 3 ? 'Insufficient setups — run Technical Signal Scan first' : 'Average model score below threshold';
 
         // `signals` is ORDER BY date DESC first, so signals[0].date is the most recent
         // technical_signals scan date any candidate here is grounded in -- surfaced to the

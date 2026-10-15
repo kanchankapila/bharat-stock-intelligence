@@ -5,6 +5,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import accuracy_scorecard as S
@@ -89,6 +90,8 @@ def test_end_to_end_on_a_throwaway_schema_and_persist_writes_one_row():
     assert all(r["low_data"] for r in out["rows"])                     # 40 sessions cannot clear 20 windows at 5d
     assert "UP" in {r["regime"] for r in out["rows"]}
     assert out["calibration"]["5"]["n"] > 0
+    assert out["calibration"]["5"]["brier_base_label"].startswith("hindsight base rate")
+    assert out["calibration"]["5"]["trailing"]["n"] > 0              # 40 signal dates: 10+ closed by date 15
     r = next(r for r in out["rows"] if r["arm"] == "published" and r["tier"] == 1.0 and r["horizon"] == 5)
     assert abs(r["excess_030_pct"] - r["excess_050_pct"] - 0.20) < 1e-9
     S.persist_snapshot(con, out)
@@ -99,9 +102,68 @@ def test_end_to_end_on_a_throwaway_schema_and_persist_writes_one_row():
 
 
 def test_attach_alerts_puts_the_evaluated_alerts_into_the_snapshot():
-    sc = {"rows": [], "calibration": {"5": {"n": 100, "brier": 0.27, "brier_base": 0.22}}}
+    worse = {"n": 100, "diff": 0.05, "ci95": [0.03, 0.07]}
+    sc = {"rows": [], "calibration": {"5": {"n": 100, "brier": 0.27, "brier_base": 0.22, "trailing": worse}}}
     S.attach_alerts(sc)
     assert [a["code"] for a in sc["alerts"]] == ["brier_worse_than_base"]
-    clean = {"rows": [], "calibration": {"5": {"n": 100, "brier": 0.20, "brier_base": 0.22}}}
+    noise = {"n": 100, "diff": 0.001, "ci95": [-0.002, 0.004]}
+    clean = {"rows": [], "calibration": {"5": {"n": 100, "brier": 0.27, "brier_base": 0.22, "trailing": noise}}}
     S.attach_alerts(clean)
     assert clean["alerts"] == []
+
+
+# ── AF-20261008-45: Brier against a TRAILING, purged base rate, not the same-period (hindsight) one ──
+
+def _drifting(n_dates=120, per_date=200, seed=11, swings=True):
+    """A decisive-WIN label whose level drifts between 0.5 and 0.3 (live: 0.50 in July -> 0.29 in September):
+    swinging every 25 dates, or one linear slide."""
+    rng = np.random.default_rng(seed)
+    days = pd.bdate_range("2026-05-01", periods=n_dates)
+    t = np.arange(n_dates)
+    rate = np.where((t // 25) % 2 == 0, 0.5, 0.3) if swings else np.linspace(0.5, 0.3, n_dates)
+    d = np.repeat(days, per_date)
+    y = (rng.random(n_dates * per_date) < np.repeat(rate, per_date)).astype(int)
+    return d, y
+
+
+def test_trailing_base_is_purged_by_the_horizon():
+    days = pd.bdate_range("2026-06-01", periods=40)
+    d = np.repeat(days, 10)
+    y = np.repeat((np.arange(40) >= 20).astype(int), 10)          # every outcome from date 20 on is a WIN
+    bases = S.trailing_bases(d, y, horizon=5, window=20, min_dates=10)[::10]   # one value per date
+    assert np.isnan(bases[:14]).all()                               # under 10 closed dates: no forecast
+    assert (bases[14:25] == 0).all()                                # date 24 may only see dates <= 19, all LOSS
+    assert bases[25] == pytest.approx(1 / 20)                        # date 25 first sees date 20
+
+
+def test_drifting_label_hindsight_says_worse_but_trailing_is_within_noise():
+    d, y = _drifting()
+    p = S.trailing_bases(d, y, horizon=5, window=30)                 # another honest, knowable estimate of the level
+    m = ~np.isnan(p)
+    hindsight = S.calibration_table(p[m], y[m])
+    assert hindsight["brier"] - hindsight["brier_base"] > 0.004      # the old benchmark calls it clearly worse
+    tr = S.trailing_base_benchmark(d, p, y, horizon=5)
+    lo, hi = tr["ci95"]
+    assert lo <= 0 <= hi and abs(tr["diff"]) < 0.002
+    from accuracy_alerts import brier_alert
+    assert brier_alert({"calibration": {"5": {**hindsight, "trailing": tr}}}) is None
+
+
+def test_a_level_that_overstates_the_win_rate_is_clearly_worse_than_the_trailing_base():
+    d, y = _drifting(swings=False)
+    p = np.full(len(y), 0.55)                                       # the live shape: ~0.55 predicted vs ~0.34 realised
+    tr = S.trailing_base_benchmark(d, p, y, horizon=5)
+    assert tr["ci95"][0] > 0.01
+    from accuracy_alerts import brier_alert
+    a = brier_alert({"calibration": {"5": {**S.calibration_table(p, y), "trailing": tr}}})
+    assert a and a["code"] == "brier_worse_than_base" and "5" in a["detail"]["horizons"]
+
+
+def test_too_few_dates_for_two_independent_blocks_gives_no_ci_and_no_alert():
+    # Live 15d on 2026-10-15: 7 signal dates under a 15-date block -> every resample was the whole series and the
+    # "CI" collapsed to the point estimate, which read as significant. Not measured is not measured.
+    d, y = _drifting(n_dates=22, swings=False)
+    tr = S.trailing_base_benchmark(d, np.full(len(y), 0.55), y, horizon=5)
+    assert tr["dates"] < 10 and tr["ci95"] is None and tr["low_data"] is True
+    from accuracy_alerts import brier_alert
+    assert brier_alert({"calibration": {"5": {"n": 1, "trailing": tr}}}) is None

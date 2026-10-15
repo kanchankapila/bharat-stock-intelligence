@@ -6,6 +6,7 @@ import {
   ArrowRight, ArrowUpRight, ArrowDownRight, Radio
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { mlRankLabel, ML_RANK_TOOLTIP } from '../lib/format';
 import { RiskMetricsDashboard } from './RiskMetricsDashboard';
 import { ActivityFeed } from './ActivityFeed';
 import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
@@ -167,7 +168,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
         </div>
         <div className="flex items-center gap-3 shrink-0">
           <span className="text-[10px] font-bold text-slate-400 hidden sm:block">
-            {overview.activeSignalsCount ?? candidates.length} signals · A/D {overview.advDecRatio ?? '—'}x · Win {overview.avgWinProbability ?? '—'}%
+            {overview.activeSignalsCount ?? candidates.length} signals · A/D {overview.advDecRatio ?? '—'}x · Model avg {overview.avgWinProbability ?? '—'} (not a hit rate)
           </span>
           <button onClick={() => refetch()} title={dataUpdatedAt > 0 ? `Last fetched ${formatISTWithLocal(dataUpdatedAt)}` : 'Refresh'}
             className="p-2 bg-slate-800/60 hover:bg-slate-800 border border-slate-700/50 rounded-lg text-slate-400 transition-all">
@@ -201,7 +202,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
               <table className="w-full text-left">
                 <thead>
                   <tr className="border-b border-slate-800/40">
-                    {['Stock / Sector', 'Price ₹', 'Chg%', 'RSI', 'MACD', 'Setup', 'Score', 'Entry / SL', 'Win%', ''].map((h, i) => (
+                    {['Stock / Sector', 'Price ₹', 'Chg%', 'RSI', 'MACD', 'Setup', 'Score', 'Entry / SL', 'ML rank', ''].map((h, i) => (
                       <th key={i} className={cn(
                         'px-3 py-2.5 text-[9px] font-black text-slate-500 font-display uppercase tracking-widest whitespace-nowrap',
                         i > 1 && 'text-center'
@@ -312,9 +313,9 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                           </p>
                         </td>
 
-                        {/* Win% */}
-                        <td className="px-3 py-3 text-center text-xs font-black text-indigo-400 tabular-nums">
-                          {c.mlProbability != null ? `${c.mlProbability}%` : '—'}
+                        {/* ML rank (AF-20261008-45: not a win probability) */}
+                        <td className="px-3 py-3 text-center text-xs font-black text-indigo-400 tabular-nums" title={ML_RANK_TOOLTIP}>
+                          {mlRankLabel(c.mlRankPct) ?? '—'}
                         </td>
 
                         {/* Open Full */}
@@ -513,9 +514,9 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                         <p className="text-sm font-black text-indigo-400">{selectedCand.compositeScore}</p>
                       </div>
                       <div>
-                        <p className="text-[8.5px] text-slate-500 uppercase">Win%</p>
-                        <p className="text-sm font-black text-emerald-400">
-                          {selectedCand.mlProbability != null ? `${selectedCand.mlProbability}%` : '—'}
+                        <p className="text-[8.5px] text-slate-500 uppercase" title={ML_RANK_TOOLTIP}>ML rank</p>
+                        <p className="text-sm font-black text-emerald-400" title={ML_RANK_TOOLTIP}>
+                          {mlRankLabel(selectedCand.mlRankPct) ?? '—'}
                         </p>
                       </div>
                       <div>
@@ -582,16 +583,16 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                   <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3 space-y-2">
                     <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-wider">Factor Breakdown</p>
                     {[
-                      { label: selectedCand.winProbSource === 'heuristic' ? 'Win Prob (heuristic, not a model)' : 'ML Win Prob (rank-like, overstates hit rate)', v: selectedCand.mlProbability, color: 'bg-indigo-500', isModel: selectedCand.winProbSource !== 'heuristic' },
+                      { label: 'ML rank (percentile, not a win chance)', v: selectedCand.mlRankPct ?? null, text: mlRankLabel(selectedCand.mlRankPct) ?? '—', color: 'bg-indigo-500', isModel: true },
                       { label: 'Technical Signals (derived)', v: Math.min(100, (selectedCand.techSignalCount ?? 0) * 25), color: 'bg-emerald-500', isModel: false },
                       { label: 'Quant Rank (derived)', v: Math.max(0, 100 - (selectedCand.quantRank ?? 100)), color: 'bg-amber-500', isModel: false },
                       { label: 'Smart Money (derived)', v: Math.min(100, Math.max(0, 50 + (selectedCand.smartMoneyCr ?? 0) * 5)), color: 'bg-pink-500', isModel: false },
                       { label: 'News Sentiment (derived)', v: Math.min(100, Math.max(0, 50 + (selectedCand.newsSentiment ?? 0) * 50)), color: 'bg-indigo-500', isModel: false },
                     ].map((f, i) => (
-                      <div key={i} title={f.isModel ? 'Model output. Not validated as a probability: realised hit rates have run well below it.' : 'Rule-of-thumb or client-side heuristic, not a model score'}>
+                      <div key={i} title={f.isModel ? ML_RANK_TOOLTIP : 'Rule-of-thumb or client-side heuristic, not a model score'}>
                         <div className="flex justify-between text-[9px] font-bold mb-0.5">
                           <span className={f.isModel ? "text-slate-300" : "text-slate-500"}>{f.label}</span>
-                          <span className="text-slate-300 tabular-nums">{f.v != null ? `${Math.round(f.v)}%` : '—'}</span>
+                          <span className="text-slate-300 tabular-nums">{f.text ?? (f.v != null ? `${Math.round(f.v)}%` : '—')}</span>
                         </div>
                         <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
                           <div className={cn('h-full rounded-full', f.color, !f.isModel && 'opacity-60')}

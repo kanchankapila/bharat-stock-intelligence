@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
-import { DASH, ago, frac, n0, num, parseJson, pct, price, prob, rupees } from '../lib/format';
+import { DASH, ago, frac, n0, num, parseJson, pct, price, prob, rupees, mlRankLabel, ML_RANK_TOOLTIP } from '../lib/format';
 import {
   buildTradePlan,
   classifyAction,
@@ -429,12 +429,14 @@ function SetupTab({ pick, q, dlp }: { pick: PickRow | null; q: any; dlp: any }) 
 
         <Panel eyebrow="POSITION" title="Sizing context">
           <div className="space-y-2.5">
-            <Stat
-              label="Win probability"
-              value={prob(pick.win_probability)}
-              size="lg"
-              tone={(num(pick.win_probability) ?? 0) > 0.55 ? 'text-up' : 'text-warn'}
-            />
+            <span title={ML_RANK_TOOLTIP}>
+              <Stat
+                label="ML rank (not a win chance)"
+                value={mlRankLabel(pick.mlRankPct) ?? DASH}
+                size="lg"
+                tone={(num(pick.mlRankPct) ?? 0) >= 90 ? 'text-up' : 'text-warn'}
+              />
+            </span>
             <Stat label="Realised vol (20d)" value={num(pick.hv_20d) === null ? DASH : pct(pick.hv_20d, 1)} size="md" />
             <Stat label="Beta (1y)" value={num(q?.beta_1y)?.toFixed(2) ?? DASH} size="md" />
             <Stat

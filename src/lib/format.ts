@@ -83,3 +83,13 @@ export function formatPct(
   const sign = signed ? (n < 0 ? '−' : '+') : (n < 0 ? '−' : '');
   return `${sign}${Math.abs(n).toFixed(decimals)}%`;
 }
+
+/** AF-20261008-45: the ML win probability ranks stocks but is not a probability. */
+export const ML_RANK_TOOLTIP =
+  "Rank among today's stocks, not a probability of winning: out-of-sample, no recalibration beat a constant base rate (AF-20261008-45)";
+
+/** mlRankPct (0-100 percentile, 100 = highest) -> "top X%"; null when the stock is unranked. */
+export function mlRankLabel(rankPct: number | string | null | undefined): string | null {
+  const n = finite(rankPct);
+  return n === null ? null : `top ${Math.max(1, Math.round(100 - n))}%`;
+}

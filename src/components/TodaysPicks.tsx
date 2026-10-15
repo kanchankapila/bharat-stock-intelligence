@@ -2,6 +2,7 @@ import React from 'react';
 import { TrendingUp, TrendingDown, AlertCircle, Target, ShieldAlert, Zap } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
+import { mlRankLabel, ML_RANK_TOOLTIP } from '../lib/format';
 import { LegacyScoreBanner } from './CanonicalSourceNote';
 import { relativeFromNow, formatISTWithLocal } from '../lib/timeFormat';
 
@@ -97,7 +98,7 @@ export function TodaysPicks({ onSelectStock }: TodaysPicksProps) {
           {picks.map((pick) => {
             const cv = conviction(pick.conviction_level);
             const unifiedPct = Math.round((pick.confluence_composite_score ?? 0) * 100);
-            const winPct = pick.win_probability != null ? Math.round(pick.win_probability * 100) : null;
+            const rank = mlRankLabel(pick.mlRankPct);
             const targets = (() => {
               try {
                 const t = typeof pick.targets === 'string' ? JSON.parse(pick.targets) : pick.targets;
@@ -162,9 +163,9 @@ export function TodaysPicks({ onSelectStock }: TodaysPicksProps) {
                     <p className="text-xs font-semibold text-white">{pick.signal_score ?? '—'}/10</p>
                   </div>
                   <div>
-                    <p className="text-[10px] text-slate-500">ML Win%</p>
-                    <p className={cn('text-xs font-semibold', winPct != null && winPct >= 60 ? 'text-emerald-400' : 'text-slate-300')}>
-                      {winPct != null ? `${winPct}%` : '—'}
+                    <p className="text-[10px] text-slate-500" title={ML_RANK_TOOLTIP}>ML rank</p>
+                    <p className={cn('text-xs font-semibold', (pick.mlRankPct ?? 0) >= 90 ? 'text-emerald-400' : 'text-slate-300')} title={ML_RANK_TOOLTIP}>
+                      {rank ?? '—'}
                     </p>
                   </div>
                   <div>

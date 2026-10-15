@@ -13,6 +13,24 @@ export const LATEST_COMPLETE_TS_DATE_SQL = `(
   ) m)
 )`;
 
+// AF-20261008-45: win_probability ranks stocks but is not a probability (out of sample, no
+// recalibration beat a constant base rate). Readers show its percentile within the latest
+// complete day's scored universe instead: 0-100, 100 = highest, ties share the lower rank,
+// absent when the stock has no win_probability that day. Level-free, so drift cannot move it.
+export const ML_RANK_PCT_SQL = `(
+  SELECT symbol, ROUND((100 * percent_rank() OVER (ORDER BY wp))::numeric, 1)::float8 AS "mlRankPct"
+  FROM (
+    SELECT symbol, NULLIF(win_probability, 'NaN'::float8) AS wp
+    FROM technical_signals WHERE date = ${LATEST_COMPLETE_TS_DATE_SQL}
+  ) s
+  WHERE wp IS NOT NULL
+)`;
+
+export async function mlRankPctFor(symbol: string): Promise<number | null> {
+  const row = await dbGet<{ mlRankPct: number | null }>(`SELECT "mlRankPct" FROM ${ML_RANK_PCT_SQL} r WHERE symbol = ?`, [symbol]);
+  return row?.mlRankPct ?? null;
+}
+
 export async function latestCompleteSignalDate(): Promise<string | null> {
   const row = await dbGet<{ d: string | null }>(`SELECT ${LATEST_COMPLETE_TS_DATE_SQL}::text AS d`);
   return row?.d ?? null;

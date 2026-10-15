@@ -23,9 +23,17 @@ def test_lift_ci_alert_needs_three_consecutive_snapshots_past_the_window_floor()
     assert not AL.lift_ci_alert([_snap(0.01, 0.03, eff=12)] * 3)    # under 20 independent windows: LOW-DATA, no alert
 
 
-def test_brier_worse_than_base_rate():
-    assert AL.brier_alert({"calibration": {"5": {"brier": 0.25, "brier_base": 0.22, "n": 100}}})
-    assert not AL.brier_alert({"calibration": {"5": {"brier": 0.20, "brier_base": 0.22, "n": 100}}})
+def _cal(diff, lo, hi, brier=0.25, base=0.22):
+    return {"calibration": {"5": {"brier": brier, "brier_base": base, "n": 100,
+                                  "trailing": {"n": 100, "diff": diff, "ci95": [lo, hi]}}}}
+
+
+def test_brier_alert_reads_the_trailing_benchmark_not_the_hindsight_one():
+    # AF-20261008-45: the same-period base rate is unknowable in advance; only a trailing purged one is fair.
+    assert AL.brier_alert(_cal(0.05, 0.03, 0.07))                   # worse, CI excludes zero
+    assert not AL.brier_alert(_cal(0.004, -0.001, 0.009))           # hindsight says worse, trailing is noise
+    assert not AL.brier_alert(_cal(-0.01, -0.02, -0.001))           # better than the trailing base
+    assert not AL.brier_alert({"calibration": {"5": {"brier": 0.25, "brier_base": 0.22, "n": 100}}})  # not measured
 
 
 def test_top_decile_dispersion_collapse():
@@ -74,6 +82,6 @@ def test_feature_collapse_trips_when_a_column_stops_being_written():
 
 def test_evaluate_collects_alerts():
     bad = _snap(0.01, 0.03)
-    bad["calibration"] = {"5": {"brier": 0.25, "brier_base": 0.22, "n": 100}}
+    bad["calibration"] = _cal(0.05, 0.03, 0.07)["calibration"]
     codes = {a["code"] for a in AL.evaluate(bad, history=[bad, bad])}
     assert codes == {"published_lift_ci", "brier_worse_than_base"}

@@ -5,7 +5,7 @@ that wants to notify passes the result of evaluate() to its own sender.
 
   published_lift_ci      published-tier hit lift's 95% band includes zero (or is negative) on each of the last 3 weekly
                          snapshots, counted only once the tier has >= MIN_DATES_RELIABLE independent windows
-  brier_worse_than_base  calibrated_win_probability scores worse than predicting the constant base rate
+  brier_worse_than_base  calibrated_win_probability scores worse than a trailing, horizon-purged base rate, CI > 0
   dispersion_collapse    the published top decile's distinct-value share collapses vs its trailing median
   ic_sign_change         an arm's rolling IC over 20 independent windows changes sign vs the 20 before
   feature_collapse       a ranker input's non-null share or distinct count collapses, or one value takes over the
@@ -48,11 +48,16 @@ def lift_ci_alert(snapshots, arm="published", tier="published", horizon=5, floor
 
 
 def brier_alert(sc):
-    bad = {h: c for h, c in (sc.get("calibration") or {}).items()
-           if c.get("n") and c.get("brier") is not None and c["brier"] > c["brier_base"]}
+    """Fires only when the column is worse than the TRAILING purged base rate with the 95% CI above zero. The
+    same-period base rate is hindsight (any honest forecast loses to it while the level drifts, AF-20261008-45)."""
+    bad = {}
+    for h, c in (sc.get("calibration") or {}).items():
+        t = c.get("trailing") or {}
+        if t.get("n") and t.get("ci95") and t["ci95"][0] > 0:
+            bad[h] = {"diff": t["diff"], "ci95": t["ci95"], "n": t["n"]}
     if bad:
-        return _alert("brier_worse_than_base", "calibrated_win_probability scores worse than the constant base rate "
-                      "at horizon(s) " + ",".join(bad), horizons=bad)
+        return _alert("brier_worse_than_base", "calibrated_win_probability scores worse than a trailing 20-date base "
+                      "rate (95% CI above zero) at horizon(s) " + ",".join(bad), horizons=bad)
     return None
 
 

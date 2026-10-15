@@ -6,13 +6,13 @@ import { parseDecisionMatrixInputs, buildMatrixItems } from '../decisionMatrixIn
 // and the canonical picks were never displayed; with both empty it showed 6 made-up STRONG BUYs.
 const candidate = {
   symbol: 'ABBOTINDIA', name: 'Abbott India', advice: 'STRONG BUY', compositeScore: 86,
-  mlWinProbability: 79, winProbSource: 'calibrated', factors: { technical: 90, fundamental: 100, momentum: 100, sentiment: 50, smartMoney: 50 },
+  mlWinProbability: 79, winProbSource: 'calibrated', mlRankPct: 92.4, factors: { technical: 90, fundamental: 100, momentum: 100, sentiment: 50, smartMoney: 50 },
   entryPrice: 27270, targetPrice: null, stopLoss: 26412.33, rsi: 59.14, cmp: 27270, changePct: 1.98, aiInsight: null,
 };
 const pick = {
   symbol: 'BOSCH-HCIL', unified_score: 98.14, conviction_level: 'S_ELITE', classification: 'Strong Buy',
   stop_loss: 1895.71, target_1: 2011.78, target_2: 2089.15, entry_zone_low: 1933.64, entry_zone_high: 1935.16,
-  risk_reward: 4, trade_reasoning: 'BOSCH-HCIL: 19 bullish scanners', win_probability: null, rsi: 70.6, cmp: 1934.4, change_pct: 7.32,
+  risk_reward: 4, trade_reasoning: 'BOSCH-HCIL: 19 bullish scanners', win_probability: 0.61, mlRankPct: 88, rsi: 70.6, cmp: 1934.4, change_pct: 7.32,
 };
 
 describe('buildMatrixItems', () => {
@@ -21,7 +21,7 @@ describe('buildMatrixItems', () => {
     expect(it0).toMatchObject({
       symbol: 'BOSCH-HCIL', source: 'canonical', action: 'STRONG BUY', score: 98, price: 1934.4,
       changePct: 7.32, target1: 2011.78, target2: 2089.15, stopLoss: 1895.71, rrRatio: '1:4',
-      reasoning: 'BOSCH-HCIL: 19 bullish scanners', confidence: null,
+      reasoning: 'BOSCH-HCIL: 19 bullish scanners', confidence: null, mlRankPct: 88,
     });
     expect(it0.entryZone).toContain('1,934');
   });
@@ -29,7 +29,7 @@ describe('buildMatrixItems', () => {
   it('maps cockpit candidates from their real fields', () => {
     const [it0] = buildMatrixItems([candidate], []);
     expect(it0).toMatchObject({
-      symbol: 'ABBOTINDIA', source: 'cockpit', action: 'STRONG BUY', score: 86, confidence: 79,
+      symbol: 'ABBOTINDIA', source: 'cockpit', action: 'STRONG BUY', score: 86, confidence: null, mlRankPct: 92.4,
       price: 27270, target1: null, stopLoss: 26412.33, rrRatio: null, reasoning: null, setupType: 'BREAKOUT',
     });
   });
@@ -40,13 +40,14 @@ describe('buildMatrixItems', () => {
     expect(items[0].source).toBe('canonical');
   });
 
-  // V-08 (2026-10-08): the canonical pick's win_probability is technical_signals' RAW 0-1 value
-  // (~8pp above calibrated) and rendered as "1%"; a cockpit raw/heuristic value is not calibrated
-  // either. Only a calibrated probability may fill `confidence`.
-  it('never shows a raw or heuristic win probability as confidence', () => {
+  // V-08 (2026-10-08) and AF-20261008-45 (2026-10-15): no stored win probability is a
+  // probability -- out of sample, no recalibration beat a constant base rate, and even the
+  // calibrated column overstated the hit rate by ~20pp. `confidence` is null for every source;
+  // the rank travels in mlRankPct.
+  it('never shows any win probability as confidence, calibrated included', () => {
     const [canon] = buildMatrixItems([], [{ ...pick, win_probability: 0.553 }]);
     expect(canon.confidence).toBeNull();
-    for (const src of ['raw', 'heuristic', undefined]) {
+    for (const src of ['calibrated', 'raw', 'heuristic', undefined]) {
       const [c] = buildMatrixItems([{ ...candidate, winProbSource: src }], []);
       expect(c.confidence).toBeNull();
     }

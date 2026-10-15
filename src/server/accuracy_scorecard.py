@@ -12,7 +12,8 @@ and never touches its PROTOCOL; the frozen forward test remains the arbiter. Thi
   per row   dates, independent windows, rank IC (+t over windows), hit rate, random-pick hit, lift +-95%,
             net excess at the frozen 0.50% round trip and at 0.30%, payoff ratio, turnover, LOW-DATA flag
   plus      a reliability table and Brier score for technical_signals.calibrated_win_probability against decisive
-            signal_outcomes (technical, path_barrier) vs the constant base rate; IC series per arm; top-decile
+            signal_outcomes (technical, path_barrier) vs a TRAILING purged base rate (the alert's benchmark) and,
+            descriptively, the same rows' hindsight base rate; IC series per arm; top-decile
             distinct-value share of the published score (inputs to accuracy_alerts.py)
 
 Usage (from src/server):
@@ -66,6 +67,54 @@ def calibration_table(p, y, bins: int = 10) -> dict:
             "realised": float(y[idx == i].mean())} for i in range(bins) if (idx == i).any()]
     return {"n": int(len(p)), "mean_predicted": float(p.mean()), "base_rate": float(base),
             "brier": float(((p - y) ** 2).mean()), "brier_base": float(((base - y) ** 2).mean()), "bins": out}
+
+
+HINDSIGHT_LABEL = "hindsight base rate (realised rate of these same rows; unknowable when the forecast was made)"
+TRAILING_WINDOW = 20      # signal dates
+TRAILING_MIN_DATES = 10
+
+
+def trailing_bases(dates, y, horizon: int, window: int = TRAILING_WINDOW, min_dates: int = TRAILING_MIN_DATES):
+    """Per row, the decisive-WIN rate of the `window` most recent signal dates whose outcome had closed: index
+    <= t - horizon on the calendar of signal dates (purged by the horizon). NaN while fewer than `min_dates` qualify.
+    The constant a forecaster could actually have known at t (AF-20261008-45)."""
+    d = pd.to_datetime(np.asarray(dates))
+    g = pd.Series(np.asarray(y, dtype=float), index=d).groupby(level=0)
+    s, n = g.sum(), g.size()
+    cs, cn = np.concatenate([[0], np.cumsum(s.to_numpy())]), np.concatenate([[0], np.cumsum(n.to_numpy())])
+    base = np.full(len(s), np.nan)
+    for t in range(len(s)):
+        hi = t - horizon + 1                       # dates [lo, hi) have closed
+        lo = max(0, hi - window)
+        if hi - lo >= min_dates:
+            base[t] = (cs[hi] - cs[lo]) / (cn[hi] - cn[lo])
+    return pd.Series(base, index=s.index).reindex(d).to_numpy()
+
+
+def trailing_base_benchmark(dates, p, y, horizon: int, reps: int = 2000, seed: int = 0) -> dict:
+    """Brier of p minus Brier of the trailing purged base rate, paired on the same rows, with a moving-block
+    bootstrap CI over signal dates (block = horizon dates, since overlapping windows are not independent)."""
+    df = pd.DataFrame({"d": pd.to_datetime(np.asarray(dates)), "p": np.asarray(p, dtype=float),
+                       "y": np.asarray(y, dtype=float)})
+    df["b"] = trailing_bases(df["d"], df["y"], horizon)
+    df = df.dropna()
+    if df.empty:
+        return {"n": 0, "dates": 0, "brier": None, "brier_trailing_base": None, "diff": None, "ci95": None,
+                "low_data": True, "window": TRAILING_WINDOW, "purge_dates": int(horizon)}
+    g = df.assign(a=(df.p - df.y) ** 2, c=(df.b - df.y) ** 2).groupby("d").agg(a=("a", "sum"), c=("c", "sum"), n=("y", "size"))
+    a, c, n = g.a.to_numpy(), g.c.to_numpy(), g.n.to_numpy()
+    T, L = len(n), max(1, int(horizon))
+    out = {"n": int(n.sum()), "dates": int(T), "brier": float(a.sum() / n.sum()),
+           "brier_trailing_base": float(c.sum() / n.sum()), "diff": float((a.sum() - c.sum()) / n.sum()),
+           "ci95": None, "low_data": T < 2 * L, "window": TRAILING_WINDOW, "purge_dates": int(horizon)}
+    if out["low_data"]:                            # under two independent blocks a resample is the series itself
+        return out
+    rng = np.random.default_rng(seed)
+    st = rng.integers(0, T - L + 1, (reps, int(np.ceil(T / L))))
+    idx = (st[:, :, None] + np.arange(L)).reshape(reps, -1)[:, :T]
+    boot = (a[idx].sum(1) - c[idx].sum(1)) / n[idx].sum(1)
+    out["ci95"] = [float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))]
+    return out
 
 
 def turnover(sets) -> float:
@@ -163,15 +212,20 @@ def load_market_state(con, since: str):
 
 def load_calibration(con, since: str) -> dict:
     rows = con.execute(
-        "SELECT t.calibrated_win_probability AS p, o.outcome AS outcome, o.horizon_days AS h "
+        "SELECT t.calibrated_win_probability AS p, o.outcome AS outcome, o.horizon_days AS h, t.date AS d "
         "FROM technical_signals t JOIN signal_outcomes o ON o.symbol = t.symbol AND o.signal_date = t.date "
         "WHERE o.signal_source = 'technical' AND o.label_definition = 'path_barrier' AND o.horizon_days IN (5, 15) "
         "AND o.outcome IN ('WIN','LOSS','STOP_LOSS') AND t.date >= ? AND t.calibrated_win_probability IS NOT NULL",
         (since,)).fetchall()
-    df = _frame(rows, ["p", "outcome", "h"])
+    df = _frame(rows, ["p", "outcome", "h", "d"])
     df["p"] = pd.to_numeric(df["p"], errors="coerce")
     df["y"] = [1 if classify_outcome(o) == "WIN" else 0 for o in df["outcome"]]
-    return {str(h): calibration_table(df.loc[df["h"] == h, "p"], df.loc[df["h"] == h, "y"]) for h in (5, 15)}
+    out = {}
+    for h in (5, 15):
+        s = df[df["h"] == h]
+        out[str(h)] = {**calibration_table(s["p"], s["y"]), "brier_base_label": HINDSIGHT_LABEL,
+                       "trailing": trailing_base_benchmark(s["d"], s["p"], s["y"], h)}
+    return out
 
 
 # ── assembly ──────────────────────────────────────────────────────────────────
@@ -262,7 +316,12 @@ def print_report(out: dict, floor: float = FLOORS[0], tiers=("published", 0.10))
     for h, c in out["calibration"].items():
         if c["n"]:
             print(f"calibration {h}d: n={c['n']} mean predicted {c['mean_predicted']:.3f} vs decisive-WIN base {c['base_rate']:.3f}; "
-                  f"Brier {c['brier']:.4f} vs base-rate {c['brier_base']:.4f}")
+                  f"Brier {c['brier']:.4f} vs hindsight base rate {c['brier_base']:.4f}")
+            t = c.get("trailing") or {}
+            if t.get("n"):
+                ci = "LOW-DATA, no CI" if t["ci95"] is None else f"[{t['ci95'][0]:+.4f}, {t['ci95'][1]:+.4f}]"
+                print(f"  vs trailing {t['window']}-date base (purged {t['purge_dates']}): n={t['n']} dates={t['dates']} "
+                      f"dBrier {t['diff']:+.4f} {ci}")
 
 
 def main() -> int:

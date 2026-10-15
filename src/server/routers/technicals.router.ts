@@ -8,6 +8,7 @@ import { alphaQuant } from "../alphaQuantClient";
 import { router, publicProcedure, adminProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { fetchWithCache } from "../cacheService";
+import { ML_RANK_PCT_SQL, mlRankPctFor } from "../technicalSignalsDate";
 
 // Next calendar day (UTC) as a 'YYYY-MM-DD' string, used to build a half-open [d, d+1) range
 // for getTechnicalConfluenceSignals below -- extracted so month/year-boundary correctness is
@@ -51,7 +52,7 @@ export const technicalsRouter = router({
       // ponytail: technical_signals has no `patterns` column (nothing writes it), so this
       // used to always JSON.parse(undefined || '[]') into a permanently-empty array. Dropped
       // rather than fabricated -- add back once a writer actually populates it.
-      return row;
+      return { ...row, mlRankPct: await mlRankPctFor(input.symbol) };
     }),
 
   runTechnicalSignalScan: adminProcedure
@@ -130,9 +131,11 @@ export const technicalsRouter = router({
             -- AF-20260827-09: disclosure only, not a weight/formula change (that needs
             -- verify-gate.mjs backtest evidence) -- lets the UI show reduced confidence when
             -- the composite above leaned on a COALESCE default instead of a real input.
-            (ts.win_probability IS NULL OR cs.confluence_score IS NULL) AS confluence_composite_partial
+            (ts.win_probability IS NULL OR cs.confluence_score IS NULL) AS confluence_composite_partial,
+            mr."mlRankPct"
           FROM technical_signals ts
           LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
+          LEFT JOIN ${ML_RANK_PCT_SQL} mr ON mr.symbol = ts.symbol
           -- Was date(cs.computed_at) = ? -- wrapping confluence_signals' TimescaleDB
           -- partitioning column in date() defeats both the existing idx_csi_computed index and
           -- Timescale's own chunk-exclusion pruning (same bug class already fixed for

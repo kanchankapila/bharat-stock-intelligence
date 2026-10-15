@@ -69,6 +69,8 @@ export function rupees(v: unknown): string {
   return `${sign}₹${abs.toFixed(0)}`;
 }
 
+export { mlRankLabel, ML_RANK_TOOLTIP } from '../../lib/format';
+
 /** 0..1 probability -> "57.2%" */
 export function prob(v: unknown, dp = 1): string {
   return frac(v, dp);

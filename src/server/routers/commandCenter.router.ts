@@ -5,7 +5,7 @@ import { runPython } from '../pythonRunner';
 import { cacheGet } from '../cacheService';
 import { latestComputedAt, invalidateLatestComputedAt } from '../latestComputedAt';
 import { planStatus } from '../planLifecycle';
-import { LATEST_COMPLETE_TS_DATE_SQL } from '../technicalSignalsDate';
+import { LATEST_COMPLETE_TS_DATE_SQL, ML_RANK_PCT_SQL, mlRankPctFor } from '../technicalSignalsDate';
 
 // Shared TTL probe (consolidated 2026-09-02 from the per-router copies) — 5-min TTL so new
 // ranker runs are picked up; CAST-to-TEXT semantics preserved.
@@ -205,7 +205,8 @@ export const commandCenterRouter = router({
           ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
           ts.is_nifty50, ts.nifty_tier,
           ts.hv_20d, ts.iv_hv_ratio,
-          ts.days_to_next_results
+          ts.days_to_next_results,
+          mr."mlRankPct"
         FROM unified_recommendations ur
         LEFT JOIN (
           SELECT symbol, win_probability, signal_type, rsi, cmp, change_pct,
@@ -230,6 +231,7 @@ export const commandCenterRouter = router({
           FROM technical_signals
           WHERE date = ${LATEST_COMPLETE_TS_DATE_SQL}
         ) ts ON ts.symbol = ur.symbol
+        LEFT JOIN ${ML_RANK_PCT_SQL} mr ON mr.symbol = ur.symbol
         WHERE ur.computed_at = ?
         ${convFilter}${horizonFilter}${sectorFilter}
         ORDER BY NULLIF(ur.unified_score, 'NaN'::float8) DESC
@@ -346,7 +348,7 @@ export const commandCenterRouter = router({
         `, [input.symbol]),
       ]);
       if (!ur) return null;
-      return { ...ur, ...(ts ?? {}) };
+      return { ...ur, ...(ts ?? {}), mlRankPct: await mlRankPctFor(input.symbol) };
     }),
 
   runUnifiedRanker: adminProcedure
