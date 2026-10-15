@@ -6,6 +6,8 @@ Each test uses the connector's OWN fetch + parse + write (never a re-implementat
 most recent completed session, and treats "empty on a trading day" as a FAILURE, not a skip.
 """
 
+import datetime as dt
+
 import pytest
 
 from bharat_alpha.db import read_df
@@ -90,14 +92,16 @@ def test_mc_global_live(conn, client, session):
     assert v.value.between(5_000, 100_000).all()          # an index level, not a change or a percent
 
 def test_nse_results_live(conn, client, session):
-    """Settles the results-comparison field names nse_results.parse_results is strict about."""
+    """Mirrors real integrated-filing XBRLs through the connector and verifies usable values."""
     from bharat_alpha.ingest.sources.nse_results import NseResults
 
     assert run_connector(conn, CONNECTORS["nse_bhavcopy"](), session, client=client)[0] == "success"
     status, n = run_connector(conn, NseResults(["RELIANCE", "INFY", "HDFCBANK"]), session, client=client)
     assert status == "success" and n >= 9, read_df(conn, "SELECT detail FROM alpha.ingest_run ORDER BY run_id DESC LIMIT 1")
-    eps = read_df(conn, "SELECT value FROM alpha.fundamental WHERE source='nse_results' AND field='res_eps'")
+    eps = read_df(conn, "SELECT value, period_end, knowable_at FROM alpha.fundamental WHERE source='nse_results' AND field='res_eps'")
     assert eps.value.abs().between(0.01, 10_000).all()
+    assert eps.period_end.max() >= session - dt.timedelta(days=400)
+    assert eps.knowable_at.notna().all()
 
 
 def test_fred_live(conn, client, session):

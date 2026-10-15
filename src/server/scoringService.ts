@@ -1,6 +1,7 @@
 import { exec } from 'child_process';
 import path from 'path';
 import { dbGet, dbAll, dbRun } from './dbAsync';
+import { liquidityTier, type LiquidityTier } from './liquidityTier';
 import { syncAllScreenerStocksToDB } from './trendlyneScreener';
 import { syncMoneyControlScreeners } from './moneycontrolScreener';
 import { initEtnowScreeners } from './etnow';
@@ -19,6 +20,8 @@ export interface ScoredStock {
   last_updated: string;
   top_domain?: string;
   position_size_pct?: number;   // #6 suggested portfolio weight (0 for non-buys)
+  adt_cr?: number | null;       // ~30-session avg daily turnover, Rs crore
+  liquidity?: LiquidityTier | null; // label only; never changes score/classification (AF-20261015-10)
 }
 
 export interface FactorBreakdown {
@@ -122,6 +125,8 @@ function mapRecToScoredStock(rec: any): ScoredStock {
     last_updated:   rec.generated_at ?? rec.computed_at,
     top_domain,
     position_size_pct: rec.position_size_pct ?? 0,
+    adt_cr:         rec.adt_cr != null ? Number(rec.adt_cr) : null,
+    liquidity:      liquidityTier(rec.adt_cr != null ? Number(rec.adt_cr) : null),
   };
 }
 
@@ -133,7 +138,7 @@ export function clearTopRatedCache(): void {
 }
 
 /**
- * Get top rated stocks. Long-term reads LONG_TERM rows from the latest canonical
+ * Get top rated stocks. Long-term reads POSITIONAL rows from the latest canonical
  * unified batch; intraday reads intraday_recommendations. Neither substitutes legacy
  * scores when canonical results are empty. Other horizons retain their legacy path.
  */
@@ -157,11 +162,18 @@ export async function getTopRatedStocks(limit: number = 50, timeframe: string = 
 
     if (timeframe === 'long_term') {
       const recs = await dbAll<any>(`
-        SELECT * FROM unified_recommendations
-        WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
-          AND timeframe = 'LONG_TERM'
-        ORDER BY unified_score DESC
-        LIMIT ?
+        SELECT r.*, a.adt_cr
+          FROM unified_recommendations r
+          LEFT JOIN (
+            SELECT symbol, AVG(close * volume) / 1e7 AS adt_cr
+              FROM stock_ohlcv
+             WHERE date >= CURRENT_DATE - 45 AND COALESCE(is_suspect, 0) = 0
+             GROUP BY symbol
+          ) a ON a.symbol = r.symbol
+         WHERE r.computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
+           AND r.timeframe = 'POSITIONAL'
+         ORDER BY r.unified_score DESC
+         LIMIT ?
       `, [limit]);
       // Do not resurrect an older horizon batch or substitute a component score.
       result = recs.map(mapRecToScoredStock);
@@ -184,7 +196,7 @@ export async function getTopRatedStocks(limit: number = 50, timeframe: string = 
     return result;
   } catch (error) {
     console.error('❌ Error fetching top rated stocks:', error);
-    return [];
+    throw error;
   }
 }
 

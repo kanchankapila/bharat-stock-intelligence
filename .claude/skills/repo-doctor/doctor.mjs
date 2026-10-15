@@ -18,6 +18,7 @@ import path from 'path';
 import { execSync } from 'child_process';
 import 'dotenv/config';
 import {
+  classifyLatestDq,
   isKnownTransientFailure,
   latestExpectedNseDailyRun,
   latestExpectedNseIntradaySlot,
@@ -98,6 +99,53 @@ const vite = read('vite.config.ts');
 check('vite-watch-ignored', 'code',
   vite.includes('.audit-files.txt') ? 'PASS' : 'WARN',
   vite.includes('.audit-files.txt') ? '.audit-files.txt in vite watch.ignored' : 'audit scratch files may re-trigger EBUSY rejections in vite watcher');
+
+// AF-20261014-07: a lost PM2 daemon leaves real venv interpreters serving behind dead
+// redirectors. The guard must prove same-service ownership before terminating an exact PID, and
+// its timeout must count as unstable rather than resetting max_restarts forever.
+const portGuard = read('src/server/pyboot/port_guard.py');
+const ecosystem = read('ecosystem.config.cjs');
+const minUptimeMatch = ecosystem.match(/min_uptime:\s*([\d_]+)/);
+const minUptimeMs = minUptimeMatch ? Number(minUptimeMatch[1].replaceAll('_', '')) : 0;
+const managedTakeover = portGuard.includes('owner[0] == expected_service')
+  && portGuard.includes('owner[1] != os.getpid()')
+  && portGuard.includes('_terminate_process(owner[1])')
+  && minUptimeMs > 300_000;
+check('pm2-python-orphan-takeover', 'code', managedTakeover ? 'PASS' : 'FAIL',
+  managedTakeover
+    ? `same-service PID takeover present; PM2 min_uptime ${minUptimeMs}ms exceeds the 300000ms guard`
+    : 'safe same-service PID takeover or PM2 stability-window ordering is missing — an orphan can restart-storm forever');
+
+// AF-20261014-08: PM2 kill_timeout is shutdown grace after SIGINT, not maximum runtime. An
+// hours-long value delays the next cron restart if the prior run is genuinely hung.
+const bqaBlock = ecosystem.match(/name:\s*'bqa-daily'[\s\S]*?kill_timeout:\s*([\d_]+)/);
+const bqaShutdownGraceMs = bqaBlock ? Number(bqaBlock[1].replaceAll('_', '')) : 0;
+const bqaShutdownBounded = bqaShutdownGraceMs >= 60_000 && bqaShutdownGraceMs <= 15 * 60_000;
+check('bqa-daily-shutdown-grace', 'code', bqaShutdownBounded ? 'PASS' : 'FAIL',
+  bqaShutdownBounded
+    ? `BQA daily shutdown grace is ${(bqaShutdownGraceMs / 60_000).toFixed(0)}m; the next cron cannot wait hours on a hung predecessor`
+    : `BQA daily kill_timeout ${bqaShutdownGraceMs || 'missing'}ms is not a 1-15m shutdown grace`);
+
+// AF-20261014-10: a fan-out is not successful when the parent merely enqueues delayed children,
+// and arbitrary child successes must not overwrite a sibling failure.
+const queuesSource = read('src/server/queues.ts');
+const batchSource = read('src/server/trendlyneDailyBatch.ts');
+const jobRegistrySource = read('src/server/jobRegistry.ts');
+const trendlyneGraceMatch = jobRegistrySource.match(
+  /jobName:\s*'trendlyne-daily-fetch'[\s\S]{0,250}?graceMinutes:\s*(\d+)/,
+);
+const trendlyneGraceMinutes = trendlyneGraceMatch ? Number(trendlyneGraceMatch[1]) : 0;
+const honestTrendlyneBatch = queuesSource.includes('initialiseTrendlyneBatch(')
+  && queuesSource.includes('settleTrendlyneBatch(')
+  && queuesSource.includes('job.attemptsMade < attempts')
+  && queuesSource.includes('legacy child completed')
+  && batchSource.includes("hsetnx(key, 'completed'")
+  && batchSource.includes('missing batch state for')
+  && trendlyneGraceMinutes >= 12 * 60;
+check('trendlyne-fanout-heartbeat', 'code', honestTrendlyneBatch ? 'PASS' : 'FAIL',
+  honestTrendlyneBatch
+    ? `Trendlyne daily heartbeat finalises once from retry-safe aggregate terminal child outcomes; grace=${trendlyneGraceMinutes}m`
+    : 'Trendlyne daily fan-out lacks retry-safe state, honest terminal aggregation, or enough grace for its delayed children');
 
 // Recurring class "notification gate reads a field its pipeline never populates" (heuristic)
 const suspectGates = new Set();
@@ -328,10 +376,9 @@ if (client) {
   try {
     const dq = await q(`WITH latest AS (SELECT DISTINCT ON (check_id) check_id, status, critical
         FROM data_quality_results ORDER BY check_id, checked_at DESC)
-      SELECT status, COUNT(*) AS n, SUM(CASE WHEN critical = 1 THEN 1 ELSE 0 END) AS crit FROM latest GROUP BY status`);
-    const dqFail = dq.filter(r => r.status === 'fail' || r.status === 'error');
-    check('dq-latest', 'db', dqFail.length ? 'FAIL' : 'PASS',
-      dq.map(r => `${r.status}=${r.n}${Number(r.crit) ? `(crit ${r.crit})` : ''}`).join(' / '));
+      SELECT check_id, status, critical FROM latest ORDER BY check_id`);
+    const verdict = classifyLatestDq(dq);
+    check('dq-latest', 'db', verdict.status, verdict.detail);
   } catch (e) { check('dq-latest', 'db', 'WARN', e.message); }
 
   // ml dispersion collapse (isotonic-calibration behaviour — trend-watch, not a fix)
@@ -373,12 +420,16 @@ if (client) {
 
   // telegram settings + gemini key
   try {
-    const tgset = await q(`SELECT key, CASE WHEN key='telegram_bot_token' THEN left(value,8)||'...' ELSE value END AS v
+    // Prove configuration without selecting or printing any credential material. Token prefixes
+    // and chat identifiers are still secrets; redaction is safer than partial disclosure.
+    const tgset = await q(`SELECT key, (COALESCE(value, '') <> '') AS configured,
+        CASE WHEN key = 'telegram_enabled' THEN lower(value) = 'true' ELSE NULL END AS enabled
       FROM app_settings WHERE key LIKE 'telegram%'`);
-    const enabled = tgset.find(r => r.key === 'telegram_enabled')?.v === 'true';
-    const hasTok = !!tgset.find(r => r.key === 'telegram_bot_token');
-    check('telegram-settings', 'db', enabled && hasTok ? 'PASS' : 'WARN',
-      tgset.map(r => `${r.key}=${r.v}`).join(', '));
+    const enabled = tgset.find(r => r.key === 'telegram_enabled')?.enabled === true;
+    const hasTok = tgset.find(r => r.key === 'telegram_bot_token')?.configured === true;
+    const hasChat = tgset.find(r => r.key === 'telegram_chat_id')?.configured === true;
+    check('telegram-settings', 'db', enabled && hasTok && hasChat ? 'PASS' : 'WARN',
+      `enabled=${enabled}; bot_token=${hasTok ? 'configured' : 'missing'}; chat_id=${hasChat ? 'configured' : 'missing'}`);
   } catch (e) { check('telegram-settings', 'db', 'WARN', e.message); }
   // The interactive shell may intentionally omit secrets while the persisted PM2 service
   // environment contains them. Check the deployed process configuration without printing it.
@@ -400,6 +451,10 @@ const BENIGN_LOG = [
   [/timeout exceeded when trying to connect/i, 'DB connect blip (documented transient family — verify it did not persist)'],
   [/GenAI (?:Profile )?API Error:.*(?:429|503)/i, 'legacy pre-circuit Gemini quota/high-demand error (current code logs bounded WARN; doctor enforces the circuit)'],
   [/Error fetching /i, 'fetcher vendor error (verify the next scheduled run succeeded)'],
+  // Child attempts are retry telemetry. The batch-final `batch failed: N/M symbol fetches
+  // failed` line is deliberately NOT matched and remains the actionable aggregate outcome.
+  [/^\[QUEUE\] trendlyne-daily-fetch failed: Trendlyne metrics fetch returned no durable data for \S+$/i,
+    'Trendlyne symbol retry (aggregate batch verdict remains actionable)'],
 ];
 try {
   const days = [new Date(), new Date(Date.now() - 86_400_000)].map(d => d.toISOString().slice(0, 10));

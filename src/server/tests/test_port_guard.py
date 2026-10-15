@@ -5,10 +5,12 @@
 each new instance died on `[Errno 10048]` and pm2 restarted it ~120 times in 3 minutes.
 """
 import os
+import re
 import socket
 import sys
 import threading
 import time
+from io import BytesIO
 
 import pytest
 
@@ -57,6 +59,17 @@ def test_every_service_entrypoint_waits_for_its_port_before_binding():
         run_at = text.index("uvicorn.run(")
         guard_at = text.find("wait_for_port_free(")
         assert 0 <= guard_at < run_at, f"{f}: uvicorn.run( without a preceding wait_for_port_free("
+        assert "expected_service=" in text[guard_at:run_at], (
+            f"{f}: port guard cannot distinguish its own stale interpreter from an unrelated listener"
+        )
+        expected = re.search(r'expected_service="([^"]+)"', text[guard_at:run_at])
+        assert expected, f"{f}: expected service identity must be a static, reviewable value"
+        assert f'"service": "{expected.group(1)}"' in text, (
+            f"{f}: health response does not expose the identity used by port_guard"
+        )
+        assert '"pid": os.getpid()' in text, (
+            f"{f}: health response does not expose the exact process port_guard may terminate"
+        )
     assert {"python_api.py", "worker_service.py", "app.py", "main.py"} <= set(services), services
 
 
@@ -68,3 +81,79 @@ def test_gives_up_with_a_clear_exit_instead_of_crash_looping():
         assert str(port) in str(exc.value.code)
     finally:
         s.close()
+
+
+class _Response:
+    def __init__(self, payload: bytes):
+        self._body = BytesIO(payload)
+
+    def read(self):
+        return self._body.read()
+
+    def close(self):
+        pass
+
+
+def test_matching_managed_owner_is_terminated_once(monkeypatch):
+    free = iter([False, False, True])
+    terminated = []
+    monkeypatch.setattr(port_guard, "_port_free", lambda *_: next(free))
+    monkeypatch.setattr(port_guard, "_managed_owner", lambda *_: ("ml-api", 4242))
+    monkeypatch.setattr(port_guard, "_terminate_process", terminated.append)
+
+    port_guard.wait_for_port_free(
+        "127.0.0.1", 8000, timeout_s=1, interval_s=0, expected_service="ml-api"
+    )
+
+    assert terminated == [4242]
+
+
+def test_different_service_identity_is_never_terminated(monkeypatch):
+    terminated = []
+    monkeypatch.setattr(port_guard, "_port_free", lambda *_: False)
+    monkeypatch.setattr(port_guard, "_managed_owner", lambda *_: ("unrelated-service", 4242))
+    monkeypatch.setattr(port_guard, "_terminate_process", terminated.append)
+
+    with pytest.raises(SystemExit):
+        port_guard.wait_for_port_free(
+            "127.0.0.1", 8000, timeout_s=0, interval_s=0, expected_service="ml-api"
+        )
+
+    assert terminated == []
+
+
+def test_health_probe_accepts_degraded_json_identity(monkeypatch):
+    body = BytesIO(b'{"status":"degraded","service":"chatbot","pid":1234}')
+    degraded = port_guard.HTTPError("http://127.0.0.1:8001/health", 503, "degraded", {}, body)
+
+    def raise_degraded(*_args, **_kwargs):
+        raise degraded
+
+    monkeypatch.setattr(port_guard, "urlopen", raise_degraded)
+
+    assert port_guard._managed_owner("127.0.0.1", 8001) == ("chatbot", 1234)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"service":"ml-api"}',
+        b'{"service":"ml-api","pid":"1234"}',
+        b'{"service":"ml-api","pid":0}',
+        b"not-json",
+    ],
+)
+def test_health_probe_rejects_unusable_identity(monkeypatch, payload):
+    monkeypatch.setattr(port_guard, "urlopen", lambda *_args, **_kwargs: _Response(payload))
+
+    assert port_guard._managed_owner("127.0.0.1", 8000) is None
+
+
+def test_pm2_stability_window_exceeds_port_guard_timeout():
+    """A guard timeout must count toward max_restarts, not reset it forever as a stable run."""
+    from pathlib import Path
+
+    ecosystem = (Path(__file__).resolve().parents[3] / "ecosystem.config.cjs").read_text("utf-8")
+    value = re.search(r"min_uptime:\s*([\d_]+)", ecosystem)
+    assert value
+    assert int(value.group(1).replace("_", "")) > 300_000

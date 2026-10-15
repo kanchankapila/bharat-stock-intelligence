@@ -70,7 +70,7 @@ def test_entry_is_next_open_after_the_decision_became_knowable(pg_db_conn):
     assert status == "pending" and entry is None and exit_ is None and ret is None
 
 
-def test_pending_resolves_on_a_later_run_and_suspect_bars_are_excluded(pg_db_conn):
+def test_pending_resolves_on_a_later_run_and_suspect_bars_are_invalid(pg_db_conn):
     conn = pg_db_conn
     _setup(conn)
     _bars(conn, [("2026-09-28", 100.0, 101.0, 99.0, 100.0)])
@@ -81,4 +81,4 @@ def test_pending_resolves_on_a_later_run_and_suspect_bars_are_excluded(pg_db_con
     conn.execute("UPDATE stock_ohlcv SET is_suspect = 1 WHERE symbol='RELIANCE' AND date='2026-09-29'")
     resolve_decision_outcomes(conn, horizons=(2,))
     row = _outcomes(conn)[2]
-    assert row[1] == "excluded" and row[4] is None, "a suspect bar in the window must not grade"
+    assert row[1] == "invalid" and row[4] is None, "a suspect bar in the window must not grade"

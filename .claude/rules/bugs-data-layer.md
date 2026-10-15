@@ -339,3 +339,36 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   — it clears EVERY repeatable on its queue before adding its own. The nightly job digest had not
   fired on its cron since a morning digest was added to its queue (2026-09-02); it only ran as a
   boot-time catch-up. 🤖-adjacent: `repeatableQueuesUnique.test.ts`.
+- **A status string invented in application code can pass tests while violating the live CHECK
+  constraint when the checked-in schema snapshot omitted that constraint.** 2026-10-14:
+  `decision_outcome_resolver.py` wrote `excluded`, while the migration/live table had always
+  allowed only `pending|resolved|invalid`; the test schema omitted the CHECK, so its suspect-bar
+  case asserted the invalid value as if it were a contract. Keep the canonical database enum in
+  code and in `db/schema.postgres.sql`, then make the real-Postgres negative path exercise the
+  constrained value. **Tell:** `CheckViolation` on the first genuinely malformed/quarantined row
+  after months of green normal-path runs. AF-20261014-11.
+
+## Identity and price-basis defects found by the 2026-10-15 systems audit
+
+- **A corporate action with no clean ratio is rejected by a detector that "reports rather than guesses",
+  and nothing consumes the report, so the ex-date stays a -60..-91% return forever.** Demergers,
+  capital reductions and ratio-less splits arrive from the NSE feed as `OTHER`/`SPLIT` with `ratio=NULL`
+  (the `subject` text is not stored), `ohlcv_adjust` rejects them as `not_a_clean_ratio`, and
+  `repair_unadjusted_splits` only applies existing factors: BHAGYANGR 10-08 (-91%), VERANDA 10-06 (-86%),
+  HEG 09-07 (-63%), TEMBO 08-05 (-89%). **Tell:** `SELECT ... WHERE abs(close/lag(close)-1) > 0.35 AND
+  is_suspect = 0` joined to `corporate_actions` on the ex-date window; any row with an `OTHER`/NULL-ratio
+  action is this class. Fixed by `promote_declared_seams` (declared action within 3 days + move beyond the
+  20% band + whole session on the new level + level persists): the observed ratio assumes a zero market
+  move on the ex-date, an error of a few percent against one of 60-90%. A bad print that reverts (CCAVENUE)
+  is never promoted. AF-20261015-07.
+- **A symbol that is priced but not LISTED is a duplicate entity, not a stock.** Thirteen retired aliases or
+  phantoms (INDUSIND, LARSEN, MAHINDRA, KOTAK, NESTLE, TATAMOTORS, CHOLAFINSV, ...) had Yahoo bars, so they
+  passed the "in master and priced" filter and were ranked beside the real listing with a different verdict
+  (INDUSIND Hold 42 vs INDUSINDBK Sell 23). CHOLAFINSV is CHOLAFIN's bars under a phantom "Chola Insurance"
+  row carrying 3M India's ISIN. **Tell:** `nse_stocks` symbols with no `nse_universe_history` row in 45 days
+  while `stock_ohlcv` has bars; `GROUP BY isin HAVING count(*) > 1`. The ranker now requires an exchange row
+  (fail-open on an empty table). AF-20261015-12.
+- **Float32 where the identifier of a price lives.** `nse_universe_history` stores prices and volume as
+  REAL; `ohlcv_adjust` reads seam ratios at 7 significant digits and volume above 2^24 is rounded. Calendar-
+  blocked (compressed hypertable rewrite). AF-20261015-13.
+

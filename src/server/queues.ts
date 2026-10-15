@@ -36,6 +36,7 @@ import { updateMonitorState } from './monitoringService';
 import { StepTracker } from './jobSteps';
 import { updateTrailingStops } from './trailingStopUpdater';
 import { getTrendlyneMetricSymbols, enqueueTrendlyneMetricsFetchJobs, runTrendlyneMetricsFetch } from './trendlyneDailyFetchService';
+import { initialiseTrendlyneBatch, requireSuccessfulTrendlyneFetch, settleTrendlyneBatch, trendlyneBatchId } from './trendlyneDailyBatch';
 import { isMarketOpen, isTradingHolidayToday, shouldSkipOnTradingHoliday } from './marketStatusService';
 import {
   isDormant, shouldStartNewCycle, pickRandomBatch, randomDelayMs, DORMANT_RECHECK_MS,
@@ -49,6 +50,13 @@ import { recordHeartbeat, startHeartbeatMonitor, bullJobDurationMs } from './job
 import { startJobWatchdog, buildDailyDigest } from './jobWatchdog';
 import { telegramService, sanitizeMarkdown } from './telegramService';
 import { sendAccuracyDigest } from './signalAccuracyDigest';
+
+// Keep the literal failed-heartbeat write for this aggregate in one place. The worker has
+// several mutually exclusive accounting failures, but duplicating the write at every branch
+// makes static/runtime audits unable to prove one batch produces at most one terminal record.
+function recordTrendlyneDailyFailure(message?: string, durationMs?: number) {
+  return recordHeartbeat('trendlyne-daily-fetch', 'failed', message, durationMs);
+}
 
 // ─── Redis connection shared across all BullMQ objects ───────────────────────
 
@@ -3249,21 +3257,71 @@ export async function initQueues(): Promise<boolean> {
       async (job: Job) => {
         if (!job.data || !job.data.symbol) {
           const symbols = await getTrendlyneMetricSymbols();
-          await enqueueTrendlyneMetricsFetchJobs(trendlyneDailyFetchQueue!, symbols, 12);
+          const batchId = trendlyneBatchId(job.data?.batchId, job.id);
+          await initialiseTrendlyneBatch(trendlyneDailyFetchQueue!, batchId, symbols.length);
+          await job.updateData({ ...job.data, batchId, total: symbols.length });
+          await enqueueTrendlyneMetricsFetchJobs(trendlyneDailyFetchQueue!, symbols, 12, batchId);
+          if (symbols.length === 0) {
+            recordHeartbeat('trendlyne-daily-fetch', 'success', undefined, bullJobDurationMs(job));
+          }
           return;
         }
-        await runTrendlyneMetricsFetch(job.data.symbol);
+        await requireSuccessfulTrendlyneFetch(
+          job.data.symbol,
+          (symbol) => runTrendlyneMetricsFetch(symbol, true),
+        );
       },
       { connection, concurrency: 2, lockDuration: 30 * 60_000 }
     );
 
-    trendlyneDailyFetchWorker.on('completed', (job) => {
-      console.log('[QUEUE] trendlyne-daily-fetch completed');
-      recordHeartbeat('trendlyne-daily-fetch', 'success', undefined, bullJobDurationMs(job));
+    trendlyneDailyFetchWorker.on('completed', async (job) => {
+      try {
+        if (!job.data?.symbol) {
+          console.log(`[QUEUE] trendlyne-daily-fetch batch ${job.data?.batchId ?? 'legacy'} enqueued (${job.data?.total ?? 0} symbols)`);
+          return;
+        }
+        if (!job.data?.batchId) {
+          // Pre-deploy delayed children have no batch identity. Never let one arbitrary success
+          // overwrite a sibling failure; tomorrow's batch carries the honest aggregate contract.
+          console.log(`[QUEUE] trendlyne-daily-fetch legacy child completed: ${job.data.symbol}`);
+          return;
+        }
+        const verdict = await settleTrendlyneBatch(
+          trendlyneDailyFetchQueue!, job.data.batchId, 'completed');
+        if (!verdict) return;
+        if (verdict.success) {
+          console.log(`[QUEUE] trendlyne-daily-fetch batch completed: ${verdict.completed}/${verdict.total}`);
+          await recordHeartbeat('trendlyne-daily-fetch', 'success', undefined, verdict.durationMs);
+        } else {
+          const message = `${verdict.failed}/${verdict.total} symbol fetches failed`;
+          console.error(`[QUEUE] trendlyne-daily-fetch batch failed: ${message}`);
+          await recordTrendlyneDailyFailure(message, verdict.durationMs);
+        }
+      } catch (error) {
+        const message = `batch completion accounting failed: ${(error as Error).message}`;
+        console.error(`[QUEUE] trendlyne-daily-fetch ${message}`);
+        await recordTrendlyneDailyFailure(message, bullJobDurationMs(job));
+      }
     });
-    trendlyneDailyFetchWorker.on('failed', (job, e) => {
-      console.error('[QUEUE] trendlyne-daily-fetch failed:', e.message);
-      recordHeartbeat('trendlyne-daily-fetch', 'failed', e?.message, bullJobDurationMs(job));
+    trendlyneDailyFetchWorker.on('failed', async (job, e) => {
+      try {
+        console.error('[QUEUE] trendlyne-daily-fetch failed:', e.message);
+        if (!job?.data?.symbol || !job.data?.batchId) {
+          await recordTrendlyneDailyFailure(e?.message, bullJobDurationMs(job));
+          return;
+        }
+        const attempts = Number(job.opts.attempts ?? 1);
+        if (job.attemptsMade < attempts) return;
+        const verdict = await settleTrendlyneBatch(
+          trendlyneDailyFetchQueue!, job.data.batchId, 'failed');
+        if (!verdict) return;
+        const message = `${verdict.failed}/${verdict.total} symbol fetches failed`;
+        await recordTrendlyneDailyFailure(message, verdict.durationMs);
+      } catch (error) {
+        const message = `batch failure accounting failed: ${(error as Error).message}`;
+        console.error(`[QUEUE] trendlyne-daily-fetch ${message}`);
+        await recordTrendlyneDailyFailure(message, bullJobDurationMs(job));
+      }
     });
 
     const trendlyneWeeklyJobs = await registerTrendlyneWeeklyJobs(connection);

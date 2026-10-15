@@ -581,12 +581,15 @@ def upsert_cashflow_history(symbol: str, rows: list[dict], con) -> None:
 
 
 def update_technical_signals(symbol: str, features: dict, con, today: str | None = None) -> None:
-    # Point-in-time stamp: apply these annual figures only to rows on/after the results were
-    # published (date >= floor), and NULL them on older rows. A plain `WHERE symbol = ?` smeared
-    # the latest annual value across the symbol's whole history, leaking future fundamentals into
-    # the per-signal-date feature join in ml_ensemble/exit_policy. The as-of trail lives in
-    # tl_financial_quality; technical_signals only carries the value from its knowable date on.
-    floor = as_of_floor(features.get("year_ending"), fallback=today)
+    # Point-in-time stamp: annual ratios become knowable after the statutory publication lag.
+    # The capex-based FCF fields are different: they are assembled from the latest quarterly
+    # payload during this fetch, so their first defensible availability date is `today`. Applying
+    # those values at the annual floor would leak later quarters into historical model features.
+    annual_floor = as_of_floor(features.get("year_ending"), fallback=today)
+    fcf_floor = today or date.today().isoformat()
+    quarterly_fcf_columns = {
+        "fcf_yield_approx", "fcf_positive", "fcf_basis", "fcf_ttm_as_of",
+    }
     cur = con.cursor()
     base_columns = ["fcf_yield_approx", "interest_coverage", "fcf_positive", "debt_coverage_risk",
                     "fcf_basis", "fcf_ttm_as_of"] + _HARVEST_COLUMNS
@@ -595,6 +598,7 @@ def update_technical_signals(symbol: str, features: dict, con, today: str | None
     )
     params = []
     for c in base_columns:
+        floor = fcf_floor if features.get("fcf_basis") == "capex" and c in quarterly_fcf_columns else annual_floor
         params.extend([floor, features.get(c)])
     params.append(symbol)
     cur.execute(f"""
@@ -636,12 +640,13 @@ def process_stock(symbol: str, company_id: str, today: str,
 
     # ── Prefer REAL TTM FCF over the CFO+CFI proxy wherever it exists ─────────────
     # compute_ratios() has no DB access, so the quarterly-capex upgrade happens here,
-    # after the row is built. `as_of` is the FISCAL YEAR END of the annual figures
-    # above, which is strictly conservative: the window may only use quarters that
-    # were already inside the reported fiscal year, so this can never pull a quarter
-    # published after the annual results this fetcher is stamping. When year_ending is
-    # unavailable (ET omitted it) fall back to `today` so a late quarter cannot leak in.
-    as_of = features.get("year_ending") or today
+    # after the row is built. Bound the quarterly window by the FETCH date, not the annual
+    # fiscal year-end. The old bound rejected every legitimate quarter reported after March
+    # (for example June and September), which is why live fcf_ttm_as_of remained 100% NULL
+    # even when finstack history contained four usable quarters. `today` is also the earliest
+    # safe availability date because this vendor table has period_end/fetched_at, not a filing
+    # publication timestamp; using period_end to backfill older signal dates would leak data.
+    as_of = today
     fcf_ttm, latest_period = finstack_ttm_fcf(con, symbol, as_of=as_of)
     if fcf_ttm is not None:
         # Finstack/Yahoo is raw INR while the ET proxy and this column's historical contract

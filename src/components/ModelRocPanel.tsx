@@ -34,13 +34,13 @@ function interpTpr(roc: Roc[], x: number): number {
 }
 
 function verdict(auc: number): { label: string; cls: string } {
-  if (auc >= 0.60) return { label: 'Tradeable edge', cls: 'text-emerald-400' };
-  if (auc >= 0.55) return { label: 'Marginal',       cls: 'text-amber-400' };
-  return { label: 'No live edge', cls: 'text-rose-400' };
+  if (auc >= 0.60) return { label: 'Strong discrimination', cls: 'text-emerald-400' };
+  if (auc >= 0.55) return { label: 'Weak discrimination',   cls: 'text-amber-400' };
+  return { label: 'Near chance', cls: 'text-rose-400' };
 }
 
 export function ModelRocPanel() {
-  const { data, isLoading } = trpc.getModelRocDiagnostics.useQuery(undefined, {
+  const { data, isLoading, isError, refetch } = trpc.getModelRocDiagnostics.useQuery(undefined, {
     staleTime: 5 * 60_000,
   });
 
@@ -60,6 +60,14 @@ export function ModelRocPanel() {
       <div className="glass border border-slate-800/60 rounded-2xl p-5 h-80 flex flex-col items-center justify-center">
         <Loader2 className="w-6 h-6 text-indigo-400 animate-spin mb-2" />
         <span className="text-[10px] text-slate-500 font-data font-display uppercase tracking-widest">Computing deployment ROC…</span>
+      </div>
+    );
+  }
+  if (isError) {
+    return (
+      <div className="glass border border-rose-500/30 rounded-2xl p-5 h-80 flex flex-col items-center justify-center" role="alert">
+        <span className="text-[10px] text-rose-400 font-data font-display uppercase tracking-widest">Could not load deployment ROC</span>
+        <button type="button" className="mt-2 text-xs text-slate-300 underline" onClick={() => void refetch()}>Retry</button>
       </div>
     );
   }
@@ -115,7 +123,7 @@ export function ModelRocPanel() {
           <span className="text-xl font-black font-data italic text-rose-400">
             {gap != null ? `${gap >= 0 ? '−' : '+'}${Math.abs(gap).toFixed(3)}` : '—'}
           </span>
-          <span className="text-[8px] text-slate-500 block font-bold font-data uppercase">edge lost in deployment</span>
+          <span className="text-[8px] text-slate-500 block font-bold font-data uppercase">discrimination gap</span>
         </div>
       </div>
 

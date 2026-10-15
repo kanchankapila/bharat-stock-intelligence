@@ -225,17 +225,19 @@ clients. It's split by index/stock futures and calls/puts, and stored in `alpha.
 
 ## Reported results (`nse_results`)
 
-A per-stock sweep of NSE's `api/results-comparision` (NIFTY 500 names, in the vendor stage)
-stores reported quarterly EPS, total income and net profit in `alpha.fundamental` under source
-`nse_results`.
+A local bridge mirrors the primary platform's `nse_filing_financials` into
+`alpha.fundamental` under source `nse_results`. That upstream table is built from NSE's current
+Integrated Filing listing and each filing's XBRL. NSE froze the former per-stock
+`api/results-comparision` endpoint at the December-2024 quarter when it moved March-2025-and-later
+results to Integrated Filing; an HTTP-200 response from that endpoint is therefore not evidence
+of freshness.
 
-- **Strict parsing.** No field name could be verified from the build container (AF-20260928-10),
-  so a payload without `resCmpData`, or a row missing its period end, income, profit or a known
-  EPS key, fails the run instead of writing something half-understood.
-- **Dating.** A quarter is knowable at this engine's own board-meeting results date for that
-  quarter, stamped 23:00 IST because results often come out after hours, so they're used the next
-  session. If there's no such event, it's the SEBI deadline (45 days after quarter end, 60 for
-  March) or the fetch time if earlier.
+- **Canonical selection.** One usable row per stock/quarter is selected, preferring original
+  consolidated, then original standalone; a revision is used only if no usable original exists.
+- **Units.** XBRL monetary values are Rs crore upstream and are converted to the existing
+  Rs-lakh storage contract. EPS remains rupees per share.
+- **Dating.** `knowable_at` is NSE's exact exchange broadcast timestamp, so an after-hours filing
+  first reaches a feature on the next session without an estimated deadline or meeting date.
 - **Re-imports.** The first import of a quarter wins, so later fetches never restamp history.
 - **Features:**
   - `res_eps_yoy_px`: EPS minus the same quarter a year earlier, over price. This is the

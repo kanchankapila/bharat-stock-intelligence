@@ -1629,6 +1629,8 @@ CREATE TABLE IF NOT EXISTS "market_decision_outcome" (
   "source_table" TEXT,
   "source_ref" TEXT,
   "created_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT market_decision_outcome_outcome_status_check
+    CHECK (outcome_status IN ('pending', 'resolved', 'invalid')),
   PRIMARY KEY ("decision_key", "label_definition", "horizon_days")
 );
 

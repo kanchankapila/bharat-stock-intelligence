@@ -70,6 +70,12 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   distinct: `data-sources.md`'s Trendlyne cumulative-allowance entry (there, no amount of backoff
   converges — only a bounded slice + resume-from-DB does).
 - **A full-universe fetcher with no resumability turns "retried on catch-up" into "always starts from zero"** — a killed run's real progress is thrown away every retry, compounding any transient slowdown into total failure instead of graceful degradation. Track `MAX(date)`-per-key against wall-clock cost the same way the write-amplification fix does against write volume.
+- **Schedule recovery history on a shared queue must be filtered by the scheduled job name.**
+  `queue.getJobs(['completed'])` is queue-wide: its newest retained row may belong to a sibling.
+  Using that timestamp to decide whether *this* schedule was missed can suppress a required
+  catch-up or manufacture one depending on which sibling finished last. Read the bounded retained
+  set, filter `j.name === jobName`, then take the newest completion/failure for that name.
+  Regression guard: one fresh sibling plus one stale target must still queue the target catch-up.
 - **`keep_alive: 0` on a repeated local-LLM/embedding call forces a full reload between EVERY call in the same run**, even with zero external contention. Drop it (default keep-alive) for any script calling the same endpoint in a loop.
 - **A provider-issued id column that silently holds the wrong shape (e.g. a symbol instead of the provider's numeric id) is a permanent, self-concealing 404** for every row with that shape, while also burning retry/backoff budget that masks a real transient outage in the noise floor. `SELECT count(*) FROM t WHERE provider_id !~ '^[0-9]+$'` (or whatever shape the provider actually uses) before trusting a column `data-sources.md` calls opaque/numeric.
 - **A timestamp used as a uniqueness key is only as fine-grained as the SYSTEM CLOCK TICK, not as precise as its ISO output implies** (Windows: 15.6ms; two calls in the same tick return the SAME value). If that key backs `ON CONFLICT DO NOTHING`, the second write in a tick is silently discarded. Bump by 1µs on collision if the constraint depends on strict ordering. The answer differs by platform (Linux ~1ns) — "it never happens in prod" can be true on Linux and false in dev, or the reverse.
@@ -348,17 +354,28 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   `last_updated`, so a bounded daily slice converges.
 - **A per-15-min model process on CUDA contends with the trainer for the same WDDM card.**
   `finbert_news_sentiment.py` (96 runs/day) is pinned to CPU: same speed warm, ~0.9GB less commit.
-- **`pm2 reload`/`restart` of a venv Python service on Windows orphans the real interpreter, and
-  the next instance then crash-loops on `[Errno 10048]` (port in use).** pm2 tracks the
-  `venv\Scripts\python.exe` redirector; killing it leaves the real interpreter (and its child)
-  holding the port, still serving, while pm2 restarts a copy every few seconds (chatbot reached 46
-  restarts, engine-worker 74, on 2026-09-30). `pm2 stop` left 4 such processes alive. Deploy
-  procedure for these services: `pm2 stop <app>` -> kill every remaining `python.exe` whose
-  command line names the script -> `pm2 start <app> --update-env` -> confirm `restart_time` holds
-  steady for a minute. **Tell:** `waiting restart` plus a climbing restart count while the port
-  still answers 200.
+- **`pm2 reload`/`restart` of a venv Python service on Windows can orphan the real interpreter,
+  and losing the PM2 daemon can orphan all four at once.** pm2 tracks the
+  `venv\Scripts\python.exe` redirector; killing it leaves the real interpreter holding the port.
+  The original five-minute `port_guard` wait was not enough: PM2's `min_uptime` was only ten
+  seconds, so each timeout counted as a stable run, reset `max_restarts`, and retried forever
+  every five minutes (2026-10-14: four services, host RAM 94%, daemon disappeared again).
+  Every managed health endpoint must expose its static service identity and real `os.getpid()`;
+  the replacement may terminate that exact PID only when both identities match. Never kill an
+  unknown port owner. Keep PM2 `min_uptime` longer than the guard budget so a genuinely foreign
+  listener exhausts the bounded restart policy. `test_port_guard.py` derives coverage from every
+  source-tree `uvicorn.run` entrypoint and pins both halves of this contract. **Tell:** a port
+  still answers while PM2 has no matching app, or wrappers recur at five-minute intervals even
+  though `max_restarts` is set.
 
 ## Provider retry budgets must fit the owning job
+
+- **PM2 `kill_timeout` is not a runtime limit.** It is the grace period after PM2 sends SIGINT
+  before it escalates to SIGKILL. Raising it to “give a long job more time” does not protect a
+  healthy run; it makes a hung predecessor delay the next cron restart by that many hours. Keep
+  one-shot cron shutdown grace bounded (1-15 minutes here), put core work before optional vendor
+  tails, and use ledgered stages or an application-level deadline if a real runtime cap is needed.
+  Pin the meaning against the installed PM2 `schema.json`/`God/Methods.js`, not a variable name.
 
 - **A provider's RetryInfo is not automatically a safe sleep duration.** Gemini can return a
   10-30 second per-minute delay or a 16-hour per-day reset using the same HTTP 429 shape. Never
@@ -369,3 +386,17 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 - **Provider failure is not a conservative factual classification.** Do not persist fallback
   zeros/false flags or advance freshness after an AI/API error. Preserve the prior row, report
   the enrichment as unavailable, and stop a batch when the error applies to every remaining item.
+
+- **A guard that skips an "off-schedule" launch also discards the only catch-up chance after a host
+  outage (2026-10-15).** The 23:15 IST `pg-backup-nightly` slot never fired on 10-14 (host down); the
+  00:26 post-boot launch was skipped as "likely a registration/restart launch", so the newest verified
+  dump was 43 h old and `pg-backup-recency` still read pass (it warns only above 2 days). The guard
+  exists to stop a mid-market dump (a 2026-09-03 restart at 09:20 IST blocked a migration for ~12 min).
+  **Rule:** a schedule-window guard must pair with an overdue-catch-up path that keys on the artifact's
+  own age (newest dump older than 26 h) and still refuses market hours. Verify by reading the job log
+  for a gap in slots, not the heartbeat. AF-20261015-08.
+- **A timeout bump is not a fix for a job whose cost has a per-iteration plan problem.**
+  `mover-study-weekly` went 30 -> 45 min while one CTE was inlined with a 2-row estimate (actual ~100k)
+  and rescanned the window per symbol for each of 166 dates (7.9-11.4 s vs 0.22 s `MATERIALIZED`). The
+  run had no per-stage timings, so the timeout message said "No stderr captured". Log elapsed time at
+  each stage to stderr first, then look at `EXPLAIN` `loops=`. AF-20261015-06.

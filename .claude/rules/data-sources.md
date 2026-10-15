@@ -432,3 +432,37 @@ looks dead.
 routes answer **405 Method Not Allowed** to a GET — they are POST endpoints. Only when POSTed
 with the real payload and a valid Bearer token do they return 401, which is what actually proves
 the Prime gate. A 403/405 on a GET proves nothing about entitlement.
+
+## One empty symbol must not discard a valid per-symbol batch (2026-10-14)
+
+An endpoint can return a structurally valid no-data sentinel for one symbol while returning real
+rows for hundreds of others. Parse and validate each symbol at the per-symbol boundary; preserve
+strict row validation for every payload that claims to contain rows. Never flatten the whole batch
+through one strict parser if one expected empty sentinel can raise after all network requests have
+already succeeded. AF-20261014-12: NSE `results-comparision` returned HTTP 200 with
+`resCmpData: null` for ABFRL, ABINFRA, ATGL and BBOX, while adjacent symbols returned valid lists.
+The all-or-nothing comprehension threw on the first null and discarded the valid batch after a
+29-minute sweep. The live test's three blue-chip symbols all returned lists, so the sentinel path
+needed its own mixed-payload regression.
+
+## An HTTP-200 historical snapshot is not a live source (2026-10-15)
+
+Validate the newest business date/period in a snapshot response, not only its shape and row count.
+NSE's `results-comparision` endpoint continued returning five well-formed quarters for thousands
+of symbols after NSE moved March-2025-and-later results to Integrated Filing. A full BQA sweep took
+four hours, wrote/read 13,715 plausible rows and reported success, while `max(period_end)` remained
+2024-12-31 and `max(knowable_at)` remained 2025-02-14. The replacement is the already-canonical
+Integrated Filing + XBRL pipeline (`nse_results_filings` -> `nse_filing_financials`), mirrored into
+BQA with the real exchange broadcast timestamp. When a provider changes publication routes,
+check the provider page's transition notice and the payload's maximum effective date before
+optimising retries or loosening a parser.
+
+## Resolve provider IDs from the canonical master before derived membership tables (2026-10-15)
+
+Trendlyne stock endpoints require a numeric `tlid`. `nse_stocks.tlid` is the maintained canonical
+mapping; `trendlyne_screener_stocks.stock_id` is derived membership history and contains legacy
+symbol-shaped debris. Live: LMW had canonical `tlid=785` but screener `stock_id='LMW'`; the daily
+metrics fetcher skipped the canonical table, requested `/LMW/`, and received a deterministic 404.
+Resolution order is static mapping → `nse_stocks.tlid` → numeric-only screener fallback. Validate
+the identifier shape before constructing the URL. A non-empty provider-id column is not sufficient
+evidence that it contains provider IDs.

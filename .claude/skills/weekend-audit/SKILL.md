@@ -184,9 +184,10 @@ Reading the results:
 
 ## Lane 5 — Frontend
 
-No component tests exist, so the check is that it actually renders. Use the
-`run-bharat-stock-intelligence` skill to boot and drive it; screenshot **v6 first** (the default a
-fresh visitor gets), then spot-check one other shell.
+Use the `run-bharat-stock-intelligence` skill to boot and drive the real route surface. Screenshot
+the `/*` v1 shell first (the default a fresh visitor gets), then spot-check `/tala/*`; audit
+`/concept` separately as an explicitly simulated design concept. The former v2-v6 shells were
+removed and must not be used as audit targets.
 
 - Browser console clean of errors on load?
 - Does the home surface show real numbers, or the "looks healthy, is actually broken" shape —

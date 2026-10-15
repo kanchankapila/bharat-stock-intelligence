@@ -81,6 +81,22 @@ EXPECTED_DEAD_COLUMNS: dict[tuple[str, str], str] = {
 }
 
 EXPECTED_FROZEN_COLUMNS: dict[tuple[str, str], str] = {
+    ("technical_signals", "fii_3d_net"):
+        "Market-wide FII flow context is intentionally repeated across the daily symbol grid.",
+    ("technical_signals", "dii_3d_net"):
+        "Market-wide DII flow context is intentionally repeated across the daily symbol grid.",
+    ("technical_signals", "eps_miss_after_streak"):
+        "Sparse binary event flag; a day with no qualifying event is legitimately all zero.",
+    ("technical_signals", "insider_buy_flag"):
+        "Sparse binary event flag; a day with no qualifying filing is legitimately all zero.",
+    ("technical_signals", "insider_sell_flag"):
+        "Sparse binary event flag; a day with no qualifying filing is legitimately all zero.",
+    ("technical_signals", "wc_deteriorating"):
+        "Quarterly-change binary flag; a daily grid may legitimately contain one state.",
+    ("technical_signals", "wc_improving"):
+        "Quarterly-change binary flag; a daily grid may legitimately contain one state.",
+    ("technical_signals", "near_expiry_gamma"):
+        "Calendar/expiry binary context; a non-expiry daily grid is legitimately all zero.",
     ("feature_store", "target_dir_5d"):
         "Forward classification label, not a live input; one class may occupy one date.",
     ("feature_store", "target_dir_15d"):

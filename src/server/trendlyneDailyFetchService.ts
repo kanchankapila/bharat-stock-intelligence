@@ -2,6 +2,7 @@ import { Queue } from 'bullmq';
 import { getAllStocks } from './stockMapping';
 import { fetchTrendlyneStockMetrics } from './trendlyneService';
 import { dbAll, dbRun } from './dbAsync';
+import { trendlyneChildJobId } from './trendlyneDailyBatch';
 
 const DEFAULT_WINDOW_HOURS = 12;
 const MAX_WINDOW_HOURS = 24;
@@ -80,17 +81,23 @@ export async function saveStockMetricsToDB(symbol: string, date: string, body: R
 
 export async function getTrendlyneMetricSymbols(limit = TOP_N_BY_MARKET_CAP): Promise<string[]> {
   try {
-    const rows = await dbAll<{ symbol: string }>(
-      `SELECT symbol FROM nse_stocks WHERE market_cap IS NOT NULL AND status = 'ACTIVE'
-       ORDER BY market_cap DESC LIMIT ?`,
-      [limit],
+    const rows = await dbAll<{ symbol: string; tlid: string | null }>(
+      `SELECT symbol, tlid FROM nse_stocks WHERE market_cap IS NOT NULL AND status = 'ACTIVE'
+       ORDER BY market_cap DESC`,
     );
-    if (rows.length > 0) return rows.map(r => r.symbol.toUpperCase());
+    // This endpoint accepts Trendlyne's numeric stock id, not an NSE symbol. The legacy
+    // screener table contains symbol-shaped stock_id debris (LMW -> "LMW"), which yields a
+    // deterministic 404 and would make tomorrow's honest aggregate batch fail every day.
+    const mapped = rows.filter(r => /^\d+$/.test(String(r.tlid ?? ''))).slice(0, limit);
+    if (mapped.length > 0) return mapped.map(r => r.symbol.toUpperCase());
   } catch (err) {
     console.warn('[TRENDLYNE DAILY FETCH] market-cap ranked query failed, falling back to full universe:', (err as Error).message);
   }
   // Fallback (nse_stocks not yet populated, or the query failed): full universe, same as before.
-  return getAllStocks().map((stock) => stock.symbol.toUpperCase());
+  return getAllStocks()
+    .filter(stock => /^\d+$/.test(String(stock.tlid ?? '')))
+    .slice(0, limit)
+    .map(stock => stock.symbol.toUpperCase());
 }
 
 export function randomDelayMs(windowHours = DEFAULT_WINDOW_HOURS): number {
@@ -102,6 +109,7 @@ export async function enqueueTrendlyneMetricsFetchJobs(
   queue: Queue,
   symbols: string[],
   windowHours = DEFAULT_WINDOW_HOURS,
+  batchId?: string,
 ): Promise<void> {
   const maxDelayMs = Math.max(0, Math.min(windowHours, MAX_WINDOW_HOURS)) * 60 * 60 * 1000;
 
@@ -110,22 +118,26 @@ export async function enqueueTrendlyneMetricsFetchJobs(
 
     await queue.add(
       'trendlyne-metrics-fetch',
-      { symbol },
+      { symbol, ...(batchId ? { batchId } : {}) },
       {
         delay,
         attempts: 2,
         backoff: { type: 'exponential', delay: 5000 },
-        removeOnComplete: true,
+        jobId: batchId ? trendlyneChildJobId(batchId, symbol) : undefined,
+        removeOnComplete: batchId ? { age: 24 * 60 * 60, count: 5000 } : true,
         removeOnFail: 3,
       },
     );
   }
 }
 
-export async function runTrendlyneMetricsFetch(symbol: string): Promise<boolean> {
+export async function runTrendlyneMetricsFetch(
+  symbol: string,
+  requirePersistence = false,
+): Promise<boolean> {
   try {
     const data = await fetchTrendlyneStockMetrics(symbol);
-    if (!data?.body) return data !== null && data !== undefined;
+    if (!data?.body) return requirePersistence ? false : data !== null && data !== undefined;
 
     // Persist alongside the existing cache-warm (2026-08-15) -- this job's own window (10 AM -
     // 10 PM, randomDelayMs above) never crosses midnight, so a plain calendar date is a safe
@@ -139,6 +151,7 @@ export async function runTrendlyneMetricsFetch(symbol: string): Promise<boolean>
       // contract (a boolean success/failure signal for the caller) predates persistence and
       // several callers key retry/backoff off it.
       console.warn(`[TRENDLYNE DAILY FETCH] Metrics fetched but DB persist failed for ${symbol}:`, (persistErr as Error).message);
+      if (requirePersistence) throw persistErr;
     }
     return true;
   } catch (error) {

@@ -38,6 +38,23 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   after the first post-close no-op. Immunized by `jobReadinessRegistry.test.ts` and the
   technical-scan negative control in `monitorScriptsCronMirror.test.ts` (AF-20261006-06).
 
+- **A fan-out parent finishing means only that children were enqueued, and a shared heartbeat
+  written by every child makes the last arbitrary child overwrite the batch truth.** Trendlyne's
+  daily parent queued hundreds of symbol jobs across a 12-hour delay window, immediately stamped
+  the daily job successful, then each child stamped the same heartbeat again; one child failure
+  could be erased by the next success. Give every fan-out a batch id, initialise its total before
+  enqueueing, atomically count final child outcomes, and permit exactly one finaliser to write the
+  aggregate heartbeat only after `completed + failed >= total`. Batch initialisation must be
+  retry-idempotent (`HSETNX`, not a reset), missing/expired state must fail closed rather than
+  manufacture a zero-work success, and a changed universe total on retry must be rejected rather
+  than leaving the batch impossible to settle. Deterministic child IDs must prevent a parent
+  retry from duplicating settled work. A retry attempt is not a final failure. Pre-batch legacy child
+  successes must never overwrite a failure. The registry grace must cover the full intentional
+  child-delay window plus execution margin; otherwise an honest in-progress batch is reported
+  late by design. Immunized by `trendlyneDailyBatch.test.ts` (retry initialisation, missing state,
+  incomplete, all-green and mixed/finalise-once cases), the 12-hour grace consistency test and
+  repo-doctor's `trendlyne-fanout-heartbeat` check, AF-20261014-10.
+
 - **An inline wrapper that declares fewer parameters than its caller passes silently drops the
   extras.** `registerJob` calls `monitorFn(name, status, detail, durationMs)`; three wrappers in
   `dl.jobs.ts` were written `(_name, status, detail) => updateMonitorState(...)`, so
@@ -342,6 +359,15 @@ generated after the close.
   degraded-read message must name the subject and say how the response differed from the
   contract the code checked.
 
+- **A fan-out child failure is retry telemetry; the aggregate terminal verdict is the job
+  outcome.** Once every child has bounded retries and the batch records exactly one terminal
+  heartbeat, alerting independently on each `Trendlyne metrics fetch returned no durable data`
+  line double-counts one incident and keeps recovered attempts red. The doctor may classify that
+  exact child-attempt signature as retry noise, but must leave `batch failed: N/M symbol fetches
+  failed` actionable. A broad `trendlyne-daily-fetch failed` benign regex would mute the real
+  aggregate and is forbidden. Verify recovery by durable rows for the named symbols, not merely
+  by a later green heartbeat.
+
 - **A `cumprod` over a long panel overflows to `inf`, and `Series.min()`/`.max()` SKIP NaN — so
   the metric returns a plausible, finite, correctly-signed number computed from only the rows
   before the overflow.** `performance_tracker`'s `max_drawdown_pct` compounded the h=15 group
@@ -414,3 +440,30 @@ the fix it reads `no evidence`.
 
 Fixed and immunized in AF-20260929-09; `bharat_alpha/tests/test_legacy_bridge.py` and
 `tests/test_ablation.py` carry the guards.
+
+## Recovery telemetry is not current failure state (2026-10-15)
+
+- A rolling failure ratio must also report the latest verdict. `2/5` with a latest success means
+  "recovered, two earlier failures remain in the seven-day evidence window", not "failing 40%"
+  in the present tense. Preserve the denominator and history; change the tense, do not delete rows.
+- Multiple catch-up enqueue logs are not automatically duplicate detection. On 2026-10-14 the
+  same five jobs each had events at 08:16 and 12:03 UTC, matching two distinct scheduler outages.
+  Only call them duplicate recovery when they cluster inside one bounded restart window; parse
+  and enforce the advertised 24-hour timestamp window rather than reading two whole log files.
+- A deliberately gated model output and a dead raw model are different populations. The stored
+  ML blend score had sd ~0.55 because the live calibration slope intentionally shrank a raw
+  score with sd ~4.31 toward neutral. A dispersion monitor must read both: fail when raw output
+  collapses, but describe a dispersed-raw/collapsed-consumed shape as an honest exclusion. Never
+  lower the floor or inject variance merely to make the check green.
+
+- **A check keyed on "the latest session" fires in the gap between the data landing and the job meant
+  to act on it (2026-10-15).** `unified-signals-expiry-overdue` counted signals past their validity
+  window against the cutoff that includes today's bar; that bar lands ~16:00 IST while the closer runs
+  at 16:30, so it failed 11 times between 16:04 and 16:28 IST and passed once the closer ran. Judge
+  against the session list WITHOUT today until the closer's slot plus grace has passed, then apply the
+  full count, so a closer that never ran is still caught. Query `data_quality_history` for the minute-of-
+  day of every fail before calling a recurring red a real outage. AF-20261008-46.
+- **A registry whose rows can only say "working" is a list, not a health record.**
+  `market_endpoint_registry` held 3,408 of 3,408 `is_working = true`, last validated 2026-09-13. Report
+  `validated_at` age next to any status read from it, and re-probe a sample on a schedule so a negative
+  result can exist (`market-endpoint-validation-age`).

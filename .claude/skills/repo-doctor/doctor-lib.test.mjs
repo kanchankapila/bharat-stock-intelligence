@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'fs';
 import {
+  classifyLatestDq,
   isKnownTransientFailure,
   latestExpectedNseDailyRun,
   latestExpectedNseIntradaySlot,
@@ -75,5 +77,48 @@ describe('repo-doctor known-transient failure classifier', () => {
       { job_name: 'open', err: '1 steps failed: real_step', recovered: false },
     ];
     expect(unrecoveredFailureRows(rows).map(r => r.job_name)).toEqual(['open']);
+  });
+});
+
+describe('repo-doctor latest DQ classifier', () => {
+  const pass = { check_id: 'freshness', status: 'pass', critical: 1 };
+  const noEdge = { check_id: 'ur-engine-dispersion-collapse', status: 'fail', critical: 0 };
+
+  it('keeps the frozen-experiment no-edge result visible as a warning', () => {
+    expect(classifyLatestDq([pass, noEdge])).toEqual({
+      status: 'WARN',
+      detail: 'pass=1(crit 1) / fail=1; evidence-lane: ur-engine-dispersion-collapse',
+    });
+  });
+
+  it('still fails on any unrelated DQ failure beside the evidence row', () => {
+    const result = classifyLatestDq([
+      pass,
+      noEdge,
+      { check_id: 'prices-stale', status: 'error', critical: 1 },
+    ]);
+    expect(result.status).toBe('FAIL');
+    expect(result.detail).toContain('blocking: prices-stale');
+  });
+
+  it('passes when every latest verdict passes', () => {
+    expect(classifyLatestDq([pass]).status).toBe('PASS');
+  });
+});
+
+describe('repo-doctor secret hygiene', () => {
+  it('never selects or prints Telegram credential values', () => {
+    const source = fs.readFileSync(new URL('./doctor.mjs', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/left\(value/i);
+    expect(source).not.toMatch(/telegram-settings[\s\S]{0,500}\.v\b/);
+    expect(source).toContain("bot_token=${hasTok ? 'configured' : 'missing'}");
+  });
+
+  it('keeps the Trendlyne fan-out lifecycle in the consolidated doctor', () => {
+    const source = fs.readFileSync(new URL('./doctor.mjs', import.meta.url), 'utf8');
+    expect(source).toContain("check('trendlyne-fanout-heartbeat'");
+    expect(source).toContain("queuesSource.includes('settleTrendlyneBatch('");
+    expect(source).toContain('trendlyneGraceMinutes >= 12 * 60');
+    expect(source).toContain("batchSource.includes('missing batch state for')");
   });
 });

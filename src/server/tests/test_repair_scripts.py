@@ -204,3 +204,52 @@ def test_event_clock_ctes_are_materialized():
     p = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "repair" / "repair_event_clocks.py"
     text = p.read_text(encoding="utf-8")
     assert "WITH k AS MATERIALIZED" in text and "pit AS MATERIALIZED" in text and "WITH s AS MATERIALIZED" in text
+
+
+# ── ghost bars: absent from a complete official bhavcopy ────────────────────
+
+def _seed_ghosts(conn):
+    conn.execute("CREATE TABLE nse_stocks (symbol TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE nse_universe_history (date DATE, symbol TEXT, series TEXT, close REAL, "
+                 "PRIMARY KEY (date, symbol, series))")
+    conn.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date DATE, open REAL, high REAL, low REAL, "
+                 "close REAL, volume BIGINT, is_suspect BIGINT, suspect_reason TEXT, PRIMARY KEY (symbol, date))")
+    conn.execute("INSERT INTO nse_stocks VALUES ('GHOST'), ('ALIAS'), ('LIVE')")
+    for d in ('2026-10-12', '2026-10-13', '2026-10-14'):
+        conn.execute("INSERT INTO nse_universe_history SELECT ?, 'F' || g, 'EQ', 1 "
+                     "FROM generate_series(1, 1500) g", (d,))
+        conn.execute("INSERT INTO nse_universe_history VALUES (?, 'LIVE', 'EQ', 5)", (d,))
+        for s in ('GHOST', 'ALIAS', 'LIVE'):
+            conn.execute("INSERT INTO stock_ohlcv VALUES (?, ?, 5, 6, 4, 5, 100, 0, NULL)", (s, d))
+    conn.execute("INSERT INTO nse_universe_history VALUES ('2026-10-12', 'GHOST', 'EQ', 5)")
+    conn.commit()
+
+
+def _flags(conn):
+    return [(r[0], str(r[1]), r[2]) for r in _q(
+        conn, "SELECT symbol, date, suspect_reason FROM stock_ohlcv WHERE is_suspect = 1 ORDER BY 1, 2")]
+
+
+def test_ghost_bars_dry_run_then_apply_then_idempotent(pg_conn, dump, capsys):
+    m = _load('flag_ghost_bars')
+    _seed_ghosts(pg_conn)
+    assert m.main([], conn=pg_conn) == 0
+    out = capsys.readouterr().out
+    assert '2026-10-13: 1 ghost bar(s), 1 identical to the previous bar: GHOST' in out
+    assert 'would flag 1' in out and 'ALIAS' not in out
+    assert _flags(pg_conn) == []
+
+    assert m.main(['--apply', '--dump-path', dump], conn=pg_conn) == 0
+    reason = m.GHOST_REASON
+    assert _flags(pg_conn) == [('GHOST', '2026-10-13', reason), ('GHOST', '2026-10-14', reason)]
+
+    capsys.readouterr()
+    assert m.main([], conn=pg_conn) == 0
+    assert 'would flag' not in capsys.readouterr().out
+
+
+def test_ghost_bars_apply_refuses_without_dump(pg_conn):
+    m = _load('flag_ghost_bars')
+    _seed_ghosts(pg_conn)
+    assert m.main(['--apply'], conn=pg_conn) == 2
+    assert _flags(pg_conn) == []

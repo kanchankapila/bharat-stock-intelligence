@@ -100,6 +100,8 @@ async def health():
         status_code=200 if ready else 503,
         content={
             "status": "ok" if ready else "degraded",
+            "service": "chatbot",
+            "pid": os.getpid(),
             "llm": llm_type,
             "graph_ready": _graph is not None,
         },
@@ -190,5 +192,5 @@ if __name__ == "__main__":
     except ImportError:  # `npm start` runs without it: no restart loop to guard against there
         wait_for_port_free = None
     if wait_for_port_free:
-        wait_for_port_free("127.0.0.1", CHATBOT_PORT)
+        wait_for_port_free("127.0.0.1", CHATBOT_PORT, expected_service="chatbot")
     uvicorn.run("app:app", host="127.0.0.1", port=CHATBOT_PORT, reload=False)

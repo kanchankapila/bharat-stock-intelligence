@@ -11256,3 +11256,69 @@ Full write-up: `docs/expert-review-2026-10-08.md`. Ledger: AF-20261008-11..28 (a
   failures or weekend/cadence/measurement alerts, not current failed jobs. Tapetide remains the sole
   owner-decision item: its three promoted routes still hard-404, reproduced again in the weekly crawl;
   per the datasource rule they are not silently disabled or relabeled as another vendor.
+
+
+## 2026-10-15 (evening) — systems audit, price-basis repairs, phantom alias symbols, backup catch-up
+
+Audit document: `docs/expert-review-2026-10-15-systems-audit.md`. Ledger: AF-20261015-06..13, AF-20261008-46.
+
+- **False page.** `unified-signals-expiry-overdue` failed 11 times 16:04-16:28 IST because the day's bar
+  (~16:00) advances the session cutoff 30 minutes before the closer's 16:30 slot. It now judges the
+  session list without today until 17:00 IST (`dataQualityExpiryOverdueTiming.test.ts`).
+- **mover-study-weekly.** Cost was one inlined CTE (2-row estimate vs ~100k) rescanned per symbol for 166
+  dates: `nifty AS MATERIALIZED`, 195 s for 250 days, identical factor frames (SHA-256) old vs new, and
+  per-stage elapsed lines on stderr.
+- **Price basis.** NSE demergers arrive as `OTHER`/NULL ratio and `ohlcv_adjust` rejected them as not a
+  clean ratio, so BHAGYANGR (-91%), VERANDA (-86%), HEG (-63%), TEMBO (-89%) stayed fake returns.
+  `promote_declared_seams` (declared action + beyond the 20% band + session fully on the new level +
+  persisting level) produced 22 `declared_action_seam` factors; applied behind the verified dump and read
+  back continuous. 440 ghost bars (halted listings' forward-filled copies) flagged
+  `absent_from_official_bhavcopy`.
+- **Backup.** The 10-14 23:15 IST dump never ran (host down) and the post-boot launch was discarded by the
+  off-schedule guard. Fresh dump `bharat_intel_20261015_185325.dump` (5,552 MB, TOC verified); the guard now
+  catches up an overdue dump outside 09:00-17:00 IST.
+- **Identity.** 13 priced-but-unlisted symbols (INDUSIND, LARSEN, MAHINDRA, KOTAK, NESTLE, TATAMOTORS,
+  CHOLAFINSV = CHOLAFIN's bars, ...) were ranked beside the real listing; the ranker now requires a
+  bhavcopy row in 45 sessions. `nse_stocks` rows still ACTIVE (production write left to the user).
+- **Measured.** Top-decile 5d excess vs universe +0.37..+0.69% (all names, t 2.3-4.2) falls to
+  +0.18..+0.39% (t 0.7-3.7) at ADT >= Rs 10 cr, about the 0.30% round trip; recorded in `measurement.md`.
+  The long-term top-rated list queried `LONG_TERM` while the ranker writes `POSITIONAL` (AF-20261015-14);
+  the list now also carries a Thin / Not-tradable label from ~30-session ADT (label only, no score change).
+- **Incident.** A scripted insert truncated `dataQualityChecks.ts` (open-for-write before the assertion);
+  restored from scratchpad snapshots, one hunk re-derived from its test. Rule added to
+  `bugs-testing-env.md`: compute first, write after.
+- **Gates on the final tree.** `tsc` clean; `vitest` 219 files pass; full pytest 3,765 passed / 266 skipped;
+  `findings:check` and `doc:numbers:check` OK. Production writes were run by the user (the auto-mode classifier
+  refuses them); `bharat-server` restarted 2026-10-15 after confirming no critical job was running.
+- **Open, needing a decision or a window:** AF-20261015-11 (admit ~15 liquid new names / ETFs),
+  AF-20261015-12 (set the 13 alias rows non-ACTIVE, sector label merge), AF-20261015-13 (float32 / TEXT
+  dates, weekend window).
+
+## 2026-10-15 (late) — audit remediation: canonical reads, temporal FCF, honest diagnostics
+
+- Closed ten implementation findings from the systems review without changing ranker weights or
+  claiming unmeasured alpha. One shared horizon normalizer now maps UI `long_term` requests to the
+  ranker's persisted `POSITIONAL` vocabulary (`src/server/horizon.ts:16`); canonical single-symbol
+  reasoning replaces the legacy-score explanation (`src/server/routers/commandCenter.router.ts:311`),
+  and reader failures are no longer rendered as genuine empty lists (`src/components/TopRatedStocks.tsx:152`).
+- Replaced the ROC endpoint's full-row transfer and two Node sorts with exact SQL probability buckets
+  plus weighted, tie-aware AUC/ROC (`src/server/routers/ml.router.ts:67`). The UI now describes
+  discrimination, not profitability, and exposes query failures. Sector AI generation now uses the
+  shared expensive-procedure rate limiter (`src/server/routers/sectors.router.ts:778`).
+- Fixed two linked FCF look-ahead defects. The quarterly TTM search is bounded by fetch date, and
+  capex-based FCF fields use that same date as their storage availability floor while annual ratios
+  retain their filing-lag floor (`src/server/financial_ratios_fetcher.py:590`). A forced INFY refresh
+  read back `fcf_ttm_as_of=2026-06-30` and `fcf_yield_approx=0.0918` only on 2026-10-15; sampled older
+  signal dates were NULL, proving the repair did not backfill future quarterly information.
+- Added an endpoint-registry validation-age DQ check (`src/server/dataQualityChecks.ts:3630`), clamped
+  DATE-granularity ontology freshness to non-negative elapsed age (`src/server/ontology/introspect.py:182`),
+  scoped eight known market-wide/sparse event fields out of false frozen-column alarms
+  (`scripts/integrity_sweep.py:83`), corrected weekend-audit route drift, and removed the hard-coded
+  `/8` engine denominator from two UI surfaces.
+- Verification on the final tree: TypeScript clean; Vite production build clean; Vitest 220 files,
+  1,970 passed / 45 skipped; Python 3,766 passed / 266 skipped; schema drift clean; findings ledger
+  clean; focused changed-area suite 307/307. Ledger rows AF-20261015-14..27 carry regression evidence.
+- Deployment is deliberately pending (AF-20261015-27): the shared tree contains many unrelated,
+  pre-existing server/runtime edits. Restarting `bharat-server` would deploy all of them, so only the
+  self-contained Python FCF path was live-run and read back; TypeScript/frontend changes remain locally
+  verified until the tree's owners reconcile or authorize the combined deployment.

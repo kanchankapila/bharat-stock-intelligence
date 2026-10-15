@@ -27,8 +27,8 @@ function makeQueue(opts: {
   // 2026-08-29 regression: completed/failed job history, queried as two SEPARATE per-status
   // lists (matching the real getJobs(['completed'],...) / getJobs(['failed'],...) call shape),
   // each { finishedOn, timestamp }.
-  completedHistory?: Array<{ finishedOn?: number; timestamp: number }>;
-  failedHistory?: Array<{ finishedOn?: number; timestamp: number }>;
+  completedHistory?: Array<{ name?: string; finishedOn?: number; timestamp: number }>;
+  failedHistory?: Array<{ name?: string; finishedOn?: number; timestamp: number }>;
 } = {}) {
   const { staleRepeatable = true, inFlight = [], completedHistory = [], failedHistory = [] } = opts;
   const add = vi.fn().mockResolvedValue({});
@@ -42,8 +42,12 @@ function makeQueue(opts: {
   // single-status calls (the 2026-08-29 fix), each returning its own history array unmodified --
   // real BullMQ already returns newest-first for a single status with asc=false.
   const getJobs = vi.fn(async (states: string[]) => {
-    if (states.length === 1 && states[0] === 'completed') return completedHistory;
-    if (states.length === 1 && states[0] === 'failed') return failedHistory;
+    if (states.length === 1 && states[0] === 'completed') {
+      return completedHistory.map(j => ({ name: 'test-job', ...j }));
+    }
+    if (states.length === 1 && states[0] === 'failed') {
+      return failedHistory.map(j => ({ name: 'test-job', ...j }));
+    }
     return inFlight.filter(j => states.includes(j.state ?? 'delayed'));
   });
   const drain = vi.fn().mockResolvedValue(undefined);
@@ -172,6 +176,24 @@ describe('addJobWithCatchup', () => {
     });
     await addJobWithCatchup(queue, 'test-job', {}, {
       repeat: { every: 24 * 60 * 60_000 },
+      jobId: 'test-job-id',
+    });
+    expect(queue.add).toHaveBeenCalledTimes(2);
+    expect(queue.add.mock.calls[1][1]).toMatchObject({ isCatchup: true });
+  });
+
+  it('uses this job name rather than a newer sibling on a shared queue when deciding whether ' +
+     'the schedule was missed', async () => {
+    const now = Date.now();
+    const queue = makeQueue({
+      staleRepeatable: false,
+      completedHistory: [
+        { name: 'other-job', finishedOn: now - 5 * 60_000, timestamp: now - 5 * 60_000 },
+        { name: 'test-job', finishedOn: now - 2 * 60 * 60_000, timestamp: now - 2 * 60 * 60_000 },
+      ],
+    });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { every: 60 * 60_000 },
       jobId: 'test-job-id',
     });
     expect(queue.add).toHaveBeenCalledTimes(2);

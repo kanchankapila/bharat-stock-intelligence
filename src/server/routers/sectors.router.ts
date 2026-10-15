@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { router, publicProcedure } from '../trpc';
+import { router, publicProcedure, expensiveProcedure } from '../trpc';
 import { dbAll, dbGet } from '../dbAsync';
 import { fetchWithCache } from '../cacheService';
 import {
@@ -775,7 +775,7 @@ export const sectorsRouter = router({
   }),
 
   // ─── 6. On-Demand AI Sector Analyst Briefing ───────────────────────────────
-  generateSectorAiBriefing: publicProcedure
+  generateSectorAiBriefing: expensiveProcedure
     .input(z.object({ sectorId: z.string() }))
     .mutation(async ({ input }) => {
       const def = SECTOR_DEFINITIONS.find((s) => s.id === input.sectorId) || SECTOR_DEFINITIONS[0];

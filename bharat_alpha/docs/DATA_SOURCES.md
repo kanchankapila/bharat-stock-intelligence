@@ -84,7 +84,7 @@ come first because they have dated history and the bhavcopy's trust level:
 | Priority | Family | Source | Why |
 |---|---|---|---|
 | ~~high~~ integrated | `nse_participant_oi` | `nsearchives…/content/nsccl/fao_participant_oi_DDMMYYYY.csv` (and `_vol_`) | FII / DII / Pro / Client long-short in index and stock futures and options, a dated daily archive with years of history. A market-regime block the engine lacks. |
-| ~~high~~ integrated | `nse_api_results` | `nseindia.com/api/corporates-financial-results`, `/api/results-comparision?symbol=` | Reported revenue, PAT and EPS, plus each filing's broadcast time. This is the standardised earnings surprise (SUE) input, from the exchange rather than `mc_earnings`. |
+| ~~high~~ integrated | `nse_api_results` | NSE Integrated Filing listing + filing XBRL, mirrored from `nse_filing_financials` | Reported revenue, PAT and EPS with the exchange broadcast time. The frozen `/api/results-comparision` route is retained only for pre-2025 forensic history. |
 | ~~medium~~ integrated | `nse_fo_secban` | `…/content/fo/fo_secban_DDMMYYYY.csv` | Dated F&O ban list. Supersedes the vendor ban-list routes, with history. |
 | medium (narrowed) | `nse_security_lists` | `…/content/equities/delisted.csv`, `namechange.csv` | Delisting dates and reasons. `fo_mktlots.csv` is superseded: the lot is in the F&O bhavcopy as `NewBrdLotQty`, dated and with history. Survivorship itself is already handled — a stock that stops trading exits at its last close. |
 | ~~medium~~ integrated (`nse_pr_bc`) | `nse_pr_bundle` | `…/archives/equities/bhavcopy/pr/PRddmmyy.zip` (Bc, Hl, Pd files) | The exchange's own corporate-action file: an independent check on factors derived from `PREV_CLOSE`. |

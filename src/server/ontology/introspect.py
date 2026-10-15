@@ -175,6 +175,11 @@ def _freshness_probe(conn, table: str, column: str, lag_hours: Optional[float],
     if day_granular:
         parsed = parsed + timedelta(days=1)      # the value covers the whole day
     age = (datetime.now(timezone.utc) - parsed).total_seconds() / 3600.0
+    # A current DATE is modelled as covering through end-of-day, which is necessarily in the
+    # future until midnight. Freshness age is elapsed staleness, not signed clock distance;
+    # reporting -11h confused healthy day-granular data with timestamp skew.
+    if day_granular:
+        age = max(0.0, age)
     out["age_hours"] = round(age, 2)
     if day_granular:
         out["granularity"] = "day"

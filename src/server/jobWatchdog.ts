@@ -55,7 +55,7 @@ const DOUBLE_RECORDED_STEP_JOBS_SQL =
  *  per actual run (job_name/status/ran_at), so removed jobs drop out of the window naturally
  *  and the percentage means "is this job failing NOW". */
 async function getJobFailRateFlags(): Promise<string[]> {
-  const rows = await dbAll<{ job_name: string; total: number; fails: number }>(
+  const rows = await dbAll<{ job_name: string; total: number; fails: number; latest_status: string }>(
     `WITH ordered AS (
        SELECT job_name, status, ran_at,
               LAG(ran_at) OVER (PARTITION BY job_name ORDER BY ran_at) AS prev_ran_at,
@@ -63,7 +63,7 @@ async function getJobFailRateFlags(): Promise<string[]> {
        FROM job_run_history
        WHERE ran_at > now() - interval '7 days'
      ), deduped AS (
-       SELECT job_name, status
+       SELECT job_name, status, ran_at
      FROM ordered
      WHERE prev_ran_at IS NULL
           OR job_name NOT IN (${DOUBLE_RECORDED_STEP_JOBS_SQL})
@@ -72,7 +72,8 @@ async function getJobFailRateFlags(): Promise<string[]> {
      )
      SELECT job_name,
             COUNT(*) AS total,
-            COUNT(*) FILTER (WHERE status <> 'success') AS fails
+            COUNT(*) FILTER (WHERE status <> 'success') AS fails,
+            (ARRAY_AGG(status ORDER BY ran_at DESC))[1] AS latest_status
      FROM deduped
      GROUP BY job_name
      HAVING COUNT(*) >= ?`,
@@ -80,16 +81,18 @@ async function getJobFailRateFlags(): Promise<string[]> {
   );
   return rows
     .filter(r => r.fails / r.total > FAIL_RATE_WARN)
-    .map(r => `📉 \`${sanitizeMarkdown(r.job_name)}\` failing ${Math.round(100 * r.fails / r.total)}% of runs (${r.fails}/${r.total}, last 7d)`);
+    .map(r => r.latest_status === 'success'
+      ? `📈 \`${sanitizeMarkdown(r.job_name)}\` latest run recovered; ${r.fails}/${r.total} earlier runs failed in the trailing 7d (${Math.round(100 * r.fails / r.total)}%)`
+      : `📉 \`${sanitizeMarkdown(r.job_name)}\` failing ${Math.round(100 * r.fails / r.total)}% of runs (${r.fails}/${r.total}, last 7d)`);
 }
 
-/** Counts REAL catch-up queuings (not the already-deduped "skipping duplicate" path — see
- *  registerJob.ts's addJobWithCatchup) per job name from the last ~24h of the winston app log.
- *  More than one real catch-up for the same job in a day means something keeps re-concluding
- *  "missed" rather than one genuine outage being caught once. */
+/** Counts suspiciously clustered REAL catch-up queuings (not the already-deduped "skipping
+ * duplicate" path). Two catch-ups hours apart can be two distinct process outages; only two
+ * inside one 30-minute restart window are evidence that one missed slot was detected twice. */
 function getRecentCatchupCounts(now: Date): Map<string, number> {
   const logDir = path.join(process.cwd(), 'logs');
-  const counts = new Map<string, number>();
+  const events = new Map<string, Array<number | null>>();
+  const windowStart = now.getTime() - 86_400_000;
   for (const d of [now, new Date(now.getTime() - 86_400_000)]) {
     let text: string;
     try {
@@ -98,11 +101,37 @@ function getRecentCatchupCounts(now: Date): Map<string, number> {
       continue; // log rotated away or not yet created -- not an error
     }
     for (const line of text.split('\n')) {
-      const m = line.match(/Job (\S+) in \S+ missed its scheduled run\. Catch-up queued/);
-      if (m) counts.set(m[1], (counts.get(m[1]) ?? 0) + 1);
+      let message = line;
+      let eventTime: number | null = null;
+      try {
+        const parsed = JSON.parse(line);
+        if (typeof parsed?.message === 'string') message = parsed.message;
+        const rawTime = parsed?.timestamp ?? parsed?.time;
+        const timestamp = rawTime ? Date.parse(rawTime) : Number.NaN;
+        if (Number.isFinite(timestamp)) eventTime = timestamp;
+      } catch { /* legacy/plain-text line: count conservatively, without time bucketing */ }
+      const m = message.match(/Job (\S+) in \S+ missed its scheduled run\. Catch-up queued/);
+      if (!m) continue;
+      if (eventTime !== null && (eventTime < windowStart || eventTime > now.getTime())) continue;
+      const jobEvents = events.get(m[1]) ?? [];
+      jobEvents.push(eventTime);
+      events.set(m[1], jobEvents);
     }
   }
-  return counts;
+  const suspicious = new Map<string, number>();
+  const sameOutageWindowMs = 30 * 60_000;
+  for (const [job, times] of events) {
+    const unknownTimes = times.filter(t => t === null).length;
+    const knownTimes = times.filter((t): t is number => t !== null).sort((a, b) => a - b);
+    let largestCluster = unknownTimes;
+    let left = 0;
+    for (let right = 0; right < knownTimes.length; right++) {
+      while (knownTimes[right] - knownTimes[left] > sameOutageWindowMs) left++;
+      largestCluster = Math.max(largestCluster, right - left + 1);
+    }
+    if (largestCluster > 1) suspicious.set(job, largestCluster);
+  }
+  return suspicious;
 }
 
 /**
@@ -443,7 +472,9 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
     if (prev === undefined) continue;
     if (prev !== state) {
       const wasProblem = prev === 'fail' || prev === 'error';
-      if (wasProblem && !isProblem) changed.push(`✅ ${sanitizeMarkdown(r.label)} — recovered (was ${prev})`);
+      if (wasProblem && state === 'warn') {
+        changed.push(`⚠️ ${sanitizeMarkdown(r.label)} — no longer failing; remains warn: ${sanitizeMarkdown(r.detail)}`);
+      } else if (wasProblem && !isProblem) changed.push(`✅ ${sanitizeMarkdown(r.label)} — recovered (was ${prev})`);
       else if (!wasProblem && isProblem) changed.push(`${dqIcon(state)} ${sanitizeMarkdown(r.label)} — newly ${state}: ${sanitizeMarkdown(r.detail)}`);
       // pass<->warn transitions aren't worth a line
     } else if (state === 'pass') {
@@ -485,7 +516,7 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
   });
   const catchupFlags = [...getRecentCatchupCounts(now).entries()]
     .filter(([, n]) => n > 1)
-    .map(([job, n]) => `🔁 \`${sanitizeMarkdown(job)}\` queued ${n} catch-ups in the last 24h — likely repeated missed-run detection, not one real outage`);
+    .map(([job, n]) => `🔁 \`${sanitizeMarkdown(job)}\` queued ${n} catch-ups inside one 30-minute outage window — repeated missed-run detection`);
   if (failRateFlags.length || catchupFlags.length) {
     lines.push('', '*Job-runtime health:*', ...failRateFlags, ...catchupFlags);
   }

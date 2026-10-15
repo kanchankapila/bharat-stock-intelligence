@@ -365,6 +365,24 @@ describe('buildDailyDigest', () => {
     expect(mockRunDataQualityChecks).not.toHaveBeenCalled();
   });
 
+  it('reports fail-to-warn as mitigated but still warning, rather than fully recovered', async () => {
+    mockDbGet.mockResolvedValue({
+      value: JSON.stringify({ 'dq:ur-engine-dispersion-collapse': 'fail' }),
+    });
+    mockGetLatestDataQualityResults.mockResolvedValue([{
+      id: 'ur-engine-dispersion-collapse',
+      label: 'ML dispersion',
+      category: 'scoring',
+      critical: false,
+      status: 'warn',
+      detail: 'raw source remains dispersed; blend is deliberately excluded',
+    }]);
+    const digest = await buildDailyDigest(new Date('2026-10-15T00:30:00Z'));
+    expect(digest).toContain('no longer failing; remains warn');
+    expect(digest).toContain('deliberately excluded');
+    expect(digest).not.toContain('ML dispersion — recovered');
+  });
+
   // job-runtime-audit (2026-08-19): the deterministic, dailyable slice of that audit.
   // 2026-09-02: source switched from job_heartbeat lifetime ratios to job_run_history's
   // rolling-7-day window (a decommissioned job's lifetime ratio was being reported as
@@ -377,6 +395,16 @@ describe('buildDailyDigest', () => {
     expect(digest).toContain('Job-runtime health');
     expect(digest).toContain('ml-daily-ops');
     expect(digest).toContain('49%');
+  });
+
+  it('calls a high trailing fail rate historical when the latest run recovered', async () => {
+    mockDbAll.mockImplementation(async (sql?: string) => sql?.includes('daily-job-run-sheet') ? [] : [
+      { job_name: 'morning-brief', total: 5, fails: 2, latest_status: 'success' },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-10-14T15:30:00Z'));
+    expect(digest).toContain('morning-brief');
+    expect(digest).toContain('latest run recovered');
+    expect(digest).not.toContain('morning-brief` failing');
   });
 
   it('does not flag a job below the fail-rate threshold or with too few runs to judge', async () => {
@@ -435,6 +463,41 @@ describe('buildDailyDigest', () => {
     );
     const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
     expect(digest).not.toContain('Job-runtime health');
+  });
+
+  it('does not mislabel catch-ups from two distinct scheduler outages as duplicate detection', async () => {
+    mockReadFileSync.mockImplementationOnce(() =>
+      [
+        '{"timestamp":"2026-10-14T08:16:19.000Z","message":"[QUEUE] Job nse-announcements-refresh in news-sentiment missed its scheduled run. Catch-up queued with a 0min stagger."}',
+        '{"timestamp":"2026-10-14T12:03:00.000Z","message":"[QUEUE] Job nse-announcements-refresh in news-sentiment missed its scheduled run. Catch-up queued with a 30min stagger."}',
+      ].join('\n'),
+    );
+    const digest = await buildDailyDigest(new Date('2026-10-14T15:30:00Z'));
+    expect(digest).not.toContain('repeated missed-run detection');
+  });
+
+  it('does not chain separate outages through an intermediate event outside one 30-minute window', async () => {
+    mockReadFileSync.mockImplementationOnce(() =>
+      [
+        '{"timestamp":"2026-10-14T08:00:00.000Z","message":"[QUEUE] Job chained-catchup in shared missed its scheduled run. Catch-up queued with a 0min stagger."}',
+        '{"timestamp":"2026-10-14T08:25:00.000Z","message":"[QUEUE] Job chained-catchup in shared missed its scheduled run. Catch-up queued with a 0min stagger."}',
+        '{"timestamp":"2026-10-14T08:50:00.000Z","message":"[QUEUE] Job chained-catchup in shared missed its scheduled run. Catch-up queued with a 0min stagger."}',
+      ].join('\n'),
+    );
+    const digest = await buildDailyDigest(new Date('2026-10-14T15:30:00Z'));
+    expect(digest).toContain('2 catch-ups inside one 30-minute outage window');
+    expect(digest).not.toContain('3 catch-ups inside one 30-minute outage window');
+  });
+
+  it('does not count clustered events outside the stated trailing 24-hour window', async () => {
+    mockReadFileSync.mockImplementationOnce(() =>
+      [
+        '{"timestamp":"2026-10-13T13:00:00.000Z","message":"[QUEUE] Job old-catchup in shared missed its scheduled run. Catch-up queued with a 0min stagger."}',
+        '{"timestamp":"2026-10-13T13:05:00.000Z","message":"[QUEUE] Job old-catchup in shared missed its scheduled run. Catch-up queued with a 0min stagger."}',
+      ].join('\n'),
+    );
+    const digest = await buildDailyDigest(new Date('2026-10-14T15:30:00Z'));
+    expect(digest).not.toContain('old-catchup');
   });
 
   it('does NOT report Saturday jobs as late in a weekday digest', async () => {

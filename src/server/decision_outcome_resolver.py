@@ -12,7 +12,7 @@ Label `next_open_close_h{N}` (one label per horizon row, keyed by horizon_days):
 return_pct is the raw price move; the decision's direction lives on market_decision_event and is
 deliberately not folded in here, so a Sell and a Buy on one name grade against the same move.
 
-A window containing an is_suspect bar is recorded `excluded` (no prices), never graded.
+A window containing an is_suspect bar is recorded `invalid` (no prices), never graded.
 Pending rows are written once and upgraded in place when enough sessions exist.
 """
 import argparse
@@ -39,7 +39,7 @@ def resolve_decision_outcomes(conn, horizons: Iterable[int] = HORIZONS) -> Dict[
     done = {
         (r[0], int(r[1])) for r in conn.execute(
             "SELECT decision_key, horizon_days FROM market_decision_outcome "
-            "WHERE label_definition = ? AND outcome_status IN ('resolved', 'excluded')",
+            "WHERE label_definition = ? AND outcome_status IN ('resolved', 'invalid')",
             [LABEL]).fetchall()
     }
     pending_seen = {
@@ -48,7 +48,7 @@ def resolve_decision_outcomes(conn, horizons: Iterable[int] = HORIZONS) -> Dict[
             "WHERE label_definition = ? AND outcome_status = 'pending'", [LABEL]).fetchall()
     }
     todo = [(k, s, d) for k, s, d in events if any((k, h) not in done for h in horizons)]
-    counts = {"resolved": 0, "excluded": 0, "pending": 0, "unchanged": 0}
+    counts = {"resolved": 0, "invalid": 0, "pending": 0, "unchanged": 0}
     if not todo:
         return counts
 
@@ -84,9 +84,9 @@ def resolve_decision_outcomes(conn, horizons: Iterable[int] = HORIZONS) -> Dict[
                 entry = window[0][1]
                 if any(b[5] for b in window) or not entry or entry <= 0:
                     record_decision_outcome(conn, decision=key, label_definition=LABEL,
-                                            horizon_days=hz, outcome_status="excluded",
+                                            horizon_days=hz, outcome_status="invalid",
                                             source_table="stock_ohlcv", source_ref=ref)
-                    counts["excluded"] += 1
+                    counts["invalid"] += 1
                     continue
                 exit_ = window[-1][4]
                 hi = max(b[2] for b in window)

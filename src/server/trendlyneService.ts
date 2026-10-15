@@ -14,6 +14,32 @@ const HEADERS = {
   'Accept': 'application/json'
 };
 
+export function isValidTrendlyneStockId(value: unknown): boolean {
+  return /^\d+$/.test(String(value ?? ''));
+}
+
+async function resolveTrendlyneStockId(symbol: string, mappedId?: string): Promise<string | undefined> {
+  if (isValidTrendlyneStockId(mappedId)) return mappedId;
+  try {
+    // nse_stocks.tlid is the canonical maintained mapping. Consult it before the screener
+    // membership table, whose historical stock_id column contains symbol-shaped debris.
+    const canonical = await dbGet(
+      'SELECT tlid FROM nse_stocks WHERE symbol = ? LIMIT 1',
+      [symbol],
+    ) as { tlid: string | null } | undefined;
+    if (isValidTrendlyneStockId(canonical?.tlid)) return String(canonical!.tlid);
+
+    const fallback = await dbGet(
+      'SELECT DISTINCT stock_id FROM trendlyne_screener_stocks WHERE symbol = ? ORDER BY stock_id',
+      [symbol],
+    ) as { stock_id: string } | undefined;
+    if (isValidTrendlyneStockId(fallback?.stock_id)) return String(fallback!.stock_id);
+  } catch (error) {
+    console.warn(`[TRENDLYNE] Stock-id lookup failed for ${symbol}:`, (error as Error).message);
+  }
+  return undefined;
+}
+
 export interface TrendlyneOverviewData {
   companyProfileData?: {
     companyDescription?: string;
@@ -49,18 +75,7 @@ async function loadFundamentalsFromDb(symbol: string) {
 
 export async function fetchTrendlyneFundamentals(symbol: string) {
   const map = getStockMapping(symbol);
-  let tlid = map?.tlid;
-
-  if (!tlid) {
-    try {
-      const row = await dbGet('SELECT DISTINCT stock_id FROM trendlyne_screener_stocks WHERE symbol = ?', [symbol]) as { stock_id: string } | undefined;
-      if (row?.stock_id) {
-        tlid = row.stock_id;
-      }
-    } catch (dbErr) {
-      // ignore
-    }
-  }
+  const tlid = await resolveTrendlyneStockId(symbol, map?.tlid);
 
   if (!tlid) {
     console.log(`[TRENDLYNE] No tlid found for fundamentals: ${symbol}`);
@@ -203,19 +218,7 @@ export async function getTrendlyneDVMFromDb(symbol: string): Promise<TrendlyneDv
 
 export async function fetchTrendlyneStockMetrics(symbol: string) {
   const map = getStockMapping(symbol);
-  let tlid = map?.tlid;
-
-  if (!tlid) {
-    try {
-      const row = await dbGet('SELECT DISTINCT stock_id FROM trendlyne_screener_stocks WHERE symbol = ?', [symbol]) as { stock_id: string } | undefined;
-      if (row?.stock_id) {
-        tlid = row.stock_id;
-        console.log(`[TRENDLYNE] Resolved tlid dynamically from database for metrics: ${symbol} -> ${tlid}`);
-      }
-    } catch (dbErr: any) {
-      console.warn(`[TRENDLYNE] Database metrics lookup failed for ${symbol}:`, dbErr.message);
-    }
-  }
+  const tlid = await resolveTrendlyneStockId(symbol, map?.tlid);
 
   if (!tlid) {
     console.log(`[TRENDLYNE] No metrics tlid found for ${symbol}.`);
@@ -275,19 +278,7 @@ export async function fetchTrendlyneAdvTechnicalAnalysis(symbol: string, timefra
 
 async function fetchTrendlyneAdvTechnicalAnalysisRaw(symbol: string, timeframe: 'D' | 'W' | 'M' = 'D') {
   const map = getStockMapping(symbol);
-  let tlid = map?.tlid;
-
-  if (!tlid) {
-    try {
-      const row = await dbGet('SELECT DISTINCT stock_id FROM trendlyne_screener_stocks WHERE symbol = ?', [symbol]) as { stock_id: string } | undefined;
-      if (row?.stock_id) {
-        tlid = row.stock_id;
-        console.log(`[TRENDLYNE] Resolved tlid dynamically from database for TA: ${symbol} -> ${tlid}`);
-      }
-    } catch (dbErr: any) {
-      console.warn(`[TRENDLYNE] Database TA lookup failed for ${symbol}:`, dbErr.message);
-    }
-  }
+  const tlid = await resolveTrendlyneStockId(symbol, map?.tlid);
 
   if (!tlid) {
     console.log(`[TRENDLYNE] No TA tlid found for ${symbol}.`);

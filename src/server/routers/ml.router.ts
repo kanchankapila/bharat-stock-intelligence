@@ -57,6 +57,65 @@ function computeRoc(regime: string, pts: { p: number; y: number }[], minN: numbe
   };
 }
 
+type WeightedRocPoint = { p: number; wins: number; losses: number };
+
+/**
+ * Exact tie-aware ROC/AUC from probability buckets. The database can collapse hundreds of
+ * thousands of resolved rows to one row per (regime, probability), avoiding a large request-
+ * handler transfer and two full JavaScript sorts over the unaggregated history.
+ */
+export function computeWeightedRoc(
+  regime: string,
+  points: WeightedRocPoint[],
+  minN: number,
+  maxPoints: number,
+): RocResult | null {
+  const buckets = new Map<number, { wins: number; losses: number }>();
+  for (const point of points) {
+    const current = buckets.get(point.p) ?? { wins: 0, losses: 0 };
+    current.wins += point.wins;
+    current.losses += point.losses;
+    buckets.set(point.p, current);
+  }
+  const asc = [...buckets.entries()].sort((a, b) => a[0] - b[0]);
+  const positives = asc.reduce((sum, [, value]) => sum + value.wins, 0);
+  const negatives = asc.reduce((sum, [, value]) => sum + value.losses, 0);
+  const n = positives + negatives;
+  if (n < minN || positives === 0 || negatives === 0) return null;
+
+  let seen = 0;
+  let rankSum = 0;
+  for (const [, value] of asc) {
+    const bucketN = value.wins + value.losses;
+    const avgRank = (seen + 1 + seen + bucketN) / 2;
+    rankSum += value.wins * avgRank;
+    seen += bucketN;
+  }
+  const auc = (rankSum - (positives * (positives + 1)) / 2) / (positives * negatives);
+
+  let tp = 0;
+  let fp = 0;
+  const roc = [{ fpr: 0, tpr: 0 }];
+  for (const [, value] of [...asc].reverse()) {
+    tp += value.wins;
+    fp += value.losses;
+    roc.push({ fpr: fp / negatives, tpr: tp / positives });
+  }
+  const curve = roc.length > maxPoints
+    ? Array.from({ length: maxPoints }, (_, index) => roc[Math.round((index * (roc.length - 1)) / (maxPoints - 1))])
+    : roc;
+
+  return {
+    regime,
+    n,
+    positives,
+    negatives,
+    baseRate: Math.round((positives / n) * 1000) / 1000,
+    auc: Math.round(auc * 1000) / 1000,
+    roc: curve,
+  };
+}
+
 export const mlRouter = router({
   getFiiDiiFlow: publicProcedure
     // fii_dii_flow was deep-backfilled to 2016-01-01 (see fii_dii_history_fetcher.py) --
@@ -651,38 +710,43 @@ export const mlRouter = router({
       return fetchWithCache(`ml:roc-diagnostics:${minN}:${maxPoints}:${days}`, async () => {
       const rows = await dbAll(`
         SELECT ts.nifty_regime AS regime, ts.win_probability AS prob,
-               CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
+               COUNT(*) FILTER (WHERE so.outcome = 'WIN') AS wins,
+               COUNT(*) FILTER (WHERE so.outcome = 'LOSS') AS losses
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND so.signal_date = ts.date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
           AND so.signal_date >= ? AND so.signal_source = 'technical'
-      `, [cutoff]) as Array<{ regime: string | null; prob: number; y: number }>;
+        GROUP BY ts.nifty_regime, ts.win_probability
+      `, [cutoff]) as Array<{ regime: string | null; prob: number; wins: number | string; losses: number | string }>;
 
       // A signal counts only when the ensemble actually scored it. Unscored rows carry
       // win_probability = 0.5 exactly (legacy default from the pre-fix scoring outage) or NaN — if
       // left in, they drag whatever regime they fall in toward a fabricated AUC 0.5 (a constant
       // score is always 0.5). Split them out so a regime with no real scores reads as "unmeasured",
       // not "no edge".
-      const groups = new Map<string, { p: number; y: number }[]>();
+      const groups = new Map<string, WeightedRocPoint[]>();
       const unscored = new Map<string, number>();
-      const push = (key: string, p: number, y: number) => {
+      const push = (key: string, point: WeightedRocPoint) => {
         if (!groups.has(key)) groups.set(key, []);
-        groups.get(key)!.push({ p, y });
+        groups.get(key)!.push(point);
       };
       for (const r of rows) {
         const p = Number(r.prob);
         const reg = r.regime ?? 'UNKNOWN';
+        const wins = Number(r.wins);
+        const losses = Number(r.losses);
+        const count = wins + losses;
         if (!Number.isFinite(p) || p === 0.5) {
-          unscored.set(reg, (unscored.get(reg) ?? 0) + 1);
+          unscored.set(reg, (unscored.get(reg) ?? 0) + count);
           continue;
         }
-        const y = Number(r.y) === 1 ? 1 : 0;
-        push(reg, p, y);
-        push('OVERALL', p, y);
+        const point = { p, wins, losses };
+        push(reg, point);
+        push('OVERALL', point);
       }
 
       const regimes = [...groups.entries()]
-        .map(([regime, pts]) => computeRoc(regime, pts, minN, maxPoints))
+        .map(([regime, pts]) => computeWeightedRoc(regime, pts, minN, maxPoints))
         .filter((x): x is RocResult => x !== null)
         .sort((a, b) => (a.regime === 'OVERALL' ? -1 : b.regime === 'OVERALL' ? 1 : b.n - a.n));
 
@@ -700,8 +764,8 @@ export const mlRouter = router({
         ORDER BY trained_at DESC LIMIT 1
       `) as { cv_roc_auc: number | null; model_version: string | null; trained_at: string | null } | undefined;
 
-      const scoredTotal = regimes.find((r) => r.regime === 'OVERALL')?.n
-        ?? [...groups.values()].reduce((s, g) => s + g.length, 0);
+      const totalResolved = rows.reduce((sum, row) => sum + Number(row.wins) + Number(row.losses), 0);
+      const scoredTotal = regimes.find((r) => r.regime === 'OVERALL')?.n ?? 0;
 
       return {
         regimes,
@@ -709,7 +773,7 @@ export const mlRouter = router({
         trainingAuc: model?.cv_roc_auc ?? null,
         trainingModelVersion: model?.model_version ?? null,
         trainingTrainedAt: model?.trained_at ?? null,
-        totalResolved: rows.length,
+        totalResolved,
         scoredTotal,
         computedAt: new Date().toISOString(),
       };

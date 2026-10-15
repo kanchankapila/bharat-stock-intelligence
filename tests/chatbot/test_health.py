@@ -36,6 +36,8 @@ def test_health_requires_graph_and_llm(chatbot_app, monkeypatch, graph_ready, ll
     assert response.status_code == (200 if ready else 503)
     assert response.json() == {
         "status": "ok" if ready else "degraded",
+        "service": "chatbot",
+        "pid": chatbot_app.os.getpid(),
         "llm": "FakeLLM" if llm_ready else "unavailable",
         "graph_ready": graph_ready,
     }

@@ -371,6 +371,24 @@ class TestProcessStockPrefersRealCapexFcf:
         assert feats["fcf_basis"] == frf.FCF_BASIS_CAPEX
         assert feats["fcf_ttm_as_of"] == "2026-06-30"
 
+    def test_quarterly_fcf_window_is_bounded_by_fetch_date_not_annual_year_end(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(frf, "fetch_et_stats",
+                            lambda cid, family, sess, **kw: self._cashflow() if family == "CashFlow"
+                            else [{"interestCoverage": 12.5}])
+        monkeypatch.setattr(frf, "get_market_cap", lambda *a: 500_000_000_000.0)
+        monkeypatch.setattr(
+            frf,
+            "finstack_ttm_fcf",
+            lambda con, symbol, as_of=None: (seen.setdefault("as_of", as_of) and 1.0, "2026-06-30"),
+        )
+        monkeypatch.setattr(frf, "upsert_quality", MagicMock())
+        monkeypatch.setattr(frf, "upsert_cashflow_history", MagicMock())
+        monkeypatch.setattr(frf, "update_technical_signals", MagicMock())
+
+        frf.process_stock("TEST", "123", "2026-10-11", MagicMock(), MagicMock())
+        assert seen["as_of"] == "2026-10-11"
+
     def test_real_negative_capex_fcf_flips_fcf_positive(self, monkeypatch):
         feats = self._run(monkeypatch, fcf_ttm=-2_000_000_000.0, latest_period="2026-06-30")
         assert feats["fcf_positive"] == 0
@@ -534,6 +552,46 @@ class TestAsOfFloor:
     def test_unknown_year_ending_falls_back_to_today(self):
         assert et_stats_client.as_of_floor(None) == date.today().isoformat()
         assert et_stats_client.as_of_floor("garbage") == date.today().isoformat()
+
+    def test_quarterly_fcf_is_not_backfilled_before_fetch_date(self, monkeypatch):
+        """Quarterly TTM FCF is first knowable at this fetch, not at the annual filing floor."""
+        executed = {}
+
+        class Cursor:
+            def execute(self, sql, params):
+                executed["sql"] = sql
+                executed["params"] = params
+
+        class Connection:
+            def cursor(self):
+                return Cursor()
+
+            def commit(self):
+                pass
+
+        monkeypatch.setattr(frf, "as_of_floor", lambda *_args, **_kwargs: "2026-05-30")
+        frf.update_technical_signals(
+            "TEST",
+            {
+                "year_ending": "2026-03-31",
+                "fcf_yield_approx": 4.2,
+                "fcf_positive": 1,
+                "fcf_basis": "capex",
+                "fcf_ttm_as_of": "2026-06-30",
+                "interest_coverage": 8.0,
+            },
+            Connection(),
+            today="2026-10-11",
+        )
+
+        columns = ["fcf_yield_approx", "interest_coverage", "fcf_positive",
+                   "debt_coverage_risk", "fcf_basis", "fcf_ttm_as_of"] + frf._HARVEST_COLUMNS
+        floors = dict(zip(columns, executed["params"][0:-1:2]))
+        assert floors["interest_coverage"] == "2026-05-30"
+        assert floors["fcf_yield_approx"] == "2026-10-11"
+        assert floors["fcf_positive"] == "2026-10-11"
+        assert floors["fcf_basis"] == "2026-10-11"
+        assert floors["fcf_ttm_as_of"] == "2026-10-11"
 
 class TestParseCashflowSeries:
 

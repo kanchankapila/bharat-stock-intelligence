@@ -156,9 +156,9 @@ function EodPickCard({ pick, onSelect, flags }: { pick: any; onSelect: (sym: str
             {pick.engine_coverage_count != null && (
               <span
                 className="text-slate-500"
-                title="How many of the ranker's 8 component engines (screener/ml/confluence/technical/dl/cs/breakout/smart_money) had data for this stock — a better at-a-glance confidence signal than the blended score alone"
+                title="How many currently active weighted engines had data for this stock. Inactive configured engine slots are excluded."
               >
-                · {pick.engine_coverage_count}/8
+                · {pick.engine_coverage_count} active engines
               </span>
             )}
           </span>

@@ -34,7 +34,7 @@ _executor = ThreadPoolExecutor(max_workers=4)
 @app.get("/health")
 def health():
     """Cheap liveness probe shared with the other PM2 Python services."""
-    return {"status": "ok", "service": "ml-api"}
+    return {"status": "ok", "service": "ml-api", "pid": os.getpid()}
 
 
 async def run_in_thread(fn, *args, **kwargs):
@@ -98,6 +98,6 @@ if __name__ == "__main__":
     except ImportError:  # `npm start` runs without it: no restart loop to guard against there
         wait_for_port_free = None
     if wait_for_port_free:
-        wait_for_port_free("127.0.0.1", port)
+        wait_for_port_free("127.0.0.1", port, expected_service="ml-api")
     uvicorn.run("python_api:app", host="127.0.0.1", port=port, reload=False)
 

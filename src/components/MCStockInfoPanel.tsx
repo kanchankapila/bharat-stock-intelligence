@@ -833,7 +833,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               {unifiedScore.trade_reasoning}
               {unifiedScore.engine_coverage_count != null && (
                 <span className="text-slate-600 ml-1.5 text-[10px]">
-                  ({unifiedScore.engine_coverage_count}/8 engines · {unifiedScore.computed_at})
+                  ({unifiedScore.engine_coverage_count} active engines · {unifiedScore.computed_at})
                 </span>
               )}
             </p>

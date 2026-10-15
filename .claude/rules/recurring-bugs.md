@@ -44,10 +44,17 @@ This file used to hold every class (~127 KB) and loaded on the first `.py`/`.ts`
 | "Not measured" reported as "measured and found nothing" (2026-09-29) | `bugs-monitoring.md` |
 | A cleanup keyed on a label another writer overwrites (2026-09-30) | `bugs-data-layer.md` (Writes & keys) |
 | Everyday memory contention: pinned-host leak, stale weight table, unbounded latest-per-symbol on a compressed hypertable (2026-09-30) | `bugs-jobs-runtime.md` |
+| PM2 Windows redirector orphans and `kill_timeout` mistaken for a runtime cap (2026-10-15) | `bugs-jobs-runtime.md` |
 | Making a hidden provider failure loud is observability, not a root-cause fix (2026-10-04) | `bugs-data-layer.md` |
 | Provider RetryInfo longer than the job budget; provider failure persisted as factual defaults (2026-10-06) | `bugs-jobs-runtime.md` |
 | Split monitoring registries/evidence sources; polling cron broader than the worker's real-work window (2026-10-06) | `bugs-monitoring.md` |
 | Raw-age market-session checks plus provider-name/generic failure suppression create simultaneous false reds and false greens (2026-10-10) | `bugs-monitoring.md` |
+| Fan-out parent/child heartbeats, retry-idempotent batch finalisation and honest aggregate status (2026-10-15) | `bugs-monitoring.md` |
+| Recovery history reported as current failure; catch-ups clustered across distinct outages; raw vs gated model populations (2026-10-15) | `bugs-monitoring.md` |
 | Fresh-but-meaningless features: forward-filled countdowns, partial-day `MAX(date)` joins, `mcsymbol` SQL joins, dict-row DataFrame NaN, fixes in unrouted components (2026-10-08) | `bugs-data-layer.md` |
+| Declared corporate action with no clean ratio left as a fake -90% return; priced-but-unlisted alias symbols ranked as separate stocks; float32 price storage (2026-10-15) | `bugs-data-layer.md` |
+| Off-schedule guard discarding the post-outage catch-up; timeout bumped instead of a per-iteration plan fix (2026-10-15) | `bugs-jobs-runtime.md` |
+| A check keyed on the latest session firing before its closer's slot; a status registry that can only say "working" (2026-10-15) | `bugs-monitoring.md` |
+| Truncate-then-compute script emptying a shared file; classifier-refused production writes and conditional approvals (2026-10-15) | `bugs-testing-env.md` |
 
 When you add a class, put it in the area file whose `paths:` cover the code it bites, and add its row here.

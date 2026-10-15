@@ -125,3 +125,31 @@ export function isKnownTransientFailure(message) {
 export function unrecoveredFailureRows(rows) {
   return rows.filter(row => !row.recovered && !isKnownTransientFailure(row.err));
 }
+
+const EVIDENCE_LANE_DQ = new Set(['ur-engine-dispersion-collapse']);
+
+/** Keep known no-edge evidence visible without letting it mask an unrelated hard DQ failure. */
+export function classifyLatestDq(rows) {
+  const failing = rows.filter(row => row.status === 'fail' || row.status === 'error');
+  const blocking = failing.filter(row => !EVIDENCE_LANE_DQ.has(row.check_id));
+  const counts = new Map();
+  for (const row of rows) {
+    const current = counts.get(row.status) || { n: 0, crit: 0 };
+    current.n += 1;
+    if (Number(row.critical)) current.crit += 1;
+    counts.set(row.status, current);
+  }
+  const summary = [...counts.entries()]
+    .map(([status, count]) => `${status}=${count.n}${count.crit ? `(crit ${count.crit})` : ''}`)
+    .join(' / ');
+  if (blocking.length) {
+    return { status: 'FAIL', detail: `${summary}; blocking: ${blocking.map(row => row.check_id).join(', ')}` };
+  }
+  if (failing.length) {
+    return {
+      status: 'WARN',
+      detail: `${summary}; evidence-lane: ${failing.map(row => row.check_id).join(', ')}`,
+    };
+  }
+  return { status: 'PASS', detail: summary };
+}

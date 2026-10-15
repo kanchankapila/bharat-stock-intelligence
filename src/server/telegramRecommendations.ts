@@ -15,13 +15,15 @@
  */
 import { dbAll } from './dbAsync';
 import { telegramService, sanitizeMarkdown } from './telegramService';
+import { normaliseHorizon, type CanonicalHorizon } from './horizon';
+export { normaliseHorizon } from './horizon';
 
 /** Picks shown per horizon. Telegram caps a message at 4096 chars; see splitForTelegram. */
 export const MAX_PICKS_PER_HORIZON = 5;
 /** Screener names listed per pick before overflow is summarised as "+N more". */
 export const MAX_SCREENERS_PER_PICK = 4;
 
-export type Horizon = 'INTRADAY' | 'SWING' | 'POSITIONAL';
+export type Horizon = CanonicalHorizon;
 
 export interface Pick {
   symbol: string;
@@ -77,29 +79,6 @@ const HORIZON_LABEL: Record<Horizon, string> = {
  * months-scale in the Telegram digest. Conservative-by-default is right for an UNKNOWN value,
  * wrong for a known synonym.
  */
-const HORIZON_ALIASES: Record<string, Horizon> = {
-  INTRADAY: 'INTRADAY',
-  SWING: 'SWING',
-  SHORT: 'SWING',
-  SHORT_TERM: 'SWING',
-  'SWING (3-7D)': 'SWING',
-  POSITIONAL: 'POSITIONAL',
-  LONG_TERM: 'POSITIONAL',
-  'POSITIONAL (2-4W)': 'POSITIONAL',
-  'POSITIONAL (1-3M)': 'POSITIONAL',
-};
-
-export function normaliseHorizon(raw: string | null | undefined): Horizon {
-  const t = (raw ?? '').trim().toUpperCase();
-  const mapped = HORIZON_ALIASES[t] ?? HORIZON_ALIASES[t.replace(/[\s-]+/g, '_')];
-  if (mapped) return mapped;
-  // POSITIONAL, LONG_TERM and NULL all mean a multi-day hold. NULL is the common case for
-  // rows whose levels came from a source that never recorded a horizon, and defaulting those
-  // to the longest bucket is the conservative read -- it never mislabels a multi-day idea
-  // as an intraday one.
-  return 'POSITIONAL';
-}
-
 export { sanitizeMarkdown } from './telegramService';
 
 function parseScreeners(json: string | null | undefined): { names: string[]; count: number } {

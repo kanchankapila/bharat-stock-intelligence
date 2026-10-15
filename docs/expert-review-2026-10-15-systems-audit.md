@@ -131,3 +131,20 @@ Open items are filed in `docs/audit-findings.md` (AF-20261015-07..13); nothing h
 4. Derive the universe from the latest complete bhavcopy; decide on ETFs (AF-20261015-11).
 5. Store the corporate-action `subject` text and classify demerger / consolidation / capital reduction explicitly.
 6. Add a per-feature point-in-time table (as-of date, filing date) so fundamentals can never be joined on period end.
+
+## 10. Status at end of 2026-10-15 (supersedes section 9 where they differ)
+
+| Item | State |
+|---|---|
+| Demerger / ratio-less seams (AF-07) | Applied and verified on live data; BHAGYANGR, VERANDA, HEG, TEMBO continuous |
+| Ghost bars (AF-09) | 440 bars flagged; nightly reconcile quarantines new ones |
+| Backup (AF-08) | Fresh verified dump; overdue-catch-up guard shipped |
+| Tradability (AF-10) | Measured: top-decile excess halves at ADT >= Rs 10 cr and is about the 0.30% round trip. Thin / Not-tradable badge shipped, no score change |
+| Phantom alias symbols (AF-12) | Ranker drops the 13; `nse_stocks` rows still ACTIVE (needs a production write) |
+| Universe gap (AF-11) | Measured: ~15 rankable names, 192+ ETFs, 234 new listings; admission needs a decision |
+| Float32 / TEXT dates (AF-13) | Calendar-blocked to a weekend window |
+| Long-term list returned empty | Queried `LONG_TERM`, ranker writes `POSITIONAL`; fixed (AF-20261015-14) |
+
+Corrections made while verifying: the "103 liquid names missing" figure was mostly ETFs (about 15 equities
+are rankable); cost is ~4% of the swing first target, not ~40%; the duplicate-ranking pair is CHOLAFIN /
+CHOLAFINSV (a phantom), not CHOLAFINSV / 3MINDIA.

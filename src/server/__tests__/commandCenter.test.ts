@@ -208,6 +208,19 @@ describe('getBuyRecommendations', () => {
     expect(symbols).toContain('REALBUY');
   });
 
+  it("maps the UI's long_term horizon to canonical POSITIONAL rows", async () => {
+    const ts = '2026-10-15T00:00:00.000Z';
+    await dbRun(`INSERT INTO unified_recommendations
+      (symbol, computed_at, regime, unified_score, conviction_level, classification, timeframe)
+      VALUES ('POSITIONAL_BUY', ?, 'BULL', 80.0, 'A_HIGH', 'Buy', 'POSITIONAL')`, [ts]);
+    await dbRun(`INSERT INTO unified_recommendations
+      (symbol, computed_at, regime, unified_score, conviction_level, classification, timeframe)
+      VALUES ('LEGACY_LABEL', ?, 'BULL', 90.0, 'A_HIGH', 'Buy', 'LONG_TERM')`, [ts]);
+
+    const result = await caller.getBuyRecommendations({ conviction: 'ALL', horizon: 'long_term' });
+    expect(result.picks.map((p: any) => p.symbol)).toEqual(['POSITIONAL_BUY']);
+  });
+
   // 2026-10-08: the day's first partial technical scan (392 rows, all NULL win_probability) made
   // MAX(date) the join day, so every pick's confidence was blank all session.
   it('joins technical_signals on the latest COMPLETE day, not a newer partial one', async () => {

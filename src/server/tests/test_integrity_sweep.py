@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "scripts"))
 
-from integrity_sweep import _classify  # noqa: E402
+from integrity_sweep import EXPECTED_FROZEN_COLUMNS, _classify  # noqa: E402
 
 
 class TestClassify:
@@ -34,3 +34,12 @@ class TestClassify:
         # nn < n means SOME rows are null and some aren't -- not the "100% NULL" or "every row
         # identical" shape this sweep exists to catch.
         assert _classify(nn=50, nd=3, n=100, dt='double precision') is None
+
+    def test_single_day_market_context_and_sparse_flags_are_scoped_not_reported_broken(self):
+        expected = {
+            "fii_3d_net", "dii_3d_net", "eps_miss_after_streak", "insider_buy_flag",
+            "insider_sell_flag", "wc_deteriorating", "wc_improving", "near_expiry_gamma",
+        }
+        assert expected <= {
+            column for table, column in EXPECTED_FROZEN_COLUMNS if table == "technical_signals"
+        }

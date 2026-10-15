@@ -255,4 +255,9 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     expect(entry?.cronPattern).toBeUndefined();
     expect(entry?.everyMs).toBeUndefined();
   });
+
+  it('trendlyne-daily-fetch grace covers its deliberate 12-hour delayed fan-out', () => {
+    const entry = JOB_REGISTRY.find(j => j.jobName === 'trendlyne-daily-fetch');
+    expect(entry?.graceMinutes).toBeGreaterThanOrEqual(13 * 60);
+  });
 });

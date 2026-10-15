@@ -120,7 +120,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "Bharat Stock Intelligence FastAPI"}
+    return {"status": "ok", "service": "alphaquant-api", "pid": os.getpid()}
 
 
 # ── Backtester ────────────────────────────────────────────────────────────────
@@ -325,5 +325,5 @@ if __name__ == "__main__":
     except ImportError:  # `npm start` runs without it: no restart loop to guard against there
         wait_for_port_free = None
     if wait_for_port_free:
-        wait_for_port_free(host, port)
+        wait_for_port_free(host, port, expected_service="alphaquant-api")
     uvicorn.run("main:app", host=host, port=port, reload=False)

@@ -18,6 +18,8 @@ interface ScoredStock {
   classification?: string;
   top_domain?: string;
   position_size_pct?: number;
+  adt_cr?: number | null;
+  liquidity?: 'ok' | 'thin' | 'untradable' | null;
   positive_count?: number;
   negative_count?: number;
   reasons?: Array<{ name?: string; sentiment?: string; source?: string }>;
@@ -42,12 +44,13 @@ const RankingList: React.FC<{
   title: string; 
   stocks: ScoredStock[]; 
   isLoading: boolean;
+  isError: boolean;
   icon: React.ReactNode;
   subtitle: string;
   onSelectStock: (symbol: string) => void;
   watchlist: string[];
   onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
-}> = ({ title, stocks, isLoading, icon, subtitle, onSelectStock, watchlist = [], onToggleWatchlist }) => (
+}> = ({ title, stocks, isLoading, isError, icon, subtitle, onSelectStock, watchlist = [], onToggleWatchlist }) => (
   <div className="space-y-6">
     <div className="flex items-center gap-3 px-2">
       <div className="w-8 h-8 rounded-lg glass border border-slate-800/50 flex items-center justify-center">
@@ -117,6 +120,15 @@ const RankingList: React.FC<{
                   <div className="flex items-center gap-3 mt-1.5">
                     <span className="text-[10px] font-black text-slate-400 uppercase">Score <span className="text-white">{stock.score?.toFixed(1) ?? '—'}</span></span>
                     <span className="text-[10px] font-black text-indigo-500/80 uppercase tracking-tighter bg-indigo-500/5 px-1.5 py-0.5 rounded italic">Driver: {stock.top_domain ?? 'Unknown'}</span>
+                    {(stock.liquidity === 'thin' || stock.liquidity === 'untradable') && (
+                      <span
+                        title={`~30-session average turnover ${stock.adt_cr != null ? stock.adt_cr.toFixed(2) : '?'} Rs cr/day. Measured: the ranking's edge is concentrated in names under Rs 10 cr/day, where entries are not reliably fillable.`}
+                        className={cn("text-[10px] font-black uppercase tracking-tighter px-1.5 py-0.5 rounded italic",
+                          stock.liquidity === 'untradable' ? "text-rose-400 bg-rose-500/10" : "text-amber-400 bg-amber-500/10")}
+                      >
+                        {stock.liquidity === 'untradable' ? 'Not tradable' : 'Thin'}
+                      </span>
+                    )}
                     {(stock.position_size_pct ?? 0) > 0 && (
                       <span className="text-[10px] font-black text-emerald-400 uppercase tracking-tighter bg-emerald-500/10 px-1.5 py-0.5 rounded italic">Weight: {stock.position_size_pct!.toFixed(1)}%</span>
                     )}
@@ -137,7 +149,12 @@ const RankingList: React.FC<{
         </motion.div>
       ))}
       
-      {stocks.length === 0 && !isLoading && (
+      {isError && !isLoading && (
+        <div className="text-center py-12 border border-rose-500/30 rounded-3xl" role="alert">
+          <p className="text-[10px] font-black text-rose-400 font-display uppercase tracking-widest">Could not load this ranking</p>
+        </div>
+      )}
+      {stocks.length === 0 && !isLoading && !isError && (
         <div className="text-center py-12 border border-dashed border-slate-800/50 rounded-3xl">
           <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest">No Signals Detected</p>
         </div>
@@ -207,7 +224,7 @@ const TopRatedStocks: React.FC<{
       </div>
 
       <div className="rounded-lg border border-slate-800 px-3 py-2 text-xs text-slate-400">
-        Long-term reads canonical unified recommendations filtered to LONG_TERM; intraday reads the canonical intraday ranker.
+        Long-term reads canonical unified recommendations filtered to POSITIONAL; intraday reads the canonical intraday ranker.
         Scores are rankings, not calibrated probabilities of profit. Reloading reads available results; it does not recompute them.
         Generation age is not a guarantee that every underlying input is fresh.
       </div>
@@ -220,6 +237,7 @@ const TopRatedStocks: React.FC<{
             subtitle="Fundamental + Multi-Factor Consensus"
             stocks={longTermStocks || []} 
             isLoading={isLoadingLT}
+            isError={isErrorLT}
             icon={<Trophy className="w-4 h-4 text-amber-500" />}
             onSelectStock={onSelectStock}
             watchlist={watchlist}
@@ -232,6 +250,7 @@ const TopRatedStocks: React.FC<{
             subtitle="Momentum + Volume + Technical Scans"
             stocks={intradayStocks || []} 
             isLoading={isLoadingID}
+            isError={isErrorID}
             icon={<Zap className="w-4 h-4 text-indigo-500" />}
             onSelectStock={onSelectStock}
             watchlist={watchlist}

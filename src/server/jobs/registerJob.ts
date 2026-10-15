@@ -342,16 +342,21 @@ export async function addJobWithCatchup(
     // what starved exit_policy.py --train of its Python-subprocess slot budget). Query each status
     // separately (BullMQ returns newest-first within a single status) and take whichever of the
     // two is actually more recent -- neither a stale failure nor an absent history should shadow
-    // a genuinely recent run of the other kind.
+    // a genuinely recent run of the other kind. Regression 2026-10-15: this must also filter the
+    // retained rows by jobName; on shared queues a recent sibling is not evidence this job ran.
     const [completedJobs, failedJobs] = await Promise.all([
-      queue.getJobs(['completed'], 0, 1, false),
-      queue.getJobs(['failed'], 0, 1, false),
+      // Shared queues (notably news-sentiment) retain several differently named jobs. Reading
+      // only the queue's newest completion lets a recent sibling hide that THIS schedule was
+      // missed. Retention is deliberately tiny at every caller (normally 3-5 per state), so
+      // reading the retained set and filtering by name is both bounded and correct.
+      queue.getJobs(['completed'], 0, -1, false),
+      queue.getJobs(['failed'], 0, -1, false),
     ]);
-    const candidateTimes = [completedJobs[0], failedJobs[0]]
-      .filter((j): j is Job => Boolean(j))
+    const matchingRunTimes = [...completedJobs, ...failedJobs]
+      .filter((j): j is Job => Boolean(j) && j.name === jobName)
       .map(j => j.finishedOn ?? j.timestamp)
       .filter((t): t is number => typeof t === 'number');
-    const lastRunTime = candidateTimes.length > 0 ? Math.max(...candidateTimes) : null;
+    const lastRunTime = matchingRunTimes.length > 0 ? Math.max(...matchingRunTimes) : null;
 
     let missed = staleNextMissed;
 

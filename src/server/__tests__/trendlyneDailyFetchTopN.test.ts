@@ -13,10 +13,10 @@ const { getTrendlyneMetricSymbols } = await import('../trendlyneDailyFetchServic
 describe('getTrendlyneMetricSymbols (top-N by market cap)', () => {
   it('ranks by market_cap DESC and respects the limit', async () => {
     await dbExec('DELETE FROM nse_stocks');
-    const insert = "INSERT INTO nse_stocks (symbol, name, status, market_cap) VALUES (?, ?, 'ACTIVE', ?)";
-    await dbRun(insert, ['SMALLCO', 'Small Co', 1000]);
-    await dbRun(insert, ['BIGCO', 'Big Co', 500000]);
-    await dbRun(insert, ['MIDCO', 'Mid Co', 50000]);
+    const insert = "INSERT INTO nse_stocks (symbol, name, status, market_cap, tlid) VALUES (?, ?, 'ACTIVE', ?, ?)";
+    await dbRun(insert, ['SMALLCO', 'Small Co', 1000, '1001']);
+    await dbRun(insert, ['BIGCO', 'Big Co', 500000, '1002']);
+    await dbRun(insert, ['MIDCO', 'Mid Co', 50000, '1003']);
 
     const symbols = await getTrendlyneMetricSymbols(2);
     expect(symbols).toEqual(['BIGCO', 'MIDCO']);
@@ -24,13 +24,23 @@ describe('getTrendlyneMetricSymbols (top-N by market cap)', () => {
 
   it('excludes rows with no market_cap and inactive symbols', async () => {
     await dbExec('DELETE FROM nse_stocks');
-    const insert = "INSERT INTO nse_stocks (symbol, name, status, market_cap) VALUES (?, ?, ?, ?)";
-    await dbRun(insert, ['NOCAP', 'No Cap Co', 'ACTIVE', null]);
-    await dbRun(insert, ['DELISTED', 'Delisted Co', 'DELISTED', 999999]);
-    await dbRun(insert, ['REALCO', 'Real Co', 'ACTIVE', 1000]);
+    const insert = "INSERT INTO nse_stocks (symbol, name, status, market_cap, tlid) VALUES (?, ?, ?, ?, ?)";
+    await dbRun(insert, ['NOCAP', 'No Cap Co', 'ACTIVE', null, '1010']);
+    await dbRun(insert, ['DELISTED', 'Delisted Co', 'DELISTED', 999999, '1011']);
+    await dbRun(insert, ['REALCO', 'Real Co', 'ACTIVE', 1000, '1012']);
 
     const symbols = await getTrendlyneMetricSymbols(10);
     expect(symbols).toEqual(['REALCO']);
+  });
+
+  it('excludes symbols whose supposed Trendlyne id is missing or is just the NSE symbol', async () => {
+    await dbExec('DELETE FROM nse_stocks');
+    const insert = "INSERT INTO nse_stocks (symbol, name, status, market_cap, tlid) VALUES (?, ?, 'ACTIVE', ?, ?)";
+    await dbRun(insert, ['VALID', 'Valid Co', 1000, '12345']);
+    await dbRun(insert, ['LMW', 'LMW Ltd', 900, 'LMW']);
+    await dbRun(insert, ['MISSING', 'Missing Id Co', 800, null]);
+
+    expect(await getTrendlyneMetricSymbols(10)).toEqual(['VALID']);
   });
 
   it('falls back to the full universe when nse_stocks has no market-cap-ranked rows', async () => {

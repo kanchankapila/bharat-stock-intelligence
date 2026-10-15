@@ -46,7 +46,10 @@ const common = {
   autorestart: true,
   max_restarts: 10,
   restart_delay: 3000,
-  min_uptime: 10_000,
+  // Longer than port_guard's 300s budget. A genuinely foreign listener must count as an
+  // unstable launch so max_restarts eventually parks the service instead of resetting the
+  // counter and retrying forever every five minutes (AF-20261014-07).
+  min_uptime: 360_000,
   kill_timeout: 10_000,
   env: { ...dotenvVars, PYTHONUNBUFFERED: '1' },
   out_file: path.resolve(__dirname, 'logs', 'pm2-out.log'),
@@ -220,18 +223,17 @@ module.exports = {
     // It reads the previous session: features enforce a 19:00 IST knowability cutoff, so a
     // 06:00 run publishes for the session about to open, with ~3h of slack.
     //
-    // ⚠ kill_timeout is 3h and is NOT a measured steady-state budget. The only full run so far
-    // (2026-09-29) took >3.5h, but that was a COLD START: investsights_estimates 94 min and
-    // investsights_fundamentals 83 min were backfilling full history (33,836 + 36,617 rows).
-    // Those are now loaded, so incremental runs should be far shorter. CHECK THE FIRST
-    // SCHEDULED RUN's duration and re-cut this budget against it -- a budget with no headroom
-    // over its real runtime is AF-20260929-04's exact failure (killed at the cap, reported as
-    // a slow job).
+    // The 2026-10-14 incremental vendor tail took 24m (MC), 99m (InvestSights fundamentals)
+    // and 120m (InvestSights estimates) before even starting MarketsMojo. Core inference and
+    // publication therefore remain first, while per-source ledger rows make the optional long
+    // tail observable and independently retryable. `kill_timeout` is NOT a runtime budget in
+    // PM2; it is only the grace after SIGINT before SIGKILL. Keep that grace short so the next
+    // 06:00 cron can replace a genuinely hung predecessor instead of waiting for hours.
     {
       ...cronApp,
       name: 'bqa-daily',
       cron_restart: '0 6 * * *',
-      kill_timeout: 10_800_000,          // 3h; see the warning above before trusting it
+      kill_timeout: 600_000,             // 10m shutdown grace; AF-20261014-08
       interpreter: BQA_PY,
       script: path.resolve(BQA_DIR, 'src', 'bharat_alpha', 'cli.py'),
       args: 'daily',

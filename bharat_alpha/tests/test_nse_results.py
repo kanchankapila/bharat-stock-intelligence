@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from bharat_alpha.ingest.sources.nse_results import filing_deadline, knowable_for, parse_results
+from bharat_alpha.ingest.sources.nse_results import filing_deadline, knowable_for, parse_filing_rows, parse_results
 from bharat_alpha.timeutil import IST
 
 
@@ -24,6 +24,34 @@ def test_parse_is_strict_about_shape():
         parse_results({"resCmpData": [{"re_to_dt": "31-Dec-2025", "re_total_inc": 1, "re_net_profit": 1}]})  # no EPS
     with pytest.raises(ValueError):
         parse_results({"resCmpData": [row("Q3 FY26", 1.0)]})                          # unparseable period
+
+
+def test_integrated_filing_bridge_maps_symbols_units_and_exact_broadcast_time():
+    known = dt.datetime(2026, 10, 13, 17, 42, tzinfo=IST)
+    got = parse_filing_rows(
+        [
+            {"symbol": "RELIANCE", "period_end": dt.date(2026, 6, 30), "eps_basic": "12.5",
+             "total_income_crore": "10.25", "pat_crore": 1.5, "broadcast_ts": known},
+            {"symbol": "NOT-IN-BQA", "period_end": dt.date(2026, 6, 30), "eps_basic": 2,
+             "total_income_crore": 3, "pat_crore": 1, "broadcast_ts": known},
+        ],
+        {"RELIANCE": 101},
+    )
+    assert got == [
+        {
+            "instrument_id": 101,
+            "period_end": dt.date(2026, 6, 30),
+            "res_eps": 12.5,
+            "res_revenue_lakh": 1025.0,
+            "res_net_profit_lakh": 150.0,
+            "knowable_at": known,
+        }
+    ]
+    with pytest.raises(ValueError, match="timestamp"):
+        parse_filing_rows([
+            {"symbol": "RELIANCE", "period_end": "30-Jun-2026", "eps_basic": 1,
+             "total_income_crore": 2, "pat_crore": 1, "broadcast_ts": "2026-10-13 17:42:00"},
+        ], {"RELIANCE": 101})
 
 
 def test_knowable_is_the_results_date_else_the_deadline():
@@ -74,3 +102,23 @@ def test_eps_yoy_reaches_features_after_the_results_date(conn):
     assert eps.loc[nxt] == pytest.approx(5.0 / p.raw_close.loc[nxt, iid])            # 15 - 10, the same quarter a year earlier
     assert rev.loc[nxt] == pytest.approx(0.5)
     assert eps.loc[:ts(results_day)].isna().all()                                    # only one YoY pair exists
+
+
+def test_write_uses_exchange_broadcast_timestamp_when_present(conn):
+    from bharat_alpha.db import read_df
+    from bharat_alpha.ingest.base import run_connector
+    from bharat_alpha.ingest.sources.nse_bhavcopy import NseBhavcopy
+    from bharat_alpha.ingest.sources.nse_results import write_results
+    from bharat_alpha.sim import simulate
+
+    sim = simulate(n_stocks=6, n_days=5, seed=19)
+    for day in sim.dates:
+        run_connector(conn, NseBhavcopy(), day, raw=sim.bhavcopies[day])
+    iid = int(read_df(conn, "SELECT instrument_id FROM alpha.symbol_history ORDER BY instrument_id LIMIT 1").iloc[0, 0])
+    broadcast = dt.datetime(2026, 10, 14, 18, 7, 3, tzinfo=IST)
+    rows = [{"instrument_id": iid, "period_end": dt.date(2026, 9, 30), "res_eps": 4.2,
+             "res_revenue_lakh": 1200.0, "res_net_profit_lakh": 100.0,
+             "knowable_at": broadcast}]
+    assert write_results(conn, rows, dt.datetime(2026, 10, 15, tzinfo=IST)) == 3
+    stored = read_df(conn, "SELECT DISTINCT knowable_at FROM alpha.fundamental WHERE source='nse_results'")
+    assert len(stored) == 1 and pd.Timestamp(stored.knowable_at.iloc[0]) == pd.Timestamp(broadcast)

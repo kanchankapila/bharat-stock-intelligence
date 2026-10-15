@@ -28,6 +28,14 @@ describe('ecosystem.config.cjs Python services', () => {
     expect(scheduler.autorestart).toBe(true);
   });
 
+  it('does not mistake PM2 shutdown grace for a BQA runtime budget', () => {
+    const daily = apps.find(a => a.name === 'bqa-daily');
+    expect(daily, 'bqa-daily missing from ecosystem.config.cjs').toBeDefined();
+    expect(daily.cron_restart).toBe('0 6 * * *');
+    expect(daily.kill_timeout).toBeGreaterThanOrEqual(60_000);
+    expect(daily.kill_timeout).toBeLessThanOrEqual(15 * 60_000);
+  });
+
   it('finds every Python app by interpreter, not by a hand-kept list', () => {
     // Guard the guard: if this ever reads 0, the filter broke and every assertion below
     // vacuously passes. Independent floor -- the four long-running services plus bqa-daily.

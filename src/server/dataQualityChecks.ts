@@ -3626,6 +3626,28 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       return { status: 'pass', detail: 'No polled HTTP endpoint is mislabeled as a realtime tick stream.' };
     },
   },
+  {
+    id: 'market-endpoint-validation-age',
+    label: 'Endpoint registry status is labelled as stale discovery evidence, not current health',
+    category: 'reference',
+    critical: false,
+    // `is_working` / `http_status_code` in market_endpoint_registry were captured when each URL was
+    // last probed (validated_at), not on a schedule. Anything that reads them as "currently
+    // working" is reading a dated snapshot; this makes the age visible instead of implied.
+    sql: `SELECT MAX(validated_at) AS last_validated_at FROM market_endpoint_registry`,
+    evaluate: (row, now) => {
+      const at = now instanceof Date ? now : new Date();
+      const last = row?.last_validated_at ? new Date(row.last_validated_at as string).getTime() : NaN;
+      if (!Number.isFinite(last)) {
+        return { status: 'warn', detail: 'No endpoint in the registry carries a validated_at; its status columns are unvalidated discovery evidence.' };
+      }
+      const days = Math.floor((at.getTime() - last) / 86_400_000);
+      if (days > 30) {
+        return { status: 'warn', detail: `Endpoint registry was last validated ${days}d ago: its is_working/status columns are discovery evidence from then, not current health.` };
+      }
+      return { status: 'pass', detail: `Endpoint registry validated ${days}d ago.` };
+    },
+  },
 
   ...TABLE_FRESHNESS_CHECKS.map(makeFreshnessCheck),
   {
@@ -3738,21 +3760,41 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // NOTE the scale: ZERO_DISPERSION_MIN_SD = 5.0 is calibrated for 0-100 engine scores and
     // is meaningless against raw model outputs (win_probability is 0-1, sd ~0.07 -- every
     // engine looks collapsed). A 2026-08-22 ablation applied it on the raw scale and dropped
-    // ml on 33 of 43 dates, flipping its own result negative. This check reads the stored
-    // 0-100 columns, which is the scale the constant was written for.
+    // ml on 33 of 43 dates, flipping its own result negative. This check reads both the stored
+    // 0-100 blend inputs and raw win_probability*100. That split matters because the live
+    // edge/calibration gate deliberately shrinks untrusted probabilities toward 50 before the
+    // stored score is tested. A collapsed stored score with a dispersed raw source is an honest
+    // exclusion; collapse in the raw source itself is the actual dead-engine failure.
     sql: `WITH d AS (SELECT DISTINCT computed_at::date AS dt FROM unified_recommendations
-                      ORDER BY 1 DESC LIMIT 10)
+                      ORDER BY 1 DESC LIMIT 10),
+          stored AS (
+            SELECT ur.computed_at::date AS dt,
+                   stddev_samp(ur.ml_score)        AS sd_ml,
+                   stddev_samp(ur.dl_score)        AS sd_dl,
+                   stddev_samp(ur.technical_score) AS sd_tech
+              FROM unified_recommendations ur
+             WHERE ur.computed_at::date IN (SELECT dt FROM d)
+             GROUP BY 1 HAVING count(*) >= 50
+          ),
+          raw_d AS (
+            SELECT DISTINCT date::date AS dt FROM technical_signals
+             WHERE win_probability IS NOT NULL ORDER BY 1 DESC LIMIT 10
+          ),
+          raw_ml AS (
+            SELECT ts.date::date AS dt, stddev_samp(ts.win_probability * 100.0) AS sd_ml
+              FROM technical_signals ts
+             WHERE ts.date::date IN (SELECT dt FROM raw_d)
+             GROUP BY 1 HAVING count(*) >= 50
+          )
           SELECT count(*) AS dates,
                  count(*) FILTER (WHERE sd_ml   < 3.0) AS collapse_ml,
                  count(*) FILTER (WHERE sd_dl   < 5.0) AS collapse_dl,
-                 count(*) FILTER (WHERE sd_tech < 5.0) AS collapse_technical
-            FROM (SELECT ur.computed_at::date AS dt,
-                         stddev_samp(ur.ml_score)        AS sd_ml,
-                         stddev_samp(ur.dl_score)        AS sd_dl,
-                         stddev_samp(ur.technical_score) AS sd_tech
-                    FROM unified_recommendations ur
-                   WHERE ur.computed_at::date IN (SELECT dt FROM d)
-                   GROUP BY 1 HAVING count(*) >= 50) x`,
+                 count(*) FILTER (WHERE sd_tech < 5.0) AS collapse_technical,
+                 (SELECT count(*) FROM raw_ml) AS raw_dates,
+                 (SELECT count(*) FROM raw_ml WHERE sd_ml < 3.0) AS raw_collapse_ml,
+                 COALESCE((SELECT value = 'true' FROM app_settings
+                            WHERE key = 'edge_adjustment_enabled'), false) AS edge_adjustment_enabled
+            FROM stored`,
     evaluate: (row) => {
       const dates = Number(row?.dates ?? 0);
       if (dates < 5) return { status: 'pass', detail: `Only ${dates} ranker dates — too few to judge` };
@@ -3762,6 +3804,27 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       const detail = rates.map(x => `${x.e} ${(x.rate * 100).toFixed(0)}%`).join(', ') +
         ` of last ${dates} dates (baseline 2026-08-22: dl 39%, ml 34%, technical 18%)`;
       const worst = rates[0];
+      const rawDates = Number(row?.raw_dates ?? 0);
+      const rawMlRate = rawDates > 0 ? Number(row?.raw_collapse_ml ?? 0) / rawDates : null;
+      const edgeGateEnabled = row?.edge_adjustment_enabled === true || row?.edge_adjustment_enabled === 'true';
+
+      if (rawDates >= 5 && rawMlRate !== null && rawMlRate >= 0.9) {
+        return {
+          status: 'fail',
+          detail: `raw ML source collapsed on ${(rawMlRate * 100).toFixed(0)}% of its last ${rawDates} ` +
+            `dates — this is upstream model/data failure, not the edge gate. Stored blend view: ${detail}`,
+        };
+      }
+      if (worst.e === 'ml' && worst.rate >= 0.9 && edgeGateEnabled &&
+          rawDates >= 5 && rawMlRate !== null && rawMlRate < 0.75) {
+        return {
+          status: 'warn',
+          detail: `ml deliberately excluded from the blend after the live edge/calibration gate ` +
+            `shrunk it toward neutral on ${(worst.rate * 100).toFixed(0)}% of recent ranker dates; ` +
+            `the raw ML source remains dispersed (${(rawMlRate * 100).toFixed(0)}% collapsed over ` +
+            `${rawDates} dates). This is an honest no-trust state, not a dead input. ${detail}`,
+        };
+      }
       if (worst.rate >= 0.9) {
         return {
           status: 'fail',

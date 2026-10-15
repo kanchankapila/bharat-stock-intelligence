@@ -156,6 +156,18 @@ describe('DATA_QUALITY_CHECKS registry', () => {
     expect(check.evaluate({ bad: 0 }, new Date()).status).toBe('pass');
   });
 
+  it('labels endpoint registry status as stale validation evidence, not current health', () => {
+    const check = DATA_QUALITY_CHECKS.find(c => c.id === 'market-endpoint-validation-age')!;
+    expect(check).toBeDefined();
+    expect(check.sql).toMatch(/validated_at/);
+    const now = new Date('2026-10-15T12:00:00Z');
+    expect(check.evaluate({ last_validated_at: '2026-10-14T12:00:00Z' }, now).status).toBe('pass');
+    const stale = check.evaluate({ last_validated_at: '2026-09-13T12:00:00Z' }, now);
+    expect(stale.status).toBe('warn');
+    expect(stale.detail).toContain('discovery evidence');
+    expect(stale.detail).not.toContain('currently working');
+  });
+
   it('financial-ratio tables follow the fetcher\'s 20-day smart cadence', () => {
     const ratios = DATA_QUALITY_CHECKS.find(c => c.id === 'tl-financial-quality-freshness')!;
     const cashflow = DATA_QUALITY_CHECKS.find(c => c.id === 'et-cashflow-history-recency')!;
@@ -173,6 +185,24 @@ describe('DATA_QUALITY_CHECKS registry', () => {
 describe('individual evaluate() functions', () => {
   const now = new Date('2026-07-19T12:00:00Z');
   const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+
+  it('distinguishes an intentionally edge-gated ML blend from a dead raw ML source', () => {
+    const check = byId('ur-engine-dispersion-collapse');
+    const gated = check.evaluate({
+      dates: 10, collapse_ml: 10, collapse_dl: 0, collapse_technical: 0,
+      raw_dates: 10, raw_collapse_ml: 0, edge_adjustment_enabled: true,
+    }, now);
+    expect(gated.status).toBe('warn');
+    expect(gated.detail).toContain('raw ML source remains dispersed');
+    expect(gated.detail).toContain('deliberately excluded');
+
+    const dead = check.evaluate({
+      dates: 10, collapse_ml: 10, collapse_dl: 0, collapse_technical: 0,
+      raw_dates: 10, raw_collapse_ml: 10, edge_adjustment_enabled: true,
+    }, now);
+    expect(dead.status).toBe('fail');
+    expect(dead.detail).toContain('raw ML source');
+  });
 
   it('ohlcv-freshness-coverage fails when there is no recent data', () => {
     const r = byId('ohlcv-freshness-coverage').evaluate(undefined, now);

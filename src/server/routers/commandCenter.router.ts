@@ -6,6 +6,7 @@ import { cacheGet } from '../cacheService';
 import { latestComputedAt, invalidateLatestComputedAt } from '../latestComputedAt';
 import { planStatus } from '../planLifecycle';
 import { LATEST_COMPLETE_TS_DATE_SQL, ML_RANK_PCT_SQL, mlRankPctFor } from '../technicalSignalsDate';
+import { canonicalHorizon } from '../horizon';
 
 // Shared TTL probe (consolidated 2026-09-02 from the per-router copies) — 5-min TTL so new
 // ranker runs are picked up; CAST-to-TEXT semantics preserved.
@@ -57,14 +58,7 @@ export const commandCenterRouter = router({
         // POSITIONAL row of the same concept -- the filter's contents depended on which
         // upstream source supplied each row's levels. Mirrors _TIMEFRAME_ALIASES in
         // unified_ranker.py (the write side) and HORIZON_ALIASES in telegramRecommendations.ts.
-        const HORIZON_TO_CANONICAL: Record<string, string> = {
-          INTRADAY: 'INTRADAY',
-          SWING: 'SWING',
-          SHORT_TERM: 'SWING',
-          LONG_TERM: 'POSITIONAL',
-          POSITIONAL: 'POSITIONAL',
-        };
-        const canonical = HORIZON_TO_CANONICAL[input.horizon.toUpperCase()];
+        const canonical = canonicalHorizon(input.horizon);
         if (canonical) {
           query += ` AND timeframe = ?`;
           params.push(canonical);
@@ -163,8 +157,11 @@ export const commandCenterRouter = router({
       }
       let horizonFilter = '';
       if (input.horizon !== 'ALL') {
-        horizonFilter = ` AND ur.timeframe = ?`;
-        params.push(input.horizon.toUpperCase());
+        const canonical = canonicalHorizon(input.horizon);
+        if (canonical) {
+          horizonFilter = ` AND ur.timeframe = ?`;
+          params.push(canonical);
+        }
       }
       let sectorFilter = '';
       if (input.sector) {
@@ -325,7 +322,8 @@ export const commandCenterRouter = router({
           SELECT symbol, unified_score, conviction_level, timeframe, sector,
                  classification, stop_loss, target_1, target_2,
                  entry_zone_low, entry_zone_high, risk_reward,
-                 ml_score, confluence_score, technical_score, dl_score,
+                 screener_stock_score, ml_score, confluence_score, technical_score, dl_score,
+                 cs_score, breakout_score, smart_money_score, fundamental_score,
                  trade_reasoning, engine_coverage_count, computed_at
           FROM unified_recommendations
           WHERE symbol = ? AND computed_at = ?

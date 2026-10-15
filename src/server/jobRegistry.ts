@@ -188,7 +188,10 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // number stretched to match those anecdotal figures. Found 2026-08-03 while building the
   // graceMinutes mirror-consistency test.
   { jobName: 'ml-daily-ops', label: 'ML Daily Ops', cronPattern: '20 13 * * 1-5', graceMinutes: 270, critical: true },
-  { jobName: 'trendlyne-daily-fetch', label: 'Trendlyne Daily Metrics Fetch', cronPattern: '30 4 * * 1-5', graceMinutes: 60, critical: false },
+  // The parent intentionally spreads symbol children over 12h. Before aggregate completion
+  // accounting existed, each child falsely refreshed the heartbeat, hiding this mismatch.
+  // Allow the full fan-out plus one hour before an honest incomplete batch becomes late.
+  { jobName: 'trendlyne-daily-fetch', label: 'Trendlyne Daily Metrics Fetch', cronPattern: '30 4 * * 1-5', graceMinutes: 780, critical: false },
   // graceMinutes 180 -> 390: the Worker's own lockDuration is 6h (360min) -- 180min grace
   // flagged 'late' on any run past 3 hours, well inside what the job's own declared budget
   // (which includes a 90min ml_ensemble.py --train --tune --score step alone) allows.

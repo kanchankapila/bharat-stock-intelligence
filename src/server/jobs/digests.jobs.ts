@@ -21,6 +21,9 @@ export const QUEUE_JOB_DIGEST_MORNING = 'job-digest-morning';
 export const QUEUE_RECOMMENDATIONS_DIGEST = 'recommendations-digest';
 export const QUEUE_MORNING_BRIEF = 'morning-brief';
 
+type DigestFailureVerdict = { success: false; failedSteps: string[] };
+type DigestJobResult = DigestFailureVerdict | void;
+
 async function processJobDigest(): Promise<void> {
   const digest = await buildDailyDigest();
   const ok = await telegramService.sendMarkdownMessage(digest);
@@ -87,7 +90,7 @@ async function unifiedRankingIsFresh(): Promise<boolean> {
 // the same 14:24 ranking (AF-20261002-01). Sending identical content again carries no information.
 const DIGEST_LAST_SENT_KEY = 'recommendations_digest_last_sent_ranking';
 
-export async function processRecommendationsDigest(job?: { data?: { force?: boolean } }): Promise<void> {
+export async function processRecommendationsDigest(job?: { data?: { force?: boolean } }): Promise<DigestJobResult> {
   // 2026-09-22: the 17:10 UTC cron races unified-ranker's own 17:00 UTC slot BY DESIGN —
   // measured completions 17:11 / 17:21 / 17:39 / 17:42, and after a failed attempt the
   // bounded make-up (AF-20260917-20: 45min budget + 15min delay) can land around 18:18.
@@ -118,7 +121,7 @@ export async function processRecommendationsDigest(job?: { data?: { force?: bool
     // completed handler turns { success:false, failedSteps } into a 'failed' heartbeat whose
     // message names the gate, distinguishing "input not ready" from "nothing sent" — the same
     // surface AF-20260910-03 gave company-profiles-sync.
-    return { success: false, failedSteps: [msg] } as unknown as void;
+    return { success: false, failedSteps: [msg] };
   }
   const ranking = await dbGet<{ g: string | null }>(`SELECT MAX(generated_at)::text AS g FROM unified_recommendations`);
   const rankingKey = ranking?.g ?? null;
@@ -163,7 +166,7 @@ export async function processRecommendationsDigest(job?: { data?: { force?: bool
 const MORNING_BRIEF_MAX_CALENDAR_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const MORNING_BRIEF_LAST_SENT_KEY = 'morning_brief_last_sent_ranking';
 
-export async function processMorningBrief(job?: { data?: { force?: boolean } }): Promise<void> {
+export async function processMorningBrief(job?: { data?: { force?: boolean } }): Promise<DigestJobResult> {
   const ur = await dbGet<{ g: string | null; d: string | null }>(
     `SELECT MAX(generated_at)::text AS g,
             (MAX(generated_at) AT TIME ZONE 'Asia/Kolkata')::date::text AS d
@@ -171,7 +174,7 @@ export async function processMorningBrief(job?: { data?: { force?: boolean } }):
   if (!ur?.g || !ur.d) {
     const msg = 'SKIPPED: unified_recommendations is empty — no ranking to brief on';
     console.warn('[QUEUE] morning-brief', msg);
-    return { success: false, failedSteps: [msg] } as unknown as void;
+    return { success: false, failedSteps: [msg] };
   }
   // MAX across independently written EOD tables prevents one stale source from blessing an
   // older ranking; excluding today avoids treating a partially written morning as completed.
@@ -204,7 +207,7 @@ export async function processMorningBrief(job?: { data?: { force?: boolean } }):
       + `${Math.round(ageMs / 3_600_000)}h) — the latest session has no completed unified `
       + 'ranking; see unified-ranker heartbeat';
     console.warn('[QUEUE] morning-brief', msg);
-    return { success: false, failedSteps: [msg] } as unknown as void;
+    return { success: false, failedSteps: [msg] };
   }
   // Same recurrence this queue already has a ledger row for (AF-20261002-01): a server restart
   // replays the boot catch-up and re-fires this job, and re-sending an identical brief carries

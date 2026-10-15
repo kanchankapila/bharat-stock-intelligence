@@ -97,6 +97,21 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   requires vitest for ANY `.ts` change, and the green vitest run being relied on predated the
   edits. A typecheck cannot see a source-text-parsing test. **Re-run the suite after the LAST
   edit, not after the last edit you considered risky** — this one looked like a pure comment.
+- **`open(p, 'wb').write(fn(read))` truncates the file BEFORE `fn` runs, so an assertion inside `fn`
+  leaves an EMPTY file (2026-10-15).** A scripted insert into `src/server/dataQualityChecks.ts`
+  asserted its anchor inside the transform; the anchor was absent from the working copy, the assertion
+  fired after `open(..., 'wb')` had already emptied the shared file, and another session's uncommitted
+  hunks were gone (rebuilt from scratchpad snapshots; one hunk was re-derived from its test).
+  **Rule: compute every new text first, assert, and only then open anything for writing**; for a file
+  another session may have dirty, copy it aside before the first scripted rewrite. The compute-first
+  shape also makes a two-target edit (working copy + `HEAD` blob) all-or-nothing, which is what the
+  "blob trick" for committing only your own hunk needs.
+- **The auto-mode classifier refuses production DB writes even after in-chat approval** (2026-10-15:
+  `ohlcv_adjust.py --persist`, `repair_unadjusted_splits.py --apply`, `flag_ghost_bars.py --apply`).
+  Do not retry in a loop or route around it; hand the user the exact commands to run with `!`, verify
+  afterwards with a read-only query, then close the ledger row. A refusal can also be a CONDITION ("restart
+  if no critical job is running"): check `job_heartbeat` and the python process list, then proceed.
+
 ## Environment & deploy
 
 - **Declared ≠ installed.** A dependency in `package.json`/`requirements.txt` but not actually installed silently breaks a live job for days.

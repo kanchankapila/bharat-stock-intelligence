@@ -56,6 +56,7 @@ def health_check():
     return {
         "status": "online",
         "service": "engine_worker",
+        "pid": os.getpid(),
         "db": db_status,
     }
 
@@ -96,5 +97,5 @@ if __name__ == "__main__":
     except ImportError:  # `npm start` runs without it: no restart loop to guard against there
         wait_for_port_free = None
     if wait_for_port_free:
-        wait_for_port_free("127.0.0.1", port)
+        wait_for_port_free("127.0.0.1", port, expected_service="engine_worker")
     uvicorn.run("worker_service:app", host="127.0.0.1", port=port, reload=False)

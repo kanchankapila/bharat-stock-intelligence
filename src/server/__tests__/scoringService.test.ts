@@ -15,7 +15,7 @@ beforeEach(async () => {
   clearTopRatedCache();
 });
 
-const insertRec = (symbol: string, score: number, klass: string, bull: number, bear: number, computedAt: string, sizePct = 0, timeframe: string | null = 'LONG_TERM') =>
+const insertRec = (symbol: string, score: number, klass: string, bull: number, bear: number, computedAt: string, sizePct = 0, timeframe: string | null = 'POSITIONAL') =>
   dbRun(`INSERT INTO unified_recommendations
     (symbol, computed_at, regime, unified_score, conviction_level, classification,
      bullish_screener_count, bearish_screener_count, screener_names_json, trade_reasoning,
@@ -57,7 +57,7 @@ describe('getTopRatedStocks reroute to unified_recommendations', () => {
     }
     const rows = await getTopRatedStocks(1, 'long_term');
     expect(rows.map(r => r.symbol)).toEqual(['LONG']);
-    expect(rows[0].timeframe).toBe('LONG_TERM');
+    expect(rows[0].timeframe).toBe('POSITIONAL');
   });
 
   it('does not use an older long-term batch or legacy scores when the latest batch has no long-term rows', async () => {
