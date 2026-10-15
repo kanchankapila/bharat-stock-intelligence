@@ -72,6 +72,28 @@ def _is_within_schedule_window() -> bool:
     return min(diff_minutes, 1440 - diff_minutes) <= _SCHEDULE_TOLERANCE_MINUTES
 
 
+CATCH_UP_AFTER_HOURS = 26      # nightly cadence + the ~15 min a dump takes + slack
+
+
+def _newest_dump_age_hours(now: float | None = None) -> float | None:
+    dumps = [p for p in BACKUP_DIR.glob(f"{PG_DB}_*.dump") if p.stat().st_size > 0] if BACKUP_DIR.exists() else []
+    if not dumps:
+        return None
+    return ((now if now is not None else time.time()) - max(p.stat().st_mtime for p in dumps)) / 3600
+
+
+def _catch_up_due(now_ist: datetime | None = None, dump_age_hours: float | None = None) -> bool:
+    """A nightly slot that never fired (host asleep or pm2 down at 23:15 IST, 2026-10-14) leaves
+    the only chance at the next post-boot launch, which the off-schedule guard used to discard,
+    stretching the recovery point past two days. Run it then -- but never inside market hours
+    (09:00-17:00 IST), the reason the guard exists."""
+    now_ist = now_ist or (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30))
+    age = dump_age_hours if dump_age_hours is not None else _newest_dump_age_hours()
+    if now_ist.weekday() < 5 and 9 <= now_ist.hour < 17:
+        return False
+    return age is None or age > CATCH_UP_AFTER_HOURS
+
+
 def _record_heartbeat(ok: bool, detail: str) -> None:
     """Stamp job_heartbeat so an unrun or failing backup is visible to existing monitoring.
 
@@ -126,7 +148,7 @@ def _check_container() -> None:
 
 
 def backup() -> None:
-    if "--force" not in sys.argv[1:] and not _is_within_schedule_window():
+    if "--force" not in sys.argv[1:] and not _is_within_schedule_window() and not _catch_up_due():
         print(
             "[BACKUP] off-schedule invocation (expected ~23:15 IST daily) -- likely a pm2 "
             "registration/restart launch, not the real cron fire. Skipping (pass --force to run manually)."

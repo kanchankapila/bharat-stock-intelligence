@@ -213,6 +213,65 @@ def detect_adjustment_events(rows) -> tuple[list, list]:
     return accepted, rejected
 
 
+# A demerger / capital reduction / ratio-less split has no clean ratio, so the detector above
+# rejects it as `not_a_clean_ratio` and the ex-date reads as a -60..-90% return in every
+# momentum, volatility and drawdown figure (BHAGYANGR 2026-10-08 -91%, VERANDA 10-06 -86%,
+# HEG 09-07 -63%: all three declared by NSE as corporate actions, none with a factor).
+# Reporting rather than guessing stays the rule for an UNDECLARED move; with a declared action
+# on the date, a session fully on the new level and a level that persists, the observed ratio
+# is the best available factor (it assumes the ex-date's own market move was zero: an error of
+# a few percent against one of 60-90%).
+DECLARED_SEAM_MIN_MOVE = 0.25   # beyond NSE's widest (20%) price band
+PERSIST_BAND = 0.30             # the next closes stay within this of the ex-date close
+PERSIST_BARS = 3
+DECLARED_WINDOW_DAYS = 3
+DECLARED_TYPES = ('OTHER', 'SPLIT', 'BONUS')
+
+
+def _iso(d) -> str:
+    return str(d)[:10]
+
+
+def promote_declared_seams(rejected, srows, declared_dates) -> list:
+    """[(date, observed open/prev_close)] for `not_a_clean_ratio` rejections that a declared
+    corporate action on/near the date explains and whose new price level persists.
+
+    `srows` is the series detect_adjustment_events saw, ascending, as
+    (date, prev_close, open, high, low, close); `declared_dates` the symbol's non-dividend
+    corporate-action ex-dates.
+    """
+    from datetime import date as _date
+    declared = []
+    for x in declared_dates or ():
+        try:
+            declared.append(_date.fromisoformat(_iso(x)))
+        except ValueError:
+            continue
+    if not declared:
+        return []
+    idx = {_iso(r[0]): i for i, r in enumerate(srows)}
+    out = []
+    for d, basis, why in rejected:
+        if why != 'not_a_clean_ratio':
+            continue
+        i = idx.get(_iso(d))
+        if i is None:
+            continue
+        try:
+            dd = _date.fromisoformat(_iso(d))
+        except ValueError:
+            continue
+        if not any(abs((dd - x).days) <= DECLARED_WINDOW_DAYS for x in declared):
+            continue
+        close = srows[i][5]
+        nxt = [r[5] for r in srows[i + 1:i + 1 + PERSIST_BARS] if r[5]]
+        if not close or len(nxt) < 2:
+            continue
+        if abs(basis - 1.0) > DECLARED_SEAM_MIN_MOVE and all(abs(c / close - 1.0) <= PERSIST_BAND for c in nxt):
+            out.append((_iso(d), float(basis)))
+    return out
+
+
 def cumulative_factor_map(events: list, dates: list) -> dict:
     """{date: multiplier} putting every bar on the LATEST share basis.
 
@@ -370,11 +429,20 @@ def scan(conn: ConnWrapper, persist: bool = False) -> dict:
         # db_compat.Row is a dict subclass -- it supports int and name keys but NOT slicing.
         by_symbol.setdefault(r[0], []).append((r[1], r[2], r[3], r[4], r[5], r[6]))
 
-    all_accepted, all_rejected = [], []
+    declared: dict = {}
+    for r in conn.execute(
+        "SELECT symbol, ex_date FROM corporate_actions WHERE action_type IN ('OTHER','SPLIT','BONUS')"
+    ).fetchall():
+        declared.setdefault(r[0], []).append(r[1])
+
+    all_accepted, all_rejected, all_declared = [], [], []
     for sym, srows in by_symbol.items():
         acc, rej = detect_adjustment_events(srows)
         all_accepted += [(sym, d, f) for d, f in acc]
-        all_rejected += [(sym, d, f, why) for d, f, why in rej]
+        promoted = promote_declared_seams(rej, srows, declared.get(sym))
+        all_declared += [(sym, d, f) for d, f in promoted]
+        gone = {d for d, _ in promoted}
+        all_rejected += [(sym, d, f, why) for d, f, why in rej if _iso(d) not in gone]
 
 
     if persist and all_accepted:
@@ -387,10 +455,22 @@ def scan(conn: ConnWrapper, persist: bool = False) -> dict:
             )
         conn.commit()
 
+    if persist and all_declared:
+        ensure_schema(conn)
+        for sym, d, f in all_declared:
+            # a clean detected or authoritative factor for the same date always wins
+            conn.execute(
+                "INSERT INTO ohlcv_adjustment_factors (symbol, ex_date, factor, source) VALUES (?,?,?,?) "
+                "ON CONFLICT (symbol, ex_date) DO NOTHING",
+                (sym, d, f, 'declared_action_seam'),
+            )
+        conn.commit()
+
     return {
         'symbols_scanned': len(by_symbol),
         'accepted': all_accepted,
         'rejected': all_rejected,
+        'declared_seams': all_declared,
     }
 
 
@@ -421,7 +501,7 @@ def main():
     res = scan(conn, persist=args.persist)
     print(f"[OhlcvAdjust] scanned {res['symbols_scanned']} symbols")
     print(f"[OhlcvAdjust] accepted {len(res['accepted'])} adjustment events, "
-          f"rejected {len(res['rejected'])}")
+          f"rejected {len(res['rejected'])}, declared-action seams {len(res['declared_seams'])}")
     if args.report:
         print("\n-- accepted --")
         for sym, d, f in sorted(res['accepted'], key=lambda x: x[1]):
