@@ -131,3 +131,49 @@ def test_accuracy_summary_keeps_coverage_beside_conditional_precision():
     assert row["opposite_all_pct"] == 7.5
     assert row["not_flagged_pct"] == 85.0
     assert row["directional_precision_pct"] == 50.0
+
+
+def _momentum_plan_and_rows(sql_template):
+    """Run the momentum family on a synthetic throwaway-Postgres stock_ohlcv."""
+    import json
+    from pg_test_support import pg_memory_conn
+    con = pg_memory_conn()
+    con.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date DATE, close FLOAT8, "
+                "volume FLOAT8, is_suspect INTEGER)")
+    days = pd.bdate_range("2026-08-03", "2026-10-08")
+    rows = [(f"S{i:03d}", d.date().isoformat(), 100.0 + i + 0.37 * k, 1e5, 1 if (i + k) % 29 == 0 else 0)
+            for i in range(300) for k, d in enumerate(days)]
+    rows += [("NIFTY50", d.date().isoformat(), 20000.0 + 7 * k, 0.0, 0) for k, d in enumerate(days)]
+    con.executemany("INSERT INTO stock_ohlcv VALUES (?, ?, ?, ?, ?)", rows)
+    sql = study._render_dates(sql_template, "2026-10-08", "2026-08-09")
+    plan = con.execute("EXPLAIN (ANALYZE, FORMAT JSON) " + sql).fetchone()[0]
+    plan = plan if isinstance(plan, list) else json.loads(plan)
+    out = sorted(tuple(r) for r in con.execute(sql + " ORDER BY 1").fetchall())
+    return plan[0]["Plan"], out
+
+
+def _rescans_of_latest(node):
+    """Total loops > 1 over the window-function CTE (a per-outer-row re-scan of every bar)."""
+    n = 0
+    if node.get("Node Type") == "CTE Scan" and node.get("CTE Name") == "latest" \
+            and node.get("Actual Loops", 1) > 1:
+        n += node["Actual Loops"]
+    for child in node.get("Plans", []):
+        n += _rescans_of_latest(child)
+    return n
+
+
+def test_momentum_nifty_benchmark_is_computed_once_not_per_symbol():
+    # 2026-10-15: the inlined `nifty` CTE re-scanned all ~100k window rows once per symbol
+    # (loops=2403, 7.9s per T-1 date, x166 dates = ~22 min, ~90% of mover-study-weekly).
+    plan, rows = _momentum_plan_and_rows(study.FACTOR_SQL["momentum"])
+    assert _rescans_of_latest(plan) == 0
+    assert len(rows) == 300
+
+
+def test_momentum_materialized_benchmark_returns_identical_rows():
+    unmaterialized = study.FACTOR_SQL["momentum"].replace(
+        "nifty AS MATERIALIZED (", "nifty AS (")
+    _, before = _momentum_plan_and_rows(unmaterialized)
+    _, after = _momentum_plan_and_rows(study.FACTOR_SQL["momentum"])
+    assert before == after and len(after) == 300

@@ -56,6 +56,9 @@ MIN_ADT_CR = 1.0
 # ---------------------------------------------------------------------------
 
 FACTOR_SQL = {
+    # `nifty` must stay MATERIALIZED: inlined, the planner (row estimate 2 vs ~100k actual)
+    # re-scanned the whole `latest` window once per symbol -- 7.9s per T-1 date vs 0.22s,
+    # ~90% of the 250-day study's runtime (2026-10-15).
     "momentum": """
         WITH bars AS (
             SELECT symbol, date, close,
@@ -65,7 +68,7 @@ FACTOR_SQL = {
         ), latest AS (
             SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
             FROM bars
-        ), nifty AS (
+        ), nifty AS MATERIALIZED (
             SELECT date, close / NULLIF(close_21d, 0) - 1 AS nifty_ret_21d
             FROM latest WHERE symbol = 'NIFTY50'
         )
@@ -751,8 +754,13 @@ def main():
     run_at = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     engine = get_engine()
 
+    # Progress goes to stderr with elapsed time: pythonRunner's timeout message carries only
+    # stderr, so a killed run says which stage it was in instead of "No stderr captured".
+    def stage(msg):
+        print(f"[study] +{time.time() - t0:.1f}s {msg}", file=sys.stderr, flush=True)
+
     ev = load_events(args.days, classes, engine)
-    print(f"[study] events: {len(ev):,} rows across "
+    stage(f"events: {len(ev):,} rows across "
           f"{ev['source'].nunique() if len(ev) else 0} classes "
           f"({ev['trade_date'].nunique() if len(ev) else 0} dates)")
 
@@ -763,7 +771,7 @@ def main():
     for pair in date_pairs:
         key = (str(pair.t1_date), str(pair.trade_date))
         fac_frames[key] = load_factors_for_date(engine, key[0], event_date=key[1])
-        print(f"[study] factors loaded for T-1 {key[0]} / event {key[1]}: "
+        stage(f"factors loaded for T-1 {key[0]} / event {key[1]}: "
               f"{len(fac_frames[key])} symbols")
 
     ic_parts, lift_parts = [], []
@@ -783,8 +791,11 @@ def main():
         else pd.DataFrame()
     lift = pd.concat([p for p in lift_parts if len(p)], ignore_index=True) if lift_parts \
         else pd.DataFrame()
+    stage("factor IC / cohort lift computed")
     hits = engine_hit_rate(ev, top_n=args.top_n)
+    stage("engine hit-rate computed")
     accuracy = canonical_signal_accuracy(ev)
+    stage("canonical accuracy computed")
 
     con = connect()
     ensure_results_schema(con)
