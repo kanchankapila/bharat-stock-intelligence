@@ -139,6 +139,87 @@ class TestReconcileCorrectsExistingSymbol:
         assert row['is_suspect'] is None
 
 
+def _seed_complete_file(conn, date, n=1500):
+    """A complete official file: >= COMPLETE_FILE_MIN_SYMBOLS distinct symbols (not in nse_stocks)."""
+    conn.execute(
+        "INSERT INTO nse_universe_history (date, symbol, series, open, high, low, close, volume) "
+        "SELECT ?, 'FILLER' || g, 'EQ', 10, 10, 10, 10, 1 FROM generate_series(1, ?) g",
+        (date, n))
+    conn.commit()
+
+
+def _ghost_row(conn, symbol, date):
+    return dict(conn.execute(
+        "SELECT * FROM stock_ohlcv WHERE symbol=? AND date::text=?", (symbol, date)).fetchone())
+
+
+class TestReconcileQuarantinesGhostBars:
+    """CCAVENUE 2026-10-14 shape: a normal-looking forward-filled copy of an earlier bar for a
+    real NSE listing that is absent from a COMPLETE official bhavcopy -- it did not trade."""
+
+    def _setup(self, conn, file_symbols=1500):
+        _seed_master(conn, 'INFY', 'CCAVENUE', 'KOTAK')
+        _seed_bhavcopy(conn, '2026-10-12', 'CCAVENUE', 14.91, 15.03, 13.61, 13.83, 42602780)
+        _seed_bhavcopy(conn, '2026-10-14', 'INFY', 1500.0, 1510.0, 1490.0, 1505.0, 1000)
+        _seed_complete_file(conn, '2026-10-14', file_symbols)
+        for sym, px in (('CCAVENUE', 13.83), ('KOTAK', 1800.0)):
+            conn.execute(
+                "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume, is_suspect) "
+                "VALUES (?, '2026-10-14', ?, ?, ?, ?, 42602780, 0)", (sym, px, px * 1.02, px * 0.98, px))
+        conn.commit()
+
+    def test_normal_shaped_ghost_on_complete_file_is_quarantined(self):
+        conn = _make_conn()
+        self._setup(conn)
+
+        result = rec.reconcile(conn, trade_date='2026-10-14')
+
+        row = _ghost_row(conn, 'CCAVENUE', '2026-10-14')
+        assert row['is_suspect'] == 1
+        assert row['suspect_reason'] == rec.GHOST_REASON
+        assert row['close'] == 13.83, "quarantine flags, never rewrites the bar"
+        assert result['quarantined'] == 1
+        assert result['quality'] == {'2026-10-14': 1}
+
+    def test_symbol_never_in_any_official_file_is_an_alias_not_a_ghost(self):
+        """KOTAK/INDUSIND/JIOFINANCIAL (live 2026-10-14): nse_stocks aliases with 0 bhavcopy
+        rows ever and real, varying prices -- absence there is a naming mismatch."""
+        conn = _make_conn()
+        self._setup(conn)
+
+        rec.reconcile(conn, trade_date='2026-10-14')
+
+        assert _ghost_row(conn, 'KOTAK', '2026-10-14')['is_suspect'] == 0
+
+    def test_incomplete_file_keeps_the_shape_only_rule(self):
+        conn = _make_conn()
+        self._setup(conn, file_symbols=100)
+
+        result = rec.reconcile(conn, trade_date='2026-10-14')
+
+        assert _ghost_row(conn, 'CCAVENUE', '2026-10-14')['is_suspect'] == 0
+        assert result['quarantined'] == 0
+
+    def test_rerun_is_idempotent(self):
+        conn = _make_conn()
+        self._setup(conn)
+        rec.reconcile(conn, trade_date='2026-10-14')
+
+        again = rec.reconcile(conn, trade_date='2026-10-14')
+
+        assert again['quarantined'] == 0
+        assert _ghost_row(conn, 'CCAVENUE', '2026-10-14')['is_suspect'] == 1
+
+    def test_a_non_eq_series_row_means_it_traded(self):
+        conn = _make_conn()
+        self._setup(conn)
+        _seed_bhavcopy(conn, '2026-10-14', 'CCAVENUE', 138.0, 139.0, 137.0, 138.5, 5000, series='BE')
+
+        rec.reconcile(conn, trade_date='2026-10-14')
+
+        assert _ghost_row(conn, 'CCAVENUE', '2026-10-14')['is_suspect'] == 0
+
+
 class TestReconcileSeriesFilter:
     def test_non_eq_series_never_reaches_stock_ohlcv(self):
         """nse_universe_history carries SM/BE/ST/BZ series too -- stock_ohlcv's canonical

@@ -135,6 +135,26 @@ def test_reset_preserves_closed_session_flags_from_data_integrity_repair():
     assert rows['OTHER'][0] == 0                            # not a closed session: reset
 
 
+def test_reset_preserves_absent_from_official_bhavcopy_quarantine():
+    # CCAVENUE 2026-10-14 (live): reconcile_stock_ohlcv_from_bhavcopy quarantined a ghost bar
+    # (no row in a complete official bhavcopy), then this reset -- the very next nightly step --
+    # set is_suspect back to 0 and left the reason behind. A flat ghost copy deviates from
+    # neither neighbour, so no detector here can re-derive it; the reset must leave it alone.
+    from reconcile_stock_ohlcv_from_bhavcopy import GHOST_REASON
+
+    conn = make_db()
+    _bars(conn, 'GHOST', [100, 100, 100], start='2026-10-12')
+    conn.execute("UPDATE stock_ohlcv SET is_suspect=1, suspect_reason=? "
+                 "WHERE symbol='GHOST' AND date='2026-10-14'", (GHOST_REASON,))
+    conn.commit()
+
+    flag_bad_prints(conn)
+
+    r = conn.execute("SELECT is_suspect, suspect_reason FROM stock_ohlcv "
+                     "WHERE symbol='GHOST' AND date='2026-10-14'").fetchone()
+    assert (r[0], r[1]) == (1, GHOST_REASON)
+
+
 def _mixed_universe(conn):
     _bars(conn, 'SPIKE', [100, 100, 700, 100, 100])     # one-bar error
     _bars(conn, 'JUMP', [100, 100, 100, 5000, 5000])    # extreme persistent shift

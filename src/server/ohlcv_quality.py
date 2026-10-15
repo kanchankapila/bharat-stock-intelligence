@@ -36,6 +36,11 @@ ACTION_WINDOW_DAYS = 3       # don't flag within ±3d of a known ex-date
 # Duplicated (not imported) because both files are standalone scripts -- keep in step, the
 # same convention as CLOSED_MARKET_SHARE_FLOOR's three copies.
 CLOSED_SESSION_REASON = 'closed session: universe-wide flat zero-volume bar'
+# Same for reconcile_stock_ohlcv_from_bhavcopy's quarantine of bars absent from the official
+# bhavcopy: it runs just BEFORE this module in ml-daily-ops, and the reset used to clear it
+# (CCAVENUE 2026-10-14 kept suspect_reason with is_suspect=0). A flat ghost copy deviates from
+# neither neighbour, so no detector here can re-derive it.
+from reconcile_stock_ohlcv_from_bhavcopy import GHOST_REASON  # noqa: E402
 
 # ingest_corporate_actions() is one of the report's two 150-minute steps (scheduler-review,
 # 2026-09-04) -- a per-symbol yfinance .splits/.dividends call across the whole universe every
@@ -216,8 +221,8 @@ def flag_bad_prints(conn: ConnWrapper, threshold: float = BAD_PRINT_THRESHOLD,
     """
     conn.execute(
         "UPDATE stock_ohlcv SET is_suspect=0 WHERE is_suspect=1 "
-        "AND (suspect_reason IS NULL OR suspect_reason <> ?)",
-        (CLOSED_SESSION_REASON,))
+        "AND (suspect_reason IS NULL OR suspect_reason NOT IN (?, ?))",
+        (CLOSED_SESSION_REASON, GHOST_REASON))
     conn.commit()
 
     if action_map is None:

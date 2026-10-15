@@ -1146,6 +1146,47 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       return { status: 'warn', detail: `${symbols} post-exit symbol(s) carry ${bars} post-exit bar(s)` };
     },
   },
+  {
+    id: 'ohlcv-unflagged-ghost-bar',
+    label: 'stock_ohlcv holds no unflagged bar a complete official bhavcopy says did not trade',
+    category: 'ohlcv',
+    critical: false,
+    // CCAVENUE 2026-10-13..15: a halted/frozen listing kept a forward-filled copy of an earlier
+    // bar every session, inside the 7-day grace ohlcv-exit-carryforward allows. The nightly
+    // reconcile (reconcile_stock_ohlcv_from_bhavcopy.ghost_bar_symbols) quarantines these; this
+    // fails if one survives on the latest COMPLETE file date (>= 1,500 symbols, the same floor).
+    // Only real listings (an earlier official row) count: nse_stocks aliases such as KOTAK
+    // never appear in any file. The quarantine runs minutes after the file lands, so a fail
+    // means the flag was cleared or the reconcile did not run.
+    sql: `WITH d AS (
+            SELECT date FROM nse_universe_history
+            WHERE date >= current_date - 14
+            GROUP BY date HAVING COUNT(DISTINCT symbol) >= 1500
+            ORDER BY date DESC LIMIT 1
+          )
+          SELECT (SELECT date::text FROM d) AS trade_date, COUNT(*) AS bars,
+                 STRING_AGG(o.symbol, ' ' ORDER BY o.symbol) AS symbols
+          FROM stock_ohlcv o
+          JOIN d ON o.date = d.date
+          JOIN nse_stocks m ON m.symbol = o.symbol
+          WHERE COALESCE(o.is_suspect, 0) = 0
+            AND NOT EXISTS (SELECT 1 FROM nse_universe_history n
+                            WHERE n.date = d.date AND n.symbol = o.symbol AND n.close > 0)
+            AND EXISTS (SELECT 1 FROM nse_universe_history h
+                        WHERE h.symbol = o.symbol AND h.date < d.date)`,
+    evaluate: (row) => {
+      const bars = Number(row?.bars) || 0;
+      if (bars === 0) {
+        return { status: 'pass', detail: `no unflagged ghost bars on ${row?.trade_date ?? 'the latest complete bhavcopy date'}` };
+      }
+      return {
+        status: 'fail',
+        detail: `${bars} bar(s) on ${row?.trade_date} have no official bhavcopy row and are not quarantined: ` +
+          `${String(row?.symbols ?? '').slice(0, 300)} -- run: python scripts/repair/flag_ghost_bars.py ` +
+          `(then --apply --dump-path <pg_dump of stock_ohlcv>)`,
+      };
+    },
+  },
 
   // ── Technical signals / ML ────────────────────────────────────────────
   {

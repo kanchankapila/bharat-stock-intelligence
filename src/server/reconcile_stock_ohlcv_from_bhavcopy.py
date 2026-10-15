@@ -17,11 +17,13 @@ what actually traded; this script reconciles stock_ohlcv against it every evenin
 anything Yahoo missed and correcting anything it got wrong (overwrite=True is the default,
 matching the same-day case where no split/dividend adjustment gap can yet exist between the
 two sources -- see mc_ohlcv_backfill.py's adjustment_basis discontinuity note for why that
-caveat does NOT apply here, only to older historical rows). An intrinsically malformed Yahoo
-row for a tracked symbol that is also absent from every series in the broad official file is
-retained for forensics but quarantined with is_suspect=1. Requiring both conditions avoids
-quarantining legitimate vendor/canonical aliases while catching suspended/corporate-action
-days where Yahoo stitches stale O/L/V fields to a new-scale close (CCAVENUE, 2026-10-13).
+caveat does NOT apply here, only to older historical rows). A tracked symbol's row that is
+absent from every series of the official file is retained for forensics but quarantined
+(is_suspect=1, suspect_reason=GHOST_REASON) when it is malformed (CCAVENUE 2026-10-13: stale
+O/L/V stitched to a new-scale close) OR, on a complete file, when the symbol is a real
+listing -- then it did not trade and the bar is a forward-filled ghost however normal it looks
+(CCAVENUE 2026-10-14). See ghost_bar_symbols(). ohlcv_quality.flag_bad_prints' reset preserves
+this reason; scripts/repair/flag_ghost_bars.py applies the same rule to history.
 
 Dual-write validation phase (2026-09-03): this runs ALONGSIDE the existing Yahoo write, not
 in place of it -- see AF-20260903-01. Once proven clean over several sessions, Yahoo's own
@@ -41,6 +43,60 @@ import argparse
 import sys
 
 from db_compat import connect, ConnWrapper
+
+GHOST_REASON = 'absent_from_official_bhavcopy'
+# A day's official file is complete when it lists at least this many distinct symbols (live:
+# ~3,400/day); a partial or staged file proves nothing about absence. Same floor as the
+# ohlcv-unflagged-ghost-bar data-quality check.
+COMPLETE_FILE_MIN_SYMBOLS = 1500
+
+
+def file_is_complete(conn: ConnWrapper, trade_date: str) -> bool:
+    row = conn.execute("SELECT count(DISTINCT symbol) FROM nse_universe_history WHERE date = ?",
+                       (trade_date,)).fetchone()
+    return bool(row) and (row[0] or 0) >= COMPLETE_FILE_MIN_SYMBOLS
+
+
+def ghost_bar_symbols(conn: ConnWrapper, trade_date: str) -> list[str]:
+    """nse_stocks symbols whose trade_date bar has no official row of ANY series and is not
+    already quarantined by this rule.
+
+    The bar must also look broken (shape rule) unless the day's official file is complete and
+    the symbol is a real listing (it has an official row on an earlier date). Then absence means
+    it did not trade (halt, suspension, record-date freeze), and the bar is a forward-filled
+    ghost however normal it looks (CCAVENUE 2026-10-14). The listing test keeps aliases that
+    never appear in any file (KOTAK, INDUSIND, JIOFINANCIAL: real prices, 0 bhavcopy rows ever)
+    out of the quarantine.
+    """
+    ghost = ("o.close <= 0 OR o.low <= 0 OR o.high < o.low OR o.high / NULLIF(o.low, 0) > 3")
+    params: list = [trade_date, trade_date]
+    if file_is_complete(conn, trade_date):
+        ghost += (" OR EXISTS (SELECT 1 FROM nse_universe_history h "
+                  "            WHERE h.symbol = o.symbol AND h.date < ?)")
+        params.append(trade_date)
+    params.append(GHOST_REASON)
+    rows = conn.execute(
+        "SELECT o.symbol FROM stock_ohlcv o JOIN nse_stocks m ON m.symbol = o.symbol "
+        "WHERE o.date = ? "
+        "AND NOT EXISTS (SELECT 1 FROM nse_universe_history n "
+        "                WHERE n.date = ? AND n.symbol = o.symbol AND n.close > 0) "
+        f"AND ({ghost}) "
+        "AND (COALESCE(o.is_suspect, 0) = 0 OR o.suspect_reason IS DISTINCT FROM ?) "
+        "ORDER BY o.symbol",
+        tuple(params)).fetchall()
+    return [r[0] for r in rows]
+
+
+def quarantine(conn: ConnWrapper, trade_date: str, symbols: list[str]) -> int:
+    """Flag (never rewrite) one date's bars; the predicate is that date plus the symbol list."""
+    if not symbols:
+        return 0
+    marks = ",".join("?" * len(symbols))
+    cur = conn.execute(
+        f"UPDATE stock_ohlcv SET is_suspect = 1, suspect_reason = ? "
+        f"WHERE date = ? AND symbol IN ({marks})",
+        (GHOST_REASON, trade_date, *symbols))
+    return max(cur.rowcount, 0)
 
 
 def reconcile(conn: ConnWrapper, trade_date: str | None = None, overwrite: bool = True) -> dict:
@@ -78,17 +134,7 @@ def reconcile(conn: ConnWrapper, trade_date: str | None = None, overwrite: bool 
 
     quarantined = 0
     if overwrite:
-        cur = conn.execute(
-            "UPDATE stock_ohlcv SET is_suspect = 1, "
-            "suspect_reason = 'absent_from_official_bhavcopy' "
-            "WHERE date = ? AND symbol IN (SELECT symbol FROM nse_stocks) "
-            "AND (close <= 0 OR low <= 0 OR high < low OR high / NULLIF(low, 0) > 3) "
-            "AND NOT EXISTS (SELECT 1 FROM nse_universe_history n "
-            "                WHERE n.date = ? AND n.symbol = stock_ohlcv.symbol "
-            "                  AND n.close IS NOT NULL AND n.close > 0)",
-            (trade_date, trade_date),
-        )
-        quarantined = max(cur.rowcount, 0)
+        quarantined = quarantine(conn, trade_date, ghost_bar_symbols(conn, trade_date))
 
     conflict = ("DO UPDATE SET open=excluded.open, high=excluded.high, low=excluded.low, "
                 "close=excluded.close, volume=excluded.volume, "
@@ -172,6 +218,7 @@ def reconcile(conn: ConnWrapper, trade_date: str | None = None, overwrite: bool 
         "read": len(src_full),
         "written": len(ohlcv_batch),
         "quarantined": quarantined,
+        "quality": {trade_date: quarantined},
         "deliv_written": len(deliv_batch),
         "tech_filled": max(tech_filled, 0),
     }
@@ -198,6 +245,9 @@ def main() -> int:
           f"stock_ohlcv rows and {result.get('deliv_written', 0)} delivery rows reconciled against nse_universe_history "
           f"({'overwrite' if overwrite else 'fill-only'}), quarantined {result.get('quarantined', 0)} "
           f"unverified rows, filled {result.get('tech_filled', 0)} technical_signals.delivery_pct")
+    for d, n in result.get("quality", {}).items():
+        print(f"[RECONCILE][quality] {d}: {n} bar(s) absent from the official bhavcopy quarantined "
+              f"({GHOST_REASON})")
     return 0
 
 
