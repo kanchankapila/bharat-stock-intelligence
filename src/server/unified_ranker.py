@@ -2196,6 +2196,14 @@ class UnifiedRanker:
             priced = {r[0] for r in self.conn.execute(
                 "SELECT DISTINCT symbol FROM stock_ohlcv "
                 "WHERE date >= CURRENT_DATE - 30").fetchall()}
+            # A symbol the exchange does not list has no bhavcopy row and is not a candidate,
+            # however good its Yahoo bars look: retired aliases (INDUSIND, LARSEN, MAHINDRA,
+            # KOTAK) and the phantom CHOLAFINSV (CHOLAFIN's bars under a second name) were
+            # ranked next to the real listing with a different verdict (AF-20261015-12).
+            # Anchored on the table's own latest file, not the calendar.
+            listed = {r[0] for r in self.conn.execute(
+                "SELECT DISTINCT symbol FROM nse_universe_history "
+                "WHERE date >= (SELECT MAX(date) FROM nse_universe_history) - 45").fetchall()}
         except Exception as e:
             # A failed statement poisons the whole transaction; without this rollback every
             # subsequent query in run() dies with InFailedSqlTransaction.
@@ -2210,7 +2218,8 @@ class UnifiedRanker:
             self._degraded("[UnifiedRanker] empty master/price universe; ranking unfiltered")
             return symbols
 
-        keep = {s for s in symbols if s in master and s in priced}
+        # an empty/unavailable bhavcopy table must never empty the universe: fail open
+        keep = {s for s in symbols if s in master and s in priced and (not listed or s in listed)}
         dropped = len(symbols) - len(keep)
         if dropped:
             sample = sorted(s for s in symbols if s not in keep)[:5]
