@@ -1808,22 +1808,35 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'unified_signals ACTIVE past their own validity window (the closer is running)',
     category: 'signals',
     critical: true,
-    sql: `WITH sess AS (
+    sql: `WITH all_sess AS (
+            SELECT DISTINCT date FROM stock_ohlcv
+            WHERE date >= (now() AT TIME ZONE 'Asia/Kolkata')::date - 200),
+          sess AS (SELECT date, row_number() OVER (ORDER BY date DESC) AS rn FROM all_sess),
+          -- the same sessions WITHOUT today's (IST): the day's bar is persisted ~16:00 IST, thirty
+          -- minutes before the closer's 16:30 slot, which advances the cutoff by one session and made
+          -- this check fail every weekday 16:04-16:28 (AF-20261008-46)
+          sess_pre AS (
             SELECT date, row_number() OVER (ORDER BY date DESC) AS rn
-            FROM (SELECT DISTINCT date FROM stock_ohlcv WHERE date >= CURRENT_DATE - 200) d),
+            FROM all_sess WHERE date < (now() AT TIME ZONE 'Asia/Kolkata')::date),
           cut AS (
-            SELECT 0 AS horizon, (SELECT max(date) FROM sess) AS cutoff
-            UNION ALL SELECT 5,  (SELECT date FROM sess WHERE rn = 5)
-            UNION ALL SELECT 15, (SELECT date FROM sess WHERE rn = 15))
-          SELECT COUNT(*) AS overdue
+            SELECT 0 AS horizon, (SELECT max(date) FROM sess) AS cutoff, (SELECT max(date) FROM sess_pre) AS cutoff_pre
+            UNION ALL SELECT 5,  (SELECT date FROM sess WHERE rn = 5),  (SELECT date FROM sess_pre WHERE rn = 5)
+            UNION ALL SELECT 15, (SELECT date FROM sess WHERE rn = 15), (SELECT date FROM sess_pre WHERE rn = 15))
+          SELECT
+            COUNT(*) FILTER (WHERE (u.signal_date AT TIME ZONE 'Asia/Kolkata')::date < c.cutoff)     AS overdue,
+            COUNT(*) FILTER (WHERE (u.signal_date AT TIME ZONE 'Asia/Kolkata')::date < c.cutoff_pre) AS overdue_pre_close
           FROM unified_signals u
           JOIN cut c ON c.horizon = CASE u.signal_source
                                       WHEN 'screener' THEN 0
                                       WHEN 'technical_scan' THEN 5 ELSE 15 END
-          WHERE u.status = 'ACTIVE'
-            AND (u.signal_date AT TIME ZONE 'Asia/Kolkata')::date < c.cutoff`,
-    evaluate: (row) => {
-      const n = Number(row?.overdue) || 0;
+          WHERE u.status = 'ACTIVE'`,
+    evaluate: (row, now) => {
+      // Until 17:00 IST (the closer's 16:30 slot + 30 minutes) today's session is not counted: the
+      // closer has not yet had its slot for it. After that the full count applies, so a closer that
+      // never ran is still caught. A row already overdue against yesterday's cutoff fails at any hour.
+      const at = now instanceof Date ? now : new Date();
+      const istMinutes = (at.getUTCHours() * 60 + at.getUTCMinutes() + 330) % 1440;
+      const n = Number(istMinutes < 17 * 60 ? row?.overdue_pre_close : row?.overdue) || 0;
       // A floor, not any-row: a handful can legitimately sit between the window closing and the
       // next signal-lifecycle run. Sized well under the 12,129 the negative control produced.
       if (n > 500) return {
