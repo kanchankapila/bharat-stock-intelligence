@@ -17,13 +17,11 @@ const SOURCE = readFileSync(join(__dirname, '..', 'queues.ts'), 'utf8');
 
 const BASE_JOBS = [
   { jobName: 'nse-announcements-refresh', handler: 'runNseAnnouncementsCycle', everyMs: 15 * 60 * 1000 },
-  { jobName: 'nse-financial-results-refresh', handler: 'runNseFinancialResultsCycle', everyMs: 60 * 60 * 1000 },
   { jobName: 'mc-earnings-news-refresh', handler: 'runMcEarningsNewsCycle', everyMs: 60 * 60 * 1000 },
   { jobName: 'mc-deals-news-refresh', handler: 'runMcDealsNewsCycle', everyMs: 15 * 60 * 1000 },
 ];
 
 const HOT_JOBS = [
-  { jobName: 'nse-financial-results-refresh-hot', handler: 'runNseFinancialResultsCycle' },
   { jobName: 'mc-earnings-news-refresh-hot', handler: 'runMcEarningsNewsCycle' },
 ];
 
@@ -66,12 +64,23 @@ describe('news-sentiment extras (NSE RSS + MC earnings/deals) queue wiring', () 
     });
   }
 
-  it('no two of the 6 new repeatable jobIds collide with each other or with bse-announcements-hot', () => {
+  // Retired 2026-10-15: NSE's Financial_Results.xml RSS is a ~2.5 KB near-empty file (3 rows
+  // ever in news_sentiment_items, newest published 2026-08-24); the live replacement is
+  // /api/integrated-filing-results -> nse_results_filings. Its freshness check read a re-stamped
+  // fetched_at, so it was green over a dead feed.
+  it('the retired NSE Financial Results RSS is neither scheduled, dispatched nor monitored', () => {
+    expect(SOURCE).not.toContain("'nse-financial-results-refresh");
+    expect(SOURCE).not.toContain('runNseFinancialResultsCycle');
+    const dq = readFileSync(join(__dirname, '..', 'dataQualityChecks.ts'), 'utf8');
+    expect(dq).not.toContain("id: 'nse-financial-results-freshness'");
+  });
+
+  it('no two of the 4 repeatable jobIds collide with each other or with bse-announcements-hot', () => {
     const ids = [...SOURCE.matchAll(/jobId: '([a-z0-9-]+)'/g)].map(m => m[1]);
     const newIds = ids.filter(id =>
       id.startsWith('nse-announcements') || id.startsWith('nse-financial-results')
       || id.startsWith('mc-earnings-news') || id.startsWith('mc-deals-news'));
-    expect(newIds.length).toBe(6); // 4 base + 2 hot
+    expect(newIds.length).toBe(4); // 3 base + 1 hot
     expect(new Set(newIds).size).toBe(newIds.length); // all unique
   });
 });

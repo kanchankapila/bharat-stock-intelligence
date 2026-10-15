@@ -1007,19 +1007,26 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // stock_ohlcv's daily writers append raw prices. That left 76 split/bonus-shaped gaps for
     // technicals, ATR geometry and outcome graders to read as real moves. The repair is an
     // explicit, backup-gated production rewrite; this monitor deliberately does not automate
-    // it. It detects a recurrence early and names the dry-run-first repair. A 45-day verdict
-    // window prevents already-triaged historical ratio mismatches from warning forever; 70
-    // days of bars gives LAG() enough prior history at the left edge.
-    sql: `WITH recent_bars AS (
+    // it. It detects a recurrence early and names the dry-run-first repair. The verdict window
+    // is the last 10 sessions so already-triaged historical ratio mismatches do not warn
+    // forever; 45 days of bars gives LAG() prior history at the left edge. Seam definition is
+    // repair_unadjusted_splits.py's: zero-volume bars are synthetic and dropped before LAG, and
+    // a factor ex_date within +-5 days. An already-adjusted history has no seam, so no gap.
+    sql: `WITH sessions AS (
+            SELECT DISTINCT date FROM stock_ohlcv
+            WHERE date >= current_date - 30
+            ORDER BY date DESC LIMIT 10
+          ), recent_bars AS (
             SELECT symbol, date, close,
                    LAG(close) OVER (PARTITION BY symbol ORDER BY date) AS prior_close
             FROM stock_ohlcv
-            WHERE date >= current_date - 70
+            WHERE date >= current_date - 45
               AND COALESCE(is_suspect, 0) = 0
+              AND volume IS DISTINCT FROM 0
           ), candidate_gaps AS (
             SELECT symbol, date
             FROM recent_bars
-            WHERE date >= current_date - 45
+            WHERE date >= (SELECT MIN(date) FROM sessions)
               AND prior_close > 0
               AND ABS(close / prior_close - 1.0) > 0.35
           ), matched AS (
@@ -1030,18 +1037,21 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
           )
           SELECT COUNT(*) AS gap_count,
                  COUNT(DISTINCT symbol) AS symbol_count,
-                 MAX(date) AS latest_gap_date
+                 MAX(date) AS latest_gap_date,
+                 (SELECT string_agg(symbol, ', ' ORDER BY symbol)
+                    FROM (SELECT DISTINCT symbol FROM matched ORDER BY symbol LIMIT 5) s) AS symbols
           FROM matched`,
     evaluate: (row) => {
       const gaps = Number(row?.gap_count) || 0;
       const symbols = Number(row?.symbol_count) || 0;
       if (gaps === 0) {
-        return { status: 'pass', detail: 'no >35% OHLCV gaps near a split/bonus factor in the last 45d' };
+        return { status: 'pass', detail: 'no >35% OHLCV gaps near a split/bonus factor in the last 10 sessions' };
       }
       return {
-        status: 'warn',
-        detail: `${gaps} split/bonus-shaped gap(s) across ${symbols} symbol(s), latest ${row?.latest_gap_date ?? 'unknown'}; ` +
-          `dry-run scripts/repair/repair_unadjusted_splits.py, review every ratio, then apply only behind a fresh backup`,
+        status: gaps >= 5 ? 'fail' : 'warn',
+        detail: `${gaps} split/bonus-shaped gap(s) across ${symbols} symbol(s) (${row?.symbols ?? '?'}), latest ${row?.latest_gap_date ?? 'unknown'}; ` +
+          `dry-run \`python scripts/repair/repair_unadjusted_splits.py\`, review every ratio, then ` +
+          `\`python scripts/repair/repair_unadjusted_splits.py --apply --dump-path <fresh pg_dump>\``,
       };
     },
   },
@@ -3505,19 +3515,6 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (stale > 3) return { status: 'fail', detail: `Latest NSE Announcements row is ${fmtDays(stale)} old` };
       if (stale > 1) return { status: 'warn', detail: `Latest NSE Announcements row is ${fmtDays(stale)} old` };
       return { status: 'pass', detail: `Latest NSE Announcements row ${fmtDays(stale)} old` };
-    },
-  },
-  {
-    id: 'nse-financial-results-freshness', label: 'news_sentiment_items — NSE Financial Results source',
-    category: 'reference', critical: false,
-    sql: `SELECT MAX(fetched_at) AS last_date FROM news_sentiment_items WHERE source = 'NSE Financial Results'`,
-    evaluate: (row, now) => {
-      // Sparse by nature (few filings/day outside results season) -- warn-only, matching
-      // insider-trades-recency's existing style for episodic datasources.
-      const stale = daysStale(row?.last_date, now);
-      if (stale == null) return { status: 'warn', detail: 'No NSE Financial Results rows yet' };
-      if (stale > 7) return { status: 'warn', detail: `Latest NSE Financial Results row is ${fmtDays(stale)} old (sparse by nature, so a soft warn)` };
-      return { status: 'pass', detail: `Latest NSE Financial Results row ${fmtDays(stale)} old` };
     },
   },
   {

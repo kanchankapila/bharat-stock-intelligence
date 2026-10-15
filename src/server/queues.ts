@@ -2245,31 +2245,8 @@ export async function initQueues(): Promise<boolean> {
           removeOnFail: 3,
         },
       ),
-      // Financial_Results is low-volume (few items/day outside results season) but the highest-
-      // signal single feed here -- an hourly poll matches BSE announcements' own cadence below.
-      addJobWithCatchup(newsSentimentQueue,
-        'nse-financial-results-refresh',
-        {},
-        {
-          repeat: { every: 60 * 60 * 1000 }, // hourly
-          jobId: 'nse-financial-results-repeatable',
-          removeOnComplete: 3,
-          removeOnFail: 3,
-        },
-      ),
-      // Results-season 2nd pass -- identical reasoning to bse-announcements-refresh-hot below:
-      // a results filing is the most price-sensitive kind of announcement this feed carries,
-      // and an hourly-only poll can sit on one for up to 59 min. No-op outside results season.
-      addJobWithCatchup(newsSentimentQueue,
-        'nse-financial-results-refresh-hot',
-        {},
-        {
-          repeat: { every: 60 * 60 * 1000, offset: 30 * 60 * 1000 },
-          jobId: 'nse-financial-results-hot-repeatable',
-          removeOnComplete: 3,
-          removeOnFail: 3,
-        },
-      ),
+      // NSE Financial_Results.xml RSS retired 2026-10-15: ~2.5 KB near-empty file, 3 rows ever;
+      // results arrive via /api/integrated-filing-results -> nse_results_filings instead.
       // MC per-stock earnings news, targeted at technical_signals.days_to_next_results (2026-08-13)
       // -- hourly matches BSE announcements' cadence for the same "results are price-sensitive"
       // reasoning; the days_to_next_results window itself (not this cadence) is what keeps the
@@ -2335,14 +2312,6 @@ export async function initQueues(): Promise<boolean> {
           await svc.runInvestingIdeasCycle();
         } else if (job.name === 'nse-announcements-refresh') {
           await svc.runNseAnnouncementsCycle();
-        } else if (job.name === 'nse-financial-results-refresh') {
-          await svc.runNseFinancialResultsCycle();
-        } else if (job.name === 'nse-financial-results-refresh-hot') {
-          if (!(await svc.isResultsSeasonActive())) {
-            console.log('[QUEUE] nse-financial-results-refresh-hot skipped — not results season');
-            return { skipped: true };
-          }
-          await svc.runNseFinancialResultsCycle();
         } else if (job.name === 'mc-earnings-news-refresh') {
           await svc.runMcEarningsNewsCycle();
         } else if (job.name === 'mc-earnings-news-refresh-hot') {
