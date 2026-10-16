@@ -128,7 +128,7 @@ Open items are filed in `docs/audit-findings.md` (AF-20261015-07..13); nothing h
 1. Approve the production writes for AF-20261015-07 and -09 (dump is verified and valid until 2026-10-16 18:53 IST).
 2. Measure the Rs 10 cr tradability floor on the frozen forward-test cohort (AF-20261015-10) before any change.
 3. Re-probe 5% of the endpoint registry weekly and store negative results.
-4. Derive the universe from the latest complete bhavcopy; decide on ETFs (AF-20261015-11).
+4. ~~Derive the universe from the exchange master; decide on ETFs (AF-20261015-11).~~ Closed 2026-10-16: official NSE equity + ETF catalogues, ETFs excluded, 60-session admission.
 5. Store the corporate-action `subject` text and classify demerger / consolidation / capital reduction explicitly.
 6. Add a per-feature point-in-time table (as-of date, filing date) so fundamentals can never be joined on period end.
 

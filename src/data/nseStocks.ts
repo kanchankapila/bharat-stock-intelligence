@@ -10,7 +10,7 @@ export interface NSEStock {
   listing_date?: string;
 }
 
-export const nseStocksData: NSEStock[] = [
+const nseStocksSeedData: NSEStock[] = [
   {
     "symbol": "20MICRONS",
     "name": "20 Microns Limited",
@@ -18940,6 +18940,21 @@ export const nseStocksData: NSEStock[] = [
     "listing_date": "2009-11-13"
   }
 ];
+
+// Static metadata is a bootstrap cache, not a listing authority. These symbols are absent
+// from the official NSE equity master as of 2026-10-16 (aliases, renamed/delisted listings,
+// and one ETF). Keep their historical DB rows, but never seed them as active instruments.
+const INACTIVE_OR_NON_EQUITY = new Set([
+  'AURIGROW', 'BAJAJINSUR', 'CCAVENUE', 'CENTRALBANK', 'CHOLAFINSV', 'CLCIND',
+  'GFSTEELS', 'HEG', 'INDUSIND', 'JIOFINANCIAL', 'KOTAK', 'LARSEN', 'LASA', 'LTFH',
+  'LTIM', 'LYPSAGEMS', 'MAHINDRA', 'MCDOWELL', 'NESTLE', 'NIFTYBEES', 'OBEROI',
+  'POLICYBAZAAR', 'SANGINITA', 'SELMC', 'SILLYMONKS', 'SRTRANSFIN', 'TATAMOTORS',
+  'UNIVAFOODS', 'VODAFONE',
+]);
+
+export const nseStocksData: NSEStock[] = nseStocksSeedData.filter(
+  stock => !INACTIVE_OR_NON_EQUITY.has(stock.symbol),
+);
 
 export function getNSEStockBySymbol(symbol: string): NSEStock | undefined {
   return nseStocksData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());

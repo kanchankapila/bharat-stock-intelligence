@@ -88,6 +88,12 @@ def parse_bhavcopy(text: str, equity_only: bool = True) -> list:
             except ValueError:
                 return None
 
+        def integer(key):
+            value = num(key)
+            if value is None or not value.is_integer():
+                return None
+            return int(value)
+
         close = num('CLOSE_PRICE')
         if close is None or close <= 0:
             continue
@@ -101,10 +107,10 @@ def parse_bhavcopy(text: str, equity_only: bool = True) -> list:
             'low': num('LOW_PRICE'),
             'close': close,
             'avg_price': num('AVG_PRICE'),
-            'volume': num('TTL_TRD_QNTY'),
+            'volume': integer('TTL_TRD_QNTY'),
             'turnover_lacs': num('TURNOVER_LACS'),
-            'num_trades': num('NO_OF_TRADES'),
-            'deliv_qty': num('DELIV_QTY'),
+            'num_trades': integer('NO_OF_TRADES'),
+            'deliv_qty': integer('DELIV_QTY'),
             'deliv_pct': num('DELIV_PER'),
         })
     return rows
@@ -166,17 +172,17 @@ def ensure_schema(conn: ConnWrapper) -> None:
             date          TEXT NOT NULL,
             symbol        TEXT NOT NULL,
             series        TEXT,
-            prev_close    REAL,
-            open          REAL,
-            high          REAL,
-            low           REAL,
-            close         REAL,
-            avg_price     REAL,
-            volume        REAL,
-            turnover_lacs REAL,
-            num_trades    REAL,
-            deliv_qty     REAL,
-            deliv_pct     REAL,
+            prev_close    DOUBLE PRECISION,
+            open          DOUBLE PRECISION,
+            high          DOUBLE PRECISION,
+            low           DOUBLE PRECISION,
+            close         DOUBLE PRECISION,
+            avg_price     DOUBLE PRECISION,
+            volume        BIGINT,
+            turnover_lacs DOUBLE PRECISION,
+            num_trades    BIGINT,
+            deliv_qty     BIGINT,
+            deliv_pct     DOUBLE PRECISION,
             PRIMARY KEY (date, symbol, series)
         )
     """)

@@ -15,11 +15,11 @@ TODAY = date(2026, 10, 14)
 
 
 def _seed(conn, bhavcopy_symbols, last_bhav=TODAY):
-    conn.execute("CREATE TABLE nse_stocks (symbol TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE nse_stocks (symbol TEXT PRIMARY KEY, status TEXT, instrument_type TEXT)")
     conn.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date DATE)")
     conn.execute("CREATE TABLE nse_universe_history (symbol TEXT, date DATE)")
     for s in ("INDUSINDBK", "INDUSIND", "RELIANCE"):
-        conn.execute("INSERT INTO nse_stocks VALUES (?)", (s,))
+        conn.execute("INSERT INTO nse_stocks VALUES (?, 'ACTIVE', 'equity')", (s,))
         conn.execute("INSERT INTO stock_ohlcv VALUES (?, CURRENT_DATE)", (s,))
     for s in bhavcopy_symbols:
         conn.execute("INSERT INTO nse_universe_history VALUES (?, ?)", (s, last_bhav))
@@ -45,3 +45,13 @@ def test_empty_bhavcopy_table_never_empties_the_universe(pg_conn):
     kept = ur.UnifiedRanker(conn=pg_conn)._restrict_to_tradeable_universe(
         {"INDUSINDBK", "INDUSIND", "RELIANCE"})
     assert kept == {"INDUSINDBK", "INDUSIND", "RELIANCE"}
+
+
+def test_inactive_alias_and_etf_are_excluded_even_with_recent_prices(pg_conn):
+    _seed(pg_conn, ["INDUSINDBK", "INDUSIND", "RELIANCE"])
+    pg_conn.execute("UPDATE nse_stocks SET status='INACTIVE' WHERE symbol='INDUSIND'")
+    pg_conn.execute("UPDATE nse_stocks SET instrument_type='etf' WHERE symbol='RELIANCE'")
+    pg_conn.commit()
+    kept = ur.UnifiedRanker(conn=pg_conn)._restrict_to_tradeable_universe(
+        {"INDUSINDBK", "INDUSIND", "RELIANCE"})
+    assert kept == {"INDUSINDBK"}

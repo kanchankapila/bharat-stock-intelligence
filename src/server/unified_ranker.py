@@ -2189,7 +2189,8 @@ class UnifiedRanker:
         """
         try:
             master = {r[0] for r in self.conn.execute(
-                "SELECT symbol FROM nse_stocks").fetchall()}
+                "SELECT symbol FROM nse_stocks "
+                "WHERE status='ACTIVE' AND COALESCE(instrument_type,'equity')='equity'").fetchall()}
             # stock_ohlcv.date is a native DATE column (unlike most date columns here, which
             # are TEXT carried over from SQLite) — compare it against a DATE, not ::text, or
             # Postgres throws "operator does not exist: date >= text".

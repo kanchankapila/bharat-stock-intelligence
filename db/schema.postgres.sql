@@ -2649,8 +2649,13 @@ CREATE TABLE IF NOT EXISTS "nse_stocks" (
   "tickertape_sid" TEXT,
   "fincode" TEXT,
   "scripcode" TEXT,
+  "instrument_type" TEXT NOT NULL DEFAULT 'equity'::text,
+  "exchange_master_updated_at" TIMESTAMPTZ,
+  "admission_sessions" BIGINT,
+  "admission_reason" TEXT,
   UNIQUE ("symbol")
 );
+CREATE INDEX idx_nse_stocks_active_instrument ON public.nse_stocks USING btree (status, instrument_type);
 CREATE INDEX idx_nse_industry ON public.nse_stocks USING btree (industry);
 CREATE INDEX idx_nse_sector ON public.nse_stocks USING btree (sector);
 CREATE INDEX idx_nse_status ON public.nse_stocks USING btree (status);
@@ -2666,17 +2671,17 @@ CREATE TABLE IF NOT EXISTS "nse_universe_history" (
   "date" DATE NOT NULL,
   "symbol" TEXT NOT NULL,
   "series" TEXT NOT NULL,
-  "prev_close" REAL,
-  "open" REAL,
-  "high" REAL,
-  "low" REAL,
-  "close" REAL,
-  "avg_price" REAL,
-  "volume" REAL,
-  "turnover_lacs" REAL,
-  "num_trades" REAL,
-  "deliv_qty" REAL,
-  "deliv_pct" REAL,
+  "prev_close" DOUBLE PRECISION,
+  "open" DOUBLE PRECISION,
+  "high" DOUBLE PRECISION,
+  "low" DOUBLE PRECISION,
+  "close" DOUBLE PRECISION,
+  "avg_price" DOUBLE PRECISION,
+  "volume" BIGINT,
+  "turnover_lacs" DOUBLE PRECISION,
+  "num_trades" BIGINT,
+  "deliv_qty" BIGINT,
+  "deliv_pct" DOUBLE PRECISION,
   PRIMARY KEY ("date", "symbol", "series")
 );
 CREATE INDEX idx_nuh_date ON public.nse_universe_history USING btree (date);

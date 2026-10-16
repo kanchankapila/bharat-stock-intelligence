@@ -1155,7 +1155,10 @@ class AlphaQuantScoringEngine:
             return candidates
         try:
             with self.engine.connect() as conn:
-                master = {r[0] for r in conn.execute(text("SELECT symbol FROM nse_stocks")).fetchall()}
+                master = {r[0] for r in conn.execute(text(
+                    "SELECT symbol FROM nse_stocks "
+                    "WHERE status='ACTIVE' AND COALESCE(instrument_type,'equity')='equity'"
+                )).fetchall()}
                 # stock_ohlcv.date is a native DATE column (most date columns here are TEXT
                 # from the SQLite heritage) -- compare against a DATE, not ::text, or Postgres
                 # throws "operator does not exist: date >= text".

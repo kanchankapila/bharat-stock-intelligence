@@ -246,6 +246,9 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
     const result = await syncNSEStocksToDatabase();
     const stockCount = (result?.inserted || 0) + (result?.updated || 0);
     console.log(`[QUEUE] NSE sync completed, ${stockCount} stocks updated`);
+    // The static seed supplies mappings/classifications; the exchange masters decide which
+    // instruments are active equities. Run this before downstream universe consumers.
+    await T.run('nse-equity-master', () => runPython('nse_equity_master_fetcher.py', [], 120_000));
     // Real sector/industry source (2026-08-05): backfill_sectors.py alone was a structural
     // no-op for ~95% of the universe -- its only source, confluence_signals.sector, is itself
     // populated from nse_stocks.sector (see confluenceEngine.ts's nseMap), so it can never

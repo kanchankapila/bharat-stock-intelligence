@@ -54,11 +54,14 @@ class TestParse:
         rows = bhav.parse_bhavcopy(SAMPLE)
         assert all(r['date'] == '2026-07-29' for r in rows)
 
-    def test_numeric_fields_are_floats_not_strings(self):
+    def test_numeric_fields_use_lossless_count_types(self):
         r = next(x for x in bhav.parse_bhavcopy(SAMPLE) if x['symbol'] == 'RELIANCE')
-        for k in ('open', 'high', 'low', 'close', 'volume', 'deliv_pct'):
+        for k in ('open', 'high', 'low', 'close', 'deliv_pct'):
             assert isinstance(r[k], float), f"{k} came back as {type(r[k])}"
+        for k in ('volume', 'num_trades', 'deliv_qty'):
+            assert isinstance(r[k], int), f"{k} came back as {type(r[k])}"
         assert r['close'] == 1416.50
+        assert r['volume'] == 5_000_000
         assert r['deliv_pct'] == 50.00
 
     def test_drops_rows_with_unusable_close(self):

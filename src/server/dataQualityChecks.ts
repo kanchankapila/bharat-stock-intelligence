@@ -208,6 +208,9 @@ function makeFreshnessCheck(cfg: TableFreshnessConfig): DataQualityCheck {
 // for. One check per logically-distinct table; where several sibling fetchers share one table
 // (e.g. macro_asset_prices, fed by ~8 different scripts) there is one check, not one per script.
 const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
+  { id: 'nse-equity-master-freshness', label: 'nse_stocks official NSE equity/ETF master reconciliation',
+    category: 'reference', critical: true, table: 'nse_stocks', dateColumn: 'exchange_master_updated_at',
+    tradingDayAware: false, warnDays: 10, failDays: 16 },
   // ohlcv
   { id: 'nse-universe-history-freshness', label: 'nse_universe_history (survivorship-free PIT universe)',
     category: 'ohlcv', critical: true, table: 'nse_universe_history', dateColumn: 'date', warnDays: 3, failDays: 5 },

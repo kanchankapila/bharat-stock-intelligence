@@ -11344,3 +11344,23 @@ Audit document: `docs/expert-review-2026-10-15-systems-audit.md`. Ledger: AF-202
   before a harmless verification update was attributed to `bsi:live-ledger-verify`. The known chatbot
   503 remains AF-20260828-24/AF-20260905-26: graph is ready but no `GEMINI_API_KEY` is configured, so it
   cannot be repaired in code or by fabricating a credential.
+
+## 2026-10-16 — official universe policy, alias cleanup, and lossless bhavcopy storage
+
+- Closed AF-20261015-11/-12 with an explicit product contract: the official NSE equity master is the
+  admission authority, NSE's separate ETF catalogue is excluded by exact symbol, and a listing needs 60
+  observed bhavcopy sessions. No size or turnover admission floor is applied, avoiding a hidden large-cap
+  bias; liquidity remains a downstream execution/risk concern. The weekly NSE sync now runs the validated,
+  fail-closed reconciliation and a dedicated 10/16-day freshness check monitors it.
+- Live reconciliation validated 2,603 equity-master rows and 355 ETFs, producing 2,379 ACTIVE equities and
+  30 INACTIVE rows. All 13 named phantom/legacy aliases plus renamed LTIM/TATAMOTORS are inactive, current
+  replacements remain active, NIFTYBEES is classified ETF/inactive, and active ISIN duplicates are zero.
+  Static bootstrap data cannot reseed the retired set, and both rankers require ACTIVE equity status.
+- Closed AF-20261015-13 after disproving its maintenance premise. `nse_universe_history` was 3,417,167 rows /
+  464 MB and not a Timescale hypertable, versus the stale 19M/compressed estimate. Preflight showed a readable
+  0.3-day-old backup, no writer, zero fractional count values, and 39.83 GB free. The one-rewrite migration
+  completed in 25.7 seconds: prices/ratios are DOUBLE PRECISION and quantities are BIGINT. Existing float32
+  rounding is irreversible; future parser writes are lossless.
+- Verification: live-source contracts 13/13; TypeScript clean; Vitest 1,973 passed / 45 skipped; Python 3,728
+  passed / 267 skipped; chatbot 52/52; schema drift clean (262/262); findings check clean. The migrations and
+  reconciliation were applied and queried back in production before this entry was written.
