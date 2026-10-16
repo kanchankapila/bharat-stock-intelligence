@@ -20,7 +20,10 @@ from high_flyer_retrospective import (
     ts_precursor_flags,
     compute_lifts,
     score_candidates,
+    eligible_candidate_flags,
+    summarize_candidate_edge,
     MIN_SUPPORT,
+    MIN_DIRECTION_T,
     _SELL_CLASSES,
     _BUY_CLASSES,
 )
@@ -162,16 +165,26 @@ class TestTsPrecursorFlags:
 class TestComputeLifts:
     def test_lift_math(self):
         # 100 flyers of 1000 universe; precursor present in 50% of flyers, 10% of universe → lift 5
-        rows = [{"flyer_n": 100, "universe_n": 1000,
-                 "precursor_counts": {"p": {"universe": 100, "flyers": 50}}}]
+        rows = [{"flyer_n": 100, "diver_n": 100, "universe_n": 1000,
+                 "precursor_counts": {"p": {"universe": 100, "flyers": 50, "divers": 10}}}]
         lifts = compute_lifts(rows)
-        assert lifts["p"]["lift"] == 5.0
-        assert lifts["p"]["support"] == 50
+        assert lifts["p"]["lift"] > 4.0
+        assert lifts["p"]["support"] == 60
+        assert lifts["p"]["direction_t"] == 0.0  # one date cannot establish repeatability
+        assert lifts["p"]["flyer_lift"] == 5.0
 
     def test_aggregates_across_days(self):
-        rows = [{"flyer_n": 10, "universe_n": 100,
-                 "precursor_counts": {"p": {"universe": 10, "flyers": 5}}}] * 4
-        assert compute_lifts(rows)["p"]["support"] == 20
+        rows = [{"flyer_n": 10, "diver_n": 10, "universe_n": 100,
+                 "precursor_counts": {"p": {"universe": 10, "flyers": 5, "divers": 1}}}] * 4
+        assert compute_lifts(rows)["p"]["support"] == 24
+
+    def test_movement_only_feature_is_not_directional(self):
+        rows = [{"flyer_n": 100, "diver_n": 100, "universe_n": 1000,
+                 "precursor_counts": {"p": {"universe": 100, "flyers": 40, "divers": 40}}}]
+        lift = compute_lifts(rows)["p"]
+        assert lift["movement_lift"] == 4.0
+        assert lift["lift"] == 1.0
+        assert lift["direction_t"] == 0.0
 
     def test_empty_or_zero(self):
         assert compute_lifts([]) == {}
@@ -180,8 +193,8 @@ class TestComputeLifts:
 
 class TestScoreCandidates:
     def _lifts(self, lift=2.0, support=MIN_SUPPORT):
-        return {"a": {"lift": lift, "support": support},
-                "b": {"lift": 3.0, "support": support}}
+        return {"a": {"lift": lift, "support": support, "direction_t": MIN_DIRECTION_T},
+                "b": {"lift": 3.0, "support": support, "direction_t": MIN_DIRECTION_T}}
 
     def test_scores_sum_of_log_lifts(self):
         flags = pd.DataFrame({"a": [True, False], "b": [True, True]}, index=["X", "Y"])
@@ -198,7 +211,15 @@ class TestScoreCandidates:
 
     def test_low_lift_precursor_ignored(self):
         flags = pd.DataFrame({"a": [True]}, index=["X"])
-        out = score_candidates(flags, {"a": {"lift": 1.05, "support": 100}})
+        out = score_candidates(flags, {"a": {"lift": 1.05, "support": 100,
+                                               "direction_t": MIN_DIRECTION_T}})
+        assert out.empty
+
+    def test_movement_only_lift_cannot_make_a_bullish_candidate(self):
+        flags = pd.DataFrame({"a": [True]}, index=["X"])
+        out = score_candidates(flags, {"a": {"lift": 2.0, "support": 100,
+                                               "direction_t": 0.0,
+                                               "movement_lift": 3.0}})
         assert out.empty
 
     def test_no_flags_no_candidates(self):
@@ -221,6 +242,58 @@ class TestScoreCandidates:
     def test_no_prev_flags_keeps_old_behaviour(self):
         flags = pd.DataFrame({"a": [True]}, index=["X"])
         assert not score_candidates(flags, self._lifts()).empty
+
+
+class TestEligibleCandidateFlags:
+    def test_requires_active_equity_and_tradeable_adt(self):
+        dates = pd.date_range("2026-01-01", periods=21, freq="B").strftime("%Y-%m-%d")
+        close = pd.DataFrame({"LIQ": [100.0] * 21, "ILLIQ": [100.0] * 21,
+                              "ETF": [100.0] * 21}, index=dates)
+        volume = pd.DataFrame({"LIQ": [2_000_000] * 21, "ILLIQ": [10_000] * 21,
+                               "ETF": [2_000_000] * 21}, index=dates)
+        flags = pd.DataFrame({"p": [True, True, True]}, index=["LIQ", "ILLIQ", "ETF"])
+        out = eligible_candidate_flags(flags, close, volume, dates[-1], {"LIQ", "ILLIQ"})
+        assert list(out.index) == ["LIQ"]
+
+    def test_requires_full_twenty_observation_window(self):
+        dates = pd.date_range("2026-01-01", periods=21, freq="B").strftime("%Y-%m-%d")
+        close = pd.DataFrame({"PATCHY": [None] + [100.0] * 20}, index=dates)
+        volume = pd.DataFrame({"PATCHY": [None] + [2_000_000] * 20}, index=dates)
+        flags = pd.DataFrame({"p": [True]}, index=["PATCHY"])
+        assert eligible_candidate_flags(flags, close, volume, dates[-1], {"PATCHY"}).empty
+
+    def test_signal_day_volume_spike_cannot_manufacture_liquidity(self):
+        dates = pd.date_range("2026-01-01", periods=21, freq="B").strftime("%Y-%m-%d")
+        close = pd.DataFrame({"SPIKE": [100.0] * 21}, index=dates)
+        volume = pd.DataFrame({"SPIKE": [10_000] * 20 + [20_000_000]}, index=dates)
+        flags = pd.DataFrame({"p": [True]}, index=["SPIKE"])
+        assert eligible_candidate_flags(flags, close, volume, dates[-1], {"SPIKE"}).empty
+
+
+class TestCandidateEdgeSummary:
+    def test_daily_clusters_and_costs_block_an_uncapturable_list(self):
+        rows = pd.DataFrame([
+            {"signal_date": f"2026-01-{d:02d}", "symbol": s,
+             "return_pct": 0.2, "excess_pct": 0.1}
+            for d in range(1, 21) for s in ("A", "B")
+        ])
+        result = summarize_candidate_edge(rows)
+        assert result["n_dates"] == 20
+        assert result["n_candidates"] == 40
+        assert result["net_excess_pct"] == pytest.approx(-0.2)
+        assert result["is_edge"] is False
+
+    def test_requires_minimum_dates_and_positive_cost_aware_t_stat(self):
+        rows = pd.DataFrame([
+            {"signal_date": f"2026-{1 + d // 28:02d}-{1 + d % 28:02d}", "symbol": "A",
+             "return_pct": 1.0 + (d % 2) * 0.1, "excess_pct": 0.8 + (d % 2) * 0.1}
+            for d in range(40)
+        ])
+        result = summarize_candidate_edge(rows)
+        assert result["n_dates"] == 40
+        assert result["net_excess_pct"] > 0
+        assert result["net_excess_t"] >= 2.0
+        assert result["is_edge"] is True
 
 
 # ─────────────────────────────────────────────────────────────────────────────

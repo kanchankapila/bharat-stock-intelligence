@@ -299,6 +299,10 @@ export const marketRouter = router({
       const lifts = await dbGet<{ value: string }>(
         "SELECT value FROM app_settings WHERE key = 'high_flyer_precursor_lift'"
       );
+      const edgeRow = await dbGet<{ value: string }>(
+        "SELECT value FROM app_settings WHERE key = 'high_flyer_candidate_edge'"
+      );
+      const candidateEdge = edgeRow ? JSON.parse(edgeRow.value || '{}') : { is_edge: false };
       const candidates = await dbAll<any>(
         `SELECT date, symbol, score, precursors FROM high_flyer_candidates
          WHERE date = (SELECT MAX(date) FROM high_flyer_candidates) ORDER BY score DESC`
@@ -314,7 +318,11 @@ export const marketRouter = router({
         flyerN: stats?.flyer_n ?? 0,
         recall: stats ? JSON.parse(stats.recall_json || '{}') : {},
         lifts: lifts ? JSON.parse(lifts.value || '{}') : {},
-        candidates,
+        // Keep measuring the shadow list in Postgres, but never publish names as a
+        // bullish watchlist until next-open, cost-aware forward evidence passes.
+        candidates: candidateEdge.is_edge === true ? candidates : [],
+        shadowCandidateCount: candidates.length,
+        candidateEdge,
         flyers,
       };
     }),

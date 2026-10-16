@@ -18,13 +18,14 @@ never asks:
    flag this"; it never catches the opposite-signed call. See the 2026-08-06
    CELLO incident (Sell called, then +15.69%) for why this matters.
 
-The learned lifts then score TODAY's universe to produce tomorrow's
-high_flyer_candidates watchlist — which tomorrow's run grades, closing the loop.
+Only two-tail directional lifts score TODAY's liquid active-equity universe. The
+result stays a shadow research list until its next-open, cost-aware promotion gate
+proves edge; tomorrow's run grades it and closes the loop.
 
 Tables (self-created, like early_hours_predictions):
   high_flyer_retrospective  one row per (flyer, day): return, how it was missed/caught
   high_flyer_daily_stats    one row per day: recall by source + precursor counts
-  high_flyer_candidates     one row per (as-of day, symbol): tomorrow's watchlist
+  high_flyer_candidates     one row per (as-of day, symbol): shadow research list
 
 Run:  python high_flyer_retrospective.py            # latest completed session
       python high_flyer_retrospective.py --date 2026-07-08
@@ -46,8 +47,13 @@ MIN_BARS = 60               # need history for vol avg / 52w high
 LIFT_WINDOW_DAYS = 60       # rolling window (trading days) for precursor lift
 MIN_SUPPORT = 30            # flyer-occurrences of a precursor before its lift is trusted
 MIN_LIFT = 1.15             # precursor must beat base rate by 15% to score candidates
+MIN_DIRECTION_T = 2.90      # conservative family-wise gate for the fixed precursor set
+MIN_DIRECTION_DATES = 20    # independent samples are dates, not correlated stocks
 MAX_CANDIDATES = 30
 FRESHNESS_SESSIONS = 5      # a candidate needs a trusted precursor newly active vs 5 sessions ago
+TRADEABLE_ADT = 100_000_000 # Rs10cr/day, measured platform-wide user-grade liquidity floor
+ROUND_TRIP_COST_PCT = 0.30  # slippage + fees; candidate turnover is effectively daily
+MIN_EDGE_DATES = 40
 
 
 def ensure_schema(con) -> None:
@@ -91,12 +97,16 @@ def ensure_schema(con) -> None:
             flyer_n               INTEGER,
             recall_json           TEXT,
             precursor_counts_json TEXT,
+            diver_n               INTEGER,
+            diver_precursor_counts_json TEXT,
             computed_at           TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """))
+    safe_alter(cur, "ALTER TABLE high_flyer_daily_stats ADD COLUMN IF NOT EXISTS diver_n INTEGER")
+    safe_alter(cur, "ALTER TABLE high_flyer_daily_stats ADD COLUMN IF NOT EXISTS diver_precursor_counts_json TEXT")
     cur.execute(translate("""
         CREATE TABLE IF NOT EXISTS high_flyer_candidates (
-            date        TEXT NOT NULL,
+            date        DATE NOT NULL,
             symbol      TEXT NOT NULL,
             score       REAL NOT NULL,
             precursors  TEXT,
@@ -236,24 +246,62 @@ def ts_precursor_flags(ts: pd.DataFrame) -> pd.DataFrame:
 
 
 def compute_lifts(daily_stats: list[dict]) -> dict:
-    """daily_stats: rows of {'flyer_n', 'universe_n', 'precursor_counts': {p: {'universe': n, 'flyers': m}}}.
-    Returns {precursor: {'lift': x, 'support': m_total}} where
-    lift = P(precursor | flyer) / P(precursor | universe)."""
+    """Estimate movement and directional precursor lift from both outcome tails.
+
+    ``lift`` is the geometric mean of within-date P(flag|flyer) / P(flag|diver),
+    with Jeffreys-style smoothing.  Comparing within each date removes broad market
+    regime as a confound; the t statistic treats dates, not correlated stocks, as
+    independent observations.
+    The old winner-only ratio is retained as ``flyer_lift`` and a both-tail
+    ``movement_lift`` diagnostic, but neither can authorize a bullish candidate.
+    """
     tot_fly = sum(r["flyer_n"] for r in daily_stats)
+    tot_div = sum(r.get("diver_n", 0) for r in daily_stats)
     tot_uni = sum(r["universe_n"] for r in daily_stats)
-    if not tot_fly or not tot_uni:
+    if not tot_fly or not tot_div or not tot_uni:
         return {}
     out = {}
     names = {p for r in daily_stats for p in r["precursor_counts"]}
     for p in names:
         fly_p = sum(r["precursor_counts"].get(p, {}).get("flyers", 0) for r in daily_stats)
+        div_p = sum(r["precursor_counts"].get(p, {}).get("divers", 0) for r in daily_stats)
         uni_p = sum(r["precursor_counts"].get(p, {}).get("universe", 0) for r in daily_stats)
         if uni_p == 0:
             continue
         p_given_fly = fly_p / tot_fly
         p_given_uni = uni_p / tot_uni
         if p_given_uni > 0:
-            out[p] = {"lift": round(p_given_fly / p_given_uni, 3), "support": fly_p}
+            day_diffs, day_log_lifts = [], []
+            for r in daily_stats:
+                nf, nd = r["flyer_n"], r.get("diver_n", 0)
+                if not nf or not nd:
+                    continue
+                pc = r["precursor_counts"].get(p, {})
+                pf, pd_ = pc.get("flyers", 0), pc.get("divers", 0)
+                day_diffs.append(pf / nf - pd_ / nd)
+                day_log_lifts.append(math.log((pf + 0.5) / (nf + 1.0))
+                                     - math.log((pd_ + 0.5) / (nd + 1.0)))
+            n_dates = len(day_diffs)
+            mean_diff = sum(day_diffs) / n_dates if n_dates else 0.0
+            if n_dates >= MIN_DIRECTION_DATES:
+                variance = sum((x - mean_diff) ** 2 for x in day_diffs) / (n_dates - 1)
+                se = math.sqrt(variance / n_dates)
+                direction_t = mean_diff / se if se > 0 else (99.0 if mean_diff > 0 else 0.0)
+            else:
+                direction_t = 0.0
+            directional_lift = math.exp(sum(day_log_lifts) / n_dates) if n_dates else 1.0
+            movement_rate = (fly_p + div_p) / (tot_fly + tot_div)
+            out[p] = {
+                "lift": round(directional_lift, 3),
+                "support": fly_p + div_p,
+                "flyer_support": fly_p,
+                "diver_support": div_p,
+                "direction_t": round(direction_t, 3),
+                "direction_dates": n_dates,
+                "mean_direction_diff_pp": round(100 * mean_diff, 3),
+                "flyer_lift": round(p_given_fly / p_given_uni, 3),
+                "movement_lift": round(movement_rate / p_given_uni, 3),
+            }
     return out
 
 
@@ -267,7 +315,8 @@ def score_candidates(flags: pd.DataFrame, lifts: dict,
     next-day alpha; breakouts follow fresh setups, not chronic strength.
     Returns DataFrame(symbol, score, precursors) sorted desc, top MAX_CANDIDATES."""
     trusted = {p: v["lift"] for p, v in lifts.items()
-               if v["lift"] >= MIN_LIFT and v["support"] >= MIN_SUPPORT and p in flags.columns}
+               if v["lift"] >= MIN_LIFT and v["support"] >= MIN_SUPPORT
+               and v.get("direction_t", 0.0) >= MIN_DIRECTION_T and p in flags.columns}
     if not trusted or flags.empty:
         return pd.DataFrame(columns=["symbol", "score", "precursors"])
     weights = {p: math.log(l) for p, l in trusted.items()}
@@ -280,6 +329,78 @@ def score_candidates(flags: pd.DataFrame, lifts: dict,
         out = out[fresh.values]
     out = out[out["score"] > 0].sort_values("score", ascending=False).head(MAX_CANDIDATES)
     return out.reset_index(drop=True)
+
+
+def eligible_candidate_flags(flags: pd.DataFrame, close: pd.DataFrame,
+                             volume: pd.DataFrame, asof,
+                             active_equities: set[str] | None = None) -> pd.DataFrame:
+    """Keep only seasoned, liquid equities using information known by ``asof``."""
+    if flags.empty or asof not in close.index:
+        return flags.iloc[0:0].copy()
+    hist_c = close.loc[:asof]
+    hist_v = volume.loc[:asof]
+    last = hist_c.ffill().iloc[-1]
+    traded_value = hist_c * hist_v
+    # Exclude the signal day: a one-day mover-volume spike must not manufacture
+    # the liquidity used to call the following session tradeable.
+    prior_value = traded_value.iloc[:-1].tail(20)
+    adt20 = prior_value.mean()
+    observations = prior_value.notna().sum()
+    eligible = (last >= MIN_PRICE) & (adt20 >= TRADEABLE_ADT) & (observations >= 20)
+    if active_equities is not None:
+        eligible &= eligible.index.to_series().isin(active_equities)
+    return flags.loc[flags.index.intersection(eligible.index[eligible])]
+
+
+def summarize_candidate_edge(rows: pd.DataFrame) -> dict:
+    """Cost-aware, next-open edge verdict with one independent observation per date."""
+    if rows.empty:
+        return {"is_edge": False, "n_dates": 0, "reason": "no_resolved_candidates"}
+    daily = rows.groupby("signal_date", as_index=False).agg(
+        gross_pct=("return_pct", "mean"), excess_pct=("excess_pct", "mean"),
+        candidate_n=("symbol", "count"))
+    excess = pd.to_numeric(daily["excess_pct"], errors="coerce").dropna()
+    gross = pd.to_numeric(daily["gross_pct"], errors="coerce").dropna()
+    n = len(excess)
+    mean_excess = float(excess.mean()) if n else float("nan")
+    net_excess = mean_excess - ROUND_TRIP_COST_PCT if n else float("nan")
+    sd = float(excess.std(ddof=1)) if n > 1 else float("nan")
+    t_stat = net_excess / (sd / math.sqrt(n)) if n > 1 and sd > 0 else 0.0
+    is_edge = bool(n >= MIN_EDGE_DATES and net_excess > 0 and t_stat >= 2.0)
+    return {
+        "is_edge": is_edge,
+        "n_dates": n,
+        "n_candidates": int(daily["candidate_n"].sum()),
+        "gross_pct": round(float(gross.mean()), 4) if len(gross) else None,
+        "excess_pct": round(mean_excess, 4) if n else None,
+        "cost_pct": ROUND_TRIP_COST_PCT,
+        "net_excess_pct": round(net_excess, 4) if n else None,
+        "net_excess_t": round(t_stat, 3),
+        "entry": "next_session_open",
+        "exit": "next_session_close",
+    }
+
+
+def _candidate_edge_rows(day: str) -> pd.DataFrame:
+    cutoff = (pd.Timestamp(day) - pd.Timedelta(days=250)).strftime("%Y-%m-%d")
+    return read_df("""
+        WITH sessions AS (
+          SELECT date, LEAD(date) OVER (ORDER BY date) AS next_date
+          FROM (SELECT DISTINCT date FROM stock_ohlcv
+                WHERE date >= ? AND date <= ? AND COALESCE(is_suspect, 0) = 0) d
+        )
+        SELECT c.date AS signal_date, c.symbol,
+               100.0 * (o.close / o.open - 1.0) AS return_pct,
+               100.0 * ((o.close / o.open) - (n.close / n.open)) AS excess_pct
+        FROM high_flyer_candidates c
+        JOIN sessions s ON s.date = c.date
+        JOIN stock_ohlcv o ON o.symbol = c.symbol AND o.date = s.next_date
+                            AND COALESCE(o.is_suspect, 0) = 0
+        JOIN stock_ohlcv n ON n.symbol = 'NIFTY50' AND n.date = s.next_date
+                            AND COALESCE(n.is_suspect, 0) = 0
+        WHERE c.date >= ? AND c.date < ?
+          AND o.open > 0 AND o.close > 0 AND n.open > 0 AND n.close > 0
+    """, (cutoff, day, cutoff, day))
 
 
 # ── I/O + orchestration ──────────────────────────────────────────────────────
@@ -445,19 +566,26 @@ def _process_day(con, close, volume, open_px, day, prev_day) -> dict:
 
     # 2. ATTRIBUTION — per-precursor counts for today, then rolling lift
     fly_syms = set(flyers["symbol"])
+    div_syms = set(divers["symbol"])
     fly_flags = flags.loc[flags.index.isin(fly_syms)]
-    counts = {p: {"universe": int(flags[p].sum()), "flyers": int(fly_flags[p].sum())}
+    div_flags = flags.loc[flags.index.isin(div_syms)]
+    counts = {p: {"universe": int(flags[p].sum()), "flyers": int(fly_flags[p].sum()),
+                  "divers": int(div_flags[p].sum())}
               for p in flags.columns}
     cur.execute(translate(
         "INSERT INTO high_flyer_daily_stats "
-        "(date, universe_n, flyer_n, recall_json, precursor_counts_json) VALUES (?,?,?,?,?) "
+        "(date, universe_n, flyer_n, recall_json, precursor_counts_json, diver_n, "
+        "diver_precursor_counts_json) VALUES (?,?,?,?,?,?,?) "
         "ON CONFLICT (date) DO UPDATE SET universe_n = excluded.universe_n, "
         "flyer_n = excluded.flyer_n, recall_json = excluded.recall_json, "
-        "precursor_counts_json = excluded.precursor_counts_json"),
-        (day, int(len(flags)), n_fly, json.dumps(recall), json.dumps(counts)))
+        "precursor_counts_json = excluded.precursor_counts_json, diver_n = excluded.diver_n, "
+        "diver_precursor_counts_json = excluded.diver_precursor_counts_json"),
+        (day, int(len(flags)), n_fly, json.dumps(recall), json.dumps(counts), len(divers),
+         json.dumps({p: int(div_flags[p].sum()) for p in flags.columns})))
 
     stats = read_df(
-        "SELECT flyer_n, universe_n, precursor_counts_json FROM high_flyer_daily_stats "
+        "SELECT flyer_n, universe_n, precursor_counts_json, diver_n, "
+        "diver_precursor_counts_json FROM high_flyer_daily_stats "
         "WHERE date <= ? ORDER BY date DESC LIMIT ?", (day, LIFT_WINDOW_DAYS,))
     # SKIP rows with no precursor counts rather than coercing them: read_df returns a pandas
     # frame, so a SQL NULL arrives as float NaN and json.loads(NaN) raises TypeError, killing
@@ -471,8 +599,18 @@ def _process_day(con, close, volume, open_px, day, prev_day) -> dict:
         if not isinstance(raw, str) or not raw.strip():
             skipped += 1
             continue
-        usable.append({"flyer_n": int(s.flyer_n), "universe_n": int(s.universe_n),
-                       "precursor_counts": json.loads(raw)})
+        counts_row = json.loads(raw)
+        # Rows written by the old winner-only learner have no loser-tail counts.  They
+        # are excluded from directional learning rather than silently treating zero as
+        # evidence; --backfill repopulates them from point-in-time source data.
+        if pd.isna(s.diver_n) or not isinstance(s.diver_precursor_counts_json, str):
+            skipped += 1
+            continue
+        diver_counts = json.loads(s.diver_precursor_counts_json)
+        for p in counts_row:
+            counts_row[p]["divers"] = int(diver_counts.get(p, counts_row[p].get("divers", 0)))
+        usable.append({"flyer_n": int(s.flyer_n), "diver_n": int(s.diver_n),
+                       "universe_n": int(s.universe_n), "precursor_counts": counts_row})
     if skipped:
         print(f"[HighFlyer] skipped {skipped}/{len(stats)} stat day(s) with no "
               f"precursor_counts_json when computing lifts", file=sys.stderr)
@@ -482,13 +620,20 @@ def _process_day(con, close, volume, open_px, day, prev_day) -> dict:
         'ON CONFLICT (key) DO UPDATE SET value = excluded.value'),
         ("high_flyer_precursor_lift", json.dumps({"as_of": day, "lifts": lifts})))
 
-    # 3. CANDIDATES — score today's universe with learned lifts → tomorrow's watchlist
+    # 3. SHADOW CANDIDATES — stored and graded daily; API exposure is promotion-gated
     today_flags = ohlcv_precursor_flags(close, volume, day).join(
         ts_precursor_flags(_latest_ts(con, day)), how="left").fillna(False).astype(bool)
+    active_equities = set(read_df(
+        "SELECT symbol FROM nse_stocks WHERE status = 'ACTIVE' "
+        "AND COALESCE(instrument_type, 'equity') = 'equity'"
+    )["symbol"])
+    today_flags = eligible_candidate_flags(
+        today_flags, close, volume, day, active_equities=active_equities)
     pos = close.index.get_loc(day)
     ref_day = close.index[max(0, pos - FRESHNESS_SESSIONS)]
     ref_flags = ohlcv_precursor_flags(close, volume, ref_day).join(
         ts_precursor_flags(_latest_ts(con, ref_day)), how="left").fillna(False).astype(bool)
+    ref_flags = ref_flags.reindex(index=today_flags.index).fillna(False).astype(bool)
     cands = score_candidates(today_flags, lifts, prev_flags=ref_flags)
     cur.execute(translate("DELETE FROM high_flyer_candidates WHERE date = ?"), (day,))
     for r in cands.itertuples(index=False):
@@ -497,11 +642,18 @@ def _process_day(con, close, volume, open_px, day, prev_day) -> dict:
             "VALUES (?,?,?,?) ON CONFLICT (date, symbol) DO UPDATE SET "
             "score = excluded.score, precursors = excluded.precursors"),
             (day, r.symbol, float(r.score), r.precursors))
+    edge = summarize_candidate_edge(_candidate_edge_rows(day))
+    edge["as_of"] = day
+    cur.execute(translate(
+        'INSERT INTO app_settings (key, value) VALUES (?, ?) '
+        'ON CONFLICT (key) DO UPDATE SET value = excluded.value'),
+        ("high_flyer_candidate_edge", json.dumps(edge)))
     con.commit()
 
     print(f"[HFR] {day}: {n_fly} flyers, {len(divers)} divers | recall {json.dumps(recall)} | "
           f"wrong-direction: {wrong_bearish_miss} bearish-miss, {wrong_bullish_miss} bullish-miss | "
-          f"{len(lifts)} precursor lifts | {len(cands)} candidates for next session")
+          f"{len(lifts)} precursor lifts | {len(cands)} shadow candidates | "
+          f"edge={'PROVEN' if edge['is_edge'] else 'NOT PROVEN'}")
     if not cands.empty:
         top = ", ".join(f"{r.symbol}({r.score:.2f})" for r in cands.head(10).itertuples(index=False))
         print(f"[HFR] Top candidates: {top}")

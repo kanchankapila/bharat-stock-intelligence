@@ -34,10 +34,18 @@ export const HighFlyerWidget: React.FC<{ onSelectStock?: (symbol: string) => voi
           ))}
         </div>
       )}
+      {data.shadowCandidateCount > 0 && !data.candidateEdge?.is_edge && (
+        <div className="pt-2 border-t border-slate-800/60 text-[10px] text-slate-500">
+          {data.shadowCandidateCount} research matches withheld: no cost-aware next-open edge
+          {data.candidateEdge?.n_dates
+            ? ` (${Number(data.candidateEdge.net_excess_pct).toFixed(2)}% excess/day after costs over ${data.candidateEdge.n_dates} dates)`
+            : ''}.
+        </div>
+      )}
       {candidates.length > 0 && (
         <div className="pt-2 border-t border-slate-800/60">
           <div className="flex items-center gap-1.5 text-[9px] text-slate-500 uppercase tracking-widest mb-1.5">
-            <Target className="w-3 h-3" /> Today's Candidates
+            <Target className="w-3 h-3" /> Evidence-Gated Candidates
           </div>
           {/* Measured IC -0.041 (t=-9.02, recurring-bugs.md) despite AUC 0.81 -- the classifier
               identifies who resembles a past flyer, not that today is the day. Never treat this

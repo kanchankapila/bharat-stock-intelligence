@@ -848,6 +848,8 @@ CREATE TABLE IF NOT EXISTS "high_flyer_daily_stats" (
   "flyer_n" INTEGER,
   "recall_json" TEXT,
   "precursor_counts_json" TEXT,
+  "diver_n" INTEGER,
+  "diver_precursor_counts_json" TEXT,
   "computed_at" TEXT DEFAULT CURRENT_TIMESTAMP
 );
 

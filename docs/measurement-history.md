@@ -7,6 +7,24 @@ split `docs/session-log.md` already gets relative to `CLAUDE.md`. Split out 2026
 purely for length (measurement.md had grown to 32KB, mixing rules with investigation
 narrative); no content was changed or dropped in the split.
 
+## High-flyer daily learning: two tails and a promotion gate (2026-10-16)
+
+The prior learner estimated `P(precursor | flyer) / P(precursor | universe)` and used it as
+a bullish weight. That identifies movement features, not direction. The replacement records
+the mirrored diver tail and estimates flyer-minus-diver prevalence within each date, because
+stocks on one date are correlated and pooling them lets market regimes create Simpson's-paradox
+"edge." Only features repeated over at least 20 dates and clearing the fixed-family threshold
+can score the shadow list. Candidate eligibility is active equities with prior-20-session ADT
+of at least Rs10cr; the signal day's volume is excluded.
+
+The corrected list was replayed walk-forward for the dates with enough prior learning history:
+1,230 candidate observations over 41 dates, entered next session open and exited at its close.
+Gross return was -0.2471%/day (t=-1.26); excess to NIFTY50 was -0.1473%/day (t=-0.83).
+After the registered 0.30% round-trip cost, excess was -0.4473%/day (t=-2.53). Verdict:
+**NO EDGE; shadow-only and withheld from the frontend.** The daily job now refreshes this
+cost-aware verdict and cannot expose candidates until at least 40 dates, positive net excess,
+and t>=2.0.
+
 ## `factor_backtest.py`'s exit-pricing bug (2026-08-11, fixed 2026-08-12) — full diagnosis
 
 > ## ⚠ `factor_backtest.py` had a bug that invalidated the factor table
