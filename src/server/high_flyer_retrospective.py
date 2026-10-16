@@ -54,6 +54,7 @@ FRESHNESS_SESSIONS = 5      # a candidate needs a trusted precursor newly active
 TRADEABLE_ADT = 100_000_000 # Rs10cr/day, measured platform-wide user-grade liquidity floor
 ROUND_TRIP_COST_PCT = 0.30  # slippage + fees; candidate turnover is effectively daily
 MIN_EDGE_DATES = 40
+CANDIDATE_METHOD_VERSION = "two_tail_date_cluster_v1"
 
 
 def ensure_schema(con) -> None:
@@ -110,10 +111,13 @@ def ensure_schema(con) -> None:
             symbol      TEXT NOT NULL,
             score       REAL NOT NULL,
             precursors  TEXT,
+            method_version TEXT NOT NULL DEFAULT 'legacy',
             computed_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (date, symbol)
         )
     """))
+    safe_alter(cur, "ALTER TABLE high_flyer_candidates ADD COLUMN IF NOT EXISTS "
+                    "method_version TEXT NOT NULL DEFAULT 'legacy'")
     con.commit()
 
 
@@ -398,9 +402,9 @@ def _candidate_edge_rows(day: str) -> pd.DataFrame:
                             AND COALESCE(o.is_suspect, 0) = 0
         JOIN stock_ohlcv n ON n.symbol = 'NIFTY50' AND n.date = s.next_date
                             AND COALESCE(n.is_suspect, 0) = 0
-        WHERE c.date >= ? AND c.date < ?
+        WHERE c.date >= ? AND c.date < ? AND c.method_version = ?
           AND o.open > 0 AND o.close > 0 AND n.open > 0 AND n.close > 0
-    """, (cutoff, day, cutoff, day))
+    """, (cutoff, day, cutoff, day, CANDIDATE_METHOD_VERSION))
 
 
 # ── I/O + orchestration ──────────────────────────────────────────────────────
@@ -638,10 +642,11 @@ def _process_day(con, close, volume, open_px, day, prev_day) -> dict:
     cur.execute(translate("DELETE FROM high_flyer_candidates WHERE date = ?"), (day,))
     for r in cands.itertuples(index=False):
         cur.execute(translate(
-            "INSERT INTO high_flyer_candidates (date, symbol, score, precursors) "
-            "VALUES (?,?,?,?) ON CONFLICT (date, symbol) DO UPDATE SET "
-            "score = excluded.score, precursors = excluded.precursors"),
-            (day, r.symbol, float(r.score), r.precursors))
+            "INSERT INTO high_flyer_candidates (date, symbol, score, precursors, method_version) "
+            "VALUES (?,?,?,?,?) ON CONFLICT (date, symbol) DO UPDATE SET "
+            "score = excluded.score, precursors = excluded.precursors, "
+            "method_version = excluded.method_version"),
+            (day, r.symbol, float(r.score), r.precursors, CANDIDATE_METHOD_VERSION))
     edge = summarize_candidate_edge(_candidate_edge_rows(day))
     edge["as_of"] = day
     cur.execute(translate(

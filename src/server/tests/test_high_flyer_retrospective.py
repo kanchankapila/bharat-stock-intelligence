@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import high_flyer_retrospective as hfr
 from high_flyer_retrospective import (
     detect_flyers,
     entry_metrics,
@@ -294,6 +295,18 @@ class TestCandidateEdgeSummary:
         assert result["net_excess_pct"] > 0
         assert result["net_excess_t"] >= 2.0
         assert result["is_edge"] is True
+
+    def test_edge_query_filters_to_the_current_candidate_method(self, monkeypatch):
+        seen = {}
+
+        def fake_read(sql, params):
+            seen["sql"], seen["params"] = sql, params
+            return pd.DataFrame()
+
+        monkeypatch.setattr(hfr, "read_df", fake_read)
+        hfr._candidate_edge_rows("2026-10-16")
+        assert "c.method_version = ?" in seen["sql"]
+        assert seen["params"][-1] == hfr.CANDIDATE_METHOD_VERSION
 
 
 # ─────────────────────────────────────────────────────────────────────────────

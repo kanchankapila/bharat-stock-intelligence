@@ -837,6 +837,7 @@ CREATE TABLE IF NOT EXISTS "high_flyer_candidates" (
   "symbol" TEXT NOT NULL,
   "score" REAL NOT NULL,
   "precursors" TEXT,
+  "method_version" TEXT DEFAULT 'legacy'::text NOT NULL,
   "computed_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("date", "symbol")
 );

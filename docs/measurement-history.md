@@ -19,8 +19,8 @@ of at least Rs10cr; the signal day's volume is excluded.
 
 The corrected list was replayed walk-forward for the dates with enough prior learning history:
 1,230 candidate observations over 41 dates, entered next session open and exited at its close.
-Gross return was -0.2471%/day (t=-1.26); excess to NIFTY50 was -0.1473%/day (t=-0.83).
-After the registered 0.30% round-trip cost, excess was -0.4473%/day (t=-2.53). Verdict:
+Gross return was -0.2375%/day (t=-1.23); excess to NIFTY50 was -0.1377%/day (t=-0.80).
+After the registered 0.30% round-trip cost, excess was -0.4377%/day (t=-2.55). Verdict:
 **NO EDGE; shadow-only and withheld from the frontend.** The daily job now refreshes this
 cost-aware verdict and cannot expose candidates until at least 40 dates, positive net excess,
 and t>=2.0.
