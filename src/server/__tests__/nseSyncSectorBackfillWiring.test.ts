@@ -20,6 +20,15 @@ const SOURCE = readFileSync(
 );
 
 describe('nse-sync-weekly sector backfill wiring', () => {
+  it('runs the official NSE equity-master reconciliation before downstream backfills', () => {
+    const masterIdx = SOURCE.indexOf("runPython('nse_equity_master_fetcher.py'");
+    const sectorIdx = SOURCE.indexOf("runPython('backfill_sector_mc.py'");
+
+    expect(masterIdx).toBeGreaterThan(-1);
+    expect(sectorIdx).toBeGreaterThan(masterIdx);
+    expect(SOURCE.slice(masterIdx, sectorIdx)).toMatch(/nse_equity_master_fetcher\.py['"],\s*\[\],\s*120_000/);
+  });
+
   it('calls backfill_sector_mc.py as TWO independent steps: --enumerate then --write', () => {
     // Split 2026-09-12 (AF-20260912-16). Both phases shared one 900s budget while the enumerate
     // alone measures ~895s, so when it ran long the kill landed on the WRITE -- the only phase
