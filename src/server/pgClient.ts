@@ -62,6 +62,10 @@ export function getPool(): Pool {
     pool = new Pool({
       connectionString: schema ? (process.env.VITEST_PG_URL || pgConnectionString()) : pgConnectionString(),
       ...(schema ? { options: `-c search_path="${schema}",public` } : {}),
+      // Visible to pg_stat_activity and the technical_signal_observations trigger. Individual
+      // Python jobs carry their script name; the shared Node process is intentionally identified
+      // as one writer and the static lineage inventory resolves its service-level candidates.
+      application_name: process.env.BSI_WRITER_NAME || (process.env.VITEST ? 'bsi:vitest' : 'bsi:bharat-server'),
       // Budget: bharat-server 22 + alphaquant 5 + ml-api 5 + chatbot 3 + Python 10 = 45 / 60
       // max_connections. That budget never included the TEST processes, and it has to: vitest
       // runs TWO projects (unit + live), each a singleFork process building its own Pool from

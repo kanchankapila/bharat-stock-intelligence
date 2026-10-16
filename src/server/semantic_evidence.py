@@ -303,6 +303,68 @@ def persist_decision_evidence_bundles(conn, recommendations: Iterable[Dict[str, 
                  confidence_kind=excluded.confidence_kind, note=excluded.note""",
             evidence_rows,
         )
+
+    # Materialise the same real ranker output into the generic claim/evidence graph. These
+    # tables previously had helpers and ontology declarations but no production caller, so the
+    # graph was permanently empty. A canonical recommendation is explicitly an *inferred claim*;
+    # component scores are candidate evidence, never independent facts or probabilities.
+    if graph_schema_available(conn):
+        relation_map = {"supports": "supports", "contradicts": "opposes", "context": "context", "veto": "opposes"}
+        for rec in recs:
+            if not rec.get("symbol") or not rec.get("computed_at") or not rec.get("generated_at"):
+                continue
+            key = decision_key(rec)
+            claim_key = f"claim:{key}"
+            direction = _direction(rec.get("classification"))
+            record_market_claim(
+                conn,
+                claim_key=claim_key,
+                subject_node={
+                    "node_key": f"NSE:{rec['symbol']}",
+                    "node_type": "instrument",
+                    "label": rec["symbol"],
+                    "canonical_symbol": rec["symbol"],
+                },
+                predicate="canonical_recommendation",
+                object_value={
+                    "score": _finite(rec.get("unified_score")),
+                    "classification": rec.get("classification"),
+                    "conviction": rec.get("conviction_level"),
+                },
+                method=RANKER_POLICY_VERSION,
+                stance="bullish" if direction > 0 else "bearish" if direction < 0 else "neutral",
+                claim_status="inferred",
+                horizon=rec.get("timeframe"),
+                available_at=rec.get("generated_at"),
+                source="unified_recommendations",
+                source_ref=f"{rec['symbol']}:{rec['computed_at']}",
+            )
+            for item in build_decision_evidence(rec):
+                generic_evidence_key = f"evidence:{key}:{item['evidence_key']}"
+                record_market_evidence(
+                    conn,
+                    evidence_key=generic_evidence_key,
+                    source_type=item["evidence_type"],
+                    source_ref=item["source_ref"],
+                    content={
+                        "metric": item["metric"],
+                        "value": json.loads(item["value_json"]),
+                        "confidence_kind": item["confidence_kind"],
+                        "note": item["note"],
+                    },
+                    observed_at=rec.get("generated_at"),
+                    available_at=rec.get("generated_at"),
+                    extraction_method=RANKER_POLICY_VERSION,
+                    extraction_version=ONTOLOGY_VERSION,
+                    quality_status="candidate",
+                )
+                link_claim_evidence(
+                    conn,
+                    claim_key,
+                    generic_evidence_key,
+                    relation_map[item["relation"]],
+                    note=item["note"],
+                )
     if _table_exists(conn, "market_data_watermark"):
         first = recs[0] if recs else {}
         record_dataset_watermark(

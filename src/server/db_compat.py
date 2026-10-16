@@ -104,7 +104,18 @@ def get_engine():
     url = database_url()
     eng = _engines.get(url)
     if eng is None:
-        eng = create_engine(url, pool_pre_ping=True, future=True)
+        # PostgreSQL exposes application_name to triggers and pg_stat_activity.  The immutable
+        # technical-signal observation ledger uses it as a writer hint, so separate Python job
+        # processes no longer collapse to an anonymous multi-writer stream.  An explicit env
+        # override supports orchestrators; otherwise the executable script name is stable and
+        # more useful than the interpreter name.
+        writer_name = os.environ.get("BSI_WRITER_NAME") or Path(_sys.argv[0] or "python").name
+        eng = create_engine(
+            url,
+            pool_pre_ping=True,
+            future=True,
+            connect_args={"application_name": f"bsi:{writer_name}"[:63]},
+        )
         _engines[url] = eng
     return eng
 

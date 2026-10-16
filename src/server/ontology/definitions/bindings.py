@@ -841,6 +841,12 @@ _SEMANTIC_ROWS = [
     ("market_data_watermark", "source_version", "source_version"),
     ("market_data_watermark", "run_ref", "run_ref"),
     ("market_data_watermark", "recorded_at", "recorded_at"),
+    ("technical_signal_observations", "observation_id", "id"),
+    ("technical_signal_observations", "symbol", "symbol"),
+    ("technical_signal_observations", "signal_date", "signal_date"),
+    ("technical_signal_observations", "recorded_at", "recorded_at"),
+    ("technical_signal_observations", "writer_hint", "source"),
+    ("technical_signal_observations", "values_json", "value_json"),
 ]
 
 

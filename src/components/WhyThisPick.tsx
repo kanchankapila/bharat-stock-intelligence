@@ -32,6 +32,9 @@ export const WhyThisPick: React.FC<{ symbol: string; timeframe?: 'long_term' | '
     .filter(([key]) => score[key] != null)
     .map(([key, label]) => ({ key, label, value: Number(score[key]) }))
     .filter((engine) => Number.isFinite(engine.value));
+  const ontologyEvidence = Array.isArray(score.ontologyClaim?.evidence)
+    ? score.ontologyClaim.evidence as Array<Record<string, any>>
+    : [];
   if (!score.trade_reasoning && engines.length === 0) return null;
 
   return (
@@ -57,6 +60,20 @@ export const WhyThisPick: React.FC<{ symbol: string; timeframe?: 'long_term' | '
             <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden"><div className="h-full rounded-full bg-indigo-500" style={{ width: `${Math.max(0, Math.min(100, engine.value))}%` }} /></div>
             <span className="text-[10px] font-data w-10 text-right text-slate-300">{engine.value.toFixed(1)}</span>
           </div>)}</div>
+        </div>}
+        {score.ontologyClaim && <div>
+          <p className="text-[9px] font-bold text-slate-500 font-display uppercase tracking-wider mb-2">
+            Structured ontology evidence
+            <span className="normal-case text-slate-600"> Â· {score.ontologyClaim.claim_status} claim</span>
+          </p>
+          <div className="space-y-2">{ontologyEvidence.map((item) => <div key={item.evidence_key} className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] text-slate-300">{item.content?.metric ?? item.source_type}</span>
+              <span className="text-[9px] uppercase tracking-wide text-slate-500">{item.relation}</span>
+            </div>
+            {item.content?.note && <p className="mt-1 text-[9px] text-slate-500">{item.content.note}</p>}
+          </div>)}</div>
+          <p className="mt-2 text-[9px] text-slate-600">These are ranker inputs with provenance, not independent proof of future returns.</p>
         </div>}
       </div>}
     </div>

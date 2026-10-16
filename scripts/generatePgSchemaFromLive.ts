@@ -37,7 +37,7 @@
  * Read-only against Postgres (SELECT-only catalog queries); only mutates db/schema.postgres.sql
  * on disk.
  */
-import { writeFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
@@ -53,6 +53,23 @@ const HYPERTABLES: Record<string, { timeCol: string; chunk: string; compressAfte
   intraday_ohlcv: { timeCol: "datetime", chunk: "7 days", compressAfter: "30 days", retainAfter: "365 days" },
   macro_asset_prices: { timeCol: "date", chunk: "365 days", compressAfter: null, retainAfter: null },
 };
+
+// Catalog introspection deliberately emits tables/indexes only. This one trigger/function/view
+// bundle is part of the technical_signals table contract and must also exist in the throwaway
+// schemas built from db/schema.postgres.sql, or tests exercise a materially different storage
+// model from production. Derive the postlude from the migration itself so the two definitions
+// cannot drift by copy/paste.
+const OBSERVATION_MIGRATION = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations",
+    "20261015234500_technical-signal-observation-ledger.sql"),
+  "utf8",
+);
+const OBSERVATION_POSTLUDE_MARKER = "CREATE OR REPLACE FUNCTION journal_technical_signal_mutation()";
+const observationPostludeOffset = OBSERVATION_MIGRATION.indexOf(OBSERVATION_POSTLUDE_MARKER);
+if (observationPostludeOffset < 0) {
+  throw new Error("technical-signal observation migration is missing its function marker");
+}
+const OBSERVATION_SCHEMA_POSTLUDE = OBSERVATION_MIGRATION.slice(observationPostludeOffset).trim();
 
 // Postgres's own format_type() output (lowercase, e.g. "timestamp with time zone") -> this file's
 // existing uppercase house-style keyword. Anything not listed here is just uppercased verbatim
@@ -321,7 +338,10 @@ export function buildSchemaFile(data: Awaited<ReturnType<typeof fetchAll>>): str
     hyperSection.push(...buildHypertableDdls(table));
   }
 
-  return blocks.concat(hyperSection).join("\n") + "\n";
+  const customPostlude = tables.includes("technical_signals") && tables.includes("technical_signal_observations")
+    ? ["", "-- ── technical_signals immutable observation contract ──", OBSERVATION_SCHEMA_POSTLUDE]
+    : [];
+  return blocks.concat(hyperSection, customPostlude).join("\n") + "\n";
 }
 
 async function main() {

@@ -38,6 +38,20 @@ IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 #: real tables under 20 fake ones. These are outputs of this layer, not gaps in it.
 SELF_PREFIX = "kg_"
 
+# Coverage is intentionally scoped to datasets that can change a served decision, substantiate
+# it, grade it, or determine whether it is safe to show. Operational logs and dormant research
+# tables stay visible in `undocumented_live_tables`, but are not assigned invented semantics to
+# improve a vanity percentage.
+DECISION_BEARING_TABLES = frozenset({
+    "confluence_signals", "data_quality_results", "feature_store", "market_claim",
+    "market_claim_evidence", "market_decision_event", "market_decision_evidence",
+    "market_decision_outcome", "market_endpoint_registry", "market_evidence",
+    "market_graph_node", "market_regimes", "model_registry", "nse_stocks",
+    "signal_excursions", "signal_outcomes", "stock_ohlcv", "technical_signals",
+    "technical_signal_observations", "unified_recommendations",
+    "unified_recommendations_history", "unified_signal_outcomes",
+})
+
 _LIVE_COLUMNS_SQL = (
     "SELECT table_name, column_name, data_type, is_nullable "
     "FROM information_schema.columns WHERE table_schema = current_schema() "
@@ -178,9 +192,16 @@ def _freshness_probe(conn, table: str, column: str, lag_hours: Optional[float],
     # A current DATE is modelled as covering through end-of-day, which is necessarily in the
     # future until midnight. Freshness age is elapsed staleness, not signed clock distance;
     # reporting -11h confused healthy day-granular data with timestamp skew.
-    if day_granular:
+    future_skew = not day_granular and age < 0
+    if day_granular or future_skew:
         age = max(0.0, age)
     out["age_hours"] = round(age, 2)
+    if future_skew:
+        out["clock_skew_hours"] = round(
+            (parsed - datetime.now(timezone.utc)).total_seconds() / 3600.0, 2
+        )
+        out["verdict"] = "future"
+        return out
     if day_granular:
         out["granularity"] = "day"
     if lag_hours is None:
@@ -245,6 +266,12 @@ def coverage(onto: Ontology, conn=None, fresh: bool = False,
         broken_tables = {m.split(".")[0] for m in missing_columns}
         sound = len(documented_live) - len(broken_tables)
         total = len(documented)
+        # This metric answers whether the decision surface has authored semantics.
+        # Physical-schema drift is reported separately in ``missing_tables``; coupling
+        # the two made a documented live-only registry look undocumented in isolated
+        # test schemas.
+        missing_decision_bearing = sorted(DECISION_BEARING_TABLES - set(documented))
+        decision_bearing_documented = len(DECISION_BEARING_TABLES) - len(missing_decision_bearing)
         return {
             "schema": schema,
             "ontology_version": onto.version,
@@ -257,6 +284,11 @@ def coverage(onto: Ontology, conn=None, fresh: bool = False,
                 "bound_columns": len(onto.bindings),
                 "missing_columns": len(missing_columns),
                 "documented_tables_sound_pct": round(100.0 * sound / total, 1) if total else 0.0,
+                "decision_bearing_target": len(DECISION_BEARING_TABLES),
+                "decision_bearing_documented": decision_bearing_documented,
+                "decision_bearing_coverage_pct": round(
+                    100.0 * decision_bearing_documented / len(DECISION_BEARING_TABLES), 1
+                ),
             },
             "ok": not missing_tables and not missing_columns and not metrics_missing_source,
             "drift": {
@@ -265,6 +297,7 @@ def coverage(onto: Ontology, conn=None, fresh: bool = False,
                 "metrics_with_missing_sources": metrics_missing_source,
             },
             "gaps": {
+                "missing_decision_bearing_tables": missing_decision_bearing,
                 "undocumented_live_tables": live_only[:max_listed],
                 "undocumented_truncated": len(live_only) > max_listed,
                 "columns_not_bound": unbound,

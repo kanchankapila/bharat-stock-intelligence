@@ -7,5 +7,7 @@ describe('WhyThisPick scoring authority', () => {
     expect(source).toContain('getUnifiedScoreForSymbol.useQuery');
     expect(source).not.toContain('getStockScoreDetail.useQuery');
     expect(source).not.toContain("stock_scores.reasons");
+    expect(source).toContain('Structured ontology evidence');
+    expect(source).toContain('not independent proof of future returns');
   });
 });

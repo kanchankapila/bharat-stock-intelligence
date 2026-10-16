@@ -304,6 +304,16 @@ def cards() -> Tuple[DataCard, ...]:
                     "feeding them back in leaks the model into its own inputs.",
                     "`ai_insight` is generated text.")),
 
+        _c("technical_signal_observations", "Technical signal mutation ledger", "TechnicalSignalObservation",
+           ("observation_id",),
+           "Immutable, transaction-time journal of every insert, update, and row removal applied "
+           "to the technical_signals compatibility projection.",
+           cadence="on_write", fresh="recorded_at", use="context",
+           writers=("journal_technical_signal_mutation",),
+           caveats=("This ledger records when the platform mutation occurred; a feature's "
+                    "economic observation/availability time still comes from its source contract.",
+                    "writer_hint is provenance metadata, not a model feature.")),
+
         _c("feature_store", "Feature store", "FeatureVector",
            ("symbol", "date", "timeframe"),
            "The rolling feature panel the models train on: returns, moving averages, "

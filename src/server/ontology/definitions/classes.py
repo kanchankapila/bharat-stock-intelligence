@@ -442,6 +442,12 @@ def classes() -> Tuple[ClassDef, ...]:
           "and a guess.",
           key_properties=("id",), realization="abstract"),
 
+        C("TechnicalSignalObservation", "Technical signal observation", "governance",
+          "An immutable transaction-time record of one mutation to the technical signal "
+          "compatibility projection, including writer provenance and changed values.",
+          parents=("GovernanceRecord",), key_properties=("id",),
+          grain="one row per technical_signals mutation"),
+
         C("Endpoint", "Data endpoint", "governance",
           "A discovered, verified market-data endpoint: provider, domain, scope, update "
           "frequency and the template to call it. The platform's data-sourcing registry.",

@@ -317,7 +317,7 @@ export const commandCenterRouter = router({
       // down to this one symbol. This is likely the single highest-traffic per-symbol endpoint
       // in the app (every stock-detail page load). Split into two indexed point lookups run
       // in parallel instead: `ur` by (symbol, computed_at) and `ts` by symbol, latest date only.
-      const [ur, ts] = await Promise.all([
+      const [ur, ts, ontologyClaim] = await Promise.all([
         dbGet<any>(`
           SELECT symbol, unified_score, conviction_level, timeframe, sector,
                  classification, stop_loss, target_1, target_2,
@@ -344,9 +344,39 @@ export const commandCenterRouter = router({
           ORDER BY date DESC
           LIMIT 1
         `, [input.symbol]),
+        dbGet<any>(`
+          SELECT c.claim_key, c.claim_status, c.stance, c.method, c.available_at,
+                 c.object_value,
+                 COALESCE(
+                   jsonb_agg(jsonb_build_object(
+                     'evidence_key', e.evidence_key,
+                     'relation', ce.relation,
+                     'source_type', e.source_type,
+                     'quality_status', e.quality_status,
+                     'content', e.content,
+                     'available_at', e.available_at
+                   ) ORDER BY e.evidence_key)
+                   FILTER (WHERE e.evidence_key IS NOT NULL),
+                   '[]'::jsonb
+                 ) AS evidence
+          FROM market_claim c
+          JOIN market_graph_node n ON n.node_id = c.subject_node_id
+          LEFT JOIN market_claim_evidence ce ON ce.claim_key = c.claim_key
+          LEFT JOIN market_evidence e ON e.evidence_key = ce.evidence_key
+          WHERE n.canonical_symbol = ? AND c.predicate = 'canonical_recommendation'
+          GROUP BY c.claim_key, c.claim_status, c.stance, c.method, c.available_at,
+                   c.object_value
+          ORDER BY c.available_at DESC
+          LIMIT 1
+        `, [input.symbol]),
       ]);
       if (!ur) return null;
-      return { ...ur, ...(ts ?? {}), mlRankPct: await mlRankPctFor(input.symbol) };
+      return {
+        ...ur,
+        ...(ts ?? {}),
+        ontologyClaim: ontologyClaim ?? null,
+        mlRankPct: await mlRankPctFor(input.symbol),
+      };
     }),
 
   runUnifiedRanker: adminProcedure

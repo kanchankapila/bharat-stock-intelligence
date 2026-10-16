@@ -133,6 +133,22 @@ describe("buildSchemaFile", () => {
     expect(sql).not.toContain("create_hypertable('widgets'");
   });
 
+  it("appends the immutable observation trigger contract when both signal tables exist", () => {
+    const data = baseData({
+      tables: ["technical_signals", "technical_signal_observations"],
+      columns: [
+        { table_name: "technical_signals", ordinal: 1, column_name: "symbol", data_type: "text", not_null: true, identity_flag: "", default_expr: null },
+        { table_name: "technical_signals", ordinal: 2, column_name: "date", data_type: "date", not_null: true, identity_flag: "", default_expr: null },
+        { table_name: "technical_signal_observations", ordinal: 1, column_name: "observation_id", data_type: "bigint", not_null: true, identity_flag: "d", default_expr: null },
+      ],
+      pks: [],
+    });
+    const sql = buildSchemaFile(data);
+    expect(sql).toContain("CREATE OR REPLACE FUNCTION journal_technical_signal_mutation()");
+    expect(sql).toContain("CREATE TRIGGER technical_signals_observation_journal");
+    expect(sql).toContain("CREATE OR REPLACE VIEW v_technical_signals_current");
+  });
+
   it("silently skips a table with zero readable columns rather than emitting an empty CREATE TABLE", () => {
     const sql = buildSchemaFile(baseData({ tables: ["widgets", "ghost_table"], columns: baseData().columns }));
     expect(sql).not.toContain('"ghost_table"');

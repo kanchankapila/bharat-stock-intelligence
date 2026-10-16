@@ -55,6 +55,11 @@ def test_component_evidence_keeps_support_and_contradiction_separate():
 
 def test_decision_evidence_persists_quality_and_watermark_snapshot(pg_db_conn):
     conn = pg_db_conn
+    conn.execute("DELETE FROM market_claim_evidence")
+    conn.execute("DELETE FROM market_claim")
+    conn.execute("DELETE FROM market_evidence")
+    conn.execute("DELETE FROM market_graph_edge")
+    conn.execute("DELETE FROM market_graph_node")
     conn.execute("DELETE FROM market_decision_evidence")
     conn.execute("DELETE FROM market_decision_event")
     conn.execute("DELETE FROM market_data_watermark")
@@ -87,6 +92,9 @@ def test_decision_evidence_persists_quality_and_watermark_snapshot(pg_db_conn):
     event = conn.execute("SELECT * FROM market_decision_event").fetchone()
     evidence = conn.execute("SELECT * FROM market_decision_evidence ORDER BY evidence_key").fetchall()
     outcome = conn.execute("SELECT * FROM market_decision_outcome").fetchone()
+    claim = conn.execute("SELECT * FROM market_claim").fetchone()
+    generic_evidence = conn.execute("SELECT * FROM market_evidence ORDER BY evidence_key").fetchall()
+    claim_links = conn.execute("SELECT * FROM market_claim_evidence ORDER BY evidence_key").fetchall()
     assert count == 1
     assert event["decision_status"] == "advisory"
     assert event["knowledge_cutoff_kind"] == "generation_upper_bound"
@@ -94,6 +102,11 @@ def test_decision_evidence_persists_quality_and_watermark_snapshot(pg_db_conn):
     assert event["quality_snapshot"]["status"] == "warn"
     assert event["data_watermarks"]["status"] == "complete"
     assert {row["relation"] for row in evidence} >= {"supports", "context"}
+    assert claim["predicate"] == "canonical_recommendation"
+    assert claim["claim_status"] == "inferred"
+    assert claim["stance"] == "bullish"
+    assert len(generic_evidence) == len(evidence)
+    assert {row["relation"] for row in claim_links} >= {"supports", "context"}
     assert outcome["label_definition"] == "path_barrier"
     assert outcome["return_pct"] == 1.25
 

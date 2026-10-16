@@ -872,9 +872,12 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'semantic-graph-edge-freshness', label: 'market_graph_edge (typed bitemporal assertions)',
     category: 'reference', critical: false, table: 'market_graph_edge', dateColumn: 'recorded_at',
     nativeDateColumn: true, warnDays: 10, emptyDetail: 'instance graph not materialized yet (run `ontology identity`)' },
-  // market_evidence / market_claim: checks removed 2026-09-30 -- no production code writes them,
-  // so they could only ever warn "empty". Excluded in tableFreshnessCoverage.test.ts, which fails
-  // (and asks for the check back) as soon as record_market_evidence/record_market_claim gets a caller.
+  { id: 'semantic-market-evidence-freshness', label: 'market_evidence (source evidence linked to canonical claims)',
+    category: 'signals', critical: false, table: 'market_evidence', dateColumn: 'recorded_at',
+    nativeDateColumn: true, warnDays: 3, emptyDetail: 'no canonical ranker evidence materialized yet' },
+  { id: 'semantic-market-claim-freshness', label: 'market_claim (status-bearing canonical recommendation claims)',
+    category: 'signals', critical: false, table: 'market_claim', dateColumn: 'recorded_at',
+    nativeDateColumn: true, warnDays: 3, emptyDetail: 'no canonical recommendation claim materialized yet' },
   { id: 'semantic-decision-event-freshness', label: 'market_decision_event (append-only decision contracts)',
     category: 'signals', critical: false, table: 'market_decision_event', dateColumn: 'created_at',
     nativeDateColumn: true, warnDays: 3, emptyDetail: 'no decision evidence bundle emitted yet (deploy the semantic migration, then run the ranker)' },
@@ -884,6 +887,10 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'semantic-decision-outcome-freshness', label: 'market_decision_outcome (realized decision outcomes by label/horizon)',
     category: 'signals', critical: false, table: 'market_decision_outcome', dateColumn: 'created_at',
     nativeDateColumn: true, warnDays: 10, emptyDetail: 'no decision outcome recorded yet (resolve outcomes after the horizon elapses)' },
+  { id: 'technical-signal-observation-freshness', label: 'technical_signal_observations (immutable wide-row mutation ledger)',
+    category: 'signals', critical: false, table: 'technical_signal_observations', dateColumn: 'recorded_at',
+    nativeDateColumn: true, tradingDayAware: true, warnDays: 2, failDays: 5,
+    emptyDetail: 'observation trigger has not journalled a technical_signals mutation yet' },
 ];
 
 /**
