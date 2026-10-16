@@ -11322,3 +11322,25 @@ Audit document: `docs/expert-review-2026-10-15-systems-audit.md`. Ledger: AF-202
   pre-existing server/runtime edits. Restarting `bharat-server` would deploy all of them, so only the
   self-contained Python FCF path was live-run and read back; TypeScript/frontend changes remain locally
   verified until the tree's owners reconcile or authorize the combined deployment.
+
+## 2026-10-16 — signal mutation ledger, decision ontology, and combined deployment
+
+- Closed the remaining architecture finding without replacing the 305-column compatibility surface.
+  Migration `20261015234500` adds an atomic, append-only `technical_signal_observations` journal plus
+  current/write-activity views; PostgreSQL application names identify Python and TypeScript writers.
+  `scripts/build_technical_signals_lineage.py` produces a conservative column-to-writer/reader map.
+- Turned the claim/evidence ontology into a production path. Every canonical recommendation now creates
+  an explicitly inferred claim and candidate-quality component evidence; Why-this-pick consumes this
+  graph without calling component scores facts or probabilities. The latest production batch backfilled
+  2,314 claims, 21,036 evidence rows and 21,036 links; INFY's live tRPC response returned 10 evidence rows.
+- Defined the coverage target around the 22 decision-bearing tables rather than inventing semantics for
+  every operational/history table. Live `ontology coverage --fresh --json` reports 22/22 (100%), zero
+  missing cards/columns/metric sources, and still exposes 196 undocumented non-target tables. Future
+  producer timestamps now report `future` plus `clock_skew_hours`, never a negative age.
+- Full final gates: `tsc` clean; Vitest 221 files, 1,971 passed / 45 skipped; Python 3,775 passed / 266
+  skipped; ontology regression cluster 76/76; production build, schema drift (262/262) and findings check
+  clean. Commit `6e6f1c8f` was deployed by restarting `bharat-server` and `ml-api`; both health probes pass.
+- Production migration/readback: no pending migration; the journal already contained 3,077 observations
+  before a harmless verification update was attributed to `bsi:live-ledger-verify`. The known chatbot
+  503 remains AF-20260828-24/AF-20260905-26: graph is ready but no `GEMINI_API_KEY` is configured, so it
+  cannot be repaired in code or by fabricating a credential.
