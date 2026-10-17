@@ -11402,4 +11402,8 @@ Audit document: `docs/expert-review-2026-10-15-systems-audit.md`. Ledger: AF-202
   268 skipped), live schema drift (262/262), documentation-number check and findings-ledger check
   passed. The only extra recurring-bug scanner flag was an unchanged `date.today()` fallback whose
   production caller already supplies `logical_write_floor`; the scanner is heuristic, not this
-  change's failing gate. The TypeScript digest path requires a post-commit server restart.
+  change's failing gate. Commit `c4b5a975` was deployed after the active `exit-policy-train` job
+  completed successfully. `bharat-server` PM2 uptime 2026-10-17T13:09:49Z postdates the commit,
+  `/api/health` returned `ok`, and a post-restart production-data dry render returned five 2026-10-19
+  picks with the rank disclosure. No Telegram send occurred. The next real 23:15 IST backup remains
+  the evidence required to close AF-20261016-01.
