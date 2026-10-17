@@ -52,6 +52,80 @@ def test_factor_ic_counts_a_symbol_once_when_multiple_sources_flag_it():
     assert result.iloc[0]["ic"] == 1.0
 
 
+def test_preopen_factor_ic_uses_open_to_close_not_already_observed_overnight_gap():
+    symbols = [f"S{i:02d}" for i in range(30)]
+    events = pd.DataFrame({
+        "symbol": symbols,
+        "fwd_ret": list(range(30)),
+        "intraday_ret": list(reversed(range(30))),
+    })
+    factors = pd.DataFrame({"symbol": symbols, "f_preopen_gap_pct": range(30)})
+
+    row = study.factor_ic_table(events, factors).iloc[0]
+
+    assert row["ic"] == -1.0
+    assert row["outcome"] == "open_to_close"
+
+
+def test_cohort_lift_excludes_symbols_outside_point_in_time_eligible_universe():
+    eligible = [f"S{i:02d}" for i in range(40)]
+    ineligible = [f"X{i:02d}" for i in range(40)]
+    events = pd.DataFrame({
+        "source": ["calc_gap_up"] * 12,
+        "symbol": ["S00", "S01", *[f"S{i:02d}" for i in range(30, 40)]],
+    })
+    factors = pd.DataFrame({
+        "symbol": eligible + ineligible,
+        "f_test": list(range(40)) + list(range(100, 140)),
+    })
+
+    result = study.cohort_lift_table(
+        events, factors, eligible_symbols=eligible,
+    )
+
+    row = result.iloc[0]
+    assert row["lift"] == 5.0
+    assert row["universe_n"] == 40
+    assert row["factor_n"] == 40
+
+
+def test_eligible_universe_requires_twenty_prior_clean_bars_and_excludes_etfs(pg_schema):
+    from sqlalchemy import create_engine
+    from pg_test_support import _sa_url
+
+    conn, schema = pg_schema
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date DATE, open FLOAT8, close FLOAT8, "
+                "volume FLOAT8, is_suspect INTEGER)")
+    cur.execute("CREATE TABLE nse_universe_history (symbol TEXT, date DATE, series TEXT)")
+    cur.execute("CREATE TABLE nse_stocks (symbol TEXT PRIMARY KEY, instrument_type TEXT)")
+    days = pd.bdate_range("2026-09-01", periods=21)
+    full = [
+        (symbol, day.date().isoformat(), 100.0 + k, 100.0 + k, 200_000.0, 0)
+        for symbol in ("HISTORICAL_EQ", "KNOWN_ETF")
+        for k, day in enumerate(days)
+    ]
+    short = [
+        ("SHORT_HISTORY", day.date().isoformat(), 100.0 + k, 100.0 + k, 200_000.0, 0)
+        for k, day in enumerate(days[1:])
+    ]
+    cur.executemany("INSERT INTO stock_ohlcv VALUES (%s,%s,%s,%s,%s,%s)", full + short)
+    event_date = days[-1].date().isoformat()
+    cur.executemany("INSERT INTO nse_universe_history VALUES (%s,%s,'EQ')", [
+        (symbol, event_date) for symbol in ("HISTORICAL_EQ", "KNOWN_ETF", "SHORT_HISTORY")
+    ])
+    cur.execute("INSERT INTO nse_stocks VALUES ('KNOWN_ETF','etf')")
+
+    engine = create_engine(_sa_url(schema), future=True)
+    try:
+        result = study.load_eligible_universe(engine, [event_date])
+    finally:
+        engine.dispose()
+
+    assert result["symbol"].tolist() == ["HISTORICAL_EQ"]
+    assert result.iloc[0]["adt20_cr"] > 1.0
+
+
 def test_session_authority_drops_vendor_bars_on_a_non_trading_date():
     events = pd.DataFrame([
         {"source": "calc_gap_up", "trade_date": "2026-07-11", "symbol": "BAD"},

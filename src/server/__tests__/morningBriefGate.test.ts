@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // The 08:20 pre-open brief's input is *supposed* to be last night's 22:30 ranking, so its gate
 // is session-based, not elapsed-hour based. Two inputs are legitimate (mirroring
@@ -44,11 +44,15 @@ const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice
 
 describe('morning-brief gate accepts both legitimate ranking inputs', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-14T02:50:00.000Z')); // 08:20 IST
     store.clear();
     sendMorningBrief.mockReset();
     sendMorningBrief.mockResolvedValue({ sent: true });
     rankingG = minutesAgo(10 * 60); // ~10h old — last night's 22:30 rank read at 08:20
   });
+
+  afterEach(() => vi.useRealTimers());
 
   it('sends on a Monday using Friday session-match: rank stamped with the completed session date', async () => {
     // Friday 2026-10-09 is the latest completed session; Monday morning accepts its 22:30 rank.

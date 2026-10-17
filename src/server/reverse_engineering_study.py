@@ -6,8 +6,8 @@ Answers "why do mover stocks move?" with data instead of folklore:
 For every ground-truth mover day (from `mover_snapshots`), it reconstructs the PRE-EVENT
 state of each stock (features as of T-1 close) from tables we already store, then measures:
 
-  1. Rank-IC  -- Spearman correlation between each factor's T-1 value and the forward
-                 return of the mover cohort (and of the full cross-section).
+  1. Rank-IC  -- Spearman correlation between each factor's T-1 value and the realized
+                 event-day return, reported separately for movers and the eligible cross-section.
   2. Cohort lift -- P(mover | factor in top-quartile) / P(mover | bottom-quartile),
                  per class (gap-up / open_eq_low / volume shocker / breakout / ...).
   3. Engine hit-rate -- what fraction of actual movers our engines had ranked in their
@@ -49,6 +49,7 @@ DEFAULT_MOVER_CLASSES = [
 ]
 
 MIN_ADT_CR = 1.0
+EVENT_PREOPEN_FACTORS = {"f_preopen_gap_pct", "f_preopen_imbalance"}
 
 # ---------------------------------------------------------------------------
 # Config: factor families -> concrete columns that exist today.
@@ -161,7 +162,58 @@ FACTOR_SQL = {
 # Event loading
 # ---------------------------------------------------------------------------
 
+def load_eligible_universe(engine, event_dates) -> pd.DataFrame:
+    """Point-in-time comparison population with a clean outcome and pre-event liquidity.
+
+    Membership comes from NSE's historical bhavcopy, not today's active master.  The current
+    master is used only as a durable instrument-identity veto for known ETFs; an absent master
+    row is retained so delisted equities are not removed retrospectively.
+    """
+    dates = sorted({pd.Timestamp(d).strftime("%Y-%m-%d") for d in event_dates})
+    cols = ["symbol", "trade_date", "fwd_ret", "intraday_ret", "adt20_cr"]
+    if not dates:
+        return pd.DataFrame(columns=cols)
+    history_floor = (pd.Timestamp(dates[0]) - pd.Timedelta(days=60)).strftime("%Y-%m-%d")
+    date_sql = ",".join("'" + d.replace("'", "''") + "'" for d in dates)
+    eligible = pd.read_sql(
+        "WITH bars AS ("
+        " SELECT symbol, date, is_suspect, open, close, volume,"
+        " LAG(close) OVER (PARTITION BY symbol ORDER BY date) AS prev_close,"
+        " LAG(COALESCE(is_suspect, 0)) OVER (PARTITION BY symbol ORDER BY date) AS prev_suspect,"
+        " AVG(CASE WHEN COALESCE(is_suspect, 0)=0 AND close > 0 AND volume IS NOT NULL"
+        "          THEN close * volume END) OVER (PARTITION BY symbol ORDER BY date"
+        "          ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) / 10000000.0 AS adt20_cr,"
+        " COUNT(CASE WHEN COALESCE(is_suspect, 0)=0 AND close > 0 AND volume IS NOT NULL"
+        "            THEN 1 END) OVER (PARTITION BY symbol ORDER BY date"
+        "            ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS adt_obs"
+        f" FROM stock_ohlcv WHERE date >= '{history_floor}' AND date <= '{dates[-1]}'"
+        ") SELECT b.symbol, b.date AS trade_date,"
+        " ROUND(100.0 * (b.close / NULLIF(b.prev_close, 0) - 1)::numeric, 4) AS fwd_ret,"
+        " ROUND(100.0 * (b.close / NULLIF(b.open, 0) - 1)::numeric, 4) AS intraday_ret,"
+        " b.adt20_cr"
+        " FROM bars b"
+        f" WHERE b.date IN ({date_sql})"
+        " AND COALESCE(b.is_suspect, 1)=0 AND COALESCE(b.prev_suspect, 1)=0"
+        " AND b.open > 0 AND b.close > 0 AND b.prev_close > 0 AND b.adt_obs=20"
+        f" AND b.adt20_cr >= {MIN_ADT_CR}"
+        " AND EXISTS (SELECT 1 FROM nse_universe_history u"
+        "             WHERE u.date=b.date AND u.symbol=b.symbol AND u.series='EQ')"
+        " AND NOT EXISTS (SELECT 1 FROM nse_stocks m"
+        "                 WHERE m.symbol=b.symbol AND m.instrument_type='etf')",
+        engine,
+    )
+    if not len(eligible):
+        return pd.DataFrame(columns=cols)
+    eligible["trade_date"] = eligible["trade_date"].astype(str)
+    return eligible.drop_duplicates(["symbol", "trade_date"])[cols]
+
+
 def load_events(days: int, classes: list | None, engine) -> pd.DataFrame:
+    events, _ = load_events_and_universe(days, classes, engine)
+    return events
+
+
+def load_events_and_universe(days: int, classes: list | None, engine):
     """Load unique, liquid, non-suspect ground-truth mover events.
 
     Liquidity is measured only from sessions preceding the event, so the universe filter is
@@ -175,7 +227,7 @@ def load_events(days: int, classes: list | None, engine) -> pd.DataFrame:
                      f"WHERE trade_date >= '{cutoff}' AND source IN ({selected_sql}) "
                      f"ORDER BY trade_date DESC, source, symbol", engine)
     if len(ev) == 0:
-        return ev
+        return ev, pd.DataFrame(columns=["symbol", "trade_date", "fwd_ret", "intraday_ret", "adt20_cr"])
     # A source can be captured repeatedly during a session.  A mover event is one
     # (source, session, symbol), not one row per poll.
     ev = ev.drop_duplicates(["source", "trade_date", "symbol"], keep="last")
@@ -188,32 +240,11 @@ def load_events(days: int, classes: list | None, engine) -> pd.DataFrame:
     dates = pd.read_sql("SELECT DISTINCT date FROM nse_universe_history ORDER BY date", engine)
     ev = _attach_trading_sessions(ev, dates["date"])
     if not len(ev):
-        return ev
+        return ev, pd.DataFrame(columns=["symbol", "trade_date", "fwd_ret", "intraday_ret", "adt20_cr"])
 
-    # Realized outcome and point-in-time universe filters.  The buffer is needed because SQL
-    # window functions only see rows surviving WHERE; without it the first event date had no
-    # prior close or 20-session ADT even when the history existed.
-    # fwd.date arrives as Timestamp (PG DATE) while ev.trade_date is TEXT -- merging
-    # them raw matched NOTHING and silently NaN-ed every outcome (found 2026-08-25).
-    first_event = min(ev["trade_date"])
-    history_floor = (pd.Timestamp(first_event) - pd.Timedelta(days=60)).strftime("%Y-%m-%d")
-    fwd = pd.read_sql(
-        "WITH bars AS ("
-        " SELECT symbol, date, is_suspect, "
-        " ROUND(100.0 * (close / NULLIF(LAG(close) OVER (PARTITION BY symbol ORDER BY date), 0) - 1)::numeric, 4) AS fwd_ret, "
-        " AVG(close * volume) OVER (PARTITION BY symbol ORDER BY date ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) "
-        "   / 10000000.0 AS adt20_cr "
-        f" FROM stock_ohlcv WHERE date >= '{history_floor}'"
-        ") SELECT symbol, date, fwd_ret, adt20_cr, is_suspect FROM bars "
-        f"WHERE date >= '{first_event}'",
-        engine)
-    fwd["date"] = fwd["date"].astype(str)
-    ev = ev.merge(fwd.rename(columns={"date": "trade_date"}),
-                  on=["symbol", "trade_date"], how="left")
-    ev = ev[(ev["is_suspect"].fillna(1) == 0)
-            & (ev["adt20_cr"].fillna(0) >= MIN_ADT_CR)
-            & ev["fwd_ret"].notna()].copy()
-    return ev
+    eligible = load_eligible_universe(engine, ev["trade_date"].unique())
+    ev = ev.merge(eligible, on=["symbol", "trade_date"], how="inner")
+    return ev, eligible
 
 
 def _attach_trading_sessions(ev: pd.DataFrame, session_dates) -> pd.DataFrame:
@@ -306,35 +337,51 @@ def _rank_ic(x: pd.Series, y: pd.Series) -> float:
     return float(xr.corr(yr))
 
 
-def factor_ic_table(ev: pd.DataFrame, fac: pd.DataFrame) -> pd.DataFrame:
+def factor_ic_table(ev: pd.DataFrame, fac: pd.DataFrame,
+                    scope: str = "mover_cohort") -> pd.DataFrame:
     """Per-factor Spearman IC vs realized same-day mover returns (event days)."""
     if not len(ev) or not len(fac):
         return pd.DataFrame()
     # One symbol can appear in several mover sources on the same day.  Counting it once per
     # source would overweight the most duplicated vendor consensus names in the IC.
-    m = ev[["symbol", "fwd_ret"]].drop_duplicates("symbol").merge(
+    outcome_cols = ["symbol", "fwd_ret"]
+    if "intraday_ret" in ev.columns:
+        outcome_cols.append("intraday_ret")
+    m = ev[outcome_cols].drop_duplicates("symbol").merge(
         fac, on="symbol", how="inner")
     rows = []
     for col in [c for c in fac.columns if c.startswith("f_")]:
-        rows.append({"factor": col, "ic": round(_rank_ic(m[col], m["fwd_ret"]), 4),
-                     "n": int((m[col].notna() & m["fwd_ret"].notna()).sum())})
+        if col in EVENT_PREOPEN_FACTORS and "intraday_ret" not in m.columns:
+            continue
+        outcome = ("open_to_close" if col in EVENT_PREOPEN_FACTORS
+                   else "prior_close_to_close")
+        target = "intraday_ret" if outcome == "open_to_close" else "fwd_ret"
+        rows.append({"scope": scope, "factor": col,
+                     "outcome": outcome,
+                     "ic": round(_rank_ic(m[col], m[target]), 4),
+                     "n": int((m[col].notna() & m[target].notna()).sum())})
     out = pd.DataFrame(rows).dropna(subset=["ic"])
     return out.sort_values("ic", ascending=False) if len(out) else out
 
 
 def cohort_lift_table(ev: pd.DataFrame, fac: pd.DataFrame,
-                      classes: list | None = None) -> pd.DataFrame:
+                      classes: list | None = None,
+                      eligible_symbols=None) -> pd.DataFrame:
     """P(class member | factor top-quartile) / P(... | bottom-quartile), per class x factor.
 
     Computed per class so a factor that predicts gap-ups but not breakouts stays visible
     instead of being washed out by aggregation.
     """
+    if eligible_symbols is None:
+        raise ValueError("eligible_symbols is required for an honest cohort denominator")
+    eligible = set(eligible_symbols)
+    fac = fac[fac["symbol"].isin(eligible)].drop_duplicates("symbol").copy()
     if not len(ev) or not len(fac):
         return pd.DataFrame()
     fcols = [c for c in fac.columns if c.startswith("f_")]
     ev_u = ev[["source", "symbol"]].drop_duplicates()
     base_classes = classes or sorted(ev_u["source"].unique())
-    universe_n = max(1, len(fac))
+    universe_n = len(fac)
     rows = []
     for cls in base_classes:
         members = set(ev_u[ev_u["source"] == cls]["symbol"]) & set(fac["symbol"])
@@ -352,9 +399,12 @@ def cohort_lift_table(ev: pd.DataFrame, fac: pd.DataFrame,
             if p_bot <= 0:
                 continue
             rows.append({"class": cls, "factor": col,
+                         "factor_timing": ("event_preopen" if col in EVENT_PREOPEN_FACTORS
+                                           else "prior_close"),
                          "lift": round(p_top / p_bot, 3),
                          "p_top": round(p_top, 4), "p_bot": round(p_bot, 4),
-                         "n_members": len(members)})
+                         "n_members": len(members), "universe_n": universe_n,
+                         "factor_n": int(s.notna().sum())})
     out = pd.DataFrame(rows)
     return out.sort_values("lift", ascending=False) if len(out) else out
 
@@ -364,7 +414,11 @@ def summarize_factor_ic(ic: pd.DataFrame) -> pd.DataFrame:
     if ic is None or not len(ic):
         return pd.DataFrame()
     rows = []
-    for factor, g in ic.groupby("factor"):
+    group_cols = [c for c in ("scope", "outcome", "factor") if c in ic.columns]
+    for keys, g in ic.groupby(group_cols):
+        keys = keys if isinstance(keys, tuple) else (keys,)
+        labels = dict(zip(group_cols, keys))
+        scope, factor = labels.get("scope"), labels["factor"]
         values = pd.to_numeric(g["ic"], errors="coerce").dropna()
         if not len(values):
             continue
@@ -372,7 +426,7 @@ def summarize_factor_ic(ic: pd.DataFrame) -> pd.DataFrame:
         mean = float(values.mean())
         t_stat = (mean / (sd / np.sqrt(len(values)))
                   if len(values) > 1 and np.isfinite(sd) and sd > 0 else float("nan"))
-        rows.append({
+        row = {
             "factor": factor,
             "mean_ic": round(mean, 4),
             "median_ic": round(float(values.median()), 4),
@@ -380,7 +434,12 @@ def summarize_factor_ic(ic: pd.DataFrame) -> pd.DataFrame:
             "dates": int(len(values)),
             "t_stat": round(float(t_stat), 2) if np.isfinite(t_stat) else np.nan,
             "total_n": int(pd.to_numeric(g["n"], errors="coerce").fillna(0).sum()),
-        })
+        }
+        if scope is not None:
+            row = {"scope": scope, **row}
+        if "outcome" in labels:
+            row = {"outcome": labels["outcome"], **row}
+        rows.append(row)
     out = pd.DataFrame(rows)
     return out.sort_values("mean_ic", ascending=False) if len(out) else out
 
@@ -623,16 +682,21 @@ def persist_results(con, run_at: str, ic: pd.DataFrame, lift: pd.DataFrame,
     # these are always DataFrames, so guard on len() instead.
     for _, r in (ic if ic is not None and len(ic) else pd.DataFrame()).iterrows():
         cur.execute(translate("INSERT INTO mover_study_results "
-                              "(run_at, study_kind, factor, metric, value, n_obs) "
-                              "VALUES (?,?,?,?,?,?)"),
-                    (run_at, "factor_ic", r["factor"], "spearman_ic", r["ic"], int(r["n"])))
+                              "(run_at, study_kind, class_name, factor, metric, value, n_obs, detail_json) "
+                              "VALUES (?,?,?,?,?,?,?,?)"),
+                    (run_at, "factor_ic", r.get("scope", "mover_cohort"), r["factor"],
+                     "spearman_ic", r["ic"], int(r["n"]),
+                     json.dumps({"outcome": r.get("outcome", "prior_close_to_close")})))
         n += 1
     for _, r in (lift if lift is not None and len(lift) else pd.DataFrame()).iterrows():
         cur.execute(translate("INSERT INTO mover_study_results "
-                              "(run_at, study_kind, class_name, factor, metric, value, n_obs) "
-                              "VALUES (?,?,?,?,?,?,?)"),
+                              "(run_at, study_kind, class_name, factor, metric, value, n_obs, detail_json) "
+                              "VALUES (?,?,?,?,?,?,?,?)"),
                     (run_at, "cohort_lift", r["class"], r["factor"], "lift_q3_over_q1",
-                     r["lift"], int(r["n_members"])))
+                     r["lift"], int(r["n_members"]),
+                     json.dumps({"factor_timing": r["factor_timing"],
+                                 "universe_n": int(r["universe_n"]),
+                                 "factor_n": int(r["factor_n"])})))
         n += 1
     for _, r in (hits if hits is not None and len(hits) else pd.DataFrame()).iterrows():
         cur.execute(translate("INSERT INTO mover_study_results "
@@ -705,7 +769,7 @@ def write_report(run_at: str, ev: pd.DataFrame, ic: pd.DataFrame, lift: pd.DataF
         f"{ev['source'].nunique() if len(ev) else 0} classes", "",
         "## Event counts by class", "",
         event_counts, "",
-        "## Factor rank-IC vs realized mover returns (per-date aggregate)", "",
+        "## Factor rank-IC vs realized event-day returns (per-date, by population)", "",
         _md_table(ic_summary, max_rows=100), "",
         "## Cohort lift consistency across dates", "",
         _md_table(lift_summary, max_rows=30), "",
@@ -725,6 +789,17 @@ def write_report(run_at: str, ev: pd.DataFrame, ic: pd.DataFrame, lift: pd.DataF
         "wrong realized direction is opposite. Directional precision excludes Hold/missing but "
         "is shown beside total coverage so it cannot be presented as whole-universe accuracy.", "",
         "### How to read this",
+        "- `mover_cohort` IC describes direction within already-selected movers; "
+        "`eligible_universe` IC tests the complete point-in-time liquid equity comparison set.",
+        "- Event-session pre-open factors are measured against open-to-close returns; their "
+        "auction gap is already known at 09:10 and cannot be credited as a forecast of the gap. "
+        "All other factors use prior-close-to-close returns.",
+        "- Cohort lift uses that same eligible universe: NSE EQ membership on the event date, "
+        "known ETFs excluded, a clean current/prior bar, and exactly 20 clean pre-event "
+        f"sessions with ADT of at least Rs {MIN_ADT_CR:g} crore.",
+        "- Event-preopen lift for an open-defined class (for example, gap-up) is descriptive "
+        "of an already-observed auction state, not evidence that the pre-open factor predicted "
+        "the gap before it occurred.",
         "- IC or lift is exploratory until it repeats across enough independent dates; never "
         "change a live weight from one date or a pooled row count.",
         "- Hit-rate near 0% = the engine never saw the mover coming; that gap, not the math, "
@@ -759,10 +834,11 @@ def main():
     def stage(msg):
         print(f"[study] +{time.time() - t0:.1f}s {msg}", file=sys.stderr, flush=True)
 
-    ev = load_events(args.days, classes, engine)
+    ev, eligible = load_events_and_universe(args.days, classes, engine)
     stage(f"events: {len(ev):,} rows across "
           f"{ev['source'].nunique() if len(ev) else 0} classes "
-          f"({ev['trade_date'].nunique() if len(ev) else 0} dates)")
+          f"({ev['trade_date'].nunique() if len(ev) else 0} dates); "
+          f"eligible comparison rows: {len(eligible):,}")
 
     # T-1 factor snapshot per event date (cached: many events share a date)
     fac_frames = {}
@@ -777,12 +853,19 @@ def main():
     ic_parts, lift_parts = [], []
     for (d, event_date), fac in fac_frames.items():
         ev_d = ev[(ev["t1_date"] == d) & (ev["trade_date"] == event_date)]
-        ic_d = factor_ic_table(ev_d, fac)
+        eligible_d = eligible[eligible["trade_date"] == event_date]
+        eligible_symbols = eligible_d["symbol"].tolist()
+        ic_d = pd.concat([
+            factor_ic_table(ev_d, fac, scope="mover_cohort"),
+            factor_ic_table(eligible_d, fac, scope="eligible_universe"),
+        ], ignore_index=True)
         if len(ic_d):
             ic_d.insert(0, "t1_date", d)
             ic_d.insert(1, "event_date", event_date)
         ic_parts.append(ic_d)
-        lift_d = cohort_lift_table(ev_d, fac, classes=classes)
+        lift_d = cohort_lift_table(
+            ev_d, fac, classes=classes, eligible_symbols=eligible_symbols,
+        )
         if len(lift_d):
             lift_d.insert(0, "t1_date", d)
             lift_d.insert(1, "event_date", event_date)

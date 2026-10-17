@@ -41,7 +41,7 @@ Outcome resolution, backtests, model evaluation, and monitoring provide feedback
 operations. Do not assume every source follows this exact path or that a feedback loop is
 autonomous; inspect the relevant writer, consumer, and job before changing one.
 
-This checkout currently has 88 Python `*_fetcher.py` modules and 75 `JOB_REGISTRY` entries
+This checkout currently has 89 Python `*_fetcher.py` modules and 75 `JOB_REGISTRY` entries
 (re-derived 2026-10-14). These are inventory snapshots, not targets or enduring truths; rerun
 `npm run doc:numbers` and `npm run doc:numbers:check` before quoting or updating them.
 

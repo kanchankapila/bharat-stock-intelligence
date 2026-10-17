@@ -60,4 +60,19 @@ describe('morning brief trading-session freshness', () => {
     expect(result.failedSteps.join(' ')).toMatch(/latest completed NSE session/i);
     expect(sendMorningBrief).not.toHaveBeenCalled();
   });
+
+  it('never sends a pre-open brief after the market has opened, even on catch-up', async () => {
+    vi.setSystemTime(new Date('2026-10-14T07:02:00.000Z')); // 12:32 IST
+    rankingGeneratedAt = '2026-10-14T01:41:38.000Z';
+    latestCompletedSession = '2026-10-13';
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    const result = await processMorningBrief({ data: { force: true } }) as {
+      success: boolean;
+      failedSteps: string[];
+    };
+
+    expect(result.success).toBe(false);
+    expect(result.failedSteps.join(' ')).toMatch(/market open/i);
+    expect(sendMorningBrief).not.toHaveBeenCalled();
+  });
 });

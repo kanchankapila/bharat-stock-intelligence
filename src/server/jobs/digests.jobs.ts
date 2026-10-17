@@ -167,6 +167,15 @@ const MORNING_BRIEF_MAX_CALENDAR_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const MORNING_BRIEF_LAST_SENT_KEY = 'morning_brief_last_sent_ranking';
 
 export async function processMorningBrief(job?: { data?: { force?: boolean } }): Promise<DigestJobResult> {
+  // A missed 08:20 slot may be replayed hours later after a restart. Once the NSE opens,
+  // the prior-evening list is no longer a pre-open call and must not be sent under that label.
+  const istClock = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const istMinutes = istClock.getUTCHours() * 60 + istClock.getUTCMinutes();
+  if (istMinutes >= 9 * 60 + 15) {
+    const msg = 'SKIPPED: market open has passed; pre-open brief cannot be sent after 09:15 IST';
+    console.warn('[QUEUE] morning-brief', msg);
+    return { success: false, failedSteps: [msg] };
+  }
   const ur = await dbGet<{ g: string | null; d: string | null }>(
     `SELECT MAX(generated_at)::text AS g,
             (MAX(generated_at) AT TIME ZONE 'Asia/Kolkata')::date::text AS d
