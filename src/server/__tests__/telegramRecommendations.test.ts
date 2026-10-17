@@ -161,6 +161,19 @@ describe('renderDigest', () => {
     expect(text).toContain('Target 8378.24');
   });
 
+  it('warns when the prior session was a one-price bar rather than implying an executable entry', () => {
+    const text = renderDigest(digest({
+      longTerm: [pick({ executionWarning: 'Prior session traded at one price; entry fill is unverified.' })],
+    }));
+    expect(text).toContain('Prior session traded at one price; entry fill is unverified.');
+  });
+
+  it('does not present a Strong Buy label as a calibrated success probability', () => {
+    const text = renderDigest(digest());
+    expect(text).toContain('relative rank, not a calibrated win probability');
+    expect(text).toContain('forward-test verdict');
+  });
+
   it('explains an empty intraday section when the emission gate is closed', () => {
     // Silence here would read as "no setups today" rather than "the engine is suppressed".
     const text = renderDigest(digest({

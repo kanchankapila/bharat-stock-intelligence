@@ -113,6 +113,24 @@ a component conflict to investigate, not proof that confluence predicted the ral
    the unfixed implementation. Other days had only the evening digest; missing morning sends
    are an operational issue, not evidence that an unsent morning list was acted on.
 
+## Follow-up repair on 2026-10-17
+
+The plan replay had treated a one-price entry-session bar as a filled open trade. It now excludes
+those entries from priced outcomes and reports them separately. A live replay since 2026-10-01
+flagged 1 of 257 intraday plans and 15 of 2,463 swing plans; this does **not** certify fills on
+the remaining bars. Random controls must also have an entry bar on the same session and cannot
+use a one-price entry. The daily digest now flags a pick when its previous completed-session
+bar was single-price, without changing its score or rank. The stored HITECHCORP 2026-10-16
+call reads the 2026-10-15 one-price bar and triggers that flag. The digest also explains that
+the unified Buy/Strong Buy rating is a relative rank, not a calibrated win probability.
+
+Readback of `job_run_history` clarifies the missing morning deliveries: no `morning-brief` run
+is stored for 2026-10-07 or 2026-10-08, so the cause on those dates is not established; the
+2026-10-12 run failed its then-20-hour freshness gate after the weekend; and 2026-10-14 failed
+at 08:20 before a 12:32 catch-up sent. The current gate is trading-session-based and the
+after-open send guard is deployed. None of these unsent sessions is counted as a published
+recommendation above.
+
 This audit does not claim a particular news event, corporate action, or factor caused each
 contrary stock move. The stored pre-call signals show what the system knew; causal attribution
 would require event timestamps and independent controls. Rewriting the ranker from the losing

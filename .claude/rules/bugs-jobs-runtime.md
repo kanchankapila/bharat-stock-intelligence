@@ -395,6 +395,13 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   **Rule:** a schedule-window guard must pair with an overdue-catch-up path that keys on the artifact's
   own age (newest dump older than 26 h) and still refuses market hours. Verify by reading the job log
   for a gap in slots, not the heartbeat. AF-20261015-08.
+- **A one-shot PM2 backup can begin just before its own `cron_restart` and race a second launch
+  (three observed nights, 2026-10-10/11/15).** A permissive five-minute schedule window admitted
+  `pg_dump` at 23:14:59; PM2 restarted the app at 23:15:00-02, so two start lines appeared and the
+  first dump could be interrupted. Hold a pre-boundary launch past the observed restart jitter and
+  take an OS-released cross-process lock before dumping; a stale PID/file-existence check is not
+  sufficient. Verify the next actual scheduled slot has one start, one verified dump and one success
+  heartbeat before closing the incident. AF-20261016-01.
 - **A timeout bump is not a fix for a job whose cost has a per-iteration plan problem.**
   `mover-study-weekly` went 30 -> 45 min while one CTE was inlined with a 2-row estimate (actual ~100k)
   and rescanned the window per symbol for each of 166 dates (7.9-11.4 s vs 0.22 s `MATERIALIZED`). The

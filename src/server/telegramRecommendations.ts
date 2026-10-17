@@ -40,6 +40,7 @@ export interface Pick {
   screeners: string[];
   screenerCount: number;
   engineCoverage: number | null;
+  executionWarning?: string | null;
   source: 'unified' | 'intraday';
 }
 
@@ -115,17 +116,32 @@ const BUY_CLASSIFICATIONS = ['Strong Buy', 'Buy'];
 
 export async function fetchLongTermPicks(limit = MAX_PICKS_PER_HORIZON): Promise<Pick[]> {
   const rows = await dbAll<any>(
-    `SELECT symbol, unified_score, conviction_level, classification, timeframe,
-            entry_zone_low, entry_zone_high, stop_loss, target_1, risk_reward, sector,
-            trade_reasoning, screener_names_json, engine_coverage_count, bullish_screener_count
-       FROM unified_recommendations
-      WHERE substring(computed_at, 1, 10) = (
-              SELECT max(substring(computed_at, 1, 10)) FROM unified_recommendations)
-        AND classification IN (?, ?)
-        AND valid_until > CURRENT_TIMESTAMP
-        AND COALESCE(upper(timeframe), 'POSITIONAL') <> 'INTRADAY'
-      ORDER BY unified_score DESC
-      LIMIT ?`,
+    `WITH picks AS (
+       SELECT symbol, computed_at, unified_score, conviction_level, classification, timeframe,
+              entry_zone_low, entry_zone_high, stop_loss, target_1, risk_reward, sector,
+              trade_reasoning, screener_names_json, engine_coverage_count, bullish_screener_count
+         FROM unified_recommendations
+        WHERE substring(computed_at, 1, 10) = (
+                SELECT max(substring(computed_at, 1, 10)) FROM unified_recommendations)
+          AND classification IN (?, ?)
+          AND valid_until > CURRENT_TIMESTAMP
+          AND COALESCE(upper(timeframe), 'POSITIONAL') <> 'INTRADAY'
+        ORDER BY unified_score DESC
+        LIMIT ?
+     )
+     SELECT picks.*,
+            (pb.date = (SELECT max(date) FROM stock_ohlcv
+                         WHERE symbol = 'NIFTY50' AND date < substring(picks.computed_at, 1, 10)::date)
+             AND COALESCE(pb.is_suspect, 1) = 0 AND pb.volume > 0
+             AND pb.open = pb.high AND pb.high = pb.low AND pb.low = pb.close) AS prior_single_price
+       FROM picks
+       LEFT JOIN LATERAL (
+         SELECT date, open, high, low, close, volume, is_suspect
+           FROM stock_ohlcv
+          WHERE symbol = picks.symbol AND date < substring(picks.computed_at, 1, 10)::date
+          ORDER BY date DESC LIMIT 1
+       ) pb ON TRUE
+      ORDER BY picks.unified_score DESC`,
     [...BUY_CLASSIFICATIONS, limit],
   );
   return rows.map((r) => {
@@ -145,6 +161,9 @@ export async function fetchLongTermPicks(limit = MAX_PICKS_PER_HORIZON): Promise
       screeners: scr.names,
       screenerCount: r.bullish_screener_count ?? scr.count,
       engineCoverage: r.engine_coverage_count,
+      executionWarning: r.prior_single_price === true
+        ? 'Prior session traded at one price; entry fill is unverified.'
+        : null,
       source: 'unified' as const,
     };
   });
@@ -300,6 +319,8 @@ function renderPick(p: Pick, idx: number): string {
   if (p.engineCoverage != null) scoreBits.push(`${p.engineCoverage}/7 engines`);
   if (scoreBits.length) lines.push(`📊 ${scoreBits.join(' · ')}`);
 
+  if (p.executionWarning) lines.push(`⚠️ ${sanitizeMarkdown(p.executionWarning)}`);
+
   if (p.entry != null || p.stopLoss != null || p.target != null) {
     const rr = p.riskReward != null && Number.isFinite(p.riskReward)
       ? ` · R:R ${p.riskReward.toFixed(2)}`
@@ -354,6 +375,7 @@ export function renderDigest(d: DigestData): string {
 
   out.push('\n━━━━━━━━━━━━━━━━━━━━');
   out.push(`_${d.totalBuys} buy-rated stocks in today's full ranking._`);
+  out.push('_The unified Buy / Strong Buy rating is a relative rank, not a calibrated win probability; check the forward-test verdict before acting._');
   out.push('_Research output, not investment advice. Verify before trading._');
   return out.join('\n\n');
 }

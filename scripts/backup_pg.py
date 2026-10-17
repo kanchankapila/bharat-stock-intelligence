@@ -7,8 +7,8 @@ compressed, and restorable selectively with pg_restore.
 
   Backup (default):   python scripts/backup_pg.py
                       -> backups/bharat_intel_YYYYMMDD_HHMMSS.dump  (keeps last N)
-                      Only runs within ~90 min of its scheduled 23:15 IST cron_restart fire --
-                      pass --force to run it manually at any other time.
+                      Runs near its 23:15 IST cron_restart fire, or catches up a backup
+                      older than 26 hours outside market hours; --force bypasses the gate.
   List a dump's TOC:  python scripts/backup_pg.py --list <file>
   Restore (DESTRUCTIVE, requires --yes):
                       python scripts/backup_pg.py --restore <file> --yes
@@ -33,6 +33,7 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -58,6 +59,51 @@ _SCHEDULE_IST_HOUR, _SCHEDULE_IST_MINUTE = 23, 15
 # land inside BOTH jobs' acceptance windows at once. See the TS twin's isWithinScheduleWindow
 # doc comment (market-calendar/session-calendar.ts) for the full reasoning.
 _SCHEDULE_TOLERANCE_MINUTES = 5
+_POST_CRON_SETTLE_SECONDS = 60  # observed PM2 launches as late as 23:15:17
+
+
+def _pre_cron_delay_seconds(now_ist: datetime) -> float:
+    """Hold an early PM2 launch past the cron boundary so cron_restart cannot kill a live dump."""
+    target = now_ist.replace(hour=_SCHEDULE_IST_HOUR, minute=_SCHEDULE_IST_MINUTE,
+                             second=0, microsecond=0)
+    early = (target - now_ist).total_seconds()
+    return early + _POST_CRON_SETTLE_SECONDS if 0 < early <= _SCHEDULE_TOLERANCE_MINUTES * 60 else 0.0
+
+
+@contextmanager
+def _backup_lock(path: Path, wait_seconds: float = 30):
+    """OS-released, cross-process lock; a crashed backup cannot strand the next night."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o600), "r+b") as fh:
+        if os.fstat(fh.fileno()).st_size == 0:
+            fh.write(b"\0")
+            fh.flush()
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            fh.seek(0)
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    yield False
+                    return
+                time.sleep(0.2)
+        try:
+            yield True
+        finally:
+            fh.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 def _is_within_schedule_window() -> bool:
@@ -154,6 +200,18 @@ def backup() -> None:
             "registration/restart launch, not the real cron fire. Skipping (pass --force to run manually)."
         )
         return
+    with _backup_lock(BACKUP_DIR / f".{PG_DB}.backup.lock") as acquired:
+        if not acquired:
+            print("[BACKUP] another backup holds the lock; duplicate launch skipped")
+            return
+        delay = _pre_cron_delay_seconds(datetime.now(timezone.utc) + timedelta(hours=5, minutes=30))
+        if delay:
+            print(f"[BACKUP] early cron-boundary launch; waiting {delay:.1f}s before dumping")
+            time.sleep(delay)
+        _backup_under_lock()
+
+
+def _backup_under_lock() -> None:
     _check_container()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")

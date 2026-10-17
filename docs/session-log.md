@@ -11373,3 +11373,33 @@ Audit document: `docs/expert-review-2026-10-15-systems-audit.md`. Ledger: AF-202
 - Verification: live-source contracts 13/13; TypeScript clean; Vitest 1,973 passed / 45 skipped; Python 3,728
   passed / 267 skipped; chatbot 52/52; schema drift clean (262/262); findings check clean. The migrations and
   reconciliation were applied and queried back in production before this entry was written.
+
+## 2026-10-17 — two-week digest reverse audit and execution-honesty repairs
+
+- Reconstructed Oct 5–16 digest decisions from production history rather than treating same-day
+  high/low as a trade result. The audit found 50 published Buy-side calls, 14 adverse same-day lows,
+  and 19 losing five-session outcomes among 25 matured calls; those observations do not establish a
+  ranking edge or justify score changes. The Sell grid was not Telegram-published. Detailed cases,
+  caveats and the frozen forward-test boundary are in `docs/digest-reverse-audit-2026-10-17.md`.
+- Corrected the plan replay's execution assumptions (`src/server/plan_outcome_report.py`): a one-price
+  entry bar is reported as fill-unverified instead of counted as an open fill; a missing session
+  truncates the first-touch path; picks and random controls need an actual, non-one-price bar on the
+  exact NIFTY50 entry session. Index volume is not a calendar gate: the real Oct 16 NIFTY50 bar has
+  normal prices but volume zero. Live replay since Oct 1 found 1/257 intraday and 15/2463 swing
+  entry bars in the fill-unverified category.
+  The replay remains a shape diagnostic, not an edge proof (overlap and liquidity limitations).
+- The evening digest now labels Buy/Strong Buy as a relative rank, not a calibrated win probability,
+  and warns when the prior completed session's stock bar was one-price (`src/server/telegramRecommendations.ts`).
+  A production-data dry render returned five current picks and the rank disclosure; no Telegram
+  message was sent. HITECHCORP's Oct 15 bar is a historical positive test case, while its latest
+  Oct 16 prior bar correctly clears the warning.
+- Traced three nights of duplicate backup starts to the PM2 23:15 boundary. `scripts/backup_pg.py`
+  now waits past an early cron-boundary launch and uses a cross-process OS lock. The real next slot
+  must still prove one start, one verified dump and one success heartbeat; AF-20261016-01 stays open.
+  Regression tests cover the lock and delay. New recurrence signature is in
+  `.claude/rules/bugs-jobs-runtime.md`; ledger rows AF-20261017-03..05 hold the evidence and status.
+- Verification: TypeScript type check, Vitest (1,979 passed / 45 skipped), Python (3,742 passed /
+  268 skipped), live schema drift (262/262), documentation-number check and findings-ledger check
+  passed. The only extra recurring-bug scanner flag was an unchanged `date.today()` fallback whose
+  production caller already supplies `logical_write_floor`; the scanner is heuristic, not this
+  change's failing gate. The TypeScript digest path requires a post-commit server restart.

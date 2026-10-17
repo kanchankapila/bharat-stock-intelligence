@@ -318,3 +318,11 @@ network policy (AF-20260928-10), so no connector in this batch has seen a live r
 ## 2026-10-08 (evening) - expert review
 - Read `docs/expert-review-2026-10-08.md` first. Ledger AF-20261008-11..28. Fixes are in the working tree, uncommitted and undeployed (frontend build + `pm2 restart bharat-server` needed; Python writers pick up on next run).
 - The ranking edge is thin and unproven (one falling tape); the plan layer loses money; the calibrated probability is a rank. Do not reweight; shadow arms are the arbiter (2027-02-26).
+
+## 2026-10-17 — daily digest reverse audit and fillability checks
+
+- Live Oct 5–16 digest history yielded 50 Buy-side calls, 14 adverse same-day lows, and 19/25 matured five-session losers. These are adverse-case diagnostics, not proof that a score rewrite improves expected net returns; retain the frozen forward-test promotion boundary.
+- Plan replay no longer counts a one-price entry bar as an assumed fill or infers first touch across a missing bar. Picks and random controls need a bar on the exact NIFTY50 entry session. The live Oct 16 NIFTY50 bar has valid prices but zero index volume, so volume cannot gate the session calendar. The replay still lacks a liquidity floor and uses overlapping dates; no alpha claim is warranted.
+- Digest wording now discloses that Buy/Strong Buy is a relative rank, and flags a known one-price prior session. The current five-pick production dry render includes the disclosure. It cannot know the future entry day's fillability.
+- Backup logs showed duplicate starts at the 23:15 PM2 cron boundary on three nights. A delayed pre-boundary launch and cross-process OS lock are in code, but the next actual scheduled slot is required to close AF-20261016-01. Never equate a green unit test with a verified dump.
+- No new Claude memory topic was created: the durable rules already live in the repo's measurement and job-runtime rules; this journal preserves the session-specific evidence.

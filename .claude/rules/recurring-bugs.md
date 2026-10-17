@@ -54,6 +54,7 @@ This file used to hold every class (~127 KB) and loaded on the first `.py`/`.ts`
 | Fresh-but-meaningless features: forward-filled countdowns, partial-day `MAX(date)` joins, `mcsymbol` SQL joins, dict-row DataFrame NaN, fixes in unrouted components (2026-10-08) | `bugs-data-layer.md` |
 | Declared corporate action with no clean ratio left as a fake -90% return; priced-but-unlisted alias symbols ranked as separate stocks; float32 price storage (2026-10-15) | `bugs-data-layer.md` |
 | Off-schedule guard discarding the post-outage catch-up; timeout bumped instead of a per-iteration plan fix (2026-10-15) | `bugs-jobs-runtime.md` |
+| One-shot PM2 backup starting before its own `cron_restart` and racing a second dump (2026-10-17) | `bugs-jobs-runtime.md` |
 | A check keyed on the latest session firing before its closer's slot; a status registry that can only say "working" (2026-10-15) | `bugs-monitoring.md` |
 | Truncate-then-compute script emptying a shared file; classifier-refused production writes and conditional approvals (2026-10-15) | `bugs-testing-env.md` |
 

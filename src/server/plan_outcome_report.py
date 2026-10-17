@@ -10,6 +10,8 @@ platform's round-trip cost. Read-only; it writes nothing and adds no table.
 A control re-runs the same stop/target ATR multiples on random OTHER symbols the same session,
 because a net return alone cannot say whether the picks or merely the geometry lost money.
 Overlapping dates and no liquidity floor: a shape, not an edge claim (see measurement.md).
+Even a normal OHLC bar cannot prove a fill. A one-price entry bar is especially ambiguous and
+is excluded from the priced replay, with its count reported separately.
 
     python src/server/plan_outcome_report.py [--since 2026-08-01] [--classes Buy,"Strong Buy"]
 """
@@ -33,6 +35,12 @@ def plan_valid_at_open(entry, stop, target):
     return stop < entry < target
 
 
+def single_price_entry(bar):
+    """A one-price entry bar gives no evidence that a new buy order could fill at its open."""
+    _, open_px, high, low, close = bar
+    return open_px == high == low == close
+
+
 def scale_levels(entry, stop, target, stop_scale=1.0, target_scale=1.0):
     """Re-place a plan's stop and target at a multiple of their published distance from entry."""
     return entry - (entry - stop) * stop_scale, entry + (target - entry) * target_scale
@@ -41,6 +49,8 @@ def scale_levels(entry, stop, target, stop_scale=1.0, target_scale=1.0):
 def grade_plan(bars, entry, stop, target, window_complete):
     """bars: [(date, open, high, low, close)] for the holding window, entry session first.
     Returns (outcome, net_return_pct) or None while the window is still running."""
+    if bars and single_price_entry(bars[0]):
+        return None
     r = close_swing(bars, entry, target, stop, window_complete)
     if r is None:
         return None
@@ -67,9 +77,19 @@ def _atr_pct(bars_by_day, sessions, day, n=14):
 def _window(bars_by_day, sessions, day, h):
     i0 = bisect.bisect_left(sessions, day)
     win = sessions[i0:i0 + h]
-    complete = len(win) == h
-    rows = [(d,) + bars_by_day[d] for d in win if d in bars_by_day]
+    rows = []
+    for d in win:
+        if d not in bars_by_day:
+            break  # a later target/stop cannot be called the first touch across an unknown day
+        rows.append((d,) + bars_by_day[d])
+    complete = len(win) == h and len(rows) == h
     return rows, complete
+
+
+def _entry_session_index(sessions, day):
+    """A dated recommendation may enter only on that exact completed market session."""
+    idx = bisect.bisect_left(sessions, day)
+    return idx if idx < len(sessions) and sessions[idx] == day else None
 
 
 def _summarise(label, results):
@@ -92,7 +112,9 @@ def run(conn, since, classes, seed=7, controls=5, stop_scale=1.0, target_scale=1
           AND timeframe IS NOT NULL AND computed_at::text >= ?
     """.format(marks=','.join('?' * len(classes))), (*classes, since)).fetchall()
     sessions = [str(r[0]) for r in conn.execute(
-        "SELECT DISTINCT date FROM stock_ohlcv WHERE date >= CAST(? AS date) - 30 ORDER BY 1", (since,)).fetchall()]
+        "SELECT DISTINCT date FROM stock_ohlcv WHERE symbol = 'NIFTY50' "
+        "AND date >= CAST(? AS date) - 30 AND COALESCE(is_suspect, 0) = 0 "
+        "ORDER BY 1", (since,)).fetchall()]
     bars = defaultdict(dict)
     for s, d, o, h, l, c in conn.execute(
             "SELECT symbol, date, open, high, low, close FROM stock_ohlcv "
@@ -100,17 +122,21 @@ def run(conn, since, classes, seed=7, controls=5, stop_scale=1.0, target_scale=1
         bars[s][str(d)] = (float(o), float(h), float(l), float(c))
     universe = list(bars)
 
-    got, ctrl, invalid, total = defaultdict(list), defaultdict(list), defaultdict(int), defaultdict(int)
+    got, ctrl, invalid, single_price, total = (defaultdict(list), defaultdict(list),
+                                               defaultdict(int), defaultdict(int), defaultdict(int))
     for sym, day, tf, sl, t1, lo, hi in picks:
         h = HORIZON_SESSIONS.get(tf)
         day = day[:10]
         if not h or sym not in bars:
             continue
-        i0 = bisect.bisect_left(sessions, day)
-        if i0 >= len(sessions) or sessions[i0] not in bars[sym]:
+        i0 = _entry_session_index(sessions, day)
+        if i0 is None or day not in bars[sym]:
             continue
-        entry = bars[sym][sessions[i0]][0]
+        entry = bars[sym][day][0]
         total[tf] += 1
+        if single_price_entry((day, *bars[sym][day])):
+            single_price[tf] += 1
+            continue
         if not plan_valid_at_open(entry, float(sl), float(t1)):
             invalid[tf] += 1
             continue
@@ -128,7 +154,7 @@ def run(conn, since, classes, seed=7, controls=5, stop_scale=1.0, target_scale=1
             o = rnd.choice(universe)
             ao = _atr_pct(bars[o], sessions, day)
             rows_o, complete_o = _window(bars[o], sessions, day, h)
-            if not ao or not rows_o:
+            if not ao or not rows_o or rows_o[0][0] != day or single_price_entry(rows_o[0]):
                 continue
             e_o = rows_o[0][1]
             cr = grade_plan(rows_o, e_o, e_o * (1 - sm * ao), e_o * (1 + tm * ao), complete_o)
@@ -140,6 +166,7 @@ def run(conn, since, classes, seed=7, controls=5, stop_scale=1.0, target_scale=1
         lines.append(_summarise(f'PICKS   {tf}', got[tf]))
         lines.append(_summarise(f'CONTROL {tf} (same ATR geom)', ctrl[tf]))
         lines.append(f'   plan already invalid at the entry open: {invalid[tf]}/{total[tf]}')
+        lines.append(f'   fill unverified on a single-price entry bar: {single_price[tf]}/{total[tf]}')
     return '\n'.join(lines)
 
 

@@ -43,6 +43,10 @@ class TestGradePlan:
     def test_incomplete_window_is_not_graded(self):
         assert por.grade_plan(bars((100, 104, 98, 102)), 100.0, 95.0, 110.0, False) is None
 
+    def test_single_price_entry_is_not_priced_as_a_filled_trade(self):
+        assert por.grade_plan(bars((105, 105, 105, 105), (105, 112, 103, 111)),
+                              105.0, 100.0, 110.0, True) is None
+
 
 class TestPlanValidAtEntry:
     def test_open_inside_the_band_is_valid(self):
@@ -55,6 +59,10 @@ class TestPlanValidAtEntry:
     def test_missing_levels_are_not_valid(self):
         assert por.plan_valid_at_open(100.0, None, 110.0) is False
 
+    def test_single_price_entry_is_not_assumed_fillable(self):
+        assert por.single_price_entry(('2026-09-01', 105.0, 105.0, 105.0, 105.0)) is True
+        assert por.single_price_entry(('2026-09-01', 105.0, 106.0, 104.0, 105.0)) is False
+
 
 class TestScaleLevels:
     def test_identity_scale_keeps_the_published_levels(self):
@@ -63,3 +71,20 @@ class TestScaleLevels:
     def test_scales_each_distance_from_entry_independently(self):
         stop, target = por.scale_levels(100.0, 95.0, 110.0, stop_scale=0.5, target_scale=2.0)
         assert (round(stop, 6), round(target, 6)) == (97.5, 120.0)
+
+
+def test_missing_symbol_bar_does_not_complete_a_market_session_window():
+    sessions = ['2026-09-01', '2026-09-02', '2026-09-03']
+    by_day = {
+        '2026-09-01': (100.0, 102.0, 99.0, 101.0),
+        '2026-09-03': (104.0, 106.0, 103.0, 105.0),
+    }
+    rows, complete = por._window(by_day, sessions, '2026-09-01', 3)
+    assert len(rows) == 1, 'a later touch cannot be graded across an unobserved session'
+    assert complete is False
+
+
+def test_recommendation_cannot_enter_on_next_available_session():
+    sessions = ['2026-09-01', '2026-09-03']
+    assert por._entry_session_index(sessions, '2026-09-02') is None
+    assert por._entry_session_index(sessions, '2026-09-03') == 1
