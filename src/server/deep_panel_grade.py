@@ -272,6 +272,20 @@ def load_panel(conn, start, end) -> pd.DataFrame:
     return p
 
 
+def benchmark_clip_effect(panel, horizons=HORIZONS) -> str:
+    """Winsorising removes the right tail the median-beater trap lives in; show how much of the universe MEAN it removes."""
+    sub = panel[tier_mask(panel, "ADT>=1cr")]
+    lines = ["| label | per-date universe mean, raw | winsorised 1%/99% | per-date median | share of raw mean removed |", "|---|---|---|---|---|"]
+    for h, col, _ in _arms(sub, horizons):
+        d = pd.DataFrame({"date": sub["date"], "raw": sub[col].replace([np.inf, -np.inf], np.nan), "w": winsorise_returns(sub[col])}).dropna()
+        gm = d.groupby("date")
+        raw, w, med = gm["raw"].mean().mean() * 100, gm["w"].mean().mean() * 100, gm["raw"].median().mean() * 100
+        lines.append(f"| {col} | {raw:+.3f}% | {w:+.3f}% | {med:+.3f}% | {(1 - w / raw) if raw else float('nan'):.0%} |")
+    lines.append("\nAF-20261008-29 / factor_backtest quote the raw universe mean 1.4532%/21d period. Every `mean_benchmark_excess` "
+                 "here is against the winsorised tier mean, so the median-beater flag is a LOWER bound on the trap.")
+    return "\n".join(lines)
+
+
 def convention_check(panel) -> str:
     both = panel[["target_ret_5d", "_chk5"]].dropna()
     if both.empty:
@@ -411,10 +425,13 @@ def main(argv=None) -> int:
             f"\n\nAmbiguous (reported, not guessed): {rep['ambiguous']}\n\nUnresolved: {rep['unresolved']}\n\n"
             f"Series span {first}..{last}; uncovered dates are skipped (fno_covered False)."),
         "Label convention check": convention_check(panel),
+        "Benchmark winsorisation effect (ADT>=1cr)": benchmark_clip_effect(panel),
         "atr_pct on the 2024+ window": atr_pct_audit(conn, panel, a.start, a.end),
     }
-    header = (f"Window {a.start}..{a.end}; panel {len(panel):,} rows; composite = equal-weight 47-column PINNED set "
-              f"(see deep_panel_score), z-scored over the whole universe each date, then graded within tier.")
+    header = (f"Window {a.start}..{a.end}; panel {len(panel):,} rows; composite = equal-weight over the "
+              f"{len({c for grp in FACTOR_GROUPS.values() for c in grp})} scored columns of the 47-column PINNED set (13 are excluded as price-level or "
+              f"market-wide, see deep_panel_score), z-scored over the whole universe each date, then graded within tier. "
+              f"Panel = feature_store symbols with a daily row, not AF-20261008-29's 3,491-symbol survivorship-reduced panel.")
     v, ctrl = run(panel, score, a.out, notes, header)
     pd.set_option("display.width", 250)
     print(v[v["horizon"] == 5][["tier", "label_col", "rank_ic", "hit_auc", "dates", "eff_dates", "symbols", "verdict",
