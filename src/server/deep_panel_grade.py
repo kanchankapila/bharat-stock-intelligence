@@ -44,7 +44,8 @@ OPEN_ARM = "fwd_open_5d"
 ROW_ORDER = (
     "tier", "horizon", "label_col", "label_convention", "rank_ic", "ic_t_eff", "hit_auc", "n", "dates", "eff_dates",
     "symbols", "verdict", "median_benchmark_excess", "mean_benchmark_excess", "mean_excess_net_pct",
-    "mean_excess_t_eff", "median_beater_flag", "zero_share_max", "zero_share_max_col", "contemporaneity", "span",
+    "mean_excess_t_eff", "median_beater_flag", "median_benchmark_excess_raw", "mean_benchmark_excess_raw",
+    "t_eff_raw", "median_beater_flag_raw", "zero_share_max", "zero_share_max_col", "contemporaneity", "span",
     "fno_span", "fno_match_rate", "fno_match_rate_by_date",
 )
 
@@ -145,6 +146,10 @@ def grade_tier(panel, score, tier, horizons=HORIZONS) -> list[dict]:
         else:
             mic, auc, n, dates, symbols = res
         med_x, mean_x, t_x = _topdecile_excess(d, key, h, MIN_SYMBOLS_XS)
+        # Same books, UNclipped returns. factor_backtest benchmarks the raw universe mean, so this is the column
+        # comparable with the record; the winsorised one shows how much of a t depends on the clipping.
+        d_raw = d.assign(**{key: sub[col].replace([np.inf, -np.inf], np.nan).reindex(d.index)})
+        med_r, mean_r, t_r = _topdecile_excess(d_raw, key, h, MIN_SYMBOLS_XS)
         rows.append({
             "tier": tier, "horizon": h, "label_col": col, "label_convention": conv,
             "rank_ic": mic, "ic_t_eff": _ic_t_eff(d, key, h, MIN_SYMBOLS_XS) if res else float("nan"),
@@ -154,6 +159,8 @@ def grade_tier(panel, score, tier, horizons=HORIZONS) -> list[dict]:
             "mean_excess_net_pct": mean_x - ROUND_TRIP_COST_PCT, "mean_excess_t_eff": t_x,
             # +IC machinery beside a book that loses to the universe MEAN: right skew sits in the names the score avoids.
             "median_beater_flag": bool(med_x > 0 and mean_x < 0),
+            "median_benchmark_excess_raw": med_r, "mean_benchmark_excess_raw": mean_r, "t_eff_raw": t_r,
+            "median_beater_flag_raw": bool(med_r > 0 and mean_r < 0),
             "zero_share_max": zmax, "zero_share_max_col": zcol, "contemporaneity": contemp,
             "span": f"{d['date'].min():%Y-%m-%d}..{d['date'].max():%Y-%m-%d}" if len(d) else "",
             "fno_span": fno_span, "fno_match_rate": fno_rate, "fno_match_rate_by_date": fno_rate_d,
@@ -342,14 +349,46 @@ def _table(df, cols):
         out.append("| " + " | ".join(
             _fmt(r[c], "+.4f") if c == "rank_ic" else
             _fmt(r[c], ".3f") if c in ("hit_auc", "contemporaneity", "zero_share_max") else
-            _fmt(r[c], "+.3f") if c in ("median_benchmark_excess", "mean_benchmark_excess", "mean_excess_net_pct", "ic_t_eff", "mean_excess_t_eff") else
+            _fmt(r[c], "+.3f") if c in ("median_benchmark_excess", "mean_benchmark_excess", "mean_excess_net_pct", "ic_t_eff", "mean_excess_t_eff",
+                                         "median_benchmark_excess_raw", "mean_benchmark_excess_raw", "t_eff_raw") else
             _fmt(r[c], ".1f") if c == "eff_dates" else str(r[c]) for c in cols) + " |")
     return "\n".join(out)
 
 
+def interpretation(v) -> str:
+    """Two readings the `no edge` label hides, generated from the rows so they cannot drift from the table."""
+    out = []
+    sig = v[(v["rank_ic"] > 0) & (v["ic_t_eff"] > 2)]
+    tiers = list(dict.fromkeys(sig["tier"]))
+    best = v.loc[v["rank_ic"].idxmax()] if len(v) else None
+    out.append(
+        f"**IC significance vs the USABLE gate.** {len(sig)} of {len(v)} tier/horizon cells have a positive rank IC "
+        f"distinguishable from zero (t_eff > 2), in {len(tiers)} tiers ({', '.join(tiers) or 'none'}). The verdict vocabulary is "
+        "factor_edge's, unchanged: USABLE needs |IC| >= 0.03 AND AUC >= 0.55. "
+        + (f"The largest IC here is {best['rank_ic']:+.4f} ({best['tier']}, {best['horizon']}d) with AUC {best['hit_auc']:.3f}; "
+           f"the best AUC anywhere is {v['hit_auc'].max():.3f}. " if best is not None else "")
+        + "So `no edge` on these rows means the signal is real but economically far below the gate (reaching AUC 0.55 takes "
+        "an IC roughly 0.1), NOT that it is indistinguishable from zero. A small significant IC and a book that does not clear "
+        "the universe mean are different findings, and this run reports both.")
+    dep = v[(v["mean_excess_t_eff"] >= 3.33) & (v["t_eff_raw"] < 2)]
+    if len(dep):
+        out.append(
+            "**Winsorisation-dependent cells.** These clear t 3.33 (the AF-20261008-31 Bonferroni bar) only on clipped returns "
+            "and do NOT clear t 2 on raw returns, so they are noise that clipping made look significant, not a departure "
+            "from the record: " + "; ".join(
+                f"{r.tier} {r.horizon}d {r.label_col} (winsorised t {r.mean_excess_t_eff:+.2f} -> raw t {r.t_eff_raw:+.2f}, "
+                f"mean excess {r.mean_benchmark_excess:+.3f}% -> raw {r.mean_benchmark_excess_raw:+.3f}%)" for r in dep.itertuples()) + ".")
+    raw_flag = v[v["median_beater_flag_raw"]]
+    out.append(f"**Median-beater, raw returns:** {len(raw_flag)} of {len(v)} rows"
+               + (" (" + ", ".join(f"{r.tier} {r.horizon}d" for r in raw_flag.itertuples()) + ")" if len(raw_flag) else "")
+               + f"; winsorised: {int(v['median_beater_flag'].sum())}.")
+    return chr(10).join(x + chr(10) for x in out)
+
+
 def render_report(v, ctrl, notes, header="") -> str:
     cols = ["tier", "horizon", "label_col", "rank_ic", "ic_t_eff", "hit_auc", "n", "dates", "eff_dates", "symbols", "verdict",
-            "median_benchmark_excess", "mean_benchmark_excess", "mean_excess_net_pct", "mean_excess_t_eff", "median_beater_flag"]
+            "median_benchmark_excess", "mean_benchmark_excess", "mean_excess_net_pct", "mean_excess_t_eff", "median_beater_flag",
+            "mean_benchmark_excess_raw", "t_eff_raw", "median_beater_flag_raw"]
     parts = [
         "# Deep-panel tiered grade", "", header, "",
         "Excess columns are the top-decile book minus the tier's equal-weight MEDIAN and MEAN, in percent per period "
@@ -358,6 +397,7 @@ def render_report(v, ctrl, notes, header="") -> str:
         "", "Label conventions: stored `target_ret_Nd` are close[t+1]->close[t+1+N]; the 5d `fwd_open_5d` arm is the frozen "
         "protocol's open-entry convention. Both are reported and never averaged. Winsorised 1%/99% on observed values within "
         "each tier. Effective dates = dates / horizon.", "",
+        "## How to read this", "", interpretation(v), "",
         "## Verdicts", "", _table(v, cols), "", "## Shuffled-score control (score permuted within each date)", "",
         _table(ctrl, ["tier", "horizon", "label_col", "rank_ic", "hit_auc", "dates", "verdict", "mean_benchmark_excess"]), "",
         "## F&O tier bound", "",
