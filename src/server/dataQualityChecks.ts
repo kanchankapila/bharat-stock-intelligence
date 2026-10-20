@@ -3244,11 +3244,10 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
 
   {
     id: 'pg-backup-recency',
-    label: 'Postgres logical backup ran, and the dump it wrote was readable',
+    label: 'Postgres logical backup was fully readable at write time',
     category: 'infra',
-    // critical: a single-box deployment's entire recovery story. Everything else in this file
-    // watches whether the data is CORRECT; this is the only one watching whether it still
-    // EXISTS after a disk loss.
+    // critical: the local recovery point for logical corruption/DB failure. The dump is on
+    // the same host, so it does NOT survive a disk or host loss (AF-20261017-11).
     critical: true,
     // scripts/backup_pg.py shipped with P5 hardening and was then referenced by nothing --
     // not queues.ts, not jobRegistry.ts, not ecosystem.config.cjs. It had never run on a
@@ -3260,9 +3259,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // every 30 min year-round) and a weekend disk loss costs exactly as much as a weekday one.
     // Backups are one of the few genuinely 7-day-cadence things here.
     //
-    // backup_pg.py records success only AFTER verifying the dump's TOC with `pg_restore
-    // --list`, so last_success_at means "a readable dump exists", not merely "pg_dump exited
-    // 0" -- pg_dump can exit 0 having written a truncated file when the disk fills mid-write.
+    // backup_pg.py records success only AFTER reading the entire archive back with pg_restore,
+    // so last_success_at is a verified write-time recovery point, not merely "pg_dump exited 0".
+    // It does not prove the file remains readable forever or exists off-host.
     sql: `SELECT last_status, last_error,
                  to_timestamp(last_run_at/1000)     AS last_run_at,
                  to_timestamp(last_success_at/1000) AS last_success_at
@@ -3286,20 +3285,16 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         };
       }
       const d = sinceSuccess.toFixed(1);
-      // The job is nightly, so >2d means at least one full run was missed or failed.
-      if (sinceSuccess > 3) {
+      // Nightly slot plus read-back verification normally completes within 24h. The backup
+      // script itself triggers a catch-up after 26h; the critical check must not call a
+      // 45h-old recovery point healthy (the live 2026-10-17 false-green). Two missed
+      // recovery opportunities, 52h, are a hard failure.
+      if (sinceSuccess > 52 / 24) {
         return {
           status: 'fail',
           detail: `Last verified Postgres backup was ${d} days ago. Recovery point is now ${d} ` +
                   `days of data. Last status '${row.last_status}'` +
                   (row.last_error ? `: ${String(row.last_error).slice(0, 300)}` : '.'),
-        };
-      }
-      if (sinceSuccess > 2) {
-        return {
-          status: 'warn',
-          detail: `Last verified Postgres backup was ${d} days ago on a nightly schedule — one run ` +
-                  `was missed or failed. Last status '${row.last_status}'.`,
         };
       }
       if (row.last_status !== 'success') {
@@ -3309,7 +3304,14 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
                   `${String(row.last_error ?? '').slice(0, 300)}`,
         };
       }
-      return { status: 'pass', detail: `Verified backup ${d} days old (TOC readable at write time).` };
+      if (sinceSuccess > 26 / 24) {
+        return {
+          status: 'warn',
+          detail: `Last verified Postgres backup was ${d} days ago on a nightly schedule — one run ` +
+                  `was missed or failed. Last status '${row.last_status}'.`,
+        };
+      }
+      return { status: 'pass', detail: `Backup ${d} days old (full archive read at write time).` };
     },
   },
 

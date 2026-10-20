@@ -1066,7 +1066,7 @@ describe('pg-backup-recency', () => {
   const now = new Date('2026-08-19T12:00:00Z');
   const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
 
-  it('is critical — it is the only check watching whether the data still exists at all', () => {
+  it('is critical because logical-corruption recovery depends on a verified dump', () => {
     expect(byId('pg-backup-recency').critical).toBe(true);
   });
 
@@ -1094,14 +1094,27 @@ describe('pg-backup-recency', () => {
     expect(r.status).toBe('pass');
   });
 
-  it('warns after one missed nightly run, fails after three', () => {
+  it('warns after a missed nightly slot, fails after two overdue recovery opportunities', () => {
     const check = byId('pg-backup-recency');
     const at = (d: number) => check.evaluate(
       { last_status: 'success', last_run_at: daysAgo(d), last_success_at: daysAgo(d), last_error: null },
       now,
     ).status;
-    expect(at(2.5)).toBe('warn');
+    expect(at(1.5)).toBe('warn');
+    expect(at(2.5)).toBe('fail');
     expect(at(4)).toBe('fail');
+  });
+
+  it('does not call a 45-hour recovery point healthy after a missed nightly slot', () => {
+    const check = byId('pg-backup-recency');
+    const at = (hours: number) => check.evaluate(
+      { last_status: 'success', last_run_at: daysAgo(hours / 24),
+        last_success_at: daysAgo(hours / 24), last_error: null },
+      now,
+    ).status;
+    expect(at(24)).toBe('pass');
+    expect(at(45)).toBe('warn');
+    expect(at(53)).toBe('fail');
   });
 
   it('warns when a verified backup is recent but the LATEST run failed', () => {
