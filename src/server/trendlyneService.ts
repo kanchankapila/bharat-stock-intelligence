@@ -7,6 +7,10 @@ import {
   getTrendlyneTaCircuitState,
   isTrendlyneTaBlocked,
   markTrendlyneTaBlocked,
+  getTrendlyneStockMetricsCircuitState,
+  isTrendlyneStockMetricsBlocked,
+  markTrendlyneStockMetricsBlocked,
+  type TrendlyneStockMetricsBlockReason,
 } from './trendlyneTechnicalCircuit';
 
 const HEADERS = {
@@ -225,6 +229,16 @@ export async function fetchTrendlyneStockMetrics(symbol: string) {
     return null;
   }
 
+  // Circuit breaker: skip if Trendlyne's WAF is actively blocking this endpoint.
+  // Mirror of the TA endpoint's circuit (trendlyneTechnicalCircuit.ts) -- local to this endpoint only.
+  if (isTrendlyneStockMetricsBlocked()) {
+    const state = getTrendlyneStockMetricsCircuitState();
+    console.warn(
+      `[TRENDLYNE] Stock-metrics endpoint in local cooldown after HTTP ${state.reason}; skipping ${symbol}.`,
+    );
+    return null;
+  }
+
   console.log(`[TRENDLYNE] Fetching Stock Metrics for ${symbol} using tlid: ${tlid}`);
   const cacheKey = `trendlyne:stock-metrics:${symbol}`;
   const cached = await cacheGet<any>(cacheKey);
@@ -236,6 +250,24 @@ export async function fetchTrendlyneStockMetrics(symbol: string) {
   try {
     const response = await fetchTrendlyneWithAuth(url, { headers: HEADERS });
     if (!response.ok) {
+      // WAF / upstream errors are retryable -- throw so BullMQ's attempts + backoff kick in.
+      // Non-WAF 4xx (e.g. 404 for a dead tlid) are not retried.
+      if ([403, 429, 500].includes(response.status)) {
+        markTrendlyneStockMetricsBlocked(
+          String(response.status) as TrendlyneStockMetricsBlockReason,
+        );
+        console.error(
+          `[TRENDLYNE] Stock-metrics API returned HTTP ${response.status} for ${symbol}; opening local cooldown.`,
+        );
+        throw new Error(`Trendlyne stock-metrics HTTP ${response.status} for ${symbol}`);
+      }
+      // 502/503/504: transient upstream crash, retry via BullMQ but do not open the WAF circuit.
+      if ([502, 503, 504].includes(response.status)) {
+        console.warn(
+          `[TRENDLYNE] Stock-metrics API returned HTTP ${response.status} for ${symbol}; transient upstream error.`,
+        );
+        throw new Error(`Trendlyne stock-metrics HTTP ${response.status} for ${symbol}`);
+      }
       console.warn(`[TRENDLYNE] Metrics API failed with status ${response.status} for ${symbol}.`);
       return null;
     }
@@ -249,6 +281,12 @@ export async function fetchTrendlyneStockMetrics(symbol: string) {
     console.warn(`[TRENDLYNE] Metrics API returned gated/invalid payload for ${symbol}.`);
     return null;
   } catch (error) {
+    // Re-throw circuit-breaker / transient throws so BullMQ retries fire;
+    // log and return null for unexpected errors (network, timeout, parse).
+    const msg = (error as Error)?.message ?? '';
+    if (msg.startsWith('Trendlyne stock-metrics HTTP') || msg.includes('Trendlyne stock-metrics HTTP')) {
+      throw error;
+    }
     console.warn(`[TRENDLYNE] Error fetching stock metrics for ${symbol}:`, error);
     return null;
   }

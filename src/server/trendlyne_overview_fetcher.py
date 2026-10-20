@@ -668,11 +668,11 @@ def _load_stocks(symbol_filter: str | None, con, only_unsynced: bool = True,
     if only_unsynced and refresh_cutoff:
         unsynced_clause = (
             "AND NOT EXISTS (SELECT 1 FROM trendlyne_stock_profile tsp "
-            "WHERE tsp.symbol = symbol AND tsp.date >= ?)"
+            "WHERE tsp.symbol = universe.symbol AND tsp.date >= ?)"
         )
         params: tuple = (refresh_cutoff,)
     elif only_unsynced:
-        unsynced_clause = "AND NOT EXISTS (SELECT 1 FROM trendlyne_stock_profile tsp WHERE tsp.symbol = symbol)"
+        unsynced_clause = "AND NOT EXISTS (SELECT 1 FROM trendlyne_stock_profile tsp WHERE tsp.symbol = universe.symbol)"
         params = ()
     else:
         unsynced_clause = ""

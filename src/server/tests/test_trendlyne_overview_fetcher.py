@@ -154,3 +154,24 @@ def test_upsert_profile_same_day_retry_does_not_null_an_already_captured_descrip
         assert row == ("Axis Bank Limited provides...",)
     finally:
         con.close()
+
+
+def test_load_stocks_due_is_judged_per_symbol_not_table_wide():
+    # AF-20261019-01: `WHERE tsp.symbol = symbol` inside the NOT EXISTS bound `symbol` to the
+    # inner table, so ONE fresh row anywhere made every symbol look "recently synced" and the
+    # due list came back empty until that row aged out -- 55 names per ~8 days instead of 2,185.
+    con = pg_memory_conn()
+    try:
+        con.execute("CREATE TABLE nse_stocks (symbol TEXT, tlid TEXT)")
+        tof.ensure_schema(con)
+        for sym, tlid in (("AAA", "101"), ("BBB", "102"), ("CCC", "103")):
+            con.execute("INSERT INTO nse_stocks (symbol, tlid) VALUES (?, ?)", (sym, tlid))
+        con.execute("INSERT INTO trendlyne_stock_profile (symbol, date) VALUES ('AAA', '2026-10-18')")  # fresh
+        con.execute("INSERT INTO trendlyne_stock_profile (symbol, date) VALUES ('BBB', '2026-09-01')")  # stale
+        con.commit()
+
+        due = tof._load_stocks(None, con, only_unsynced=True, refresh_cutoff="2026-10-12")
+
+        assert sorted(s for s, _ in due) == ["BBB", "CCC"]
+    finally:
+        con.close()
