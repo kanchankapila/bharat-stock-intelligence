@@ -67,7 +67,7 @@ describe('formatForwardTestLine', () => {
 
 describe('composeMorningBrief', () => {
   it('puts the picks first, then the scorecard, then the honesty line', () => {
-    const text = composeMorningBrief('2026-10-07', 'PICKS BODY', 'SCORECARD', 'HONESTY');
+    const text = composeMorningBrief('2026-10-07', 'PICKS BODY', 'SCORECARD', 'HONESTY', 'calls', null);
     expect(text.indexOf('PICKS BODY')).toBeLessThan(text.indexOf('SCORECARD'));
     expect(text.indexOf('SCORECARD')).toBeLessThan(text.indexOf('HONESTY'));
     expect(text).toMatch(/pre-open/i);
@@ -75,14 +75,14 @@ describe('composeMorningBrief', () => {
   });
 
   it('still carries the scorecard and honesty line when there are no picks', () => {
-    const text = composeMorningBrief('2026-10-07', '', 'SCORECARD', 'HONESTY');
+    const text = composeMorningBrief('2026-10-07', '', 'SCORECARD', 'HONESTY', 'calls', null);
     expect(text).toContain('SCORECARD');
     expect(text).toContain('HONESTY');
     expect(text).toMatch(/no qualifying picks/i);
   });
 
   it('omits the scorecard block entirely rather than printing an empty heading', () => {
-    const text = composeMorningBrief('2026-10-07', 'PICKS', null, 'HONESTY');
+    const text = composeMorningBrief('2026-10-07', 'PICKS', null, 'HONESTY', 'calls', null);
     expect(text).not.toMatch(/Last session[\s\S]{0,4}$/);
     expect(text).toContain('HONESTY');
   });

@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const store = new Map<string, string>();
 let rankingG = '';      // MAX(generated_at) as stored (ISO, UTC 'Z')
 let rankingD = '';      // IST calendar date of that ranking
+let knownHoliday = false;
 let sessionD = '';      // latest COMPLETED NSE session (MAX of EOD tables, < today)
 const sendMorningBrief = vi.fn();
 
@@ -36,7 +37,7 @@ vi.mock('../dbAsync', () => ({
       const v = store.get(String(params[0]));
       return v === undefined ? undefined : { value: v };
     }
-    if (/FROM market_holidays/i.test(sql)) return { is_holiday: false };
+    if (/FROM market_holidays/i.test(sql)) return { is_holiday: knownHoliday };
     // the brief's own ranking lookup returns { g, d }
     if (/MAX\(generated_at\).*\bd\b/is.test(sql)) return { g: rankingG, d: rankingD };
     // the completed-session MAX returns { d }
@@ -52,8 +53,9 @@ describe('morning-brief gate accepts both legitimate ranking inputs', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-14T02:50:00.000Z')); // 08:20 IST
     store.clear();
+    knownHoliday = false;
     sendMorningBrief.mockReset();
-    sendMorningBrief.mockResolvedValue({ sent: true });
+    sendMorningBrief.mockResolvedValue({ sent: true, picks: 3, state: 'calls' });
     rankingG = minutesAgo(10 * 60); // ~10h old — last night's 22:30 rank read at 08:20
   });
 
@@ -78,22 +80,63 @@ describe('morning-brief gate accepts both legitimate ranking inputs', () => {
     expect(sendMorningBrief).toHaveBeenCalledTimes(1);
   });
 
-  it('skips when the ranking matches neither the completed session nor calendar-today (evening ranker failed outright)', async () => {
+  it('sends a degraded brief instead of failing when the ranking session does not match', async () => {
     rankingD = '2026-10-06';   // two sessions stale
     sessionD = '2026-10-13';   // fresher than the ranking, and not today
     const { processMorningBrief } = await import('../jobs/digests.jobs');
-    const res = await processMorningBrief();
-    expect(sendMorningBrief).not.toHaveBeenCalled();
-    expect(String((res as { failedSteps?: string[] })?.failedSteps?.[0])).toMatch(/matches neither/i);
+    const res = await processMorningBrief() as { success?: boolean } | undefined;
+    expect(sendMorningBrief).toHaveBeenCalledWith('degraded', expect.stringContaining('matches neither'));
+    expect(res?.success).not.toBe(false);
   });
 
-  it('skips a calendar-today ranking that is older than the 7-day cap', async () => {
+  it('sends a degraded brief for a calendar-today ranking older than the 7-day cap', async () => {
     rankingD = istToday();
     sessionD = '2026-10-13';
     rankingG = minutesAgo(8 * 24 * 60); // 8 days old — past MORNING_BRIEF_MAX_CALENDAR_AGE_MS
     const { processMorningBrief } = await import('../jobs/digests.jobs');
     await processMorningBrief();
+    expect(sendMorningBrief).toHaveBeenCalledWith('degraded', expect.stringContaining('matches neither'));
+  });
+
+  it('sends a degraded brief instead of failing when unified_recommendations is empty', async () => {
+    rankingG = '';
+    rankingD = '';
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    const res = await processMorningBrief() as { success?: boolean } | undefined;
+    expect(sendMorningBrief).toHaveBeenCalledWith('degraded', expect.stringContaining('no ranking'));
+    expect(res?.success).not.toBe(false);
+  });
+
+  it('throws when a degraded brief fails to reach Telegram, so the failure stays visible', async () => {
+    rankingG = '';
+    rankingD = '';
+    sendMorningBrief.mockResolvedValue({ sent: false, picks: 0, state: 'degraded' });
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    await expect(processMorningBrief()).rejects.toThrow(/failed to send/);
+  });
+
+  it('still skips, and sends nothing, on a weekend', async () => {
+    vi.setSystemTime(new Date('2026-10-17T02:50:00.000Z')); // Saturday 08:20 IST
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    expect(await processMorningBrief()).toEqual({ skipped: true });
     expect(sendMorningBrief).not.toHaveBeenCalled();
+  });
+
+  it('still skips, and sends nothing, on a listed NSE holiday', async () => {
+    knownHoliday = true;
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    expect(await processMorningBrief()).toEqual({ skipped: true });
+    expect(sendMorningBrief).not.toHaveBeenCalled();
+  });
+
+  it('refuses to send a pre-open brief after 09:15 IST and records the miss', async () => {
+    vi.setSystemTime(new Date('2026-10-14T04:00:00.000Z')); // 09:30 IST
+    rankingD = istToday();
+    sessionD = '2026-10-13';
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    const res = await processMorningBrief() as { success?: boolean } | undefined;
+    expect(sendMorningBrief).not.toHaveBeenCalled();
+    expect(res?.success).toBe(false);
   });
 
   it('does not re-send a ranking already briefed, unless forced', async () => {

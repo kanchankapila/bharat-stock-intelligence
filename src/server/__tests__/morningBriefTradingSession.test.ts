@@ -57,17 +57,14 @@ describe('morning brief trading-session freshness', () => {
     expect(sendMorningBrief).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects a ranking older than the latest completed NSE session', async () => {
+  it('sends a degraded brief for a ranking older than the latest completed NSE session', async () => {
     rankingGeneratedAt = '2026-10-08T17:00:00.000Z';
     const { processMorningBrief } = await import('../jobs/digests.jobs');
-    const result = await processMorningBrief() as unknown as {
-      success: boolean;
-      failedSteps: string[];
-    };
+    const result = await processMorningBrief() as { success?: boolean } | undefined;
 
-    expect(result.success).toBe(false);
-    expect(result.failedSteps.join(' ')).toMatch(/latest completed NSE session/i);
-    expect(sendMorningBrief).not.toHaveBeenCalled();
+    expect(result?.success).not.toBe(false);
+    expect(sendMorningBrief).toHaveBeenCalledTimes(1);
+    expect(sendMorningBrief).toHaveBeenCalledWith('degraded', expect.stringMatching(/latest completed NSE session/i));
   });
 
   it('never sends a pre-open brief after the market has opened, even on catch-up', async () => {

@@ -91,21 +91,38 @@ export function formatForwardTestLine(raw: string | null | undefined): string {
     : `${head} — ${body}.`;
 }
 
+/**
+ * calls: a current ranking produced picks. no-trade: a current ranking produced none (a verdict).
+ * degraded: the ranking could not be trusted as current, so any picks shown are NOT today's calls.
+ */
+export type BriefState = 'calls' | 'no-trade' | 'degraded';
+
 /** Assembled separately from the sends so the ordering is testable without a DB or Telegram. */
 export function composeMorningBrief(
   date: string,
   picksBody: string,
   scorecard: string | null,
   forwardLine: string,
+  state: BriefState,
+  stateReason: string | null,
 ): string {
-  const out = [`🌅 *PRE-OPEN BRIEF* — ${date}`];
+  const header = state === 'no-trade' ? `🚫 *NO TRADE TODAY* — ${date}`
+    : state === 'degraded' ? `⚠ *PRE-OPEN BRIEF (DEGRADED)* — ${date}`
+      : `🌅 *PRE-OPEN BRIEF* — ${date}`;
+  const out = [header];
+  if (state === 'degraded') {
+    out.push(`${stateReason ?? 'ranking unavailable'} — treat any names below as stale, not as today's calls.`);
+  }
   out.push(picksBody.trim() || '_No qualifying picks in the latest ranking._');
   if (scorecard) out.push(`*Last session, graded:*\n${scorecard}`);
   out.push(forwardLine);
   return out.join('\n\n');
 }
 
-export async function buildMorningBrief(): Promise<{ text: string; picks: number }> {
+export async function buildMorningBrief(
+  state?: BriefState,
+  stateReason: string | null = null,
+): Promise<{ text: string; picks: number; state: BriefState }> {
   const digest = await buildRecommendationsDigest();
   // Intraday recommendations expire at that session's close. This pre-open message reads the
   // latest completed EOD ranking, so any intraday row available here belongs to the PRIOR
@@ -136,24 +153,31 @@ export async function buildMorningBrief(): Promise<{ text: string; picks: number
     console.warn('[MorningBrief] forward test snapshot unavailable:', (e as Error).message);
   }
 
+  const resolved: BriefState = state ?? (picks === 0 ? 'no-trade' : 'calls');
   return {
     text: composeMorningBrief(
       preOpenDigest.date,
       renderDigest(preOpenDigest),
       scorecard,
       formatForwardTestLine(forwardRaw),
+      resolved,
+      stateReason,
     ),
     picks,
+    state: resolved,
   };
 }
 
-export async function sendMorningBrief(): Promise<{ sent: boolean; picks: number }> {
-  const { text, picks } = await buildMorningBrief();
+export async function sendMorningBrief(
+  state?: BriefState,
+  stateReason: string | null = null,
+): Promise<{ sent: boolean; picks: number; state: BriefState }> {
+  const { text, picks, state: resolved } = await buildMorningBrief(state, stateReason);
   const chunks = splitForTelegram(text);
   let allOk = true;
   for (const chunk of chunks) {
     if (!(await telegramService.sendMarkdownMessage(chunk))) allOk = false;
   }
-  console.log(`[MorningBrief] Sent ${chunks.length} message(s) with ${picks} picks (ok=${allOk})`);
-  return { sent: allOk, picks };
+  console.log(`[MorningBrief] Sent ${chunks.length} ${resolved} message(s) with ${picks} picks (ok=${allOk})`);
+  return { sent: allOk, picks, state: resolved };
 }

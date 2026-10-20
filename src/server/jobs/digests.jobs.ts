@@ -197,14 +197,16 @@ export async function processMorningBrief(job?: { data?: { force?: boolean } }):
     `SELECT MAX(generated_at)::text AS g,
             (MAX(generated_at) AT TIME ZONE 'Asia/Kolkata')::date::text AS d
        FROM unified_recommendations`);
+  // Missing or untrustworthy ranking is a message to the user, not a silent failed job: a
+  // degraded brief says so, instead of leaving "no ranking" indistinguishable from "no trade".
+  let degradedReason: string | null = null;
   if (!ur?.g || !ur.d) {
-    const msg = 'SKIPPED: unified_recommendations is empty — no ranking to brief on';
-    console.warn('[QUEUE] morning-brief', msg);
-    return { success: false, failedSteps: [msg] };
+    degradedReason = 'no ranking available — unified_recommendations is empty';
+    console.warn('[QUEUE] morning-brief degraded:', degradedReason);
   }
   // MAX across independently written EOD tables prevents one stale source from blessing an
   // older ranking; excluding today avoids treating a partially written morning as completed.
-  const session = await dbGet<{ d: string | null }>(
+  const session = degradedReason ? undefined : await dbGet<{ d: string | null }>(
     `SELECT MAX(d)::text AS d
        FROM (
          SELECT MAX(date)::date AS d FROM nse_universe_history
@@ -216,7 +218,8 @@ export async function processMorningBrief(job?: { data?: { force?: boolean } }):
          SELECT MAX(date)::date AS d FROM technical_signals
           WHERE date < (now() AT TIME ZONE 'Asia/Kolkata')::date
        ) completed_sessions`);
-  const ageMs = Date.now() - new Date(ur.g.endsWith('Z') ? ur.g : `${ur.g}Z`).getTime();
+  const rankingKey = ur?.g ?? `empty:${istToday}`;
+  const ageMs = ur?.g ? Date.now() - new Date(ur.g.endsWith('Z') ? ur.g : `${ur.g}Z`).getTime() : NaN;
   // Two legitimate inputs, mirroring unifiedRankingIsFresh's two paths:
   //  (a) session-match — the evening rank stamped with the latest COMPLETED session's date
   //      (this is the Monday→Friday case the docstring calls out), or
@@ -224,15 +227,14 @@ export async function processMorningBrief(job?: { data?: { force?: boolean } }):
   //      before the session's EOD tables land (2026-10-14 07:11 IST rank stamped 2026-10-14
   //      while the latest completed session was still 2026-10-13). Judging (b) only against
   //      session.d skipped the brief on every such morning; the 7-day cap still guards staleness.
-  const sessionMatches = ur.d === session?.d;
-  const generatedToday = ur.d === istToday;
-  if (!(ageMs >= 0) || ageMs > MORNING_BRIEF_MAX_CALENDAR_AGE_MS || (!sessionMatches && !generatedToday)) {
-    const msg = `SKIPPED: ranking session ${ur.d} matches neither the latest completed NSE `
+  const sessionMatches = ur?.d === session?.d;
+  const generatedToday = ur?.d === istToday;
+  if (!degradedReason && (!(ageMs >= 0) || ageMs > MORNING_BRIEF_MAX_CALENDAR_AGE_MS || (!sessionMatches && !generatedToday))) {
+    degradedReason = `ranking session ${ur?.d} matches neither the latest completed NSE `
       + `session ${session?.d ?? 'unknown'} nor calendar-today ${istToday} (age `
       + `${Math.round(ageMs / 3_600_000)}h) — the latest session has no completed unified `
       + 'ranking; see unified-ranker heartbeat';
-    console.warn('[QUEUE] morning-brief', msg);
-    return { success: false, failedSteps: [msg] };
+    console.warn('[QUEUE] morning-brief degraded:', degradedReason);
   }
   // Same recurrence this queue already has a ledger row for (AF-20261002-01): a server restart
   // replays the boot catch-up and re-fires this job, and re-sending an identical brief carries
@@ -241,17 +243,17 @@ export async function processMorningBrief(job?: { data?: { force?: boolean } }):
   if (!job?.data?.force) {
     const last = await dbGet<{ value: string }>(
       `SELECT value FROM app_settings WHERE key = ?`, [MORNING_BRIEF_LAST_SENT_KEY]);
-    if (last?.value === ur.g) {
-      console.log(`[QUEUE] morning-brief: ranking ${ur.g} already briefed — not re-sending`);
+    if (last?.value === rankingKey) {
+      console.log(`[QUEUE] morning-brief: ranking ${rankingKey} already briefed — not re-sending`);
       return;
     }
   }
   const { sendMorningBrief } = await import('../morningBrief');
-  const res = await sendMorningBrief();
+  const res = await (degradedReason ? sendMorningBrief('degraded', degradedReason) : sendMorningBrief());
   if (!res.sent) throw new Error('morning brief failed to send to Telegram');
   await dbRun(
     `INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
-    [MORNING_BRIEF_LAST_SENT_KEY, ur.g],
+    [MORNING_BRIEF_LAST_SENT_KEY, rankingKey],
   );
 }
 
