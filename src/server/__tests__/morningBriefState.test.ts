@@ -5,7 +5,42 @@ vi.mock('../telegramService', () => ({
   sanitizeMarkdown: (s: string) => s,
 }));
 
-const { composeMorningBrief } = await import('../morningBrief');
+const digestPicks: { longTerm: unknown[] } = { longTerm: [] };
+vi.mock('../telegramRecommendations', () => ({
+  buildRecommendationsDigest: vi.fn(async () => ({ date: '2026-10-19', longTerm: digestPicks.longTerm, intraday: [] })),
+  renderDigest: () => 'RENDERED',
+  splitForTelegram: (s: string) => [s],
+}));
+vi.mock('../signalAccuracyDigest', () => ({
+  buildAccuracyDigest: vi.fn(async () => null),
+  formatAccuracyScorecard: () => '',
+}));
+vi.mock('../dbAsync', () => ({ dbGet: vi.fn(async () => undefined) }));
+
+const { composeMorningBrief, buildMorningBrief } = await import('../morningBrief');
+
+describe('buildMorningBrief derives its own state from the pick count', () => {
+  it("is 'no-trade' when the digest carries no long-term picks, and says so unmistakably", async () => {
+    digestPicks.longTerm = [];
+    const r = await buildMorningBrief();
+    expect(r.picks).toBe(0);
+    expect(r.state).toBe('no-trade');
+    expect(r.text).toContain('NO TRADE TODAY');
+  });
+
+  it("is 'calls' when picks are present (non-vacuous counterpart)", async () => {
+    digestPicks.longTerm = [{ symbol: 'ACME' }];
+    const r = await buildMorningBrief();
+    expect(r.picks).toBe(1);
+    expect(r.state).toBe('calls');
+    expect(r.text).not.toContain('NO TRADE TODAY');
+  });
+
+  it('an explicit state is never overridden by the pick count', async () => {
+    digestPicks.longTerm = [{ symbol: 'ACME' }];
+    expect((await buildMorningBrief('degraded', 'ranking is stale')).state).toBe('degraded');
+  });
+});
 
 describe('composeMorningBrief state header', () => {
   it('labels a no-trade day unmistakably', () => {

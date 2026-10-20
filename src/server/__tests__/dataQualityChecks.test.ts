@@ -1732,3 +1732,96 @@ describe('technical-signals-feature-coverage — self-baselining (AF-20260816-11
     expect(RETIRED_TECHNICAL_SIGNAL_COLUMNS.cs_score).toMatch(/DECOMMISSIONED/i);
   });
 });
+
+// ── morning-brief-delivery ────────────────────────────────────────────────────────────
+// 2026-10-12 and 2026-10-19 sent no pre-open brief and nothing noticed. Commit 1f9a8411 then made
+// the brief's two bad-data branches SUCCESSFUL "degraded" sends, so job_run_history and the
+// heartbeat stay green on a stale or missing ranking: the only signal is the message text. The
+// check therefore re-derives (a) delivery and (b) ranking staleness itself, and reports them
+// distinctly. Its SQL (holiday-aware latest-due-session) is exercised in
+// dataQualityMorningBriefDelivery.test.ts; these cases pin evaluate().
+describe('morning-brief-delivery', () => {
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+  const now = new Date('2026-10-20T08:00:00Z');
+  const healthy = {
+    brief_day: '2026-10-20', receipt: '2026-10-19 17:00:02.1+00', receipt_covers: true,
+    ranking_at: '2026-10-19 17:00:02.1+00', ranking_date: '2026-10-19', session_date: '2026-10-19',
+    ranking_age_hours: 15,
+  };
+
+  it('is registered, critical, an infra fact, and not a frozen-invariant check', () => {
+    const c = byId('morning-brief-delivery');
+    expect(c).toBeDefined();
+    expect(c.critical).toBe(true);
+    expect(c.category).toBe('infra');
+    expect(c.assertsStaticProperty).toBeUndefined();
+  });
+
+  it('passes when the receipt covers the ranking the due brief would carry and that ranking is current', () => {
+    expect(byId('morning-brief-delivery').evaluate(healthy, now).status).toBe('pass');
+  });
+
+  it("passes on a Monday brief that carries Friday's ranking (Friday is still the latest completed session)", () => {
+    const r = byId('morning-brief-delivery').evaluate(
+      { ...healthy, brief_day: '2026-10-19', ranking_date: '2026-10-16', session_date: '2026-10-16', ranking_age_hours: 58 }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('passes on a ranking stamped on the brief day itself while EOD tables still lag (07:11 IST ranker run)', () => {
+    const r = byId('morning-brief-delivery').evaluate(
+      { ...healthy, ranking_date: '2026-10-20', session_date: '2026-10-19', ranking_age_hours: 1 }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('FAILS with NOT DELIVERED when the receipt predates the ranking the due brief would carry', () => {
+    const r = byId('morning-brief-delivery').evaluate({ ...healthy, receipt: '2026-10-15 17:00:02+00', receipt_covers: false }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('NOT DELIVERED');
+    expect(r.detail).toContain('2026-10-20');
+    expect(r.detail).not.toContain('DEGRADED');
+  });
+
+  it('FAILS when no receipt row exists at all', () => {
+    const r = byId('morning-brief-delivery').evaluate({ ...healthy, receipt: null, receipt_covers: null }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('NOT DELIVERED');
+  });
+
+  it('FAILS as DELIVERED-but-DEGRADED when a brief went out on a stale ranking, and says so distinctly', () => {
+    const r = byId('morning-brief-delivery').evaluate(
+      { ...healthy, ranking_date: '2026-10-14', session_date: '2026-10-19', ranking_age_hours: 130 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('DEGRADED');
+    expect(r.detail).toContain('2026-10-14');
+    expect(r.detail).not.toContain('NOT DELIVERED');
+  });
+
+  it('FAILS as degraded on an empty: receipt (a brief went out but no ranking existed)', () => {
+    const r = byId('morning-brief-delivery').evaluate(
+      { ...healthy, receipt: 'empty:2026-10-20', receipt_covers: null, ranking_at: null, ranking_date: null,
+        session_date: null, ranking_age_hours: null }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('DEGRADED');
+    expect(r.detail).toMatch(/no ranking/i);
+    expect(r.detail).not.toContain('NOT DELIVERED');
+  });
+
+  it("treats a ranking older than the job's 7-day cap as stale even if its session happens to match", () => {
+    const r = byId('morning-brief-delivery').evaluate({ ...healthy, ranking_age_hours: 24 * 8 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('DEGRADED');
+  });
+
+  it('reports both problems when nothing was delivered AND the ranking is stale', () => {
+    const r = byId('morning-brief-delivery').evaluate(
+      { ...healthy, receipt_covers: false, ranking_date: '2026-10-14', ranking_age_hours: 130 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('NOT DELIVERED');
+    expect(r.detail).toContain('DEGRADED');
+  });
+
+  it('warns rather than inventing a verdict when no due trading day was found', () => {
+    expect(byId('morning-brief-delivery').evaluate({ ...healthy, brief_day: null }, now).status).toBe('warn');
+    expect(byId('morning-brief-delivery').evaluate(undefined, now).status).toBe('warn');
+  });
+});

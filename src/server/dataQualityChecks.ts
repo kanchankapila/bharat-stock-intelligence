@@ -1198,6 +1198,91 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
 
+  {
+    id: 'morning-brief-delivery',
+    label: 'pre-open brief delivered for the latest due trading day, on a current ranking',
+    category: 'infra',
+    critical: true,
+    // 2026-10-12 and 2026-10-19 sent no pre-open brief and nothing noticed. Since 1f9a8411 the
+    // brief's two bad-data branches are SUCCESSFUL "degraded" sends, so job_run_history and the
+    // heartbeat stay green on a stale or missing ranking and the message text is the only signal.
+    // So this check does not trust the job's status: it re-derives (a) whether the receipt
+    // (app_settings morning_brief_last_sent_ranking = the briefed ranking's generated_at, or
+    // `empty:<IST date>`) covers the ranking the due brief would have carried, and (b) whether
+    // that ranking was stale by processMorningBrief's own rule (same three-table session MAX,
+    // same 7-day cap, same session-or-brief-day match). Not job_heartbeat: a retry overwrites it.
+    // Due day = latest weekday that is not an NSE market_holidays row, and (for today) only once
+    // 09:30 IST has passed, because the send is refused from 09:15. The receipt carries no send
+    // date (app_settings."updatedAt" is insert-only, no trigger), so "covers" means the receipt
+    // is at or after the newest ranking generated before that day's 08:20 send. The only param
+    // is an as-of instant for tests; NULL means now().
+    sql: `WITH ist AS (
+            SELECT (COALESCE(CAST(? AS timestamptz), now()) AT TIME ZONE 'Asia/Kolkata') AS ts
+          ), due AS (
+            SELECT MAX(ist.ts::date - g) AS day
+              FROM ist, generate_series(0, 10) g
+             WHERE EXTRACT(ISODOW FROM ist.ts::date - g) < 6
+               AND NOT EXISTS (SELECT 1 FROM market_holidays h
+                                WHERE h.exchange = 'NSE' AND h.date = ist.ts::date - g)
+               AND (g > 0 OR ist.ts::time >= TIME '09:30')
+          ), cut AS (
+            SELECT due.day, (due.day + TIME '08:20') AT TIME ZONE 'Asia/Kolkata' AS brief_at FROM due
+          ), rk AS (
+            SELECT MAX(u.generated_at) AS g FROM unified_recommendations u, cut
+             WHERE u.generated_at < cut.brief_at AND u.generated_at >= cut.brief_at - interval '30 days'
+          ), sess AS (
+            SELECT MAX(d) AS d FROM (
+              SELECT MAX(date)::date AS d FROM nse_universe_history, cut WHERE date < cut.day
+              UNION ALL
+              SELECT MAX(date)::date FROM stock_ohlcv, cut WHERE date < cut.day
+              UNION ALL
+              SELECT MAX(date)::date FROM technical_signals, cut WHERE date < cut.day
+            ) s
+          ), rc AS (
+            SELECT value FROM app_settings WHERE key = 'morning_brief_last_sent_ranking'
+          )
+          SELECT cut.day::text AS brief_day, rc.value AS receipt,
+                 CASE WHEN rc.value ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' AND rk.g IS NOT NULL
+                      THEN CAST(rc.value AS timestamptz) >= rk.g END AS receipt_covers,
+                 rk.g::text AS ranking_at,
+                 (rk.g AT TIME ZONE 'Asia/Kolkata')::date::text AS ranking_date,
+                 sess.d::text AS session_date,
+                 EXTRACT(EPOCH FROM (cut.brief_at - rk.g)) / 3600 AS ranking_age_hours
+            FROM cut LEFT JOIN rk ON true LEFT JOIN sess ON true LEFT JOIN rc ON true`,
+    params: [null],
+    evaluate: (row) => {
+      const day: string | null = row?.brief_day ?? null;
+      if (!day) {
+        return { status: 'warn', detail: 'no due NSE trading day found in the last 11 days -- cannot judge brief delivery' };
+      }
+      const receipt: string | null = row?.receipt ?? null;
+      const emptyReceipt = receipt != null && receipt.startsWith('empty:');
+      const delivered = emptyReceipt ? receipt!.slice(6) >= day : row?.receipt_covers === true;
+      let stale: string | null = null;
+      if (!row?.ranking_at) {
+        stale = 'no ranking existed before the 08:20 send (unified_recommendations empty)';
+      } else {
+        const ageH = Number(row.ranking_age_hours);
+        if (!(ageH >= 0) || ageH > 168) {
+          stale = `ranking is ${Number.isFinite(ageH) ? Math.round(ageH) + 'h' : 'of unknown'} old (job cap 168h)`;
+        } else if (row.ranking_date !== row.session_date && row.ranking_date !== day) {
+          stale = `ranking session ${row.ranking_date} matches neither the latest completed NSE session `
+            + `${row.session_date ?? 'unknown'} nor the brief day ${day}`;
+        } else if (emptyReceipt) {
+          stale = 'the brief was sent as empty although a ranking existed';
+        }
+      }
+      const problems: string[] = [];
+      if (!delivered) {
+        problems.push(`NOT DELIVERED: no brief receipt covers ${day} (receipt ${receipt ?? 'absent'}; `
+          + `ranking it would carry ${row?.ranking_at ?? 'none'})`);
+      }
+      if (stale) problems.push(`${delivered ? 'DELIVERED but ' : ''}DEGRADED: ${stale}`);
+      if (problems.length) return { status: 'fail', detail: problems.join(' | ') };
+      return { status: 'pass', detail: `brief for ${day} delivered on ranking ${row?.ranking_date} (session ${row?.session_date})` };
+    },
+  },
+
   // ── Technical signals / ML ────────────────────────────────────────────
   {
     id: 'technical-signals-freshness-coverage',
