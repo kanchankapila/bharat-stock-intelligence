@@ -29,6 +29,7 @@ import { runPython } from '../pythonRunner';
 import { isMarketOpen, shouldSkipOnTradingHoliday } from '../marketStatusService';
 import { registerRepeatableJob } from './registerJob';
 import { StepTracker } from '../jobSteps';
+import { dbGet } from '../dbAsync';
 import { makeConnection } from '../queues';
 
 export const QUEUE_CONFLUENCE_COMPUTE = 'confluence-compute';
@@ -74,7 +75,41 @@ export function shouldComputeConfluence(
   return isConfluenceComputeWindow(opts.now ?? new Date());
 }
 
-async function processConfluenceCompute(job: Job): Promise<{ computed: number; elite: number; strong: number; skipped?: boolean }> {
+/**
+ * Whether the newest `confluence_signals` row predates the last compute window that has ALREADY
+ * FULLY PASSED — i.e. a scheduled window produced no write (host asleep, deploy, restart) and the
+ * table is overdue for a catch-up. Keys on the artifact's own age against a window boundary, not a
+ * fixed duration: a fixed threshold cannot separate a missed morning (8.5h old at 08:03 IST) from a
+ * healthy pre-evening gap (legitimately 9.5h old at 16:59 IST), so only "did the last elapsed window
+ * write?" is decidable. Mirrors pg-backup's `_catch_up_due` (AF-20261015-08) — a schedule-window
+ * guard must pair with an overdue catch-up keyed on the artifact, and still refuse market hours
+ * (processConfluenceCompute's `isMarketOpen()` guard runs first, so this is only ever asked with the
+ * market closed, and only out-of-window, so it can never compete with the intraday pipeline).
+ *
+ * Windows are IST: morning [06:00,08:00), evening [17:00,24:00).
+ *   - IST 08:00–17:00 → the morning window has passed; expect a row from >= 06:00 IST today.
+ *   - IST 00:00–06:00 → the evening window has passed; expect a row from >= 17:00 IST yesterday.
+ *   - IST 06:00–08:00 / 17:00–24:00 → a window is still open, so `shouldComputeConfluence` is
+ *     already true and this is never asked; returns false there (the window itself will write).
+ *
+ * Found 2026-10-17: the host slept 01:00–08:03 IST, entirely covering the morning window. Every
+ * out-of-window tick skipped, nothing set `force`, and `confluence_signals` reached 15h stale —
+ * critical `confluence-signals-freshness` FAILed with no recovery until 17:00 IST.
+ */
+export function isConfluenceOverdue(newestComputedAt: Date | null, now = new Date()): boolean {
+  if (!newestComputedAt) return true;   // table empty → compute (aggregate MAX() is NULL, not missing)
+  const IST_MS = 5.5 * 60 * 60 * 1000;
+  const ist = new Date(now.getTime() + IST_MS);
+  const h = ist.getUTCHours();
+  const istMidnight = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate());
+  let windowStartIstAsUtc: number;
+  if (h >= 8 && h < 17)       windowStartIstAsUtc = istMidnight + 6 * 60 * 60 * 1000;  // morning 06:00 IST
+  else if (h < 6)             windowStartIstAsUtc = istMidnight - 7 * 60 * 60 * 1000;  // evening 17:00 IST y'day
+  else                        return false;                                            // window still open
+  return newestComputedAt.getTime() < windowStartIstAsUtc - IST_MS;
+}
+
+export async function processConfluenceCompute(job: Job): Promise<{ computed: number; elite: number; strong: number; skipped?: boolean }> {
   // Positional signal (whole-universe, heavy). Skip during market hours so it doesn't compete with
   // the intraday pipeline for CPU/DB — its consumers (positional dashboards + the post-close
   // unified_ranker) don't need intraday freshness. The pre-open compute carries through the session
@@ -90,8 +125,18 @@ async function processConfluenceCompute(job: Job): Promise<{ computed: number; e
     return { computed: 0, elite: 0, strong: 0, skipped: true };
   }
   if (!shouldComputeConfluence({ force: (job?.data as any)?.force })) {
-    console.log('[QUEUE] confluence-compute skipped — outside the evening-landing/pre-open window (inputs are static)');
-    return { computed: 0, elite: 0, strong: 0, skipped: true };
+    // The window guard alone can't express "catch up after a missed window", and a missed window
+    // is routine: a host sleep, a deploy or a restart silently loses one. On 2026-10-17 the host
+    // slept 01:00–08:03 IST straight through the morning window, so confluence_signals reached
+    // 15h stale and the critical confluence-signals-freshness check FAILed until 17:00 IST. Before
+    // giving up, ask whether the artifact itself says the last elapsed window produced no write.
+    // market guard above already ran, so this only ever fires with the market closed.
+    const row = await dbGet<{ newest: Date | null }>('SELECT MAX(computed_at) AS newest FROM confluence_signals');
+    if (!isConfluenceOverdue(row?.newest ?? null)) {
+      console.log('[QUEUE] confluence-compute skipped — outside the evening-landing/pre-open window (inputs are static)');
+      return { computed: 0, elite: 0, strong: 0, skipped: true };
+    }
+    console.log('[QUEUE] confluence-compute FORCED — no write in the last elapsed window (overdue catch-up)');
   }
   if ((job?.data as any)?.force === true && !isConfluenceComputeWindow()) {
     console.log('[QUEUE] confluence-compute FORCED outside its window — catch-up for a missed window');
