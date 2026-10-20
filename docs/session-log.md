@@ -11407,3 +11407,23 @@ Audit document: `docs/expert-review-2026-10-15-systems-audit.md`. Ledger: AF-202
   `/api/health` returned `ok`, and a post-restart production-data dry render returned five 2026-10-19
   picks with the rank disclosure. No Telegram send occurred. The next real 23:15 IST backup remains
   the evidence required to close AF-20261016-01.
+
+## 2026-10-17 — closed-session brief and interrupted-backup recovery
+
+- A forced boot replay could deliver Friday's ranking as a Saturday PRE-OPEN BRIEF. `processMorningBrief`
+  now skips weekends and known/live NSE holidays before delivery, with `{skipped:true}` rather than a
+  false success or failed delivery. Negative controls caught both the original Saturday send and a
+  later ordering regression where a late holiday was wrongly labelled a failed send. A live Saturday
+  `force:true` invocation returned `{skipped:true}` without reaching Telegram. The shared server has
+  not yet been restarted for this edit while another session's Confluence/Trendlyne changes are in flight.
+- The Oct 16 nightly `pg_dump` stopped at 3,714,922,216 bytes. Full `pg_restore -f /dev/null` read-back
+  returned `end of file`; no success heartbeat was recorded, yet its fresh nonempty `.dump` suppressed
+  the next boot's overdue catch-up. `backup_pg.py` now measures age from the last success heartbeat
+  matched to a real artifact, writes to `.dump.partial`, and publishes `.dump` only after full archive
+  read-back. The corrupt file and two zero-byte dumps were reversibly renamed `.dump.invalid`.
+- A live catch-up through the normal gate wrote a 5,736,477,049-byte verified dump and advanced the
+  `pg-backup` success heartbeat to 2026-10-17 16:14:29.976 UTC; verified age went from >45h while the
+  partial was still growing to 0.004h, with catch-up no longer due. The critical backup check had
+  falsely passed at 45h; its warning/failure thresholds now follow the 26h/52h recovery cadence.
+  Live pre/post evaluation returned WARN at 1.9 days and PASS after the new verified dump. A same-host
+  dump still does not protect against disk/host loss; AF-20261017-11 needs an off-host destination.

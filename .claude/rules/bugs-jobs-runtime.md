@@ -392,9 +392,12 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   00:26 post-boot launch was skipped as "likely a registration/restart launch", so the newest verified
   dump was 43 h old and `pg-backup-recency` still read pass (it warns only above 2 days). The guard
   exists to stop a mid-market dump (a 2026-09-03 restart at 09:20 IST blocked a migration for ~12 min).
-  **Rule:** a schedule-window guard must pair with an overdue-catch-up path that keys on the artifact's
-  own age (newest dump older than 26 h) and still refuses market hours. Verify by reading the job log
-  for a gap in slots, not the heartbeat. AF-20261015-08.
+  **Rule:** a schedule-window guard must pair with an overdue-catch-up path that keys on the last
+  *verified* artifact's age and still refuses market hours. A fresh, nonempty file is not proof:
+  the 2026-10-16 dump was interrupted at 3.7 GB with no success heartbeat, but its mtime suppressed
+  the 2026-10-17 catch-up. Require a success receipt plus its corresponding on-disk artifact;
+  write into a `.partial` name and publish `.dump` only after full read-back verification.
+  Verify the scheduled slot in logs and query the heartbeat. AF-20261015-08, AF-20261017-10.
 - **A one-shot PM2 backup can begin just before its own `cron_restart` and race a second launch
   (three observed nights, 2026-10-10/11/15).** A permissive five-minute schedule window admitted
   `pg_dump` at 23:14:59; PM2 restarted the app at 23:15:00-02, so two start lines appeared and the

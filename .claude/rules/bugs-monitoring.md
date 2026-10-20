@@ -25,6 +25,12 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   independently of freshness; and suppress only a demonstrated transient signature, never a
   provider name or generic wrapper text. Immunized by repo-doctor's
   `doctor-lib.test.mjs` schedule and classifier cases.
+  The same false-green shape hit `pg-backup-recency` on 2026-10-17: a 45-hour-old verified
+  backup passed a >48h warning despite a missed nightly slot and the backup script's >26h
+  catch-up trigger. For a calendar-cadence recovery job, align warning/failure thresholds
+  with its actual recovery schedule and describe the evidence precisely (full write-time
+  readback of a local dump is not off-host disaster recovery). `dataQualityChecks.test.ts`
+  now pins the 45h WARN and 53h FAIL boundaries (AF-20261017-12).
 
 - **One operations page can have multiple registries and multiple sources of run evidence.**
   `JOB_REGISTRY` jobs are schedule/holiday/runtime judged from heartbeats, while
