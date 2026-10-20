@@ -1,6 +1,6 @@
 import pytest
 
-from fno_universe_asof import fno_eligible_asof, fno_series_coverage
+from fno_universe_asof import fno_eligible_asof, fno_series_coverage, is_covered
 
 
 def _opt(conn, symbol, date, instrument="OPTSTK"):
@@ -19,6 +19,8 @@ def _seed(conn):
     _opt(conn, "OLDFNO", "2022-06-02")
     _opt(conn, "DROPPED", "2022-06-01")  # left F&O before the next session
     _opt(conn, "NIFTY", "2022-06-01", "OPTIDX")  # an index option is not a stock
+    _opt(conn, "NIFTY", "2020-01-01", "OPTIDX")  # OUTSIDE the stock span: only the filter keeps it out
+    _opt(conn, "NIFTY", "2025-01-01", "OPTIDX")
     _opt(conn, "OLDFNO", "2021-03-01")
     _opt(conn, "OLDFNO", "2024-07-05")
     conn.commit()
@@ -49,8 +51,19 @@ def test_an_uncovered_date_returns_empty_rather_than_guessing(pg_db_conn):
     _seed(pg_db_conn)
     assert fno_eligible_asof(pg_db_conn, "1999-01-01") == set()
     assert fno_eligible_asof(pg_db_conn, "2026-10-01") == set()
+    # in-span date with no row (2022-06-03): empty because the series has a hole, not a broken query
+    assert fno_eligible_asof(pg_db_conn, "2022-06-02") == {"OLDFNO"}
+    assert fno_eligible_asof(pg_db_conn, "2022-06-03") == set()
+
+
+def test_is_covered_is_exact_date_not_the_range(pg_db_conn):
+    _seed(pg_db_conn)
+    assert is_covered(pg_db_conn, "2022-06-01")
+    assert not is_covered(pg_db_conn, "2022-06-03")  # inside first/last, but a hole
+    assert not is_covered(pg_db_conn, "1999-01-01")
+    assert not is_covered(pg_db_conn, "2020-01-01")  # only an OPTIDX row exists
 
 
 def test_empty_series_has_no_coverage(pg_db_conn):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="no dated F&O series"):
         fno_series_coverage(pg_db_conn)
