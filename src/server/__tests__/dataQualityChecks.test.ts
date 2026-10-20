@@ -1825,3 +1825,71 @@ describe('morning-brief-delivery', () => {
     expect(byId('morning-brief-delivery').evaluate(undefined, now).status).toBe('warn');
   });
 });
+
+// ── unified-recommendations-timeframe-coverage ────────────────────────────────────────
+// timeframe='LONG_TERM' last produced 2026-09-28 and nothing alerted for three weeks. The set of
+// timeframes is derived from what the ranking itself produced over the trailing window, never a
+// hardcoded list, so retiring a horizon on purpose does not become a permanent red. The SQL
+// (IST ranking dates, trailing 10 ranking days) runs against a real schema in
+// dataQualityTimeframeCoverage.test.ts; these cases pin evaluate().
+describe('unified-recommendations-timeframe-coverage', () => {
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+  const now = new Date('2026-10-20T08:00:00Z');
+  const row = (latest: string, trailing: string, extra: Record<string, unknown> = {}) =>
+    ({ latest_day: '2026-10-19', trailing_days: 10, latest_set: latest, trailing_set: trailing, ...extra });
+
+  it('is registered under scoring and does not claim to assert a frozen invariant', () => {
+    const c = byId('unified-recommendations-timeframe-coverage');
+    expect(c).toBeDefined();
+    expect(c.category).toBe('scoring');
+    expect(c.assertsStaticProperty).toBeUndefined();
+  });
+
+  it('fails when a timeframe that produced rows last week produced none on the latest ranking day, and names it', () => {
+    const r = byId('unified-recommendations-timeframe-coverage')
+      .evaluate(row('SWING,POSITIONAL,INTRADAY', 'INTRADAY,LONG_TERM,POSITIONAL,SWING'), now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('LONG_TERM');
+    expect(r.detail).not.toContain('SWING');
+    expect(r.detail).toContain('2026-10-19');
+  });
+
+  it('names every silent timeframe', () => {
+    const r = byId('unified-recommendations-timeframe-coverage')
+      .evaluate(row('SWING', 'INTRADAY,LONG_TERM,POSITIONAL,SWING'), now);
+    expect(r.status).toBe('fail');
+    for (const tf of ['INTRADAY', 'LONG_TERM', 'POSITIONAL']) expect(r.detail).toContain(tf);
+  });
+
+  it('passes when every timeframe seen in the trailing window is present', () => {
+    const r = byId('unified-recommendations-timeframe-coverage')
+      .evaluate(row('INTRADAY,POSITIONAL,SWING', 'INTRADAY,POSITIONAL,SWING'), now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('does not fail for a timeframe that has never been produced (no hardcoded label list)', () => {
+    const r = byId('unified-recommendations-timeframe-coverage')
+      .evaluate(row('SWING', 'SWING'), now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('does not fail when a new timeframe appears on the latest day', () => {
+    const r = byId('unified-recommendations-timeframe-coverage')
+      .evaluate(row('SWING,MOMENTUM', 'SWING'), now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('fails when the ranking produced no timeframe rows at all on the latest day', () => {
+    const r = byId('unified-recommendations-timeframe-coverage')
+      .evaluate(row('', 'POSITIONAL,SWING'), now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('POSITIONAL');
+  });
+
+  it('fails when there is no ranking in the lookback window at all (no evidence is not health)', () => {
+    const r = byId('unified-recommendations-timeframe-coverage')
+      .evaluate({ latest_day: null, trailing_days: 0, latest_set: '', trailing_set: '' }, now);
+    expect(r.status).toBe('fail');
+    expect(byId('unified-recommendations-timeframe-coverage').evaluate(undefined, now).status).toBe('fail');
+  });
+});

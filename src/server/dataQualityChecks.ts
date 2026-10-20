@@ -1283,6 +1283,59 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
 
+  {
+    id: 'unified-recommendations-timeframe-coverage',
+    label: 'every unified_recommendations timeframe seen in the trailing 10 ranking days is still produced',
+    category: 'scoring',
+    critical: false,
+    // timeframe='LONG_TERM' last produced 2026-09-28 and nothing alerted for three weeks: the
+    // table was fresh and the other three horizons kept writing. The comparison set is what the
+    // ranking itself produced over the 10 ranking days (IST dates) before the latest one -- not
+    // a hardcoded list of labels -- so a horizon retired on purpose stops being required once
+    // it leaves that window instead of staying red forever. NULL timeframe is "no horizon", not
+    // a label. Ranking days, not calendar days, so no holiday calendar is needed. The only param
+    // is an as-of instant for tests; NULL means now().
+    sql: `WITH asof AS (
+            SELECT COALESCE(CAST(? AS timestamptz), now()) AS t
+          ), r AS (
+            SELECT (u.generated_at AT TIME ZONE 'Asia/Kolkata')::date AS d, u.timeframe
+              FROM unified_recommendations u, asof
+             WHERE u.generated_at >= asof.t - interval '45 days'
+          ), latest AS (
+            SELECT MAX(d) AS d FROM r
+          ), trail AS (
+            SELECT DISTINCT r.d FROM r, latest WHERE r.d < latest.d ORDER BY r.d DESC LIMIT 10
+          )
+          SELECT latest.d::text AS latest_day,
+                 (SELECT COUNT(*) FROM trail) AS trailing_days,
+                 COALESCE((SELECT string_agg(DISTINCT r.timeframe, ',' ORDER BY r.timeframe)
+                             FROM r, latest WHERE r.d = latest.d AND r.timeframe <> ''), '') AS latest_set,
+                 COALESCE((SELECT string_agg(DISTINCT r.timeframe, ',' ORDER BY r.timeframe)
+                             FROM r WHERE r.d IN (SELECT d FROM trail) AND r.timeframe <> ''), '') AS trailing_set
+            FROM latest`,
+    params: [null],
+    evaluate: (row) => {
+      if (!row?.latest_day) {
+        return { status: 'fail', detail: 'no unified_recommendations row in the last 45 days -- no ranking to judge timeframe coverage on' };
+      }
+      const split = (s: unknown) => String(s ?? '').split(',').filter(Boolean);
+      const present = new Set(split(row.latest_set));
+      const missing = split(row.trailing_set).filter(tf => !present.has(tf));
+      if (missing.length) {
+        return {
+          status: 'fail',
+          detail: `timeframe ${missing.join(', ')} produced rows in the previous ${row.trailing_days} ranking day(s) `
+            + `but none on the latest ranking day ${row.latest_day} -- check unified_ranker's horizon assignment `
+            + '(a horizon retired on purpose leaves this window after 10 ranking days)',
+        };
+      }
+      return {
+        status: 'pass',
+        detail: `ranking ${row.latest_day} carries timeframes ${[...present].join(', ') || 'none'}; none seen in the previous ${row.trailing_days} ranking day(s) is missing`,
+      };
+    },
+  },
+
   // ── Technical signals / ML ────────────────────────────────────────────
   {
     id: 'technical-signals-freshness-coverage',
