@@ -131,6 +131,19 @@ describe('morning-brief-delivery (real SQL)', () => {
     expect(row!.session_date).toBe('2026-10-19');
   });
 
+  it.each(['not-a-timestamp', '2026-13-45 99:99:99', '2026-10-15'])(
+    'a malformed receipt (%s) yields a clear failing verdict instead of throwing',
+    async (bad) => {
+      await session('2026-10-19');
+      await ranking('2026-10-19 22:30');
+      await receipt(bad);
+      const { row, result } = await run('2026-10-20 13:30');
+      expect(row!.receipt_malformed).toBe(true);
+      expect(result.status).toBe('fail');
+      expect(result.detail).toContain('MALFORMED RECEIPT');
+      expect(result.detail).toContain(bad);
+    });
+
   it('an empty: receipt on the brief day is a degraded delivery, not a healthy one', async () => {
     await session('2026-10-19');
     await receipt('empty:2026-10-20');

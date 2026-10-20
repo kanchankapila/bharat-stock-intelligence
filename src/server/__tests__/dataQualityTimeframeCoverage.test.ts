@@ -32,6 +32,7 @@ async function seed(day: string, timeframes: Array<string | null>) {
       [`S_${tf ?? 'NULL'}_${day}`, `${day} 22:30`, tf, `${day}T22:30:00+05:30`]);
   }
 }
+const CANON = ['INTRADAY', 'SWING', 'POSITIONAL'];
 const day = (n: number) => new Date(Date.UTC(2026, 9, 19) - n * 86_400_000).toISOString().slice(0, 10);
 
 describe('unified-recommendations-timeframe-coverage (real SQL)', () => {
@@ -40,8 +41,8 @@ describe('unified-recommendations-timeframe-coverage (real SQL)', () => {
   });
 
   it('fails naming LONG_TERM when it produced rows in the trailing days and none on the latest ranking day', async () => {
-    for (let n = 1; n <= 5; n++) await seed(day(n), ['SWING', 'LONG_TERM', null]);
-    await seed(day(0), ['SWING', null]);
+    for (let n = 1; n <= 5; n++) await seed(day(n), [...CANON, 'LONG_TERM', null]);
+    await seed(day(0), [...CANON, null]);
     const { row, result } = await run();
     expect(row!.latest_day).toBe(day(0));
     expect(result.status).toBe('fail');
@@ -49,21 +50,21 @@ describe('unified-recommendations-timeframe-coverage (real SQL)', () => {
   });
 
   it('passes when every trailing timeframe is present on the latest day', async () => {
-    for (let n = 0; n <= 5; n++) await seed(day(n), ['SWING', 'LONG_TERM']);
+    for (let n = 0; n <= 5; n++) await seed(day(n), [...CANON, 'LONG_TERM']);
     expect((await run()).result.status).toBe('pass');
   });
 
   it('a timeframe last produced before the 10-ranking-day window is retired, not a failure', async () => {
-    await seed(day(30), ['SWING', 'LONG_TERM']);
-    for (let n = 0; n <= 11; n++) await seed(day(n), ['SWING']);
+    await seed(day(30), [...CANON, 'LONG_TERM']);
+    for (let n = 0; n <= 11; n++) await seed(day(n), CANON);
     const { row, result } = await run();
-    expect(row!.trailing_set).toBe('SWING');
+    expect(row!.trailing_set).toBe('INTRADAY,POSITIONAL,SWING');
     expect(result.status).toBe('pass');
   });
 
   it('counts RANKING days, so a stretch with no rankings does not age a timeframe out of the window', async () => {
-    await seed(day(14), ['LONG_TERM', 'SWING']);
-    await seed(day(0), ['SWING']);
+    await seed(day(14), [...CANON, 'LONG_TERM']);
+    await seed(day(0), CANON);
     const { result } = await run();
     expect(result.status).toBe('fail');
     expect(result.detail).toContain('LONG_TERM');
@@ -71,7 +72,7 @@ describe('unified-recommendations-timeframe-coverage (real SQL)', () => {
 
   it('a NULL timeframe is not a label: rows with no horizon neither satisfy nor create a requirement', async () => {
     await seed(day(1), [null]);
-    await seed(day(0), ['SWING', null]);
+    await seed(day(0), [...CANON, null]);
     const { row, result } = await run();
     expect(row!.trailing_set).toBe('');
     expect(result.status).toBe('pass');
@@ -86,6 +87,22 @@ describe('unified-recommendations-timeframe-coverage (real SQL)', () => {
     expect(row!.latest_day).toBe(day(0));
     expect(result.status).toBe('fail');
     expect(result.detail).toContain('POSITIONAL');
+  });
+
+  it('a CANONICAL horizon absent from the whole trailing window still fails (a dead horizon never ages out)', async () => {
+    for (let n = 0; n <= 12; n++) await seed(day(n), ['SWING', 'POSITIONAL']);
+    const { row, result } = await run();
+    expect(row!.trailing_set).toBe('POSITIONAL,SWING');
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('INTRADAY');
+    expect(result.detail).toMatch(/canonical/i);
+  });
+
+  it('LONG_TERM (folded onto POSITIONAL, AF-20261001-06) neither fails nor is required once outside the window', async () => {
+    await seed(day(20), [...CANON, 'LONG_TERM']);
+    for (let n = 0; n <= 11; n++) await seed(day(n), CANON);
+    const { result } = await run();
+    expect(result.status).toBe('pass');
   });
 
   it('fails with no evidence when the table has no ranking in the lookback window', async () => {

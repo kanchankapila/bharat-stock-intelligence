@@ -28,9 +28,10 @@ vi.mock('../pgClient', async (importOriginal) => {
 import {
   DATA_QUALITY_CHECKS, daysStale, tradingDaysStale, safeRatio, runDataQualityChecks,
   getLatestDataQualityResults, DQ_CHECK_CONCURRENCY,
-  DQ_STATIC_PROPERTY_CHECK_IDS, RETIRED_TECHNICAL_SIGNAL_COLUMNS,
+  DQ_STATIC_PROPERTY_CHECK_IDS, RETIRED_TECHNICAL_SIGNAL_COLUMNS, CANONICAL_TIMEFRAMES,
 } from '../dataQualityChecks';
 import { dbGet } from '../dbAsync';
+import { readFileSync } from 'node:fs';
 
 describe('daysStale', () => {
   const now = new Date('2026-07-19T12:00:00Z');
@@ -1820,6 +1821,13 @@ describe('morning-brief-delivery', () => {
     expect(r.detail).toContain('DEGRADED');
   });
 
+  it('returns a clear failing verdict naming a malformed receipt instead of judging delivery on it', () => {
+    const r = byId('morning-brief-delivery').evaluate({ ...healthy, receipt: 'garbage', receipt_malformed: true, receipt_covers: null }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('MALFORMED RECEIPT');
+    expect(r.detail).toContain('garbage');
+  });
+
   it('warns rather than inventing a verdict when no due trading day was found', () => {
     expect(byId('morning-brief-delivery').evaluate({ ...healthy, brief_day: null }, now).status).toBe('warn');
     expect(byId('morning-brief-delivery').evaluate(undefined, now).status).toBe('warn');
@@ -1867,16 +1875,47 @@ describe('unified-recommendations-timeframe-coverage', () => {
     expect(r.status).toBe('pass');
   });
 
-  it('does not fail for a timeframe that has never been produced (no hardcoded label list)', () => {
+  it('does not fail for a non-canonical timeframe that has never been produced', () => {
     const r = byId('unified-recommendations-timeframe-coverage')
-      .evaluate(row('SWING', 'SWING'), now);
+      .evaluate(row('INTRADAY,POSITIONAL,SWING', 'INTRADAY,POSITIONAL,SWING'), now);
     expect(r.status).toBe('pass');
   });
 
   it('does not fail when a new timeframe appears on the latest day', () => {
     const r = byId('unified-recommendations-timeframe-coverage')
-      .evaluate(row('SWING,MOMENTUM', 'SWING'), now);
+      .evaluate(row('INTRADAY,POSITIONAL,SWING,MOMENTUM', 'INTRADAY,POSITIONAL,SWING'), now);
     expect(r.status).toBe('pass');
+  });
+
+  it('a CANONICAL horizon absent from the latest day fails even when absent from the whole trailing window', () => {
+    const r = byId('unified-recommendations-timeframe-coverage')
+      .evaluate(row('POSITIONAL,SWING', 'POSITIONAL,SWING'), now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('INTRADAY');
+    expect(r.detail).toMatch(/canonical horizon/i);
+    expect(r.detail).not.toMatch(/recently-produced/i);
+  });
+
+  it('says which kind of miss it is: canonical vs recently-produced', () => {
+    const r = byId('unified-recommendations-timeframe-coverage')
+      .evaluate(row('SWING', 'INTRADAY,LONG_TERM,POSITIONAL,SWING'), now);
+    expect(r.detail).toMatch(/canonical horizon[^|]*INTRADAY, POSITIONAL/);
+    expect(r.detail).toMatch(/recently-produced[^|]*LONG_TERM/);
+  });
+
+  it('LONG_TERM (folded onto POSITIONAL, AF-20261001-06) absent and outside the trailing window passes', () => {
+    const r = byId('unified-recommendations-timeframe-coverage')
+      .evaluate(row('INTRADAY,POSITIONAL,SWING', 'INTRADAY,POSITIONAL,SWING'), now);
+    expect(r.status).toBe('pass');
+  });
+
+  it("CANONICAL_TIMEFRAMES equals unified_ranker.py's tuple (source parity, non-vacuous)", () => {
+    const src = readFileSync(new URL('../unified_ranker.py', import.meta.url), 'utf8');
+    const m = src.match(/^CANONICAL_TIMEFRAMES\s*=\s*\(([^)]*)\)/m);
+    expect(m, 'CANONICAL_TIMEFRAMES tuple not found in unified_ranker.py').not.toBeNull();
+    const py = [...m![1].matchAll(/'([A-Z_]+)'/g)].map(x => x[1]);
+    expect(py.length).toBeGreaterThan(0);
+    expect([...CANONICAL_TIMEFRAMES]).toEqual(py);
   });
 
   it('fails when the ranking produced no timeframe rows at all on the latest day', () => {

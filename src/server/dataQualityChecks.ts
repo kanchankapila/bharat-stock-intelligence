@@ -947,6 +947,14 @@ const RETIRED_TECHNICAL_SIGNAL_COLUMNS_SQL = Object.keys(RETIRED_TECHNICAL_SIGNA
   .map(col => `'${col}'`)
   .join(', ');
 
+/** The horizons the ranker emits and the UI filters on. Source of truth: unified_ranker.py's
+ *  CANONICAL_TIMEFRAMES (parity pinned in dataQualityChecks.test.ts). LONG_TERM is absent on
+ *  purpose: it was folded onto POSITIONAL on 2026-10-03 (commit 8645d47c, AF-20261001-06), so it
+ *  is a retired label and is only ever expected via the trailing-window rule. A canonical horizon
+ *  missing from the latest ranking day fails and never ages out; changing this list is a reviewed
+ *  edit alongside the ranker's tuple. */
+export const CANONICAL_TIMEFRAMES = ['INTRADAY', 'SWING', 'POSITIONAL'] as const;
+
 export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   // ── OHLCV ──────────────────────────────────────────────────────────────
   {
@@ -1239,10 +1247,14 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
               SELECT MAX(date)::date FROM technical_signals, cut WHERE date < cut.day
             ) s
           ), rc AS (
-            SELECT value FROM app_settings WHERE key = 'morning_brief_last_sent_ranking'
+            -- Strict shape so CAST below can never throw on a hand-edited value; no question
+            -- mark in the pattern (the placeholder translator would read it as a parameter).
+            SELECT value, value ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01]) ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]+){0,1}([+-][0-9]{2}(:[0-9]{2}){0,1}){0,1}$' AS wellformed
+              FROM app_settings WHERE key = 'morning_brief_last_sent_ranking'
           )
           SELECT cut.day::text AS brief_day, rc.value AS receipt,
-                 CASE WHEN rc.value ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' AND rk.g IS NOT NULL
+                 (rc.value IS NOT NULL AND NOT rc.wellformed AND rc.value NOT LIKE 'empty:%') AS receipt_malformed,
+                 CASE WHEN rc.wellformed AND rk.g IS NOT NULL
                       THEN CAST(rc.value AS timestamptz) >= rk.g END AS receipt_covers,
                  rk.g::text AS ranking_at,
                  (rk.g AT TIME ZONE 'Asia/Kolkata')::date::text AS ranking_date,
@@ -1256,6 +1268,13 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         return { status: 'warn', detail: 'no due NSE trading day found in the last 11 days -- cannot judge brief delivery' };
       }
       const receipt: string | null = row?.receipt ?? null;
+      if (row?.receipt_malformed === true) {
+        return {
+          status: 'fail',
+          detail: `MALFORMED RECEIPT: app_settings morning_brief_last_sent_ranking = ${JSON.stringify(receipt)} is neither a ranking `
+            + `timestamp nor empty:<date>; cannot tell whether the brief for ${day} was delivered`,
+        };
+      }
       const emptyReceipt = receipt != null && receipt.startsWith('empty:');
       const delivered = emptyReceipt ? receipt!.slice(6) >= day : row?.receipt_covers === true;
       let stale: string | null = null;
@@ -1285,14 +1304,14 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
 
   {
     id: 'unified-recommendations-timeframe-coverage',
-    label: 'every unified_recommendations timeframe seen in the trailing 10 ranking days is still produced',
+    label: 'every canonical unified_recommendations horizon, and every label seen in the trailing 10 ranking days, is still produced',
     category: 'scoring',
     critical: false,
-    // timeframe='LONG_TERM' last produced 2026-09-28 and nothing alerted for three weeks: the
-    // table was fresh and the other three horizons kept writing. The comparison set is what the
-    // ranking itself produced over the 10 ranking days (IST dates) before the latest one -- not
-    // a hardcoded list of labels -- so a horizon retired on purpose stops being required once
-    // it leaves that window instead of staying red forever. NULL timeframe is "no horizon", not
+    // A horizon can stop writing while the table stays fresh and the others keep going. Expected
+    // set = CANONICAL_TIMEFRAMES (never ages out) UNION what the ranking itself produced over the
+    // 10 ranking days (IST dates) before the latest one, so a label retired on purpose (LONG_TERM,
+    // folded onto POSITIONAL 2026-10-03) stops being required once it leaves that window instead
+    // of staying red forever, while a dead canonical horizon cannot age out into silence. NULL timeframe is "no horizon", not
     // a label. Ranking days, not calendar days, so no holiday calendar is needed. The only param
     // is an as-of instant for tests; NULL means now().
     sql: `WITH asof AS (
@@ -1320,14 +1339,20 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       }
       const split = (s: unknown) => String(s ?? '').split(',').filter(Boolean);
       const present = new Set(split(row.latest_set));
-      const missing = split(row.trailing_set).filter(tf => !present.has(tf));
-      if (missing.length) {
-        return {
-          status: 'fail',
-          detail: `timeframe ${missing.join(', ')} produced rows in the previous ${row.trailing_days} ranking day(s) `
-            + `but none on the latest ranking day ${row.latest_day} -- check unified_ranker's horizon assignment `
-            + '(a horizon retired on purpose leaves this window after 10 ranking days)',
-        };
+      const canonicalMissing = CANONICAL_TIMEFRAMES.filter(tf => !present.has(tf));
+      const recentMissing = split(row.trailing_set)
+        .filter(tf => !present.has(tf) && !(CANONICAL_TIMEFRAMES as readonly string[]).includes(tf));
+      if (canonicalMissing.length || recentMissing.length) {
+        const parts: string[] = [];
+        if (canonicalMissing.length) {
+          parts.push(`canonical horizon ${canonicalMissing.join(', ')} has no rows on the latest ranking day `
+            + `${row.latest_day} (a canonical horizon never ages out -- check unified_ranker's horizon assignment)`);
+        }
+        if (recentMissing.length) {
+          parts.push(`recently-produced label ${recentMissing.join(', ')} had rows in the previous ${row.trailing_days} `
+            + `ranking day(s) but none on ${row.latest_day} (a label retired on purpose leaves this window after 10 ranking days)`);
+        }
+        return { status: 'fail', detail: parts.join(' | ') };
       }
       return {
         status: 'pass',
