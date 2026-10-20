@@ -2,6 +2,7 @@
 launch was skipped as "off-schedule", and no verified dump existed for 2+ days. An overdue backup
 must run at the next launch outside market hours, never inside them."""
 import importlib.util
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -34,3 +35,51 @@ def test_no_dump_at_all_counts_as_overdue_outside_market_hours(backup_module, tm
     monkeypatch.setattr(backup_module, "BACKUP_DIR", tmp_path)
     assert backup_module._newest_dump_age_hours() is None
     assert backup_module._catch_up_due(datetime(2026, 10, 17, 11, 0))   # Saturday
+
+
+def test_unverified_new_dump_does_not_hide_old_verified_backup(backup_module, tmp_path, monkeypatch):
+    """A killed pg_dump leaves a nonempty fresh file but cannot move the recovery point."""
+    monkeypatch.setattr(backup_module, "BACKUP_DIR", tmp_path)
+    now = datetime(2026, 10, 17, 18, 0).timestamp()
+    old = tmp_path / f"{backup_module.PG_DB}_20261015_231500.dump"
+    old.write_bytes(b"verified backup")
+    os.utime(old, (now - 43 * 3600, now - 43 * 3600))
+    partial = tmp_path / f"{backup_module.PG_DB}_20261017_170000.dump"
+    partial.write_bytes(b"partial dump")
+    os.utime(partial, (now - 3600, now - 3600))
+
+    class FakeConnection:
+        def execute(self, *_args):
+            return self
+
+        def fetchone(self):
+            return ((now - 42 * 3600) * 1000,)
+
+        def close(self):
+            pass
+
+    import db_compat
+    monkeypatch.setattr(db_compat, "connect", FakeConnection)
+    assert backup_module._newest_dump_age_hours(now=now) == pytest.approx(42)
+
+
+def test_missing_verified_artifact_requires_catch_up(backup_module, tmp_path, monkeypatch):
+    monkeypatch.setattr(backup_module, "BACKUP_DIR", tmp_path)
+    now = datetime(2026, 10, 17, 18, 0).timestamp()
+    partial = tmp_path / f"{backup_module.PG_DB}_20261017_170000.dump"
+    partial.write_bytes(b"partial dump")
+    os.utime(partial, (now - 3600, now - 3600))
+
+    class FakeConnection:
+        def execute(self, *_args):
+            return self
+
+        def fetchone(self):
+            return ((now - 42 * 3600) * 1000,)
+
+        def close(self):
+            pass
+
+    import db_compat
+    monkeypatch.setattr(db_compat, "connect", FakeConnection)
+    assert backup_module._newest_dump_age_hours(now=now) is None

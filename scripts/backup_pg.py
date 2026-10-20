@@ -22,8 +22,8 @@ DROP EXTENSION + CREATE EXTENSION in one long pg_restore session always fails ag
 preloaded extension — see the comment in restore() for the live-verified failure mode).
 A plain `pg_restore` of this dump WILL break hypertables — use this script.
 
-Every backup() run is verified (`pg_restore --list` against the dump just written) and
-recorded in `job_heartbeat` under 'pg-backup'. Both exist because an unscheduled, unmonitored
+Each completed backup() run is fully read-back verified before its `.dump.partial` is
+atomically published as `.dump`, then recorded in `job_heartbeat` under 'pg-backup'. Both exist because an unscheduled, unmonitored
 backup script is indistinguishable from no backup at all: this file sat in the repo unreferenced
 by queues.ts, jobRegistry.ts or ecosystem.config.cjs, so nothing ever ran it and nothing could
 have noticed. A dump whose TOC cannot be read is a file, not a backup -- verifying at WRITE time
@@ -122,10 +122,41 @@ CATCH_UP_AFTER_HOURS = 26      # nightly cadence + the ~15 min a dump takes + sl
 
 
 def _newest_dump_age_hours(now: float | None = None) -> float | None:
-    dumps = [p for p in BACKUP_DIR.glob(f"{PG_DB}_*.dump") if p.stat().st_size > 0] if BACKUP_DIR.exists() else []
-    if not dumps:
+    """Age of the last verified dump, never the newest nonempty (possibly partial) file.
+
+    A killed pg_dump leaves a plausible-looking file but does not record success. Require
+    both the durable success receipt and a dump written shortly before it. If either is
+    unavailable, the off-schedule guard should permit a catch-up outside market hours.
+    """
+    if not BACKUP_DIR.exists():
         return None
-    return ((now if now is not None else time.time()) - max(p.stat().st_mtime for p in dumps)) / 3600
+    try:
+        from db_compat import connect
+        conn = connect()
+        try:
+            row = conn.execute(
+                "SELECT last_success_at FROM job_heartbeat WHERE job_name = ?",
+                (HEARTBEAT_JOB,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None or row[0] is None:
+            return None
+        success_at = float(row[0]) / 1000
+        # pg_dump can run for over an hour; verification follows before the receipt.
+        # An unrelated fresh, unfinished dump cannot match an older receipt.
+        has_verified_artifact = any(
+            path.is_file()
+            and path.stat().st_size > 0
+            and 0 <= success_at - path.stat().st_mtime <= 4 * 3600
+            for path in BACKUP_DIR.glob(f"{PG_DB}_*.dump")
+        )
+        if not has_verified_artifact:
+            return None
+        return ((now if now is not None else time.time()) - success_at) / 3600
+    except Exception as exc:  # noqa: BLE001
+        print(f"[BACKUP] WARNING: verified dump age unavailable: {exc}", file=sys.stderr)
+        return None
 
 
 def _catch_up_due(now_ist: datetime | None = None, dump_age_hours: float | None = None) -> bool:
@@ -215,7 +246,14 @@ def _backup_under_lock() -> None:
     _check_container()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = BACKUP_DIR / f"{PG_DB}_{ts}.dump"
+    for attempt in range(1000):
+        suffix = "" if attempt == 0 else f"_{attempt:03d}"
+        out = BACKUP_DIR / f"{PG_DB}_{ts}{suffix}.dump"
+        pending = out.with_name(f"{out.name}.partial")
+        if not out.exists() and not pending.exists():
+            break
+    else:
+        raise RuntimeError(f"No free backup filename for {ts}")
 
     cmd = _docker_base(interactive=False) + [
         "pg_dump", "-U", PG_USER, "-d", PG_DB, "-Fc", "--no-owner",
@@ -225,11 +263,11 @@ def _backup_under_lock() -> None:
         "--exclude-schema=pytest_[0-9a-f]{12}",
         "--exclude-schema=vitest_[0-9a-f]{12}",
     ]
-    print(f"[BACKUP] dumping {PG_DB} -> {out.name} ...")
-    with open(out, "wb") as fh:
+    print(f"[BACKUP] dumping {PG_DB} -> {pending.name} ...")
+    with open(pending, "wb") as fh:
         proc = subprocess.run(cmd, stdout=fh, stderr=subprocess.PIPE)
     if proc.returncode != 0:
-        out.unlink(missing_ok=True)
+        pending.unlink(missing_ok=True)
         # Keep the TAIL, not the head: TimescaleDB's circular-FK warnings on its own catalog
         # tables (hypertable/chunk/continuous_agg) are benign boilerplate that pg_dump repeats
         # for every affected table, and they front-load enough text that a head-truncated
@@ -241,19 +279,22 @@ def _backup_under_lock() -> None:
         _record_heartbeat(False, msg)
         sys.exit(f"[BACKUP] {msg}")
 
-    size_mb = out.stat().st_size / 1_048_576
+    size_mb = pending.stat().st_size / 1_048_576
 
     # Verify at WRITE time. pg_dump can exit 0 having produced a truncated file (disk filling
     # mid-write is the realistic case on a single box), and a dump whose TOC cannot be read is
     # a file, not a backup. Reading it back is the only check that distinguishes the two, and
     # restore day is the worst possible moment to find out.
-    ok, toc_err = _verify_dump(out)
+    ok, toc_err = _verify_dump(pending)
     if not ok:
-        out.unlink(missing_ok=True)
+        pending.unlink(missing_ok=True)
         msg = f"dump failed verification and was deleted (corrupt/truncated): {toc_err[:1000]}"
         _record_heartbeat(False, msg)
         sys.exit(f"[BACKUP] {msg}")
 
+    # A PM2/host kill during pg_dump leaves only .partial. Publish into the retained
+    # *.dump set in one same-directory rename, after the full data-block readback.
+    os.replace(pending, out)
     print(f"[BACKUP] wrote {out} ({size_mb:.1f} MB), TOC verified")
     _prune()
     _record_heartbeat(True, f"{out.name} ({size_mb:.1f} MB)")
