@@ -17,6 +17,10 @@ let rankingD = '';      // IST calendar date of that ranking
 let sessionD = '';      // latest COMPLETED NSE session (MAX of EOD tables, < today)
 const sendMorningBrief = vi.fn();
 
+vi.mock('../marketStatusService', () => ({
+  isTradingHolidayToday: vi.fn(async () => false),
+}));
+
 vi.mock('../morningBrief', () => ({
   sendMorningBrief: (...a: unknown[]) => sendMorningBrief(...a),
 }));
@@ -32,6 +36,7 @@ vi.mock('../dbAsync', () => ({
       const v = store.get(String(params[0]));
       return v === undefined ? undefined : { value: v };
     }
+    if (/FROM market_holidays/i.test(sql)) return { is_holiday: false };
     // the brief's own ranking lookup returns { g, d }
     if (/MAX\(generated_at\).*\bd\b/is.test(sql)) return { g: rankingG, d: rankingD };
     // the completed-session MAX returns { d }

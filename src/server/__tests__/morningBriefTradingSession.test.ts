@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const sendMorningBrief = vi.fn();
 let rankingGeneratedAt = '2026-10-09T17:00:00.000Z';
 let latestCompletedSession = '2026-10-09';
+let knownHoliday = false;
+let liveHoliday = false;
+
+vi.mock('../marketStatusService', () => ({
+  isTradingHolidayToday: vi.fn(async () => liveHoliday),
+}));
 
 vi.mock('../morningBrief', () => ({
   sendMorningBrief: (...args: unknown[]) => sendMorningBrief(...args),
@@ -21,6 +27,7 @@ vi.mock('../dbAsync', () => ({
       };
     }
     if (/nse_universe_history/i.test(sql)) return { d: latestCompletedSession };
+    if (/FROM market_holidays/i.test(sql)) return { is_holiday: knownHoliday };
     if (/FROM app_settings/i.test(sql)) return undefined;
     return { d: latestCompletedSession };
   }),
@@ -32,6 +39,8 @@ describe('morning brief trading-session freshness', () => {
     vi.setSystemTime(new Date('2026-10-12T02:50:00.000Z')); // Monday 08:20 IST
     rankingGeneratedAt = '2026-10-09T17:00:00.000Z';       // Friday 22:30 IST
     latestCompletedSession = '2026-10-09';
+    knownHoliday = false;
+    liveHoliday = false;
     sendMorningBrief.mockReset();
     sendMorningBrief.mockResolvedValue({ sent: true, picks: 5 });
   });
@@ -73,6 +82,48 @@ describe('morning brief trading-session freshness', () => {
 
     expect(result.success).toBe(false);
     expect(result.failedSteps.join(' ')).toMatch(/market open/i);
+    expect(sendMorningBrief).not.toHaveBeenCalled();
+  });
+
+  it('does not send a Friday ranking as a Saturday pre-open catch-up', async () => {
+    vi.setSystemTime(new Date('2026-10-17T02:50:00.000Z')); // Saturday 08:20 IST
+    rankingGeneratedAt = '2026-10-16T17:00:00.000Z';       // Friday 22:30 IST
+    latestCompletedSession = '2026-10-16';
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    const result = await processMorningBrief({ data: { force: true } }) as { skipped?: boolean };
+
+    expect(result?.skipped).toBe(true);
+    expect(sendMorningBrief).not.toHaveBeenCalled();
+  });
+
+  it('skips a known NSE holiday without stamping a delivery failure', async () => {
+    vi.setSystemTime(new Date('2026-10-20T02:50:00.000Z')); // Tuesday 08:20 IST
+    rankingGeneratedAt = '2026-10-19T17:00:00.000Z';
+    latestCompletedSession = '2026-10-19';
+    knownHoliday = true;
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    const result = await processMorningBrief({ data: { force: true } }) as { skipped?: boolean };
+
+    expect(result?.skipped).toBe(true);
+    expect(sendMorningBrief).not.toHaveBeenCalled();
+  });
+
+  it('keeps a late holiday catch-up a planned skip, not a failed delivery', async () => {
+    vi.setSystemTime(new Date('2026-10-20T07:02:00.000Z')); // holiday, 12:32 IST
+    knownHoliday = true;
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    const result = await processMorningBrief({ data: { force: true } }) as { skipped?: boolean };
+
+    expect(result?.skipped).toBe(true);
+    expect(sendMorningBrief).not.toHaveBeenCalled();
+  });
+
+  it('skips a newly announced trading holiday even if the local calendar lacks it', async () => {
+    liveHoliday = true;
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    const result = await processMorningBrief({ data: { force: true } }) as { skipped?: boolean };
+
+    expect(result?.skipped).toBe(true);
     expect(sendMorningBrief).not.toHaveBeenCalled();
   });
 });

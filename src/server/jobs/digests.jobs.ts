@@ -15,6 +15,7 @@ import { buildDailyDigest } from '../jobWatchdog';
 import { telegramService } from '../telegramService';
 import { registerRepeatableJob } from './registerJob';
 import { dbGet, dbRun } from '../dbAsync';
+import { isTradingHolidayToday } from '../marketStatusService';
 
 export const QUEUE_JOB_DIGEST = 'job-digest';
 export const QUEUE_JOB_DIGEST_MORNING = 'job-digest-morning';
@@ -22,7 +23,7 @@ export const QUEUE_RECOMMENDATIONS_DIGEST = 'recommendations-digest';
 export const QUEUE_MORNING_BRIEF = 'morning-brief';
 
 type DigestFailureVerdict = { success: false; failedSteps: string[] };
-type DigestJobResult = DigestFailureVerdict | void;
+type DigestJobResult = DigestFailureVerdict | { skipped: true } | void;
 
 async function processJobDigest(): Promise<void> {
   const digest = await buildDailyDigest();
@@ -170,6 +171,22 @@ export async function processMorningBrief(job?: { data?: { force?: boolean } }):
   // A missed 08:20 slot may be replayed hours later after a restart. Once the NSE opens,
   // the prior-evening list is no longer a pre-open call and must not be sent under that label.
   const istClock = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const istToday = istClock.toISOString().slice(0, 10);
+  // Catch-up jobs can run on a weekend even though the cron itself is weekday-only. A known
+  // exchange holiday is likewise not a pre-open session. Keep expected closed days as a skip,
+  // not a failed delivery; the shared worker leaves the heartbeat untouched for {skipped:true}.
+  if (istClock.getUTCDay() === 0 || istClock.getUTCDay() === 6) {
+    console.log('[QUEUE] morning-brief skipped — no NSE session on the weekend');
+    return { skipped: true };
+  }
+  const knownHoliday = await dbGet<{ is_holiday: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM market_holidays WHERE exchange = 'NSE' AND date = ?) AS is_holiday`,
+    [istToday],
+  );
+  if (knownHoliday?.is_holiday || await isTradingHolidayToday()) {
+    console.log('[QUEUE] morning-brief skipped — NSE trading holiday');
+    return { skipped: true };
+  }
   const istMinutes = istClock.getUTCHours() * 60 + istClock.getUTCMinutes();
   if (istMinutes >= 9 * 60 + 15) {
     const msg = 'SKIPPED: market open has passed; pre-open brief cannot be sent after 09:15 IST';
@@ -207,7 +224,6 @@ export async function processMorningBrief(job?: { data?: { force?: boolean } }):
   //      before the session's EOD tables land (2026-10-14 07:11 IST rank stamped 2026-10-14
   //      while the latest completed session was still 2026-10-13). Judging (b) only against
   //      session.d skipped the brief on every such morning; the 7-day cap still guards staleness.
-  const istToday = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const sessionMatches = ur.d === session?.d;
   const generatedToday = ur.d === istToday;
   if (!(ageMs >= 0) || ageMs > MORNING_BRIEF_MAX_CALENDAR_AGE_MS || (!sessionMatches && !generatedToday)) {
