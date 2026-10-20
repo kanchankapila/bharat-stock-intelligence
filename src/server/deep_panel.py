@@ -20,6 +20,9 @@ FAKE_ZERO_COLUMNS = (
     "atr_pct",       # 5.6% zeros; 100.0% of them have sma20 NULL
     "di_plus",       # 6.5% zeros; 99.9% of them have sma20 NULL
     "di_minus",      # 6.6% zeros; 99.6% of them have sma20 NULL
+    "adx",           # 11.7% zeros; 100.0% have sma50 NULL (45,487 zeros) vs 10.57% of nonzero rows; di_plus also 0 on 55.8%
+    # Companion choice matters: ADX needs ~27 bars (14 for DI, 14 more to smooth), so test it against
+    # sma50, not sma20. A companion whose warm-up is SHORTER than the column's under-detects (vs sma20: 70.5%).
 )
 _KEY_COLUMNS = ("symbol", "date", "timeframe")
 _NUMERIC = ("double precision", "real", "numeric", "integer", "bigint", "smallint")

@@ -53,8 +53,8 @@ def _seed_zero_columns(conn):
     mtf_alignment_score: 80% zeros but sma20 is always present (a genuinely mostly-false flag)."""
     for i in range(20):
         conn.execute(
-            "INSERT INTO feature_store (symbol, date, timeframe, above_sma200, sma200, mtf_alignment_score, sma20) "
-            "VALUES (?, '2021-03-01', 'D', 0, NULL, ?, 10.0)",
+            "INSERT INTO feature_store (symbol, date, timeframe, above_sma200, sma200, adx, sma50, mtf_alignment_score, sma20) "
+            "VALUES (?, '2021-03-01', 'D', 0, NULL, 0, NULL, ?, 10.0)",
             (f"Z{i}", 0 if i < 16 else 3),
         )
     conn.commit()
@@ -62,10 +62,11 @@ def _seed_zero_columns(conn):
 
 def test_default_filled_column_is_excluded(pg_db_conn, monkeypatch):
     _seed_zero_columns(pg_db_conn)
-    assert "above_sma200" in FAKE_ZERO_COLUMNS
-    assert "above_sma200" not in deep_feature_columns(pg_db_conn)
+    for c in ("above_sma200", "adx"):
+        assert c in FAKE_ZERO_COLUMNS
+    assert not {"above_sma200", "adx"} & set(deep_feature_columns(pg_db_conn))
     monkeypatch.setattr(deep_panel, "FAKE_ZERO_COLUMNS", ())
-    assert "above_sma200" in deep_feature_columns(pg_db_conn)  # only the explicit list removes it
+    assert {"above_sma200", "adx"} <= set(deep_feature_columns(pg_db_conn))  # only the explicit list removes them
 
 
 def test_genuinely_mostly_zero_column_is_kept(pg_db_conn):
