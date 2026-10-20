@@ -4,8 +4,8 @@ import pytest
 
 import deep_panel_score as dps
 from deep_panel_score import (
-    EXCLUDED_COLUMNS, FACTOR_GROUPS, LEAK_CORR_LIMIT, LeakDetected, assert_no_same_day_leak,
-    composite_score, shuffled_control, winsorise_returns, zscore_by_date,
+    EXCLUDED_COLUMNS, FACTOR_GROUPS, LEAK_CORR_LIMIT, LeakDetected, PINNED_COLUMNS, assert_no_label_leak,
+    composite_score, same_day_contemporaneity, shuffled_control, winsorise_returns, zscore_by_date,
 )
 
 # The 47 deep_feature_columns() returned over 2021-01-01..2022-01-01 (Task 6's final set).
@@ -119,24 +119,54 @@ def test_low_volatility_scores_higher():
     assert s.iloc[0] > s.iloc[-1]
 
 
-def test_leak_guard_raises_on_a_score_that_is_the_days_return():
-    df = _panel(n_sym=80, ret_1d=1.0)
-    leaky = df["ret_1d"] + np.random.default_rng(2).normal(size=len(df)) * 0.1
+def test_pinned_columns_are_the_47_and_match_groups_plus_exclusions():
+    assert list(PINNED_COLUMNS) == C47 and len(PINNED_COLUMNS) == 47
+    assert {c for v in FACTOR_GROUPS.values() for c in v} | set(EXCLUDED_COLUMNS) == set(PINNED_COLUMNS)
+
+
+def test_a_column_outside_the_pinned_set_raises():
+    df = _panel(ret_5d=1.0, sma200=1.0)  # exists in the 2021-2026 window but not the pinned 47
+    with pytest.raises(ValueError, match="sma200"):
+        composite_score(df, ["ret_5d", "sma200"])
+
+
+def test_leak_limit_is_the_published_factor_tell():
+    assert LEAK_CORR_LIMIT == 0.15
+
+
+def test_label_gate_trips_when_the_score_is_the_label():
+    # negative control: a score that IS its label (plus a little noise) must not pass
+    df = _panel(n_sym=80, target_ret_5d=1.0)
+    leaky = df["target_ret_5d"] + np.random.default_rng(2).normal(size=len(df)) * 0.1
     with pytest.raises(LeakDetected):
-        assert_no_same_day_leak(df, leaky)
+        assert_no_label_leak(df, leaky, "target_ret_5d")
 
 
-def test_leak_guard_returns_the_correlation_when_clean():
-    df = _panel(n_sym=200, ret_1d=1.0)
+def test_label_gate_passes_an_independent_score_and_returns_the_float():
+    df = _panel(n_sym=200, target_ret_5d=1.0)
     clean = pd.Series(np.random.default_rng(3).normal(size=len(df)), index=df.index)
-    r = assert_no_same_day_leak(df, clean)
-    assert isinstance(r, float) and abs(r) < LEAK_CORR_LIMIT == 0.2
+    r = assert_no_label_leak(df, clean, "target_ret_5d")
+    assert isinstance(r, float) and abs(r) < LEAK_CORR_LIMIT
 
 
-def test_leak_guard_cannot_pass_vacuously():
-    df = _panel(n_dates=2, n_sym=2, ret_1d=1.0)  # too few names per date to correlate
+def test_label_gate_cannot_pass_vacuously():
+    df = _panel(n_dates=2, n_sym=2, target_ret_5d=1.0)
     with pytest.raises(ValueError):
-        assert_no_same_day_leak(df, pd.Series(range(len(df)), index=df.index))
+        assert_no_label_leak(df, pd.Series(range(len(df)), index=df.index), "target_ret_5d")
+
+
+def test_contemporaneity_is_reported_not_gated():
+    df = _panel(n_sym=80, ret_1d=1.0)
+    same = same_day_contemporaneity(df, df["ret_1d"].copy())  # corr 1.0 and it must NOT raise
+    assert isinstance(same, float) and same == pytest.approx(1.0)
+
+
+def test_shuffled_control_destroys_a_label_leak_the_gate_catches():
+    df = _panel(n_sym=200, target_ret_5d=1.0)
+    leaky = df["target_ret_5d"].copy()
+    with pytest.raises(LeakDetected):
+        assert_no_label_leak(df, leaky, "target_ret_5d")
+    assert abs(assert_no_label_leak(df, shuffled_control(df, leaky), "target_ret_5d")) < LEAK_CORR_LIMIT
 
 
 def test_shuffled_control_permutes_within_each_date_only():
@@ -149,11 +179,3 @@ def test_shuffled_control_permutes_within_each_date_only():
     assert not np.allclose(ctrl, score)
     assert shuffled_control(df, score).equals(ctrl)
     assert not shuffled_control(df, score, seed=1).equals(ctrl)
-
-
-def test_shuffled_control_destroys_a_leak_the_guard_catches():
-    df = _panel(n_sym=200, ret_1d=1.0)
-    leaky = df["ret_1d"].copy()
-    with pytest.raises(LeakDetected):
-        assert_no_same_day_leak(df, leaky)
-    assert abs(assert_no_same_day_leak(df, shuffled_control(df, leaky))) < LEAK_CORR_LIMIT
