@@ -12,7 +12,7 @@ vi.mock('../jobSteps', () => ({ StepTracker: vi.fn().mockImplementation(() => ({
 vi.mock('../jobs/registerJob', () => ({ registerRepeatableJob: vi.fn() }));
 vi.mock('../queues', () => ({ makeConnection: vi.fn() }));
 
-const { processConfluenceCompute, isConfluenceOverdue } = await import('../jobs/confluence.jobs');
+const { processConfluenceCompute, isConfluenceOverdue, resetConfluenceCatchupAttempts } = await import('../jobs/confluence.jobs');
 const { dbGet } = await import('../dbAsync');
 const mockDbGet = dbGet as ReturnType<typeof vi.fn>;
 const { isMarketOpen } = await import('../marketStatusService');
@@ -25,6 +25,7 @@ const NOW = new Date('2026-10-17T03:00:00Z');
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetConfluenceCatchupAttempts();
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(NOW);
   mockIsMarketOpen.mockResolvedValue(false);
@@ -66,6 +67,34 @@ describe('processConfluenceCompute missed-window catch-up', () => {
     expect(mockCompute).not.toHaveBeenCalled();
     expect(r.skipped).toBe(true);
     expect(mockDbGet).not.toHaveBeenCalled();
+  });
+});
+
+describe('processConfluenceCompute catch-up attempt limit', () => {
+  const STALE = new Date('2026-10-16T18:01:00Z');
+
+  it('stops forcing after repeated catch-ups that wrote nothing (newest row never advances)', async () => {
+    // compute exits 0 but writes no rows, so MAX(computed_at) stays stale and every 30-min tick is
+    // "overdue" again. Unbounded, that is ~17 whole-universe runs a day outside the window.
+    mockDbGet.mockResolvedValue({ newest: STALE });
+
+    for (let i = 0; i < 10; i++) await processConfluenceCompute({} as any);
+
+    expect(mockCompute.mock.calls.length).toBe(3);
+    const r = await processConfluenceCompute({} as any);
+    expect(r.skipped).toBe(true);
+    expect(mockCompute).toHaveBeenCalledTimes(3);
+  });
+
+  it('a catch-up that DID write rows earns a fresh budget for the next missed window', async () => {
+    mockDbGet.mockResolvedValue({ newest: STALE });
+    for (let i = 0; i < 5; i++) await processConfluenceCompute({} as any);
+    expect(mockCompute).toHaveBeenCalledTimes(3);
+
+    // A write advanced the newest row (still older than the last elapsed window) -> new artifact, new budget.
+    mockDbGet.mockResolvedValue({ newest: new Date('2026-10-16T19:00:00Z') });
+    await processConfluenceCompute({} as any);
+    expect(mockCompute).toHaveBeenCalledTimes(4);
   });
 });
 

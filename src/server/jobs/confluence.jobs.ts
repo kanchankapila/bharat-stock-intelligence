@@ -109,6 +109,20 @@ export function isConfluenceOverdue(newestComputedAt: Date | null, now = new Dat
   return newestComputedAt.getTime() < windowStartIstAsUtc - IST_MS;
 }
 
+/**
+ * Overdue catch-ups per stale artifact. `isConfluenceOverdue` keys on the newest row, so a compute
+ * that exits 0 but writes nothing leaves it overdue and, at the 30-min cadence, the whole-universe
+ * job would re-run ~17x a day outside its window (it ran 0x before the catch-up existed). Allow
+ * CONFLUENCE_CATCHUP_MAX_ATTEMPTS forced runs per distinct newest value -- enough to ride out a
+ * transient failure (~1.5h of retries), not a loop. A write moves the newest row, which is a new key
+ * and so a fresh budget; a process restart also resets it, which only ever grants a few more tries.
+ * pg-backup's `_catch_up_due` has no counter: it is bounded by launches (pm2 start / one nightly
+ * cron_restart), not ticks, so a per-tick job needs the explicit limit.
+ */
+export const CONFLUENCE_CATCHUP_MAX_ATTEMPTS = 3;
+let catchupAttempts = { key: '', count: 0 };
+export function resetConfluenceCatchupAttempts(): void { catchupAttempts = { key: '', count: 0 }; }
+
 export async function processConfluenceCompute(job: Job): Promise<{ computed: number; elite: number; strong: number; skipped?: boolean }> {
   // Positional signal (whole-universe, heavy). Skip during market hours so it doesn't compete with
   // the intraday pipeline for CPU/DB — its consumers (positional dashboards + the post-close
@@ -136,6 +150,13 @@ export async function processConfluenceCompute(job: Job): Promise<{ computed: nu
       console.log('[QUEUE] confluence-compute skipped — outside the evening-landing/pre-open window (inputs are static)');
       return { computed: 0, elite: 0, strong: 0, skipped: true };
     }
+    const key = String(row?.newest?.getTime() ?? 'empty');
+    if (catchupAttempts.key !== key) catchupAttempts = { key, count: 0 };
+    if (catchupAttempts.count >= CONFLUENCE_CATCHUP_MAX_ATTEMPTS) {
+      console.log(`[QUEUE] confluence-compute skipped — overdue catch-up already attempted ${catchupAttempts.count}x without a new write`);
+      return { computed: 0, elite: 0, strong: 0, skipped: true };
+    }
+    catchupAttempts.count++;
     console.log('[QUEUE] confluence-compute FORCED — no write in the last elapsed window (overdue catch-up)');
   }
   if ((job?.data as any)?.force === true && !isConfluenceComputeWindow()) {
