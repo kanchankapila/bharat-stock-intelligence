@@ -99,6 +99,6 @@ def test_label_columns_are_every_target_column(pg_db_conn):
     rows = pg_db_conn.execute(
         "SELECT column_name FROM information_schema.columns "
         "WHERE table_schema = current_schema() AND table_name = 'feature_store' AND column_name LIKE ?",
-        ("target\_%",),
+        (r"target\_%",),
     ).fetchall()
     assert {r[0] for r in rows} == set(LABEL_COLUMNS)
