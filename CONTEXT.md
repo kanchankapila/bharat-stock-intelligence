@@ -37,6 +37,13 @@ External data providers
   -> Express/tRPC APIs and WebSocket -> the React application, Telegram, and chatbot surfaces
 ```
 
+`unified_ranker.py` blends eight engines, but only four are live: `ml`, `confluence`, `technical` and
+`breakout` carry non-zero weight. `screener`, `cs`, `dl` and `smart_money` carry weight 0.0 in every
+regime (`REGIME_WEIGHTS`; zeroed after ablations, `dl` paused by user decision 2026-09-13). Their keys and reporting
+columns are kept, so a zero-weight engine still writes scores that no recommendation depends on. Treat
+those four as stored telemetry, not as ranking inputs, and read the weights from `REGIME_WEIGHTS` rather
+than from this paragraph before relying on it.
+
 Outcome resolution, backtests, model evaluation, and monitoring provide feedback for research and
 operations. Do not assume every source follows this exact path or that a feedback loop is
 autonomous; inspect the relevant writer, consumer, and job before changing one.
@@ -63,8 +70,12 @@ running product. (Two earlier rebuilds, `greenfield/` and `bharatquant/`, were n
 2026-10-03; any reference to them is stale.)
 
 ## Measured State Of The Edge
-The ranker has a small positive rank IC that is still LOW-DATA and has never passed a cost-aware
-backtest; most published factors tested here are null or inverted on this data. The realistic goal is a
+The ranker has a small positive rank IC, but every reading on `unified_recommendations` is LOW-DATA:
+41 of 41 `factor_edge_history` readings sit at 0.2-8.2 effective dates against a reliability floor of 20
+(measured 2026-10-19), so that panel gives no usable reading in either direction, and the ranker has never
+passed a cost-aware backtest. The longer-history deep-panel gradings (2021-2026, 2,431 symbols) are
+separate: no tier reaches AUC 0.55, and the F&O-eligible tier is indistinguishable from zero (see
+`.claude/rules/measurement.md`, 2026-10-21). Most published factors tested here are null or inverted on this data. The realistic goal is a
 modest, honestly-measured cross-sectional edge (rank IC of roughly 0.05-0.10), not high accuracy, and the
 system's job includes refusing to present an unproven ranking as trustworthy. Read
 `.claude/rules/measurement.md` before proposing any reweighting — it is usually the wrong fix.

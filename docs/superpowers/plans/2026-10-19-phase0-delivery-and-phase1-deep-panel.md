@@ -514,8 +514,8 @@ git commit -m "feat(deep-panel): equal-weight cross-sectional composite with obs
 
 **Interfaces:**
 - Produces:
-  - `LEAK_CORR_LIMIT = 0.2`
-  - `def assert_no_same_day_leak(panel: pd.DataFrame, score: pd.Series, same_day_return_col: str = "ret_1d") -> float` — returns the absolute correlation, raises `LeakDetected` at or above `LEAK_CORR_LIMIT`.
+  - `LEAK_CORR_LIMIT = 0.15` (was 0.2; lowered with the guard rename, commit 56ebc0bb)
+  - `def assert_no_label_leak(panel, score, label_col, limit=LEAK_CORR_LIMIT) -> float`, in `deep_panel_score.py` (renamed 2026-10-20 from the same-day-return guard; it now guards the LABEL the score is graded on) — returns the absolute correlation, raises `LeakDetected` at or above `LEAK_CORR_LIMIT`.
   - `def shuffled_control(panel: pd.DataFrame, score: pd.Series, seed: int = 20261019) -> pd.Series` — the score permuted **within each date**, so the control keeps the cross-sectional shape and destroys only the symbol mapping.
   - `class LeakDetected(RuntimeError)`
 
@@ -526,10 +526,10 @@ This is the one-line check `ml-model-bugs.md` says would have caught a +3.6%/day
 ```python
 def test_raises_when_the_score_is_the_same_day_return():
     with pytest.raises(LeakDetected):
-        assert_no_same_day_leak(panel, panel["ret_1d"])
+        assert_no_label_leak(panel, panel["fwd_5"], "fwd_5")
 
 def test_passes_for_an_honest_score():
-    assert assert_no_same_day_leak(panel, honest_score) < LEAK_CORR_LIMIT
+    assert assert_no_label_leak(panel, honest_score, "fwd_5") < LEAK_CORR_LIMIT
 
 def test_shuffle_permutes_within_date_only():
     ctl = shuffled_control(panel, score)

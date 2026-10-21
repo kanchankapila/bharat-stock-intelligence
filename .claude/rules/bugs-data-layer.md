@@ -91,6 +91,21 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   Build the frame from the rows, then rename.
 - **A fix applied to a component no route imports.** Grep the import before editing a UI file.
 
+- **A warm-up-zero-filled indicator column is 100% non-null, so it is invisible to every non-null-share coverage test (2026-10-20, `feature_store`).**
+  A column that cannot be computed until N bars exist is written as `0` instead of NULL; the zero then reads as a real, usually bearish,
+  value. **Detect it by contrast, not by raw zero-share:** the share of the column's ZEROS whose longer-warm-up companion is NULL,
+  against the same share among its NONZERO rows (`above_sma200` 94.2% vs 0.0%). A high zero-share alone proves nothing
+  (`mtf_alignment_score` has 13.5% zeros and 0 of 38,596 coincide with `sma50 IS NULL`, so those are real zeros).
+  **Never trust a companion whose warm-up is SHORTER than the column's:** `adx` (~27 bars: 14 for DI, 14 to smooth) tested against
+  `sma20` (20 bars) read an inconclusive 70.5%; against `sma50` it reads **100.00% against 10.57%** among nonzero rows.
+  Six live instances: `above_sma200` (86.6% zero-share, 94.2% vs 0.0%), `atr_14` and `atr_pct` (100.0% vs 2.75%), `di_plus` (99.9% vs 1.84%),
+  `di_minus` (99.6% vs 1.83%), `adx` (100.00% vs 10.57%). `atr_14 = 0` is additionally physically impossible for a traded stock.
+  Shipped: `deep_panel.column_zero_shares()` (prints the zero-share of every column so a newly default-filled one is visible) and
+  `deep_panel.FAKE_ZERO_COLUMNS` (the evidenced exclusion list; explicit on purpose, a threshold would be an unmeasured constant).
+  The fix at the source is NULL, not 0 (see the sentinel-instead-of-NULL entry above). Still open as AF-20261021-03: read-only check
+  2026-10-21 shows `above_sma200` is still written 0 where `sma200` is NULL (172 of 1,490 zeros on 2026-10-19; it is never 1 there), and
+  all of 2025-05 (and 62-100% of 2025-06) carries `atr_pct = 0` / `adx = 0` on every row.
+
 ## SQL dialect (`db_compat` / `sqlTranslate`)
 
 | Signature | Why it breaks |

@@ -101,3 +101,19 @@ date*, decoupled from any specific signal record). These answer genuinely differ
 a merge would require either dropping the FK (defeats its purpose) or writing a `unified_signals` row
 for every graded event (a much larger behavioral change). Do not re-attempt this merge without
 re-deriving why it doesn't work. Do not add new signal tables.
+
+## Two contracts a new consumer will get wrong (verified live 2026-10-21; AF-20261021-01, AF-20261021-02)
+
+**`unified_recommendations.conviction_level` is direction-agnostic.** It grades how far the score sits from neutral, not which way, so
+the same label sits on opposite trades: `S_ELITE` is both "Strong Buy" (2,481 rows, mean `unified_score` 85.9) and "Strong Sell"
+(9,778 rows, mean 13.8). A consumer that sorts, badges or filters on `conviction_level` alone (a "top conviction" list, a
+size-by-conviction rule) will present sells as the highest-conviction buys. Always read it together with `classification`
+(or the sign of `unified_score - 50`). The label is also not a monotone quality ladder: see AF-20261007-05.
+
+**`unified_signals.signal_type` carries two vocabularies, split by writer.** `signal_source='technical'` writes `Bullish` / `Bearish` /
+`Neutral` (128,318 rows live; plus two stray `BREAKOUT` / `EMA_BULL_STACK` rows), while `screener`, `technical_scan` and `AI` write
+`BUY` / `SELL` (`AI` also `HOLD`). Any filter on one vocabulary silently excludes the other writer's rows and returns a plausible,
+non-empty result. The correct shape is `signal_type IN ('BUY','Bullish')` (see `unified_ranker.py` ~L2621, `ranker_input_snapshot.py`
+~L164, `chatbot/tools/sql_tool.py` ~L131). `routers/misc.router.ts` ~L453 filters `signal_type = 'BUY'` only, so the entry/target/stop
+levels it attaches can never come from a technical signal. Do not "fix" it by normalising the stored values: four readers already
+depend on the split; widen the reader's predicate and measure what the newly visible rows are worth first (AF-20261021-02).

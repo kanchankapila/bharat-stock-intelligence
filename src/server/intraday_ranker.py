@@ -57,6 +57,16 @@ TARGET_PCT_FLOOR, TARGET_PCT_CAP = 0.008, 0.05   # 0.8%–5%
 # and hand-fitting them here would repeat Finding #31. The load-bearing safety mechanism is
 # EMISSION_GATE below, which is empirical; this rebalance only stops the score actively
 # pointing the wrong way.
+#
+# KNOWN DISAGREEMENT, NOT RESOLVED HERE (2026-10-21, no constant changed): the reasoning above and the
+# constants below do not agree. W_SCREENER (0.40, the largest weight) calls the same
+# compute_screener_stock_scores whose output measured rank IC -0.0326 @5d on the daily ranker and was
+# zeroed in unified_ranker's REGIME_WEIGHTS after four ablations. W_BREAKOUT is momentum, which the
+# paragraph above documents as the wrong sign intraday. Those readings are on a different score and a
+# 5d horizon, so they are not evidence for changing a weight here (ml-model-bugs.md: metrics computed
+# against different targets). The emission gate is what currently protects the output, not these weights.
+# Queued measurement: re-run the 256-config sweep described under EMISSION_GATE with W_SCREENER = 0
+# (cost-aware, same horizon) and change the constants only on that result.
 W_BREAKOUT, W_SCREENER, W_REVERSAL = 0.20, 0.40, 0.40
 
 # Regime tilt — applied to both the final score AND (unlike before) position sizing, so a

@@ -95,6 +95,45 @@ This section is a dated status board, not a verdict list. A claim carrying an ol
 in this file is not wrong, it is *unrefreshed* — check the date before quoting it, and re-run
 rather than assume. Full narrative for anything here: `docs/measurement-history.md`.
 
+### 2026-10-21 — Deep-panel tiered grading, 2021-01..2026-09 (phase 2026-10-19; `deep_panel*.py`) — do not re-run to "find" an edge
+
+Panel: `feature_store`, 2,431 symbols, **34 of the 47 pinned columns scored** (13 excluded by measurement: 7 price-level columns
+at rank corr +0.97..+1.00 with price, 6 market-wide columns with within-date std 0, and the six warm-up-zero-filled columns in
+`bugs-data-layer.md`). Labels: stored-close entry (`close[t+1] -> close[t+1+N]`) at every horizon plus an open-entry arm at h=5.
+ADT per the frozen protocol (`rolling(20, min_periods=15).mean()` of close*volume, Rs 1cr floor). Equal-weight composite,
+same-day-leak guard on the label (limit 0.15), within-date shuffled control.
+
+| h=5 tier | rank IC (close entry) | open-entry IC | verdict |
+|---|---|---|---|
+| **F&O-eligible** (dated series, bounded 2021-01-01..2024-07-05, 867 covered dates, eff 173) | +0.0077 | +0.0060 | no edge |
+| ADT >= Rs 50cr | +0.0213 | +0.0181 | no edge |
+| ADT >= Rs 10cr | +0.0257 | +0.0211 | no edge |
+| ADT >= Rs 1cr | +0.0330 | +0.0252 | no edge |
+| ADT < Rs 10cr | +0.0368 | +0.0260 | no edge |
+
+- **No tier reaches AUC 0.55, so none is USABLE. The shuffled control reads no edge on all 25 rows.**
+- **The F&O-eligible tier is new** (no earlier reading on this platform stratified by F&O eligibility), well powered (eff 173 against
+  the floor of 20), and **the only tier whose IC is not distinguishable from zero.** F&O membership is resolved to the price panel
+  by ISIN where the literal symbol has no bars (94.2% match: TATAMOTORS->TMPV, LTIM->LTM, GMRINFRA->GMRAIRPORT; 12 unresolved
+  names reported, ~4.6% of eligible name-dates).
+- **IC rises monotonically as liquidity falls** (+0.0077 -> +0.0213 -> +0.0257 -> +0.0368), independently reproducing "the edge
+  sits in untradable names" (2026-10-15 tradability-floor measurement).
+- **"No edge" here is real-but-economically-negligible, not indistinguishable from zero.** 20 of 25 cells have a positive IC that IS
+  distinguishable from zero across 4 tiers; the largest is +0.0703 at AUC 0.533. The usable gate needs roughly IC 0.1.
+- **The reusable lesson - clipping can manufacture significance.** The ADT<10cr 15-21d cells cleared a t 3.33 bar on WINSORISED
+  returns (t 4.39 / 4.56) and read **t 1.62 / 1.64 raw**; ADT>=1cr likewise 3.93 / 3.90 clipped against 1.74 / 1.75 raw. The raw
+  excess is LARGER (+3.5% at ADT<10cr 21d) and far too noisy to claim. Raw median-beater 0 of 25; the single winsorised flag
+  (ADT>=10cr h=1) is itself a clipping artefact at raw +0.012. **Rule: report the raw t beside the winsorised one whenever a
+  cost/excess claim rests on winsorised returns.**
+- **`atr_pct` warm-up audit (the strongest single-column result on record, 2026-09-26 low-volatility):** zero-share 5.84% on 2024+
+  (5.64% in 2021) and **99.5%** of those zeros still coincide with `sma20 IS NULL`, so the assumption that 2024+ warm-up touches only
+  new listings is wrong. The 2026-09-26 reading is nonetheless NOT contaminated: dropping the zero rows, or the sma20-NULL rows,
+  moves IC by <= 0.001 at every horizon. The liquid-tier replication reads -0.046 / -0.062 against the recorded -0.056 / -0.077
+  (same sign, ~20% weaker, middle horizon 15d vs 10d).
+- **Not like-for-like with AF-20261008-29** (2,431 symbols against 3,491 bhavcopy-unioned; a flat-haircut "net", not a turnover-aware
+  backtest), so this neither overturns nor rescues it. Also 2026-10-19: all 41 `factor_edge_history` readings on
+  `unified_recommendations` are LOW-DATA at 0.2-8.2 effective dates (see `CONTEXT.md`), so that panel cannot speak in either direction.
+
 ### 2026-10-04 — Trendlyne technical-analysis snapshot (`trendlyne_adv_tech_daily`, AF-20261003-02)
 
 Graded for the first time through `factor_edge.py --entry open` (read-only, not persisted): 49 daily
