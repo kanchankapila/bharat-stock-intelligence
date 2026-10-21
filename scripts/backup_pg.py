@@ -324,7 +324,26 @@ def _verify_dump(path: Path) -> tuple[bool, str]:
     return True, ""
 
 
+# A killed run (pm2/host/VM death) leaves its ~5.8 GB `.dump.partial` behind; the `*.dump` glob below
+# never sees it. Dump + full read-back verification measured ~25 min and the script itself bounds
+# dump-to-receipt at 4h (_newest_dump_age_hours), so 6h is safely past any live run yet well inside
+# the 24h cadence: a dead run's partial is gone by the next successful backup.
+PARTIAL_MAX_AGE_HOURS = 6
+
+
+def _prune_stale_partials() -> None:
+    """Only called from _prune(), i.e. while this process holds the cross-process backup lock, so no
+    OTHER dump can be in flight and this run's own partial was already renamed. mtime age is the
+    belt-and-braces guard for a partial that is not yet old enough to be a corpse."""
+    cutoff = time.time() - PARTIAL_MAX_AGE_HOURS * 3600
+    for part in BACKUP_DIR.glob(f"{PG_DB}_*.dump.partial"):
+        if part.stat().st_mtime < cutoff:
+            part.unlink()
+            print(f"[BACKUP] pruned stale partial dump {part.name}")
+
+
 def _prune() -> None:
+    _prune_stale_partials()
     dumps = sorted(BACKUP_DIR.glob(f"{PG_DB}_*.dump"), key=lambda p: p.stat().st_mtime, reverse=True)
     for old in dumps[RETENTION:]:
         old.unlink()
