@@ -117,14 +117,14 @@ describe('registerRepeatableJob: a skip must not be stamped as a success', () =>
 
   // confluence-compute is the reason this matters: it no-ops ~9h a day, so without the guard a
   // genuine failure inside its work window was overwritten by the next skip within 30 minutes.
-  it('confluence-compute returns the skip marker from BOTH of its no-op paths', () => {
+  it('confluence-compute returns the skip marker from ALL of its no-op paths', () => {
     const src = readFileSync(resolve(__dirname, '../jobs/confluence.jobs.ts'), 'utf-8');
     const body = src.slice(
       src.indexOf('async function processConfluenceCompute'),
       src.indexOf('async function processConfluenceOutcomes'),
     );
     const skipReturns = body.match(/return\s*\{[^}]*skipped:\s*true[^}]*\}/g) ?? [];
-    expect(skipReturns).toHaveLength(2);   // market-hours skip + outside-work-window skip
+    expect(skipReturns).toHaveLength(3);   // market-hours skip + outside-work-window skip + exhausted catch-up budget
   });
 
   // The other half of the fix: declining the heartbeat during a long skip window must not make
