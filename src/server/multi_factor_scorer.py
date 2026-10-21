@@ -38,6 +38,7 @@ import sys
 
 
 # ── Weight scheme ──────────────────────────────────────────────────────────────
+# unified_ranker._MF_FACTOR_WEIGHTS duplicates this on purpose; tests/test_mf_factor_weights_parity.py fails if they drift.
 FACTOR_WEIGHTS = {
     "quality":   0.25,
     "momentum":  0.30,

@@ -1594,7 +1594,7 @@ def high_vol_cutoff(vols, pctile: float = HIGH_VOL_VETO_PCTILE):
 # ── Factor crowding (#28) ────────────────────────────────────────────────────────
 # Mirrors multi_factor_scorer.py's FACTOR_WEIGHTS — duplicated rather than imported so this
 # DB-only script doesn't pick up numpy/pandas as a new dependency just for one dict. Keep the
-# two in sync if either changes.
+# two in sync if either changes; tests/test_mf_factor_weights_parity.py fails if they drift.
 _MF_FACTOR_WEIGHTS = {
     'mf_quality_score':  0.25,
     'mf_momentum_score': 0.30,
