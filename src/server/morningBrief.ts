@@ -113,7 +113,9 @@ export function composeMorningBrief(
   if (state === 'degraded') {
     out.push(`${stateReason ?? 'ranking unavailable'} — treat any names below as stale, not as today's calls.`);
   }
-  out.push(picksBody.trim() || '_No qualifying picks in the latest ranking._');
+  const noRanking = state === 'degraded' && /^no ranking available/i.test(stateReason ?? '');
+  out.push(picksBody.trim()
+    || (noRanking ? '_No ranking is available, so there are no picks to show._' : '_No qualifying picks in the latest ranking._'));
   if (scorecard) out.push(`*Last session, graded:*\n${scorecard}`);
   out.push(forwardLine);
   return out.join('\n\n');

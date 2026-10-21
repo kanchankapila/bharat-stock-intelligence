@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 vi.mock('../telegramService', () => ({
   telegramService: { sendMarkdownMessage: vi.fn(async () => true) },
@@ -61,6 +63,24 @@ describe('composeMorningBrief state header', () => {
     expect(out).toContain('DEGRADED');
     expect(out).toContain('ranking is 58h old');
     expect(out.indexOf('ranking is 58h old')).toBeLessThan(out.indexOf('ACME +1'));
+  });
+
+  it('says there is NO ranking, not "nothing qualified", when the degraded reason is the empty-ranking case', () => {
+    const reason = 'no ranking available — unified_recommendations is empty';
+    const out = composeMorningBrief('2026-10-19', '', null, 'fwd', 'degraded', reason);
+    expect(out).toContain(reason);
+    expect(out).toContain('No ranking is available');
+    expect(out).not.toContain('No qualifying picks');
+  });
+
+  it('keeps "no qualifying picks" for a degraded day whose stale ranking exists but yields none', () => {
+    const out = composeMorningBrief('2026-10-19', '', null, 'fwd', 'degraded', 'ranking is 58h old');
+    expect(out).toContain('No qualifying picks in the latest ranking');
+  });
+
+  it('the empty-ranking reason the job emits still matches the wording the composer keys on', () => {
+    const src = readFileSync(join(__dirname, '../jobs/digests.jobs.ts'), 'utf8');
+    expect(src).toContain("'no ranking available — unified_recommendations is empty'");
   });
 
   it('keeps the normal header when there are calls', () => {
