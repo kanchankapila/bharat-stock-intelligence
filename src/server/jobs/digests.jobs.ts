@@ -227,9 +227,16 @@ export async function processMorningBrief(job?: { data?: { force?: boolean } }):
   //      before the session's EOD tables land (2026-10-14 07:11 IST rank stamped 2026-10-14
   //      while the latest completed session was still 2026-10-13). Judging (b) only against
   //      session.d skipped the brief on every such morning; the 7-day cap still guards staleness.
-  const sessionMatches = ur?.d === session?.d;
-  const generatedToday = ur?.d === istToday;
-  if (!degradedReason && (!(ageMs >= 0) || ageMs > MORNING_BRIEF_MAX_CALENDAR_AGE_MS || (!sessionMatches && !generatedToday))) {
+  //  (c) a ranking dated on a non-trading day BETWEEN the latest completed session and today. The
+  //      gate's purpose is refusing a ranking from the session BEFORE the latest completed one, so
+  //      the predicate is session.d <= ranking.d <= today (IST date strings sort lexically), which
+  //      subsumes (a) and (b). 2026-10-21: Dussehra (10-20, an NSE holiday) ranked at 07:30 IST, so
+  //      ranking.d 10-20 matched neither the completed session 10-19 nor today, and the first morning
+  //      after a mid-week holiday got no brief. A null session keeps the old behaviour (only
+  //      calendar-today passes). Mirrored by `morning-brief-delivery` in dataQualityChecks.ts.
+  const rankingIsCurrent = ur?.d != null
+    && (ur.d === istToday || (!!session?.d && ur.d >= session.d && ur.d <= istToday));
+  if (!degradedReason && (!(ageMs >= 0) || ageMs > MORNING_BRIEF_MAX_CALENDAR_AGE_MS || !rankingIsCurrent)) {
     degradedReason = `ranking session ${ur?.d} matches neither the latest completed NSE `
       + `session ${session?.d ?? 'unknown'} nor calendar-today ${istToday} (age `
       + `${Math.round(ageMs / 3_600_000)}h) — the latest session has no completed unified `

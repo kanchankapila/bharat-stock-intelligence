@@ -123,6 +123,29 @@ describe('morning-brief-delivery (real SQL)', () => {
     expect(result.detail).not.toContain('NOT DELIVERED');
   });
 
+  it('does NOT call a holiday-dated ranking stale: session 10-19, ranking 10-20 (Dussehra), brief day 10-21', async () => {
+    await dbRun(`INSERT INTO "${SCHEMA}".market_holidays (date, exchange) VALUES (DATE '2026-10-20', 'NSE')`);
+    await session('2026-10-19');
+    await ranking('2026-10-20 07:30');
+    await receipt(await receiptOf('2026-10-20 07:30'));
+    const { row, result } = await run('2026-10-21 09:45');
+    expect(row!.brief_day).toBe('2026-10-21');
+    expect(row!.ranking_date).toBe('2026-10-20');
+    expect(row!.session_date).toBe('2026-10-19');
+    expect(result.status).toBe('pass');
+    expect(result.detail).not.toContain('DEGRADED');
+  });
+
+  it('still reports stale a ranking from before the latest completed session (non-vacuity for the holiday rule)', async () => {
+    await dbRun(`INSERT INTO "${SCHEMA}".market_holidays (date, exchange) VALUES (DATE '2026-10-20', 'NSE')`);
+    await session('2026-10-19');
+    await ranking('2026-10-16 22:30');
+    await receipt(await receiptOf('2026-10-16 22:30'));
+    const { result } = await run('2026-10-21 09:45');
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('DEGRADED');
+  });
+
   it('takes the latest completed session as the MAX over the three EOD tables, strictly before the brief day', async () => {
     await session('2026-10-19');
     await dbRun(`INSERT INTO "${SCHEMA}".nse_universe_history (date, symbol, series, close) VALUES (DATE '2026-10-20', 'ACME', 'EQ', 1)`);

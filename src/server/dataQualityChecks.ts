@@ -1218,7 +1218,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // (app_settings morning_brief_last_sent_ranking = the briefed ranking's generated_at, or
     // `empty:<IST date>`) covers the ranking the due brief would have carried, and (b) whether
     // that ranking was stale by processMorningBrief's own rule (same three-table session MAX,
-    // same 7-day cap, same session-or-brief-day match). Not job_heartbeat: a retry overwrites it.
+    // same 7-day cap, same session <= ranking date <= brief day rule). Not job_heartbeat: a retry overwrites it.
     // Due day = latest weekday that is not an NSE market_holidays row, and (for today) only once
     // 09:30 IST has passed, because the send is refused from 09:15. The receipt carries no send
     // date (app_settings."updatedAt" is insert-only, no trigger), so "covers" means the receipt
@@ -1284,7 +1284,11 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         const ageH = Number(row.ranking_age_hours);
         if (!(ageH >= 0) || ageH > 168) {
           stale = `ranking is ${Number.isFinite(ageH) ? Math.round(ageH) + 'h' : 'of unknown'} old (job cap 168h)`;
-        } else if (row.ranking_date !== row.session_date && row.ranking_date !== day) {
+        } else if (!(row.ranking_date === day
+            || (row.session_date != null && row.ranking_date >= row.session_date && row.ranking_date <= day))) {
+          // Same predicate as processMorningBrief (jobs/digests.jobs.ts): session <= ranking date <= brief
+          // day, so a ranking dated on a holiday between the last session and the brief day is current.
+          // YYYY-MM-DD strings sort lexically. A null session leaves only ranking date == brief day.
           stale = `ranking session ${row.ranking_date} matches neither the latest completed NSE session `
             + `${row.session_date ?? 'unknown'} nor the brief day ${day}`;
         } else if (emptyReceipt) {

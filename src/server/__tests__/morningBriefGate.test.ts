@@ -150,3 +150,57 @@ describe('morning-brief gate accepts both legitimate ranking inputs', () => {
     expect(sendMorningBrief).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('morning-brief gate: ranking dated between the last completed session and today (holiday morning)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-21T02:50:00.000Z')); // Wednesday 08:20 IST
+    store.clear();
+    knownHoliday = false;
+    sendMorningBrief.mockReset();
+    sendMorningBrief.mockResolvedValue({ sent: true, picks: 3, state: 'calls' });
+    rankingG = '2026-10-20T02:00:00.000Z';                  // 07:30 IST on the Dussehra holiday
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('sends a NON-degraded brief for a ranking dated on a holiday after the last session (the 2026-10-21 incident)', async () => {
+    rankingD = '2026-10-20';
+    sessionD = '2026-10-19';
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    await processMorningBrief();
+    expect(sendMorningBrief).toHaveBeenCalledTimes(1);
+    expect(sendMorningBrief).toHaveBeenCalledWith();
+  });
+
+  it('still degrades a ranking from the session BEFORE the latest completed one (evening ranker failed)', async () => {
+    rankingG = '2026-10-16T17:00:00.000Z';
+    rankingD = '2026-10-16';
+    sessionD = '2026-10-19';
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    await processMorningBrief();
+    expect(sendMorningBrief).toHaveBeenCalledWith('degraded', expect.stringContaining('matches neither'));
+  });
+
+  it('still degrades a ranking dated after today, even when its timestamp passes the age guard', async () => {
+    rankingD = '2026-10-22';
+    sessionD = '2026-10-19';
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    await processMorningBrief();
+    expect(sendMorningBrief).toHaveBeenCalledWith('degraded', expect.stringContaining('matches neither'));
+  });
+
+  it('with no known completed session only a calendar-today ranking passes', async () => {
+    rankingD = '2026-10-20';
+    sessionD = null as unknown as string;
+    const { processMorningBrief } = await import('../jobs/digests.jobs');
+    await processMorningBrief();
+    expect(sendMorningBrief).toHaveBeenCalledWith('degraded', expect.stringContaining('matches neither'));
+    sendMorningBrief.mockClear();
+    store.clear();
+    rankingD = '2026-10-21';
+    rankingG = '2026-10-21T01:30:00.000Z';
+    await processMorningBrief();
+    expect(sendMorningBrief).toHaveBeenCalledWith();
+  });
+});
