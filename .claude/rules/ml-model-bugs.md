@@ -161,6 +161,22 @@ cover classes that stayed in `recurring-bugs.md`.
   HIGH score (AUC 0.894) was the tell that `score()` skipped the lag `load_training_data()`
   applied — an implausibly good number is at least as suspicious as an implausibly bad one.
 
+  **Which "same-day return" — clarified 2026-10-21, because the literal reading gives a false
+  positive on a clean harness.** The 0.2 bar is for a selection variable that can contain the
+  return of the day being TRADED (here `d1_ret`, which WAS that return). It is not a bar on
+  correlation with the return of the day the feature is computed. `deep_panel_score.py`'s
+  momentum-flavoured composite read **+0.255** against `ret_1d` and a first implementation raised
+  `LeakDetected` on it — but `feature_store`'s labels are `close.pct_change(N).shift(-(N+1))`, so the
+  traded window opens at `close[t+1]` while every feature is known at `close[t]`. Measured on
+  36,036 rows (Mar 2024): `corr(ret_1d, target_ret_1d) = -0.0015`, `corr(ret_1d, target_ret_5d) =
+  +0.0133`. A trailing feature agrees with the day that already happened by construction;
+  it carries no label information. **Gate on the LABEL** (`abs(corr(score, label)) < 0.15`, the
+  "IC above ~0.15 on a price-derived factor" tell above), and report the trailing-return correlation
+  as a diagnostic, not a gate. A guard aimed at the wrong variable is worse than none in both
+  directions: it fires on clean work, and the real failure (a score that is secretly its own label)
+  is unreachable by it. Negative-control the repointed gate with `score = label`, which reads +1.000
+  and must raise. Implemented as `assert_no_label_leak` / `same_day_contemporaneity`.
+
 ## Models, labels & promotion gates
 
 - **Moving a transform out of a table and into the TRAINING loader creates train/serve skew

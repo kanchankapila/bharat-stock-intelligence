@@ -326,3 +326,11 @@ network policy (AF-20260928-10), so no connector in this batch has seen a live r
 - Digest wording now discloses that Buy/Strong Buy is a relative rank, and flags a known one-price prior session. The current five-pick production dry render includes the disclosure. It cannot know the future entry day's fillability.
 - Backup logs showed duplicate starts at the 23:15 PM2 cron boundary on three nights. A delayed pre-boundary launch and cross-process OS lock are in code, but the next actual scheduled slot is required to close AF-20261016-01. Never equate a green unit test with a verified dump.
 - No new Claude memory topic was created: the durable rules already live in the repo's measurement and job-runtime rules; this journal preserves the session-specific evidence.
+
+## 2026-10-21 - redesign: Phase 0 (honest delivery) and re-scoped Phase 1
+- Full narrative and grouped rulings: `docs/session-log.md` 2026-10-21. Spec/plan under `docs/superpowers/`. 38 commits `fc311158..efd0e0bf`.
+- **Committed, not deployed.** `pm2 restart bharat-server` was denied by the auto-mode classifier. Brief states (`calls|no-trade|degraded`) and the two new DQ checks are not live until the owner restarts. Restart AFTER the 08:20 IST brief and after 15:30 IST, with the GLOBAL pm2 (7.0.3 = the daemon), never `pm2 update`. Expect one `data-quality-daily` failure from the new critical `morning-brief-delivery` until a brief overwrites the receipt.
+- Read `measurement.md` before proposing measurement: the deep-panel replay already existed (AF-20261008-29/-31). This session added the first dated F&O tier: h=5 IC +0.0077 at eff 173, no edge; IC rises as liquidity falls; the sub-Rs-10cr 15-21d exception is clipping (raw t 1.6).
+- `LONG_TERM` is aliased to `POSITIONAL` (2026-10-03). Six `feature_store` columns are warm-up-zero-filled (AF-20261021-03, live defect, `adx` all-zero for 2025-05/06).
+- Not done: nothing removed; refusal engine only in the spec; Phases 2-5 not started. Open ledger rows AF-20261021-01..09.
+- No new Claude memory topic beyond `redesign_phase0_phase1_2026_10_21`; durable rules live in `measurement.md`, `bugs-data-layer.md`, `ml-model-bugs.md`.

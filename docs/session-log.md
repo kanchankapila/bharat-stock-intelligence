@@ -11427,3 +11427,86 @@ Audit document: `docs/expert-review-2026-10-15-systems-audit.md`. Ledger: AF-202
   falsely passed at 45h; its warning/failure thresholds now follow the 26h/52h recovery cadence.
   Live pre/post evaluation returned WARN at 1.9 days and PASS after the new verified dump. A same-host
   dump still does not protect against disk/host loss; AF-20261017-11 needs an off-host destination.
+
+## 2026-10-21 — redesign: Phase 0 (honest delivery) and a re-scoped Phase 1 (deep-panel measurement)
+
+Spec `docs/superpowers/specs/2026-10-19-full-data-honest-recommendations-design.md`, plan
+`docs/superpowers/plans/2026-10-19-phase0-delivery-and-phase1-deep-panel.md` (with an end-of-file amendment
+superseding its Tasks 8-12). 38 commits, `fc311158..efd0e0bf`, executed task-by-task with a fresh implementer and a
+fresh reviewer per task. The per-task reports and the full ruling ledger are in the git-ignored
+`.superpowers/sdd/2026-10-19-phase0-delivery-and-phase1-deep-panel/` (kept on purpose; the grouped rulings below are
+the committed copy).
+
+**What shipped and is verified**
+- **Brief states.** `composeMorningBrief` takes `BriefState = calls | no-trade | degraded`. The two bad-data branches of
+  `processMorningBrief` (empty ranking; ranking session matching neither the latest completed session nor today) now send a
+  labelled degraded brief instead of failing the job and sending nothing. Weekend, NSE-holiday and post-09:15-IST paths are
+  unchanged; post-09:15 still sends nothing. `1f9a8411`.
+- **Two data-quality checks.** `morning-brief-delivery` (`critical:true`, `infra`) fails on "no brief delivered" and, separately,
+  on "delivered on a stale ranking", because making the degraded send a success removed the old job-failure signal.
+  `unified-recommendations-timeframe-coverage` (`critical:false`) expects the union of the canonical three
+  (`INTRADAY/SWING/POSITIONAL`, pinned by a source-parity test against `unified_ranker.py`) and the trailing window.
+  Both read FAIL on live data today, correctly. `69e6fe87`, `1bb787ad`, `6643d215`.
+- **Another session's in-flight backend work landed** by explicit path in six commits (`829dfe70`..`fb8c976c`): holiday-aware
+  brief skip, atomic `.partial` backup publish, trendlyne circuit breaker, confluence missed-window catch-up, DQ per-series
+  checks. The frontend part (`App.tsx`, `V1Routes.tsx`, `AppShell.tsx`, `HighConvictionPage*`, untracked `components/v7/`) was
+  deliberately NOT landed: the tracked files import the untracked tree.
+- **Measurement path (writes no production rows).** `deep_panel.py` (47 deep `feature_store` columns, derived by coverage),
+  `fno_universe_asof.py` (dated F&O eligibility 2021-01-01..2024-07-05, 867 dates, 206 symbols, `is_covered` gate),
+  `deep_panel_score.py` (34-column equal-weight composite, label gate at 0.15), `deep_panel_grade.py` (tiered, median and mean
+  benchmarks, raw and winsorised t). `4e8d4542`..`497d8996`.
+- **Final-review fix wave:** stale `.partial` prune in `backup_pg.py` (`b0fc5aee`), attempt limit on the confluence overdue
+  catch-up (`5f34da61`), a non-raw regex string in a test (`07946a52`), empty-ranking brief wording (`74bd3098`), a LOW-DATA
+  grader test (`5663d889`), ledger rows AF-20261021-08/-09 (`9fd7b852`).
+
+**Result.** h=5 rank IC by tier, 2021-01..2026-09: F&O-eligible **+0.0077** (bounded to the dated series, eff 173), ADT>=50cr
++0.0213, >=10cr +0.0257, >=1cr +0.0330, <10cr +0.0368. No tier reaches AUC 0.55; the shuffled control reads no edge on all 25
+rows. 20 of 25 cells have an IC distinguishable from zero, none near the ~0.1 the gate needs: real but economically negligible.
+IC rises monotonically as liquidity falls. The apparent sub-Rs-10cr 15-21d exception (clipped t 4.4-4.6) is raw t 1.6: clipping
+made it look significant. Full figures: `.claude/rules/measurement.md` (2026-10-21 section).
+
+**What was learned (durable)**
+1. **Read `measurement.md` in full before proposing a "grade it on deeper history" step.** The spec's keystone, a deep-panel replay,
+   had already been run on 2026-10-09 (AF-20261008-29/-31, a broader 3,491-symbol panel: OOS IC +0.050, net -0.022%/period,
+   58 levers none past t 2). "41 of 41 readings LOW-DATA" was true of the ranker's own 42-date panel and wrong as a statement
+   about the data. Found only when the rules file finally loaded; Phase 1 was re-scoped to the three genuinely additive pieces.
+2. **`LONG_TERM` did not die; it was aliased to `POSITIONAL` on 2026-10-03** (`unified_ranker.CANONICAL_TIMEFRAMES`,
+   AF-20261001-06). The user's three horizons are `INTRADAY/SWING/POSITIONAL`. Finding B8 was withdrawn.
+3. **Warm-up-zero-filled indicator columns are 100% non-null and invisible to a coverage test.** Six found (`above_sma200`,
+   `atr_14`, `atr_pct`, `di_plus`, `di_minus`, `adx`); `adx` is 0 on every row of 2025-05 and 2025-06 (~88k rows). Detect by the
+   companion-NULL share among zeros versus among nonzeros, with a companion whose warm-up is at least as long as the column's.
+   Rule in `bugs-data-layer.md`; live defect AF-20261021-03.
+4. **A leak guard aimed at `ret_1d` fired on a clean composite** (+0.255): labels start at `close[t+1]`. Repointed at the label.
+   Clarified in `ml-model-bugs.md`.
+5. **Clipped returns can manufacture significance;** print the raw t beside the winsorised one.
+6. **F&O symbols absent from `stock_ohlcv` are renames** (TATAMOTORS->TMPV, LTIM->LTM, GMRINFRA->GMRAIRPORT by ISIN); an
+   intersect-and-drop would grade only survivors. 12 of 206 stay unresolved and are reported.
+7. **Environment:** `NODE_ENV=development`, so `server.ts` serves the frontend from the working tree via vite middleware (the
+   uncommitted `v7/` pages are live now); the auto-mode classifier denies `pm2 restart` as a production deploy.
+8. **My own errors, all caught by review rather than by me, all the same shape** (a derived figure read off a tool's own output
+   without re-deriving it): a `date_trunc('week')` bucket label read as a date (B8); a `tail`-truncated row count read as the
+   total (41 vs 97); a classification script that put one column in two buckets (59+25+21=105 vs 104); Postgres `current_date`
+   (UTC) used to answer an IST holiday question; and "0 of 17 plan steps executed" inferred from unticked checkboxes when git
+   showed the plan had run on 2026-10-08. Re-derive; do not transcribe.
+
+**NOT done, stated plainly**
+- **Phase 0 is committed but NOT DEPLOYED.** `bharat-server` predates every `.ts` change. Needs `pm2 restart bharat-server`.
+- **Nothing was removed.** The 7 + 32 never-read tables (~12.9M rows), the zero-weight engines' compute and the 6 stale worktrees
+  are all still there. The user asked for aggressive removal; Phase 3 was not started.
+- **The refusal engine exists in the spec, not in the code.** Task 1 emits `no-trade` only when `picks === 0`; the brief still
+  publishes ranked picks whenever any exist. Per-horizon emission gates, tradability tiers on calls and F&O/option data
+  (Phases 2-5) were not started.
+- Plan Tasks 8-12 were superseded, not implemented (learned #1). The 12 pre-existing open ledger rows were not re-verified.
+
+**Rulings that change what the user gets** (all 40 are in the SDD ledger; these are the ones with consequence)
+- Phase 1 re-scoped to the dated F&O tier, the zero-fill-corrected column set and dual-benchmark reporting; the user chose the
+  re-scope and the refusal-engine product shape (both as recommended).
+- The 6 zero-fill columns are excluded whole, not NULLed on warm-up rows: AF-20261021-09 records this as likely over-excluding
+  (88-94% of those columns' readings are genuine) and leaving the composite with no trend-strength factor.
+- `deep_panel_score.py` has no minimum-groups floor; `quality` is present on only 73.8% of 2021 rows: AF-20261021-08.
+- Leak gate repointed at the label rather than loosened; column set pinned at 47 for a constant composite.
+- ADT tiers use the frozen forward test's convention (20-session rolling MEAN, `min_periods=15`, Rs 1cr floor), not a median.
+- F&O verdict bounded to 2021-01-01..2024-07-05; no stitching across the 2024-07-06..2026-05-24 hole.
+- C7 (`_MF_FACTOR_WEIGHTS` duplication) fixed with a source-parity test, not by reversing the import (circular-import risk).
+- No worktree was removed (all six verified superseded); no backup artifact was deleted (`...dump.TRUNCATED` 1.44 GiB and
+  `...20261016...dump.invalid` 3.46 GiB remain, the owner's call).
