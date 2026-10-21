@@ -134,9 +134,11 @@ same-day-leak guard on the label (limit 0.15), within-date shuffled control.
   backtest), so this neither overturns nor rescues it. Also: every reading in the latest `factor_edge_history` run on
   `unified_recommendations` (97 rows, 2026-10-17) sits below the eff-20 reliability floor, at eff 0.2-8.2 (see `CONTEXT.md`), so that panel cannot speak in either direction.
 
-**Why the deep panel is gradeable at all (column-depth feasibility, measured 2026-10-19).** Of 104 numeric `feature_store` columns,
-**59 are >=60% populated back to 2021** (including all six labels), 25 are recent-only and 21 are thin even now (`iv_rank` 8.4%,
-`max_pain` 5.5%, `iv_skew` 5.5%, `block_deal_value_cr` 1.0%, `days_to_next_earnings` 1.5%). Coverage by year runs from 248 dates /
+**Why the deep panel is gradeable at all (column-depth feasibility, measured 2026-10-19).** 104 distinct numeric `feature_store` columns:
+**59 deep** (>=60% populated over 2021, including all six labels), **25 recent-only**, **21 thin on the recent window** (`iv_rank` 8.4%,
+`max_pain` 5.5%, `iv_skew` 5.5%, `block_deal_value_cr` 1.0%, `days_to_next_earnings` 1.5%). The buckets overlap by exactly one,
+`target_ret_15d`, which is deep in 2021 (100.0%) and reads thin now (50.5%) only because its 15-session forward window has not closed yet
+(not a data gap), so the three figures sum to 105 while the distinct total is 104. Coverage by year runs from 248 dates /
 1,698 symbols in 2021 to 199 dates / 2,431 symbols in 2026; 2.73M rows. That supports ~287 independent windows at h=5 and ~68 at
 h=21, against 0.2-8.2 on the ranker's own panel. Excluding the 6 labels and then the 6 zero-filled columns leaves the 47 pinned.
 

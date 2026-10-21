@@ -85,9 +85,12 @@ describe('docClaims', () => {
 
   it('measurement.md records the column-depth feasibility result and the B3 outcome table', () => {
     const m = read('.claude/rules/measurement.md');
-    expect(m).toContain('59 are >=60% populated back to 2021');
+    expect(m).toContain('(>=60% populated over 2021, including all six labels)');
     expect(m).toContain('~287 independent windows at h=5');
     expect(m).toContain('40.66% win');
+    expect(m).toContain('**59 deep**');
+    expect(m).toContain('The buckets overlap by exactly one');
+    expect(m).toContain('the three figures sum to 105 while the distinct total is 104');
   });
 
   it('the 2026-10-08 design doc section G carries the dated deep-panel correction', () => {
