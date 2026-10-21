@@ -81,10 +81,10 @@ const log = {
 };
 
 // Every `console.log`/`error`/`warn` call across the ~90 server files that still contain one
-// bypasses `log` above entirely (728 raw call sites, re-derived 2026-10-17 by scripts/docNumbers.mjs;
+// bypasses `log` above entirely (729 raw call sites, re-derived 2026-10-17 by scripts/docNumbers.mjs;
 // the previously quoted "720 ... 611 call sites / ~140 files" figures were each audit snapshots that
 // went stale — run `node scripts/docNumbers.mjs` to re-derive) -- no level, no JSON file
-// persistence, no rotation. Rewriting 728 call sites by hand is its own multi-session project;
+// persistence, no rotation. Rewriting 729 call sites by hand is its own multi-session project;
 // this instead routes the *existing* console.* API through the real logger, so every call site
 // gets structured JSON output (logs/app-*.log, logs/error-*.log) and a real level for free,
 // with zero code changes required at any of them. New code should still prefer calling `log`
