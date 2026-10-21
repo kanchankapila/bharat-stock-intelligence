@@ -749,3 +749,51 @@ it('scoring-authority.md documents the two signal_type vocabularies', () => {
 git add CONTEXT.md .claude/rules/scoring-authority.md src/server/intraday_ranker.py docs/master-build-prompt.md docs/audit-findings.md src/server/__tests__/docClaims.test.ts
 git commit -m "docs: correct the edge claim, the live engine set and two undocumented contracts"
 ```
+
+
+---
+
+# AMENDMENT 2026-10-21 — Tasks 8-12 SUPERSEDED, Phase 1 re-scoped
+
+**Why.** `measurement.md` records that the deep-panel replay this phase proposed has already been run twice, on a broader panel, with a conclusive answer:
+
+- **AF-20261008-29 (2026-10-09)** — survivorship-reduced 2021-2026 panel (3,058,836 rows, 3,491 symbols, 1,431 sessions, bhavcopy unioned with `stock_ohlcv`, 132 renames de-duplicated). Price-only ranker rebuild: IC +0.073 in the published window, **+0.003..+0.014 at 5d over 2022-2026 (t <= 1.1)**. Equal-weight price+delivery combination, signs fixed on the first half: **OOS IC +0.050 (t 5.4), positive in every regime, top-decile net -0.022%/period (t -0.38)**.
+- **AF-20261008-31 (2026-10-09)** — 58 structural levers against a Bonferroni |t| 3.33 bar; **none reached t 2 out of sample**. Recorded conclusion: *"the limit is signal strength, not cost structure."*
+- **2026-09-26** — individual `feature_store` columns graded on the liquid panel at **eff 130 at h=5**; a 5-column OOS composite read **+0.049** and then **-0.53 to -0.94%/period** after costs.
+
+So the spec's B1/B2 ("no usable edge reading exists; the deep panel is ungraded") were true of `unified_recommendations`' own 42-date panel and wrong as generalisations about the data. Rebuilding Tasks 8-12 would duplicate 11-day-old work.
+
+**Tasks 8, 9, 10, 11 and 12 are superseded.** The modules already built stand and are inputs either way: Task 6's 47-column corrected set, Task 7A's dated F&O universe with `is_covered`, and `column_zero_shares()`.
+
+### Task 8R: Composite scorer with the leak guard built in
+
+**Files:** Create `src/server/deep_panel_score.py`; Test `src/server/tests/test_deep_panel_score.py`
+
+**Interfaces — Consumes:** `deep_panel.deep_feature_columns`, `deep_panel.column_zero_shares`.
+**Produces:**
+- `FACTOR_GROUPS: dict[str, tuple[str, ...]]` over the 47 columns — `momentum`, `value`, `quality`, `flow`, `volatility`; a column no group names raises rather than being dropped.
+- `def zscore_by_date(panel, columns) -> pd.DataFrame` — per-date cross-sectional z-scores, winsorised with `interpolation="higher"/"lower"` so the cutoff is an observed value.
+- `def composite_score(panel, columns, groups=FACTOR_GROUPS) -> pd.Series` — equal weight within a group, equal weight across groups. No fitted weights (Finding #31).
+- `def winsorise_returns(s, pct=0.01) -> pd.Series`
+- `LEAK_CORR_LIMIT = 0.15`; `class LeakDetected(RuntimeError)`; `def assert_no_label_leak(panel, score, label_col, limit=LEAK_CORR_LIMIT) -> float`; `def shuffled_control(panel, score, seed=20261021) -> pd.Series` permuting **within each date**.
+
+Measured parameters to use rather than guess: the 1%/99% clip lands at about -14.7%/+25.2% on `target_ret_5d`; p50 is -0.23% against a mean of +0.62%; exactly one row sits at 99.0 (a single bad print, not a clamp).
+
+### Task 9R: Tiered grading, both benchmarks, and reconciliation
+
+**Files:** Create `src/server/deep_panel_grade.py`; Test `src/server/tests/test_deep_panel_grade.py`
+
+**Interfaces — Consumes:** `factor_edge._metrics`, `_effective_dates`, `_verdict`, `_forward_returns`, `MIN_DATES_RELIABLE`, `MIN_SYMBOLS_XS` (imported, never reimplemented); `fno_universe_asof.fno_eligible_asof` / `is_covered`; Task 8R's scorer and guards.
+**Produces:** `HORIZONS = (1, 5, 15, 21)`; `def grade_tier(panel, score, tier, horizons=HORIZONS) -> list[dict]`; `def grade_all_tiers(panel, score, horizons=HORIZONS) -> pd.DataFrame`. Every row carries `tier`, `horizon`, `rank_ic`, `hit_auc`, `n`, `dates`, `eff_dates`, `symbols`, `verdict`, **`median_benchmark_excess`**, **`mean_benchmark_excess`**, and `zero_share_max`.
+
+Three requirements that are the whole point of the re-scope:
+
+1. **The dated F&O tier**, which no recorded reading has. Gate every date through `is_covered`; the F&O verdict is bounded to 2021-01-01..2024-07-05 and says so on every row. Resolve F&O symbols to the price panel **by ISIN** when the literal symbol has no bars (TATAMOTORS -> TMPV via INE155A01022, LTIM -> LTM via INE214T01019), keep only unambiguous single-priced-twin ISINs, and report the match rate plus every unresolved symbol. 190 of 206 resolve directly; never intersect-and-drop.
+2. **Both benchmarks on every row.** `factor_edge` centres on the per-date MEDIAN while `factor_backtest` benchmarks the universe MEAN, and `measurement.md` records this as the trap that let a well-powered +0.049 IC lose money on right-skewed Indian returns. Print both; a positive median excess beside a negative mean excess is flagged on the row.
+3. **ADT uses the frozen protocol's convention verbatim** — 20-session rolling MEAN of `close*volume` with `min_periods=15`, and the Rs 1cr floor — so the tiers are comparable with `forward_test_report.py`. Not a median.
+
+**Reconciliation, not re-derivation.** The report states, for each tier and horizon, how the reading compares with the recorded AF-20261008-29 figures (OOS IC +0.050, top-decile net -0.022%/period) and the 2026-09-26 column readings, and says plainly whether it agrees. Agreement hardens the existing result; disagreement is the finding.
+
+**One genuinely open technical question to answer here:** the 2026-09-26 low-volatility reading used `atr_pct` on a 2024-01-01+ panel, and `atr_pct` is one of the six columns whose zeros are warm-up artifacts. On a 2024+ panel warm-up affects only newly-listed names, so that reading is probably sound — but `atr_pct -0.077 @21d` is the strongest single-column result on this platform's record, so measure it rather than assuming. Report `atr_pct`'s zero-share and companion-NULL coincidence on the 2024+ window.
+
+**Writes no production rows.** Outputs are files under the session scratchpad: `verdicts.csv`, `control.csv`, `REPORT.md`.
