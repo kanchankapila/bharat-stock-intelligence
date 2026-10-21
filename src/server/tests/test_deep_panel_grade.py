@@ -4,6 +4,7 @@ import pytest
 
 import deep_panel_grade as g
 from deep_panel_score import LeakDetected, shuffled_control
+from factor_edge import MIN_DATES_RELIABLE
 
 ROW_KEYS = {
     "t_eff_raw", "mean_benchmark_excess_raw", "median_benchmark_excess_raw", "median_beater_flag_raw",
@@ -127,6 +128,17 @@ def test_isin_resolution_keeps_renames_and_reports_ambiguity():
     assert rep["unresolved"] == ["GONE"]
     assert (rep["direct"], rep["by_isin"], rep["total"]) == (1, 2, 5)
     assert rep["match_rate"] == pytest.approx(3 / 5)
+
+
+def test_a_tier_with_too_few_independent_windows_reads_low_data_not_no_edge():
+    # 60 dates -> 12 effective windows at 5d (60/5), under MIN_DATES_RELIABLE (20); 1d keeps 60.
+    # Without the gate the same random panel reads "no edge", which on data this thin is a claim not earned.
+    p = make_panel(n_sym=80, n_dates=60, seed=7)
+    rows = g.grade_tier(p, _score(p), "ADT>=10cr")
+    thin = [r for r in rows if r["eff_dates"] < MIN_DATES_RELIABLE]
+    assert {r["horizon"] for r in thin} == {5, 15, 21}
+    assert {r["verdict"] for r in thin} == {"LOW-DATA"}
+    assert _row(rows, 1)["verdict"] == "no edge"  # non-vacuous: enough windows still reaches a real verdict
 
 
 def test_a_planted_real_signal_reads_usable():
