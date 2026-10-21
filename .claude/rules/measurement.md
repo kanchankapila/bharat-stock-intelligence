@@ -97,9 +97,9 @@ rather than assume. Full narrative for anything here: `docs/measurement-history.
 
 ### 2026-10-21 — Deep-panel tiered grading, 2021-01..2026-09 (phase 2026-10-19; `deep_panel*.py`) — do not re-run to "find" an edge
 
-Panel: `feature_store`, 2,431 symbols, **34 of the 47 pinned columns scored** (13 excluded by measurement: 7 price-level columns
-at rank corr +0.97..+1.00 with price, 6 market-wide columns with within-date std 0, and the six warm-up-zero-filled columns in
-`bugs-data-layer.md`). Labels: stored-close entry (`close[t+1] -> close[t+1+N]`) at every horizon plus an open-entry arm at h=5.
+Panel: `feature_store`, 2,431 symbols, **34 of the 47 pinned columns scored**. The chain: 53 derived columns -> 6 warm-up-zero-filled
+columns excluded upstream (`bugs-data-layer.md`) -> 47 pinned -> 13 excluded at grading (7 price-level columns at rank corr
++0.97..+1.00 with price, 6 market-wide columns with within-date std 0) -> 34 scored. Labels: stored-close entry (`close[t+1] -> close[t+1+N]`) at every horizon plus an open-entry arm at h=5.
 ADT per the frozen protocol (`rolling(20, min_periods=15).mean()` of close*volume, Rs 1cr floor). Equal-weight composite,
 same-day-leak guard on the label (limit 0.15), within-date shuffled control.
 
@@ -131,8 +131,17 @@ same-day-leak guard on the label (limit 0.15), within-date shuffled control.
   moves IC by <= 0.001 at every horizon. The liquid-tier replication reads -0.046 / -0.062 against the recorded -0.056 / -0.077
   (same sign, ~20% weaker, middle horizon 15d vs 10d).
 - **Not like-for-like with AF-20261008-29** (2,431 symbols against 3,491 bhavcopy-unioned; a flat-haircut "net", not a turnover-aware
-  backtest), so this neither overturns nor rescues it. Also 2026-10-19: all 41 `factor_edge_history` readings on
-  `unified_recommendations` are LOW-DATA at 0.2-8.2 effective dates (see `CONTEXT.md`), so that panel cannot speak in either direction.
+  backtest), so this neither overturns nor rescues it. Also: every reading in the latest `factor_edge_history` run on
+  `unified_recommendations` (97 rows, 2026-10-17) sits below the eff-20 reliability floor, at eff 0.2-8.2 (see `CONTEXT.md`), so that panel cannot speak in either direction.
+
+**Why the deep panel is gradeable at all (column-depth feasibility, measured 2026-10-19).** Of 104 numeric `feature_store` columns,
+**59 are >=60% populated back to 2021** (including all six labels), 25 are recent-only and 21 are thin even now (`iv_rank` 8.4%,
+`max_pain` 5.5%, `iv_skew` 5.5%, `block_deal_value_cr` 1.0%, `days_to_next_earnings` 1.5%). Coverage by year runs from 248 dates /
+1,698 symbols in 2021 to 199 dates / 2,431 symbols in 2026; 2.73M rows. That supports ~287 independent windows at h=5 and ~68 at
+h=21, against 0.2-8.2 on the ranker's own panel. Excluding the 6 labels and then the 6 zero-filled columns leaves the 47 pinned.
+
+**B3 honest-outcome table (2026-10-19, `unified_signal_outcomes`, 180 days, after the 2026-10-08 short-side re-grade; gross of costs):**
+h1 **40.66% win / -0.257% avg**, h5 **43.60% / -0.045%**, h15 **39.71% / +0.180%**.
 
 ### 2026-10-04 — Trendlyne technical-analysis snapshot (`trendlyne_adv_tech_daily`, AF-20261003-02)
 

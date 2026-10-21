@@ -71,4 +71,39 @@ describe('docClaims', () => {
     expect(a).toMatch(/\| AF-20261021-02 \|/);
     expect(a).not.toMatch(/\| AF-20261021-\d+ \|[^\n]*LONG_TERM/);
   });
+  it('CONTEXT.md and measurement.md do not claim the withdrawn "41 of 41" row count', () => {
+    for (const f of ['CONTEXT.md', '.claude/rules/measurement.md']) expect(read(f)).not.toMatch(/41 of 41|all 41 `factor_edge/);
+    expect(read('CONTEXT.md')).toContain('97 rows, 2026-10-17');
+  });
+
+  it('measurement.md states the column-exclusion chain without double counting', () => {
+    const m = read('.claude/rules/measurement.md');
+    expect(m).toContain('53 derived columns -> 6 warm-up-zero-filled');
+    expect(m).toContain('-> 47 pinned -> 13 excluded at grading');
+    expect(m).toContain('-> 34 scored');
+  });
+
+  it('measurement.md records the column-depth feasibility result and the B3 outcome table', () => {
+    const m = read('.claude/rules/measurement.md');
+    expect(m).toContain('59 are >=60% populated back to 2021');
+    expect(m).toContain('~287 independent windows at h=5');
+    expect(m).toContain('40.66% win');
+  });
+
+  it('the 2026-10-08 design doc section G carries the dated deep-panel correction', () => {
+    const g = read('docs/superpowers/specs/2026-10-08-accuracy-and-honesty-program-design.md');
+    expect(g).toContain('Correction 2026-10-21');
+    expect(g).toContain('~287 independent windows');
+  });
+
+  it('scoring-authority.md lists every live (signal_source, signal_type) pair', () => {
+    const r = read('.claude/rules/scoring-authority.md');
+    for (const v of ['SCREENER_SURFACING', 'SCREENER_ENTRY', 'platform', 'EMA_BULL_STACK', 'technical_scan']) expect(r).toContain(v);
+  });
+
+  it('audit-findings.md opens rows for the intraday weights, DQ noise, duplicated weights and stale worktrees', () => {
+    const a = read('docs/audit-findings.md');
+    for (const id of ['04', '05', '06', '07']) expect(a).toMatch(new RegExp(`\| AF-202610${'21'}-${id} \|`));
+    expect(a).toContain('`adx` is fabricated as 0 on every row for two consecutive months');
+  });
 });

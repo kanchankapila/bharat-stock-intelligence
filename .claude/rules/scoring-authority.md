@@ -111,8 +111,10 @@ size-by-conviction rule) will present sells as the highest-conviction buys. Alwa
 (or the sign of `unified_score - 50`). The label is also not a monotone quality ladder: see AF-20261007-05.
 
 **`unified_signals.signal_type` carries two vocabularies, split by writer.** `signal_source='technical'` writes `Bullish` / `Bearish` /
-`Neutral` (128,318 rows live; plus two stray `BREAKOUT` / `EMA_BULL_STACK` rows), while `screener`, `technical_scan` and `AI` write
-`BUY` / `SELL` (`AI` also `HOLD`). Any filter on one vocabulary silently excludes the other writer's rows and returns a plausible,
+`Neutral` (128,318 rows live; plus two stray `BREAKOUT` / `EMA_BULL_STACK` rows), while the other writers use their own values. Complete
+live set (2026-10-21), `(signal_source, signal_type)`: `AI` BUY / HOLD / SELL; `screener` BUY / SELL; `technical_scan` BUY; `platform` BUY (2 rows);
+`SCREENER_SURFACING` SCREENER_ENTRY / SECTOR_SCREENER_CONFLUENCE (neither is a direction); `technical` Bullish / Bearish / Neutral plus one
+stray each of BREAKOUT and EMA_BULL_STACK. A reader widening a predicate must decide for each of these. Any filter on one vocabulary silently excludes the other writer's rows and returns a plausible,
 non-empty result. The correct shape is `signal_type IN ('BUY','Bullish')` (see `unified_ranker.py` ~L2621, `ranker_input_snapshot.py`
 ~L164, `chatbot/tools/sql_tool.py` ~L131). `routers/misc.router.ts` ~L453 filters `signal_type = 'BUY'` only, so the entry/target/stop
 levels it attaches can never come from a technical signal. Do not "fix" it by normalising the stored values: four readers already

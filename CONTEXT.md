@@ -71,8 +71,8 @@ running product. (Two earlier rebuilds, `greenfield/` and `bharatquant/`, were n
 
 ## Measured State Of The Edge
 The ranker has a small positive rank IC, but every reading on `unified_recommendations` is LOW-DATA:
-41 of 41 `factor_edge_history` readings sit at 0.2-8.2 effective dates against a reliability floor of 20
-(measured 2026-10-19), so that panel gives no usable reading in either direction, and the ranker has never
+every reading in the latest `factor_edge_history` run (97 rows, 2026-10-17) sits below the eff-20 reliability floor, at
+0.2-8.2 effective dates, so that panel gives no usable reading in either direction, and the ranker has never
 passed a cost-aware backtest. The longer-history deep-panel gradings (2021-2026, 2,431 symbols) are
 separate: no tier reaches AUC 0.55, and the F&O-eligible tier is indistinguishable from zero (see
 `.claude/rules/measurement.md`, 2026-10-21). Most published factors tested here are null or inverted on this data. The realistic goal is a

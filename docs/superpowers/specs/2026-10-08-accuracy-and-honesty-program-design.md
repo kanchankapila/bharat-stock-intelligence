@@ -109,6 +109,11 @@ platform's own record is about 16 independent signals in 196 columns, so each ca
 existing factors on a panel deep enough to test, ideally one that spans bull and bear regimes (2021-2026 price, delivery and
 F&O bhavcopy history already exist; the ranker's engine inputs do not before 2026-08-10).
 
+> **Correction 2026-10-21.** The parenthetical above is true of the 8-engine blend but reads as "no deep panel is possible", and it
+> closed off the only path to significance before 2027. Measured 2026-10-19: of 104 numeric `feature_store` columns, 59 are >=60%
+> populated back to 2021 (labels included), over 2.73M rows (248 dates / 1,698 symbols in 2021, 199 / 2,431 in 2026), which supports
+> ~287 independent windows at h=5 and ~68 at h=21. The deep panel is gradeable; see `.claude/rules/measurement.md`, 2026-10-21.
+
 ## 3. Testing and verification strategy
 - Test-first for every behaviour change; show the test failing on the unfixed code; vitest unit project uses the throwaway
   schema, pytest uses `pg_conn` / `pg_memory_conn`, and tests run against an EMPTY database before they are believed.
