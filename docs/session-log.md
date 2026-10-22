@@ -11533,9 +11533,27 @@ Phase 0 `.ts` commit live, including the holiday-gate fix below. Everything here
 - **Gates run by the controller on the final tree** (not subagent-reported): CI-identical `pytest src/server/__tests__
   src/server/tests tests/chatbot` 3858 passed / 267 skipped (before `c095b7e2`, which is TypeScript-only); full `vitest` 2098
   passed / 45 skipped and `tsc --noEmit` exit 0 after it, on a tree that includes another session's uncommitted edits.
-- **Review gap, stated plainly.** `c095b7e2` was never independently reviewed: its author agent was terminated by the monthly
-  spend limit before reporting, and no further agents could be dispatched. The controller read the diff against the spec and ran
-  the negative controls itself. That is a weaker check than every other commit in this work received.
+- **Review gaps, stated plainly.** Two sets of commits never got the independent scoped re-review the process requires.
+  (1) `c095b7e2`: its author agent was terminated by the monthly spend limit before reporting and no further agents could be
+  dispatched; the controller read the diff against the spec and ran the negative controls itself. (2) The seven-commit
+  final-review fix wave (`b0fc5aee`..`efd0e0bf`): its agent reported, but the scoped re-review was never dispatched. For the
+  one commit in it that deletes files, `b0fc5aee` (stale `.dump.partial` prune in `backup_pg.py`), the controller verified by
+  reading: the glob `{PG_DB}_*.dump.partial` cannot match `.dump`, `.dump.invalid` or `.dump.TRUNCATED`; it requires mtime older
+  than 6h; and `_prune()` is reachable only through `_backup_under_lock()` after the `if not acquired` guard. The rest of the
+  wave got gates only.
+- **The running process is not HEAD.** `tsx` loads the working tree, `bharat-server` restarted 2026-10-21 17:45 IST, and another
+  session's uncommitted `jobHeartbeat.ts`, `jobSweep.ts`, `logger.ts` and `globalMarketService.ts` were last modified at 17:08 IST,
+  before it, so that unreviewed, uncommitted code is live. Full vitest passes on the tree that includes it. Attribute any odd
+  behaviour carefully.
+- **What the live brief actually says** (rendered read-only 2026-10-22 with `buildMorningBrief()`, nothing sent): state `calls`,
+  regime BEAR, five `Strong Buy` picks, every one `SWING`; the section is headed "POSITIONAL / SWING" and no pick is
+  long-term; four share R:R 1.57; the brief prints its own "Forward test: not yet measured" and "relative rank, not a
+  calibrated win probability" disclosures. Its long-term section is built from `unified_recommendations` for every
+  non-INTRADAY horizon, not from the retired `LONG_TERM` label, and `POSITIONAL` is labelled "up to 15 sessions": the
+  platform's longest horizon is about three weeks. The "Why" lines count scanners as "bullish" even where the scanner's own
+  name reads bearish (RBLBANK: `Negative Breakdown Third Support (LTP < S3)`; BEPL: `Supertrend Signal changed to Sell`;
+  REDINGTON: `Negative Breakout - Medium Trend`). That narrative is the external confluence/recommendation_log text the ranker
+  trusts for actionable long calls (`unified_ranker.py` ~L3160); how it relates to the score is not established: AF-20261022-02.
 - **A ledger-format trap.** The same agent's row for this fix wrote `\|\|` (valid markdown) and this repo's ledger parser splits on
   every `|`, giving 12 cells instead of 10 and shifting the verdict and reason columns. Never put a pipe character in a ledger
   cell, escaped or not; write "or".
