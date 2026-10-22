@@ -95,6 +95,26 @@ This section is a dated status board, not a verdict list. A claim carrying an ol
 in this file is not wrong, it is *unrefreshed* — check the date before quoting it, and re-run
 rather than assume. Full narrative for anything here: `docs/measurement-history.md`.
 
+### 2026-10-23 - MoneyControl chart-pattern trade plans graded for the first time (`mc_chart_patterns`, AF-20261023-01) - too thin to claim anything
+
+`mc_chart_patterns` is a never-read table that carries a ready-made trade plan per call: `entry_price`, `target_price`,
+`stoploss_price`, a `time_frame` (30 mins, 1/2/4 hours, 1 day, 1 week), a status and an `end_date`. Graded against
+`stock_ohlcv` daily bars, point-in-time: a call counts only if it was FIRST SEEN with status `New`, the walk starts the session
+AFTER first sight, one bar touching both levels is a stop, cost 0.30% round trip. Daily bars cannot order events inside a day,
+so the intraday frames are the least reliable rows.
+
+| fill rule | distinct calls | triggered | target / stop / still open | target rate of resolved | mean net R |
+|---|---|---|---|---|---|
+| touch only (conservative) | 241 | 41 | 11 / 22 / 8 | 33.3% | **+0.007** |
+| touch or gap-through at the open | 241 | 56 | 27 / 20 / 9 | 57.4% | -1.783 |
+
+Per time frame (touch only): 30 mins 1 target / 1 stop, 1 hour 2 / 6, 2 hours 2 / 2, 4 hours 3 / 8, 1 day 2 / 3, 1 week 1 / 2 with
+4 still open; per-frame n is 3 to 11. **Reading: indistinguishable from zero, and far too small to say anything about accuracy.** The
+second rule's -1.78 is driven by gap-through fills with a tiny stop distance (the 2-hour frame alone averages -8.2 R), which shows how sensitive
+this is to an assumption the feed does not settle: it does not say whether an entry is a breakout trigger or a dip limit.
+The table accumulates roughly 45 distinct calls a month (241 since 2026-05-25), so a result worth quoting is months away (calendar-blocked). Graded by
+`scratchpad/grade_patterns.py` (read-only); to repeat, rebuild it from the rules above.
+
 ### 2026-10-21 — Deep-panel tiered grading, 2021-01..2026-09 (phase 2026-10-19; `deep_panel*.py`) — do not re-run to "find" an edge
 
 Panel: `feature_store`, 2,431 symbols, **34 of the 47 pinned columns scored**. The chain: 53 derived columns -> 6 warm-up-zero-filled

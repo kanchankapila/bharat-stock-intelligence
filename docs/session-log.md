@@ -11563,3 +11563,24 @@ Phase 0 `.ts` commit live, including the holiday-gate fix below. Everything here
   `backups/...dump.TRUNCATED` (1.44 GiB) and `...20261016...dump.invalid` (3.46 GiB) are untouched; `src/components/v7/` and the
   files importing it are uncommitted yet served live (`NODE_ENV=development`); nothing was removed; the refusal-by-default product
   is not implemented; Phases 2-5 not started; ledger rows AF-20261021-01..09 open for their stated reasons.
+
+## 2026-10-23 - re-checks of three rows, the owner's two decisions, and the never-read-table usefulness audit
+
+- **Three ledger rows corrected from a re-measurement** (`b57aa3aa`). AF-20261021-05: `confluence-signals-freshness` does NOT fail
+  every run; it failed only on the 10-17 and 10-19 host-sleep outages, where it was correctly firing, and my 30-hour sample had
+  contained an outage. The constant noise is four always-warn checks. AF-20261017-07: only two nights are post-fix (the restart that
+  made it live was 10-21 17:45 IST), so no effect is demonstrated, and the residual failures are `no durable data` responses scattered
+  over 28 symbols, not WAF blocks. AF-20261017-06: the freshness check is green but the catch-up path is unexercised.
+- **The owner's decisions (2026-10-23).** (1) The brief should show the most accurate recommended stocks for the day, the week and
+  the months, each with entry, exit, stop-loss and risk-reward. This replaces the earlier refusal-by-default choice for the daily
+  brief. The earlier concern stands and is on the record: the measured edge is about zero net of costs, and the longest horizon the
+  platform has is about 15 sessions. (2) Removals are on hold until a usefulness check shows the data cannot help a trading analyst.
+- **Usefulness audit result** (AF-20261023-01): of the 30 never-read tables only `niftytrader_live_screener_snapshots` is expensive
+  (about 13.0M rows, over 5.5 GB, uncompressed). The other 29 total about 2.5M rows and are mostly 2026-06 onward: too new to
+  validate. They include a ready-made trade-plan feed (`mc_chart_patterns`), analyst targets (`mc_price_forecast`), consensus
+  surprise (`mc_estimates_hits_misses`, `mc_earnings_forecast`), fundamentals and F&O positioning. First test: the chart-pattern plans,
+  graded from first sight, are indistinguishable from zero (41 triggered, mean net R +0.007).
+- **What each requested horizon can honestly be built from today.** Day: the intraday engine is suppressed by its own emission gate
+  (realised net negative) and its calls are not generated until after the open, so a pre-open brief cannot carry them. Week: the
+  existing SWING picks, with a measured net of about zero. Months: nothing is validated, because the earliest candidate inputs begin
+  2026-06 and a 63-session horizon needs far more history; any list would be unvalidated and must be labelled so.
