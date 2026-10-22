@@ -11510,3 +11510,38 @@ made it look significant. Full figures: `.claude/rules/measurement.md` (2026-10-
 - C7 (`_MF_FACTOR_WEIGHTS` duplication) fixed with a source-parity test, not by reversing the import (circular-import risk).
 - No worktree was removed (all six verified superseded); no backup artifact was deleted (`...dump.TRUNCATED` 1.44 GiB and
   `...20261016...dump.invalid` 3.46 GiB remain, the owner's call).
+
+## 2026-10-22 — production verification of the 2026-10-21 redesign work (addendum)
+
+Written after the owner restarted `bharat-server` at 2026-10-21 17:45 IST (derived from pm2 uptime; restarts=1), which put every
+Phase 0 `.ts` commit live, including the holiday-gate fix below. Everything here was observed directly in production.
+
+- **A live incident the 2026-10-21 work then fixed.** At 2026-10-21 08:20:00 IST the still-old code failed the pre-open brief
+  (`SKIPPED: ranking session 2026-10-20 matches neither the latest completed NSE session 2026-10-19 nor calendar-today
+  2026-10-21`) and sent nothing; the receipt stayed at 2026-10-15. Root cause: 2026-10-20 was Dussehra (an NSE holiday), the
+  ranker ran on that holiday morning, so its IST date sat between the last completed session and today and matched neither
+  accepted case. **The first trading morning after any mid-week holiday got no brief.** Fix `c095b7e2`: the gate accepts a
+  ranking with `session <= ranking date <= today` (IST date strings), mirrored by `morning-brief-delivery`; a null session keeps
+  the old behaviour. Negative controls (run by the controller): the old two-case predicate fails exactly the 2 incident tests,
+  accept-anything fails 6, files restored byte-exact.
+- **Verified live.** 2026-10-22 08:20:04 IST, the first post-holiday morning on the fixed gate: job `success`, log
+  `[MorningBrief] Sent 1 calls message(s) with 5 picks (ok=true)`, receipt advanced 2026-10-15 -> 2026-10-21 17:00:01 UTC.
+  08:28:29 IST `morning-brief-delivery` re-evaluated to PASS. `unified-recommendations-timeframe-coverage` went FAIL -> PASS
+  after the restart (18 fail then 34 pass) as `LONG_TERM` aged out of the 10-day window. `data-quality-daily` failed once at
+  03:01 IST 2026-10-22 on the critical `morning-brief-delivery` before the brief landed, as warned; its clearing at the next
+  03:00 IST run is expected, not yet observed.
+- **Gates run by the controller on the final tree** (not subagent-reported): CI-identical `pytest src/server/__tests__
+  src/server/tests tests/chatbot` 3858 passed / 267 skipped (before `c095b7e2`, which is TypeScript-only); full `vitest` 2098
+  passed / 45 skipped and `tsc --noEmit` exit 0 after it, on a tree that includes another session's uncommitted edits.
+- **Review gap, stated plainly.** `c095b7e2` was never independently reviewed: its author agent was terminated by the monthly
+  spend limit before reporting, and no further agents could be dispatched. The controller read the diff against the spec and ran
+  the negative controls itself. That is a weaker check than every other commit in this work received.
+- **A ledger-format trap.** The same agent's row for this fix wrote `\|\|` (valid markdown) and this repo's ledger parser splits on
+  every `|`, giving 12 cells instead of 10 and shifting the verdict and reason columns. Never put a pipe character in a ledger
+  cell, escaped or not; write "or".
+- **Small leftover.** The degraded-reason text still reads "matches neither the latest completed NSE session nor calendar-today",
+  which is now slightly inaccurate (the real condition is "older than the latest completed session"). Wording only.
+- **Still open for the owner.** `GEMINI_API_KEY` is present-but-empty in `.env` (company-profiles-sync fails daily; AF-20261017-08);
+  `backups/...dump.TRUNCATED` (1.44 GiB) and `...20261016...dump.invalid` (3.46 GiB) are untouched; `src/components/v7/` and the
+  files importing it are uncommitted yet served live (`NODE_ENV=development`); nothing was removed; the refusal-by-default product
+  is not implemented; Phases 2-5 not started; ledger rows AF-20261021-01..09 open for their stated reasons.
