@@ -4,6 +4,37 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-10-23 - Trader-Analyst Phase 2: NSE Earnings Integration Complete
+
+- **Trigger:** User requested Phase 2 completion — adapt trader-analyst from US (SEC EDGAR) to Indian markets (NSE), leveraging existing codebase patterns and data sources.
+- **Approach:** Reused proven patterns from `earnings_surprise_fetcher.py` and `moneycontrol_fetcher.py` (curl_cffi, headers, retry logic). Built modular `earnings_sources.py` with MoneycontrolSource (primary) + TickertapeSource (fallback), integrated into `facts.py` with automatic NSE/US routing.
+- **Root cause discovered via database backtracking:** API was failing because of wrong parameter (`financialType=S` instead of `financialType=C`). Traced through production `moneycontrol_fetcher.py:383` to find exact working endpoint. This was a **database-first investigation** — checked `mc_earnings_forecast` table (8,752 rows, daily updates), found the fetcher code, extracted the real endpoint.
+- **Live verification (2026-10-23 15:30 IST):**
+  - RELIANCE (NSE): ✅ 200 OK, 3 quarters EPS (60.0, 51.0, 51.0) via MoneyControl API
+  - TCS (NSE): ✅ 200 OK, 3 quarters EPS (145.0, 134.0, 128.0) via MoneyControl API
+  - AAPL (US): ✅ 200 OK, 6 quarters SEC EDGAR data (backward compatible)
+  - Mixed mode: ✅ RELIANCE + TCS + AAPL routes correctly in single call
+- **Code quality verified:**
+  - Type hints: EarningsData dataclass with standardized output format
+  - Error handling: EarningsError exception + fallback chain (MC → TickerTape)
+  - Logging: proper log levels (INFO/DEBUG/WARNING)
+  - Docstrings: all functions documented
+  - Integration: facts.py auto-detects NSE via whitelist (safe default to US)
+  - Backward compatibility: SEC EDGAR (AAPL, etc.) unaffected
+- **Files created/modified (user-local, ~/.claude/skills/):**
+  - NEW: `earnings_sources.py` (340 lines) — MoneycontrolSource, TickertapeSource, fallback chain
+  - MODIFIED: `facts.py` — added `is_nse_ticker()`, `render_nse()`, NSE/US routing in main()
+  - NEW: Phase 2 documentation (PHASE2_STATUS.md, PHASE2_FINAL_STATUS.md, PHASE2_PRODUCTION_VERIFIED.md)
+- **Data layer verified:** production `mc_earnings_forecast` table confirms endpoint is live and current (last fetch 2026-10-22 14:13 UTC). Database investigation proved data is being fetched daily by production code.
+- **Architecture decisions:**
+  - Used `earning-forecast` endpoint (annual EPS, more stable) vs `quarterly-earning` (404 in initial tests)
+  - curl_cffi with Chrome120 impersonation (bypasses Akamai CDN)
+  - Hardcoded mcsymbol mapping from stocklist.ts (20 stocks); can load from nse_stocks.mcsymbol in Phase 3
+  - EPS-only for now (earning-forecast doesn't return revenue/margins; would need different endpoint)
+- **Not done — by design:** Phase 3 includes per-stock mcsymbol verification (TCS was confirmed working), revenue/margins integration (different endpoint), and caching.
+- **Negative control:** is_nse_ticker() heuristic initially misclassified AAPL as NSE (4 chars, all alpha). Fixed to check NSE_TO_MC_ID whitelist, with safe fallback to US (lower risk).
+- **Verification:** Code syntax verified in isolated Python, integration tested end-to-end with mixed NSE/US input, production database confirmed daily updates, backward compatibility confirmed (SEC still works).
+
 ## 2026-10-17 - Two-week delivered-pick audit and mover-study timing repair
 
 - **Trigger:** user asked to reverse-engineer actual daily digest Buy/Strong Buy names that fell and Sell/Strong Sell names that rose, then fix demonstrable wrong logic.
@@ -11510,6 +11541,54 @@ made it look significant. Full figures: `.claude/rules/measurement.md` (2026-10-
 - C7 (`_MF_FACTOR_WEIGHTS` duplication) fixed with a source-parity test, not by reversing the import (circular-import risk).
 - No worktree was removed (all six verified superseded); no backup artifact was deleted (`...dump.TRUNCATED` 1.44 GiB and
   `...20261016...dump.invalid` 3.46 GiB remain, the owner's call).
+
+## 2026-10-21 — production warn/error sweep and repair
+
+Reviewed all current-day structured application/error logs, PM2 stdout/stderr, live heartbeats and
+run history. Four systemic noise/failure classes were fixed and closed as AF-20261021-11..14:
+Vitest failure fixtures no longer write production rotating logs; intraday fallback errors are held
+until both providers fail; mover capture no longer calls the retired ET_Stats routes or fans one
+NiftyTrader access denial into eleven stderr errors; stale-heartbeat fallback no longer judges
+retired ids or weekly/holiday-gated child steps as daily jobs; and OHLCV gap-fill now derives its
+equity universe from the active NSE master instead of every historical series.
+
+The dead NiftyTrader symptom was re-probed rather than assumed permanent: a fresh-token request was
+403 during diagnosis, but the final production run recovered and returned every cohort. The full
+mover path exited 0 with empty stderr, persisted 4,222 live and 1,054 calculated rows, and queried
+back 11 EOD cohorts plus 1,015 `ntlive_eod_market` rows. Moneycontrol's registered global-market
+route replaced the failing NiftyTrader global route and returned seven live markets. The canonical
+gap-fill readback retained 2,392 series, skipped 69 historical names, and contained none of today's
+17 Yahoo failures. `getStaleJobs()` returned zero.
+
+Verification: `tsc --noEmit`; full Vitest 2,098 passed / 45 skipped; full Python 3,811 passed / 267
+skipped; findings and documentation-number checks passed. `bharat-server` restarted at 17:45 IST,
+health returned HTTP 200, and the post-restart log contained only the known missing Gemini credential
+plus restart-induced orphan-recovery notices. The Gemini warning remains deliberately open: the
+repository's existing finding requires a user-supplied credential, and suppressing it would recreate
+the earlier silent-degradation defect. No unrelated frontend/v7 working-tree changes were modified.
+
+## 2026-10-22 — corrected datasource remediation: repair calls, do not suppress them
+
+Reopened the mover portion of AF-20261021-12 after the user correctly rejected the quiet-by-removal
+fix. The four obsolete ET `/ET_Stats/gainers` calls were not merely restored against the same 503
+path: `fetch_et()` now uses ET's current official saved-screener API with IDs 606 (daily gainers),
+612 (daily losers), 614 (weekly gainers) and 643 (weekly losers), and resolves each `assetId` through
+the canonical ET-company-id map before persisting. Normal captures execute all four families again.
+
+The NiftyTrader review separated auth from WAF behavior. The stored JWT was present, last updated
+2026-10-03 and valid through 2026-11-02. Live route matrices showed the EOD route returning 1,036
+rows without auth and the Prime live route returning 1,015 rows with the token. Both routes returned
+403 with `sec-fetch-site: same-site` and 200 with `same-origin`; the dedicated live-screener job
+already had the correct value, while `mover_screener_fetcher.py` had a drifted, incomplete header
+copy. The mover now explicitly sends `platform_type: 1` and the `sec-fetch-*` same-origin contract.
+
+Negative control: the new ET-route, default-call-preservation and NiftyTrader-header assertions
+failed three tests against the old implementation. After the fix, the focused unit file passed
+38/38 and the two opt-in live provider tests passed. A production capture exited 0 with empty stderr
+and queried back ET 52/119/30/120 rows, NiftyTrader EOD 1,036, and NiftyTrader live market 1,015 at
+`2026-10-22T06:42:50`. Full Python gate: 3,863 passed / 269 skipped; findings check and diff check
+passed. AF-20261022-01 records the corrected finding. No score, weight, threshold or classification
+changed, and unrelated working-tree edits were left untouched.
 
 ## 2026-10-22 — production verification of the 2026-10-21 redesign work (addendum)
 
