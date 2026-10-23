@@ -164,3 +164,19 @@ class TestGapFillAsync:
     def test_semaphore_limit(self):
         """Gap-fill concurrency is capped at 20."""
         assert mod._GAP_FILL_CONCURRENCY == 20
+
+
+def test_canonical_gap_fill_universe_excludes_retired_aliases_and_keeps_indices(pg_conn):
+    pg_conn.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date DATE)")
+    pg_conn.execute("CREATE TABLE nse_stocks (symbol TEXT, status TEXT)")
+    pg_conn.executemany(
+        "INSERT INTO stock_ohlcv(symbol,date) VALUES (?, '2026-10-19')",
+        [("RELIANCE",), ("FSN",), ("ZZTEST",), ("NIFTY50",)],
+    )
+    pg_conn.execute("INSERT INTO nse_stocks VALUES ('RELIANCE', 'ACTIVE')")
+    pg_conn.commit()
+
+    symbols, skipped = mod._canonical_gap_fill_symbols(pg_conn, {"NIFTY50"})
+
+    assert set(symbols) == {"RELIANCE", "NIFTY50"}
+    assert skipped == 2

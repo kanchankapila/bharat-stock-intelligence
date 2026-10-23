@@ -395,16 +395,33 @@ class TestDualSourceFetch:
 
     def test_falls_back_to_yahoo_when_mc_has_no_data(self, monkeypatch):
         con = _make_db([("NOMCDATA", None)])
-        monkeypatch.setattr(itf, "_fetch_live", lambda symbol, from_ts, to_ts, countback=500: None)
-        monkeypatch.setattr(itf, "_fetch_yahoo", lambda symbol, from_ts, to_ts, countback=500: _good_fetch(symbol, from_ts, to_ts))
+        monkeypatch.setattr(itf, "_fetch_live", lambda symbol, from_ts, to_ts, countback=500, errors=None: None)
+        monkeypatch.setattr(itf, "_fetch_yahoo", lambda symbol, from_ts, to_ts, countback=500, errors=None: _good_fetch(symbol, from_ts, to_ts))
         n = itf.run()
         assert n == 3
         assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv WHERE symbol='NOMCDATA'").fetchone()[0] == 3
 
+    def test_primary_error_is_not_stderr_when_fallback_succeeds(self, monkeypatch, capsys):
+        _make_db([("FALLBACKOK", None)])
+
+        def broken_mc(symbol, from_ts, to_ts, countback=500, errors=None):
+            if errors is not None:
+                errors.append("mc: timed out")
+            return None
+
+        monkeypatch.setattr(itf, "_fetch_live", broken_mc)
+        monkeypatch.setattr(
+            itf, "_fetch_yahoo",
+            lambda symbol, from_ts, to_ts, countback=500, errors=None:
+                _good_fetch(symbol, from_ts, to_ts),
+        )
+        assert itf.run() == 3
+        assert capsys.readouterr().err == ""
+
     def test_falls_back_to_mc_when_yahoo_has_no_data(self, monkeypatch):
         con = _make_db([("NOYAHOODATA", None)])
-        monkeypatch.setattr(itf, "_fetch_live", lambda symbol, from_ts, to_ts, countback=500: _good_fetch(symbol, from_ts, to_ts))
-        monkeypatch.setattr(itf, "_fetch_yahoo", lambda symbol, from_ts, to_ts, countback=500: None)
+        monkeypatch.setattr(itf, "_fetch_live", lambda symbol, from_ts, to_ts, countback=500, errors=None: _good_fetch(symbol, from_ts, to_ts))
+        monkeypatch.setattr(itf, "_fetch_yahoo", lambda symbol, from_ts, to_ts, countback=500, errors=None: None)
         n = itf.run()
         assert n == 3
         assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv WHERE symbol='NOYAHOODATA'").fetchone()[0] == 3
@@ -417,6 +434,23 @@ class TestDualSourceFetch:
         assert n == 0
         assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv").fetchone()[0] == 0
 
+    def test_both_source_errors_emit_one_actionable_line(self, monkeypatch, capsys):
+        _make_db([("BOTHFAIL", None)])
+
+        def fail(source):
+            def _inner(symbol, from_ts, to_ts, countback=500, errors=None):
+                if errors is not None:
+                    errors.append(f"{source}: unavailable")
+                return None
+            return _inner
+
+        monkeypatch.setattr(itf, "_fetch_live", fail("mc"))
+        monkeypatch.setattr(itf, "_fetch_yahoo", fail("yahoo"))
+        assert itf.run() == 0
+        err = capsys.readouterr().err
+        assert err.count("BOTHFAIL") == 1
+        assert "mc: unavailable" in err and "yahoo: unavailable" in err
+
     def test_both_sources_get_used_across_the_universe(self, monkeypatch):
         """Regression guard for the load-distribution goal: with both sources healthy,
         neither source should end up handling 100% of the universe."""
@@ -424,11 +458,11 @@ class TestDualSourceFetch:
         con = _make_db(symbols)
         mc_hits, yahoo_hits = [], []
 
-        def fake_mc(symbol, from_ts, to_ts, countback=500):
+        def fake_mc(symbol, from_ts, to_ts, countback=500, errors=None):
             mc_hits.append(symbol)
             return _good_fetch(symbol, from_ts, to_ts)
 
-        def fake_yahoo(symbol, from_ts, to_ts, countback=500):
+        def fake_yahoo(symbol, from_ts, to_ts, countback=500, errors=None):
             yahoo_hits.append(symbol)
             return _good_fetch(symbol, from_ts, to_ts)
 

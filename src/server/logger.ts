@@ -4,9 +4,12 @@ import path from 'path';
 import fs from 'fs';
 import util from 'util';
 
-// Ensure logs directory exists
+const isTestProcess = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
+
+// Tests deliberately exercise failures (memory ceilings, timeouts, malformed payloads). Those
+// records belong in the test reporter, not the same rotating files PM2 operators inspect.
 const logDir = path.join(process.cwd(), 'logs');
-if (!fs.existsSync(logDir)) {
+if (!isTestProcess && !fs.existsSync(logDir)) {
   fs.mkdirSync(logDir, { recursive: true });
 }
 
@@ -32,7 +35,7 @@ const logger = winston.createLogger({
     json()
   ),
   defaultMeta: { service: 'bharat-stock-intelligence' },
-  transports: [
+  transports: isTestProcess ? [] : [
     new DailyRotateFile({
       filename: path.join(logDir, 'error-%DATE%.log'),
       datePattern: 'YYYY-MM-DD',
@@ -47,14 +50,14 @@ const logger = winston.createLogger({
       zippedArchive: true,
     }),
   ],
-  exceptionHandlers: [
+  exceptionHandlers: isTestProcess ? [] : [
     new DailyRotateFile({
       filename: path.join(logDir, 'exceptions-%DATE%.log'),
       datePattern: 'YYYY-MM-DD',
       maxFiles: '14d',
     })
   ],
-  rejectionHandlers: [
+  rejectionHandlers: isTestProcess ? [] : [
     new DailyRotateFile({
       filename: path.join(logDir, 'rejections-%DATE%.log'),
       datePattern: 'YYYY-MM-DD',

@@ -305,7 +305,8 @@ def parse_bars(data: Optional[dict], symbol: str, interval: str = "15m",
 
 # ── Live fetch ─────────────────────────────────────────────────────────────────
 
-def _fetch_live(symbol: str, from_ts: int, to_ts: int, countback: int = 500) -> Optional[dict]:
+def _fetch_live(symbol: str, from_ts: int, to_ts: int, countback: int = 500,
+                errors: Optional[list[str]] = None) -> Optional[dict]:
     url = _URL.format(scId=symbol, from_ts=from_ts, to_ts=to_ts, countback=countback)
     try:
         resp = _http_get(url)
@@ -316,7 +317,14 @@ def _fetch_live(symbol: str, from_ts: int, to_ts: int, countback: int = 500) -> 
         # Return None is the contract, but the caller cannot tell an empty window from a
         # failed request -- and for intraday bars those are opposite conclusions about the
         # market. Name the symbol so a missing session is traceable.
-        print(f"[Intraday] live fetch failed for {symbol}: {exc}", file=sys.stderr)
+        message = f"mc: {exc}"
+        if errors is not None:
+            errors.append(message)
+        else:
+            print(f"[Intraday] live fetch failed for {symbol}: {exc}", file=sys.stderr)
+    else:
+        if errors is not None:
+            errors.append("mc: empty response")
     return None
 
 
@@ -330,7 +338,8 @@ def _yahoo_window(to_ts: int, lookback_days: int) -> int:
 
 
 def _fetch_yahoo(symbol: str, from_ts: int, to_ts: int, countback: int = 500,
-                 yahoo_symbol: Optional[str] = None) -> Optional[dict]:
+                 yahoo_symbol: Optional[str] = None,
+                 errors: Optional[list[str]] = None) -> Optional[dict]:
     """countback is accepted-but-unused -- kept so this has the same call signature as
     _fetch_live for the dual-source dispatch in run(). Reshapes Yahoo's chart payload into
     the same {"t","o","h","l","c","v"} shape MC returns so parse_bars() stays source-agnostic.
@@ -345,10 +354,14 @@ def _fetch_yahoo(symbol: str, from_ts: int, to_ts: int, countback: int = 500,
         resp = _get_session().get(url, timeout=10)
         result = resp.json().get("chart", {}).get("result")
         if not result:
+            if errors is not None:
+                errors.append("yahoo: empty response")
             return None
         r0 = result[0]
         ts = r0.get("timestamp")
         if not ts:
+            if errors is not None:
+                errors.append("yahoo: response has no timestamps")
             return None
         quote = r0["indicators"]["quote"][0]
         return {
@@ -359,7 +372,9 @@ def _fetch_yahoo(symbol: str, from_ts: int, to_ts: int, countback: int = 500,
             "c": quote.get("close", []),
             "v": quote.get("volume", []),
         }
-    except Exception:
+    except Exception as exc:
+        if errors is not None:
+            errors.append(f"yahoo: {exc}")
         return None
 
 
@@ -412,18 +427,22 @@ def run(
         both, and fall back to the other source on a miss -- MC and Yahoo don't agree on
         which illiquid names have recent data (verified live: MC had zero data for
         ABANSENT, Yahoo had 157 bars), so the fallback also recovers real coverage."""
+        errors = []
         if idx % 2 == 0:
-            data = _fetch_live(symbol, from_ts, to_ts, countback)
+            data = _fetch_live(symbol, from_ts, to_ts, countback, errors=errors)
             if data:
                 return data, "mc"
-            data = _fetch_yahoo(symbol, from_ts, to_ts, countback)
-            return (data, "yahoo") if data else (None, None)
+            data = _fetch_yahoo(symbol, from_ts, to_ts, countback, errors=errors)
         else:
-            data = _fetch_yahoo(symbol, from_ts, to_ts, countback)
+            data = _fetch_yahoo(symbol, from_ts, to_ts, countback, errors=errors)
             if data:
                 return data, "yahoo"
-            data = _fetch_live(symbol, from_ts, to_ts, countback)
-            return (data, "mc") if data else (None, None)
+            data = _fetch_live(symbol, from_ts, to_ts, countback, errors=errors)
+        if data:
+            return data, "yahoo" if idx % 2 == 0 else "mc"
+        detail = "; ".join(errors) if errors else "both sources returned no data"
+        print(f"[Intraday] all sources failed for {symbol}: {detail}", file=sys.stderr)
+        return None, None
 
     if use_live:
         # Fetch is I/O-bound (network round-trip dominates) -- sequential fetching of the

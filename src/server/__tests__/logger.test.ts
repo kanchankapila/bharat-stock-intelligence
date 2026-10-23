@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { installStructuredConsole } from "../logger";
+import { installStructuredConsole, logger } from "../logger";
 
 // Every test here MUST call the returned restore function (or use the `withStructuredConsole`
 // helper below) -- this repo's vitest config runs the whole suite in a single shared process
@@ -118,5 +118,11 @@ describe("installStructuredConsole", () => {
     } finally {
       restore();
     }
+  });
+});
+
+describe("logger transports in tests", () => {
+  it("does not persist synthetic test failures into the production daily logs", () => {
+    expect(logger.transports.some(t => t.constructor.name === "DailyRotateFile")).toBe(false);
   });
 });

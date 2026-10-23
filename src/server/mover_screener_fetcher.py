@@ -63,9 +63,13 @@ VOLUME_SHOCKER_X = 5.0       # volume >= 5x trailing 20-session median
 BREAKOUT_LOOKBACK = 20       # prior-session high window for intraday breakout
 BREAKOUT_CLOSE_POS = 0.75    # close must sit in the top 25% of the day's range
 
-ET_GAINERS_URL = ("https://etmarketsapis.indiatimes.com/ET_Stats/gainers"
-                  "?pagesize=50&marketcap=largecap%2Cmidcap%2Csmallcap&duration={dur}"
-                  "&sort=intraday&sortby=percentchange&sortorder={order}&pageno=1")
+ET_MOVER_SCREENER_URL = "https://screener.indiatimes.com/screener/v2/screenerByScreenerIdForWeb"
+ET_MOVER_SCREENS = {
+    "gainers_1d": ("606", "1D Returns (%) >2", "1D Returns (%)"),
+    "losers_1d": ("612", "1D Returns (%) <-2", "1D Returns (%)"),
+    "gainers_1w": ("614", "1W Returns (%) >=10", "1W Returns (%)"),
+    "losers_1w": ("643", "1W Returns (%) <= -10", "1W Returns (%)"),
+}
 MOJO_MOVERS_URL = "https://frapi.marketsmojo.com/market_Gainersloser/getData?exchange=0&type={t}&"
 # `www.niftytrader.in/api/niftytrader/symbol/top-gainers-data` 401s unconditionally now, even with a
 # freshly-issued, otherwise-valid Bearer token that DOES work against the sibling
@@ -94,6 +98,10 @@ NT_HEADERS = {
     "Origin": "https://www.niftytrader.in",
     "Referer": "https://www.niftytrader.in/",
     "Accept": "application/json",
+    "platform_type": "1",
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
 }
 
 # Screen catalog: mover_snapshots source -> NT filter body. Names deliberately mirror the
@@ -115,12 +123,9 @@ NT_EOD_SCREENS = [
 ]
 
 MC_SHOCKERS_URL = "https://api.moneycontrol.com/mcapi/v1/earnings/price-shockers?limit=50&page=1"
-# ET's long-standing /ET_Stats/gainers listing went hard-down server-side on 2026-08-25
-# ("503 - DNS failure" from their edge for EVERY marketstats listing route while
-# /ET_Stats/mobile, /sectorperformance and /ET_TechnicalScreeners still serve 200s --
-# their upstream, not our client). Kept wired in fetch_et() so capture resumes
-# automatically if ET repairs it; the healthy TechnicalScreeners service below is the
-# replacement ground truth until then.
+# ET retired the old /ET_Stats/gainers path behind a persistent edge DNS-failure 503.
+# The four official replacements are saved screeners 606/612/614/643 above; they preserve
+# the provider and horizon instead of dropping these source families from normal capture.
 ET_TECH_SCREENER_URL = ("https://etmarketsapis.indiatimes.com"
                         "/ET_TechnicalScreeners/getFilteredData/{pattern}")
 
@@ -343,19 +348,61 @@ def normalize_row(row: dict, rank: int) -> tuple | None:
 
 def fetch_et(session, dur_label: str, dur_param: str, order: str = "desc") -> list:
     label = f"et_{dur_label}"
-    rows = []
+    spec = ET_MOVER_SCREENS.get(dur_label)
+    if not spec:
+        print(f"[{label}] unknown mover screen; skipping", file=sys.stderr)
+        return []
+    screener_id, query_condition, return_field = spec
     try:
-        resp = session.get(ET_GAINERS_URL.format(dur=dur_param, order=order),
-                           headers=ET_HEADERS, timeout=15)
+        payload = {
+            "viewId": 6916,
+            "sort": [],
+            "pagesize": 250,
+            "pageno": 1,
+            "deviceId": "web",
+            "filterType": "index",
+            "filterValue": [],
+            "screenerId": screener_id,
+            "queryCondition": query_condition,
+        }
+        headers = {
+            **ET_HEADERS,
+            "Content-Type": "application/json",
+            "Origin": "https://economictimes.indiatimes.com",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        resp = session.post(ET_MOVER_SCREENER_URL, headers=headers,
+                            json=payload, timeout=30)
         resp.raise_for_status()
-        rows = _rows_from_response(resp, label)
+        body = resp.json()
     except Exception as e:
         print(f"[{label}] fetch failed: {e}", file=sys.stderr)
+        return []
+
+    cmap = _et_company_map() or {}
     out = []
-    for i, row in enumerate(rows, 1):
-        norm = normalize_row(row, i)
-        if norm:
-            out.append((label,) + norm)
+    for row in body.get("dataList") or []:
+        if not isinstance(row, dict):
+            continue
+        symbol = cmap.get(str(row.get("assetId")))
+        if not symbol:
+            continue
+        values = {
+            item.get("keyText"): item.get("value")
+            for item in row.get("data") or []
+            if isinstance(item, dict) and item.get("keyText")
+        }
+        payload = {
+            "assetId": row.get("assetId"),
+            "assetName": row.get("assetName"),
+            "assetSymbol": row.get("assetSymbol"),
+            **values,
+        }
+        out.append((label, symbol, len(out) + 1,
+                    _to_float(values.get(return_field)),
+                    _to_float(values.get("Current Price (Rs)")),
+                    json.dumps(payload, default=str)))
+    print(f"[{label}] captured {len(out)} rows via ET screener {screener_id}")
     return out
 
 
@@ -689,6 +736,9 @@ def fetch_nt_screens(session, wanted: set | None = None) -> list:
         try:
             r = session.post(NT_EOD_SCREENER_URL, headers=NT_HEADERS,
                              data=json.dumps(body), timeout=30)
+            if r.status_code in (401, 403):
+                print(f"[nteod] access denied (HTTP {r.status_code}); skipping remaining NT EOD screens")
+                break
             r.raise_for_status()
             rows = _rows_from_nt_screener(r, source)
             out += rows
@@ -709,8 +759,8 @@ def fetch_nt_live_screener(session, bearer: str | None = None, hhmm: str = "eod"
         r = session.post(NT_LIVE_SCREENER_URL,
                          headers={**NT_HEADERS, "Authorization": f"Bearer {bearer}"},
                          data=json.dumps({}), timeout=30)
-        if r.status_code == 401:
-            print(f"[ntlive_{hhmm}] unauthorized (token absent/expired/no Prime); skipping")
+        if r.status_code in (401, 403):
+            print(f"[ntlive_{hhmm}] access denied (HTTP {r.status_code}; token/Prime may not grant this route); skipping")
             return []
         r.raise_for_status()
         js = r.json()

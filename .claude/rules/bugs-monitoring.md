@@ -345,6 +345,13 @@ generated after the close.
 
 ## Noise floors, and metrics that overflow into a plausible wrong number
 
+- **A primary-source exception is not the terminal verdict when a fallback is still pending.**
+  Printing it to stderr inside the primary fetch function makes the wrapper report `real_error`
+  even when the alternate source immediately supplies the same symbol. Buffer per-attempt errors
+  locally; discard them only after durable fallback success, and emit one combined, subject-named
+  stderr line when every source fails. Never solve this with a broad benign classifierâ€”that would
+  also hide the all-sources-failed case. AF-20261021-12.
+
 - **A log-level classifier that recognises exactly ONE logging format reports ordinary progress
   output as a crash, and a loud noise floor is what trains everyone to skip the warnings that
   matter.** `classifyStderr`'s benign pattern required `INFO:` **with a colon** directly after

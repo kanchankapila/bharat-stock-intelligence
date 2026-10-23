@@ -57,5 +57,6 @@ This file used to hold every class (~127 KB) and loaded on the first `.py`/`.ts`
 | One-shot PM2 backup starting before its own `cron_restart` and racing a second dump (2026-10-17) | `bugs-jobs-runtime.md` |
 | A check keyed on the latest session firing before its closer's slot; a status registry that can only say "working" (2026-10-15) | `bugs-monitoring.md` |
 | Truncate-then-compute script emptying a shared file; classifier-refused production writes and conditional approvals (2026-10-15) | `bugs-testing-env.md` |
+| Test failures persisted into production logs; primary-source errors emitted before fallback verdict (2026-10-21) | `bugs-testing-env.md` / `bugs-monitoring.md` |
 
 When you add a class, put it in the area file whose `paths:` cover the code it bites, and add its row here.

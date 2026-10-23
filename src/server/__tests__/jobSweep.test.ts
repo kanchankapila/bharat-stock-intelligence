@@ -134,6 +134,12 @@ describe('classifyStderr', () => {
     expect(classifyStderr('[HighFlyer] skipped 1/6 stat day(s) with no precursor_counts_json when computing lifts\nTraceback (most recent call last):')).toBe('real_error');
   });
 
+  it('classifies an already-closed advisory-lock cleanup as benign', () => {
+    expect(classifyStderr(
+      '[Resolver] advisory lock connection already gone at release; lock was released with the connection',
+    )).toBe('benign_warning');
+  });
+
   it('classifies a traceback as a real error', () => {
     expect(classifyStderr('Traceback (most recent call last):\n  File "x.py", line 1')).toBe('real_error');
   });

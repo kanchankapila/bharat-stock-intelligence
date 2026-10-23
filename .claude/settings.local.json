@@ -50,7 +50,9 @@
       "Bash(python3 -m pytest tests -q -rs --co)",
       "Bash(python3 -m pytest tests/test_portfolio.py -q)",
       "Bash(python3 -m pytest tests/test_portfolio.py -q -k stall)",
-      "Bash(git commit -q -m 'bharat_alpha: quarterly ownership features from legacy shareholding history *)"
+      "Bash(git commit -q -m 'bharat_alpha: quarterly ownership features from legacy shareholding history *)",
+      "Read(//c/Users/amitk/.claude/skills/trader-analyst/**)",
+      "Bash(python earnings_sources.py)"
     ]
   },
   "skillOverrides": {
@@ -69,6 +71,7 @@
     "weekend-audit": "on"
   },
   "enabledPlugins": {
-    "frontend-design@claude-plugins-official": false
+    "frontend-design@claude-plugins-official": false,
+    "day-trader-skill@day-trader-skill": true
   }
 }

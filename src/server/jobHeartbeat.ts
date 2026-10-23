@@ -155,7 +155,21 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
     // dataQualityChecks.ts's own read path.
     // gdelt-sentiment: retired 2026-09-11 (queues.ts) -- its heartbeat row would otherwise read
     // as STALE here every hour, forever.
-    const decommissionedJobs = new Set(['deploy-drift', 'port-drift', 'dl-inference', 'gdelt-sentiment']);
+    const decommissionedJobs = new Set([
+      'deploy-drift', 'port-drift', 'dl-inference', 'gdelt-sentiment',
+      // Removed producers/checks leave durable heartbeat rows behind. Without an explicit
+      // tombstone each one is re-announced as stale hourly forever.
+      'semantic-claim-freshness', 'semantic-evidence-freshness',
+      'nse-financial-results-freshness', 'signal-outcomes',
+    ]);
+    // These are StepTracker children. Their parent owns the cron, holiday gate and failure
+    // verdict; applying this function's anonymous 26h fallback to a weekly/holiday-skipped
+    // child contradicts the parent's schedule and creates phantom outages.
+    const parentManagedSteps = new Set([
+      'nse-equity-master',
+      'screener-performance-compute',
+      'live-screener-ml-train',
+    ]);
 
     const rows = await dbAll('SELECT job_name, last_success_at FROM job_heartbeat') as
       Array<{ job_name: string; last_success_at: number | null }>;
@@ -173,6 +187,7 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
       // heartbeat's binary success age.
       if (dataQualityIds.has(r.job_name)) continue;
       if (decommissionedJobs.has(r.job_name)) continue;
+      if (parentManagedSteps.has(r.job_name)) continue;
       if (r.last_success_at == null) {
         // Never succeeded — no epoch to measure staleness against; "?? 0" here would
         // report "hours since 1970" (~495,000h) instead of the real signal, which is

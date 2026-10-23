@@ -162,6 +162,14 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 
 ## Testing
 
+- **A test process using the production logger can pollute the production incident record without
+  touching production data.** Failure-path tests are supposed to emit errors (memory ceilings,
+  timeouts, malformed payloads); if the shared logger installs rotating file, exception or
+  rejection transports under `VITEST`, those synthetic errors become indistinguishable from PM2
+  failures in the next log sweep. Keep console reporting for the test runner, but disable all
+  persistent transports in test processes. Assert the actual transport list, then prove a full
+  failure-heavy suite adds no fixture signature to `logs/app-*` / `logs/error-*`. AF-20261021-11.
+
 - **A warning printed by a test runner is not a verdict — CI and hooks read the EXIT CODE.** A suite that skips everything it can't reach (e.g. no DB) and still exits 0 is advisory-only to any automation consuming it; flip the exit code non-zero when a test was skipped for a reason that shouldn't be silently tolerated (e.g. an unreachable required dependency).
 - **A live test that SKIPS when its source is empty stops testing anything the day that source
   retires -- and the skip reason ("holiday or blocked") keeps it looking benign forever.**

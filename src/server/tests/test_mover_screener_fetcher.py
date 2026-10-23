@@ -223,6 +223,7 @@ class _FakeResp:
 class _FakeSession:
     def __init__(self, routes):
         self._routes = routes          # url-substring -> payload
+        self.last_post = None
 
     def get(self, url, **kw):
         for frag, payload in self._routes.items():
@@ -231,22 +232,41 @@ class _FakeSession:
         return _FakeResp({})
 
     def post(self, url, **kw):
+        self.last_post = {"url": url, **kw}
         return self.get(url, **kw)     # screener POSTs route on the same substrings
 
 
 class TestLiveSources:
-    def test_fetch_et_labels_and_order_asc_for_losers(self):
-        sess = _FakeSession({"ET_Stats/gainers": {"data": [
-            {"NSE_SYMBOL": "RELIANCE", "percentChange": "2.5"},
-            {"NSE_SYMBOL": "HDFCBANK", "percentChange": "1.9"}]}})
+    def test_fetch_et_uses_current_screener_api_and_canonical_company_map(self, monkeypatch):
+        monkeypatch.setattr(msf, "_et_company_map", lambda: {
+            "11936": "RELIANCE", "9195": "HDFCBANK"
+        })
+        sess = _FakeSession({"screenerByScreenerIdForWeb": {
+            "statusCode": 200,
+            "dataList": [
+                {"assetId": "11936", "assetSymbol": "RELIANCEEQ", "data": [
+                    {"keyText": "1D Returns (%)", "value": "-2.5"},
+                    {"keyText": "Current Price (Rs)", "value": "1,250.50"},
+                ]},
+                {"assetId": "9195", "assetSymbol": "HDFCBANKEQ", "data": [
+                    {"keyText": "1D Returns (%)", "value": "-1.9"},
+                    {"keyText": "Current Price (Rs)", "value": "980.25"},
+                ]},
+                {"assetId": "unmapped", "assetSymbol": "NOTCANONICALEQ", "data": []},
+            ],
+        }})
         rows = msf.fetch_et(sess, "losers_1d", "1%20day", order="asc")
         assert [r[0] for r in rows] == ["et_losers_1d", "et_losers_1d"]
         assert [r[1] for r in rows] == ["RELIANCE", "HDFCBANK"]
         assert [r[2] for r in rows] == [1, 2]
+        assert [r[3] for r in rows] == [-2.5, -1.9]
+        assert [r[4] for r in rows] == [1250.5, 980.25]
+        assert sess.last_post["json"]["screenerId"] == "612"
+        assert sess.last_post["json"]["queryCondition"] == "1D Returns (%) <-2"
 
     def test_fetch_et_failure_returns_empty_not_raise(self):
         class BoomSession:
-            def get(self, url, **kw):
+            def post(self, url, **kw):
                 raise ConnectionError("boom")
         assert msf.fetch_et(BoomSession(), "gainers_1d", "1%20day") == []
 
@@ -385,13 +405,33 @@ class TestNiftyTraderScreens:
         rows = msf.fetch_nt_screens(sess, {"nteod_gain5"})
         assert {r[0] for r in rows} == {"nteod_gain5"}
 
-    def test_live_screener_skips_without_token_and_on_401(self):
+    def test_access_denied_stops_after_one_request_without_stderr_storm(self, capsys):
+        class _DeniedSession:
+            calls = 0
+
+            def post(self, url, **kw):
+                self.calls += 1
+                return _FakeResp({}, status=403)
+
+        sess = _DeniedSession()
+        assert msf.fetch_nt_screens(sess) == []
+        captured = capsys.readouterr()
+        assert sess.calls == 1
+        assert captured.err == ""
+        assert "HTTP 403" in captured.out
+
+    def test_live_screener_skips_without_token_and_on_access_denied(self, capsys):
         sess = _FakeSession({"live-market-filter-data": self.EOD_PAYLOAD})
         assert msf.fetch_nt_live_screener(sess, bearer=None) == []
         class _Sess401:
             def post(self, url, **kw):
                 return _FakeResp({}, status=401)
         assert msf.fetch_nt_live_screener(_Sess401(), bearer="tok") == []
+        class _Sess403:
+            def post(self, url, **kw):
+                return _FakeResp({}, status=403)
+        assert msf.fetch_nt_live_screener(_Sess403(), bearer="tok") == []
+        assert capsys.readouterr().err == ""
 
     def test_live_screener_emits_slot_stamped_market_and_screens(self):
         sess = _FakeSession({"live-market-filter-data": {
@@ -404,6 +444,8 @@ class TestNiftyTraderScreens:
                  "gap_up_down": "Gap down"}]}})
         # default hhmm -> "eod" (EOD-run compatibility)
         rows = msf.fetch_nt_live_screener(sess, bearer="tok")
+        assert sess.last_post["headers"]["sec-fetch-site"] == "same-origin"
+        assert sess.last_post["headers"]["platform_type"] == "1"
         sources = {r[0] for r in rows}
         assert "ntlive_eod_market" in sources
         assert "ntlive_eod_gap_up" in sources          # gap_up_down == 'Gap up'
@@ -448,6 +490,21 @@ def test_niftytrader_screener_calls_use_a_plain_requests_session(monkeypatch, wa
     msf.fetch_live("2026-09-11", wanted=wanted)
     assert len(seen) == 1
     assert type(seen[0]) is msf.requests.Session
+
+
+def test_default_live_capture_calls_all_current_et_mover_screens(monkeypatch):
+    seen = []
+    monkeypatch.setattr(msf, "fetch_et", lambda _s, label, *_a, **_k: seen.append(label) or [])
+    monkeypatch.setattr(msf, "fetch_mojo", lambda *a, **k: [])
+    monkeypatch.setattr(msf, "fetch_niftytrader", lambda *a, **k: [])
+    monkeypatch.setattr(msf, "fetch_mc_shockers", lambda *a, **k: [])
+    monkeypatch.setattr(msf, "fetch_nt_screens", lambda *a, **k: [])
+    monkeypatch.setattr(msf, "fetch_et_screens", lambda *a, **k: [])
+    monkeypatch.setattr(msf, "fetch_nt_live_screener", lambda *a, **k: [])
+    monkeypatch.setattr(msf, "_mc_symbol_map", lambda: {})
+    monkeypatch.setattr(msf, "_nt_bearer_token", lambda: None)
+    assert msf.fetch_live("2026-10-21") == []
+    assert seen == ["gainers_1d", "losers_1d", "gainers_1w", "losers_1w"]
 
 
 # 2026-10-05: the --intraday slot path built its OWN curl_cffi Chrome session, so the 09-11 fix above

@@ -306,22 +306,14 @@ export default function App() {
   );
 
 
-  return (
+  // V7 Pro pages bring their own shell (V7Shell renders the sidebar/topbar); stacking the
+  // outer AppShell on top would put two sidebars on screen, so /v7-* paths render the route
+  // tree directly — AppShell-only chrome (ticker tape, command palette) skips with it.
+  const isV7 = location.pathname.startsWith('/v7-');
+  const routesContent = (
     <>
-      <AppShell
-        user={user}
-        onLogin={handleLogin}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        stocks={stocks}
-        onSelectStock={handleSelectStock}
-        displayIndices={displayIndices}
-        onSelectIndexByName={handleSelectIndexByName}
-        dataUpdatedAt={stocksUpdatedAt}
-      >
-        <TickerTapeWidget />
-        <AnimatePresence mode="wait">
-          <SafeRoutes>
+      <AnimatePresence mode="wait">
+        <SafeRoutes>
             <V1Routes
                 stocks={stocks}
                 watchlist={watchlist}
@@ -337,8 +329,30 @@ export default function App() {
                 userId={user?.uid}
             />
           </SafeRoutes>
-        </AnimatePresence>
-      </AppShell>
+      </AnimatePresence>
+    </>
+  );
+
+  return (
+    <>
+      {isV7 ? (
+        routesContent
+      ) : (
+        <AppShell
+          user={user}
+          onLogin={handleLogin}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          stocks={stocks}
+          onSelectStock={handleSelectStock}
+          displayIndices={displayIndices}
+          onSelectIndexByName={handleSelectIndexByName}
+          dataUpdatedAt={stocksUpdatedAt}
+        >
+          <TickerTapeWidget />
+          {routesContent}
+        </AppShell>
+      )}
 
       <SlideOutDrawer
         symbol={drawerSymbol}

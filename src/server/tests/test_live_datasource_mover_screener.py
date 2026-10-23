@@ -1,21 +1,16 @@
 """Live-datasource test for mover_screener_fetcher.py (MANDATORY per data-sources.md).
 
 mover_screener_fetcher.py aggregates several genuinely distinct provider integrations into
-one module (ET TechnicalScreeners, MarketsMojo, NiftyTrader EOD screener, NiftyTrader top
-gainers, MoneyControl price shockers) writing one shared table, mover_snapshots. A single
+one module (ET mover/technical screeners, MarketsMojo, NiftyTrader EOD/live screeners,
+NiftyTrader top gainers, MoneyControl price shockers) writing one shared table,
+mover_snapshots. A single
 "hit one endpoint" test would leave four of the five silently unverified, so this file has
 one class per LIVE provider surface rather than one test for the module as a whole -- each
 hits the real endpoint, parses with the fetcher's OWN function, and writes through the
 fetcher's OWN persist() into a throwaway schema.
 
-Deliberately NOT covered here:
-  - fetch_et() (the classic /ET_Stats/gainers listing) -- documented in the fetcher's own
-    header as down server-side since 2026-08-25 (503 upstream, not a client bug). A live test
-    against a known-dead endpoint would be permanently red for a reason unrelated to our code;
-    fetch_et_screens() below is the verified-live replacement covering the same ET surface.
-  - fetch_nt_live_screener() -- Prime-token-gated (needs a JWT from app_settings that a test
-    environment does not have) and already best-effort by design in production (skipped
-    silently when the token is absent). Nothing to verify without a live Prime account.
+The Prime-gated NiftyTrader test skips when app_settings has no token; on the production test
+host it exercises the same stored credential and request headers as the scheduled capture.
 
 Skipped by default; opt in with RUN_LIVE_DATASOURCE_TESTS=1. Never runs in CI -- a transient
 upstream outage on any one of these providers must not fail the build.
@@ -137,6 +132,28 @@ class TestNiftyTraderEodScreenerLive:
         assert_non_empty_response(rows, "fetch_nt_screens(nteod_gap_up)")
         tagged = [r + ("2026-08-27",) for r in rows]
         _write_and_read_back(tagged, "nteod_gap_up")
+
+
+class TestNiftyTraderLiveScreenerLive:
+    def test_real_fetch_returns_full_market_cross_section(self):
+        token = msf._nt_bearer_token()
+        if not token:
+            pytest.skip("no stored NiftyTrader token")
+        rows = msf.fetch_nt_live_screener(_nt_session(), token, "probe")
+        market = [row for row in rows if row[0] == "ntlive_probe_market"]
+        assert_non_empty_response(market, "fetch_nt_live_screener")
+        for source, symbol, rank, pct, metric, payload in market[:20]:
+            assert_looks_like_ticker(symbol, "ntlive_probe_market.symbol")
+
+
+class TestEtMoversLive:
+    def test_real_fetch_uses_current_saved_screener(self):
+        rows = msf.fetch_et(_session(), "gainers_1d", "1%20day")
+        assert_non_empty_response(rows, "fetch_et(gainers_1d)")
+        for source, symbol, rank, pct, metric, payload in rows[:20]:
+            assert source == "et_gainers_1d"
+            assert_looks_like_ticker(symbol, "et_gainers_1d.symbol")
+            assert_numeric_and_finite(pct, "et_gainers_1d.pct_change")
 
 
 class TestMarketsMojoMoversLive:

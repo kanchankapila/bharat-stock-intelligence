@@ -202,6 +202,25 @@ describe('getStaleJobs', () => {
     vi.useRealTimers();
     expect(stale.map(s => s.job)).toContain('event-triggers');
   });
+
+  it('does not apply the generic daily threshold to retired checks or parent-managed weekly steps', async () => {
+    vi.setSystemTime(new Date('2026-10-21T12:00:00Z'));
+    const old = new Date('2026-10-17T12:00:00Z').getTime();
+    for (const job_name of [
+      'semantic-claim-freshness',
+      'semantic-evidence-freshness',
+      'nse-financial-results-freshness',
+      'signal-outcomes',
+      'nse-equity-master',
+      'screener-performance-compute',
+      'live-screener-ml-train',
+    ]) {
+      mockRows.push({ job_name, last_success_at: old, last_error: null, last_alert_sent_at: null });
+    }
+    const stale = await getStaleJobs();
+    vi.useRealTimers();
+    expect(stale).toEqual([]);
+  });
 });
 
 /**

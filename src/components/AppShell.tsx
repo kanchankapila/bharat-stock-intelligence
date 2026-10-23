@@ -76,6 +76,16 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'V7 Pro',
+    items: [
+      { icon: LayoutDashboard, label: 'Dashboard', id: 'v7-dashboard' },
+      { icon: Shield,          label: 'Top Picks',     id: 'v7-top-picks' },
+      { icon: Filter,          label: 'Screener',      id: 'v7-screener'  },
+      { icon: Search,          label: 'Stock Analysis', id: 'v7-stock'    },
+      { icon: Activity,        label: 'Signals',       id: 'v7-signals'   },
+    ],
+  },
+  {
     label: 'Analysis',
     items: [
       { icon: Filter,  label: 'Screener',   id: 'screener'    },

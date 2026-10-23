@@ -448,6 +448,35 @@ def _get_index_tickers() -> dict[str, str]:
     return m if m else _INDEX_TICKERS_FALLBACK
 
 
+def _canonical_gap_fill_symbols(conn, index_names: set[str]) -> tuple[list[str], int]:
+    """Return historical series that are still canonical fetch targets.
+
+    stock_ohlcv intentionally retains renamed, delisted and test-era series. Using every
+    historical symbol as today's fetch universe repeatedly asks Yahoo for dead aliases such as
+    FSN/ONE97 and test probes such as ZZTEST. The official active master is authoritative for
+    equities; explicitly registered index series are the only non-equity exception.
+
+    Fail open if the master is unavailable: losing a gap-fill cycle is worse than temporarily
+    retaining the old broad universe, and the caller's post-exit/write guards still apply.
+    """
+    existing = [r[0] for r in conn.execute(
+        "SELECT DISTINCT symbol FROM stock_ohlcv"
+    ).fetchall()]
+    try:
+        active = {r[0] for r in conn.execute(
+            "SELECT symbol FROM nse_stocks WHERE status = 'ACTIVE'"
+        ).fetchall()}
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return existing, 0
+    allowed = active | set(index_names)
+    kept = [symbol for symbol in existing if symbol in allowed]
+    return kept, len(existing) - len(kept)
+
+
 def fetch_indices(conn) -> None:
     """Backfill index OHLCV data — not in nse_stocks, fetched separately."""
     import pandas as pd
@@ -488,9 +517,10 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
     # dated AFTER that purge. `ohlcv-exit-carryforward` is the backstop (AF-20260914-05).
     from as_of import post_exit_symbols, POST_EXIT_GRACE_DAYS
     _dead = post_exit_symbols(conn)
-    symbols = [r[0] for r in conn.execute(
-        "SELECT DISTINCT symbol FROM stock_ohlcv"
-    ).fetchall()]
+    _idx_map = _get_index_tickers()
+    symbols, retired_count = _canonical_gap_fill_symbols(conn, set(_idx_map))
+    if retired_count:
+        print(f"[GAP-FILL] skipping {retired_count} historical non-canonical symbol(s)")
     if _dead:
         _before = len(symbols)
         symbols = [s for s in symbols if s not in _dead]
@@ -508,7 +538,6 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
     batch_size = 50
     for i in range(0, len(symbols), batch_size):
         batch = symbols[i:i + batch_size]
-        _idx_map = _get_index_tickers()
         tickers = [f"{YAHOO_SYMBOL_MAP.get(s, s)}.NS" if s not in _idx_map else _idx_map[s]
                    for s in batch]
 

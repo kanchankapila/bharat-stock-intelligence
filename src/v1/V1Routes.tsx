@@ -8,6 +8,14 @@ import { PageFallback } from '../components/PageFallback';
 import { V1PageFrame } from '../components/v1/V1PageFrame';
 import { Globe, Activity } from 'lucide-react';
 
+// --- V7 Pro routes (trading-analyst frontend) ---
+import { V7Layout } from '../components/v7/V7Routes';
+const V7Dashboard   = React.lazy(() => import('../components/v7/pages/Dashboard').then((m) => ({ default: m.DashboardPage })));
+const V7TopPicks    = React.lazy(() => import('../components/v7/pages/TopPicks').then((m) => ({ default: m.TopPicksPage })));
+const V7Screener    = React.lazy(() => import('../components/v7/pages/Screener').then((m) => ({ default: m.ScreenerPage })));
+const V7StockDetail = React.lazy(() => import('../components/v7/pages/StockDetail').then((m) => ({ default: m.StockDetailPage })));
+const V7Signals     = React.lazy(() => import('../components/v7/pages/Signals').then((m) => ({ default: m.SignalsPage })));
+
 
 // --- Lazy-loaded V1 page components ---
 const TrendlyneScreenerPanel = React.lazy(() => import('../components/TrendlyneScreenerPanel'));
@@ -353,6 +361,18 @@ const V1Routes = ({
                                 </V1PageFrame>
                             } />
                             <Route path="/alpha-cockpit" element={<Navigate to="/alpha" replace />} />
+
+                            {/* ─── V7 Pro: trading-analyst frontend (own shell, App.tsx skips the
+                                 AppShell chrome on /v7-* paths so V7Shell is the only sidebar).
+                                 Flat ids keep sidebarRoutes.test.ts's [a-z0-9-]+ scan honest. ─── */}
+                            <Route element={<V7Layout />}>
+                              <Route path="/v7-dashboard" element={<V7Dashboard />} />
+                              <Route path="/v7-top-picks" element={<V7TopPicks />} />
+                              <Route path="/v7-screener" element={<V7Screener />} />
+                              <Route path="/v7-signals" element={<V7Signals />} />
+                              <Route path="/v7-stock" element={<V7StockDetail />} />
+                              <Route path="/v7-stock/:symbol" element={<V7StockDetail />} />
+                            </Route>
                         </Routes>
                     </React.Suspense>
                 </motion.div>

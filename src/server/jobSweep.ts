@@ -127,6 +127,9 @@ export function classifyStderr(stderr: string | null | undefined): 'clean' | 'be
     // keep firing.
     /^\[UnifiedRanker\] (?:universe filter|track-record advisory flagged)/im,
     /^\[StockOptionChain\] \d+\/\d+ symbol\(s\) have no chain in ANY surviving source/im,
+    // Cleanup is idempotent: when the DB connection has already closed, Postgres has already
+    // released its session advisory lock. The resolver is reporting that fact, not a leak.
+    /^\[Resolver\] advisory lock connection already gone at release;/im,
   ];
   const REAL = [
     /Traceback \(most recent call last\)/i,
