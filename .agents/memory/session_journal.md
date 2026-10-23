@@ -2,6 +2,40 @@
 
 Lean, incremental checkpoint of decisions / known bugs / state. Newest first.
 
+## 2026-10-23 — Day Trader Skills Phase 1: US → NSE Adaptation
+
+- **Task:** Complete trader skill adaptations from US markets (NYSE/EST) to Indian markets (NSE/IST).
+- **Scope:** 5 trader skills: scanner, entry, news, alerts, analyst
+- **Completed (trader-news, trader-alerts, trader-analyst):**
+  - Replaced timezone logic: EST/EDT DST → IST (UTC+5:30, fixed, no DST)
+  - Market hours: 09:30–16:00 EST → 09:15–15:30 IST
+  - Holidays: NYSE calendar → NSE calendar (2026–2027, 24 holidays)
+  - Data sources: Yahoo Finance URLs now append `.NS` suffix for Indian symbols
+  - SEC EDGAR: Disabled for NSE (not applicable; deferred to Phase 2)
+  - Functions renamed: `to_eastern()` → `to_ist()`, `eastern_to_utc()` → `ist_to_utc()`
+  - `trader-alerts`: Removed 3-hour early-close logic (NSE trading is flat 09:15–15:30)
+  - All files: syntax verified, help text updated
+- **Live Test: RELIANCE Daily Scan**
+  - Command: `PYTHONIOENCODING=utf-8 python ~/.claude/skills/trader-scanner/scan.py daily --symbols RELIANCE --limit 1`
+  - Result: ✓ Fetched 1 chart, ✓ Prices in ₹, ✓ Volumes in millions, ✓ Times in IST 13:51 IST
+  - Liquidity filter working: ₹50+ and 500,000+ shares
+- **Files Modified (user-local, ~/.claude/skills/):**
+  - `trader-news/news.py` — 3 major edits
+  - `trader-alerts/alerts.py` — 8 major edits
+  - `trader-analyst/facts.py` — Docstring: marked Phase 2 (needs Indian earnings data sources)
+- **Documentation:**
+  - Created `docs/trader-skills-phase1-completion.md` (Phase 1 summary, live test results, Phase 2 preview)
+  - Created `docs/trader-analyst-phase2-plan.md` (detailed Phase 2 roadmap: BSE XBRL, Moneycontrol scrape, 4-day timeline)
+  - Committed: `fb4890d3` (docs: record trader skills Phase 1 completion and Phase 2 plan)
+- **Status:**
+  - ✅ Phase 1 COMPLETE: 4 of 5 trader skills now work on NSE
+  - 📋 Phase 2 READY: Plan documented; blockers identified (Indian earnings data sources)
+- **Known Unknowns (Phase 2):**
+  - Liquidity floor: `--min-volume 500K` is a guess (verify NSE ADV distribution)
+  - 5-minute bars: DB has 15m only; Yahoo `.NS` 5m bars unverified on live trading
+  - Corporate actions: NSE splits, bonus, rights offers (add Phase 2 risk rules)
+- **Ponytail note:** Lazy handoff: Phase 2 roadmap is complete, blockers identified (data source research). No further work needed until earnings sources are validated.
+
 ## 2026-09-09 — Telegram daily-report audit (AF-20260909-07..10)
 
 - **Task:** audit codebase + DB + error logs + every Telegram daily report; fix failures.
@@ -334,3 +368,26 @@ network policy (AF-20260928-10), so no connector in this batch has seen a live r
 - `LONG_TERM` is aliased to `POSITIONAL` (2026-10-03). Six `feature_store` columns are warm-up-zero-filled (AF-20261021-03, live defect, `adx` all-zero for 2025-05/06).
 - Not done: nothing removed; refusal engine only in the spec; Phases 2-5 not started. Open ledger rows AF-20261021-01..09.
 - No new Claude memory topic beyond `redesign_phase0_phase1_2026_10_21`; durable rules live in `measurement.md`, `bugs-data-layer.md`, `ml-model-bugs.md`.
+
+## 2026-10-21 — current-day warn/error sweep
+
+- Closed AF-20261021-11..14. The durable rules are now in `bugs-testing-env.md` (tests must not
+  persist into production log files) and `bugs-monitoring.md` (do not emit a primary-source error
+  before fallback reaches its terminal verdict).
+- Live after `bharat-server` restart: health 200; global market feed returned seven rows;
+  `getStaleJobs()` returned zero; full mover capture wrote 5,276 rows with empty stderr; no
+  `mem_hog.py` fixture record entered the rotating app log during the full Vitest run.
+- `GEMINI_API_KEY` remains an honest, known configuration warning requiring the user's credential.
+  Do not classify it benign or copy another secret automatically.
+
+## 2026-10-22 — datasource-call correction
+
+- User rejected the 2026-10-21 ET noise fix because it stopped making four failing calls instead
+  of restoring their output. The old `/ET_Stats/gainers` route is still a path-specific 503, but
+  ET's current saved screeners 606/612/614/643 now populate the same daily/weekly mover labels.
+- NiftyTrader's token was healthy; the durable fault was request-contract drift. The dedicated
+  live job sent `sec-fetch-site: same-origin`, while `mover_screener_fetcher.py` did not pin the
+  WAF headers. A live matrix proved `same-site` -> 403 and `same-origin` -> 200; the mover now pins
+  the working contract.
+- Live run at 06:42:50 wrote ET 52/119/30/120, NiftyTrader EOD 1,036 and live-market 1,015 rows
+  with empty stderr. Full Python: 3,863 passed / 269 skipped. AF-20261022-01 is closed.
