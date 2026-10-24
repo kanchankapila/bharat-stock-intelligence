@@ -27,6 +27,7 @@ import { AiInsightsTab } from '../components/v2/views/stock-analysis/AiInsightsT
 import { V1PeadConcallWidget } from './V1PeadConcallWidget';
 import { PlanTimeline } from './PlanTimeline';
 import { V1TradeRiskCalculatorWidget } from './V1TradeRiskCalculatorWidget';
+import { ProfileAnalysisProvenance } from './ProfileAnalysisProvenance';
 
 // Same O(1) lookup maps App.tsx builds at module scope for the same purpose (avoids O(n)
 // .find() on every stock detail open) -- duplicated here rather than imported from App.tsx,
@@ -620,11 +621,12 @@ export const V1StockDetails: React.FC<{
                       )}
                     </div>
                   </div>
+                  <ProfileAnalysisProvenance updatedAt={(profileAnalysis as any).last_updated} />
                   <p className="text-slate-300 text-sm leading-relaxed mb-4">
                     {(profileAnalysis as any).ai_analysis}
                   </p>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400 font-display uppercase tracking-wide">Growth Score</span>
+                    <span className="text-xs text-slate-400 font-display uppercase tracking-wide">AI growth assessment</span>
                     <div className="flex-1 bg-slate-900 rounded-full h-2 overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-emerald-600 to-emerald-400 h-full rounded-full transition-all duration-1000"

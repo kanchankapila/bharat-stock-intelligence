@@ -596,7 +596,7 @@ def update_technical_signals(symbol: str, features: dict, con, today: str | None
     base_columns = ["fcf_yield_approx", "interest_coverage", "fcf_positive", "debt_coverage_risk",
                     "fcf_basis", "fcf_ttm_as_of"] + _HARVEST_COLUMNS
     set_clause = ",\n            ".join(
-        f"{c} = CASE WHEN date >= ? THEN COALESCE(?, {c}) ELSE NULL END" for c in base_columns
+        f"{c} = CASE WHEN date >= ? THEN COALESCE(?, {c}) ELSE {c} END" for c in base_columns
     )
     params = []
     for c in base_columns:
@@ -609,6 +609,44 @@ def update_technical_signals(symbol: str, features: dict, con, today: str | None
         WHERE symbol = ?
     """, tuple(params))
     con.commit()
+
+
+def deliver_latest_quality(con, anchor: str) -> int:
+    """Hydrate one daily grid from snapshots known by that session's IST end.
+
+    The generic densifier probes yesterday's coverage, so it misses an entire family
+    disappearing today. Read the source instead; never replay today's snapshot into
+    older rows or renew a source's age by copying a previously carried value.
+    """
+    if not anchor:
+        raise ValueError("financial-ratio delivery requires a completed-session anchor")
+    date.fromisoformat(anchor)
+    columns = ["fcf_yield_approx", "interest_coverage"] + _HARVEST_COLUMNS
+    assignments = [f"{c} = COALESCE(ts.{c}, q.{c})" for c in columns]
+    assignments += [
+        "fcf_positive = CASE WHEN ts.fcf_yield_approx IS NULL AND q.fcf_ttm_approx IS NOT NULL "
+        "THEN CASE WHEN q.fcf_ttm_approx > 0 THEN 1 ELSE 0 END ELSE ts.fcf_positive END",
+        "debt_coverage_risk = CASE WHEN ts.interest_coverage IS NULL AND q.interest_coverage IS NOT NULL "
+        f"THEN CASE WHEN q.interest_coverage < {DEBT_COVERAGE_RISK_THRESHOLD} THEN 1 ELSE 0 END "
+        "ELSE ts.debt_coverage_risk END",
+        "fcf_basis = CASE WHEN ts.fcf_yield_approx IS NULL THEN q.fcf_basis ELSE ts.fcf_basis END",
+        "fcf_ttm_as_of = CASE WHEN ts.fcf_yield_approx IS NULL THEN q.fcf_ttm_as_of ELSE ts.fcf_ttm_as_of END",
+    ]
+    cur = con.cursor()
+    cur.execute(f"""
+        WITH known AS (
+            SELECT DISTINCT ON (symbol) * FROM tl_financial_quality
+            WHERE as_of_date <= CAST(? AS DATE)
+              AND NULLIF(fetched_at, '')::timestamptz <
+                  ((CAST(? AS DATE) + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata')
+              AND NULLIF(fetched_at, '')::timestamptz >=
+                  ((CAST(? AS DATE) - INTERVAL '120 days') AT TIME ZONE 'Asia/Kolkata')
+            ORDER BY symbol, NULLIF(fetched_at, '')::timestamptz DESC, as_of_date DESC
+        )
+        UPDATE technical_signals ts SET {', '.join(assignments)}
+        FROM known q WHERE ts.symbol = q.symbol AND ts.date = CAST(? AS DATE)
+    """, (anchor, anchor, anchor, anchor))
+    return cur.rowcount
 
 
 def get_market_cap(symbol: str, con) -> float | None:
@@ -694,9 +732,40 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Process first N stocks")
     parser.add_argument("--force", action="store_true", default=False,
                         help="Force re-fetch all symbols even if fresh within last 20 days")
+    parser.add_argument("--deliver-only", action="store_true",
+                        help="Replay source delivery to the latest completed grid without vendor requests")
+    parser.add_argument("--apply", action="store_true",
+                        help="Commit --deliver-only; without this flag delivery is rolled back")
     args = parser.parse_args()
+    if args.apply and not args.deliver_only:
+        parser.error("--apply is only valid with --deliver-only")
 
     con = connect()
+    if args.deliver_only:
+        try:
+            con.execute("SET LOCAL statement_timeout = '60s'")
+            con.execute("SET LOCAL lock_timeout = '5s'")
+            anchor = logical_write_floor(con)
+            coverage_sql = (
+                "SELECT COUNT(*) n, COUNT(fcf_yield_approx) fcf, "
+                "COUNT(interest_coverage) coverage, COUNT(roce) roce "
+                "FROM technical_signals WHERE date = CAST(? AS DATE)"
+            )
+            target = con.execute("SELECT current_database(), inet_server_addr(), inet_server_port()").fetchone()
+            print(f"[FinancialRatios] delivery target={tuple(target)} anchor={anchor}")
+            before = dict(con.execute(coverage_sql, (anchor,)).fetchone())
+            matched = deliver_latest_quality(con, anchor)
+            after = dict(con.execute(coverage_sql, (anchor,)).fetchone())
+            print(f"[FinancialRatios] matched={matched}; before={before}; after={after}")
+            if args.apply:
+                con.commit()
+                print("[FinancialRatios] delivery committed; existing predictions were not rescored")
+            else:
+                con.rollback()
+                print("[FinancialRatios] dry replay rolled back; use --apply to persist")
+        finally:
+            con.close()
+        return
     ensure_schema(con)
 
     stocks = load_stocks(args.symbol, args.limit)

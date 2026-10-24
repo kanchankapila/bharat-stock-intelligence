@@ -59,6 +59,27 @@ function computeRoc(regime: string, pts: { p: number; y: number }[], minN: numbe
 
 type WeightedRocPoint = { p: number; wins: number; losses: number };
 
+// Aggregate outcomes before joining the wide grid. The old nested-loop plan did
+// 175k index lookups (~1.7m buffer accesses) and took 22.1s on a cold live read.
+// Counts retain the existing mixed-horizon diagnostic contract exactly.
+export const MODEL_ROC_DIAGNOSTICS_SQL = `
+  WITH resolved AS MATERIALIZED (
+    SELECT symbol, signal_date,
+           COUNT(*) FILTER (WHERE outcome = 'WIN') AS wins,
+           COUNT(*) FILTER (WHERE outcome = 'LOSS') AS losses
+    FROM signal_outcomes
+    WHERE outcome IN ('WIN', 'LOSS') AND signal_source = 'technical'
+      AND signal_date >= ?
+    GROUP BY symbol, signal_date
+  )
+  SELECT ts.nifty_regime AS regime, ts.win_probability AS prob,
+         SUM(r.wins) AS wins, SUM(r.losses) AS losses
+  FROM resolved r JOIN technical_signals ts
+    ON ts.symbol = r.symbol AND ts.date = r.signal_date
+  WHERE ts.date >= ? AND ts.win_probability IS NOT NULL
+  GROUP BY ts.nifty_regime, ts.win_probability
+`;
+
 /**
  * Exact tie-aware ROC/AUC from probability buckets. The database can collapse hundreds of
  * thousands of resolved rows to one row per (regime, probability), avoiding a large request-
@@ -708,16 +729,9 @@ export const mlRouter = router({
       // batch-job cadence, not per request -- this whole read-only diagnostics computation was
       // re-run from scratch (including the synchronous rank-sort AUC math) on every single call.
       return fetchWithCache(`ml:roc-diagnostics:${minN}:${maxPoints}:${days}`, async () => {
-      const rows = await dbAll(`
-        SELECT ts.nifty_regime AS regime, ts.win_probability AS prob,
-               COUNT(*) FILTER (WHERE so.outcome = 'WIN') AS wins,
-               COUNT(*) FILTER (WHERE so.outcome = 'LOSS') AS losses
-        FROM signal_outcomes so JOIN technical_signals ts
-          ON ts.symbol = so.symbol AND so.signal_date = ts.date
-        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
-          AND so.signal_date >= ? AND so.signal_source = 'technical'
-        GROUP BY ts.nifty_regime, ts.win_probability
-      `, [cutoff]) as Array<{ regime: string | null; prob: number; wins: number | string; losses: number | string }>;
+      const rows = await dbAll(MODEL_ROC_DIAGNOSTICS_SQL, [cutoff, cutoff]) as Array<{
+        regime: string | null; prob: number; wins: number | string; losses: number | string;
+      }>;
 
       // A signal counts only when the ensemble actually scored it. Unscored rows carry
       // win_probability = 0.5 exactly (legacy default from the pre-fix scoring outage) or NaN — if
@@ -775,6 +789,7 @@ export const mlRouter = router({
         trainingTrainedAt: model?.trained_at ?? null,
         totalResolved,
         scoredTotal,
+        evaluationContract: 'Historical mixed-horizon outcome discrimination; not probability calibration or a profitability test',
         computedAt: new Date().toISOString(),
       };
       }, 300);

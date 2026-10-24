@@ -70,6 +70,13 @@ if (observationPostludeOffset < 0) {
   throw new Error("technical-signal observation migration is missing its function marker");
 }
 const OBSERVATION_SCHEMA_POSTLUDE = OBSERVATION_MIGRATION.slice(observationPostludeOffset).trim();
+const FUNDAMENTAL_MIGRATION = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations",
+    "20261024120000_fundamental-observations.sql"), "utf8",
+);
+const fundamentalPostludeOffset = FUNDAMENTAL_MIGRATION.indexOf("CREATE FUNCTION journal_fundamental_observation()");
+if (fundamentalPostludeOffset < 0) throw new Error("fundamental observation migration is missing its function marker");
+const FUNDAMENTAL_SCHEMA_POSTLUDE = FUNDAMENTAL_MIGRATION.slice(fundamentalPostludeOffset).trim();
 
 // Postgres's own format_type() output (lowercase, e.g. "timestamp with time zone") -> this file's
 // existing uppercase house-style keyword. Anything not listed here is just uppercased verbatim
@@ -341,7 +348,10 @@ export function buildSchemaFile(data: Awaited<ReturnType<typeof fetchAll>>): str
   const customPostlude = tables.includes("technical_signals") && tables.includes("technical_signal_observations")
     ? ["", "-- ── technical_signals immutable observation contract ──", OBSERVATION_SCHEMA_POSTLUDE]
     : [];
-  return blocks.concat(hyperSection, customPostlude).join("\n") + "\n";
+  const fundamentalPostlude = tables.includes("fundamental_observations")
+    ? ["", "-- Immutable vendor fundamental observations", FUNDAMENTAL_SCHEMA_POSTLUDE]
+    : [];
+  return blocks.concat(hyperSection, customPostlude, fundamentalPostlude).join("\n") + "\n";
 }
 
 async function main() {

@@ -7,6 +7,7 @@ import { latestComputedAt, invalidateLatestComputedAt } from '../latestComputedA
 import { planStatus } from '../planLifecycle';
 import { LATEST_COMPLETE_TS_DATE_SQL, ML_RANK_PCT_SQL, mlRankPctFor } from '../technicalSignalsDate';
 import { canonicalHorizon } from '../horizon';
+import { UNIFIED_RANKER_TIMEOUT_MS } from '../jobBudgets';
 
 // Shared TTL probe (consolidated 2026-09-02 from the per-router copies) — 5-min TTL so new
 // ranker runs are picked up; CAST-to-TEXT semantics preserved.
@@ -382,10 +383,8 @@ export const commandCenterRouter = router({
   runUnifiedRanker: adminProcedure
     .mutation(async () => {
       try {
-        // AF-20260927-07: matches queues.ts's scheduled invocation. Healthy runs measure 7-12min,
-        // but the same DB-contention tail latency that budget guards against applies to an
-        // on-demand run too — 5min timeout-killed it before it could ever finish under load.
-        const { stdout } = await runPython('unified_ranker.py', [], 45 * 60_000);
+        // Both entry points need the same budget under DB contention (AF-20260927-07 recurred).
+        const { stdout } = await runPython('unified_ranker.py', [], UNIFIED_RANKER_TIMEOUT_MS);
         const parsed = JSON.parse(stdout.trim().split('\n').pop() || '{}');
         return {
           success: true,

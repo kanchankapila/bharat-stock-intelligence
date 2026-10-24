@@ -535,6 +535,8 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // (migration 20260905130000), matching its four moneycontrol_fetcher.py siblings.
   { id: 'mc-earnings-forecast-freshness', label: 'mc_earnings_forecast (MC forward estimates)',
     category: 'fundamentals', critical: false, table: 'mc_earnings_forecast', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  { id: 'fundamental-observations-freshness', label: 'immutable estimate and financial observations',
+    category: 'fundamentals', critical: false, table: 'fundamental_observations', dateColumn: 'observed_at', warnDays: 3, failDays: 5 },
   // 2026-08-13: 3 more moneycontrol_fetcher.py siblings, same daily crawl -- gained fetched_at
   // this session (migration 1786990000000) after fetcher-accuracy-review found they had no
   // timestamp column at all.
@@ -2008,6 +2010,37 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (codes.length) return { status: 'warn', detail: `accuracy_scorecard alerts: ${codes.join(', ')}${alertEvidence}` };
       return { status: 'pass', detail: `accuracy_scorecard snapshot ${fmtDays(stale)} old, no alerts` };
     },
+  },
+  {
+    id: 'earnings-revision-shadow-freshness',
+    label: 'point-in-time earnings revision research snapshot',
+    category: 'fundamentals',
+    critical: false,
+    sql: `SELECT "updatedAt" AS last_date FROM app_settings WHERE key = 'earnings_revision_shadow'`,
+    evaluate: (row, now) => {
+      const stale = tradingDaysStale(row?.last_date, now);
+      if (stale == null) return { status: 'fail', detail: 'No earnings_revision_shadow snapshot; the research consumer has not run' };
+      if (stale > 6) return { status: 'fail', detail: `Research snapshot ${fmtDays(stale)} old` };
+      if (stale > 3) return { status: 'warn', detail: `Research snapshot ${fmtDays(stale)} old` };
+      return { status: 'pass', detail: 'Research consumer is accumulating observations; this is not an alpha promotion' };
+    },
+  },
+  {
+    id: 'fundamental-observation-writer-contract',
+    label: 'all four mutable fundamental projections retain observation triggers',
+    category: 'fundamentals',
+    critical: false,
+    sql: `SELECT COUNT(DISTINCT c.relname) AS covered FROM pg_trigger t
+          JOIN pg_class c ON c.oid = t.tgrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          JOIN pg_proc p ON p.oid = t.tgfoid
+          WHERE n.nspname = current_schema() AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+            AND p.proname = 'journal_fundamental_observation'
+            AND c.relname IN ('mc_earnings_forecast', 'mc_estimates_hits_misses',
+                              'mc_price_forecast', 'tl_financial_quality')`,
+    evaluate: (row) => Number(row?.covered) === 4
+      ? { status: 'pass', detail: 'All four source writers archive observations atomically' }
+      : { status: 'fail', detail: `Only ${Number(row?.covered) || 0}/4 source writers archive observations` },
   },
   {
     id: 'technical-composite-age',

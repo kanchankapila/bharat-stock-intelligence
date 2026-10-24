@@ -18,6 +18,7 @@ import { dbGet, dbAll, dbRun } from './dbAsync';
 import Redis from 'ioredis';
 import { REDIS_BASE } from './redisConfig';
 import { runPython } from './pythonRunner';
+import { UNIFIED_RANKER_TIMEOUT_MS } from './jobBudgets';
 import { registerScreenerJobs } from './jobs/screeners.jobs';
 import { addJobWithCatchup } from './jobs/registerJob';
 import { registerAgentJobs } from './jobs/agents.jobs';
@@ -1356,6 +1357,11 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // `accuracy-scorecard-freshness`. ~50 s measured against the live DB.
   await runPython('accuracy_scorecard.py', ['--persist'], 10 * 60_000)
     .catch(e => T.fail('accuracy_scorecard', e));
+
+  // Archive-only baseline observations cannot supply past consensus revisions.
+  // This shadow report starts from actual receipt times and never changes a trading score.
+  await runPython('earnings_revision_shadow.py', ['--persist'], 2 * 60_000)
+    .catch(e => T.fail('earnings_revision_shadow', e));
 
   // Surface the real per-step outcomes (and a degraded job state if any failed) instead of the
   // old blanket 'success' the completed handler used to stamp on all of these.
@@ -3359,7 +3365,7 @@ export async function initQueues(): Promise<boolean> {
         // measured success, and BOTH 09-28 failures died at exactly 2,700,000ms (cut at the
         // cap, not hung). 37min vs a 45min cap = the 1.2x-headroom class, during the
         // post-close cluster + nightly memory squeeze (AF-20260928-03). 75min ~ 2x worst success.
-        await runPython('unified_ranker.py', [], 75 * 60_000);
+        await runPython('unified_ranker.py', [], UNIFIED_RANKER_TIMEOUT_MS);
 
         // Immutable input archive; never fails the run (alarm: ranker-input-snapshot-freshness DQ).
         // 118s measured; 75+5 min stays inside the 85-min lock.

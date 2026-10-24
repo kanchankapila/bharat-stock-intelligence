@@ -7,7 +7,7 @@ import { Activity, Loader2, AlertTriangle } from 'lucide-react';
 
 const FONT_MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
-// Regime -> line colour. BEAR is the only regime with a live edge, so it reads green.
+// Stable regime colours identify curves; they do not encode a measured edge.
 const REGIME_COLOR: Record<string, string> = {
   OVERALL: '#6366f1', BEAR: '#10b981', SIDEWAYS: '#f59e0b', BULL: '#f43f5e', UNKNOWN: '#64748b',
 };
@@ -82,25 +82,23 @@ export function ModelRocPanel() {
   const overall = (data.regimes as RegimeRes[]).find((r) => r.regime === 'OVERALL');
   const trainAuc = data.trainingAuc ?? null;
   const liveAuc = overall?.auc ?? null;
-  const gap = trainAuc != null && liveAuc != null ? trainAuc - liveAuc : null;
 
   return (
     <div className="glass border border-slate-800/60 rounded-2xl p-5">
       <div className="flex justify-between items-start mb-4">
         <div>
           <h3 className="text-xs font-black text-slate-200 font-display uppercase tracking-wider font-data flex items-center gap-2">
-            <Activity className="w-4 h-4 text-indigo-400" /> Deployment ROC — win-probability vs realized outcome
+            <Activity className="w-4 h-4 text-indigo-400" /> Historical ROC — model score vs recorded outcome
           </h3>
           <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5 font-data">
-            How well the live win_probability ranks WIN over LOSS, per market regime · {(data.scoredTotal ?? 0).toLocaleString()} scored / {data.totalResolved.toLocaleString()} resolved
+            Mixed-horizon WIN/LOSS discrimination by market regime · {(data.scoredTotal ?? 0).toLocaleString()} scored / {data.totalResolved.toLocaleString()} resolved
           </p>
         </div>
         <span className="text-[8px] font-black text-slate-400 bg-slate-800/40 px-2 py-0.5 rounded border border-slate-700/40 font-data font-display uppercase tracking-widest">
-          Out-of-sample
+          Mixed horizons
         </span>
       </div>
 
-      {/* Train -> live gap callout: the whole point of the panel */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         <div className="v1-card p-3">
           <span className="text-[8px] text-slate-500 block uppercase font-black font-data tracking-widest">Training-CV AUC</span>
@@ -110,7 +108,7 @@ export function ModelRocPanel() {
           </span>
         </div>
         <div className="v1-card p-3">
-          <span className="text-[8px] text-slate-500 block uppercase font-black font-data tracking-widest">Live overall AUC</span>
+          <span className="text-[8px] text-slate-500 block uppercase font-black font-data tracking-widest">Historical overall AUC</span>
           <span className={`text-xl font-black font-data italic ${liveAuc != null ? verdict(liveAuc).cls : 'text-slate-300'}`}>
             {liveAuc != null ? liveAuc.toFixed(3) : '—'}
           </span>
@@ -118,12 +116,12 @@ export function ModelRocPanel() {
         </div>
         <div className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-3">
           <span className="text-[8px] text-rose-400/80 block uppercase font-black font-data tracking-widest flex items-center gap-1">
-            <AlertTriangle className="w-3 h-3" /> Train → live gap
+            <AlertTriangle className="w-3 h-3" /> Training comparison
           </span>
           <span className="text-xl font-black font-data italic text-rose-400">
-            {gap != null ? `${gap >= 0 ? '−' : '+'}${Math.abs(gap).toFixed(3)}` : '—'}
+            Not comparable
           </span>
-          <span className="text-[8px] text-slate-500 block font-bold font-data uppercase">discrimination gap</span>
+          <span className="text-[8px] text-slate-500 block font-bold font-data uppercase">Different targets, horizons and model cohorts</span>
         </div>
       </div>
 
@@ -200,10 +198,10 @@ export function ModelRocPanel() {
       )}
 
       <p className="text-[8px] text-slate-600 font-bold uppercase mt-3 font-data leading-relaxed">
-        AUC 0.50 = coin flip. Only actually-scored signals are counted (unscored 0.5-default rows are
-        excluded). The deployed probability ranks above chance in BEAR; SIDEWAYS is weak; regimes with
-        no scored signals show as unmeasured, not tested. Read alongside the breakout classifier,
-        which carries the real cross-sectional edge.
+        AUC 0.50 indicates chance discrimination. Exact 0.5 legacy defaults are excluded.
+        This historical diagnostic pools horizons and model versions; it does not establish
+        probability calibration, independent forward performance or profit after costs.
+        Use the frozen forward report for promotion evidence.
       </p>
     </div>
   );

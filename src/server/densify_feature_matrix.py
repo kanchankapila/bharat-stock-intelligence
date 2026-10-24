@@ -32,6 +32,8 @@ import datetime
 import pandas as pd
 import polars as pl
 from db_compat import connect
+from as_of import logical_write_floor
+from financial_ratios_fetcher import deliver_latest_quality
 
 # Below this coverage on a normal trading day, a column is treated as sporadically-written
 # enrichment rather than a genuinely-daily series.
@@ -165,6 +167,11 @@ def ffill_and_ages(df, cols):
 def run(since: str, dry: bool) -> None:
     conn = connect()
     try:
+        if not dry:
+            anchor = logical_write_floor(conn)
+            delivered = deliver_latest_quality(conn, anchor)
+            conn.commit()
+            _log(f"financial-ratio source delivery: {delivered} matched rows on {anchor}")
         conn.execute("ALTER TABLE technical_signals "
                      "ADD COLUMN IF NOT EXISTS enrichment_ffill_age_days INTEGER")
         conn.commit()

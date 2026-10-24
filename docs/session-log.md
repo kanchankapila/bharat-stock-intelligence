@@ -11692,3 +11692,31 @@ Phase 0 `.ts` commit live, including the holiday-gate fix below. Everything here
   269 skipped) passed. The critical smoke rerun passed 10/10 after the earlier ROC timeout; because the persistent server cache had
   been warmed, AF-20261024-03 remains open for a measured cold-process run. No ranker weight, threshold, model artifact or
   classification changed; unrelated working-tree edits were preserved.
+
+## 2026-10-24 - audit remediation: input delivery, immutable observations and diagnostic honesty
+
+- Applied bounded source delivery to the completed 2026-10-23 technical grid: FCF 1,616, interest coverage/ROCE
+  1,582 each of 2,151, previously zero. Generic densification sampled yesterday's coverage and missed today's
+  family collapse. Source age and actual availability are bounded; previous history and frozen prediction inputs
+  were not rewritten. Separate real-writer negative control exposed quarterly updates erasing old observed FCF;
+  ELSE now preserves old values. No model/weight/promotion claim follows from restored input coverage.
+- Applied immutable fundamental observations across four mutable projections, 39,945 installation-time baselines.
+  All four production writer triggers were exercised inside a rolled-back transaction; exact payloads and +1
+  observations were checked, with no synthetic data persisted. New earnings shadow uses only actual observed
+  period/metric histories and pre-actual estimates. Baseline correctly has no usable revisions/surprises and
+  5,243 missing pre-announcement estimates. Nightly wiring/freshness/trigger DQ guards added.
+- Original ROC query measured 22,144ms; pre-aggregation plus covering index measured 609ms. Bidirectional EXCEPT ALL
+  proved exact equality across 19,522 probability buckets / 141,562 outcomes. Weighted ROC semantics unchanged.
+  UI now discloses mixed horizons, non-comparable train/live targets and absence of a calibration/profit verdict.
+- Added actual analysis-time and qualitative/unvalidated AI provenance to both live profile detail renderers.
+  Missing provider credential is still real; neither selected Gemini key nor historically cited legacy key exists.
+- Ranker timeout mismatch recurred (75min scheduled / 45min API); both now share a constant and AST guard. Old literal
+  fails the negative control. Reconciled scheduled Trendlyne recovery, 2,234 recovered crawl symbols, seven verified
+  single-launch backup nights and canonical alias exclusion. SHINDL is a real listed stock, not an alias to remove.
+- Pre-deploy gates: Python 3,878 passed / 269 skipped, TypeScript 2,107 passed / 46 skipped, type-check, production
+  build, schema drift 263/263, findings, doc numbers and recurring scanner clean. Nine backup guard tests pass.
+  Build retains existing chunk-size/mixed-import warnings; skipped live tests are not claimed as executed.
+- Coverage plan records all 116 conservative ledger candidates. Corporate-action repair needs coherent plan/label
+  basis replay, not a price-only adjustment; off-host backup needs a destination; independent research cohorts need
+  real observations. Environment repair and process deployment are being verified separately below. Unrelated
+  worktree changes were preserved. Existing recurring-bug classes cover these failures; new executable guards added.

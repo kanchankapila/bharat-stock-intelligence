@@ -17,6 +17,7 @@ import {
   AdvancedChartWidget 
 } from './TradingViewWidgets';
 import { McNewsCard, McNewsLinks, McNewsEmptyState } from './McNewsCard';
+import { ProfileAnalysisProvenance } from './ProfileAnalysisProvenance';
 
 const ACTION_TYPE_COLORS: Record<string, string> = {
   dividend: 'text-emerald-400 bg-emerald-500/10',
@@ -1112,11 +1113,12 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   )}
                 </div>
               </div>
+              <ProfileAnalysisProvenance updatedAt={(profileAnalysis as any).last_updated} />
               <p className="text-slate-300 text-sm leading-relaxed mb-4">
                 {(profileAnalysis as any).ai_analysis}
               </p>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400 font-display uppercase tracking-wide">Growth Score</span>
+                <span className="text-xs text-slate-400 font-display uppercase tracking-wide">AI growth assessment</span>
                 <div className="flex-1 bg-slate-900 rounded-full h-2 overflow-hidden">
                   <div 
                     className="bg-gradient-to-r from-emerald-600 to-emerald-400 h-full rounded-full transition-all duration-1000"

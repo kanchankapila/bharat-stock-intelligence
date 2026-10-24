@@ -1,0 +1,578 @@
+{
+  "selected": [
+    {
+      "symbol": "SSWL",
+      "pct": 19.884910485933503,
+      "turnover_cr": 932.822203125
+    },
+    {
+      "symbol": "LINC",
+      "pct": 16.454545454545457,
+      "turnover_cr": 3.208374666
+    },
+    {
+      "symbol": "J&KBANK",
+      "pct": -16.279241930707734,
+      "turnover_cr": 262.282342695
+    },
+    {
+      "symbol": "SWIGGY",
+      "pct": -14.125396438155644,
+      "turnover_cr": 2418.7420576
+    },
+    {
+      "symbol": "ANTELOPUS",
+      "pct": 13.640000000000011,
+      "turnover_cr": 362.26568304
+    },
+    {
+      "symbol": "KSOLVES",
+      "pct": -13.581027667984195,
+      "turnover_cr": 6.738091247999999
+    },
+    {
+      "symbol": "AVONMORE",
+      "pct": -12.683284457478008,
+      "turnover_cr": 1.7129902890000002
+    },
+    {
+      "symbol": "INNOVISION",
+      "pct": -11.749651000465331,
+      "turnover_cr": 1.0272771550000002
+    },
+    {
+      "symbol": "MUTHOOTCAP",
+      "pct": -10.774509803921564,
+      "turnover_cr": 1.2817666380000001
+    },
+    {
+      "symbol": "TRANSWORLD",
+      "pct": -10.689093868692359,
+      "turnover_cr": 1.37938092
+    }
+  ],
+  "tradeable_universe": 500,
+  "regime": {
+    "regime": "BEAR",
+    "prob": 0.7046102823899001
+  },
+  "unified_recommendations_computed_at": "2026-10-26",
+  "stages": [
+    {
+      "stage": "feature:win_probability (ml_ensemble)",
+      "kind": "engine",
+      "alive": true,
+      "universe": 2227,
+      "degraded": false,
+      "note": null,
+      "error": null,
+      "covered": [
+        "ANTELOPUS",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": [
+        "AVONMORE"
+      ]
+    },
+    {
+      "stage": "engine:ml_score",
+      "kind": "engine",
+      "alive": true,
+      "universe": 2185,
+      "degraded": false,
+      "note": null,
+      "error": null,
+      "covered": [
+        "ANTELOPUS",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": [
+        "AVONMORE"
+      ]
+    },
+    {
+      "stage": "engine:cs_score (cs_ranker)",
+      "kind": "engine",
+      "alive": true,
+      "disabled": true,
+      "universe": 0,
+      "note": "SKIPPED: producer retired; no longer blended by unified_ranker"
+    },
+    {
+      "stage": "engine:confluence",
+      "kind": "engine",
+      "alive": true,
+      "universe": 4606,
+      "degraded": false,
+      "note": null,
+      "error": null,
+      "covered": [
+        "ANTELOPUS",
+        "AVONMORE",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": []
+    },
+    {
+      "stage": "engine:technical (signal_score)",
+      "kind": "engine",
+      "alive": true,
+      "universe": 2185,
+      "degraded": false,
+      "note": null,
+      "error": null,
+      "covered": [
+        "ANTELOPUS",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": [
+        "AVONMORE"
+      ]
+    },
+    {
+      "stage": "engine:dl (deep_learning_predictions)",
+      "kind": "engine",
+      "alive": true,
+      "universe": 2431,
+      "degraded": false,
+      "note": null,
+      "error": null,
+      "covered": [
+        "ANTELOPUS",
+        "AVONMORE",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": []
+    },
+    {
+      "stage": "engine:breakout",
+      "kind": "engine",
+      "alive": true,
+      "universe": 2189,
+      "degraded": false,
+      "note": null,
+      "error": null,
+      "covered": [
+        "ANTELOPUS",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": [
+        "AVONMORE"
+      ]
+    },
+    {
+      "stage": "engine:smart_money",
+      "kind": "engine",
+      "alive": true,
+      "universe": 1553,
+      "degraded": false,
+      "note": null,
+      "error": null,
+      "covered": [
+        "ANTELOPUS",
+        "INNOVISION",
+        "LINC",
+        "SSWL",
+        "SWIGGY"
+      ],
+      "missing": [
+        "AVONMORE",
+        "J&KBANK",
+        "KSOLVES",
+        "MUTHOOTCAP",
+        "TRANSWORLD"
+      ]
+    },
+    {
+      "stage": "engine:screener membership",
+      "kind": "engine",
+      "alive": true,
+      "universe": 4416,
+      "degraded": false,
+      "note": null,
+      "error": null,
+      "covered": [
+        "ANTELOPUS",
+        "AVONMORE",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": []
+    },
+    {
+      "stage": "input:quant_scores (quality/vol)",
+      "kind": "engine",
+      "alive": true,
+      "universe": 2427,
+      "degraded": false,
+      "note": null,
+      "error": null,
+      "covered": [
+        "ANTELOPUS",
+        "AVONMORE",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": []
+    },
+    {
+      "stage": "input:fundamental_scores",
+      "kind": "engine",
+      "alive": true,
+      "universe": 5113,
+      "degraded": false,
+      "note": null,
+      "error": null,
+      "covered": [
+        "ANTELOPUS",
+        "AVONMORE",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": []
+    },
+    {
+      "stage": "input:realized_vol",
+      "kind": "engine",
+      "alive": true,
+      "universe": 2189,
+      "degraded": false,
+      "note": null,
+      "error": null,
+      "covered": [
+        "ANTELOPUS",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": [
+        "AVONMORE"
+      ]
+    },
+    {
+      "stage": "input:multi_factor (crowding)",
+      "kind": "engine",
+      "alive": true,
+      "universe": 2427,
+      "degraded": false,
+      "note": null,
+      "error": null,
+      "covered": [
+        "ANTELOPUS",
+        "AVONMORE",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": []
+    },
+    {
+      "stage": "input:event_triggers (advisory)",
+      "kind": "engine",
+      "alive": true,
+      "universe": 394,
+      "note": "date=2026-10-23 (NOT 2026-10-26)",
+      "covered": [
+        "J&KBANK",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": [
+        "ANTELOPUS",
+        "AVONMORE",
+        "INNOVISION",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL"
+      ]
+    },
+    {
+      "stage": "risk:track-record advisory",
+      "kind": "engine",
+      "alive": true,
+      "universe": 2112,
+      "verdicts": {
+        "SSWL": true,
+        "LINC": false,
+        "J&KBANK": false,
+        "SWIGGY": false,
+        "ANTELOPUS": true,
+        "KSOLVES": false,
+        "AVONMORE": true,
+        "INNOVISION": true,
+        "MUTHOOTCAP": true,
+        "TRANSWORLD": true
+      }
+    },
+    {
+      "stage": "reward:signal_type_weights",
+      "kind": "sql",
+      "rows": 911,
+      "last": "2026-10-23T21:37:46.627090",
+      "alive": true,
+      "note": null
+    },
+    {
+      "stage": "reward:signal_source_weights",
+      "kind": "sql",
+      "rows": 221,
+      "last": "2026-10-23 21:37:55.353081+00:00",
+      "alive": true,
+      "note": null
+    },
+    {
+      "stage": "outcomes:signal_outcomes (30d)",
+      "kind": "sql",
+      "rows": 275114,
+      "last": "2026-10-22",
+      "alive": true,
+      "note": null
+    },
+    {
+      "stage": "outcomes:signal_excursions tb_label (30d)",
+      "kind": "sql",
+      "rows": 73901,
+      "last": "2026-10-22",
+      "alive": true,
+      "note": null
+    },
+    {
+      "stage": "scoring_engine:stock_scores",
+      "kind": "sql",
+      "universe": 5113,
+      "last": "2026-10-23T15:00:44.562712+00:00",
+      "covered": [
+        "ANTELOPUS",
+        "AVONMORE",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": [],
+      "alive": true,
+      "note": null
+    },
+    {
+      "stage": "features:feature_store (latest date)",
+      "kind": "sql",
+      "universe": 2364,
+      "last": "2026-10-23",
+      "covered": [
+        "ANTELOPUS",
+        "AVONMORE",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": [],
+      "alive": true,
+      "note": null
+    },
+    {
+      "stage": "composite:engine_composite_scores (latest)",
+      "kind": "sql",
+      "universe": 2151,
+      "last": "2026-10-23",
+      "covered": [
+        "ANTELOPUS",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": [
+        "AVONMORE"
+      ],
+      "alive": true,
+      "note": null
+    },
+    {
+      "stage": "signals:unified_signals (7d)",
+      "kind": "sql",
+      "universe": 2378,
+      "last": "2026-10-23 00:00:00+00:00",
+      "covered": [
+        "ANTELOPUS",
+        "AVONMORE",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": [],
+      "alive": true,
+      "note": null
+    },
+    {
+      "stage": "canonical:unified_recommendations",
+      "kind": "sql",
+      "alive": true,
+      "universe": 2354,
+      "last": "2026-10-26",
+      "note": "generated_at=2026-10-23 17:00:02.140005+00:00",
+      "covered": [
+        "ANTELOPUS",
+        "AVONMORE",
+        "INNOVISION",
+        "J&KBANK",
+        "KSOLVES",
+        "LINC",
+        "MUTHOOTCAP",
+        "SSWL",
+        "SWIGGY",
+        "TRANSWORLD"
+      ],
+      "missing": []
+    },
+    {
+      "stage": "canonical:engine coverage per symbol",
+      "kind": "sql",
+      "alive": true,
+      "universe": 2354,
+      "note": "avg=6.09/8 engines, 164 symbol(s) on <=3 (blend renormalizes over those present, so thin rows are NOT comparable)"
+    }
+  ],
+  "calls": {
+    "SSWL": {
+      "classification": "Sell",
+      "conviction": "A_HIGH",
+      "unified_score": 28.95
+    },
+    "LINC": {
+      "classification": "Hold",
+      "conviction": "D_MARGINAL",
+      "unified_score": 36.43
+    },
+    "J&KBANK": {
+      "classification": "Sell",
+      "conviction": "A_HIGH",
+      "unified_score": 21.45
+    },
+    "SWIGGY": {
+      "classification": "Hold",
+      "conviction": "D_MARGINAL",
+      "unified_score": 48.08
+    },
+    "ANTELOPUS": {
+      "classification": "Hold",
+      "conviction": "D_MARGINAL",
+      "unified_score": 56.14
+    },
+    "KSOLVES": {
+      "classification": "Hold",
+      "conviction": "D_MARGINAL",
+      "unified_score": 64.54
+    },
+    "AVONMORE": {
+      "classification": "Hold",
+      "conviction": "D_MARGINAL",
+      "unified_score": 74.23
+    },
+    "INNOVISION": {
+      "classification": "Hold",
+      "conviction": "D_MARGINAL",
+      "unified_score": 42.34
+    },
+    "MUTHOOTCAP": {
+      "classification": "Sell",
+      "conviction": "A_HIGH",
+      "unified_score": 29.09
+    },
+    "TRANSWORLD": {
+      "classification": "Hold",
+      "conviction": "D_MARGINAL",
+      "unified_score": 39.05
+    }
+  },
+  "failures": [],
+  "verdict": "PASS"
+}

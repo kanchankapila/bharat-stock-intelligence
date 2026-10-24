@@ -563,6 +563,18 @@ describe('individual evaluate() functions', () => {
     expect(r.detail).toMatch(/2151/);
   });
 
+  it('fundamental-observation-writer-contract fails on a removed archive trigger', () => {
+    const check = byId('fundamental-observation-writer-contract');
+    expect(check.evaluate({ covered: 3 }, now).status).toBe('fail');
+    expect(check.evaluate({ covered: 4 }, now).status).toBe('pass');
+  });
+
+  it('earnings-revision-shadow-freshness requires a real research consumer snapshot', () => {
+    const check = byId('earnings-revision-shadow-freshness');
+    expect(check.evaluate({}, now).status).toBe('fail');
+    expect(check.evaluate({ last_date: new Date(now).toISOString() }, now).status).toBe('pass');
+  });
+
   it('technical-signals-financial-ratio-delivery passes at the measured healthy-session baseline', () => {
     const r = byId('technical-signals-financial-ratio-delivery').evaluate(
       { total: 2133, fcf_n: 1624, coverage_n: 1589, roce_n: 1589, measured_date: '2026-10-22' }, now,
