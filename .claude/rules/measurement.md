@@ -95,6 +95,76 @@ This section is a dated status board, not a verdict list. A claim carrying an ol
 in this file is not wrong, it is *unrefreshed* — check the date before quoting it, and re-run
 rather than assume. Full narrative for anything here: `docs/measurement-history.md`.
 
+### 2026-10-25 — the five open EVIDENCE items measured (AF-20261021-02/-03/-04/-08/-09); four refuted their own hypothesis
+
+Pre-registered before any variant ran (decision rule, variant list and signs fixed in advance): a variant changes the verdict only
+if rank IC moves **>= +0.010 AND `ic_t_eff` rises AND the RAW top-decile excess does not fall**; a USABLE flip additionally needs
+AUC >= 0.55 with the shuffled control reading no edge. **Baseline gate passed first** — the replay reproduced every recorded h=5
+close-entry IC to 4 decimals (FNO +0.0077, ADT>=50cr +0.0214, ADT>=10cr +0.0258, ADT<10cr +0.0367, ADT>=1cr +0.0330) and V0's
+score is bit-identical to `deep_panel_score.composite_score`. **All 6 variants x 5 tiers read `no edge`; every shuffled control
+reads no edge (max |IC| 0.0026, max AUC 0.5008).**
+
+**AF-20261021-08 — the missing min-groups floor does NOT bias the verdict. Closed, no change.** The group-count distribution the
+row asked for (share of rows scored on N of 5 factor groups): FNO 91.9% on 5 / 7.4% on 4; ADT>=50cr 83.0% / 11.4%;
+ADT>=10cr 80.9% / 12.7%; **ADT<10cr 72.2% / 19.0%** (thin tiers worst hit, as predicted); <=3 groups is 0.5-0.9% everywhere and
+0 groups never occurs. Requiring >= 4 groups (V1) drops 7-8% of rows and moves IC by **at most -0.0008** — ADT<10cr 0.0367 -> 0.0365,
+ADT>=1cr 0.0330 -> 0.0322, FNO 0.0077 -> 0.0072. Every move is NEGATIVE and ~12x below the pre-registered threshold. Adding the floor
+is not wrong, it is simply not load-bearing; it would cost 7-8% of the panel for no measurable change.
+
+**AF-20261021-09 — restoring the excluded columns makes the composite WORSE, refuting the row's own hypothesis. Closed, keep
+`FAKE_ZERO_COLUMNS` as it is.** The row argued the composite "has no trend-strength factor at all (ADX/DI are the only candidates),
+which weakens the no-edge verdict". Measured with `NULLIF(col, 0)` on the warm-up zeros instead of whole-column exclusion, adding a
+`trend` group of di_plus/di_minus (V2) **halves the IC** — ADT>=1cr 0.0330 -> 0.0165, ADT<10cr 0.0367 -> 0.0143, FNO 0.0077 -> 0.0031.
+Adding `adx` back (V3) recovers only part of it (ADT>=1cr 0.0200); adding `atr_pct` to volatility (V4) is neutral (0.0201); V4 plus the
+>=4-group floor (V5) is 0.0201. AUC never exceeds 0.5129 against the 0.55 bar. So the exclusion is not discarding a trend factor the
+composite needs — **trend strength is dilutive here**, and the "no edge" verdict is if anything stronger than recorded.
+
+**AF-20261021-03 — the warm-up zero-fill is confirmed and bounded, and the reader side costs nothing.** Monthly zero-share over
+2021-01..2026-10 (live): the fake zeros are **not spread through history**, they sit in two blocks — 2021-01 (`adx` 100.0%,
+`di_plus` 75.7%, `atr_pct` 65.8%) decaying to <1.5% by 2021-03, and **2025-04..2025-07** (2025-04 ~16%, **2025-05 100.0% on adx,
+atr_pct and di_plus across all 43,839 rows**, 2025-06 adx 100.0% / atr_pct 81.0%, 2025-07 adx 44.0% then back to ~1%). In both blocks
+the companion is also NULL, so `NULLIF`/companion masking catches them. `above_sma200` is a different and still-live shape: 100.0%
+zeros with `sma200` NULL on every row from 2025-05 to 2026-02, recovering only in 2026-03. **The writer-side repair is still owed**
+(this row stays open for it), but V2-V5 settle the reader-side question: keeping these columns via NULLIF does not improve any tier,
+so no reader is being starved of signal by the exclusion.
+
+**AF-20261021-02 — widening `misc.router.ts`'s `signal_type = 'BUY'` filter to include `Bullish` is REFUTED. Do not widen it.**
+Replayed every `unified_signals` row with levels since 2026-08-03 on `stock_ohlcv` using `plan_outcome_report`'s own rules (entry at
+the next session open, first-touch wins, stop wins a bar touching both, net of the platform round-trip cost), with an ATR-geometry
+random control per signal:
+
+| source / type | horizon | n | days | target | stop | net/trade | control net |
+|---|---|---|---|---|---|---|---|
+| `technical` / **Bullish** (the rows widening would admit) | 15s | 54,148 | 54 | 23.4% | **60.8%** | **-1.736%** | -1.769% |
+| `screener` / BUY (already admitted) | 5s | 12,398 | 55 | 22.0% | 59.8% | -1.317% | -1.271% |
+| `AI` / BUY | 15s | 3,486 | 5 | 29.8% | 48.3% | -0.574% | -0.741% |
+| `technical_scan` / BUY | 5s | 501 | 14 | 12.8% | 53.9% | -1.810% | -2.017% |
+
+At ADT >= Rs 10cr the technical Bullish rows are **-1.771%/trade** (n=28,167). Every arm loses, every arm is indistinguishable from
+its own ATR-geometry control, and the Bullish rows are the **worst** of the four — they would stop out 61% of the time. The levels are
+real and parseable (0 of 54,148 missing a target or stop), so the filter is not hiding usable geometry; it is hiding the worst geometry.
+The split stays. Four readers depend on it (`scoring-authority.md`).
+
+**AF-20261021-04 — the queued 256-config sweep is moot: the component the row is about has been a CONSTANT since 2026-08-12.**
+See the new ledger row AF-20261025-01. `intraday_ranker`'s `W_SCREENER = 0.40` — its largest weight — multiplies
+`compute_screener_stock_scores`, which returns **exactly 50.0 for every symbol on every cycle**: live, 1 distinct value across
+2,880 symbols, and `screener_score` is a flat 50.0 on all 2.4M `intraday_recommendations_history` rows and all
+`intraday_recommendations` rows since 2026-08-12 (it varied 0.04-99.97 before that). Root cause proved by calling the real function on
+live membership: the three categories the intraday membership actually carries — `intraday` (9,098 rows), `technical` (1,834),
+`momentum` (1,285) — are **all absent from `CAT_BASE_WT`**, so `weights.get(cat, 0.0)` is 0.0 for every row, every contribution is 0,
+and `_normalize_to_100` maps an all-equal input to 50.0 for everyone. Mapping `intraday` to an existing weighted category restores
+217 distinct values spanning 0.02-99.98. This is `bugs-data-layer.md`'s degenerate-input class: a constant cannot change any ranking,
+so it is invisible to every rank-based diagnostic, but it **does** shift the whole population against `_classify`'s absolute
+Buy/Sell thresholds. Replaying the blend on the two stored components (1,600 cycles, 68 days, entry at the next 15m bar open, exit at
+the session's last close, independent unit = DAY): live (W_S .40 / W_B .20) IC **-0.0275** (t -4.20); **W_SCREENER = 0 — the row's
+queued variant — is WORSE at -0.0320** (t -4.80); the published `intraday_score` (which also carries the reversal component and the
+regime/news tilts) is **+0.0179** (t +2.06), top-decile +0.047%/session gross but **-0.253% net** of a generous 15bps/side. So the
+reversal component carries what little positive sign exists, the screener+breakout pair is negative, and nothing is profitable after
+costs — the emission gate remains the thing protecting the output. **The real measurement cannot be run retrospectively:**
+`trendlyne_screener_stocks`, `moneycontrol_screener_stocks` and `etnow_screener_stocks` have **no date column at all** (current-state
+snapshots), so there is no membership history to replay a repaired screener score against. It needs forward collection after the
+category mapping is fixed.
+
 ### 2026-10-23 - MoneyControl chart-pattern trade plans graded for the first time (`mc_chart_patterns`, AF-20261023-01) - too thin to claim anything
 
 `mc_chart_patterns` is a never-read table that carries a ready-made trade plan per call: `entry_price`, `target_price`,

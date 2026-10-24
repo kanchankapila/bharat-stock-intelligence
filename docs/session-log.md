@@ -11759,3 +11759,16 @@ Phase 0 `.ts` commit live, including the holiday-gate fix below. Everything here
 ## 2026-10-25 — stale-ledger reconciliation
 
 AF-20261007-04, AF-20261017-09 and AF-20261017-12 were still "deploy pending" though bharat-server restarted 2026-10-24 23:43 IST after their last commits. Verified: heartbeat rows (morning-brief 11 runs, pg-backup success 1.7h old), 234 brief/backup vitest tests pass, findings:check OK. Closed the three rows and updated the remediation plan matrix; AF-20261017-06/-07 stay open as calendar-blocked.
+
+## 2026-10-25 — the five open EVIDENCE items measured
+
+AF-20261021-02/-04/-08/-09 measured and closed or answered; AF-20261021-03 reader side settled, writer repair still owed; new row AF-20261025-01.
+
+- Pre-registered the decision rule and variant list before running; baseline replay reproduced all five recorded deep-panel h=5 ICs to 4 dp and was bit-identical to `composite_score`.
+- **AF-20261021-08** (min-groups floor): measured, no change warranted. A >=4-group floor moves IC by at most -0.0008 and costs 7-8% of rows. Group-count distribution recorded.
+- **AF-20261021-09** (FAKE_ZERO_COLUMNS): hypothesis refuted. Restoring the columns via NULLIF HALVES deep-panel IC; trend strength is dilutive, so the no-edge verdict is stronger, not weaker.
+- **AF-20261021-02** (vocabulary split): widening refuted. technical/Bullish levels are the worst of four arms (-1.736%/trade, 60.8% stop rate, n=54,148) and beat no control.
+- **AF-20261021-04** (intraday weights): queued variant refuted (W_SCREENER=0 is worse) and the question is moot.
+- **AF-20261025-01 (new)**: `intraday_ranker` W_SCREENER=0.40 has multiplied a constant 50.0 since 2026-08-12. The categories the membership carries (`intraday`/`technical`/`momentum`) are all absent from CAT_BASE_WT. Root cause proved by calling the real function on live membership. Repair is EVIDENCE-gated and cannot be replayed retrospectively: the three membership tables have no date column.
+
+No source changed this session — measurement and ledger only.
