@@ -554,6 +554,22 @@ describe('individual evaluate() functions', () => {
     expect(r.status).toBe('pass');
   });
 
+  it('technical-signals-financial-ratio-delivery fails when fresh wide rows lost the ratio family', () => {
+    const r = byId('technical-signals-financial-ratio-delivery').evaluate(
+      { total: 2151, fcf_n: 0, coverage_n: 0, roce_n: 0, measured_date: '2026-10-23' }, now,
+    );
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/0\.0%/);
+    expect(r.detail).toMatch(/2151/);
+  });
+
+  it('technical-signals-financial-ratio-delivery passes at the measured healthy-session baseline', () => {
+    const r = byId('technical-signals-financial-ratio-delivery').evaluate(
+      { total: 2133, fcf_n: 1624, coverage_n: 1589, roce_n: 1589, measured_date: '2026-10-22' }, now,
+    );
+    expect(r.status).toBe('pass');
+  });
+
   it('NEGATIVE CONTROL: mc-deals-news-freshness does not false-warn on a Friday row checked over the weekend', () => {
     // MoneyControl Deals only publishes on trading days. Raw daysStale() read a Friday row as
     // stale on the very next Sunday it was checked (>1 raw calendar day) -- live-confirmed

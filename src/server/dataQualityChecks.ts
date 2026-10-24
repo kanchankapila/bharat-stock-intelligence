@@ -1411,6 +1411,40 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'technical-signals-financial-ratio-delivery',
+    label: 'slow-moving financial ratios reach the latest completed technical_signals grid',
+    category: 'signals',
+    critical: false,
+    // AF-20261024-02. The source snapshot can be fresh while the daily wide row silently loses
+    // the whole family: financial_ratios_fetcher updates rows that exist at its weekly run, but
+    // cannot update a technical_signals row created later. ml_ensemble reads these wide columns
+    // and substitutes defaults, so table freshness and non-null model output both stay green.
+    // Healthy 2026-10-22 baseline was 74.5-76.1%; 2026-10-23 collapsed to 0/2,151.
+    sql: `WITH d AS (
+            SELECT MAX(date) AS measured_date FROM technical_signals WHERE date < current_date
+          )
+          SELECT d.measured_date, COUNT(*) AS total,
+                 COUNT(ts.fcf_yield_approx) AS fcf_n,
+                 COUNT(ts.interest_coverage) AS coverage_n,
+                 COUNT(ts.roce) AS roce_n
+          FROM d LEFT JOIN technical_signals ts ON ts.date = d.measured_date
+          GROUP BY d.measured_date`,
+    evaluate: (row) => {
+      const total = Number(row?.total) || 0;
+      if (!row?.measured_date || total === 0) {
+        return { status: 'fail', detail: 'No completed technical_signals day to verify financial-ratio delivery' };
+      }
+      const shares = [row?.fcf_n, row?.coverage_n, row?.roce_n]
+        .map((n) => safeRatio(n, total));
+      const minimum = Math.min(...shares);
+      const detail = `minimum ${(minimum * 100).toFixed(1)}% of ${total} rows on ${String(row.measured_date).slice(0, 10)} ` +
+        `(FCF ${Number(row?.fcf_n) || 0}, interest coverage ${Number(row?.coverage_n) || 0}, ROCE ${Number(row?.roce_n) || 0})`;
+      if (minimum < 0.2) return { status: 'fail', detail };
+      if (minimum < 0.6) return { status: 'warn', detail };
+      return { status: 'pass', detail };
+    },
+  },
+  {
     id: 'technical-signals-range-bounds',
     label: 'technical_signals value-range invariants (RSI 0-100, win-prob 0-1)',
     category: 'signals',

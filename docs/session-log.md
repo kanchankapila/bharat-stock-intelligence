@@ -11663,3 +11663,32 @@ Phase 0 `.ts` commit live, including the holiday-gate fix below. Everything here
   (realised net negative) and its calls are not generated until after the open, so a pre-open brief cannot carry them. Week: the
   existing SWING picks, with a measured net of about zero. Months: nothing is validated, because the earliest candidate inputs begin
   2026-06 and a 63-session horizon needs far more history; any list would be unvalidated and must be labelled so.
+
+## 2026-10-24 - end-to-end stock lifecycle and data-source audit
+
+- **Verdict.** The collection and publication pipeline is operational and broadly fresh, but the recommendations remain an
+  experimental prioritisation system rather than validated profitable predictions. The 10-stock/27-stage lifecycle harness passed;
+  the frozen forward cohort has only 1.4 effective 5-day windows and currently trails the liquid-universe benchmark after 50 bps.
+  The longer retrospective sample is still LOW-DATA, and calibrated win probabilities are materially overconfident.
+- **New delivery defect (AF-20261024-02).** The latest completed `technical_signals` grid has zero delivered FCF yield, interest
+  coverage and ROCE values across 2,151 rows even though `tl_financial_quality` remains populated. Weekly copy-forward ordering
+  allows a later-created daily row to lose the slow feature family, while ML defaults hide the failure. Added the noncritical
+  `technical-signals-financial-ratio-delivery` DQ check; the live DQ run now exposes the condition. The data repair is deliberately
+  EVIDENCE-gated because it changes model inputs and requires a population-boundary replay/retrain.
+- **Temporal regression fixed locally (AF-20261024-01).** `financial_ratios_fetcher.update_technical_signals()` no longer falls
+  back to host `date.today()` for direct/manual calls. It resolves the last completed OHLCV session or fails loudly. The old code
+  failed the weekend negative control; the focused regression and recurring-bug scanner pass. Not deployed from this shared dirty
+  worktree.
+- **Unused-data research path (AF-20261024-04).** Fresh forecast, estimate-hit/miss, target-history, Trendlyne-metric and screener
+  snapshot datasets are collected but do not contribute to canonical scoring. Highest-value next experiment is immutable
+  observed-at estimate revisions and standardized earnings surprise; raw target upside and screener vote counts should not be
+  promoted. `mc_earnings_forecast` currently overwrites revisions under `(symbol,date,metric_type)`.
+- **Reliability follow-up (AF-20261024-03).** The cold `getModelRocDiagnostics` path exceeded the 15-second critical smoke budget
+  once under audit load; its plan scans roughly 214k technical rows and joins about 142k outcomes. It needs isolated measurement and
+  query/persisted-snapshot comparison, not a larger timeout by assumption.
+- **Artifacts and gates.** Detailed evidence and priorities are in `docs/stock-lifecycle-audit-2026-10-24.md`; raw lifecycle
+  evidence is in `audit_e2e_2026-10-24.json`. TypeScript type-check, production build, schema drift (262/262), findings ledger,
+  diff check, recurring-bug scan, full Vitest (2,099 passed / 46 skipped), and the post-change full Python gate (3,864 passed /
+  269 skipped) passed. The critical smoke rerun passed 10/10 after the earlier ROC timeout; because the persistent server cache had
+  been warmed, AF-20261024-03 remains open for a measured cold-process run. No ranker weight, threshold, model artifact or
+  classification changed; unrelated working-tree edits were preserved.

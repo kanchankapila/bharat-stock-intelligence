@@ -593,6 +593,47 @@ class TestAsOfFloor:
         assert floors["fcf_basis"] == "2026-10-11"
         assert floors["fcf_ttm_as_of"] == "2026-10-11"
 
+    def test_missing_today_uses_last_completed_trading_session(self, monkeypatch):
+        """Direct/manual callers must not anchor quarterly fields to a weekend calendar date."""
+        executed = {}
+
+        class Cursor:
+            def execute(self, sql, params):
+                executed["params"] = params
+
+        class Connection:
+            def cursor(self):
+                return Cursor()
+
+            def commit(self):
+                pass
+
+        con = Connection()
+        monkeypatch.setattr(frf, "logical_write_floor", lambda got_con, fallback=None: (
+            "2026-10-23" if got_con is con else pytest.fail("wrong connection")
+        ))
+        monkeypatch.setattr(frf, "as_of_floor", lambda *_args, **_kwargs: "2026-05-30")
+
+        frf.update_technical_signals(
+            "TEST",
+            {
+                "year_ending": "2026-03-31",
+                "fcf_yield_approx": 4.2,
+                "fcf_positive": 1,
+                "fcf_basis": "capex",
+                "fcf_ttm_as_of": "2026-06-30",
+            },
+            con,
+        )
+
+        columns = ["fcf_yield_approx", "interest_coverage", "fcf_positive",
+                   "debt_coverage_risk", "fcf_basis", "fcf_ttm_as_of"] + frf._HARVEST_COLUMNS
+        floors = dict(zip(columns, executed["params"][0:-1:2]))
+        assert floors["fcf_yield_approx"] == "2026-10-23"
+        assert floors["fcf_positive"] == "2026-10-23"
+        assert floors["fcf_basis"] == "2026-10-23"
+        assert floors["fcf_ttm_as_of"] == "2026-10-23"
+
 class TestParseCashflowSeries:
 
     """Pins the 2026-09-01 full-series harvest: the last=6 CashFlow payload was already being

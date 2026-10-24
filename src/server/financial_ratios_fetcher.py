@@ -585,8 +585,10 @@ def update_technical_signals(symbol: str, features: dict, con, today: str | None
     # The capex-based FCF fields are different: they are assembled from the latest quarterly
     # payload during this fetch, so their first defensible availability date is `today`. Applying
     # those values at the annual floor would leak later quarters into historical model features.
-    annual_floor = as_of_floor(features.get("year_ending"), fallback=today)
-    fcf_floor = today or date.today().isoformat()
+    fcf_floor = today or logical_write_floor(con)
+    if not fcf_floor:
+        raise RuntimeError("Cannot date financial-ratio features: stock_ohlcv has no completed session")
+    annual_floor = as_of_floor(features.get("year_ending"), fallback=fcf_floor)
     quarterly_fcf_columns = {
         "fcf_yield_approx", "fcf_positive", "fcf_basis", "fcf_ttm_as_of",
     }
