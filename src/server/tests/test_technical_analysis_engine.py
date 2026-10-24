@@ -120,3 +120,71 @@ def test_last_updated_and_signal_date_are_not_naive_local_time():
     assert "datetime.datetime.now().date().isoformat()" not in src
     assert "datetime.datetime.now(datetime.timezone.utc)" in src
     assert "logical_write_floor" in src
+
+
+# ── B2: Zero-price guard (AF-20261008-06, technical_analysis_engine gate) ──────────────
+# analyze_stock returns None when the latest close is 0 or negative, preventing zero-price
+# rows from entering unified_signals. Without this guard, entry/target/stop all compute as
+# 0.0 and pass downstream until long_geometry_rr rejects them (late, in the ranker).
+# This test FAILS if the guard on line 128 is removed, proving it blocks zero-price signals
+# at the source where they are safest to reject.
+
+def test_zero_price_blocks_signal_generation():
+    """Negative-control: signal generation skips zero-price stocks (AF-20261008-06 B2)."""
+    # Import here to avoid DB connection at module load
+    from technical_analysis_engine import TechnicalAnalysisEngine
+    import pandas as pd
+
+    # Create a mock engine with a zero-price fixture
+    engine = TechnicalAnalysisEngine()
+
+    # Mock load_ohlcv to return valid data EXCEPT the latest close is 0
+    # This tests the guard path: df not empty, >= 50 rows, but close <= 0
+    valid_close = 100.0
+    zero_close = 0.0
+    negative_close = -5.0
+
+    # Test 1: valid close → analyze_stock returns a dict
+    import unittest.mock as mock
+    with mock.patch.object(engine, 'load_ohlcv') as mock_load:
+        # 50+ bars, all columns needed, latest close is valid
+        dates = pd.date_range('2026-08-01', periods=51)
+        mock_load.return_value = pd.DataFrame({
+            'date': dates,
+            'close': [valid_close] * 50 + [valid_close],
+            'high': [valid_close * 1.01] * 51,
+            'low': [valid_close * 0.99] * 51,
+            'open': [valid_close] * 51,
+            'volume': [1000000] * 51,
+        })
+        result = engine.analyze_stock('VALIDSTOCK')
+        assert result is not None, "Valid close should produce a signal"
+        assert result['trend'] in ['Bullish', 'Bearish', 'Neutral']
+
+    # Test 2: zero close → guard rejects it (NEGATIVE CONTROL)
+    with mock.patch.object(engine, 'load_ohlcv') as mock_load:
+        dates = pd.date_range('2026-08-01', periods=51)
+        mock_load.return_value = pd.DataFrame({
+            'date': dates,
+            'close': [valid_close] * 50 + [zero_close],
+            'high': [valid_close * 1.01] * 50 + [0.01],
+            'low': [valid_close * 0.99] * 50 + [0.0],
+            'open': [valid_close] * 50 + [0.0],
+            'volume': [1000000] * 51,
+        })
+        result = engine.analyze_stock('ZEROSTOCK')
+        assert result is None, "Zero close must be rejected by guard (AF-20261001-12)"
+
+    # Test 3: negative close → guard rejects it
+    with mock.patch.object(engine, 'load_ohlcv') as mock_load:
+        dates = pd.date_range('2026-08-01', periods=51)
+        mock_load.return_value = pd.DataFrame({
+            'date': dates,
+            'close': [valid_close] * 50 + [negative_close],
+            'high': [valid_close * 1.01] * 50 + [0.0],
+            'low': [valid_close * 0.99] * 50 + [negative_close],
+            'open': [valid_close] * 50 + [negative_close],
+            'volume': [1000000] * 51,
+        })
+        result = engine.analyze_stock('NEGSTOCK')
+        assert result is None, "Negative close must be rejected by guard"
