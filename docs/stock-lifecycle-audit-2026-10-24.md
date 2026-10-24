@@ -326,4 +326,5 @@ ROC SQL is much faster and exactly equivalent, but one cold-start smoke still ti
 host load despite subsequent sub-second/one-second cache-miss calls. AF-20261024-03 stays open
 for tail-latency validation. A separate redundant heartbeat ALTER blocked monitoring behind the
 nightly backup; the matched waiting DDL was cancelled without stopping the backup, and a catalog-
-first/bounded-bootstrap repair is being verified (AF-20261024-07).
+first/bounded-bootstrap repair was deployed and verified as 447b0343 (AF-20261024-07). The backup
+completed successfully. See the remediation plan for unresolved engineering and evidence work.

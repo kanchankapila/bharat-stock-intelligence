@@ -11747,3 +11747,11 @@ Phase 0 `.ts` commit live, including the holiday-gate fix below. Everything here
   Updated AF-20261021-03/report with dates and exact replay. This needs separate read/write windows, validity masks,
   bounded rebuild and retrain evidence. No feature-store history or scoring formula changed. Existing dated memory
   was corrected so a later session does not repeat the now-completed dependency repair.
+- **Final deployment check (447b0343).** bharat-server uptime 2026-10-24T18:13:05.404Z postdates the heartbeat-fix
+  commit; HTTP health succeeds and production has zero waiting heartbeat ALTERs. PM2 saved. Final full repo-doctor
+  reports 38 PASS / 4 WARN / 0 FAIL, including clean type-check/build and no new log errors. Schema drift 263/263,
+  doc numbers and findings validation pass. Graph updated. Session log, existing memory and findings were updated;
+  no new recurring-bug rule was invented because redundant-DDL lock contention and missing-input sentinels are
+  already documented classes, now guarded at the newly found actual entry points. Whole-program completion is not
+  claimed: the plan retains model/feature replay, coherent split repair, remaining ledger reconciliation, host-load
+  ROC validation, credentials, off-host recovery and calendar-bound research.

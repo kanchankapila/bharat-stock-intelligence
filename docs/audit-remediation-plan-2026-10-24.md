@@ -149,7 +149,7 @@ Snapshot: 116 candidate rows from 706 unique ledger IDs. This conservative inven
 
 New findings after the original 116-row snapshot: AF-20261024-05 (history erasure, closed),
 AF-20261024-06 (profile provenance deployed; provider credential missing), and AF-20261024-07
-(heartbeat DDL/backup contention, final verification/deployment in progress). They remain in the ledger.
+(heartbeat DDL/backup contention, closed after deployment 447b0343). They remain in the ledger.
 
 - Source-derived `ponytail:`, TODO and FIXME inventory: rerun after source changes; functional debt is folded into the ledger, cosmetic/history comments are recorded as such.
 - Plan documents: inspect active `docs/superpowers/plans/`, trader-analyst plans and master build prompt; superseded intent does not authorize resurrecting retired systems.
@@ -167,7 +167,7 @@ AF-20261024-06 (profile provenance deployed; provider credential missing), and A
 - Shared 75-minute ranker budget replaces divergent scheduled/API literals, with AST guard and a failing old-code negative control.
 - Profile provenance added to both active detail panels. Credential remains absent; user asked to configure it in the environment. No fake successful refresh.
 - Reconciled sustained Trendlyne midweek/crawl recovery, seven verified single-launch backup nights, and latest-universe alias exclusion. SHINDL is a real exchange listing and was not removed.
-- Full source gates passed: Python 3,878 passed / 269 skipped; TypeScript 2,107 passed / 46 skipped; type-check/build/schema 263/263/findings/recurring scan pass. Dependency repair and deployment verification are in progress.
+- Full source gates passed: Python 3,878 passed / 269 skipped; final TypeScript 2,111 passed / 46 skipped; type-check/build/schema 263/263/findings/recurring scan pass. Dependency repair and deployment verified; post-repair Python subset 65 passed. Repo-doctor full: 38 PASS / 4 WARN / 0 FAIL. Commits 8a3bb6f2 and 447b0343 are deployed to their affected services.
 
 ## Outstanding work, not waived by these repairs
 
@@ -176,4 +176,4 @@ AF-20261024-06 (profile provenance deployed; provider credential missing), and A
 - Probability/model research: use target- and horizon-matched calibration and date-level evidence. Keep currently ineffective ML contribution excluded. New history cannot retrospectively create PIT consensus or mature forward outcomes.
 - External inputs: configure a profile-provider credential and select/configure off-host backup destination. Never put secrets in this plan or chat. Local dump verification is not a completed restore rehearsal.
 - The coverage matrix is a work queue, not 116 completed fixes. Remaining consumer-side classification contracts, warm-up zeros, source probes, endpoint age, host availability, older textual closures and independent replay experiments must each be reconciled before claiming whole-program completion.
-- Newly found heartbeat DDL/backup contention (AF-20261024-07) is being fixed and deployed; cancelling only the matched redundant ALTER released monitoring writes without disturbing pg_dump. Full live DQ completed 208 PASS / 5 WARN / 0 critical failures. New-feature delivery/archive/shadow checks all pass.
+- Heartbeat DDL/backup contention (AF-20261024-07) is fixed and deployed; cancelling only the matched redundant ALTER released monitoring writes without disturbing pg_dump. The nightly backup completed and verified at 23:37:51 IST. Full live DQ completed 208 PASS / 5 WARN / 0 critical failures. New-feature delivery/archive/shadow checks all pass. No claim of zero remaining defects or validated trading profitability is made.
