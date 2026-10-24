@@ -28,7 +28,7 @@ Snapshot: 116 candidate rows from 706 unique ledger IDs. This conservative inven
 
 | Finding | Area | Recorded lane | Remediation state |
 |---|---|---|---|
-| AF-20260816-12 | data | INVESTIGATE | Pending code/live reconciliation |
+| AF-20260816-12 | data | INVESTIGATE | Closed: four latest regular midweek runs succeeded. |
 | AF-20260816-14 | deploy | FIX | Pending code/live reconciliation |
 | AF-20260817-24 | monitoring | EVIDENCE | Pending code/live reconciliation |
 | AF-20260823-71 | coverage | EVIDENCE | Pending code/live reconciliation |
@@ -69,7 +69,7 @@ Snapshot: 116 candidate rows from 706 unique ledger IDs. This conservative inven
 | AF-20260918-06 | job-reliability | INVESTIGATE | Pending code/live reconciliation |
 | AF-20260924-01 | job-reliability | FIX | Pending code/live reconciliation |
 | AF-20260924-02 | data-integrity | FIX | Pending code/live reconciliation |
-| AF-20260925-01 | environment | DEPENDS (maintenance window) | Pending code/live reconciliation |
+| AF-20260925-01 | environment | DEPENDS (maintenance window) | Closed: authorized stop-window repair, clean pip constraints, exact wheel hashes and live model/service checks. |
 | AF-20260925-03 | tech-debt | FIX | Pending code/live reconciliation |
 | AF-20260925-05 | silent-failure | FIX | Pending code/live reconciliation |
 | AF-20260926-05 | claude-setup | FIX | Pending code/live reconciliation |
@@ -78,13 +78,13 @@ Snapshot: 116 candidate rows from 706 unique ledger IDs. This conservative inven
 | AF-20260927-04 | correctness | FIX | Pending code/live reconciliation |
 | AF-20260927-05 | tech-debt | FIX | Pending code/live reconciliation |
 | AF-20260927-06 | test-infra | FIX | Pending code/live reconciliation |
-| AF-20260927-07 | reliability | FIX | Pending code/live reconciliation |
+| AF-20260927-07 | reliability | FIX | Shared-budget recurrence fixed and deployed; all actual invocations guarded by AST test. |
 | AF-20260927-08 | evidence | EVIDENCE | Pending code/live reconciliation |
 | AF-20260927-09 | reliability | INVESTIGATE | Pending code/live reconciliation |
 | AF-20260927-10 | architecture | INVESTIGATE | Pending code/live reconciliation |
 | AF-20260927-11 | hygiene | FIX | Pending code/live reconciliation |
 | AF-20260927-12 | job-reliability | FIX | Pending code/live reconciliation |
-| AF-20260927-15 | environment | FIX (declaration) Â· DEPENDS (repair) | Pending code/live reconciliation |
+| AF-20260927-15 | environment | FIX (declaration) Â· DEPENDS (repair) | Closed: binary/metadata tree repaired, legacy extra file quarantined recoverably. |
 | AF-20260927-18 | ml-model | EVIDENCE | Pending code/live reconciliation |
 | AF-20260927-19 | measurement | EVIDENCE | Pending code/live reconciliation |
 | AF-20260927-20 | job-reliability | FIX | Pending code/live reconciliation |
@@ -95,7 +95,7 @@ Snapshot: 116 candidate rows from 706 unique ledger IDs. This conservative inven
 | AF-20260929-10 | scoring-authority | FIX â€” the premise was WRONG and the finding is withdrawn as filed. The data exists: `nse_stocks.sector` in `bharat_intel` is 2,366 rows, 100% populated, 14 sectors, and `src/server/backfill_sectors.py` already maintains it. The three "routes" below were all unnecessary. I filed this after checking `nse_constituents`, `stock_master.sector` and `stocklist.ts` and stopping â€” the `information_schema` sweep across every table carrying a `sector` column would have found it immediately. This is precisely the lane CLAUDE.md says not to enter until self-determination is exhausted, and it is now `data-sources.md`'s RULE ZERO. | Pending code/live reconciliation |
 | AF-20260930-03 | ledger-integrity | FIX | Pending code/live reconciliation |
 | AF-20260930-14 | data-freshness | FIX | Pending code/live reconciliation |
-| AF-20260930-16 | identifiers | â€” | Pending code/live reconciliation |
+| AF-20260930-16 | identifiers | â€” | Closed: 12 aliases absent from latest ranking; SHINDL independently verified as real NSE listing. |
 | AF-20260930-26 | host-memory | INVESTIGATE | Pending code/live reconciliation |
 | AF-20261001-48 | measurement | DEPENDS | Pending code/live reconciliation |
 | AF-20261001-49 | measurement | Calendar-blocked | Pending code/live reconciliation |
@@ -119,7 +119,7 @@ Snapshot: 116 candidate rows from 706 unique ledger IDs. This conservative inven
 | AF-20261008-39 | macro-series | EVIDENCE | Pending code/live reconciliation |
 | AF-20261008-42 | preregistered-shadow-arm | EVIDENCE | Pending code/live reconciliation |
 | AF-20261013-07 | model-calibration / no-edge | EVIDENCE | Pending code/live reconciliation |
-| AF-20261016-01 | backup / duplicate-launch | FIX | Pending code/live reconciliation |
+| AF-20261016-01 | backup / duplicate-launch | FIX | Closed: seven verified single-launch backup nights; off-host restore remains separate. |
 | AF-20261017-03 | digest-recommendation / forward-edge | EVIDENCE | Pending code/live reconciliation |
 | AF-20261017-06 | recurring-bugs-runtime | FIX | Pending code/live reconciliation |
 | AF-20261017-07 | trendlyne-daily-fetch | FIX | Pending code/live reconciliation |
@@ -127,12 +127,12 @@ Snapshot: 116 candidate rows from 706 unique ledger IDs. This conservative inven
 | AF-20261017-09 | digest-delivery / closed-session catch-up | FIX | Pending code/live reconciliation |
 | AF-20261017-11 | disaster-recovery / correlated-storage-risk | INVESTIGATE | Pending code/live reconciliation |
 | AF-20261017-12 | monitoring-honesty / backup-recency | FIX | Pending code/live reconciliation |
-| AF-20261019-01 | name-capture / starved-crawl | FIX | Pending code/live reconciliation |
+| AF-20261019-01 | name-capture / starved-crawl | FIX | Closed: 2,234 symbols fetched since repair, above >55 recovery criterion. |
 | AF-20261019-02 | data-coverage / unconsumed-data | INVESTIGATE | Pending code/live reconciliation |
 | AF-20261019-03 | provider-credential / job-red | INVESTIGATE | Pending code/live reconciliation |
 | AF-20261021-01 | consumer-contract / label-semantics | INVESTIGATE | Pending code/live reconciliation |
 | AF-20261021-02 | consumer-contract / vocabulary-split | EVIDENCE | Pending code/live reconciliation |
-| AF-20261021-03 | data-integrity / warm-up-zero-fill | EVIDENCE | Pending code/live reconciliation |
+| AF-20261021-03 | data-integrity / warm-up-zero-fill | EVIDENCE | Root mechanism reproduced on actual RELIANCE OHLCV: backfills persist the truncated read window's warm-up over valid history. Separate load/write windows + validity masks + paired rebuild/retrain required (EVIDENCE). |
 | AF-20261021-04 | blend-weights / measurement-mismatch | EVIDENCE | Pending code/live reconciliation |
 | AF-20261021-05 | monitoring-noise / threshold-calibration | INVESTIGATE | Pending code/live reconciliation |
 | AF-20261021-07 | repo-hygiene / stale-worktrees | ACCEPT | Pending code/live reconciliation |
@@ -140,12 +140,16 @@ Snapshot: 116 candidate rows from 706 unique ledger IDs. This conservative inven
 | AF-20261021-09 | measurement-bias / over-broad-exclusion | EVIDENCE | Pending code/live reconciliation |
 | AF-20261022-02 | presentation / explanation-honesty | INVESTIGATE | Pending code/live reconciliation |
 | AF-20261023-01 | data-usefulness / removal-decision | INVESTIGATE | Pending code/live reconciliation |
-| AF-20261024-01 | temporal-correctness / write-anchor | FIX | Pending code/live reconciliation |
-| AF-20261024-02 | model-input-delivery / wide-row-ordering | EVIDENCE | Pending code/live reconciliation |
-| AF-20261024-03 | API-performance / diagnostics | INVESTIGATE | Pending code/live reconciliation |
-| AF-20261024-04 | unconsumed-data / alpha-research | EVIDENCE | Pending code/live reconciliation |
+| AF-20261024-01 | temporal-correctness / write-anchor | FIX | Closed: weekend default anchor and 86 preserved historical rows verified against real writer in rolled-back control. |
+| AF-20261024-02 | model-input-delivery / wide-row-ordering | EVIDENCE | Input delivery repaired/applied/deployed; promotion remains EVIDENCE-gated, predictions not rescored. |
+| AF-20261024-03 | API-performance / diagnostics | INVESTIGATE | SQL/query and UI repairs deployed; exact buckets and sub-second fresh API proved, but one startup-load timeout keeps tail-latency validation open. |
+| AF-20261024-04 | unconsumed-data / alpha-research | EVIDENCE | Immutable archive and RESEARCH_ONLY consumer live; accumulation and prospective alpha tests still required. |
 
 ## Additional backlog coverage
+
+New findings after the original 116-row snapshot: AF-20261024-05 (history erasure, closed),
+AF-20261024-06 (profile provenance deployed; provider credential missing), and AF-20261024-07
+(heartbeat DDL/backup contention, final verification/deployment in progress). They remain in the ledger.
 
 - Source-derived `ponytail:`, TODO and FIXME inventory: rerun after source changes; functional debt is folded into the ledger, cosmetic/history comments are recorded as such.
 - Plan documents: inspect active `docs/superpowers/plans/`, trader-analyst plans and master build prompt; superseded intent does not authorize resurrecting retired systems.
@@ -168,7 +172,8 @@ Snapshot: 116 candidate rows from 706 unique ledger IDs. This conservative inven
 ## Outstanding work, not waived by these repairs
 
 - Corporate actions: BANSALWIRE 5:1 and JSWDULUX 10:1 are corroborated by declarations and actual prices. Repair must normalize decision-time plan prices and replay affected features/outcomes together; a price-only backfill would mix bases and is not applied.
-- Environment: complete the service-stop repair of mixed-state websockets, incompatible protobuf and declared transformers version, then verify wheel hashes, pip constraints, active model loading and all service endpoints.
+- Environment repair completed: websockets 15.0.1 / protobuf 6.33.6 / transformers 5.10.1; exact freeze diff, 51/51 wheel code hashes, clean pip check and active model load verified. All five services restarted after code commit; chatbot readiness is independently blocked by missing provider credential. Post-repair Python subset passed 65 tests.
 - Probability/model research: use target- and horizon-matched calibration and date-level evidence. Keep currently ineffective ML contribution excluded. New history cannot retrospectively create PIT consensus or mature forward outcomes.
 - External inputs: configure a profile-provider credential and select/configure off-host backup destination. Never put secrets in this plan or chat. Local dump verification is not a completed restore rehearsal.
 - The coverage matrix is a work queue, not 116 completed fixes. Remaining consumer-side classification contracts, warm-up zeros, source probes, endpoint age, host availability, older textual closures and independent replay experiments must each be reconciled before claiming whole-program completion.
+- Newly found heartbeat DDL/backup contention (AF-20261024-07) is being fixed and deployed; cancelling only the matched redundant ALTER released monitoring writes without disturbing pg_dump. Full live DQ completed 208 PASS / 5 WARN / 0 critical failures. New-feature delivery/archive/shadow checks all pass.

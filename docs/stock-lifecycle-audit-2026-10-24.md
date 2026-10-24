@@ -297,3 +297,33 @@ where timestamp, economic meaning and evaluation protocol are clear.
   the measured 74.5–76.1% healthy-session coverage, not an assumed 100% ideal.
 
 No weights, thresholds, model artifacts or classifications were changed.
+
+## Remediation follow-up — 2026-10-24
+
+See `audit-remediation-plan-2026-10-24.md` and the findings ledger for deployment and remaining gates.
+Financial delivery was bounded, replayed and applied; immutable observations were installed with true
+installation-time baselines; a research-only estimate consumer now accumulates prospective history.
+These changes do not establish a profitable prediction model.
+
+The historical warm-up defect (AF-20261021-03) is now reproduced from actual RELIANCE OHLCV, not
+inferred from column coverage. The real feature function produces:
+
+| Session | Full-history ADX / ATR / above-SMA200 | Read window starting 2025-04-28 |
+|---|---|---|
+| 2025-05-02 | 26.8288 / 32.4455 / 1 | 0 / 0 / 0 |
+| 2025-05-09 | 30.2453 / 29.7012 / 1 | 0 / 0 / 0 |
+| 2025-06-02 | 24.0507 / 24.8733 / 1 | 0 / 25.4066 / 0 |
+
+Underlying prices are healthy. The stored April25 row was computed September13 and is valid;
+April28 was computed September14 and is zero, matching the 504-calendar-day read cutoff. Both
+serial and worker full-backfill paths persist their own warm-up region over older observations.
+The repair must separate the preceding-bar read/warm-up window from the write window, preserve
+per-feature missingness, rebuild bounded history and compare retrained candidates before promotion.
+No feature-store overwrite was made during this diagnostic. DL training already derives binary
+labels from non-NULL raw returns; its legacy direction columns are not its active target.
+
+ROC SQL is much faster and exactly equivalent, but one cold-start smoke still timed out under
+host load despite subsequent sub-second/one-second cache-miss calls. AF-20261024-03 stays open
+for tail-latency validation. A separate redundant heartbeat ALTER blocked monitoring behind the
+nightly backup; the matched waiting DDL was cancelled without stopping the backup, and a catalog-
+first/bounded-bootstrap repair is being verified (AF-20261024-07).

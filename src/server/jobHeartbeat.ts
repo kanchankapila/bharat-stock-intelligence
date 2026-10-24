@@ -8,17 +8,16 @@
  *
  * Timestamps are stored as epoch-ms integers to avoid SQLite/JS timezone parsing pitfalls.
  */
-import { dbAll, dbRun, dbExec } from './dbAsync';
+import { dbAll, dbRun, dbTransaction } from './dbAsync';
 import { CronExpressionParser } from 'cron-parser';
 import { JOB_REGISTRY, HOLIDAY_ACTIVE_JOB_NAMES } from './jobRegistry';
 import { MONITOR_SCRIPTS } from './monitorScripts';
 import { DATA_QUALITY_CHECKS, tradingDaysStale } from './dataQualityChecks';
 import { isTradingHolidayToday } from './marketStatusService';
 
-// This module is the sole creator of job_heartbeat on both engines (it is not in db.ts
-// nor the generated PG schema). The CREATE runs once, memoized, and every public fn
-// awaits it before its first query — so there is no create-vs-query race now that the
-// data layer is async.
+// Bootstrap remains available for an empty/legacy schema. A current schema needs only a
+// catalog read: even a redundant ALTER waits for an exclusive lock behind pg_dump and
+// then blocks ordinary heartbeat writes queued behind it (AF-20261024-07).
 // last_run_at / last_success_at / last_alert_sent_at hold epoch-ms (~1.7e12) which
 // overflows Postgres' 32-bit INTEGER — use BIGINT (SQLite treats BIGINT as 64-bit
 // INTEGER affinity, so the same DDL is correct on both engines).
@@ -36,13 +35,23 @@ const HEARTBEAT_DDL = `CREATE TABLE IF NOT EXISTS job_heartbeat (
 let _tableReady: Promise<void> | null = null;
 function ensureTable(): Promise<void> {
   if (!_tableReady) {
-    _tableReady = dbExec(HEARTBEAT_DDL)
-      .catch(() => { /* already exists / DB not ready */ })
-      // Self-heal a pre-existing job_heartbeat table (created before last_alert_sent_at
-      // existed) — CREATE TABLE IF NOT EXISTS above is a no-op in that case, so add the
-      // column here and swallow "duplicate column" the same way as "already exists".
-      .then(() => dbExec('ALTER TABLE job_heartbeat ADD COLUMN last_alert_sent_at BIGINT'))
-      .catch(() => { /* column already exists */ });
+    _tableReady = (async () => {
+      const columns = await dbAll<{ column_name: string }>(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'job_heartbeat'
+      `);
+      if (columns.some(c => c.column_name === 'last_alert_sent_at')) return;
+      await dbTransaction(async tx => {
+        await tx.run("SET LOCAL lock_timeout = '2s'");
+        await tx.run("SET LOCAL statement_timeout = '5s'");
+        if (columns.length === 0) await tx.run(HEARTBEAT_DDL);
+        else await tx.run('ALTER TABLE job_heartbeat ADD COLUMN IF NOT EXISTS last_alert_sent_at BIGINT');
+      });
+    })().catch(error => {
+      // Failed readiness must be retried, not memoized as a successful repair.
+      _tableReady = null;
+      throw error;
+    });
   }
   return _tableReady;
 }

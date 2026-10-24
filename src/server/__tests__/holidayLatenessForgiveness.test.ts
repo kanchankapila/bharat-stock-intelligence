@@ -31,7 +31,8 @@ let mockScanRows: any[] = [];         // technical_signals rows (gap-band probe)
 const mockIsTradingHolidayToday = vi.fn(async () => false);
 vi.mock('../dbAsync', () => ({
   dbAll: vi.fn(async (sql: string) =>
-    sql.includes('stock_ohlcv') ? mockSessionRows
+    sql.includes('information_schema.columns') ? [{ column_name: 'last_alert_sent_at' }]
+      : sql.includes('stock_ohlcv') ? mockSessionRows
       : sql.includes('technical_signals') ? mockScanRows
         : mockHeartbeatRows),
   dbRun: vi.fn(async () => {}),

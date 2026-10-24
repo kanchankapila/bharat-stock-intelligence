@@ -11,7 +11,8 @@ import {
 
 const mockDbAll = vi.fn();
 vi.mock('../dbAsync', () => ({
-  dbAll: (sql: string, params?: unknown[]) => mockDbAll(sql, params),
+  dbAll: (sql: string, params?: unknown[]) => sql.includes('information_schema.columns')
+    ? Promise.resolve([{ column_name: 'last_alert_sent_at' }]) : mockDbAll(sql, params),
   dbRun: vi.fn(async () => ({ changes: 0, lastInsertRowid: 0 })),
   dbExec: vi.fn(async () => {}),
 }));

@@ -48,6 +48,11 @@ vi.mock('../dbAsync', () => ({
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 
+// Resolve the job graph before installing fake clocks. A cold module load can outlive
+// the first case under backup I/O; its still-running import then crosses into the next
+// case after timers/mocks reset. The gate assertions below still call the real processor.
+await import('../jobs/digests.jobs');
+
 describe('morning-brief gate accepts both legitimate ranking inputs', () => {
   beforeEach(() => {
     vi.useFakeTimers();

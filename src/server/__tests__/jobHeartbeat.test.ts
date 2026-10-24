@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockRows: any[] = [];
 vi.mock('../dbAsync', () => ({
-  dbAll: vi.fn(async () => mockRows),
+  dbAll: vi.fn(async (sql: string) => sql.includes('information_schema.columns')
+    ? [{ column_name: 'last_alert_sent_at' }] : mockRows),
   dbRun: vi.fn(async () => {}),
   dbExec: vi.fn(async () => {}),
 }));

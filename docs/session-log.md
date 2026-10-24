@@ -11720,3 +11720,30 @@ Phase 0 `.ts` commit live, including the holiday-gate fix below. Everything here
   basis replay, not a price-only adjustment; off-host backup needs a destination; independent research cohorts need
   real observations. Environment repair and process deployment are being verified separately below. Unrelated
   worktree changes were preserved. Existing recurring-bug classes cover these failures; new executable guards added.
+
+- **Applied/deployed follow-up (8a3bb6f2).** Production venv repaired in a controlled stop window: websockets 15.0.1,
+  protobuf 6.33.6, transformers 5.10.1. pip freeze changed exactly those packages; all 51 wheel code hashes match and
+  pip check is clean. A legacy non-wheel proxy.py was quarantined recoverably in the runtime-repair backup. Active
+  ensemble.pkl loads, server/ML/AlphaQuant/worker health pass, all five PM2 uptimes postdate the commit, PM2 saved.
+  Chatbot starts and builds its graph but honestly returns 503 because the LLM credential is missing. Post-repair
+  Python subset: 65 passed. No provider success fabricated; credential/destination questions remain unanswered.
+- **ROC caveat retained.** Fresh router/API misses measured 0.55–1.08s, but a cold-start smoke under simultaneous
+  service imports still exceeded 15s, and a later cache-miss under graph/test load took 11.46s. Subsequent smoke
+  passed 10/10. Exact query equivalence is proved; host-load tail latency is NOT closed (AF-20261024-03).
+- **New backup/monitoring contention (AF-20261024-07).** Runtime schema initialization unconditionally queued an
+  exclusive ALTER on an existing heartbeat column behind pg_dump, blocking subsequent heartbeat writes >200s.
+  Cancelled only the verified waiting application PID/query, not the backup. Catalog-first schema readiness now
+  avoids DDL entirely for current schemas; genuine bootstrap has transaction-local 2s lock/5s statement limits and
+  retries readiness after failure. Old-code controls fail; four new controls pass. A current-schema read took 71ms
+  after backup. Final full TS gate: 2,111 passed / 46 skipped, type-check clean. Two caller mocks now expose actual
+  catalog state; the morning-brief harness loads its real subject before fake clocks to prevent cold imports crossing
+  case teardown. Initial full-gate failures and backup-I/O timeouts were not silently rounded up to a pass.
+- **Backup continued successfully.** 2026-10-24 scheduled dump verified at 23:37:51 IST, 6,014,597,644 bytes; success
+  heartbeat persisted. Live DQ finished 208/213 PASS, five WARN, zero critical failures. Financial delivery, immutable
+  archive writer contract and research snapshot checks all pass. Off-host recovery and restore rehearsal remain open.
+- **Warm-up mechanism reproduced, not repaired blindly.** Actual RELIANCE full-history features on 2025-05-02 give
+  ADX 26.8288 / ATR 32.4455 / above-SMA200 1; the real function fed only bars since 2025-04-28 returns 0/0/0, matching
+  live rows. Serial/worker full backfills both write their own truncated-window warm-up; source prices are healthy.
+  Updated AF-20261021-03/report with dates and exact replay. This needs separate read/write windows, validity masks,
+  bounded rebuild and retrain evidence. No feature-store history or scoring formula changed. Existing dated memory
+  was corrected so a later session does not repeat the now-completed dependency repair.
