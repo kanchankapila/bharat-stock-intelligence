@@ -121,12 +121,12 @@ Snapshot: 116 candidate rows from 706 unique ledger IDs. This conservative inven
 | AF-20261013-07 | model-calibration / no-edge | EVIDENCE | Pending code/live reconciliation |
 | AF-20261016-01 | backup / duplicate-launch | FIX | Closed: seven verified single-launch backup nights; off-host restore remains separate. |
 | AF-20261017-03 | digest-recommendation / forward-edge | EVIDENCE | Pending code/live reconciliation |
-| AF-20261017-06 | recurring-bugs-runtime | FIX | Pending code/live reconciliation |
-| AF-20261017-07 | trendlyne-daily-fetch | FIX | Pending code/live reconciliation |
+| AF-20261017-06 | recurring-bugs-runtime | FIX | Live since 2026-10-21/22; freshness check passing, but the catch-up path has not been exercised (needs a missed window). Open as calendar-blocked; close if none occurs by 2026-11-06. |
+| AF-20261017-07 | trendlyne-daily-fetch | FIX | Fix live since 2026-10-21; effect not demonstrated and root-cause claim weakened (ledger). Calendar-blocked: more post-fix nights needed to set a tolerance. |
 | AF-20261017-08 | company-profiles-sync | INVESTIGATE | Pending code/live reconciliation |
-| AF-20261017-09 | digest-delivery / closed-session catch-up | FIX | Pending code/live reconciliation |
+| AF-20261017-09 | digest-delivery / closed-session catch-up | FIX | Closed 2026-10-25: deployed (bharat-server restarted 2026-10-24 23:43 IST); weekend/holiday skip tests pass. |
 | AF-20261017-11 | disaster-recovery / correlated-storage-risk | INVESTIGATE | Pending code/live reconciliation |
-| AF-20261017-12 | monitoring-honesty / backup-recency | FIX | Pending code/live reconciliation |
+| AF-20261017-12 | monitoring-honesty / backup-recency | FIX | Closed 2026-10-25: deployed; 26h WARN / 52h FAIL; live heartbeat 1.7h old (PASS). |
 | AF-20261019-01 | name-capture / starved-crawl | FIX | Closed: 2,234 symbols fetched since repair, above >55 recovery criterion. |
 | AF-20261019-02 | data-coverage / unconsumed-data | INVESTIGATE | Pending code/live reconciliation |
 | AF-20261019-03 | provider-credential / job-red | INVESTIGATE | Pending code/live reconciliation |

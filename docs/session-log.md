@@ -11755,3 +11755,7 @@ Phase 0 `.ts` commit live, including the holiday-gate fix below. Everything here
   already documented classes, now guarded at the newly found actual entry points. Whole-program completion is not
   claimed: the plan retains model/feature replay, coherent split repair, remaining ledger reconciliation, host-load
   ROC validation, credentials, off-host recovery and calendar-bound research.
+
+## 2026-10-25 — stale-ledger reconciliation
+
+AF-20261007-04, AF-20261017-09 and AF-20261017-12 were still "deploy pending" though bharat-server restarted 2026-10-24 23:43 IST after their last commits. Verified: heartbeat rows (morning-brief 11 runs, pg-backup success 1.7h old), 234 brief/backup vitest tests pass, findings:check OK. Closed the three rows and updated the remediation plan matrix; AF-20261017-06/-07 stay open as calendar-blocked.
