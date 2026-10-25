@@ -427,8 +427,9 @@ def summarize_factor_ic(ic: pd.DataFrame) -> pd.DataFrame:
         if not len(out) or not len(o2c):
             return out
         keys = [c for c in ("scope", "factor") if c in out.columns]
-        o2c = o2c[keys + ["mean_ic", "t_stat", "dates", "total_n"]].rename(
-            columns={"mean_ic": "mean_ic_o2c", "t_stat": "t_stat_o2c",
+        o2c = o2c[keys + ["mean_ic", "median_ic", "positive_dates", "t_stat", "dates", "total_n"]].rename(
+            columns={"mean_ic": "mean_ic_o2c", "median_ic": "median_ic_o2c",
+                     "positive_dates": "positive_dates_o2c", "t_stat": "t_stat_o2c",
                      "dates": "dates_o2c", "total_n": "total_n_o2c"})
         return out.merge(o2c, on=keys, how="left")
     rows = []
@@ -662,6 +663,11 @@ def _preopen_snapshot(recs: pd.DataFrame, trade_date) -> pd.DataFrame:
 _MOVER_BUCKETS = ("matched", "opposite", "rated_hold", "no_coverage", "flat_outcome")
 
 
+# Bump when a grader's polarity or bucket rules change, so trend queries can split rows by era.
+# Rows written before 2026-10-25 (Strong Sell treated as non-short) carry no grader_version key.
+GRADER_VERSION = "2026-10-25-strong-sell"
+
+
 def canonical_signal_accuracy(events: pd.DataFrame) -> pd.DataFrame:
     """Grade the canonical pre-open call as matched, opposite, or not flagged per date."""
     if not len(events):
@@ -719,13 +725,16 @@ def call_confusion(events: pd.DataFrame, eligible: pd.DataFrame) -> pd.DataFrame
     grades EVERY directional call in the snapshot against the realised close-to-close return
     (`fwd_ret`, the column the movers carry) of the whole point-in-time eligible universe, and
     puts each precision beside its null: the share of that universe that moved the called way.
-    A snapshot symbol outside the graded universe is not graded (snapshot_symbols -
+    The same calls are also graded on open-to-close (`intraday_ret`, the `*_o2c` fields), the leg
+    a pre-open call can actually trade; their denominators are the rows with a non-NULL
+    `intraday_ret` (`graded_symbols_o2c`, `universe_symbols_o2c`).  A snapshot symbol outside the graded universe is not graded (snapshot_symbols -
     graded_symbols shows how many).  Dates with no snapshot are excluded, as in
     canonical_signal_accuracy.
     """
     if eligible is None or not len(eligible):
         return pd.DataFrame()
-    universe = eligible[["trade_date", "symbol", "fwd_ret"]].dropna(subset=["fwd_ret"]).copy()
+    cols = ["trade_date", "symbol", "fwd_ret"] + (["intraday_ret"] if "intraday_ret" in eligible.columns else [])
+    universe = eligible[cols].dropna(subset=["fwd_ret"]).copy()
     universe["trade_date"] = universe["trade_date"].astype(str)
     universe = universe.drop_duplicates(["trade_date", "symbol"])
     recs = _load_preopen_recommendations(universe["trade_date"].unique())
@@ -745,7 +754,17 @@ def call_confusion(events: pd.DataFrame, eligible: pd.DataFrame) -> pd.DataFrame
             continue
         calls = dict(zip(snap["symbol"], snap["classification"]))
         ret = dict(zip(uni["symbol"], uni["fwd_ret"].astype(float)))
+        # A pre-open call can only be entered at the open, so the overnight gap inside fwd_ret is
+        # not harvestable: grade the same calls on open-to-close beside it (AF-20261007-05/-06).
+        ret_o = ({s: r for s, r in zip(uni["symbol"], uni["intraday_ret"].astype(float)) if r == r}
+                 if "intraday_ret" in uni.columns else {})
         graded = [(ret[s], _call_side(c)) for s, c in calls.items() if s in ret]
+        graded_o = [(ret_o[s], _call_side(c)) for s, c in calls.items() if s in ret_o]
+        long_o = [r for r, side in graded_o if side == 1]
+        short_o = [r for r, side in graded_o if side == -1]
+        long_hits_o = sum(r > 0 for r in long_o)
+        short_hits_o = sum(r < 0 for r in short_o)
+        n_o = len(ret_o)
         # A realised 0 is neither a hit nor a miss: it stays in the call count (the precision
         # denominator) and in universe_symbols (the base-rate denominator), so a precision and
         # its null are ratios over the same kind of population.
@@ -761,17 +780,24 @@ def call_confusion(events: pd.DataFrame, eligible: pd.DataFrame) -> pd.DataFrame
         rows.append({
             "event_date": str(td),
             "long_calls": len(long_r), "long_hits": int(long_hits),
+            "long_hits_o2c": int(long_hits_o),
             "long_precision": rate(long_hits, len(long_r)),
+            "long_precision_o2c": rate(long_hits_o, len(long_o)),
             "universe_up_rate": rate(sum(r > 0 for r in ret.values()), n_uni),
+            "universe_up_rate_o2c": rate(sum(r > 0 for r in ret_o.values()), n_o),
             "short_calls": len(short_r), "short_hits": int(short_hits),
+            "short_hits_o2c": int(short_hits_o),
             "short_precision": rate(short_hits, len(short_r)),
+            "short_precision_o2c": rate(short_hits_o, len(short_o)),
             "universe_down_rate": rate(sum(r < 0 for r in ret.values()), n_uni),
+            "universe_down_rate_o2c": rate(sum(r < 0 for r in ret_o.values()), n_o),
             "movers": len(movers),
             "movers_called_right": b["matched"], "movers_called_wrong": b["opposite"],
             "movers_rated_hold": b["rated_hold"], "movers_no_row": b["no_coverage"],
             "movers_flat": b["flat_outcome"],
             "snapshot_symbols": int(len(snap)), "graded_symbols": len(graded),
-            "universe_symbols": n_uni,
+            "graded_symbols_o2c": len(graded_o), "universe_symbols": n_uni,
+            "universe_symbols_o2c": n_o,
             "snapshot_asof": snap["generated_at"].max().isoformat(),
         })
     return pd.DataFrame(rows)
@@ -852,6 +878,7 @@ def persist_results(con, run_at: str, ic: pd.DataFrame, lift: pd.DataFrame,
                          "rated_hold": int(r["rated_hold"]),
                          "no_coverage": int(r["no_coverage"]),
                          "flat_outcome": int(r["flat_outcome"]),
+                         "grader_version": GRADER_VERSION,
                          "examples": r["examples"],
                      })))
         n += 1
@@ -860,6 +887,7 @@ def persist_results(con, run_at: str, ic: pd.DataFrame, lift: pd.DataFrame,
         # NaN (no calls on a side) is stored as null: NaN is not valid JSON.
         detail = {k: (None if isinstance(v, float) and v != v else v)
                   for k, v in r.items() if k != "event_date"}
+        detail["grader_version"] = GRADER_VERSION
         value = r["long_precision"]
         cur.execute(translate("INSERT INTO mover_study_results "
                               "(run_at, study_kind, class_name, metric, value, n_obs, detail_json) "
@@ -921,7 +949,13 @@ def write_report(run_at: str, ev: pd.DataFrame, ic: pd.DataFrame, lift: pd.DataF
             f"**{int((long_d['long_precision'] > long_d['universe_up_rate']).sum())}** of "
             f"{len(long_d)} dates with a long call; short precision beat `universe_down_rate` on "
             f"**{int((short_d['short_precision'] > short_d['universe_down_rate']).sum())}** of "
-            f"{len(short_d)} dates with a short call. Snapshots were unavailable for "
+            f"{len(short_d)} dates with a short call. Open-to-close (the leg a pre-open call can "
+            f"trade; the `*_o2c` columns sit beside each close-to-close figure): long beat "
+            f"`universe_up_rate_o2c` on "
+            f"**{int((long_d['long_precision_o2c'] > long_d['universe_up_rate_o2c']).sum())}**, "
+            f"short beat `universe_down_rate_o2c` on "
+            f"**{int((short_d['short_precision_o2c'] > short_d['universe_down_rate_o2c']).sum())}**. "
+            f"Snapshots were unavailable for "
             f"{max(0, event_dates - len(confusion))} of {event_dates} event dates (excluded).")
     else:
         confusion_note = "_no trustworthy pre-open recommendation snapshots_"

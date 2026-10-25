@@ -514,3 +514,97 @@ def test_call_confusion_reaches_the_report(monkeypatch, tmp_path):
                        pd.DataFrame(), str(out), confusion=conf)
     text = out.read_text(encoding="utf-8")
     assert "call confusion" in text.lower() and "universe_up_rate" in text
+
+
+# --- final fix wave: o2c grading of pre-open calls, grader_version, o2c sign consistency ----
+
+def _gap_only_calls_frames():
+    """Every long call rose close-to-close only because of the overnight gap."""
+    longs = ["L1", "L2", "L3", "L4"]
+    others = ["N1", "N2", "N3", "N4", "N5", "N6"]
+    recs = pd.DataFrame([{"symbol": s, "classification": "Buy",
+                          "generated_at": "2026-10-04T17:00:00Z"} for s in longs])
+    rows = []
+    for i, s in enumerate(longs):
+        rows.append({"trade_date": "2026-10-05", "symbol": s, "fwd_ret": 2.0,
+                     "intraday_ret": 1.0 if i % 2 == 0 else -1.0})
+    for i, s in enumerate(others):
+        rows.append({"trade_date": "2026-10-05", "symbol": s, "fwd_ret": -1.0,
+                     "intraday_ret": 1.0 if i % 2 == 0 else -1.0})
+    return recs, pd.DataFrame(rows)
+
+
+def test_call_confusion_o2c_removes_the_gap_a_close_to_close_precision_credits(monkeypatch):
+    recs, eligible = _gap_only_calls_frames()
+    monkeypatch.setattr(study, "get_engine", lambda: object())
+    monkeypatch.setattr(pd, "read_sql", lambda *_a, **_k: recs.copy())
+    row = study.call_confusion(eligible.iloc[:0], eligible).iloc[0]
+    assert row["long_precision"] == 1.0 and row["universe_up_rate"] == pytest.approx(0.4)
+    assert row["long_precision_o2c"] == pytest.approx(0.5)
+    assert row["universe_up_rate_o2c"] == pytest.approx(0.5)
+    assert row["long_hits_o2c"] == 2 and row["graded_symbols_o2c"] == 4
+    assert row["universe_symbols_o2c"] == 10
+    assert pd.isna(row["short_precision_o2c"]) and row["short_hits_o2c"] == 0
+    assert row["universe_down_rate_o2c"] == pytest.approx(0.5)
+
+
+def test_call_confusion_o2c_denominator_is_rows_with_an_intraday_ret(monkeypatch):
+    recs, eligible = _gap_only_calls_frames()
+    eligible.loc[eligible["symbol"].isin(["L1", "N1", "N2"]), "intraday_ret"] = float("nan")
+    monkeypatch.setattr(study, "get_engine", lambda: object())
+    monkeypatch.setattr(pd, "read_sql", lambda *_a, **_k: recs.copy())
+    row = study.call_confusion(eligible.iloc[:0], eligible).iloc[0]
+    assert (row["graded_symbols"], row["graded_symbols_o2c"]) == (4, 3)
+    assert (row["universe_symbols"], row["universe_symbols_o2c"]) == (10, 7)
+    assert row["long_hits"] == 4 and row["long_hits_o2c"] == 1
+
+
+def test_call_confusion_without_intraday_ret_still_grades_close_to_close(monkeypatch):
+    recs, events, eligible = _confusion_frames()
+    monkeypatch.setattr(study, "get_engine", lambda: object())
+    monkeypatch.setattr(pd, "read_sql", lambda *_a, **_k: recs.copy())
+    row = study.call_confusion(events, eligible).iloc[0]
+    assert row["long_calls"] == 3 and row["graded_symbols_o2c"] == 0
+    assert pd.isna(row["long_precision_o2c"]) and pd.isna(row["universe_up_rate_o2c"])
+
+
+def test_persisted_call_confusion_and_accuracy_rows_carry_o2c_and_grader_version(monkeypatch):
+    import json as _json
+    recs, eligible = _gap_only_calls_frames()
+    monkeypatch.setattr(study, "get_engine", lambda: object())
+    monkeypatch.setattr(pd, "read_sql", lambda *_a, **_k: recs.copy())
+    conf = study.call_confusion(eligible.iloc[:0], eligible)
+    acc = study.canonical_signal_accuracy(eligible[["trade_date", "symbol", "fwd_ret"]])
+    con = _RecordingCon()
+    study.persist_results(con, "2026-10-25T00:00:00", pd.DataFrame(), pd.DataFrame(),
+                          pd.DataFrame(), acc, confusion=conf)
+    by_kind = {r[1]: r for r in con.rows}
+    c = by_kind["call_confusion"]
+    assert c[3] == "long_precision" and c[4] == 1.0          # headline stays close-to-close
+    detail = _json.loads(c[6])
+    assert detail["long_precision_o2c"] == 0.5 and detail["grader_version"] == study.GRADER_VERSION
+    assert _json.loads(by_kind["canonical_signal_accuracy"][6])["grader_version"] == study.GRADER_VERSION
+
+
+def test_call_confusion_report_shows_o2c_beside_close_to_close(monkeypatch, tmp_path):
+    recs, eligible = _gap_only_calls_frames()
+    monkeypatch.setattr(study, "get_engine", lambda: object())
+    monkeypatch.setattr(pd, "read_sql", lambda *_a, **_k: recs.copy())
+    conf = study.call_confusion(eligible.iloc[:0], eligible)
+    cols = list(conf.columns)
+    assert cols.index("long_precision_o2c") == cols.index("long_precision") + 1
+    assert cols.index("short_precision_o2c") == cols.index("short_precision") + 1
+    out = tmp_path / "r.md"
+    study.write_report("run", eligible.iloc[:0], pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+                       pd.DataFrame(), str(out), confusion=conf)
+    assert "open-to-close" in out.read_text(encoding="utf-8").split("call confusion", 1)[1].lower()
+
+
+def test_factor_summary_carries_o2c_median_and_sign_consistency():
+    ic = pd.DataFrame([
+        {"event_date": d, "scope": "u", "factor": "f", "metric": m, "outcome": "o", "ic": v, "n": 10}
+        for d, vals in [("d1", (0.5, 0.2)), ("d2", (0.4, -0.1)), ("d3", (0.3, -0.3))]
+        for m, v in zip(("spearman_ic", "spearman_ic_o2c"), vals)])
+    row = study.summarize_factor_ic(ic).iloc[0]
+    assert row["positive_dates"] == 3 and row["positive_dates_o2c"] == 1
+    assert row["median_ic_o2c"] == pytest.approx(-0.1) and row["median_ic"] == pytest.approx(0.4)
