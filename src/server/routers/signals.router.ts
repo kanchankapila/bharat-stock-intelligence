@@ -3,7 +3,7 @@ import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { enqueueAISignals, getAIQueueStats } from "../queues";
 import { invalidateAISignalCache } from "../signals";
 import { MAX_SIGNAL_BATCH } from "../../lib/signalBatch";
-import { router, publicProcedure, protectedProcedure, adminProcedure, expensiveProcedure } from "../trpc";
+import { router, publicProcedure, protectedProcedure, adminProcedure, expensiveAdminProcedure } from "../trpc";
 
 /** ISO timestamp `days` ago — used instead of SQLite datetime('now','-N days') so the
  *  same query runs on both SQLite and Postgres (a parameterised interval isn't portable). */
@@ -60,7 +60,7 @@ export const signalsRouter = router({
   // ~2,400-name live universe, NOT "tens of symbols". It must stay <= this cap or zod rejects
   // every click (silently: the component swallows the error). The 2026-08-07 auto-trigger on
   // mount was removed on purpose (0d199a7f); V3Dashboard.tsx no longer exists.
-  enqueueSignals: expensiveProcedure
+  enqueueSignals: expensiveAdminProcedure
     .input(z.array(z.object({
       symbol:    z.string().max(32),
       stockData: z.record(z.string(), z.unknown()),
