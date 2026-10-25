@@ -2,7 +2,8 @@ import { z } from "zod";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { enqueueAISignals, getAIQueueStats } from "../queues";
 import { invalidateAISignalCache } from "../signals";
-import { router, publicProcedure, protectedProcedure, adminProcedure, expensiveProcedure } from "../trpc";
+import { MAX_SIGNAL_BATCH } from "../../lib/signalBatch";
+import { router, publicProcedure, protectedProcedure, adminProcedure, expensiveAdminProcedure } from "../trpc";
 
 /** ISO timestamp `days` ago — used instead of SQLite datetime('now','-N days') so the
  *  same query runs on both SQLite and Postgres (a parameterised interval isn't portable). */
@@ -53,14 +54,17 @@ export const signalsRouter = router({
       return { success: true };
     }),
 
-  // .max(200): this array was unbounded, and every element becomes a BullMQ AI-queue job (an
-  // LLM call each). The two real callers batch the visible dashboard table -- DashboardPage.tsx
-  // and V3Dashboard.tsx -- which is tens of symbols, well under this ceiling.
-  enqueueSignals: expensiveProcedure
+  // Capped at MAX_SIGNAL_BATCH: every element becomes a BullMQ AI-queue job (an LLM call each).
+  // The only caller is the AI Signals REFRESH button in DashboardPage.tsx (route `/` and
+  // `/dashboard`, V1Routes.tsx), which sends buildSignalBatch(stocks) -- the top movers of a
+  // ~2,400-name live universe, NOT "tens of symbols". It must stay <= this cap or zod rejects
+  // every click (the component now shows the error). Admin-only since 2026-10-25 (the 2026-08-07 auto-trigger on
+  // mount was removed because anonymous visitors could fan out LLM calls; 0d199a7f).
+  enqueueSignals: expensiveAdminProcedure
     .input(z.array(z.object({
       symbol:    z.string().max(32),
       stockData: z.record(z.string(), z.unknown()),
-    })).max(200))
+    })).max(MAX_SIGNAL_BATCH))
     .mutation(async ({ input }) => enqueueAISignals(input)),
 
   getQueueStats: publicProcedure

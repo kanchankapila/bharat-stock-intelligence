@@ -56,7 +56,7 @@ export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
 // and far below what makes an LLM bill or a queue flood interesting to an abuser.
 const expensiveLimiter = makeRateLimiter({ windowMs: 60_000, max: 20 });
 
-export const expensiveProcedure = t.procedure.use(async ({ ctx, next }) => {
+const expensiveLimit = t.middleware(async ({ ctx, next }) => {
   if (ctx.req && expensiveLimiter(ctx.req)) {
     throw new TRPCError({
       code: "TOO_MANY_REQUESTS",
@@ -65,3 +65,10 @@ export const expensiveProcedure = t.procedure.use(async ({ ctx, next }) => {
   }
   return next({ ctx });
 });
+
+export const expensiveProcedure = t.procedure.use(expensiveLimit);
+
+// Same limiter behind admin auth, for a mutation whose cost is an unbounded LLM fan-out
+// (enqueueSignals: up to MAX_SIGNAL_BATCH calls per click). Its anonymous auto-trigger was removed
+// on 2026-08-07 for exactly that reason.
+export const expensiveAdminProcedure = adminProcedure.use(expensiveLimit);
