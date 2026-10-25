@@ -18,6 +18,7 @@ import { readdirSync, statSync, existsSync, readFileSync } from 'fs';
 import { join, extname, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
+import { quotesNumber } from './quotesNumber.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CHECK = process.argv.includes('--check');
@@ -124,14 +125,10 @@ if (CHECK) {
   const claude = readFileSync(join(ROOT, 'CLAUDE.md'), 'utf8');
   const context = readFileSync(join(ROOT, 'CONTEXT.md'), 'utf8');
   const stale = [];
-  // Digit-boundary match, not a bare substring: `includes('89')` is satisfied by "891" or
-  // "1890" anywhere in the doc, so a drifted figure could pass on an unrelated number that
-  // happens to contain it. A number may legitimately be written with thousands separators,
-  // so allow those inside the needle's own digits only.
+  // Digit-boundary match lives in quotesNumber.mjs (unit-tested there).
   const expect = (hay, needle, label) => {
     if (needle === null) return;
-    const pattern = new RegExp(`(?<![\\d,.])${String(needle).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\d,.])`);
-    if (!pattern.test(hay)) stale.push(`${label}: expected "${needle}"`);
+    if (!quotesNumber(hay, needle)) stale.push(`${label}: expected "${needle}"`);
   };
   expect(claude, String(pyNonTest.length), 'CLAUDE.md non-test Python module count');
   // Was printed with a [CLAUDE.md intro] label but never asserted, so CLAUDE.md's figure
