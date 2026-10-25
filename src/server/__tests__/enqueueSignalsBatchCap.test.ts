@@ -30,9 +30,10 @@ describe('enqueueSignals batch cap vs the REFRESH button payload', () => {
     expect(kept).toBeGreaterThanOrEqual(dropped);
   });
 
-  it('the router still refuses an oversize batch (cost ceiling intact)', async () => {
-    const oversize = universe.slice(0, MAX_SIGNAL_BATCH + 1).map(s => ({ symbol: s.symbol, stockData: {} }));
-    await expect(caller.enqueueSignals(oversize)).rejects.toThrow();
+  it('the router cap is exactly MAX_SIGNAL_BATCH: cap accepted, cap+1 rejected', async () => {
+    const batch = (n: number) => Array.from({ length: n }, (_, i) => ({ symbol: `S${i}`, stockData: {} }));
+    await expect(caller.enqueueSignals(batch(MAX_SIGNAL_BATCH))).resolves.toBeDefined();
+    await expect(caller.enqueueSignals(batch(MAX_SIGNAL_BATCH + 1))).rejects.toThrow(/too_big|<=s*${MAX_SIGNAL_BATCH}/);
   });
 
   it('DashboardPage builds its payload through buildSignalBatch', () => {

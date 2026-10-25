@@ -64,7 +64,7 @@ export const signalsRouter = router({
     .input(z.array(z.object({
       symbol:    z.string().max(32),
       stockData: z.record(z.string(), z.unknown()),
-    })).max(200))
+    })).max(MAX_SIGNAL_BATCH))
     .mutation(async ({ input }) => enqueueAISignals(input)),
 
   getQueueStats: publicProcedure
