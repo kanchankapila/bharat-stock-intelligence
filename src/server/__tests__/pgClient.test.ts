@@ -14,12 +14,18 @@ vi.mock('pg', () => ({
   },
 }));
 
-const { withClient, withTransientRetry, alterMigrationName, isTransientConnError } = await import('../pgClient');
+const { withClient, withTransientRetry, alterMigrationName, isTransientConnError, getPool, closePool } = await import('../pgClient');
 
 describe('pgClient', () => {
   beforeEach(() => {
     mockRelease.mockClear();
     mockConnect.mockClear();
+  });
+
+  it('registers the actual module cleanup when a test pool is opened', () => {
+    getPool();
+    const registry = (globalThis as any)[Symbol.for('bsi.vitest.pool-cleanups')] as Set<() => Promise<void>> | undefined;
+    expect(registry?.has(closePool)).toBe(true);
   });
 
   it('withClient releases client after success', async () => {

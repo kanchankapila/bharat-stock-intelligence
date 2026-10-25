@@ -83,6 +83,13 @@ export function getPool(): Pool {
       connectionTimeoutMillis: 15_000,  // more resilient to startup spikes
     });
     pool.on('error', (err) => console.error('[PG] idle client error:', err.message));
+    if (process.env.VITEST) {
+      // Do not make teardown import this driver into suites that never opened a pool.
+      // Distinct module instances after vi.resetModules each need their own cleanup.
+      const key = Symbol.for('bsi.vitest.pool-cleanups');
+      const registry = ((globalThis as any)[key] ??= new Set<() => Promise<void>>());
+      registry.add(closePool);
+    }
   }
   return pool;
 }

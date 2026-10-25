@@ -2,7 +2,7 @@
 
 Real-time Indian stock market (NSE/BSE) research and decision-support platform. Express + tRPC
 backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, 320 non-test Python modules
-in `src/server/` (89 `*_fetcher.py` plus ML engines, jobs and helpers; 797 `.py` files including tests).
+in `src/server/` (89 `*_fetcher.py` plus ML engines, jobs and helpers; 798 `.py` files including tests).
 
 **What the product is for, and the contracts a change must preserve: `CONTEXT.md`.** This file is the
 operating manual (rules, checks, workflow). `AGENTS.md` is only the inventory of skills, commands,

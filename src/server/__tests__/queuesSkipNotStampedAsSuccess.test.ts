@@ -33,7 +33,7 @@ export function scanSkipStamping(src: string): { skippers: string[]; offenders: 
 }
 
 describe('queues.ts: a skipped run is not stamped as a success', () => {
-  const src = readFileSync(join(__dirname, '..', 'queues.ts'), 'utf8');
+  const src = readFileSync(join(__dirname, '..', 'queues.ts'), 'utf8').replace(/\r\n/g, '\n');
   const { skippers, offenders } = scanSkipStamping(src);
 
   it('the scan is not vacuous: it finds the workers whose processors can skip', () => {
@@ -44,13 +44,13 @@ describe('queues.ts: a skipped run is not stamped as a success', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('the scan does flag the pre-fix shape', () => {
+  it.each(['\n', '\r\n'])('the scan does flag the pre-fix shape with %j line endings', eol => {
     const preFix = `
       const w = new Worker('q', async () => { return { skipped: true }; }, {});
       w.on('completed', (job) => {
         recordHeartbeat('j', 'success', undefined, 1);
       });`;
-    expect(scanSkipStamping(preFix).offenders).toEqual(['w']);
+    expect(scanSkipStamping(preFix.replace(/\r?\n/g, eol)).offenders).toEqual(['w']);
   });
 
   it('mover capture has one success writer: the completed handler', () => {

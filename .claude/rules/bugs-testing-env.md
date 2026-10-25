@@ -158,7 +158,7 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   Same family as the `.graphify_python` BOM noted in memory and the CRLF entry below: Windows
   tooling silently changing bytes that other tools treat as content.
 
-- **CRLF from a Windows checkout breaks every bash script under `.claude/hooks/`.** git's `core.autocrlf=true` rewrote `session-start.sh` to CRLF on checkout, so bash rejected it outright (`$'\r': command not found`, `set: pipefail: invalid option name`) — and the failure re-appears on every fresh clone until the repository pins it. `* text=auto` (if previously set) does not survive: the file must be pinned `*.sh text eol=lf` in `.gitattributes`, and re-normalized in the working copy (`scratch_verify/lf_fix.py`). `.mjs` hooks are immune (node tolerates CRLF); this is why hooks here should be node modules.
+- **CRLF from a Windows checkout breaks every bash script under `.claude/hooks/`.** git's `core.autocrlf=true` rewrote `session-start.sh` to CRLF on checkout, so bash rejected it outright (`$'\r': command not found`, `set: pipefail: invalid option name`) — and the failure re-appears on every fresh clone until the repository pins it. `* text=auto` (if previously set) does not survive: the file must be pinned `*.sh text eol=lf` in `.gitattributes`, and re-normalized in the working copy (`scratch_verify/lf_fix.py`). Native Node accepts CRLF, but **Vite 6 SSR's `/^#!.*\n/` matcher misses CRLF hashbangs** and injects imports/exports BEFORE `#!`, causing `SyntaxError: Invalid or unexpected token` when a test imports an otherwise valid CLI. Found on the isolated fresh Windows checkout during the Vitest 5 migration (2026-10-26); `node --check` alone passed. Pin `*.mjs text eol=lf` too (`scripts/dependencySecurity.test.mjs` guards the policy and imported checker). Source-scanning tests must normalize CRLF before matching literal LF boundaries; preserve the assertions and test negative controls with both endings (`queuesSkipNotStampedAsSuccess.test.ts`).
 
 ## Testing
 
@@ -168,6 +168,17 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   duplicate keys and wrong-window assertions. Batch the same fixture rows into bounded writes,
   preserve the scenarios/assertions/budgets, and await the actual writer/commit (not an early
   success object). A later isolated pass does not erase the failed full run. AF-20261025-30/32.
+  Recurred in `mlRankPct.test.ts` (2026-10-26): per-row fixture commits timed out and spilled
+  into the next case. Batch the same values/defaults in an awaited transaction; do not adjust
+  ranking assertions or the hook budget. `dependencySecurity.test.mjs` guards the seed shape.
+
+- **A teardown import can load a real dependency that a mock-only suite never used.** The
+  global pool hook imported pgClient at afterAll even when every DB call in the file was mocked;
+  under load that import exceeded its hook budget. Register cleanup when a real test pool is
+  opened instead, keyed across module resets, and consume callbacks without importing the
+  driver. Never move the import to setup (it defeats vi.mock hoisting), skip real open pools,
+  or swallow cleanup failures. `vitestPoolCleanup.test.ts` uses a throwing unused-module factory;
+  `pgClient.test.ts` asserts actual pool registration. The production registration guard is VITEST.
 
 - **A test process using the production logger can pollute the production incident record without
   touching production data.** Failure-path tests are supposed to emit errors (memory ceilings,
@@ -194,6 +205,22 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 - **A `live_datasource`-gated test is code that DOES NOT RUN by default, so it rots silently** — the gate must stay (a third-party outage must never redden CI), but treat these files as needing a periodic manual full run, and after any bulk change touching test fixtures, explicitly check which of the gated files it did not execute. A stub that dispatches on its input (not a blanket return) fails loudly on an unexpected call instead of confidently answering with someone else's data.
 - **An unqualified `information_schema.columns`/`information_schema.tables` query can silently read a leaked throwaway test schema as a second copy of a real table**, producing duplicate column names that break downstream code with an error naming no table or schema. 🤖 Automated — `check_information_schema_missing_table_schema`. Fix: `AND table_schema = current_schema()`, not a hardcoded `'public'` (which breaks inside test fixtures that deliberately scope into their own schema).
 - **A throwaway-schema fixture that keeps `public` on the `search_path` reaches PRODUCTION for every name the fixture forgot to create — and on a busy table the ACCESS EXCLUSIVE LOCK, not the DDL, is the damage.** Caught live 2026-09-17 (AF-20260917-11): `conftest.py`'s `pg_schema` used `SET search_path TO "<throwaway>", public` under a comment asserting "the throwaway schema is FIRST, so an unqualified name can only ever shadow a production table, never write to one." **"First" only protects a name the schema HAS.** A test whose schema held 2 tables ran `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS …` against `public.technical_signals`; the column already existed so the DDL was a no-op, but the queued ACCESS EXCLUSIVE lock — stuck behind the nightly `pg_dump` — blocked **every subsequent reader** of the platform's main feature table for minutes. An `IF NOT EXISTS` that changes nothing still takes the lock. **Two tells, both cheap:** (1) `SHOW search_path` in the fixture — if `public` is on it, the isolation is partial by construction; (2) in `pg_stat_activity`, a DDL statement whose backend has a `t_`/`pytest_` search_path but whose target table is not in that schema. **The meta-lesson is the one this file already states in the comments-vs-guards entry**: the sibling fixture `pg_test_support.pg_memory_conn()` omitted `public` and documented exactly this hazard, and `CLAUDE.md` said `pg_conn` "puts `public` on the search_path, so a table the fixture forgot silently resolves to the real one" — three sources, two of them right, and the wrong one was the one sitting next to the code. When two places describe the same guard incompatibly, believe neither until you run the probe. Immunized by `src/server/tests/test_pg_schema_isolation.py`, whose negative control is that `SELECT 1 FROM technical_signals` **does not raise** against the unfixed fixture.
+
+  **2026-10-26 recurrence:** worker endpoint tests probed `db_compat` reachability at collection
+  time instead of requesting a private fixture. They read pre-existing production tables locally
+  and skipped in CI; an empty dedicated database exposed two UndefinedTable failures. Bind the
+  actual endpoint connector via `pg_db`, assert `current_schema()` is private, and verify seeded
+  private rows through the real endpoints (`test_worker_service.py`). Reachable is not isolated.
+
+- **`CREATE EXTENSION IF NOT EXISTS` is database-global and is not concurrency-safe.** Concurrent
+  Vitest/Python setup on a new test database raced on `pg_extension_name_index` for
+  `pg_stat_statements`, poisoning one session-scoped fixture and producing ninety setup errors
+  (2026-10-26). Bootstrap missing extensions in public, outside disposable schemas, under the
+  SAME database-scoped session advisory lock in both runners. Always unlock in finally; never
+  suppress the creation error. Existing extension homes are preserved, not silently relocated.
+  Guarded by `scripts/testPgExtensions.test.ts` and `test_extension_bootstrap_lock.py`, including
+  a real blocked initializer and failure-propagation controls. Keep runner databases separate
+  during broad parallel gates to avoid fixture I/O contention as well as shared DDL state.
 
 - **CI and this repo's dev boxes can run DIFFERENT MAJOR pandas versions, and the gap is a
   behaviour difference, not a warning — it fails only on CI, after you have pushed.** Measured
