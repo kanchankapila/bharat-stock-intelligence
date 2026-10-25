@@ -357,9 +357,16 @@ def factor_ic_table(ev: pd.DataFrame, fac: pd.DataFrame,
                    else "prior_close_to_close")
         target = "intraday_ret" if outcome == "open_to_close" else "fwd_ret"
         rows.append({"scope": scope, "factor": col,
-                     "outcome": outcome,
+                     "outcome": outcome, "metric": "spearman_ic",
                      "ic": round(_rank_ic(m[col], m[target]), 4),
                      "n": int((m[col].notna() & m[target].notna()).sum())})
+        # Close-to-close includes the overnight gap, which is not harvestable here
+        # (AF-20261025-08); grade the same factor on the open-to-close leg too.
+        if col not in EVENT_PREOPEN_FACTORS and "intraday_ret" in m.columns:
+            rows.append({"scope": scope, "factor": col,
+                         "outcome": "open_to_close", "metric": "spearman_ic_o2c",
+                         "ic": round(_rank_ic(m[col], m["intraday_ret"]), 4),
+                         "n": int((m[col].notna() & m["intraday_ret"].notna()).sum())})
     out = pd.DataFrame(rows).dropna(subset=["ic"])
     return out.sort_values("ic", ascending=False) if len(out) else out
 
@@ -413,6 +420,17 @@ def summarize_factor_ic(ic: pd.DataFrame) -> pd.DataFrame:
     """Aggregate IC per date; never let the latest date masquerade as the whole study."""
     if ic is None or not len(ic):
         return pd.DataFrame()
+    if "metric" in ic.columns:
+        is_o2c = ic["metric"] == "spearman_ic_o2c"
+        out = summarize_factor_ic(ic[~is_o2c].drop(columns=["metric"]))
+        o2c = summarize_factor_ic(ic[is_o2c].drop(columns=["metric"]))
+        if not len(out) or not len(o2c):
+            return out
+        keys = [c for c in ("scope", "factor") if c in out.columns]
+        o2c = o2c[keys + ["mean_ic", "t_stat", "dates", "total_n"]].rename(
+            columns={"mean_ic": "mean_ic_o2c", "t_stat": "t_stat_o2c",
+                     "dates": "dates_o2c", "total_n": "total_n_o2c"})
+        return out.merge(o2c, on=keys, how="left")
     rows = []
     group_cols = [c for c in ("scope", "outcome", "factor") if c in ic.columns]
     for keys, g in ic.groupby(group_cols):
@@ -702,7 +720,7 @@ def persist_results(con, run_at: str, ic: pd.DataFrame, lift: pd.DataFrame,
                               "(run_at, study_kind, class_name, factor, metric, value, n_obs, detail_json) "
                               "VALUES (?,?,?,?,?,?,?,?)"),
                     (run_at, "factor_ic", r.get("scope", "mover_cohort"), r["factor"],
-                     "spearman_ic", r["ic"], int(r["n"]),
+                     r.get("metric", "spearman_ic"), r["ic"], int(r["n"]),
                      json.dumps({"outcome": r.get("outcome", "prior_close_to_close")})))
         n += 1
     for _, r in (lift if lift is not None and len(lift) else pd.DataFrame()).iterrows():
@@ -816,7 +834,10 @@ def write_report(run_at: str, ev: pd.DataFrame, ic: pd.DataFrame, lift: pd.DataF
         "`eligible_universe` IC tests the complete point-in-time liquid equity comparison set.",
         "- Event-session pre-open factors are measured against open-to-close returns; their "
         "auction gap is already known at 09:10 and cannot be credited as a forecast of the gap. "
-        "All other factors use prior-close-to-close returns.",
+        "All other factors use prior-close-to-close returns (`mean_ic`) and are also graded "
+        "against open-to-close (`mean_ic_o2c`): the gap between the two is the overnight gap, "
+        "which is not harvestable here. A factor whose `mean_ic` survives only in the "
+        "close-to-close column is a gap predictor, not a tradeable signal.",
         "- Cohort lift uses that same eligible universe: NSE EQ membership on the event date, "
         "known ETFs excluded, a clean current/prior bar, and exactly 20 clean pre-event "
         f"sessions with ADT of at least Rs {MIN_ADT_CR:g} crore.",

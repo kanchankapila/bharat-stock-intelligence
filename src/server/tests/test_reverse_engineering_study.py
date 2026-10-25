@@ -331,3 +331,79 @@ def test_every_accuracy_count_column_reaches_the_persisted_detail_json():
         f"canonical_signal_accuracy produces {missing} but persist_results never writes them "
         f"into detail_json, so no consumer can read them"
     )
+
+
+def _gap_only_frames(n=60):
+    import numpy as np
+    symbols = [f"S{i:02d}" for i in range(n)]
+    gap = np.arange(n, dtype=float)
+    o2c = np.random.default_rng(7).permutation(n).astype(float)
+    events = pd.DataFrame({"symbol": symbols, "fwd_ret": gap * 10 + o2c, "intraday_ret": o2c})
+    factors = pd.DataFrame({"symbol": symbols, "f_carry": gap, "f_preopen_gap_pct": gap})
+    return events, factors
+
+
+def test_factor_that_only_predicts_the_overnight_gap_reads_high_c2c_and_near_zero_o2c():
+    events, factors = _gap_only_frames()
+    out = study.factor_ic_table(events, factors)
+    c2c = out[(out["factor"] == "f_carry") & (out["metric"] == "spearman_ic")].iloc[0]
+    o2c = out[(out["factor"] == "f_carry") & (out["metric"] == "spearman_ic_o2c")].iloc[0]
+    assert c2c["ic"] > 0.9 and c2c["outcome"] == "prior_close_to_close"
+    assert abs(o2c["ic"]) < 0.3 and o2c["outcome"] == "open_to_close"
+    assert o2c["n"] == 60
+
+
+def test_preopen_factors_get_no_o2c_duplicate():
+    events, factors = _gap_only_frames()
+    out = study.factor_ic_table(events, factors)
+    pre = out[out["factor"] == "f_preopen_gap_pct"]
+    assert list(pre["metric"]) == ["spearman_ic"] and list(pre["outcome"]) == ["open_to_close"]
+
+
+def test_o2c_uses_only_rows_that_have_intraday_ret_and_records_that_n():
+    events, factors = _gap_only_frames()
+    events.loc[:19, "intraday_ret"] = float("nan")
+    out = study.factor_ic_table(events, factors)
+    o2c = out[(out["factor"] == "f_carry") & (out["metric"] == "spearman_ic_o2c")].iloc[0]
+    assert o2c["n"] == 40
+    events.loc[:39, "intraday_ret"] = float("nan")
+    out = study.factor_ic_table(events, factors)
+    assert out[(out["factor"] == "f_carry") & (out["metric"] == "spearman_ic_o2c")].empty
+    assert len(out[(out["factor"] == "f_carry") & (out["metric"] == "spearman_ic")]) == 1
+
+
+class _RecordingCon:
+    def __init__(self):
+        self.rows = []
+
+    def cursor(self):
+        return self
+
+    def execute(self, sql, params=()):
+        self.rows.append(params)
+
+    def commit(self):
+        pass
+
+
+def test_persisted_rows_include_o2c_metric_and_leave_c2c_rows_unchanged():
+    events, factors = _gap_only_frames()
+    ic = study.factor_ic_table(events, factors)
+    con = _RecordingCon()
+    study.persist_results(con, "2026-10-25T00:00:00", ic, pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+    by_key = {(r[3], r[4]): r for r in con.rows}
+    assert set(by_key) == {("f_carry", "spearman_ic"), ("f_carry", "spearman_ic_o2c"),
+                           ("f_preopen_gap_pct", "spearman_ic")}
+    assert by_key[("f_carry", "spearman_ic")][5] > 0.9
+    assert '"open_to_close"' in by_key[("f_carry", "spearman_ic_o2c")][7]
+    assert '"prior_close_to_close"' in by_key[("f_carry", "spearman_ic")][7]
+
+
+def test_factor_summary_shows_c2c_and_o2c_side_by_side():
+    events, factors = _gap_only_frames()
+    s = study.summarize_factor_ic(study.factor_ic_table(events, factors))
+    row = s[s["factor"] == "f_carry"].iloc[0]
+    assert row["mean_ic"] > 0.9 and abs(row["mean_ic_o2c"]) < 0.3
+    assert row["dates_o2c"] == 1 and row["total_n_o2c"] == 60
+    pre = s[s["factor"] == "f_preopen_gap_pct"].iloc[0]
+    assert pd.isna(pre["mean_ic_o2c"])
