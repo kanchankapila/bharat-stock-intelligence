@@ -58,8 +58,8 @@ export const signalsRouter = router({
   // The only caller is the AI Signals REFRESH button in DashboardPage.tsx (route `/` and
   // `/dashboard`, V1Routes.tsx), which sends buildSignalBatch(stocks) -- the top movers of a
   // ~2,400-name live universe, NOT "tens of symbols". It must stay <= this cap or zod rejects
-  // every click (silently: the component swallows the error). The 2026-08-07 auto-trigger on
-  // mount was removed on purpose (0d199a7f); V3Dashboard.tsx no longer exists.
+  // every click (the component now shows the error). Admin-only since 2026-10-25 (the 2026-08-07 auto-trigger on
+  // mount was removed because anonymous visitors could fan out LLM calls; 0d199a7f).
   enqueueSignals: expensiveAdminProcedure
     .input(z.array(z.object({
       symbol:    z.string().max(32),
