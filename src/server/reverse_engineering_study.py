@@ -598,36 +598,83 @@ def summarize_accuracy(accuracy: pd.DataFrame) -> pd.DataFrame:
     }])
 
 
-def canonical_signal_accuracy(events: pd.DataFrame) -> pd.DataFrame:
-    """Grade the canonical pre-open call as matched, opposite, or not flagged per date."""
-    if not len(events):
-        return pd.DataFrame()
-    engine = get_engine()
-    dmin = (pd.Timestamp(str(events["trade_date"].min()))
-            - pd.Timedelta(days=10)).strftime("%Y-%m-%d")
-    dmax = (pd.Timestamp(str(events["trade_date"].max()))
-            + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+# One polarity map for every grader here (canonical_signal_accuracy, call_confusion), so the
+# two cannot drift.  Symmetric on purpose: the sell side used to match only the exact string
+# "sell", so every "strong sell" scored side == 0 and was graded as "no opinion".  Strong Sell is
+# the largest directional bucket in the live ranking (204 of 2,354 on 2026-10-24).
+_LONG_CALLS = frozenset({"buy", "strong buy"})
+_SHORT_CALLS = frozenset({"sell", "strong sell"})
+
+
+def _call_side(classification) -> int:
+    """+1 long call, -1 short call, 0 no directional opinion (Hold, blank, unknown)."""
+    call = str(classification or "").strip().lower()
+    return 1 if call in _LONG_CALLS else (-1 if call in _SHORT_CALLS else 0)
+
+
+def _mover_bucket(symbol, calls: dict, ret: float) -> str:
+    """Grade one mover: matched / opposite, or one of the three causes of 'not flagged'.
+
+    A rated Hold is a calibration miss (we looked and said nothing), an absent snapshot row is a
+    coverage miss (we never looked), and a flat tape is not a miss at all.
+    """
+    realized = 1 if ret > 0 else (-1 if ret < 0 else 0)
+    if realized == 0:
+        return "flat_outcome"
+    if symbol not in calls:
+        return "no_coverage"
+    side = _call_side(calls[symbol])
+    if side == 0:
+        return "rated_hold"
+    return "matched" if side == realized else "opposite"
+
+
+def _load_preopen_recommendations(trade_dates) -> pd.DataFrame | None:
+    """Every unified_recommendations row that can be the pre-open call for one of these dates."""
+    ts = pd.to_datetime(pd.Series([str(d) for d in trade_dates]))
+    dmin = (ts.min() - pd.Timedelta(days=10)).strftime("%Y-%m-%d")
+    dmax = (ts.max() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     try:
         recs = pd.read_sql(
             "SELECT symbol, classification, generated_at FROM unified_recommendations "
             f"WHERE generated_at >= '{dmin}' AND generated_at < '{dmax}'",
-            engine,
+            get_engine(),
         )
     except Exception as exc:
-        print(f"[study] canonical signal accuracy unavailable (...{str(exc)[-220:]})",
+        print(f"[study] pre-open recommendations unavailable (...{str(exc)[-220:]})",
               file=sys.stderr)
-        return pd.DataFrame()
+        return None
     recs["generated_at"] = pd.to_datetime(recs["generated_at"], utc=True, errors="coerce")
-    recs = recs.dropna(subset=["symbol", "classification", "generated_at"])
+    return recs.dropna(subset=["symbol", "classification", "generated_at"])
+
+
+def _preopen_snapshot(recs: pd.DataFrame, trade_date) -> pd.DataFrame:
+    """Latest row per symbol generated in [cutoff - 7d, cutoff), cutoff = trade_date 03:45 UTC.
+
+    A same-session post-open overwrite must never grade the session it was written in.
+    """
+    cutoff = pd.Timestamp(str(trade_date), tz="UTC") + pd.Timedelta(hours=3, minutes=45)
+    return (recs[(recs["generated_at"] < cutoff)
+                 & (recs["generated_at"] >= cutoff - pd.Timedelta(days=7))]
+            .sort_values("generated_at").drop_duplicates("symbol", keep="last"))
+
+
+_MOVER_BUCKETS = ("matched", "opposite", "rated_hold", "no_coverage", "flat_outcome")
+
+
+def canonical_signal_accuracy(events: pd.DataFrame) -> pd.DataFrame:
+    """Grade the canonical pre-open call as matched, opposite, or not flagged per date."""
+    if not len(events):
+        return pd.DataFrame()
+    recs = _load_preopen_recommendations(events["trade_date"].unique())
+    if recs is None:
+        return pd.DataFrame()
 
     truth = events[["trade_date", "symbol", "fwd_ret"]].drop_duplicates(
         ["trade_date", "symbol"])
     rows = []
     for td, actual in truth.groupby("trade_date"):
-        cutoff = pd.Timestamp(str(td), tz="UTC") + pd.Timedelta(hours=3, minutes=45)
-        snap = (recs[(recs["generated_at"] < cutoff)
-                     & (recs["generated_at"] >= cutoff - pd.Timedelta(days=7))]
-                .sort_values("generated_at").drop_duplicates("symbol", keep="last"))
+        snap = _preopen_snapshot(recs, td)
         # No snapshot means the historical system did not yet exist (or its audit data is
         # unavailable); it does NOT mean every mover was consciously classified Hold.  The old
         # report counted 24 pre-inception dates as 100% not_flagged and materially understated
@@ -635,51 +682,97 @@ def canonical_signal_accuracy(events: pd.DataFrame) -> pd.DataFrame:
         if not len(snap):
             continue
         calls = dict(zip(snap["symbol"], snap["classification"]))
-        matched = opposite = not_flagged = 0
-        # not_flagged merged three causes that need OPPOSITE work: a rated Hold is a
-        # calibration miss (we looked and said nothing), an absent snapshot row is a coverage
-        # miss (we never looked), and a flat tape is not a miss at all. Reported alongside the
-        # sum, which stays `not_flagged` so existing consumers are unchanged.
-        rated_hold = no_coverage = flat_outcome = 0
+        # not_flagged = rated_hold + no_coverage + flat_outcome (see _mover_bucket), kept as one
+        # column beside its three causes so existing consumers are unchanged.
+        counts = dict.fromkeys(_MOVER_BUCKETS, 0)
         examples = {"matched": [], "opposite": [], "not_flagged": []}
         for row in actual.itertuples(index=False):
-            call = str(calls.get(row.symbol, "")).strip().lower()
-            # Symmetric on purpose: the sell side used to match only the exact string "sell",
-            # so every "strong sell" scored side == 0 and was graded as "no opinion". Strong
-            # Sell is the largest directional bucket in the live ranking (204 of 2,354 on
-            # 2026-10-24), so the whole high-conviction short book was absent from
-            # matched/opposite and inflated not_flagged.
-            side = 1 if call in {"buy", "strong buy"} else (-1 if call in {"sell", "strong sell"} else 0)
-            realized = 1 if float(row.fwd_ret) > 0 else (-1 if float(row.fwd_ret) < 0 else 0)
-            if side == 0 or realized == 0:
-                not_flagged += 1
-                bucket = "not_flagged"
-                if realized == 0:
-                    flat_outcome += 1
-                elif row.symbol not in calls:
-                    no_coverage += 1
-                else:
-                    rated_hold += 1
-            elif side == realized:
-                matched += 1
-                bucket = "matched"
-            else:
-                opposite += 1
-                bucket = "opposite"
-            if len(examples[bucket]) < 5:
-                examples[bucket].append({"symbol": row.symbol, "return_pct": round(float(row.fwd_ret), 2),
+            # Both strong tiers are directional on their side: _call_side is the one polarity map.
+            bucket = _mover_bucket(row.symbol, calls, float(row.fwd_ret))
+            counts[bucket] += 1
+            ex_key = bucket if bucket in ("matched", "opposite") else "not_flagged"
+            if len(examples[ex_key]) < 5:
+                examples[ex_key].append({"symbol": row.symbol, "return_pct": round(float(row.fwd_ret), 2),
                                          "call": calls.get(row.symbol)})
+        matched, opposite = counts["matched"], counts["opposite"]
+        not_flagged = counts["rated_hold"] + counts["no_coverage"] + counts["flat_outcome"]
         n = len(actual)
         rows.append({
             "event_date": str(td), "matched": matched, "opposite": opposite,
             "not_flagged": not_flagged, "n_movers": n,
-            "rated_hold": rated_hold, "no_coverage": no_coverage, "flat_outcome": flat_outcome,
+            "rated_hold": counts["rated_hold"], "no_coverage": counts["no_coverage"],
+            "flat_outcome": counts["flat_outcome"],
             "snapshot_symbols": int(len(snap)),
             "snapshot_asof": snap["generated_at"].max().isoformat(),
             "matched_pct": round(100 * matched / n, 2),
             "opposite_pct": round(100 * opposite / n, 2),
             "not_flagged_pct": round(100 * not_flagged / n, 2),
             "examples": examples,
+        })
+    return pd.DataFrame(rows)
+
+
+def call_confusion(events: pd.DataFrame, eligible: pd.DataFrame) -> pd.DataFrame:
+    """Type I and Type II for the same pre-open snapshot, one row per date.
+
+    canonical_signal_accuracy starts from the day's movers, so it can only see misses.  This
+    grades EVERY directional call in the snapshot against the realised close-to-close return
+    (`fwd_ret`, the column the movers carry) of the whole point-in-time eligible universe, and
+    puts each precision beside its null: the share of that universe that moved the called way.
+    A snapshot symbol outside the graded universe is not graded (snapshot_symbols -
+    graded_symbols shows how many).  Dates with no snapshot are excluded, as in
+    canonical_signal_accuracy.
+    """
+    if eligible is None or not len(eligible):
+        return pd.DataFrame()
+    universe = eligible[["trade_date", "symbol", "fwd_ret"]].dropna(subset=["fwd_ret"]).copy()
+    universe["trade_date"] = universe["trade_date"].astype(str)
+    universe = universe.drop_duplicates(["trade_date", "symbol"])
+    recs = _load_preopen_recommendations(universe["trade_date"].unique())
+    if recs is None:
+        return pd.DataFrame()
+    mover_frame = (events[["trade_date", "symbol"]].astype(str) if len(events)
+                   else pd.DataFrame(columns=["trade_date", "symbol"]))
+    movers_by_date = mover_frame.groupby("trade_date")["symbol"].unique().to_dict()
+
+    def rate(k, n):
+        return round(k / n, 4) if n else float("nan")
+
+    rows = []
+    for td, uni in universe.groupby("trade_date"):
+        snap = _preopen_snapshot(recs, td)
+        if not len(snap):
+            continue
+        calls = dict(zip(snap["symbol"], snap["classification"]))
+        ret = dict(zip(uni["symbol"], uni["fwd_ret"].astype(float)))
+        graded = [(ret[s], _call_side(c)) for s, c in calls.items() if s in ret]
+        # A realised 0 is neither a hit nor a miss: it stays in the call count (the precision
+        # denominator) and in universe_symbols (the base-rate denominator), so a precision and
+        # its null are ratios over the same kind of population.
+        long_r = [r for r, side in graded if side == 1]
+        short_r = [r for r, side in graded if side == -1]
+        long_hits = sum(r > 0 for r in long_r)
+        short_hits = sum(r < 0 for r in short_r)
+        movers = [s for s in movers_by_date.get(td, []) if s in ret]
+        b = dict.fromkeys(_MOVER_BUCKETS, 0)
+        for s in movers:
+            b[_mover_bucket(s, calls, ret[s])] += 1
+        n_uni = len(ret)
+        rows.append({
+            "event_date": str(td),
+            "long_calls": len(long_r), "long_hits": int(long_hits),
+            "long_precision": rate(long_hits, len(long_r)),
+            "universe_up_rate": rate(sum(r > 0 for r in ret.values()), n_uni),
+            "short_calls": len(short_r), "short_hits": int(short_hits),
+            "short_precision": rate(short_hits, len(short_r)),
+            "universe_down_rate": rate(sum(r < 0 for r in ret.values()), n_uni),
+            "movers": len(movers),
+            "movers_called_right": b["matched"], "movers_called_wrong": b["opposite"],
+            "movers_rated_hold": b["rated_hold"], "movers_no_row": b["no_coverage"],
+            "movers_flat": b["flat_outcome"],
+            "snapshot_symbols": int(len(snap)), "graded_symbols": len(graded),
+            "universe_symbols": n_uni,
+            "snapshot_asof": snap["generated_at"].max().isoformat(),
         })
     return pd.DataFrame(rows)
 
@@ -710,7 +803,8 @@ def ensure_results_schema(con) -> None:
 
 
 def persist_results(con, run_at: str, ic: pd.DataFrame, lift: pd.DataFrame,
-                    hits: pd.DataFrame, accuracy: pd.DataFrame) -> int:
+                    hits: pd.DataFrame, accuracy: pd.DataFrame,
+                    confusion: pd.DataFrame | None = None) -> int:
     cur = con.cursor()
     n = 0
     # NOTE: `df or pd.DataFrame()` is ambiguous for DataFrames (ValueError on bool());
@@ -761,6 +855,19 @@ def persist_results(con, run_at: str, ic: pd.DataFrame, lift: pd.DataFrame,
                          "examples": r["examples"],
                      })))
         n += 1
+    for _, r in (confusion if confusion is not None and len(confusion) else pd.DataFrame()).iterrows():
+        # Every column goes to detail_json, so a new grader column cannot silently not persist.
+        # NaN (no calls on a side) is stored as null: NaN is not valid JSON.
+        detail = {k: (None if isinstance(v, float) and v != v else v)
+                  for k, v in r.items() if k != "event_date"}
+        value = r["long_precision"]
+        cur.execute(translate("INSERT INTO mover_study_results "
+                              "(run_at, study_kind, class_name, metric, value, n_obs, detail_json) "
+                              "VALUES (?,?,?,?,?,?,?)"),
+                    (run_at, "call_confusion", str(r["event_date"]), "long_precision",
+                     None if pd.isna(value) else float(value), int(r["graded_symbols"]),
+                     json.dumps(detail, default=lambda o: o.item())))
+        n += 1
     con.commit()
     return n
 
@@ -792,7 +899,8 @@ def _md_table(df: pd.DataFrame, max_rows: int = 15) -> str:
 
 
 def write_report(run_at: str, ev: pd.DataFrame, ic: pd.DataFrame, lift: pd.DataFrame,
-                  hits: pd.DataFrame, accuracy: pd.DataFrame, out_path: str) -> None:
+                  hits: pd.DataFrame, accuracy: pd.DataFrame, out_path: str,
+                  confusion: pd.DataFrame | None = None) -> None:
     event_counts = (
         _df_to_markdown(ev.groupby("source").size().rename("events").to_frame(), index=True)
         if len(ev) else "_none_"
@@ -804,6 +912,19 @@ def write_report(run_at: str, ev: pd.DataFrame, ic: pd.DataFrame, lift: pd.DataF
     event_dates = int(ev["trade_date"].nunique()) if len(ev) else 0
     assessed_dates = int(accuracy["event_date"].nunique()) if len(accuracy) else 0
     unassessable_dates = max(0, event_dates - assessed_dates)
+    confusion = confusion if confusion is not None else pd.DataFrame()
+    if len(confusion):
+        long_d = confusion[confusion["long_calls"] > 0]
+        short_d = confusion[confusion["short_calls"] > 0]
+        confusion_note = (
+            f"Long precision beat its null (`universe_up_rate`) on "
+            f"**{int((long_d['long_precision'] > long_d['universe_up_rate']).sum())}** of "
+            f"{len(long_d)} dates with a long call; short precision beat `universe_down_rate` on "
+            f"**{int((short_d['short_precision'] > short_d['universe_down_rate']).sum())}** of "
+            f"{len(short_d)} dates with a short call. Snapshots were unavailable for "
+            f"{max(0, event_dates - len(confusion))} of {event_dates} event dates (excluded).")
+    else:
+        confusion_note = "_no trustworthy pre-open recommendation snapshots_"
     lines = [
         "# Mover Reverse-Engineering Study", "",
         f"Run: `{run_at}`  |  events analyzed: **{len(ev):,}** across "
@@ -829,6 +950,14 @@ def write_report(run_at: str, ev: pd.DataFrame, ic: pd.DataFrame, lift: pd.DataF
         "and not flagged. Hold/missing calls are not flagged; only an actionable call in the "
         "wrong realized direction is opposite. Directional precision excludes Hold/missing but "
         "is shown beside total coverage so it cannot be presented as whole-universe accuracy.", "",
+        "## Pre-open call confusion — every call vs the whole universe, by date", "",
+        confusion_note, "",
+        _md_table(confusion, max_rows=100), "",
+        "Type I (a call that did not move its way) and Type II (a mover we missed) from the same "
+        "snapshot. Each precision sits beside the share of the graded universe that moved that "
+        "way on that date; a precision at or below its null is no evidence of skill. Flat "
+        "returns stay in both denominators. `graded_symbols` = snapshot names with a realised "
+        "return in the eligible universe.", "",
         "### How to read this",
         "- `mover_cohort` IC describes direction within already-selected movers; "
         "`eligible_universe` IC tests the complete point-in-time liquid equity comparison set.",
@@ -923,12 +1052,14 @@ def main():
     stage("engine hit-rate computed")
     accuracy = canonical_signal_accuracy(ev)
     stage("canonical accuracy computed")
+    confusion = call_confusion(ev, eligible)
+    stage("call confusion computed")
 
     con = connect()
     ensure_results_schema(con)
-    persisted = persist_results(con, run_at, ic, lift, hits, accuracy)
+    persisted = persist_results(con, run_at, ic, lift, hits, accuracy, confusion)
     con.close()
-    write_report(run_at, ev, ic, lift, hits, accuracy, args.report)
+    write_report(run_at, ev, ic, lift, hits, accuracy, args.report, confusion)
 
     print(f"[study] persisted {persisted} result rows; report -> {args.report} "
           f"({time.time() - t0:.1f}s)")
