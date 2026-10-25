@@ -618,14 +618,30 @@ def canonical_signal_accuracy(events: pd.DataFrame) -> pd.DataFrame:
             continue
         calls = dict(zip(snap["symbol"], snap["classification"]))
         matched = opposite = not_flagged = 0
+        # not_flagged merged three causes that need OPPOSITE work: a rated Hold is a
+        # calibration miss (we looked and said nothing), an absent snapshot row is a coverage
+        # miss (we never looked), and a flat tape is not a miss at all. Reported alongside the
+        # sum, which stays `not_flagged` so existing consumers are unchanged.
+        rated_hold = no_coverage = flat_outcome = 0
         examples = {"matched": [], "opposite": [], "not_flagged": []}
         for row in actual.itertuples(index=False):
             call = str(calls.get(row.symbol, "")).strip().lower()
-            side = 1 if call in {"buy", "strong buy"} else (-1 if call == "sell" else 0)
+            # Symmetric on purpose: the sell side used to match only the exact string "sell",
+            # so every "strong sell" scored side == 0 and was graded as "no opinion". Strong
+            # Sell is the largest directional bucket in the live ranking (204 of 2,354 on
+            # 2026-10-24), so the whole high-conviction short book was absent from
+            # matched/opposite and inflated not_flagged.
+            side = 1 if call in {"buy", "strong buy"} else (-1 if call in {"sell", "strong sell"} else 0)
             realized = 1 if float(row.fwd_ret) > 0 else (-1 if float(row.fwd_ret) < 0 else 0)
             if side == 0 or realized == 0:
                 not_flagged += 1
                 bucket = "not_flagged"
+                if realized == 0:
+                    flat_outcome += 1
+                elif row.symbol not in calls:
+                    no_coverage += 1
+                else:
+                    rated_hold += 1
             elif side == realized:
                 matched += 1
                 bucket = "matched"
@@ -639,6 +655,7 @@ def canonical_signal_accuracy(events: pd.DataFrame) -> pd.DataFrame:
         rows.append({
             "event_date": str(td), "matched": matched, "opposite": opposite,
             "not_flagged": not_flagged, "n_movers": n,
+            "rated_hold": rated_hold, "no_coverage": no_coverage, "flat_outcome": flat_outcome,
             "snapshot_symbols": int(len(snap)),
             "snapshot_asof": snap["generated_at"].max().isoformat(),
             "matched_pct": round(100 * matched / n, 2),
@@ -717,6 +734,12 @@ def persist_results(con, run_at: str, ic: pd.DataFrame, lift: pd.DataFrame,
                          "not_flagged": int(r["not_flagged"]),
                          "opposite_pct": float(r["opposite_pct"]),
                          "not_flagged_pct": float(r["not_flagged_pct"]),
+                         # The three causes behind not_flagged. Without these every consumer
+                         # reads one 77% bucket and cannot tell a calibration miss (rated Hold)
+                         # from a coverage miss (no snapshot row) from a flat tape.
+                         "rated_hold": int(r["rated_hold"]),
+                         "no_coverage": int(r["no_coverage"]),
+                         "flat_outcome": int(r["flat_outcome"]),
                          "examples": r["examples"],
                      })))
         n += 1

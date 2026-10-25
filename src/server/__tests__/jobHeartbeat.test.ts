@@ -146,6 +146,53 @@ describe('getLateJobs', () => {
 describe('getStaleJobs', () => {
   beforeEach(() => { mockRows.length = 0; });
 
+  // 2026-10-25 (AF-20261025-07): a JOB_REGISTRY entry with NEITHER cronPattern NOR everyMs sits
+  // in a monitoring dead zone -- getLateJobs() skips it ("event-driven, no schedule to be late
+  // against") and this function skipped it too ("covered by cron-aware getLateJobs() instead"),
+  // which is false for exactly those entries. Measured live 2026-10-25: `dl-retrain-emergency`
+  // had sat last_status='failed' for 61 days and `ai-signals` had not run for 78, with no
+  // instrument able to say so. Per bugs-monitoring.md ("failure status wins independently of
+  // freshness") a TERMINAL FAILURE is the honest signal for an event-driven job; staleness is
+  // not, because a job nothing triggered is legitimately idle and alerting on that is the
+  // "check that can never pass" anti-pattern. Uses the mocked registry's own 'event-job'
+  // (no schedule) and 'daily-job' (scheduled). Negative control: the first case fails against
+  // the blanket `if (registryNames.has(r.job_name)) continue`.
+  it('flags an event-driven registry job whose last run FAILED and has not succeeded since', async () => {
+    vi.setSystemTime(new Date('2026-10-25T07:00:00Z'));
+    mockRows.push({
+      job_name: 'event-job', last_status: 'failed',
+      last_success_at: new Date('2026-08-14T07:00:00Z').getTime(),
+      last_error: 'SyntaxError', last_alert_sent_at: null,
+    });
+    const stale = await getStaleJobs();
+    vi.useRealTimers();
+    expect(stale.map(s => s.job)).toContain('event-job');
+  });
+
+  it('does NOT flag an event-driven registry job that is merely idle (last run succeeded)', async () => {
+    vi.setSystemTime(new Date('2026-10-25T07:00:00Z'));
+    mockRows.push({
+      job_name: 'event-job', last_status: 'success',
+      last_success_at: new Date('2026-08-08T07:00:00Z').getTime(),
+      last_error: null, last_alert_sent_at: null,
+    });
+    const stale = await getStaleJobs();
+    vi.useRealTimers();
+    expect(stale.map(s => s.job)).not.toContain('event-job');
+  });
+
+  it('still leaves a SCHEDULED registry job to getLateJobs even when its last run failed', async () => {
+    vi.setSystemTime(new Date('2026-10-25T07:00:00Z'));
+    mockRows.push({
+      job_name: 'daily-job', last_status: 'failed',
+      last_success_at: new Date('2026-08-08T07:00:00Z').getTime(),
+      last_error: 'boom', last_alert_sent_at: null,
+    });
+    const stale = await getStaleJobs();
+    vi.useRealTimers();
+    expect(stale.map(s => s.job)).not.toContain('daily-job');
+  });
+
   it('does not flag a data-quality check id even with last_success_at null', async () => {
     // markAlerted() inserts a job_heartbeat row keyed by DQ check id to dedupe Telegram
     // alerts; recordHeartbeat() is never called for these ids so last_success_at stays

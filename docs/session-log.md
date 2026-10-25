@@ -11772,3 +11772,81 @@ AF-20261021-02/-04/-08/-09 measured and closed or answered; AF-20261021-03 reade
 - **AF-20261025-01 (new)**: `intraday_ranker` W_SCREENER=0.40 has multiplied a constant 50.0 since 2026-08-12. The categories the membership carries (`intraday`/`technical`/`momentum`) are all absent from CAT_BASE_WT. Root cause proved by calling the real function on live membership. Repair is EVIDENCE-gated and cannot be replayed retrospectively: the three membership tables have no date column.
 
 No source changed this session — measurement and ledger only.
+
+## 2026-10-25 — whole-system audit: two grader defects, two guards that could not fail, one unbuildable HEAD
+
+Full `weekend-audit` sweep (lanes 0-8) requested as an end-to-end audit of code, pipelines,
+confidence scoring, the learning loop, factor coverage and the docs. Four defects fixed with
+negative controls; four findings left open with stated reasons. New ledger rows AF-20261025-02..09
+(note AF-20261025-20..26 the same day are a concurrent Codex session's, not this one's).
+
+**Fixed and verified**
+
+- **AF-20261025-02 — the mover grader counted every Strong Sell as "no opinion."**
+  `reverse_engineering_study.canonical_signal_accuracy:624` mapped `{"buy", "strong buy"}` to +1
+  but only the exact string `"sell"` to -1, so `"strong sell"` scored `side == 0`. Measured live
+  over the graded window since 2026-09-01: of 54,034 graded mover-days, **5,128 carried a Strong
+  Sell call and every one was filed as no-opinion — 31.6% of all 16,232 directional calls**, a
+  bucket nearly the size of the whole long book (5,797 buy-side), and Strong Sell is the largest
+  directional bucket the ranker emits (204 of 2,354). Recurrence of the ternary-polarity class,
+  now automated as `check_asymmetric_classification_polarity` (verified to fire on the pre-fix
+  line, stay silent on the fixed one, on a single-label test, and on a `polarity-exempt:` marker;
+  clean over 797 py + 153 ts files).
+- **AF-20261025-03 — the same grader's `not_flagged` merged three causes** needing opposite work:
+  31,261 rated Hold (calibration), 6,541 no-row (coverage), 5,128 Strong Sell (the above). Split
+  into `rated_hold`/`no_coverage`/`flat_outcome` beside the unchanged sum, **and wired through
+  `persist_results`'s `detail_json`** — without that the fix would have changed only the in-memory
+  frame while every consumer kept the old shape. A source-derived parity test now fails if a
+  future count column does not reach the database.
+- **AF-20261025-04 — `doc:numbers:check` printed a row it never asserted.** The `py.length` row
+  carried a `[CLAUDE.md intro]` label with no `expect()` call, so CLAUDE.md's count drifted
+  791 -> 797 while the guard reported "All checked doc numbers match". Added the assertion, and
+  replaced `hay.includes(needle)` with a digit-boundary regex (`"89"` was satisfied by `"891"`).
+- **AF-20261025-07 — two exclusions each deferring to the other left 2 of 75 registry jobs
+  monitored by nothing.** `getLateJobs()` skips an entry with no schedule; `getStaleJobs()` skipped
+  the same names as "covered by getLateJobs instead", which is false for exactly those. `ai-signals`
+  had not run in 78 days; `dl-retrain-emergency` had sat `last_status='failed'` for 61. Fixed to
+  report an event-driven entry only on a terminal failure — not on staleness, since an untriggered
+  job is legitimately idle and alerting on that is the "check that can never pass" anti-pattern.
+  **In tree only; needs `pm2 restart bharat-server`.**
+
+**Open, with reasons**
+
+- **AF-20261025-05 — `main` does not build from a clean checkout.** `git ls-tree -r HEAD` has **0**
+  files under `src/components/v7/` while the working tree has **16**, and committed
+  `V1Routes.tsx` imports 6 of them and registers 5 routes. Local `tsc`, `vitest` and `npm run build`
+  pass *only* because the untracked files are present. Introduced by `64dec1b3` (2026-10-23). Needs
+  a user decision: commit v7 (a third frontend surface, which CLAUDE.md forbids) or revert the import.
+- **AF-20261025-06 — 82 commits exist only on this machine.** `origin/main` is 11 days behind and
+  its last CI run failed on a TS error since fixed locally. CI has no `npm run build` step, so even
+  green CI would not have caught AF-20261025-05.
+- **AF-20261025-08 — the strongest measured factors are collected but unwired** (EVIDENCE).
+  `f_cost_of_carry` IC **+0.1884** (81 independent dates) and `f_preopen_gap_pct` **-0.1487** (115);
+  everything else <= 0.02, including a well-powered null on `f_delivery_pct` (+0.0025, 256 dates,
+  210k obs). `unified_ranker.py` has 0 references to `cost_of_carry` and `feature_store`'s 112
+  columns hold no basis/carry/pre-open column, while `fno_rollover` and `ndtv_fno_basis` already
+  carry the data daily — a wiring gap, not an acquisition gap. **Caveat found late and recorded:**
+  the non-pre-open factors are graded against `fwd_ret` (close-to-close, gap included), so the
+  decisive first step is re-grading carry against `intraday_ret`, not a backtest.
+- **AF-20261025-09 — conviction is not a confidence** (EVIDENCE). `conviction_level` is a
+  one-to-one relabeling of `classification`, so the S_ELITE tier is 3.5:1 bearish and averages
+  score 30.8 vs D_MARGINAL's 51.4. Realised 5d outcome is **non-monotone** in `signal_score`:
+  Q4 (70-77) is the worst bucket at -0.788%/35.6% win, Q2 (20-44) the only positive at
+  +0.372%/47.6% — so raising a confidence threshold selects into the worst names. Agrees in sign
+  with the live Brier reading (5d 0.2560 vs base 0.2168; 15d 0.2714 vs 0.2138). Power stated, not
+  glossed: 87 dates at h=5 = ~17 independent periods, below `MIN_DATES_RELIABLE` 20, so not a
+  significance claim. `signal_score` is NULL on 71.8-76.7% of graded rows.
+
+**Lane verdicts** — 0 ⚠️ (v7 + unpushed) · 1 ⚠️ (gates pass; `backlog:check` red on another
+session's 195 unmigrated items) · 2 ✅ (all five services 200) · 3 ✅ (DQ 207/213, **0 critical**;
+no silent-truncation events) · 4 ✅ (31 connections, no long transactions, no bloat >100k dead,
+`schema:drift` clean) · 5 skipped · 6 skipped (rotation not run; superseded by the depth of lanes
+0-4) · 7 ✅ · 8 ✅.
+
+**Verification note worth keeping:** the full `vitest` run reported `6 failed` while exiting **0**.
+None were attributable to this session — 3 were in a test file a concurrent agent modified *during*
+the run (14:00, mid-flight), 1 was that agent's new untracked test, and 2 passed in isolation
+(13/13, 4/4), i.e. database contention from the concurrent pytest run. This change was instead
+verified on the 5 suites importing the edited module (150/150) and the study's own file (18/18).
+Read the summary line, not the exit code, and attribute before owning.
+

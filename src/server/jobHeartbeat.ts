@@ -149,6 +149,14 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
     await ensureTable();
     const now = Date.now();
     const registryNames = new Set(JOB_REGISTRY.map(j => j.jobName));
+    // AF-20261025-07: getLateJobs() can only judge an entry that HAS a schedule -- its own
+    // final branch is `continue; // event-driven, no schedule to be late against`. So for an
+    // entry with neither cronPattern nor everyMs, "covered by getLateJobs() instead" below is
+    // false, and the two exclusions together left `ai-signals` (78 days silent) and
+    // `dl-retrain-emergency` (61 days terminal-failed) with no instrument able to report them.
+    const eventDrivenRegistryNames = new Set(
+      JOB_REGISTRY.filter(j => !j.cronPattern && !j.everyMs).map(j => j.jobName),
+    );
     const monitorScriptIds = new Set(MONITOR_SCRIPTS.map(s => s.id as string));
     const dataQualityIds = new Set(DATA_QUALITY_CHECKS.map(c => c.id));
     // 'deploy-drift' and 'port-drift': their pm2 cron_restart apps were deliberately removed
@@ -180,11 +188,19 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
       'live-screener-ml-train',
     ]);
 
-    const rows = await dbAll('SELECT job_name, last_success_at FROM job_heartbeat') as
-      Array<{ job_name: string; last_success_at: number | null }>;
+    const rows = await dbAll('SELECT job_name, last_status, last_success_at FROM job_heartbeat') as
+      Array<{ job_name: string; last_status: string | null; last_success_at: number | null }>;
     const stale: Array<{ job: string; hoursStale: number | null }> = [];
     for (const r of rows) {
-      if (registryNames.has(r.job_name)) continue; // covered by cron-aware getLateJobs() instead
+      if (registryNames.has(r.job_name)) {
+        // A SCHEDULED entry is genuinely covered by cron-aware getLateJobs(); leave it there.
+        if (!eventDrivenRegistryNames.has(r.job_name)) continue;
+        // An EVENT-DRIVEN entry is covered by nothing. Staleness is still the wrong question
+        // for it -- nothing triggered it is a legitimate idle state, and alerting on that is
+        // the "check that can never pass" anti-pattern -- so report it only on a TERMINAL
+        // FAILURE, then fall through to the ordinary last-success age math below.
+        if ((r.last_status ?? '').toLowerCase() !== 'failed') continue;
+      }
       if (monitorScriptIds.has(r.job_name)) continue; // covered by getSystemStatus() instead
       // DQ check ids: since 2026-09-20 the sweep itself stamps these rows live
       // (dataQualityChecks.ts persistCheckHeartbeat -- liveness only, deliberately NO

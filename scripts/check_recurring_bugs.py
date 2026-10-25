@@ -920,6 +920,49 @@ def check_job_step_catch_console(path: Path, text: str) -> list[str]:
     return findings
 
 
+# Canonical `unified_recommendations.classification` values. A directional bucketing that names
+# one pole's "strong" tier and not the other silently files the missing tier as "no opinion".
+_STRONG_BUY = "strong buy"
+_STRONG_SELL = "strong sell"
+
+
+def check_asymmetric_classification_polarity(path: Path, text: str) -> list[str]:
+    """Flag a direction mapping that names one pole's 'strong' tier but not the other's.
+
+    Recurrence of the documented ternary-polarity class (bugs-jobs-runtime.md: "a ternary
+    branching on `== 'bullish'` silently treats every OTHER value as the opposite pole").
+    Live instance 2026-10-25: `reverse_engineering_study.canonical_signal_accuracy` mapped
+    `{"buy", "strong buy"}` to +1 but only the exact string `"sell"` to -1, so all 5,128
+    Strong Sell calls over the graded window scored 0 and were reported as "not flagged" --
+    31.6% of every directional call the grader saw.
+
+    Signature: a single expression naming BOTH poles, where exactly one carries its strong
+    tier. Requiring both poles keeps this off the many display-layer sites that legitimately
+    test a single vendor label.
+    """
+    findings: list[str] = []
+    for i, line in enumerate(text.splitlines()):
+        if "swallow-ok" in line or "polarity-exempt" in line:
+            continue
+        lits = {m.lower() for m in re.findall(r"""['"]([^'"\n]{1,24})['"]""", line)}
+        if not ({"buy", "sell"} & lits):
+            continue
+        has_sb, has_ss = _STRONG_BUY in lits, _STRONG_SELL in lits
+        if has_sb == has_ss:
+            continue
+        named, missing = (_STRONG_BUY, _STRONG_SELL) if has_sb else (_STRONG_SELL, _STRONG_BUY)
+        # Both poles must be in play, or this is a single-label test, not a polarity map.
+        if not ({"buy", "sell"} <= lits):
+            continue
+        findings.append(
+            f"{_display_path(path)}:{i + 1}: directional mapping names '{named}' but not "
+            f"'{missing}', so every '{missing}' row falls through to the neutral branch and is "
+            f"counted as 'no opinion'. Match both strong tiers symmetrically. If this really is "
+            f"a one-sided test, add a `polarity-exempt: <reason>` marker on the line."
+        )
+    return findings
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("paths", nargs="*", help="specific files to check")
@@ -956,12 +999,14 @@ def main() -> int:
         all_findings.extend(check_information_schema_missing_table_schema(path, text))
         all_findings.extend(check_degraded_print_to_stdout(path, text, runpython_scripts))
         all_findings.extend(check_screener_catalog_exact_case_source(path, text))
+        all_findings.extend(check_asymmetric_classification_polarity(path, text))
 
     for path in ts_files:
         ts_text = path.read_text(encoding="utf-8", errors="ignore")
         all_findings.extend(check_skip_not_success(path, ts_text))
         all_findings.extend(check_job_step_catch_console(path, ts_text))
         all_findings.extend(check_screener_catalog_exact_case_source(path, ts_text))
+        all_findings.extend(check_asymmetric_classification_polarity(path, ts_text))
 
     if not args.skip_live_datasource_check:
         all_findings.extend(check_missing_live_datasource_test(py_files))

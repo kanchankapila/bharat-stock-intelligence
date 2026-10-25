@@ -124,10 +124,19 @@ if (CHECK) {
   const claude = readFileSync(join(ROOT, 'CLAUDE.md'), 'utf8');
   const context = readFileSync(join(ROOT, 'CONTEXT.md'), 'utf8');
   const stale = [];
+  // Digit-boundary match, not a bare substring: `includes('89')` is satisfied by "891" or
+  // "1890" anywhere in the doc, so a drifted figure could pass on an unrelated number that
+  // happens to contain it. A number may legitimately be written with thousands separators,
+  // so allow those inside the needle's own digits only.
   const expect = (hay, needle, label) => {
-    if (needle !== null && !hay.includes(needle)) stale.push(`${label}: expected "${needle}"`);
+    if (needle === null) return;
+    const pattern = new RegExp(`(?<![\\d,.])${String(needle).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\d,.])`);
+    if (!pattern.test(hay)) stale.push(`${label}: expected "${needle}"`);
   };
   expect(claude, String(pyNonTest.length), 'CLAUDE.md non-test Python module count');
+  // Was printed with a [CLAUDE.md intro] label but never asserted, so CLAUDE.md's figure
+  // drifted 791 -> 797 while this check reported "All checked doc numbers match".
+  expect(claude, String(py.length), 'CLAUDE.md total .py file count (incl. tests)');
   expect(claude, String(fetchers.length), 'CLAUDE.md fetcher count');
   expect(context, String(fetchers.length), 'CONTEXT.md fetcher count');
   expect(context, String(jobRegistry), 'CONTEXT.md JOB_REGISTRY entries');

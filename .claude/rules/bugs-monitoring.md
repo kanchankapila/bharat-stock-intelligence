@@ -476,6 +476,26 @@ Fixed and immunized in AF-20260929-09; `bharat_alpha/tests/test_legacy_bridge.py
   against the session list WITHOUT today until the closer's slot plus grace has passed, then apply the
   full count, so a closer that never ran is still caught. Query `data_quality_history` for the minute-of-
   day of every fail before calling a recurring red a real outage. AF-20261008-46.
+- **Two exclusions that each defer to the other leave a job monitored by nothing, and the comments
+  on both read as correct (2026-10-25, AF-20261025-07).** `getLateJobs()` ends
+  `continue; // event-driven, no schedule to be late against`; `getStaleJobs()` skipped the same
+  names under `// covered by cron-aware getLateJobs() instead`. Both sentences are true of a
+  SCHEDULED entry and the second is false of exactly the entries the first one drops — a
+  `JOB_REGISTRY` entry with neither `cronPattern` nor `everyMs`. Measured blast radius was exactly
+  **2 of 75** entries, and both were in a bad state nobody could see: `ai-signals` 78 days without
+  a run, `dl-retrain-emergency` sitting `last_status='failed'` for 61 days.
+  **Tell, and it is a one-liner worth running after any change to either function:** derive the set
+  of registry entries that satisfy NEITHER evaluator's precondition
+  (`JOB_REGISTRY.filter(j => !j.cronPattern && !j.everyMs)`) and check that something reports them.
+  More generally, whenever an exclusion defers to another instrument, the exclusion's predicate must
+  be the other instrument's ACCEPTANCE predicate, not merely membership in the same registry.
+  **And the fix is not "also apply staleness":** for an event-driven job nothing triggered, idleness
+  is correct, so a staleness alert is this file's own "check that can never pass". The honest signal
+  is a terminal `last_status='failed'` — failure status wins independently of freshness. Guarded by
+  three cases in `jobHeartbeat.test.ts` (failed event-driven flagged, idle event-driven NOT flagged,
+  scheduled still left to `getLateJobs`); only the first fails pre-fix, which is what makes the other
+  two load-bearing rather than decorative.
+
 - **A registry whose rows can only say "working" is a list, not a health record.**
   `market_endpoint_registry` held 3,408 of 3,408 `is_working = true`, last validated 2026-09-13. Report
   `validated_at` age next to any status read from it, and re-probe a sample on a schedule so a negative

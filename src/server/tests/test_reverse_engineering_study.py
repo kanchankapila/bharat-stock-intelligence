@@ -251,3 +251,83 @@ def test_momentum_materialized_benchmark_returns_identical_rows():
     _, before = _momentum_plan_and_rows(unmaterialized)
     _, after = _momentum_plan_and_rows(study.FACTOR_SQL["momentum"])
     assert before == after and len(after) == 300
+
+
+def test_canonical_accuracy_grades_strong_sell_as_a_directional_call(monkeypatch):
+    """A Strong Sell on a name that fell is a MATCHED call, not 'not flagged'.
+
+    The buy side has always matched both tiers ({"buy", "strong buy"}) while the sell side
+    matched only the exact string "sell", so every Strong Sell fell through to side == 0 and
+    was counted as 'no opinion'. Strong Sell is the largest directional bucket in the live
+    ranking (204 of 2,354 on 2026-10-24), so the omission silently removed the whole
+    high-conviction short book from matched/opposite and inflated not_flagged.
+    """
+    recs = pd.DataFrame([
+        {"symbol": "SSDOWN", "classification": "Strong Sell", "generated_at": "2026-10-04T17:00:00Z"},
+        {"symbol": "SSUP", "classification": "Strong Sell", "generated_at": "2026-10-04T17:00:00Z"},
+        {"symbol": "SBDOWN", "classification": "Strong Buy", "generated_at": "2026-10-04T17:00:00Z"},
+    ])
+    monkeypatch.setattr(study, "get_engine", lambda: object())
+    monkeypatch.setattr(pd, "read_sql", lambda *_args, **_kwargs: recs.copy())
+    events = pd.DataFrame([
+        {"trade_date": "2026-10-05", "symbol": "SSDOWN", "fwd_ret": -6.0},   # Strong Sell, fell  -> matched
+        {"trade_date": "2026-10-05", "symbol": "SSUP", "fwd_ret": 4.0},      # Strong Sell, rose  -> opposite
+        {"trade_date": "2026-10-05", "symbol": "SBDOWN", "fwd_ret": -3.0},   # Strong Buy, fell   -> opposite
+    ])
+    row = study.canonical_signal_accuracy(events).iloc[0]
+    assert (row["matched"], row["opposite"], row["not_flagged"]) == (1, 2, 0)
+
+
+def test_canonical_accuracy_splits_not_flagged_into_its_three_causes(monkeypatch):
+    """'Not flagged' merges a rated Hold, an absent row and a flat tape. They need opposite work.
+
+    A rated Hold on a mover is a CALIBRATION miss (we looked and said nothing); a symbol with no
+    snapshot row is a COVERAGE miss (we never looked); a flat outcome is not a miss at all. The
+    merged bucket read 77% on 2026-10-23 and sent every reader to the wrong fix. Keeps
+    `not_flagged` as the sum so existing consumers are unchanged.
+    """
+    recs = pd.DataFrame([
+        {"symbol": "HELD", "classification": "Hold", "generated_at": "2026-10-04T17:00:00Z"},
+        {"symbol": "FLAT", "classification": "Buy", "generated_at": "2026-10-04T17:00:00Z"},
+    ])
+    monkeypatch.setattr(study, "get_engine", lambda: object())
+    monkeypatch.setattr(pd, "read_sql", lambda *_args, **_kwargs: recs.copy())
+    events = pd.DataFrame([
+        {"trade_date": "2026-10-05", "symbol": "HELD", "fwd_ret": 6.0},    # rated Hold -> calibration
+        {"trade_date": "2026-10-05", "symbol": "NOROW", "fwd_ret": 5.0},   # no snapshot row -> coverage
+        {"trade_date": "2026-10-05", "symbol": "FLAT", "fwd_ret": 0.0},    # flat tape -> not a miss
+    ])
+    row = study.canonical_signal_accuracy(events).iloc[0]
+    assert row["not_flagged"] == 3
+    assert row["rated_hold"] == 1
+    assert row["no_coverage"] == 1
+    assert row["flat_outcome"] == 1
+
+
+def test_every_accuracy_count_column_reaches_the_persisted_detail_json():
+    """A grader column the persist block never names is invisible to every consumer.
+
+    `persist_results` builds `detail_json` from a hand-written key list, so a new column in
+    `canonical_signal_accuracy` changes only the in-memory frame while the database -- what
+    the report, the DQ check and any dashboard read -- keeps the old shape. Derived from the
+    source so a future column fails this test instead of silently not persisting.
+    """
+    import inspect
+    import re as _re
+
+    grader = inspect.getsource(study.canonical_signal_accuracy)
+    persist = inspect.getsource(study.persist_results)
+
+    # The dict literal the grader appends per date.
+    produced = set(_re.findall(r'"(\w+)":\s*(?:int|float)?\(?\s*(?:matched|opposite|not_flagged|rated_hold|no_coverage|flat_outcome)\b', grader))
+    counts = {c for c in ("matched", "opposite", "not_flagged", "rated_hold", "no_coverage", "flat_outcome")
+              if f'"{c}"' in grader}
+    assert counts, "scan found no count columns -- the grader's shape changed, fix this test"
+
+    accuracy_block = persist[persist.index('"canonical_signal_accuracy"'):]
+    accuracy_block = accuracy_block[:accuracy_block.index('n += 1')]
+    missing = sorted(c for c in counts if f'"{c}"' not in accuracy_block)
+    assert not missing, (
+        f"canonical_signal_accuracy produces {missing} but persist_results never writes them "
+        f"into detail_json, so no consumer can read them"
+    )
