@@ -32,6 +32,7 @@ import { V1SmartMoneyFlowWidget } from './V1SmartMoneyFlowWidget';
 import { V1FnOMicrostructureWidget } from './V1FnOMicrostructureWidget';
 import { V1TradeRiskCalculatorWidget } from './V1TradeRiskCalculatorWidget';
 import { dailyCloses } from '../lib/dailyCloses';
+import { buildSignalBatch, refreshFailureMessage, QUEUE_UNAVAILABLE_MESSAGE, INDEX_SYMBOLS } from '../lib/signalBatch';
 
 // ─── Fonts injected once ──────────────────────────────────────────────────────
 const FONT_FAMILY_DISPLAY = "'Archivo', sans-serif";
@@ -381,6 +382,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [queueProgress, setQueueProgress] = useState<{ completed: number; total: number } | null>(null);
   const [historySymbol, setHistorySymbol] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   const { data: niftyOhlc } = trpc.getOHLCData.useQuery({ symbol: 'in;NSX', dur: '1M' });
   const { data: vixData } = trpc.getIndiaVix.useQuery(undefined, { refetchInterval: 30000 });
@@ -440,11 +442,13 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const handleGenerateSignals = async () => {
     if (stocks.length === 0) return;
     setIsGenerating(true);
-    setQueueProgress({ completed: 0, total: stocks.length });
+    setRefreshError(null);
+    const payload = buildSignalBatch(stocks);
+    setQueueProgress({ completed: 0, total: payload.length });
     try {
-      const payload = stocks.map(s => ({ symbol: s.symbol, stockData: s as unknown as Record<string, unknown> }));
       const result = await enqueueSignalsMutation.mutateAsync(payload);
       if (!result.queueAvailable) {
+        setRefreshError(QUEUE_UNAVAILABLE_MESSAGE);
         setIsGenerating(false);
         setQueueProgress(null);
       } else {
@@ -452,7 +456,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         refetchStats();
         refetchSignals();
       }
-    } catch {
+    } catch (err) {
+      // An empty catch here hid a 71-day always-rejected REFRESH (AF-20261025-07): surface it.
+      setRefreshError(refreshFailureMessage(err));
       setIsGenerating(false);
       setQueueProgress(null);
     }
@@ -467,7 +473,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     decliners: stocks.filter(s => s.changePct < 0).length,
     topGainers: [...stocks].sort((a, b) => b.changePct - a.changePct).slice(0, 5),
     topLosers: [...stocks].sort((a, b) => a.changePct - b.changePct).slice(0, 5),
-    niftyStock: stocks.find(s => s.symbol === 'NIFTY' || s.symbol === 'NIFTY50') ?? stocks[0],
+    niftyStock: stocks.find(s => INDEX_SYMBOLS.includes(s.symbol)) ?? stocks[0],
   }), [stocks]);
 
   const signalCount = aiSignals.filter(s => s.signal === 'BUY' || s.signal === 'SELL').length;
@@ -857,6 +863,12 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                 {isGenerating ? 'SCANNING' : 'REFRESH'}
               </button>
             </div>
+
+            {refreshError && (
+              <div role="alert" style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 9, color: '#f87171', marginBottom: 8, letterSpacing: 1 }}>
+                {refreshError}
+              </div>
+            )}
 
             {/* Progress bar */}
             {isGenerating && queueProgress && queueProgress.total > 0 && (
