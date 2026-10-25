@@ -325,7 +325,7 @@ export const commandCenterRouter = router({
                  entry_zone_low, entry_zone_high, risk_reward,
                  screener_stock_score, ml_score, confluence_score, technical_score, dl_score,
                  cs_score, breakout_score, smart_money_score, fundamental_score,
-                 trade_reasoning, engine_coverage_count, computed_at
+                 trade_reasoning, engine_coverage_count, computed_at, generated_at
           FROM unified_recommendations
           WHERE symbol = ? AND computed_at = ?
         `, [input.symbol, latest ?? '']),

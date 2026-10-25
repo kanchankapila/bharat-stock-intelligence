@@ -1,5 +1,10 @@
 # Phase 2 Research: Indian Earnings Data Sources (Complete)
 
+> Historical design/recipe, not a separate work queue. Current scope, owner and status are
+> stored only in `docs/audit-findings.md` (AF-20261025-24). The bullet steps below
+> retain the proposed design; moving tracking does not mean they were completed. Re-check
+> current code and the ledger before executing dated commands or reviving retired surfaces.
+
 **Date:** 2026-10-23  
 **Status:** Research phase  
 **Source:** docs/url_explorer/field_report.md (834 endpoints cataloged; 2026-08-03)
@@ -286,10 +291,10 @@ def get_earnings(nse_symbol):
 - [x] Expected JSON structure identified
 - [x] Fallback chain planned (MC → TickerTape → Trendlyne)
 - [x] NSE → Moneycontrol ID mapping needed (10 top symbols hardcoded)
-- [ ] **Next (Phase 2b):** Test Moneycontrol endpoints on RELIANCE/TCS/INFY (live fetch)
-- [ ] Extract & parse quarterly financials (revenue, EPS, margins)
-- [ ] Build earnings_sources.py module with all three fallbacks
-- [ ] Refactor trader-analyst/facts.py to use new sources
+- **Next (Phase 2b):** Test Moneycontrol endpoints on RELIANCE/TCS/INFY (live fetch)
+- Extract & parse quarterly financials (revenue, EPS, margins)
+- Build earnings_sources.py module with all three fallbacks
+- Refactor trader-analyst/facts.py to use new sources
 
 ---
 
@@ -346,11 +351,11 @@ except Exception as e:
 ```
 
 **Success criteria:**
-- [ ] Fetch returns 200 OK
-- [ ] JSON contains "quarters" array
-- [ ] First quarter has revenue, eps_diluted, net_income fields
-- [ ] Values are numbers (not strings or null)
-- [ ] Same test works for TCS (532540) and INFY (500209)
+- Fetch returns 200 OK
+- JSON contains "quarters" array
+- First quarter has revenue, eps_diluted, net_income fields
+- Values are numbers (not strings or null)
+- Same test works for TCS (532540) and INFY (500209)
 
 ---
 

@@ -14,7 +14,11 @@ vi.mock('../lib/trpc', () => ({
   trpc: {
     getCommandCenter: q({
       regime: { name: 'BEAR', confidence: 0.99, updated_at: '2026-10-08' },
-      eodPicks: [{ symbol: 'PICKA', unified_score: 90, conviction_level: 'S_ELITE', classification: 'Strong Buy', timeframe: 'SWING', planStatus: 'ACTIVE' }],
+      eodPicks: [
+        { symbol: 'PICKA', unified_score: 90, conviction_level: 'S_ELITE', classification: 'Strong Buy', timeframe: 'SWING', planStatus: 'ACTIVE' },
+        { symbol: 'SHORTA', unified_score: 10, conviction_level: 'S_ELITE', classification: 'Strong Sell', timeframe: 'SWING', screener_names_json: JSON.stringify(['Negative Breakout', 'Supertrend Signal changed to Sell']) },
+        { symbol: 'UNKNOWN', unified_score: 90, conviction_level: 'S_ELITE', classification: null },
+      ],
       lastComputedAt: '2026-10-08', avgEngineTrackRecord: null,
     }),
     runUnifiedRanker: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
@@ -68,5 +72,23 @@ describe('Alpha (CommandCenterDashboard) honesty surfaces', () => {
 
   it('makes pick cards keyboard-operable', () => {
     expect(html).toMatch(/role="button"[^>]*tabindex="0"|tabindex="0"[^>]*role="button"/);
+  });
+
+  it('uses the explicit classification, not the conviction tier, for card direction', () => {
+    const cardClass = (symbol: string) => html.match(new RegExp(`<div[^>]*class="([^"]*)"[^>]*aria-label="Open ${symbol} in the trade cockpit"`))?.[1];
+    expect(cardClass('PICKA')).toContain('v1-card-up');
+    expect(cardClass('SHORTA')).toContain('v1-card-down');
+    expect(cardClass('UNKNOWN')).toContain('v1-card-neutral');
+    expect(html).toMatch(/class="[^"]*text-rose-400[^"]*"[^>]*>Strong Sell<\/span>/);
+  });
+
+  it('does not describe a direction-agnostic conviction tier as a Buy-only rating', () => {
+    expect(html).toContain('direction-agnostic');
+    expect(html).not.toContain('Tier mirrors the Buy/Strong Buy rating');
+  });
+
+  it('does not present a generic scanner-membership list as bullish evidence', () => {
+    expect(html).toContain('Scanner matches');
+    expect(html).not.toContain('Bullish screeners');
   });
 });

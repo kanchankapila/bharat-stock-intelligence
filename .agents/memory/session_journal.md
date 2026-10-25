@@ -391,3 +391,22 @@ network policy (AF-20260928-10), so no connector in this batch has seen a live r
   the working contract.
 - Live run at 06:42:50 wrote ET 52/119/30/120, NiftyTrader EOD 1,036 and live-market 1,015 rows
   with empty stderr. Full Python: 3,863 passed / 269 skipped. AF-20261022-01 is closed.
+
+## 2026-10-25 — Installed skills and one cross-agent backlog
+
+- User requires all repository backlogs, including skill observations, to use docs/audit-findings.md.
+  Plans and memory retain history/design only; AF-20261025-20 and the shared-backlog guard own this contract.
+- Installed the coordinated five-skill update with exact full-tree readback; global staging records
+  were reconciled. User approved retaining v7 and pushing reviewed history to a review branch.
+- V7 validation exposed real consumer/library defects, including a component score mislabelled
+  Unified Score and a removed candlestick API. Regression tests and actual production-data browser
+  checks are distinct. The verification script now permits only live responses, never fixtures.
+- Next-session labels are not generation timestamps. The latest TCS session is 2026-10-26 while
+  generation occurred on 2026-10-23; the UI must show them separately, without altering stored data.
+- User explicitly chose to restart bharat-server personally. No agent restart was performed;
+  backend deployment and its production queryback must not be claimed complete before that action.
+- Full-run timing investigations exposed a real completion bug, not only contention: awaiting
+  NSE sync did not await its detached transaction. AF-20261025-32 records the shared completion
+  promise/error-propagation repair. Polling a row did not prove that the current run had committed.
+- Timeouts do not cancel async fixture writes. Batch the same private-schema dataset rather than
+  weakening assertions or stock-test budgets; unfinished seeders can contaminate later cases.

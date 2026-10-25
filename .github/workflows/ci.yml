@@ -6,10 +6,7 @@ on:
   pull_request:
     branches: [main]
 
-# Typecheck + unit tests only. Both run with no external services: vitest uses an
-# in-memory SQLite DB (vite.config injects only GEMINI_API_KEY, never USE_POSTGRES),
-# and tsc needs nothing. Postgres/Python (incl. the ML walk-forward leakage-regression
-# test) require services and are a follow-on lane — see prod-readiness P5.
+# Build from tracked sources, enforce the shared backlog, then run typed/Postgres tests.
 jobs:
   build-test:
     runs-on: ubuntu-latest
@@ -61,6 +58,12 @@ jobs:
 
       - name: Typecheck (lint)
         run: npm run lint
+
+      - name: Production frontend build (clean checkout)
+        run: npm run build
+
+      - name: Shared backlog and finding evidence
+        run: npm run findings:check
 
       - name: Unit tests
         run: npm test

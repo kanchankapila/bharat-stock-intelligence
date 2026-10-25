@@ -4,20 +4,39 @@ description: Build, start, and drive the Bharat Stock Intelligence web app (Expr
 ---
 
 This is a React 19 + Vite SPA served by an Express/tRPC backend (`server.ts`,
-port 3000), backed by 3 separate Python FastAPI services and Postgres. It has
-no test-mode stub data — every screen reads live tRPC queries. Drive it with
+port 3000), backed by Python FastAPI services and Postgres. Internal project skill:
+live-data pages and explicitly simulated concepts must be verified separately. Drive it with
 the Playwright script-runner at
 `.claude/skills/run-bharat-stock-intelligence/driver.mjs` (there is no
 `chromium-cli` or `tmux` on this box — see Gotchas).
 
 All paths below are relative to the repo root.
+Use current evidence, not this document's historical session assertions, to establish that
+dependencies, services and tests are ready. Browser inspection alone does not authorize
+dependency installation, production writes or service restarts; launch/setup steps apply
+when the request includes running or setting up the app. Preserve the check-before-launch rule.
+
+## Route-target pre-flight
+
+Before browser verification, read `src/main.tsx` and follow the application/route modules
+it actually imports, including nested routes. Record the import chain for each target and
+whether it is live-data, explicitly simulated, or present only in the working tree. Component
+directories, old screenshots and generation names do not establish reachability or deployment.
+Where still imported, inspect `src/v1/V1Routes.tsx` and `src/tala/TalaRoutes.tsx`; follow any
+additional route tree the entry point now mounts rather than freezing this pair as an allowlist.
+
+Drive the actual default landing page and a representative page in each mounted application.
+Keep simulated pages such as `/concept` separate from live-data checks. Verify the deployed
+build serves the intended routes; a catch-all that paints the default page for an unknown URL
+does not prove the requested page exists. Do not call route coverage complete until each named
+target has an active import chain and the observed page matches that target.
 
 ## Prerequisites
 
-Verified this session on Windows (Git Bash), Node v24.16.0:
+Check the current Node/Playwright installation on Windows before setup. When setup is authorized:
 
 ```bash
-npm install -D playwright        # already a project devDependency after this
+npm install -D playwright        # only if the current dependency installation needs it
 npx playwright install chromium  # downloads Chrome for Testing, ~300MB, one-time
 ```
 
@@ -29,8 +48,8 @@ natively on Windows.
 The four services (`bharat-server`, `alphaquant-api`, `ml-api`, `chatbot`)
 need `.env` (Postgres URL, API keys) and two separate dependency installs —
 Node at repo root, and a Python venv at `backend-python/venv` (the three
-Python services use that interpreter; see `ecosystem.config.cjs`). This
-session found all of that **already done and already running** — see below.
+Python services use that interpreter; see `ecosystem.config.cjs`). Check the current
+configuration and running service inventory rather than relying on a previous session's state.
 
 ## Run (agent path)
 
@@ -43,13 +62,11 @@ pm2 list
 
 If `bharat-server` shows `online`, it's already serving on `:3000` — go
 straight to driving it, do not start a second copy (`EADDRINUSE`, plus it
-doubles DB connections against a shared Postgres). This is what this session
-actually did: found all 4 services already `online` (`pm2 list`, verified),
-and drove the running instance rather than restarting anything.
+doubles DB connections against a shared Postgres). Reuse the existing instance after checking
+that the target page actually answers; process state alone is not application readiness.
 
-If nothing is running, the verified-working launch (from
-`ecosystem.config.cjs`'s own header, not re-run this session since a live
-copy was already up):
+If the requested run/setup requires launching services and none is running, check the current
+operating manual and ecosystem configuration before using its launch command:
 
 ```bash
 pm2 start ecosystem.config.cjs
@@ -103,12 +120,12 @@ Ctrl-C to stop. Useless in a headless session — use the agent path.
 
 ## Test
 
-Verified this session, all passing against the current `main`:
+Run these when validating source changes; quote results only from the run actually observed:
 
 ```bash
 npx tsc --noEmit                                            # typecheck
-npx vitest run                                               # ~104 suites
-python -m pytest src/server/__tests__/ src/server/tests/ -q  # ~1750 tests
+npx vitest run                                               # unit tests
+backend-python/venv/Scripts/python.exe -m pytest src/server/__tests__/ src/server/tests/ -q
 ```
 
 ## Gotchas
@@ -125,17 +142,12 @@ python -m pytest src/server/__tests__/ src/server/tests/ -q  # ~1750 tests
   only proves the shell painted — screenshot too early and you get a page
   full of skeleton loaders, not the real data. Give it 3-4s after that
   before the screenshot that's supposed to prove real content loaded.
-- **There is only ONE shell since the 2026-08-29 consolidation.** `App.tsx`
-  force-migrates any stored `dashboardVersion` to `'v1'` on mount; every page
-  renders through `V1Routes`/`AppShell` and the old v2–v6 shells were folded into
-  `src/components/v{2,4,5,6}/` — so the driver screenshots above are always the
-  v1 shell, and there are no `V1`/`V2`/`V3`/`V5` switcher buttons to click.
-  (Any doc you find describing six switchable shells or a `v6` default
-  predates the consolidation.)
-- **This app has no demo/offline mode.** Every screen is live production
-  data off Postgres via tRPC — there's no seeded fixture state to reset
-  between runs, so a screenshot today will show different numbers tomorrow.
-  That's expected, not a bug in the driver.
+- **Resolve surfaces from imports, not remembered shell versions.** The historical v2–v6
+  switcher is not a route inventory. Use the route-target pre-flight to discover the current
+  root, separately mounted applications and nested surfaces before choosing screenshots.
+- **Live-data pages are production reads, not fixtures.** Their values change over time;
+  do not reset production to make screenshots repeatable. Explicitly simulated concept pages
+  are a different verification surface: label them and never cite their values as live evidence.
 
 ## Troubleshooting
 

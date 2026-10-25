@@ -1,6 +1,11 @@
 # Phase 0 (honest delivery) + Phase 1 (deep-panel replay) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Historical design/recipe, not a separate work queue. Current scope, owner and status are
+> stored only in `docs/audit-findings.md` (AF-20261021-01, AF-20261021-03, AF-20261024-06). The bullet steps below
+> retain the proposed design; moving tracking does not mean they were completed. Re-check
+> current code and the ledger before executing dated commands or reviving retired surfaces.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Live tracking belongs only to `docs/audit-findings.md`; these steps are design reference.
 
 **Goal:** Make the pre-open brief deliver every trading day in an honest state (calls / no-trade / degraded) and monitor that it did, then produce the project's first statistically usable verdict on whether a cross-sectional ranking has any edge, by replaying a composite score over the 1,439-date `feature_store` panel per liquidity tier and horizon, cost-aware and negative-controlled.
 
@@ -43,16 +48,16 @@ Five conditions the spec implies that no task's happy path exercises. Each one's
 
 `docs/superpowers/plans/2026-10-08-land-and-deploy.md` exists with 6 tasks / 17 steps and **zero executed**; its unlanded diff is the 23 modified files plus untracked tests currently in the working tree, and it touches `jobs/digests.jobs.ts` — the exact file Task 1 modifies. Executing Phase 0 on top of an unlanded tree produces a diff nobody can review.
 
-- [ ] **Step 1: Confirm the working tree still matches that plan's scope**
+- **Step 1: Confirm the working tree still matches that plan's scope**
 
 Run: `git status --short`
 Expected: the modified set still includes `src/server/jobs/digests.jobs.ts`, `src/server/dataQualityChecks.ts`, `src/v1/V1Routes.tsx`, `src/App.tsx`. If it does not, stop and report — another session has moved on and this plan's Task 1 baseline is wrong.
 
-- [ ] **Step 2: Execute `docs/superpowers/plans/2026-10-08-land-and-deploy.md` end to end**
+- **Step 2: Execute `docs/superpowers/plans/2026-10-08-land-and-deploy.md` end to end**
 
 Follow that plan's own steps and gates. Do **not** revert or rewrite another session's hunks; commit by explicit path only.
 
-- [ ] **Step 3: Confirm the tree is clean for the files Phase 0 will touch**
+- **Step 3: Confirm the tree is clean for the files Phase 0 will touch**
 
 Run: `git status --short src/server/jobs/digests.jobs.ts src/server/morningBrief.ts src/server/dataQualityChecks.ts`
 Expected: empty.
@@ -74,7 +79,7 @@ Expected: empty.
   - `export async function sendMorningBrief(state?: BriefState, stateReason?: string | null): Promise<{ sent: boolean; picks: number; state: BriefState }>`
   - `buildMorningBrief()` returns `{ text, picks, state }`, deriving `state` as `'no-trade'` when `picks === 0` and `'calls'` otherwise; an explicit `state` argument overrides it.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 ```ts
 // src/server/__tests__/morningBriefState.test.ts
@@ -127,29 +132,29 @@ it('refuses to send a pre-open brief after 09:15 IST and records the miss', asyn
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- **Step 2: Run the tests to verify they fail**
 
 Run: `npx vitest run src/server/__tests__/morningBriefState.test.ts src/server/__tests__/morningBriefGate.test.ts`
 Expected: FAIL — `composeMorningBrief` takes 4 arguments, and the gate tests fail on `{ success: false }`.
 
-- [ ] **Step 3: Add `BriefState` and the state header to `composeMorningBrief`**
+- **Step 3: Add `BriefState` and the state header to `composeMorningBrief`**
 
 `'calls'` keeps today's `🌅 *PRE-OPEN BRIEF* — <date>` header. `'no-trade'` uses `🚫 *NO TRADE TODAY* — <date>` followed by the gate's own words, and still prints the scorecard and the forward-test line (the honesty blocks are the point of an empty day). `'degraded'` uses `⚠ *PRE-OPEN BRIEF (DEGRADED)* — <date>` and puts `stateReason` on its own line directly under the header, before any picks.
 
-- [ ] **Step 4: Thread the state through `buildMorningBrief` and `sendMorningBrief`**
+- **Step 4: Thread the state through `buildMorningBrief` and `sendMorningBrief`**
 
 `buildMorningBrief(state?, stateReason?)` derives `'no-trade'` from `picks === 0` when no state is passed. Keep both existing try/catch degradations exactly as they are — neither honesty block may fail a send.
 
-- [ ] **Step 5: Convert the two data branches in `processMorningBrief` from failures to degraded sends**
+- **Step 5: Convert the two data branches in `processMorningBrief` from failures to degraded sends**
 
 In `src/server/jobs/digests.jobs.ts`: the empty-`unified_recommendations` branch and the session-mismatch branch each call `sendMorningBrief('degraded', msg)` and return the normal success path, still writing `MORNING_BRIEF_LAST_SENT_KEY`. Keep the weekend, holiday and post-09:15 branches byte-for-byte as they are: the first two are correct skips, and the third is a correct refusal whose visibility is Task 2's job, not a send.
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- **Step 6: Run the tests to verify they pass**
 
 Run: `npx vitest run src/server/__tests__/morningBriefState.test.ts src/server/__tests__/morningBriefGate.test.ts src/server/__tests__/morningBriefTradingSession.test.ts`
 Expected: PASS, including the pre-existing trading-session suite.
 
-- [ ] **Step 7: Commit**
+- **Step 7: Commit**
 
 ```bash
 git add src/server/morningBrief.ts src/server/jobs/digests.jobs.ts src/server/__tests__/morningBriefState.test.ts src/server/__tests__/morningBriefGate.test.ts
@@ -170,7 +175,7 @@ git commit -m "feat(brief): deliver an explicit calls/no-trade/degraded state in
 
 Evidence this check must catch (spec B7): the brief delivered on 5 of 7 trading days; on 2026-10-12 and 2026-10-19 nothing was sent and no check noticed. `app_settings.morning_brief_last_sent_ranking` is the delivery receipt.
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```ts
 it('morning-brief-delivery fails when the latest trading day has no delivery receipt', async () => {
@@ -182,21 +187,21 @@ it('morning-brief-delivery passes on a day whose receipt matches the latest rank
 it('morning-brief-delivery does not fail on a weekend or listed holiday', async () => { /* Review Focus 1 */ });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- **Step 2: Run to verify it fails**
 
 Run: `npx vitest run src/server/__tests__/dataQualityChecks.test.ts -t morning-brief-delivery`
 Expected: FAIL — no such check id.
 
-- [ ] **Step 3: Add the check**
+- **Step 3: Add the check**
 
 Compare `app_settings.morning_brief_last_sent_ranking` against the latest completed NSE session, holiday-aware via the same session source `processMorningBrief` uses. FAIL when a trading day passed with no receipt; pass on weekends and listed holidays. Do **not** key it on `job_heartbeat` — a heartbeat is the last run and `bugs-monitoring.md` records it being overwritten by a retry.
 
-- [ ] **Step 4: Run to verify it passes**
+- **Step 4: Run to verify it passes**
 
 Run: `npx vitest run src/server/__tests__/dataQualityChecks.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/server/dataQualityChecks.ts src/server/__tests__/dataQualityChecks.test.ts
@@ -215,7 +220,7 @@ git commit -m "feat(dq): fail when a trading day passes with no pre-open brief d
 
 **Premise corrected 2026-10-20.** Spec B8 is withdrawn: `LONG_TERM` last produced 2026-09-30 (not 09-28) and its disappearance was **deliberate** — folded onto `POSITIONAL` on 2026-10-03 (`unified_ranker.py:192-215`, `CANONICAL_TIMEFRAMES`, commit `8645d47c`, AF-20261001-06). So this check must expect the **union** of the hardcoded canonical three (`INTRADAY`/`SWING`/`POSITIONAL`, sourced from the ranker's own tuple and guarded by a source-parity test) and the trailing-window set. A missing canonical horizon fails and never ages out; a retired non-canonical label ages out of the window and self-heals. What remains true from C2 is that 87% of rows carry a NULL `timeframe`.
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```ts
 it('fails when a timeframe that produced rows last week produced none on the latest ranking day', () => { /* seeded: SWING present, LONG_TERM absent */ });
@@ -223,13 +228,13 @@ it('passes when every timeframe seen in the trailing window is present', () => {
 it('does not fail for a timeframe that has never been produced', () => {});  // no false alarm on an unused label
 ```
 
-- [ ] **Step 2: Run to verify it fails** — `npx vitest run src/server/__tests__/dataQualityChecks.test.ts -t timeframe-coverage`. Expected: FAIL, no such check.
+- **Step 2: Run to verify it fails** — `npx vitest run src/server/__tests__/dataQualityChecks.test.ts -t timeframe-coverage`. Expected: FAIL, no such check.
 
-- [ ] **Step 3: Add the check.** Compare the distinct non-NULL `timeframe` set on the latest `generated_at::date` against the set seen in the trailing 10 trading days. A timeframe in the trailing set and absent today is a FAIL naming it. Key the comparison on the trailing set, not a hardcoded list of four labels, so retiring a horizon deliberately does not become a permanent red.
+- **Step 3: Add the check.** Compare the distinct non-NULL `timeframe` set on the latest `generated_at::date` against the set seen in the trailing 10 trading days. A timeframe in the trailing set and absent today is a FAIL naming it. Key the comparison on the trailing set, not a hardcoded list of four labels, so retiring a horizon deliberately does not become a permanent red.
 
-- [ ] **Step 4: Run to verify it passes** — `npx vitest run src/server/__tests__/dataQualityChecks.test.ts`. Expected: PASS.
+- **Step 4: Run to verify it passes** — `npx vitest run src/server/__tests__/dataQualityChecks.test.ts`. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/server/dataQualityChecks.ts src/server/__tests__/dataQualityChecks.test.ts
@@ -246,27 +251,27 @@ git commit -m "feat(dq): fail when a previously-produced recommendation timefram
 
 Evidence (spec B11/C8): "0/15 profiles synced (15 failed)" on 2026-10-16, -17, -18 and -19.
 
-- [ ] **Step 1: Establish what actually fails, before changing anything**
+- **Step 1: Establish what actually fails, before changing anything**
 
 Read the step's own stderr from pm2 stdout as well as the app log (`bugs-monitoring.md`: the runtime numbers were in `logs/pm2-out.log` all along), then run the writer standalone for one symbol and print the exact request it sends.
 
-- [ ] **Step 2: Follow `data-sources.md`'s mandatory sequence before declaring the provider dead**
+- **Step 2: Follow `data-sources.md`'s mandatory sequence before declaring the provider dead**
 
 In order: `market_endpoint_registry` (3,408 endpoints; views `v_working_market_endpoints`), then `python -m url_explorer.ingest --find-alternates "<target>" --exclude <failing-host>` from `src/server`, then `unique_urls.txt`, then sibling routes probed one at a time with the **minimum** headers — start from none, because `bugs-data-layer.md` records a token *lowering* access on exactly this class of route.
 
-- [ ] **Step 3: Write the failing test for the real cause**
+- **Step 3: Write the failing test for the real cause**
 
 A `live_datasource` test that hits one real symbol and asserts a non-empty parsed row. It must fail against the current code.
 
-- [ ] **Step 4: Fix the cause and make the failure loud if it recurs**
+- **Step 4: Fix the cause and make the failure loud if it recurs**
 
 If the provider genuinely changed, repoint to the alternate found in Step 2. Exit non-zero on sustained failure so the step cannot report success over zero rows, and classify a throttle separately from a genuine empty (`bugs-jobs-runtime.md`).
 
-- [ ] **Step 5: Verify live**
+- **Step 5: Verify live**
 
 Run the job's step and query the written rows back with `backend-python/venv/Scripts/python.exe scripts/sql.py "<SQL>"`. A green test does not show a fetcher wrote the right rows.
 
-- [ ] **Step 6: Commit, and open/close the ledger row**
+- **Step 6: Commit, and open/close the ledger row**
 
 ```bash
 git add <writer> <test> docs/audit-findings.md
@@ -281,16 +286,16 @@ git commit -m "fix(company-profiles): repair the sync writer and fail loudly on 
 
 Evidence (spec B13/C10): five full copies under `.claude/worktrees/` multiply every repo-wide count by six and already corrupted one measurement this session.
 
-- [ ] **Step 1: List them and confirm each is spent**
+- **Step 1: List them and confirm each is spent**
 
 Run: `git worktree list` and `git -C .claude/worktrees/<each> status --short`
 Expected: each is either clean or holds only work already on `main`. **If any has unique uncommitted work, stop and report it** — do not remove another session's work.
 
-- [ ] **Step 2: Remove the spent ones**
+- **Step 2: Remove the spent ones**
 
 Run: `git worktree remove .claude/worktrees/<name>` per spent worktree, then `git worktree prune`.
 
-- [ ] **Step 3: Verify the multiplier is gone**
+- **Step 3: Verify the multiplier is gone**
 
 Run: `grep -rl "niftytrader_live_screener_snapshots" --include=*.py --include=*.ts . | grep -v node_modules | wc -l`
 Expected: a count consistent with one checkout (single digits), not ~6x.
@@ -317,7 +322,7 @@ No task in this phase writes a production row or runs a migration.
 
 The measured answer today is 59 columns including the labels; excluding the 6 labels leaves 53 features. Deriving it keeps the set honest as coverage changes, and excluding the labels by explicit name is the fix for the `select_dtypes`-swept-the-label class in `ml-model-bugs.md`.
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```python
 def test_excludes_label_columns(pg_db_conn):
@@ -334,15 +339,15 @@ def test_floor_is_applied_not_ignored(pg_db_conn):
     assert len(deep_feature_columns(pg_db_conn, floor=0.99)) < len(deep_feature_columns(pg_db_conn, floor=0.10))
 ```
 
-- [ ] **Step 2: Run to verify it fails** — `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_deep_panel_columns.py -v`. Expected: FAIL, module does not exist.
+- **Step 2: Run to verify it fails** — `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_deep_panel_columns.py -v`. Expected: FAIL, module does not exist.
 
-- [ ] **Step 3: Implement `deep_feature_columns`**
+- **Step 3: Implement `deep_feature_columns`**
 
 Read candidate names from `information_schema.columns` **qualified with `table_schema`** (`check_information_schema_missing_table_schema` enforces this), then one aggregate query computing per-column non-null share over the window. Use `db_compat` and `?` placeholders.
 
-- [ ] **Step 4: Run to verify it passes.** Expected: PASS.
+- **Step 4: Run to verify it passes.** Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/server/deep_panel.py src/server/tests/test_deep_panel_columns.py
@@ -364,7 +369,7 @@ git commit -m "feat(deep-panel): derive the deep feature column set from measure
 
 The spec settles this explicitly and it is the one contaminable input in the whole phase: `nse_stocks.fno_eligible` is a **current-state** flag (209 symbols) and applying it backwards injects survivorship into the tier the user cares most about. Derive the dated series from the F&O bhavcopy (the 2026-10-08 review records the old-format bhavcopy returning 2022 history at ~62k stock-option rows/day); treat `technical_signals.mc_fno_eligible` as corroboration only, since it starts late and is written with the `date >= floor` pattern. Where the series cannot reach, the F&O tier's verdict is bounded to the dates it covers and says so.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 ```python
 def test_never_falls_back_to_the_current_state_flag(pg_conn):
@@ -382,15 +387,15 @@ def test_an_uncovered_date_returns_empty_rather_than_guessing(pg_conn):
     assert fno_eligible_asof(pg_conn, "1999-01-01") == set()
 ```
 
-- [ ] **Step 2: Run to verify they fail** — `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_fno_universe_asof.py -v`. Expected: FAIL, module does not exist. The first test is the load-bearing one: confirm it fails for the right reason (the current-state flag leaking in), not merely on the missing import.
+- **Step 2: Run to verify they fail** — `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_fno_universe_asof.py -v`. Expected: FAIL, module does not exist. The first test is the load-bearing one: confirm it fails for the right reason (the current-state flag leaking in), not merely on the missing import.
 
-- [ ] **Step 3: Establish what dated source actually exists, then implement**
+- **Step 3: Establish what dated source actually exists, then implement**
 
 Before writing the derivation, check what is already stored: `nt_index_oi_eod`, `index_max_pain`, `trendlyne_fno_activity` and `so_option_chain` all hold rows and three of them are on the spec's write-only list. If one carries dated per-symbol F&O presence, use it and skip the bhavcopy work entirely. Report which source was chosen and its real span.
 
-- [ ] **Step 4: Run to verify they pass.** Expected: PASS.
+- **Step 4: Run to verify they pass.** Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/server/fno_universe_asof.py src/server/tests/test_fno_universe_asof.py
@@ -412,7 +417,7 @@ git commit -m "feat(deep-panel): dated F&O eligibility, never the current-state 
   - `def tradable_tier(adt_cr: float, fno_eligible: bool) -> str` — returns one of `"FNO"`, `"ADT50CR"`, `"ADT10CR"`, `"BELOW10CR"`.
   - `def exclude_alias_symbols(conn, symbols: Iterable[str]) -> set[str]` — symbols priced but with no `nse_universe_history` row in 45 days, plus any symbol sharing an ISIN with another (`GROUP BY isin HAVING count(*) > 1`).
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 ```python
 def test_drops_priced_but_unlisted_alias_symbols(pg_conn):   # Review Focus 5
@@ -435,15 +440,15 @@ def test_empty_window_returns_empty_frame_not_an_exception(pg_conn):
     assert load_panel(pg_conn, ["rsi_14"], "1990-01-01", "1990-02-01").empty
 ```
 
-- [ ] **Step 2: Run to verify they fail.** Expected: FAIL, functions do not exist.
+- **Step 2: Run to verify they fail.** Expected: FAIL, functions do not exist.
 
-- [ ] **Step 3: Implement the three functions**
+- **Step 3: Implement the three functions**
 
 `adt_20d` is a 20-session rolling median of `close * volume` from `stock_ohlcv`, in crore. Build the frame from the row dicts and rename after, never `pd.DataFrame(rows, columns=[...])` (`bugs-data-layer.md`). Stream large reads with `db_compat.iter_rows`.
 
-- [ ] **Step 4: Run to verify they pass.** Expected: PASS.
+- **Step 4: Run to verify they pass.** Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/server/deep_panel.py src/server/tests/test_deep_panel_loader.py
@@ -467,7 +472,7 @@ git commit -m "feat(deep-panel): load the panel with alias symbols excluded and 
 
 Equal weight is deliberate: `measurement.md`'s Finding #31 forbids hand-fitting weights, and a fitted model is Phase 2's job after this baseline has a number.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 ```python
 def test_quantile_winsorise_actually_clips_a_lone_extreme():   # Review Focus 4
@@ -491,13 +496,13 @@ def test_composite_is_group_equal_weighted():
     ...
 ```
 
-- [ ] **Step 2: Run to verify they fail.** Expected: FAIL, module does not exist. Confirm the winsorise test fails specifically on the ~25.0 value — that is the documented trap, and a test that passes before the fix proves nothing.
+- **Step 2: Run to verify they fail.** Expected: FAIL, module does not exist. Confirm the winsorise test fails specifically on the ~25.0 value — that is the documented trap, and a test that passes before the fix proves nothing.
 
-- [ ] **Step 3: Implement the four functions.** Use `interpolation="higher"` / `"lower"` on the quantiles so the cutoff is an observed value.
+- **Step 3: Implement the four functions.** Use `interpolation="higher"` / `"lower"` on the quantiles so the cutoff is an observed value.
 
-- [ ] **Step 4: Run to verify they pass.** Expected: PASS.
+- **Step 4: Run to verify they pass.** Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/server/deep_panel_score.py src/server/tests/test_deep_panel_score.py
@@ -521,7 +526,7 @@ git commit -m "feat(deep-panel): equal-weight cross-sectional composite with obs
 
 This is the one-line check `ml-model-bugs.md` says would have caught a +3.6%/day fabrication in seconds. It runs before any verdict is written, not after.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 ```python
 def test_raises_when_the_score_is_the_same_day_return():
@@ -541,13 +546,13 @@ def test_shuffle_is_reproducible_from_the_seed():
     assert shuffled_control(panel, score).equals(shuffled_control(panel, score))
 ```
 
-- [ ] **Step 2: Run to verify they fail.** Expected: FAIL, functions do not exist.
+- **Step 2: Run to verify they fail.** Expected: FAIL, functions do not exist.
 
-- [ ] **Step 3: Implement them.**
+- **Step 3: Implement them.**
 
-- [ ] **Step 4: Run to verify they pass.** Expected: PASS.
+- **Step 4: Run to verify they pass.** Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/server/deep_panel_score.py src/server/tests/test_deep_panel_leak_guard.py
@@ -569,7 +574,7 @@ git commit -m "feat(deep-panel): assert no same-day leak and add a within-date s
   - `def grade_tier(panel: pd.DataFrame, score: pd.Series, tier: str, horizons=HORIZONS) -> list[dict]` — one row per horizon with `tier`, `horizon`, `rank_ic`, `hit_auc`, `n`, `dates`, `eff_dates`, `symbols`, `verdict`.
   - `def grade_all_tiers(panel, score, horizons=HORIZONS) -> pd.DataFrame`
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 ```python
 def test_a_narrow_tier_reads_degenerate_xs():        # Review Focus 3
@@ -589,13 +594,13 @@ def test_a_wide_deep_panel_can_read_usable():        # non-vacuity: the grader m
     assert rows[0]["verdict"] == "USABLE"
 ```
 
-- [ ] **Step 2: Run to verify they fail.** Expected: FAIL, module does not exist.
+- **Step 2: Run to verify they fail.** Expected: FAIL, module does not exist.
 
-- [ ] **Step 3: Implement `grade_tier` / `grade_all_tiers`** by grouping the panel on the tier column and delegating each group to the imported `_metrics` / `_verdict`.
+- **Step 3: Implement `grade_tier` / `grade_all_tiers`** by grouping the panel on the tier column and delegating each group to the imported `_metrics` / `_verdict`.
 
-- [ ] **Step 4: Run to verify they pass.** Expected: PASS, including the non-vacuity case.
+- **Step 4: Run to verify they pass.** Expected: PASS, including the non-vacuity case.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/server/deep_panel_grade.py src/server/tests/test_deep_panel_grade.py
@@ -618,7 +623,7 @@ git commit -m "feat(deep-panel): grade per tier and horizon through factor_edge'
 
 Disjoint rebalances are the point: `ml-model-bugs.md` records that `factor_backtest.py`'s periods are independent while `factor_edge.py`'s overlap, and applying the overlap correction to disjoint periods would throw away real evidence.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 ```python
 def test_cost_is_charged_per_side_and_reduces_gross():
@@ -637,13 +642,13 @@ def test_round_trip_cost_is_read_as_a_fraction_not_bps():
     ...
 ```
 
-- [ ] **Step 2: Run to verify they fail.** Expected: FAIL.
+- **Step 2: Run to verify they fail.** Expected: FAIL.
 
-- [ ] **Step 3: Implement both functions.**
+- **Step 3: Implement both functions.**
 
-- [ ] **Step 4: Run to verify they pass.** Expected: PASS.
+- **Step 4: Run to verify they pass.** Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/server/deep_panel_grade.py src/server/tests/test_deep_panel_costs.py
@@ -662,7 +667,7 @@ git commit -m "feat(deep-panel): net expectancy over disjoint rebalances with re
 - Consumes: every function from Tasks 6-11.
 - Produces: `python -m deep_panel_replay --start 2021-01-01 --end 2026-10-19 --out <dir>`, writing `verdicts.csv` (one row per tier × horizon from Task 10, plus Task 11's net columns), `control.csv` (the same grid for the shuffled control) and `REPORT.md`.
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 ```python
 def test_refuses_to_write_a_report_when_the_leak_guard_trips():
@@ -682,22 +687,22 @@ def test_writes_no_production_rows(pg_db_conn):
     assert row_counts(pg_db_conn) == before
 ```
 
-- [ ] **Step 2: Run to verify they fail.** Expected: FAIL, module does not exist.
+- **Step 2: Run to verify they fail.** Expected: FAIL, module does not exist.
 
-- [ ] **Step 3: Implement `main(argv)`** in this order: derive columns → load panel → score → **leak guard** → grade all tiers → net expectancy → shuffled control through the identical grid → write the three files. The guard precedes every write.
+- **Step 3: Implement `main(argv)`** in this order: derive columns → load panel → score → **leak guard** → grade all tiers → net expectancy → shuffled control through the identical grid → write the three files. The guard precedes every write.
 
-- [ ] **Step 4: Run to verify they pass.** Expected: PASS.
+- **Step 4: Run to verify they pass.** Expected: PASS.
 
-- [ ] **Step 5: Run the real replay and read the verdict**
+- **Step 5: Run the real replay and read the verdict**
 
 Run: `backend-python/venv/Scripts/python.exe -m deep_panel_replay --start 2021-01-01 --end 2026-10-19 --out <scratchpad>/replay` from `src/server`.
 Expected: `verdicts.csv` with `eff_dates >= 20` on at least the 5d horizon for the ADT tiers, a shuffled control whose rank IC sits near zero, and a stated verdict per tier. **A `no edge` verdict here is a successful run.**
 
-- [ ] **Step 6: Record the verdict where the next session will find it**
+- **Step 6: Record the verdict where the next session will find it**
 
 Append the measured table to `.claude/rules/measurement.md` with its date, method, `eff_dates` and cost assumption, and open the ledger row. Per the spec's §8, also correct `CONTEXT.md`'s "Measured State Of The Edge" and the 2026-10-08 design's §G claim about pre-2026-08-10 inputs.
 
-- [ ] **Step 7: Commit**
+- **Step 7: Commit**
 
 ```bash
 git add src/server/deep_panel_replay.py src/server/tests/test_deep_panel_replay.py .claude/rules/measurement.md CONTEXT.md docs/superpowers/specs/2026-10-08-accuracy-and-honesty-program-design.md docs/audit-findings.md
@@ -717,7 +722,7 @@ The spec's §8 lists eight corrections. Two method notes, both learned on this p
 - **`npm run doc:numbers:check` already passes**, so none of these are count drift. They are reasoning errors, and no automated check can find them.
 - **A raw grep for a retired name is not a staleness finding.** Measured 2026-10-19: `greenfield`, `bharatquant`, `V2AppShell`, `V6Shell`, `dashboardVersion`, `timeframe_scores` and `better-sqlite3` all still appear in docs and rules — and **every occurrence is a note saying the thing is gone**, which is exactly what those files should say. Classify each hit as *gone-note* or *live assumption* before changing anything; only the second is a defect.
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```ts
 it('CONTEXT.md states the effective-date range behind the edge claim, not just the LOW-DATA label', () => {
@@ -737,13 +742,13 @@ it('scoring-authority.md documents the two signal_type vocabularies', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails** — `npx vitest run src/server/__tests__/docClaims.test.ts`. Expected: FAIL on all four.
+- **Step 2: Run to verify it fails** — `npx vitest run src/server/__tests__/docClaims.test.ts`. Expected: FAIL on all four.
 
-- [ ] **Step 3: Apply the eight corrections from the spec's §8**, including the `intraday_ranker.py` header whose reasoning and constants disagree (comment only — the constants need their own measurement, per the spec's C5 resolution).
+- **Step 3: Apply the eight corrections from the spec's §8**, including the `intraday_ranker.py` header whose reasoning and constants disagree (comment only — the constants need their own measurement, per the spec's C5 resolution).
 
-- [ ] **Step 4: Run to verify it passes, and run the doc-number gate** — `npx vitest run src/server/__tests__/docClaims.test.ts && npm run doc:numbers:check`. Expected: PASS and no drift.
+- **Step 4: Run to verify it passes, and run the doc-number gate** — `npx vitest run src/server/__tests__/docClaims.test.ts && npm run doc:numbers:check`. Expected: PASS and no drift.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add CONTEXT.md .claude/rules/scoring-authority.md src/server/intraday_ranker.py docs/master-build-prompt.md docs/audit-findings.md src/server/__tests__/docClaims.test.ts

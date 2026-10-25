@@ -48,7 +48,9 @@ describe('mlRankPct', () => {
       expect((picks.find((p: any) => p.symbol === s) as any).mlRankPct, s).toBe(want);
     }
     expect((picks.find((p: any) => p.symbol === 'RK_A') as any).win_probability).toBeCloseTo(0.9);
-    expect(((await caller.getUnifiedScoreForSymbol({ symbol: 'RK_C' })) as any).mlRankPct).toBe(33.3);
+    const detail = await caller.getUnifiedScoreForSymbol({ symbol: 'RK_C' }) as any;
+    expect(detail.mlRankPct).toBe(33.3);
+    expect(detail).toHaveProperty('generated_at'); // session label is not the production timestamp
   });
 
   it('getTradeDecisionCockpitData carries mlRankPct beside an unchanged winProbSource', async () => {

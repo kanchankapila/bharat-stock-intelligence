@@ -5,6 +5,11 @@ description: Run one end-to-end lifecycle check over 10 real stocks (default, th
 
 # End-to-end lifecycle check
 
+Keep execution within the current request: verification is read-only by default. A FAIL
+does not authorize remediation, production writes, migrations, restarts or deployment.
+The fix-and-rerun handoff below applies only when implementation is authorized; otherwise
+report the first traced cause and the required next action without claiming it is repaired.
+
 One command, from the repo root, ~2–4 minutes:
 
 ```powershell
@@ -72,6 +77,21 @@ are the pipeline working as designed. `--symbols RELIANCE,INFY` overrides.
   `--run-ranker` re-runs `unified_ranker.py` first — a **production write** (it appends a
   snapshot to `unified_recommendations_history`), which is why it is opt-in; a non-zero exit
   from it is itself a FAIL.
+
+## Supplementary producer-to-reader contracts
+
+When enum/API filters or aliases cross a producer-reader boundary, or a populated stage
+serves an unexpectedly empty result, load the sibling `../audit-loop/SKILL.md`, section
+`## Contract checks — producer to public reader`. Follow its private-schema, producer-shaped
+fixtures and boundary controls through the actual public readers, plus the read-only live
+cross-check; do not duplicate that checklist or reimplement the readers' SQL.
+Resolve the sibling relative to this skill directory in the same installation/staging set;
+do not silently combine staged guidance with an older live shared checklist.
+
+`e2e_lifecycle_check.py` does **not** currently automate these supplementary probes. Report
+their evidence or omissions beside the stage verdicts; a lifecycle PASS alone does not certify
+reader mappings. This remains a read-only **plumbing** check, never a model-edge gate. Do not
+use `--run-ranker` merely to test an enum; production writes require separate authorization.
 
 ## Reading a FAIL
 

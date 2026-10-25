@@ -25,13 +25,13 @@ describe('getAccuracyMetrics', () => {
       [-1, 110, 95], [-2, 110, 95], [-3, 110, 95], [-4, 110, 95], [-5, 110, 95],
       [-6, 90, 105], [-7, 90, 105], [-8, null, null],
     ];
-    for (const [id, target, stop] of signals) {
-      await dbRun(
-        `INSERT INTO unified_signals (id, symbol, signal_source, signal_type, target_price, stop_loss, signal_generated_at)
-         VALUES (?, ?, 'technical', 'X', ?, ?, '2026-09-01T10:00:00Z')`,
-        [id, `ACCM${id}`, target, stop],
-      );
-    }
+    // Batch fixture rows: per-row autocommit made this setup fsync-bound on the shared test
+    // host. Preserve every case and the original time budgets instead of relaxing assertions.
+    await dbRun(
+      `INSERT INTO unified_signals (id, symbol, signal_source, signal_type, target_price, stop_loss, signal_generated_at)
+       VALUES ${signals.map(() => "(?, ?, 'technical', 'X', ?, ?, '2026-09-01T10:00:00Z')").join(',')}`,
+      signals.flatMap(([id, target, stop]) => [id, `ACCM${id}`, target, stop]),
+    );
     const outcomes: Array<[number, number, string, number | null]> = [
       [-1, 15, 'WIN', 4], [-2, 15, 'LOSS', -2], [-3, 15, 'STOP_LOSS', -5], [-4, 15, 'NEUTRAL', 0],
       [-5, 15, 'PENDING', null],
@@ -39,15 +39,13 @@ describe('getAccuracyMetrics', () => {
       [-8, 15, 'WIN', 3],                              // unknown side: excluded
       [-1, 5, 'WIN', 2], [-2, 5, 'WIN', 2],            // other horizon: excluded
     ];
-    for (const [id, h, outcome, ret] of outcomes) {
-      await dbRun(
-        `INSERT INTO unified_signal_outcomes
-           (unified_signal_id, symbol, signal_date, signal_source, horizon_days, entry_price, entry_time,
-            outcome, return_pct, check_date)
-         VALUES (?, ?, '2026-09-01', 'technical', ?, 100, '2026-09-01T10:00:00Z', ?, ?, '2026-09-22')`,
-        [id, `ACCM${id}`, h, outcome, ret],
-      );
-    }
+    await dbRun(
+      `INSERT INTO unified_signal_outcomes
+         (unified_signal_id, symbol, signal_date, signal_source, horizon_days, entry_price, entry_time,
+          outcome, return_pct, check_date)
+       VALUES ${outcomes.map(() => "(?, ?, '2026-09-01', 'technical', ?, 100, '2026-09-01T10:00:00Z', ?, ?, '2026-09-22')").join(',')}`,
+      outcomes.flatMap(([id, h, outcome, ret]) => [id, `ACCM${id}`, h, outcome, ret]),
+    );
   });
 
   it('reports a LONG-only 15d win rate over decisive outcomes, NEUTRAL shown separately', async () => {

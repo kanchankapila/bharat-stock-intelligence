@@ -5,6 +5,16 @@ description: The remediation loop that turns audit output into closed issues —
 
 # Audit loop
 
+Internal project skill. The contract and learner-replay sections below are the shared core
+for the repository's audit/health skills; callers load the relevant section, not a copied rule set.
+Product-file paths are relative to the repository root, not this skill's directory.
+
+Operate within the current request's authority. A review, diagnosis or read-only verification
+does not authorize fixes, production writes, migrations, restarts or deployment. In that mode,
+trace and report findings with their missing evidence/authorization, then stop at the handoff.
+The fix/deploy steps below apply when implementation is authorized; loading just a shared
+checklist does not activate the whole remediation workflow or broaden that authorization.
+
 An audit that produces a list nobody acts on is worse than no audit — it manufactures the feeling
 of coverage. This skill is the second half: **triage → fix → verify → immunize → carry forward**.
 
@@ -17,15 +27,19 @@ Two hard constraints from this repo's own history govern everything below:
 2. **A fix is not done when it is committed.** `tsc --noEmit` and a green suite do not tell you a
    fetcher wrote the right rows. Written ≠ applied, committed ≠ deployed, declared ≠ installed.
 
-## 0. Scope the sweep — five inventories, not just the findings you were handed
+## 0. Scope the sweep — inventories, not just the findings you were handed
 
 Before triaging, confirm coverage against what actually exists, not what the input audit happened
 to touch. Grep-derived, not remembered — this repo's history is full of "complete" reviews that
 stopped at N instances when a static check immediately found N+4 more.
 
-- **Features** — v1 (the only frontend since the 2026-09-01 shell consolidation, `fd0cbd4`) and
-  every scoring/ranking-shaped tRPC procedure in `router.ts`/`routers/*.ts`. Run
-  `canonical-read-audit` if the input audit didn't already cover it.
+- **Features** — derive the mounted frontend surfaces from `src/main.tsx` and follow its
+  imported application/route trees, including nested routes; a component directory or a
+  remembered shell name is not proof of reachability. Confirm each named audit target is
+  reachable before browser verification. Separate live-data routes, explicitly simulated
+  concepts, and working-tree routes not verified in the deployed build. Include every
+  scoring/ranking-shaped tRPC procedure in `router.ts`/`routers/*.ts`; run
+  `canonical-read-audit` if the input audit did not already cover it.
 - **Scripts** — every fetcher (`*_fetcher.py`), every engine/scorer/ranker (`*_engine.py`,
   `*_scorer.py`, `*_ranker.py`), every one-shot script under `scripts/`. `data-coverage-audit` and
   `fetcher-accuracy-review` cover fetchers; cross-check the rest against `git ls-files '*.py'` —
@@ -71,8 +85,45 @@ stopped at N instances when a static check immediately found N+4 more.
   files). Fold whatever's still open into this run's triage — a pending item nobody re-reads is
   indistinguishable from a closed one.
 
-A gap in any of the five is itself a finding — give it its own ledger row rather than silently
+A gap in any inventory is itself a finding — give it its own ledger row rather than silently
 narrowing the sweep to whatever the input audit happened to include.
+
+## Contract checks — producer to public reader
+
+Load this section when a change crosses an enum/filter/alias boundary, or when a populated
+pipeline stage serves an unexpectedly empty result. This is a supplementary contract check:
+the existing doctor and lifecycle commands do not automatically perform this census.
+
+1. Enumerate the actual producer, its vocabulary/normalizer, and **every public reader** of
+   that concept, including sibling APIs and cached/service paths. Compare producer domains
+   with reader mappings on the same latest eligible batch and universe, not all historical
+   rows. Record the batch, legitimate admission filters and expected-empty conditions.
+2. Use a private Postgres schema and producer-shaped rows. Exercise the real writer or shared
+   normalizer where practical, then call the actual public readers; do not reimplement their
+   SQL in the test. Include a positive row for each supported value/alias, higher-scoring rows
+   in other horizons (to catch LIMIT-before-filter), unknown/missing values, and an
+   intentionally empty eligible batch. Assert the documented behavior for each, not that
+   every reader must always return rows. Fixtures must never enter production tables.
+   **Before seeding**, prove the existing isolation harness redirects the writer, all reader
+   pools/connections and relevant cache state into that sandbox. Do not assume that one
+   connection's search_path redirects schema-qualified SQL or another pool. If any access
+   cannot be isolated, do not run that fixture path: repair the isolated harness when authorized
+   or report the probe blocked. Check that no fixture marker reached production.
+3. Prefer one shared normalizer **per concept**, not uppercasing at each reader. For example,
+   a long-term UI alias may map to stored `POSITIONAL`; classification, conviction and signal
+   direction are different concepts and must not be collapsed into one enum. Preserve
+   intentional producer vocabularies and explicit reader mappings.
+4. Negative-control the boundary: substitute an incompatible alias/filter in the isolated
+   test and require the positive fixture to disappear or fail its assertion for that reason.
+   A test that validates only each module's preferred spelling does not cover the contract.
+5. Cross-check production read-only: compare source-domain counts and real API results with
+   the same batch/filter parameters. An empty answer is a defect only when the positive
+   evidence establishes an eligible row. Report reader coverage and any skipped probe; a
+   green doctor/lifecycle command alone cannot certify this supplementary check.
+
+Before closing a contract finding, verify every enumerated reader has a tested mapping or an
+explicit, evidenced exclusion. Preserve source/output evidence and name the regression test
+in the findings ledger. This procedure does not authorize rescoring or production fixture writes.
 
 ## 1. Normalize the findings
 
@@ -132,6 +183,34 @@ Then the three this repo added because the above were not enough:
   ledger row as still-open with what was tried and why it made things worse. A fix that is
   committed but demonstrably wrong live is worse than the original finding: it reads as closed.
 
+### Learner replay — conditional evidence gate
+
+Load this section and `.claude/rules/measurement.md` before evaluating a learner change,
+including feature-history/input repairs. Unit tests and a live plumbing PASS are not edge evidence.
+
+- Replay baseline and candidate on the same representative, point-in-time panel before
+  promotion. Respect information availability, label horizon and the next tradable entry;
+  preserve frozen publication inputs. If changed history affects scaling or model inputs,
+  pair the repair with train/serve parity checks and the required retraining/replay, not a
+  silent rewrite under an existing model.
+- For a directional claim, compare winners and losers **within the same decision date**;
+  then infer across dates (or a justified predeclared cluster), not correlated stock rows.
+  Distinguish movement/volatility prediction from direction. Report independent date/period
+  counts and handle overlapping horizons per measurement.md; do not penalize already
+  non-overlapping periods twice. Underpowered evidence remains LOW-DATA.
+- Inspect the **actual produced ranking** by date: score range/quantiles, dispersion, number
+  of distinct values, zero/missing shares, gate prevalence, and feature contributions for
+  representative names. Compare both versions; investigate near-identical or collapsed output
+  instead of treating a successful backfill as validation. No new numeric acceptance bar is
+  implied by this diagnostic checklist.
+- Grade executable returns net of turnover-dependent costs/slippage against the declared
+  benchmark using the predeclared primary metric and untouched holdout. Keep a candidate
+  shadow-only when that evidence does not support promotion; do not tune a gate to pass it.
+
+Before declaring the learner repair verified, attach the paired replay, date/period counts,
+ranking/contribution diagnostics and cost-aware verdict (or state which evidence is missing).
+Use this alongside, never instead of, the existing measurement/promotion rules and live query-back.
+
 Commit **by explicit path**, never `git add -A` — multiple sessions edit this repo concurrently.
 Re-check `git status` immediately before committing.
 
@@ -143,7 +222,7 @@ prose, so **prose alone does not hold.**
 
 For each fixed finding, pick the strongest applicable rung:
 
-1. **A static check in `scripts/check_recurring_bugs.py`** — best; it runs in CI and looks
+1. **A static check in `./scripts/check_recurring_bugs.py`** — best; it runs in CI and looks
    everywhere the class can hide, including files nobody touched. Writing the check for the
    skip-path class immediately found 4 more live instances the manual pass had missed.
 2. **A gate in `verify-gate.mjs`** — for "this kind of change requires this kind of evidence".
@@ -211,10 +290,12 @@ changed code path is queried back against production.
 
 Code compiling and tests passing is not the same claim as the system running. Also check:
 
-- **All four services are actually up.** `pm2 jlist` (or the platform equivalent) shows
-  `bharat-server`, `ml-api`, `chatbot`, `alphaquant-api` all `online`, not `errored`/`stopped`, and
-  `pm_uptime` postdates the fix commit — "committed ≠ deployed" from CLAUDE.md, checked mechanically
-  rather than assumed.
+- **All required long-lived services are actually up.** Derive them from the current operating
+  manual and `ecosystem.config.cjs`, rather than assuming the historical four-service list is
+  complete. `pm2 jlist` (or the platform equivalent) must show those services online and the
+  relevant uptime must postdate deployment. Scheduled one-shots may correctly be stopped between
+  runs. Uptime is a deployment clue, not proof of the exact served artifact: verify the affected
+  build/revision and real output through `deploy-and-verify` before claiming the fix is live.
 - **A log sweep for the failure modes tests can't see.** `bugs-data-layer.md`'s swallowed-exception
   and skip-as-success classes produce no red test — they show up only as `InFailedSqlTransaction`,
   a truncated stderr, or a "finished successfully with warnings" line in pm2/job logs. Grep recent

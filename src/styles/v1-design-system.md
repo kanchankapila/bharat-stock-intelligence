@@ -1,5 +1,10 @@
 # V1 Design System — Complete Reference
 
+> Historical design/recipe, not a separate work queue. Current scope, owner and status are
+> stored only in `docs/audit-findings.md` (AF-20261025-26). The bullet steps below
+> retain the proposed design; moving tracking does not mean they were completed. Re-check
+> current code and the ledger before executing dated commands or reviving retired surfaces.
+
 ## Philosophy
 V1 is a **premium dark equity intelligence dashboard**. Every design choice reflects the subject: real-time data, precision, high stakes, decisive action. No softness, no decoration that doesn't serve clarity.
 
@@ -272,10 +277,10 @@ properties: transform, box-shadow, border-color
 
 ## Implementation Checklist
 
-- [ ] Add reusable utility classes for buttons, inputs, badges to `index.css`
-- [ ] Audit all 63 pages for style map and inline color overrides
-- [ ] Refactor pages to use token system instead of custom colors
-- [ ] Build Storybook or component catalog (optional but recommended)
-- [ ] Ensure responsive behavior (mobile padding, font sizes, grid cols)
-- [ ] Verify keyboard navigation and focus states work everywhere
-- [ ] Test reduced-motion preference across pages
+- Add reusable utility classes for buttons, inputs, badges to `index.css`
+- Audit all 63 pages for style map and inline color overrides
+- Refactor pages to use token system instead of custom colors
+- Build Storybook or component catalog (optional but recommended)
+- Ensure responsive behavior (mobile padding, font sizes, grid cols)
+- Verify keyboard navigation and focus states work everywhere
+- Test reduced-motion preference across pages

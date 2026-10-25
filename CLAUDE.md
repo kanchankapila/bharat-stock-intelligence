@@ -43,6 +43,27 @@ the unfixed code, then passing, and named in the ledger row's `Immunized` cell.
 a row, close it in place). Do not create another "things to do later" file — three were retired for drifting.
 Findings are not GitHub issues; GitHub (`kanchankapila/bharat-stock-intelligence`, via `gh`) is for PRs.
 
+### Shared backlog — every agent and model
+
+Use `docs/audit-findings.md` for **all repository work**, whether performed by Claude, ChatGPT/Codex,
+Cline, Cursor, Copilot, Hermes or another assistant: bugs, audits, implementation debt, deferred
+experiments, skill/process improvements, installation/deployment follow-ups and user decisions.
+Read it before starting; search for an existing stable ID before adding one. Record owner/origin,
+next action, verification evidence and any real blocker/unblock condition in the existing cells.
+Re-read a row before updating it so concurrent agents do not overwrite each other's evidence.
+
+Plans are designs/recipes, session logs and memory are history, and package manifests describe
+artifacts; none is a second work queue. Link their relevant ledger IDs instead of maintaining
+independent pending states or leaving work only in chat, local memory or a model-specific file.
+Do not mark a migrated checkbox complete merely because tracking moved. Procedural verification
+templates may remain checklists only when explicitly registered as templates in the ledger.
+
+Project override for task-observer: repository-specific unresolved observations belong in this
+same ledger, not a separate per-observation pending queue. Existing global observation records
+remain historical evidence; do not merge unrelated projects' private work into this repository.
+Run `npm run backlog:check` and `npm run findings:check` before handing off. These checks enforce
+tracking contracts, not the correctness or profitability of the recommendations.
+
 A finding may stay **open** only for one of these reasons, stated in its row:
 - **EVIDENCE** — it touches a score, weight, threshold or classification, so `measurement.md` /
   `ml-model-bugs.md` require measuring first. "Resolve now" then means run the measurement now.
@@ -151,7 +172,9 @@ db/schema.postgres.sql   schema of record, generated from live (`npm run schema:
 Component, procedure and table inventories are deliberately **not** listed — they rot. Grep the source.
 v1 (`src/v1/V1Routes.tsx`) is the only legacy route tree. A reference to "six dashboards", `dashboardVersion` or a shell
 name (`V2AppShell`, `V6Shell`) is stale; a fix lands in v1 or it does not ship. A second, newer terminal, TALA
-(`src/tala/`, mounted at `/tala/*` in `src/main.tsx`), also exists; do not add a third. **Before editing a component, confirm a
+(`src/tala/`, mounted at `/tala/*` in `src/main.tsx`), also exists. The user explicitly approved retaining
+the existing v7 Pro routes (`/v7-*`, `src/components/v7/`) on 2026-10-25; these are mounted in v1's route tree
+with their own shell, not a new ranking authority. Do not add another surface. **Before editing a component, confirm a
 route renders it** (grep its import): `BuyRecommendationsPage.tsx` is imported by nothing, and honesty fixes landed there on
 2026-10-08 that no user could see.
 

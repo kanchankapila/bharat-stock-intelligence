@@ -1,5 +1,10 @@
 # Phase 2: trader-analyst — Indian Earnings Data Integration
 
+> Historical design/recipe, not a separate work queue. Current scope, owner and status are
+> stored only in `docs/audit-findings.md` (AF-20261025-24). The bullet steps below
+> retain the proposed design; moving tracking does not mean they were completed. Re-check
+> current code and the ledger before executing dated commands or reviving retired surfaces.
+
 **Objective:** Adapt `trader-analyst/facts.py` from SEC EDGAR (US) to support NSE/BSE earnings (India)
 
 **Timeline:** 2-4 days (depends on data source availability)
@@ -13,11 +18,11 @@
 **Goal:** Can we extract earnings from official BSE filings?
 
 **Tasks:**
-- [ ] Visit https://www.bseindia.com/ and explore filing structure
-- [ ] Locate one company's quarterly filing (e.g., RELIANCE, TCS)
-- [ ] Check if XBRL is machine-readable or HTML-only
-- [ ] Document URL pattern: `https://www.bseindia.com/.../<company>/<filing>/...`
-- [ ] Extract sample: revenue, net income, EPS from one quarter
+- Visit https://www.bseindia.com/ and explore filing structure
+- Locate one company's quarterly filing (e.g., RELIANCE, TCS)
+- Check if XBRL is machine-readable or HTML-only
+- Document URL pattern: `https://www.bseindia.com/.../<company>/<filing>/...`
+- Extract sample: revenue, net income, EPS from one quarter
 
 **Reference:** SEC EDGAR is fully machine-readable JSON/XBRL. BSE may be HTML-heavy.
 
@@ -26,11 +31,11 @@
 **Goal:** Can we scrape/parse Moneycontrol's aggregated financials?
 
 **Tasks:**
-- [ ] Open Moneycontrol (e.g., https://www.moneycontrol.com/stocks/companyinfo/reliance/)
-- [ ] Locate quarterly financials table
-- [ ] Reverse-engineer page structure (HTML selectors, table format)
-- [ ] Test extraction on 3 stocks (RELIANCE, TCS, INFY)
-- [ ] Document: CSS selectors, column order, date format
+- Open Moneycontrol (e.g., https://www.moneycontrol.com/stocks/companyinfo/reliance/)
+- Locate quarterly financials table
+- Reverse-engineer page structure (HTML selectors, table format)
+- Test extraction on 3 stocks (RELIANCE, TCS, INFY)
+- Document: CSS selectors, column order, date format
 
 **Reference:** May be faster than BSE if Moneycontrol is consistent. Risk: site redesigns break scraper.
 
@@ -39,10 +44,10 @@
 **Goal:** Are there official APIs or downloadable files?
 
 **Tasks:**
-- [ ] Check https://www.nseindia.com/ for data portal / APIs
-- [ ] Search for company investor-relations links (IRL pages)
-- [ ] Check if NSE publishes consolidated earnings calendars
-- [ ] Document: API endpoints, auth requirements, data format
+- Check https://www.nseindia.com/ for data portal / APIs
+- Search for company investor-relations links (IRL pages)
+- Check if NSE publishes consolidated earnings calendars
+- Document: API endpoints, auth requirements, data format
 
 **Reference:** Most unlikely to have APIs; mostly manual links per company.
 
@@ -51,10 +56,10 @@
 **Goal:** NSE symbol → BSE company code
 
 **Tasks:**
-- [ ] Check if nse_stocks table has BSE mapping (grep schema, run query)
-- [ ] If missing, build mapping: NSE symbol → BSE company code
-- [ ] Test on 5 symbols (RELIANCE, TCS, INFY, M&M, BAJAJ-AUTO)
-- [ ] Document: lookup table / SQL / API endpoint
+- Check if nse_stocks table has BSE mapping (grep schema, run query)
+- If missing, build mapping: NSE symbol → BSE company code
+- Test on 5 symbols (RELIANCE, TCS, INFY, M&M, BAJAJ-AUTO)
+- Document: lookup table / SQL / API endpoint
 
 **Reference:** You have ~2,400 NSE symbols. Mapping is a one-time task.
 
@@ -247,12 +252,12 @@ except Exception as e:
 
 ## 5. Success Criteria
 
-- [ ] `python facts.py RELIANCE` returns 8+ quarters of financials (INR)
-- [ ] `python facts.py TCS INFY` bulk-exports metrics to JSON
-- [ ] `python facts.py AAPL --source sec` still works (backward compat)
-- [ ] Unit tests pass (BSE extraction, Moneycontrol fallback, mapping)
-- [ ] Help text documents all sources and flags
-- [ ] No external dependencies beyond stdlib (keep "Standard library only" rule)
+- `python facts.py RELIANCE` returns 8+ quarters of financials (INR)
+- `python facts.py TCS INFY` bulk-exports metrics to JSON
+- `python facts.py AAPL --source sec` still works (backward compat)
+- Unit tests pass (BSE extraction, Moneycontrol fallback, mapping)
+- Help text documents all sources and flags
+- No external dependencies beyond stdlib (keep "Standard library only" rule)
 
 ---
 

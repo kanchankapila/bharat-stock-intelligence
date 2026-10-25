@@ -24,13 +24,13 @@ async function run() {
   return { row, result: check().evaluate(row, new Date(AS_OF)) };
 }
 // One ranking row per (day, timeframe), stamped 22:30 IST on `day`; null = a row with no horizon.
-async function seed(day: string, timeframes: Array<string | null>) {
-  for (const tf of timeframes) {
-    await dbRun(
-      `INSERT INTO "${SCHEMA}".unified_recommendations (symbol, unified_score, regime, conviction_level, computed_at, timeframe, generated_at)
-       VALUES (?, 50, 'neutral', 'medium', ?, ?, CAST(? AS timestamptz))`,
-      [`S_${tf ?? 'NULL'}_${day}`, `${day} 22:30`, tf, `${day}T22:30:00+05:30`]);
-  }
+async function seed(days: string | string[], timeframes: Array<string | null>) {
+  const rows = (typeof days === 'string' ? [days] : days).flatMap(day =>
+    timeframes.map(tf => [`S_${tf ?? 'NULL'}_${day}`, `${day} 22:30`, tf, `${day}T22:30:00+05:30`]));
+  await dbRun(
+    `INSERT INTO "${SCHEMA}".unified_recommendations (symbol, unified_score, regime, conviction_level, computed_at, timeframe, generated_at)
+     VALUES ${rows.map(() => "(?, 50, 'neutral', 'medium', ?, ?, CAST(? AS timestamptz))").join(', ')}`,
+    rows.flat());
 }
 const CANON = ['INTRADAY', 'SWING', 'POSITIONAL'];
 const day = (n: number) => new Date(Date.UTC(2026, 9, 19) - n * 86_400_000).toISOString().slice(0, 10);
@@ -41,7 +41,7 @@ describe('unified-recommendations-timeframe-coverage (real SQL)', () => {
   });
 
   it('fails naming LONG_TERM when it produced rows in the trailing days and none on the latest ranking day', async () => {
-    for (let n = 1; n <= 5; n++) await seed(day(n), [...CANON, 'LONG_TERM', null]);
+    await seed(Array.from({ length: 5 }, (_, n) => day(n + 1)), [...CANON, 'LONG_TERM', null]);
     await seed(day(0), [...CANON, null]);
     const { row, result } = await run();
     expect(row!.latest_day).toBe(day(0));
@@ -50,13 +50,13 @@ describe('unified-recommendations-timeframe-coverage (real SQL)', () => {
   });
 
   it('passes when every trailing timeframe is present on the latest day', async () => {
-    for (let n = 0; n <= 5; n++) await seed(day(n), [...CANON, 'LONG_TERM']);
+    await seed(Array.from({ length: 6 }, (_, n) => day(n)), [...CANON, 'LONG_TERM']);
     expect((await run()).result.status).toBe('pass');
   });
 
   it('a timeframe last produced before the 10-ranking-day window is retired, not a failure', async () => {
     await seed(day(30), [...CANON, 'LONG_TERM']);
-    for (let n = 0; n <= 11; n++) await seed(day(n), CANON);
+    await seed(Array.from({ length: 12 }, (_, n) => day(n)), CANON);
     const { row, result } = await run();
     expect(row!.trailing_set).toBe('INTRADAY,POSITIONAL,SWING');
     expect(result.status).toBe('pass');
@@ -90,7 +90,7 @@ describe('unified-recommendations-timeframe-coverage (real SQL)', () => {
   });
 
   it('a CANONICAL horizon absent from the whole trailing window still fails (a dead horizon never ages out)', async () => {
-    for (let n = 0; n <= 12; n++) await seed(day(n), ['SWING', 'POSITIONAL']);
+    await seed(Array.from({ length: 13 }, (_, n) => day(n)), ['SWING', 'POSITIONAL']);
     const { row, result } = await run();
     expect(row!.trailing_set).toBe('POSITIONAL,SWING');
     expect(result.status).toBe('fail');
@@ -100,7 +100,7 @@ describe('unified-recommendations-timeframe-coverage (real SQL)', () => {
 
   it('LONG_TERM (folded onto POSITIONAL, AF-20261001-06) neither fails nor is required once outside the window', async () => {
     await seed(day(20), [...CANON, 'LONG_TERM']);
-    for (let n = 0; n <= 11; n++) await seed(day(n), CANON);
+    await seed(Array.from({ length: 12 }, (_, n) => day(n)), CANON);
     const { result } = await run();
     expect(result.status).toBe('pass');
   });

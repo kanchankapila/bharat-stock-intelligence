@@ -144,7 +144,7 @@ export async function recordHeartbeat(
   }
 }
 
-export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: number | null }>> {
+export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: number | null; reason?: 'failed' }>> {
   try {
     await ensureTable();
     const now = Date.now();
@@ -190,7 +190,7 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
 
     const rows = await dbAll('SELECT job_name, last_status, last_success_at FROM job_heartbeat') as
       Array<{ job_name: string; last_status: string | null; last_success_at: number | null }>;
-    const stale: Array<{ job: string; hoursStale: number | null }> = [];
+    const stale: Array<{ job: string; hoursStale: number | null; reason?: 'failed' }> = [];
     for (const r of rows) {
       if (registryNames.has(r.job_name)) {
         // A SCHEDULED entry is genuinely covered by cron-aware getLateJobs(); leave it there.
@@ -198,8 +198,11 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
         // An EVENT-DRIVEN entry is covered by nothing. Staleness is still the wrong question
         // for it -- nothing triggered it is a legitimate idle state, and alerting on that is
         // the "check that can never pass" anti-pattern -- so report it only on a TERMINAL
-        // FAILURE, then fall through to the ordinary last-success age math below.
+        // FAILURE, independently of the ordinary last-success age threshold below.
         if ((r.last_status ?? '').toLowerCase() !== 'failed') continue;
+        stale.push({ job: r.job_name, reason: 'failed', hoursStale: r.last_success_at == null
+          ? null : Math.max(0, Math.floor((now - r.last_success_at) / 3_600_000)) });
+        continue;
       }
       if (monitorScriptIds.has(r.job_name)) continue; // covered by getSystemStatus() instead
       // DQ check ids: since 2026-09-20 the sweep itself stamps these rows live
@@ -805,8 +808,10 @@ export function startHeartbeatMonitor(): void {
   const check = async () => {
     const stale = await getStaleJobs();
     for (const s of stale) {
-      if (s.hoursStale == null) {
-        console.warn(`[HEARTBEAT] STALE: '${s.job}' has never succeeded`);
+      if (s.reason === 'failed' || s.hoursStale == null) {
+        console.warn(s.reason === 'failed'
+          ? `[HEARTBEAT] FAILED: '${s.job}' last event-driven run failed; no later success recorded`
+          : `[HEARTBEAT] STALE: '${s.job}' has never succeeded`);
         continue;
       }
       console.warn(`[HEARTBEAT] STALE: '${s.job}' has not succeeded in ~${s.hoursStale}h`);

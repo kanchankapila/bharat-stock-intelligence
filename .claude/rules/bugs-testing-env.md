@@ -162,6 +162,13 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 
 ## Testing
 
+- **A test timeout does not cancel its unfinished async fixture.** Per-row autocommit seeders
+  in accuracy/timeframe coverage tests exceeded their budgets under shared Postgres I/O load;
+  the timed-out timeframe seed then continued into later cases after their cleanup, producing
+  duplicate keys and wrong-window assertions. Batch the same fixture rows into bounded writes,
+  preserve the scenarios/assertions/budgets, and await the actual writer/commit (not an early
+  success object). A later isolated pass does not erase the failed full run. AF-20261025-30/32.
+
 - **A test process using the production logger can pollute the production incident record without
   touching production data.** Failure-path tests are supposed to emit errors (memory ceilings,
   timeouts, malformed payloads); if the shared logger installs rotating file, exception or

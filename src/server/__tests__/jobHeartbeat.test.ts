@@ -181,6 +181,14 @@ describe('getStaleJobs', () => {
     expect(stale.map(s => s.job)).not.toContain('event-job');
   });
 
+  it('reports a terminal event-driven failure even immediately after a recent success', async () => {
+    vi.setSystemTime(new Date('2026-10-25T07:00:00Z'));
+    try {
+      mockRows.push({ job_name: 'event-job', last_status: 'failed', last_success_at: Date.now() - 1000 });
+      expect(await getStaleJobs()).toContainEqual({ job: 'event-job', reason: 'failed', hoursStale: 0 });
+    } finally { vi.useRealTimers(); }
+  });
+
   it('still leaves a SCHEDULED registry job to getLateJobs even when its last run failed', async () => {
     vi.setSystemTime(new Date('2026-10-25T07:00:00Z'));
     mockRows.push({

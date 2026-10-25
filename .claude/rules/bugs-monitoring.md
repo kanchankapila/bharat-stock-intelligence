@@ -60,6 +60,12 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   late by design. Immunized by `trendlyneDailyBatch.test.ts` (retry initialisation, missing state,
   incomplete, all-green and mixed/finalise-once cases), the 12-hour grace consistency test and
   repo-doctor's `trendlyne-fanout-heartbeat` check, AF-20261014-10.
+  The same completion error occurs with a zero-delay timer: `await` on a synchronous
+  "started successfully" object does not await its detached transaction. NSE master sync
+  did this while its scheduled caller immediately began dependent backfills. Return a shared
+  completion promise and propagate commit errors; a concurrency/deferred-commit test must
+  prove the success boundary, not merely poll one row that an older run might have written.
+  Guard: `nseSyncCompletion.test.ts`, AF-20261025-32.
 
 - **An inline wrapper that declares fewer parameters than its caller passes silently drops the
   extras.** `registerJob` calls `monitorFn(name, status, detail, durationMs)`; three wrappers in
@@ -495,6 +501,9 @@ Fixed and immunized in AF-20260929-09; `bharat_alpha/tests/test_legacy_bridge.py
   three cases in `jobHeartbeat.test.ts` (failed event-driven flagged, idle event-driven NOT flagged,
   scheduled still left to `getLateJobs`); only the first fails pre-fix, which is what makes the other
   two load-bearing rather than decorative.
+  Follow-up: testing only an OLD failure misses a residual freshness veto. A recent success must
+  not suppress a newer terminal failure. `jobHeartbeat.test.ts` also pins the recent-success case;
+  return the explicit failure reason before age arithmetic and log FAILED, not a false STALE age.
 
 - **A registry whose rows can only say "working" is a list, not a health record.**
   `market_endpoint_registry` held 3,408 of 3,408 `is_working = true`, last validated 2026-09-13. Report

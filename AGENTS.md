@@ -10,6 +10,10 @@ This file is only the **inventory of agent tooling**. It holds no rules of its o
 drift from `CLAUDE.md`. Every name below is a real file — `claude-config.test.mjs` fails if a
 skill, command or subagent exists but is not listed here, or if a cited path does not exist.
 
+**Shared work tracker for every agent/model:** `docs/audit-findings.md`.
+Read the "Shared backlog — every agent and model" policy in `CLAUDE.md` before work; plans,
+memory and model-specific instruction files point there rather than owning independent queues.
+
 ## Rules (auto-scoped by `paths:` frontmatter — loaded when you touch a matching file)
 | File | Covers |
 |---|---|

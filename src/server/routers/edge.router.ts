@@ -9,10 +9,14 @@ import { calendarBlockedUntil, MIN_DATES_RELIABLE, type ForwardTestReport } from
 const BUY = new Set(['Buy', 'Strong Buy']);
 
 // forward_test_report.py writes json.dumps(..., default=str), which emits bare NaN/Infinity.
-// ponytail: a token replace; a string value containing the word NaN would be nulled too.
+// Consume quoted JSON tokens first so explanatory text and keys remain byte-for-byte intact.
 function parsePyJson<T = any>(text: string | null | undefined): T | null {
   if (!text) return null;
-  try { return JSON.parse(text.replace(/-?\bNaN\b|-?\bInfinity\b/g, 'null')) as T; } catch { return null; }
+  try {
+    const normalized = text.replace(/"(?:\\.|[^"\\])*"|-?\b(?:NaN|Infinity)\b/g,
+      token => token.startsWith('"') ? token : 'null');
+    return JSON.parse(normalized) as T;
+  } catch { return null; }
 }
 
 type SnapRow = { symbol: string; classification: string | null; unified_score: number | null; valid_until: string | Date | null };

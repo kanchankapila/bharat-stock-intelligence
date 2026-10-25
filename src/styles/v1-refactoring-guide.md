@@ -1,5 +1,10 @@
 # V1 Design System — Refactoring Guide for All 63 Pages
 
+> Historical design/recipe, not a separate work queue. Current scope, owner and status are
+> stored only in `docs/audit-findings.md` (AF-20261025-26). The bullet steps below
+> retain the proposed design; moving tracking does not mean they were completed. Re-check
+> current code and the ledger before executing dated commands or reviving retired surfaces.
+
 ## The Transformation Goal
 
 **Before**: Pages have scattered Tailwind colors, inline style maps, inconsistent typography, and mixed patterns
@@ -193,18 +198,18 @@ const convictionClass = {
 
 Remove these patterns from EVERY page:
 
-- [ ] Delete custom style maps (CONV, COLOR, REGIME_COLOR, etc.) — use v1-badge-* instead
-- [ ] Replace `text-emerald-400` / `text-rose-400` with `v1-text-bullish` / `v1-text-bearish`
-- [ ] Replace hand-rolled buttons with `v1-btn-primary` / `v1-btn-secondary` / `v1-btn-ghost`
-- [ ] Replace hand-rolled inputs with `v1-input`
-- [ ] Replace `bg-slate-900 border border-slate-700 rounded` with `v1-card`
-- [ ] Replace page title classes with `v1-title-page`
-- [ ] Replace section headers with `v1-title-section`
-- [ ] Replace card titles with `v1-title-card`
-- [ ] Use `v1-header` / `v1-header-left` / `v1-header-actions` for page headers
-- [ ] Replace grids with `v1-grid`, `v1-grid-2`, `v1-grid-3`, `v1-grid-4`
-- [ ] Use `v1-page` for top-level page container
-- [ ] Audit text colors: replace all `text-slate-*` with semantic classes (`v1-text-secondary`, `v1-text-muted`)
+- Delete custom style maps (CONV, COLOR, REGIME_COLOR, etc.) — use v1-badge-* instead
+- Replace `text-emerald-400` / `text-rose-400` with `v1-text-bullish` / `v1-text-bearish`
+- Replace hand-rolled buttons with `v1-btn-primary` / `v1-btn-secondary` / `v1-btn-ghost`
+- Replace hand-rolled inputs with `v1-input`
+- Replace `bg-slate-900 border border-slate-700 rounded` with `v1-card`
+- Replace page title classes with `v1-title-page`
+- Replace section headers with `v1-title-section`
+- Replace card titles with `v1-title-card`
+- Use `v1-header` / `v1-header-left` / `v1-header-actions` for page headers
+- Replace grids with `v1-grid`, `v1-grid-2`, `v1-grid-3`, `v1-grid-4`
+- Use `v1-page` for top-level page container
+- Audit text colors: replace all `text-slate-*` with semantic classes (`v1-text-secondary`, `v1-text-muted`)
 
 ---
 

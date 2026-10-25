@@ -52,7 +52,7 @@ function pickExplanation(pick: any): { label: string; text: string } | null {
       : Array.isArray(parsed) ? parsed : [];
     const clean = names.filter((name: unknown): name is string => typeof name === 'string' && name.trim().length > 0);
     return clean.length > 0
-      ? { label: 'Bullish screeners', text: clean.slice(0, 6).join(' · ') }
+      ? { label: 'Scanner matches (direction unverified)', text: clean.slice(0, 6).join(' · ') }
       : null;
   } catch {
     return null;
@@ -89,11 +89,14 @@ function EodPickCard({ pick, onSelect, flags }: { pick: any; onSelect: (sym: str
   const [expanded, setExpanded] = useState(false);
   const style = CONVICTION_STYLE[pick.conviction_level] ?? CONVICTION_STYLE.C_LOW;
   const explanation = pickExplanation(pick);
+  const isBuy = pick.classification === 'Buy' || pick.classification === 'Strong Buy';
+  const isSell = pick.classification === 'Sell' || pick.classification === 'Strong Sell';
+  const card = isBuy ? 'v1-card-up' : isSell ? 'v1-card-down' : 'v1-card-neutral';
 
   return (
     <motion.div
       layout
-      className={cn(style.card, 'p-4 cursor-pointer hover:brightness-110')}
+      className={cn(card, 'p-4 cursor-pointer hover:brightness-110')}
       onClick={() => onSelect(pick.symbol)}
       role="button"
       tabIndex={0}
@@ -106,7 +109,7 @@ function EodPickCard({ pick, onSelect, flags }: { pick: any; onSelect: (sym: str
             <span className="text-white font-bold text-sm">{pick.symbol}</span>
             <span
               className={cn('text-[10px] font-black', style.badge)}
-              title="Tier mirrors the Buy/Strong Buy rating, not a graded accuracy scale"
+              title="Conviction is direction-agnostic: read the Buy/Sell classification. Not graded accuracy."
             >
               {style.label}
             </span>
@@ -114,7 +117,7 @@ function EodPickCard({ pick, onSelect, flags }: { pick: any; onSelect: (sym: str
           <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[10px]">
             {pick.classification && (
               <span className={cn('px-1.5 py-0.5 rounded border',
-                /Buy/.test(pick.classification) ? 'text-emerald-400 border-emerald-500/30' : 'text-slate-400 border-slate-600/40')}>
+                isBuy ? 'text-emerald-400 border-emerald-500/30' : isSell ? 'text-rose-400 border-rose-500/30' : 'text-slate-400 border-slate-600/40')}>
                 {pick.classification}
               </span>
             )}
@@ -174,8 +177,8 @@ function EodPickCard({ pick, onSelect, flags }: { pick: any; onSelect: (sym: str
       </div>
 
       <div className="flex items-center gap-3 text-[11px] mb-3">
-        <span className="text-emerald-400 font-medium">↑{pick.bullish_screener_count ?? 0} bullish</span>
-        <span className="text-rose-400 font-medium">↓{pick.bearish_screener_count ?? 0} bearish</span>
+        <span className="text-emerald-400 font-medium" title="Vendor label counts, not independently validated directional evidence">↑{pick.bullish_screener_count ?? 0} vendor-bullish</span>
+        <span className="text-rose-400 font-medium" title="Vendor label counts, not independently validated directional evidence">↓{pick.bearish_screener_count ?? 0} vendor-bearish</span>
         {pick.realizedReturnPct != null && (
           <span className={cn('ml-auto font-bold', pctColor(pick.realizedReturnPct))}>
             {pct(pick.realizedReturnPct)} vs entry-zone low, gross

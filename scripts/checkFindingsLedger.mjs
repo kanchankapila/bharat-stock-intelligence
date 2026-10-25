@@ -16,7 +16,7 @@ export const RULE_START = '2026-09-30';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // An artifact that can fail: a test file, a scanner/check script, or a named static check.
-const ARTIFACT = /`?([\w./-]+?\.(?:test\.ts|test\.mjs|py|mjs|ts))`?|check_[a-z_]+|\bTest[A-Z]\w+|\btest_[a-z0-9_]+/g;
+const ARTIFACT = /`?([\w./-]+?\.(?:test\.tsx?|test\.mjs|py|mjs|tsx?))(?![\w./-])`?|check_[a-z_]+|\bTest[A-Z]\w+|\btest_[a-z0-9_]+/g;
 // The four legitimate reasons for a row to stay open (CLAUDE.md), plus a refused permission,
 // which is "needs a user decision" in practice.
 // "Fixed, pending the next live run/retrain" is committed-not-yet-verified-live: calendar-blocked

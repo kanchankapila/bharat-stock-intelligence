@@ -42,82 +42,53 @@ export async function backfillNseStocksFundamentalsFallback(): Promise<{ updated
   return { updated: result?.changes ?? 0 };
 }
 
-let _nseSyncInProgress = false;
+type NseSyncResult = { success: true; message: string; written: number; inserted: null; updated: null };
+let _nseSyncPromise: Promise<NseSyncResult> | null = null;
 
 // Initialize NSE stocks in database (run once or periodically)
-export function syncNSEStocksToDatabase(): { success: boolean; message: string; inserted: number; updated: number } {
-  if (_nseSyncInProgress) {
-    return { success: true, message: 'NSE stocks sync already in progress', inserted: 0, updated: 0 };
-  }
-  try {
+export function syncNSEStocksToDatabase(): Promise<NseSyncResult> {
+  if (_nseSyncPromise) return _nseSyncPromise;
+  _nseSyncPromise = (async (): Promise<NseSyncResult> => {
     const stocks = getAllNSEStocks();
-    _nseSyncInProgress = true;
+    const BATCH_SIZE = 100;
+    const ROW_PH = `(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`;
+    const COLS = `symbol,name,sector,industry,isin,listing_date,exchange,status,last_updated`;
+    // sector/industry: the static src/data/nseStocks.ts seed file hardcodes 'Unknown' for
+    // ~95% of symbols (real classification is backfilled separately by
+    // backfill_sector_mc.py/backfill_sector_industry.py, chained right after this sync --
+    // see processNSESync in jobs/sync.jobs.ts). This job runs weekly; a blind
+    // `sector=excluded.sector` would silently wipe every backfilled real value back to
+    // 'Unknown' on the very next run. Only take the incoming value when it's a genuine
+    // classification, or when the existing row has nothing at all (first-ever sync) --
+    // never let a placeholder downgrade a real one, matching the "gap-fill only, never
+    // clobber" convention the backfill scripts themselves already follow.
+    const CONFLICT = `name=excluded.name,`
+      + `sector=CASE WHEN excluded.sector IS NOT NULL AND excluded.sector NOT IN ('','Unknown') THEN excluded.sector `
+      +   `WHEN nse_stocks.sector IS NULL THEN excluded.sector ELSE nse_stocks.sector END,`
+      + `industry=CASE WHEN excluded.industry IS NOT NULL AND excluded.industry NOT IN ('','Unknown') THEN excluded.industry `
+      +   `WHEN nse_stocks.industry IS NULL THEN excluded.industry ELSE nse_stocks.industry END,`
+      + `isin=excluded.isin,listing_date=excluded.listing_date,last_updated=CURRENT_TIMESTAMP`;
 
-    // Run the sync asynchronously to avoid blocking the event loop during request handling
-    setTimeout(async () => {
-      try {
-        const insertSql = `
-            INSERT INTO nse_stocks (symbol, name, sector, industry, isin, listing_date, exchange, status, last_updated)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(symbol) DO UPDATE SET
-              name = excluded.name,
-              sector = excluded.sector,
-              industry = excluded.industry,
-              isin = excluded.isin,
-              listing_date = excluded.listing_date,
-              last_updated = CURRENT_TIMESTAMP
-          `;
-
-        const BATCH_SIZE = 100;
-        const ROW_PH = `(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`;
-        const COLS = `symbol,name,sector,industry,isin,listing_date,exchange,status,last_updated`;
-        // sector/industry: the static src/data/nseStocks.ts seed file hardcodes 'Unknown' for
-        // ~95% of symbols (real classification is backfilled separately by
-        // backfill_sector_mc.py/backfill_sector_industry.py, chained right after this sync --
-        // see processNSESync in jobs/sync.jobs.ts). This job runs weekly; a blind
-        // `sector=excluded.sector` would silently wipe every backfilled real value back to
-        // 'Unknown' on the very next run. Only take the incoming value when it's a genuine
-        // classification, or when the existing row has nothing at all (first-ever sync) --
-        // never let a placeholder downgrade a real one, matching the "gap-fill only, never
-        // clobber" convention the backfill scripts themselves already follow.
-        const CONFLICT = `name=excluded.name,`
-          + `sector=CASE WHEN excluded.sector IS NOT NULL AND excluded.sector NOT IN ('','Unknown') THEN excluded.sector `
-          +   `WHEN nse_stocks.sector IS NULL THEN excluded.sector ELSE nse_stocks.sector END,`
-          + `industry=CASE WHEN excluded.industry IS NOT NULL AND excluded.industry NOT IN ('','Unknown') THEN excluded.industry `
-          +   `WHEN nse_stocks.industry IS NULL THEN excluded.industry ELSE nse_stocks.industry END,`
-          + `isin=excluded.isin,listing_date=excluded.listing_date,last_updated=CURRENT_TIMESTAMP`;
-
-        let inserted = 0;
-        let updated = 0;
-        await dbTransaction(async (tx) => {
-          for (let i = 0; i < stocks.length; i += BATCH_SIZE) {
-            const chunk = stocks.slice(i, i + BATCH_SIZE);
-            const sql = `INSERT INTO nse_stocks (${COLS}) VALUES ${chunk.map(() => ROW_PH).join(',')}
-              ON CONFLICT(symbol) DO UPDATE SET ${CONFLICT}`;
-            const params = chunk.flatMap(s => [
-              s.symbol, s.name, s.sector, s.industry, s.isin,
-              s.listing_date || null, 'NSE', 'ACTIVE',
-            ]);
-            const result = await tx.run(sql, params);
-            inserted += result.changes ?? 0;
-          }
-          updated = stocks.length - inserted;
-        });
-
-        console.log(`✅ NSE Stocks Sync: Inserted ${inserted}, Updated ${updated} from ${stocks.length} stocks`);
-      } catch (error) {
-        console.error('❌ Error in background NSE stocks sync:', error);
-      } finally {
-        _nseSyncInProgress = false;
+    let written = 0;
+    await dbTransaction(async (tx) => {
+      for (let i = 0; i < stocks.length; i += BATCH_SIZE) {
+        const chunk = stocks.slice(i, i + BATCH_SIZE);
+        const sql = `INSERT INTO nse_stocks (${COLS}) VALUES ${chunk.map(() => ROW_PH).join(',')}
+          ON CONFLICT(symbol) DO UPDATE SET ${CONFLICT}`;
+        const params = chunk.flatMap(s => [
+          s.symbol, s.name, s.sector, s.industry, s.isin,
+          s.listing_date || null, 'NSE', 'ACTIVE',
+        ]);
+        const result = await tx.run(sql, params);
+        written += result.changes ?? 0;
       }
-    }, 0);
+    });
 
-    return { success: true, message: `Syncing ${stocks.length} NSE stocks in background...`, inserted: 0, updated: 0 };
-  } catch (error) {
-    _nseSyncInProgress = false;
-    console.error('❌ Error initiating NSE stocks sync:', error);
-    return { success: false, message: `Error initiating NSE stocks sync: ${error}`, inserted: 0, updated: 0 };
-  }
+    // The adapter counts upserted rows, not INSERT versus UPDATE. Do not invent that split.
+    console.log(`✅ NSE Stocks Sync: Wrote ${written} rows from ${stocks.length} stocks`);
+    return { success: true, message: `Synced ${written} NSE stock rows`, written, inserted: null, updated: null };
+  })().finally(() => { _nseSyncPromise = null; });
+  return _nseSyncPromise;
 }
 
 // Get all NSE stocks from database

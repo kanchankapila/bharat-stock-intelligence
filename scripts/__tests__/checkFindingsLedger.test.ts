@@ -14,6 +14,16 @@ describe('checkFindingsLedger.validate', { timeout: 60_000 }, () => {
     expect(validate(t)).toEqual([]);
   });
 
+  it('accepts an existing TSX render regression by path or basename', () => {
+    for (const name of ['src/components/CommandCenterDashboard.test.tsx', 'CommandCenterDashboard.test.tsx']) {
+      expect(validate(table(`| AF-20261025-99 | 2026-10-25 | x | UI bug | FIX | fixed | ${name} | 2026-10-25 |`))).toEqual([]);
+    }
+  });
+
+  it('does not accept an existing filename merely as a prefix of a nonexistent artifact', () => {
+    expect(validate(table('| AF-20261025-99 | 2026-10-25 | x | UI bug | FIX | fixed | src/components/CommandCenterDashboard.test.tsx.nonexistent | 2026-10-25 |')).join()).toMatch(/cites no existing regression test/);
+  });
+
   it('accepts a closed FIX row that cites an existing named test class', () => {
     const t = table('| AF-20260930-90 | 2026-09-30 | x | bug | FIX | fixed | `TestFetchRetriesTransient405` | 2026-09-30 |');
     expect(validate(t)).toEqual([]);

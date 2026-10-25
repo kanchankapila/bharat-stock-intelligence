@@ -244,7 +244,7 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
   try {
     const { syncNSEStocksToDatabase } = await import('../nseService');
     const result = await syncNSEStocksToDatabase();
-    const stockCount = (result?.inserted || 0) + (result?.updated || 0);
+    const stockCount = result.written;
     console.log(`[QUEUE] NSE sync completed, ${stockCount} stocks updated`);
     // The static seed supplies mappings/classifications; the exchange masters decide which
     // instruments are active equities. Run this before downstream universe consumers.

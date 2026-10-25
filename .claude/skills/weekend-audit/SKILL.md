@@ -1,11 +1,16 @@
 ---
 name: weekend-audit
-description: Weekly whole-system health sweep across repo/build, the five services, jobs, Postgres, the ML layer and the frontend — runs the checks that already exist, adds only the ones nothing covers, rotates through the 14 deep audit commands, then hands every finding to the audit-loop skill to be fixed, verified and immunized. Use on a weekend, when asked to audit the whole system / check everything is running right, or when scheduling a recurring health check.
+description: Weekly whole-system health sweep across repo/build, services, jobs, Postgres, the ML layer and the frontend — runs existing checks, adds checks for coverage gaps, rotates through deep audit commands, then hands findings to audit-loop for authorized remediation. Use on a weekend, when asked to audit the whole system or check everything is running correctly, or when scheduling a recurring health check.
 ---
 
 # Weekend audit
 
-Nothing here is a new monitoring engine. The 15-minute `jobWatchdog`, the 62 checks in
+Internal project skill; shared contract/replay requirements live in the audit-loop skill.
+For shared-skill handoffs use the same installation/staging set, never a staged caller with
+an older live checklist. A review-only request runs discovery and reports the remediation
+handoff; Lane 8's fix/deploy obligations apply only when the request authorizes implementation.
+
+Nothing here is a new monitoring engine. The configured `jobWatchdog`, the current checks in
 `dataQualityChecks.ts`, and the `.claude/commands/*.md` review files already cover most
 of this. (Those commands are user-invoked as `/name` and hidden from the model's skill list via
 `disable-model-invocation`; to run one yourself, Read its file and follow it.) This skill exists for the gaps those cannot see:
@@ -19,10 +24,10 @@ of this. (Those commands are user-invoked as `/name` and hidden from the model's
   `data_quality_history` (added 2026-08-15) is the append-only counterpart — query that for
   verdict-over-time. It starts on 2026-08-15, so anything older than that is only comparable via
   this skill's own ledger.
-- **The frontend has zero monitoring and zero component tests.** Since the 2026-08-29
-  consolidation it is one v1 shell (`AppShell`/`V1Routes`); there is no v-something a fresh
-  visitor "lands on" any more — old shell names predate the consolidation.
-- **The 12 deep audits are run only when someone remembers.** Rotation below fixes that.
+- **Build, component tests and screenshots cover different things.** Inventory the current
+  route trees and their tests rather than assuming that a shell name or a passing build
+  proves every live surface is covered. Lane 5 checks what users can actually reach.
+- **Deep audits need a recorded rotation.** The rotation below makes missed coverage visible.
 
 Read `.claude/rules/recurring-bugs.md` before starting. Run lanes in order; a red lane does not
 stop the others. **Do not fix as you go.** Collect findings through Lane 6, then run the whole set
@@ -47,6 +52,8 @@ pm2 jlist | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{for
 `pm_uptime` **older than the newest commit touching `.ts` / `.py` for that service is a finding**,
 not a curiosity — committed ≠ deployed, and `.ts` is not hot-reloaded. `restart_time` climbing
 between weekends means a crash loop nothing alerted on.
+Conversely, a newer uptime does not identify the served build. Verify the deployed revision
+and actual changed output before describing a repair as live.
 
 ## Lane 1 — Repo & build
 
@@ -64,9 +71,18 @@ npm run build
 that is the only pass that sees a class hiding in a file nobody touched this week. Use
 `backend-python/venv`, never bare `python` (different sklearn).
 
+When changed fields cross producer-to-reader enum/filter boundaries, or a populated stage
+returns an unexpectedly empty API result, load the sibling `../audit-loop/SKILL.md`'s
+**Contract checks — producer to public reader** section and run its supplementary checks.
+That sibling path is relative to this skill directory, including during a staged preview.
+The lane's normal green commands do not imply those checks ran; record their reader coverage
+or explicit skip separately.
+
 ## Lane 2 — Services
 
-The four processes (`bharat-server`:3000, `ml-api`:8000, `chatbot`:8001, `alphaquant-api`:8002).
+Derive the full required service inventory from the current operating manual and
+`ecosystem.config.cjs`; distinguish long-lived services from scheduled one-shots. The probes
+below cover the historical app-facing subset, not proof that the full inventory is healthy.
 `pm2 jlist` says "online"; that is not the same as answering.
 
 ```bash
@@ -184,10 +200,17 @@ Reading the results:
 
 ## Lane 5 — Frontend
 
-Use the `run-bharat-stock-intelligence` skill to boot and drive the real route surface. Screenshot
-the `/*` v1 shell first (the default a fresh visitor gets), then spot-check `/tala/*`; audit
-`/concept` separately as an explicitly simulated design concept. The former v2-v6 shells were
-removed and must not be used as audit targets.
+Use the `run-bharat-stock-intelligence` skill, starting with its route-target pre-flight.
+Read `src/main.tsx`, follow the applications and nested route trees it actually imports,
+and record how each planned browser target is reached. Existing examples are the `/*` v1 shell,
+`/tala/*` and `/concept`; they are examples to re-check, not a permanent coverage allowlist.
+Inspect the imported `src/v1/V1Routes.tsx` and `src/tala/TalaRoutes.tsx` where still applicable,
+including newly nested surfaces. Do not use retired generation names or component directories
+as proof that a route is live. Check the deployed build separately from working-tree imports.
+
+Screenshot the actual default landing surface, then a representative page in every mounted
+application tree. Audit simulated concept pages separately and label their values as simulated;
+do not present them as live-data verification. A route with no import chain is not an audit target.
 
 - Browser console clean of errors on load?
 - Does the home surface show real numbers, or the "looks healthy, is actually broken" shape —
@@ -203,7 +226,7 @@ Roughly three per weekend, so all 14 land every 5 weeks. Pick the group by ISO w
 | 0 | Data layer | `/data-coverage-audit` · `/fetcher-accuracy-review` · `/cross-writer-collision-audit` |
 | 1 | Backend | `/job-runtime-audit` · `/trpc-surface-review` · `/migration-safety-review` |
 | 2 | ML & measurement | `/signal-accuracy-review` · `/measurement-integrity-review` · `/ml-promotion-gate-review` |
-| 3 | Frontend & canonical | `/canonical-read-audit` · `/data-honesty-review` — `/shell-parity-audit` retired 2026-09-01 (v1 is now the only frontend, nothing left to compare shells against) |
+| 3 | Frontend & canonical | `/canonical-read-audit` · `/data-honesty-review` — `/shell-parity-audit` retired; use Lane 5's current route inventory, not historical shell counts |
 | 4 | Silent-green | `/temporal-correctness-audit` · `/test-integrity-audit` · `/threshold-calibration-audit` |
 
 Group 4 covers the three clusters with the highest recorded recurrence counts and, until now, no
@@ -211,8 +234,14 @@ command coverage at all: date anchors and trading-day arithmetic (~35 instances)
 green while protecting nothing, and monitors whose verdict never varies.
 
 Record which group ran, so a skipped weekend is visible as a gap rather than silently rotating on.
-If a lane above went red in a way one of the other 12 commands is built for, run that one too
+If a lane above went red in a way another available audit command is built for, run that one too
 regardless of rotation — the schedule is the floor, not the ceiling.
+
+When the changes under review affect a learner or its feature history, load
+the sibling `../audit-loop/SKILL.md`'s **Learner replay — conditional evidence gate** section
+before accepting quantitative claims. Carry its paired replay, independent-date counts,
+actual-ranking diagnostics and cost-aware verdict into the handoff. Missing evidence stays
+explicitly missing; a green pipeline is not a profitable-prediction claim.
 
 ## Lane 7 — Report and ledger
 
@@ -236,7 +265,7 @@ actually ran — a skipped lane is reported as skipped, never as green.
 Hand every finding from Lanes 0-7 to the **`audit-loop`** skill. It owns the rest: triage into
 FIX / EVIDENCE / INVESTIGATE / ACCEPT, fix the safe ones root-cause-first, negative-control each
 test, verify against live production via `deploy-and-verify`, immunize with a static check in
-`scripts/check_recurring_bugs.py` where possible, and carry every unclosed finding forward in
+`./scripts/check_recurring_bugs.py` where possible, and carry every unclosed finding forward in
 `docs/audit-findings.md` with a stable ID.
 
 **Report-only is not an outcome of this skill (user, 2026-09-30).** Lanes 0-7 say "do not fix as

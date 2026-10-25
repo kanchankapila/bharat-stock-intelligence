@@ -1,5 +1,10 @@
 # V1 Design System — Implementation Summary
 
+> Historical design/recipe, not a separate work queue. Current scope, owner and status are
+> stored only in `docs/audit-findings.md` (AF-20261025-26). The bullet steps below
+> retain the proposed design; moving tracking does not mean they were completed. Re-check
+> current code and the ledger before executing dated commands or reviving retired surfaces.
+
 **Date**: 2026-08-21 | **Status**: Ready to Deploy | **Scope**: All 63 v1 Pages
 
 ---
@@ -186,36 +191,36 @@ export function MyNewPage() {
 ## Rollout Plan
 
 ### Phase 1: Critical Pages (This Week)
-- [ ] BuyRecommendationsPage
-- [ ] HighConvictionPage
-- [ ] IndicesPage
-- [ ] EarningsPage
+- BuyRecommendationsPage
+- HighConvictionPage
+- IndicesPage
+- EarningsPage
 
 **Effort**: ~4-6 hours total
 **Risk**: Low (styling only, no logic changes)
 **QA**: Visual inspection + keyboard testing
 
 ### Phase 2: Intelligence Pages (Next Week)
-- [ ] ScreenerIntelligencePage
-- [ ] SmartMoneyPage
-- [ ] PremiumScreenersPage
-- [ ] ScreenerBrowserPage (if exists)
+- ScreenerIntelligencePage
+- SmartMoneyPage
+- PremiumScreenersPage
+- ScreenerBrowserPage (if exists)
 
 **Effort**: ~4 hours
 **Risk**: Low
 
 ### Phase 3: Remaining Pages (Sprint)
-- [ ] 50+ remaining pages in parallel
+- 50+ remaining pages in parallel
 - Developers can pick pages and refactor independently
 
 **Effort**: ~5 minutes per page average
 **Risk**: Very low (CSS-only changes)
 
 ### Phase 4: Comprehensive QA
-- [ ] Visual regression testing across 63 pages
-- [ ] Mobile/tablet/desktop responsive validation
-- [ ] Keyboard navigation on all interactive elements
-- [ ] Reduced motion preference testing
+- Visual regression testing across 63 pages
+- Mobile/tablet/desktop responsive validation
+- Keyboard navigation on all interactive elements
+- Reduced motion preference testing
 
 ---
 
@@ -247,14 +252,14 @@ export function MyNewPage() {
 
 Before marking any page as "refactored":
 
-- [ ] `npx tsc --noEmit` passes (no TypeScript errors)
-- [ ] Page renders without console errors in dark mode
-- [ ] All text meets WCAG AA contrast (16:1 for primary text)
-- [ ] `:focus-visible` ring visible on all buttons when tabbing
-- [ ] Buttons have hover state (lifted, shadow change)
-- [ ] Mobile view (640px) responsive — grids stack to 1 column
-- [ ] Reduced motion enabled — animations disabled
-- [ ] Live page looks like DashboardPage in aesthetic (glass cards, proper spacing, color usage)
+- `npx tsc --noEmit` passes (no TypeScript errors)
+- Page renders without console errors in dark mode
+- All text meets WCAG AA contrast (16:1 for primary text)
+- `:focus-visible` ring visible on all buttons when tabbing
+- Buttons have hover state (lifted, shadow change)
+- Mobile view (640px) responsive — grids stack to 1 column
+- Reduced motion enabled — animations disabled
+- Live page looks like DashboardPage in aesthetic (glass cards, proper spacing, color usage)
 
 ---
 

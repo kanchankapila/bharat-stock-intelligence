@@ -11850,3 +11850,81 @@ the run (14:00, mid-flight), 1 was that agent's new untracked test, and 2 passed
 verified on the 5 suites importing the edited module (150/150) and the study's own file (18/18).
 Read the summary line, not the exit code, and attribute before owning.
 
+## 2026-10-25 — Skill installation, shared backlog and retained v7 validation
+
+Installed the five previously staged audit/app-driving skill instructions. Full installed/staged
+tree comparison matched every payload; supporting assets were preserved. External delivery and
+observation records now describe installation, not a pending install. AF-20261025-20 owns this work.
+
+All repository work now shares docs/audit-findings.md across agents/models. Cline, Cursor and
+Copilot entrypoints link the same operating manual and ledger. Old plans retain design/history
+but no parallel unchecked implementation queues or remediation-status matrix. Source-comment
+markers and individually registered procedural templates are checked by a source-derived guard;
+its first real-repository negative control failed before migration, then passed afterwards.
+
+With user approval, retained and staged the previously untracked v7 UI, added a CI production
+build/backlog gate and verified a tracked-only source export builds without untracked UI files.
+Review found and repaired missing flow narrated as inflow, missing index change shown as zero,
+clock-only LIVE claims, failed requests shown as empty results, inaccessible table controls,
+legacy component scores labelled Unified Score and the removed chart-library API. The stock
+detail now reads the existing canonical endpoint and labels legacy diagnostics separately.
+Command-center direction styling and scanner narration were also corrected. Edge-report JSON
+normalization now leaves quoted text/keys intact while normalizing bare non-finite values.
+
+Unit regression controls failed against the original defects. Production verification is
+separate and read-only: the actual TCS canonical API and SQL both returned score 77.9 / Buy,
+session 2026-10-26, generated 2026-10-23 17:00:02 UTC; the browser rendered actual OHLC data.
+The future session label is intentional, not future generation. Its actual generated_at is now
+selected by the API instead of presenting the session as a computation time. The production-only
+browser check correctly reports that the old running backend still omits this field.
+
+Follow-up on AF-20261025-07 reproduced a residual monitoring defect: terminal event-driven
+failure was still suppressed after a recent success. It now bypasses age arithmetic and carries
+an explicit FAILED reason. No production heartbeat/history, ranking weight or stock data was
+rewritten. User chose to perform the bharat-server restart personally; backend repairs are not
+claimed deployed. User also approved pushing to a review branch, not remote main.
+
+Verification encountered intermittent default-budget test timeouts while concurrent pytest
+TRUNCATE and production table reads contended for I/O. Named failures passed separately; the
+default runs remain recorded as failed, not rounded to green. Full assertion verification with
+a documented longer per-test budget and remote CI are tracked in AF-20261025-06. Schema drift,
+inventory and shared-backlog checks pass; repo-doctor full reported no hard failure but retains
+provider/configuration warnings. All current actions and blockers remain only in the ledger.
+
+Final local verification: full Vitest at the ORIGINAL default test/hook budgets passed
+2,142 tests with 46 gated skips, zero failures and a successful JSON report. The last timing
+bottleneck's fixture was batched without changing its data, assertions or budgets. A separate
+timestamp-transport regression reproduced the React Date-child crash before using the existing
+IST formatter; both new cases now pass. Final typecheck and a refreshed tracked-only production
+build pass. The earlier failed runs remain evidence of host contention, not erased history.
+
+A subsequent final gate exposed two additional defects. The findings validator tokenized
+existing `.test.tsx` evidence as a nonexistent `.test.ts` path; complete-extension and suffix
+controls now cover that boundary (AF-20261025-31). A fresh full run also showed that attributing
+every race solely to host load was incomplete: NSE master sync returned a success object while
+its setTimeout transaction still ran. Awaiting that object did not wait for commit, allowing
+dependent backfills and later tests to race its writes. Two deterministic controls failed on
+the old function. It now returns a shared completion promise, propagates commit errors and
+permits retry; the scheduled caller uses actual rows written. Insert/update split is explicitly
+unknown rather than fabricated from an upsert affected-row count (AF-20261025-32). The real
+writer passes its private-schema sector-preservation controls; production rerun is reserved for
+the user-owned restart and normal schedule, not synthetic production writes.
+
+Latest complete Vitest after those follow-ups: 2,146 passed / 46 gated skips / zero failures
+(67.55s, successful JSON report). The timeframe-coverage fixture had the same per-row autocommit
+amplification as the accuracy fixture; after a timeout its unfinished inserts contaminated later
+cases. Both now batch the original data, retaining all stock-test assertions and time budgets.
+The newly added whole-repository backlog scan has an explicit 30s filesystem budget after a
+12.7s scan under contention; the scanner's nine negative/logic controls are unchanged. This is
+not a relaxation of stock logic or production latency requirements. AF-20261025-31 is closed;
+AF-20261025-26 no longer cites an already-closed dependency and names its actual remaining probes.
+
+Pre-push final gates all exited zero: full Python 3,881 passed / 269 gated skips (81 warnings,
+29m08s); full workspace Vitest 2,146 passed / 46 gated skips; tsc, refreshed tracked-source build,
+schema drift, inventory/backlog/findings and recurring-bug scan against origin/main. The Vitest
+total includes five passing tests in two unrelated untracked user files, deliberately excluded
+from this commit. Fresh full repo-doctor: 38 PASS / 4 WARN / 0 FAIL. Warnings retain historical
+host downtime, provider failures and absent Gemini configuration; they are not declared fixed.
+No backend restart or production stock-data mutation was performed. User-approved delivery is
+a new review branch only, with remote main unchanged and live backend readback still pending.
+

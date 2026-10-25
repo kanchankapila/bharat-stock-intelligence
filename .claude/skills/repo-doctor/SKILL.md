@@ -7,6 +7,9 @@ description: ONE consolidated health check across codebase, database, frontend a
 
 Single entry point for "is anything wrong anywhere". Replaces the per-lane ad-hoc sweeps that
 used to be re-invented every session (and that each missed what the last one had learned).
+The remediation/registry steps apply only when implementation is authorized. A review or
+diagnostic request does not authorize fixes, production writes, restarts or deployment;
+report the finding and handoff instead of treating a failed check as new permission.
 
 ## Run it
 
@@ -49,6 +52,20 @@ Exit code 0 = clear (WARNs allowed), 1 = at least one FAIL.
    contamination, Telegram settings, GEMINI key.
 4. **Logs** — today+yesterday error lines grouped by normalized signature; anything not
    matching a known-benign class is surfaced for root-causing.
+
+## Supplementary producer-to-reader contracts
+
+When enum/API filters or aliases cross a producer-reader boundary, or a populated stage
+serves an unexpectedly empty result, load the sibling `../audit-loop/SKILL.md`, section
+`## Contract checks — producer to public reader`. Follow its private-schema, producer-shaped
+fixtures and boundary controls through the actual public readers, plus the read-only live
+cross-check; do not duplicate that checklist or reimplement the readers' SQL.
+Resolve the sibling relative to this skill directory in the same installation/staging set;
+do not silently combine staged guidance with an older live shared checklist.
+
+`doctor.mjs` does **not** currently automate these supplementary probes. Report their evidence
+or omissions separately: an exit-0 doctor run does not certify these contracts. This guidance
+does not authorize production fixture writes or rescoring.
 
 ## Extending the registry (mandatory)
 

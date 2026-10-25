@@ -4,7 +4,7 @@
 > CLAUDE.md's "Closing a session" step 2 ("update MEMORY.md's index") means.
 
 - **Session journal (append a dated section per session):** `.agents/memory/session_journal.md`
-- **Findings ledger (fix-and-close in session; stable `AF-YYYYMMDD-NN` ids):** `docs/audit-findings.md`
+- **Single shared backlog for every agent/model and repository task (including skills, deployment and research; stable `AF-YYYYMMDD-NN` ids):** `docs/audit-findings.md`. Plans, logs and memory link IDs; they are not separate pending queues. Enforced by `npm run backlog:check` / `npm run findings:check`.
 - **Session log (what changed + what was learned):** `docs/session-log.md`
 - **Recurring bug classes (check before debugging):** `.claude/rules/recurring-bugs.md`
 - **Repo rules:** `CLAUDE.md` — "Read first", with domain rules load-on-demand (pointed to by `.claude/hooks/rules-pointer.mjs` on every Edit/Write)

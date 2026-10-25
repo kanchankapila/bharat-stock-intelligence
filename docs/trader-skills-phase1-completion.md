@@ -1,5 +1,10 @@
 # Day Trader Skills: Phase 1 Completion (NSE Adaptation)
 
+> Historical design/recipe, not a separate work queue. Current scope, owner and status are
+> stored only in `docs/audit-findings.md` (AF-20261025-24). The bullet steps below
+> retain the proposed design; moving tracking does not mean they were completed. Re-check
+> current code and the ledger before executing dated commands or reviving retired surfaces.
+
 **Date:** 2026-10-23  
 **Status:** ✅ COMPLETE  
 **Location:** `~/.claude/skills/trader-*/` (user-local, not committed to repo)
@@ -103,21 +108,21 @@ Output:
 ### Roadmap
 
 **Phase 2a (Data source research — 1-2 days):**
-- [ ] Document BSE XBRL API / HTML structure
-- [ ] Reverse-engineer Moneycontrol earnings pages
-- [ ] Test extraction on 3 stocks (RELIANCE, TCS, INFY)
+- Document BSE XBRL API / HTML structure
+- Reverse-engineer Moneycontrol earnings pages
+- Test extraction on 3 stocks (RELIANCE, TCS, INFY)
 
 **Phase 2b (Implementation — 2-3 days):**
-- [ ] Write `bse_facts()` / `moneycontrol_facts()` functions
-- [ ] Map NSE → BSE company codes
-- [ ] Refactor to share extraction logic with SEC path
-- [ ] Add `--source` flag (bse / moneycontrol / sec / auto)
+- Write `bse_facts()` / `moneycontrol_facts()` functions
+- Map NSE → BSE company codes
+- Refactor to share extraction logic with SEC path
+- Add `--source` flag (bse / moneycontrol / sec / auto)
 
 **Phase 2c (Polish — 1 day):**
-- [ ] Test on 5+ real stocks
-- [ ] Add earnings date calendar
-- [ ] Handle corporate actions (splits, bonuses)
-- [ ] Document all three sources in help text
+- Test on 5+ real stocks
+- Add earnings date calendar
+- Handle corporate actions (splits, bonuses)
+- Document all three sources in help text
 
 ---
 
