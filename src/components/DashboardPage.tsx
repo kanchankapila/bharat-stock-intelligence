@@ -32,6 +32,7 @@ import { V1SmartMoneyFlowWidget } from './V1SmartMoneyFlowWidget';
 import { V1FnOMicrostructureWidget } from './V1FnOMicrostructureWidget';
 import { V1TradeRiskCalculatorWidget } from './V1TradeRiskCalculatorWidget';
 import { dailyCloses } from '../lib/dailyCloses';
+import { buildSignalBatch } from '../lib/signalBatch';
 
 // ─── Fonts injected once ──────────────────────────────────────────────────────
 const FONT_FAMILY_DISPLAY = "'Archivo', sans-serif";
@@ -440,9 +441,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const handleGenerateSignals = async () => {
     if (stocks.length === 0) return;
     setIsGenerating(true);
-    setQueueProgress({ completed: 0, total: stocks.length });
+    const payload = buildSignalBatch(stocks);
+    setQueueProgress({ completed: 0, total: payload.length });
     try {
-      const payload = stocks.map(s => ({ symbol: s.symbol, stockData: s as unknown as Record<string, unknown> }));
       const result = await enqueueSignalsMutation.mutateAsync(payload);
       if (!result.queueAvailable) {
         setIsGenerating(false);

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { enqueueAISignals, getAIQueueStats } from "../queues";
 import { invalidateAISignalCache } from "../signals";
+import { MAX_SIGNAL_BATCH } from "../../lib/signalBatch";
 import { router, publicProcedure, protectedProcedure, adminProcedure, expensiveProcedure } from "../trpc";
 
 /** ISO timestamp `days` ago — used instead of SQLite datetime('now','-N days') so the
@@ -53,9 +54,12 @@ export const signalsRouter = router({
       return { success: true };
     }),
 
-  // .max(200): this array was unbounded, and every element becomes a BullMQ AI-queue job (an
-  // LLM call each). The two real callers batch the visible dashboard table -- DashboardPage.tsx
-  // and V3Dashboard.tsx -- which is tens of symbols, well under this ceiling.
+  // Capped at MAX_SIGNAL_BATCH: every element becomes a BullMQ AI-queue job (an LLM call each).
+  // The only caller is the AI Signals REFRESH button in DashboardPage.tsx (route `/` and
+  // `/dashboard`, V1Routes.tsx), which sends buildSignalBatch(stocks) -- the top movers of a
+  // ~2,400-name live universe, NOT "tens of symbols". It must stay <= this cap or zod rejects
+  // every click (silently: the component swallows the error). The 2026-08-07 auto-trigger on
+  // mount was removed on purpose (0d199a7f); V3Dashboard.tsx no longer exists.
   enqueueSignals: expensiveProcedure
     .input(z.array(z.object({
       symbol:    z.string().max(32),
