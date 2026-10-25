@@ -11928,3 +11928,20 @@ host downtime, provider failures and absent Gemini configuration; they are not d
 No backend restart or production stock-data mutation was performed. User-approved delivery is
 a new review branch only, with remote main unchanged and live backend readback still pending.
 
+Committed the reviewed owned paths as ddf7826e and pushed only
+codex/audit-remediation-2026-10-25. Remote ref readback matches the source commit; remote main
+remains 2f29d3e5. GitHub CI 40196319746 has passed build-test and smoke-test; its Python lane
+was still running at this entry. Bharat Alpha CI 40196319743 passed. The code graph was refreshed
+from ddf7826e. PM2 readback confirms the six long-lived services remain online with unchanged
+uptimes; no restart was performed. The user's unrelated permissions edit and two test files
+remain outside the commit.
+
+The push exposed a new security follow-up, not a reason to call the release production-ready:
+GitHub's old-default-branch alert was checked against this actual tree with npm audit --json.
+It reports thirty flagged package entries (five critical / twenty high / five moderate), not
+thirty independent CVEs or confirmed reachable exploits. AF-20261025-33 records the complete
+package list, primary advisories and the isolated-worktree migration decision requested from
+the user. This exceeds AF-20260925-04's historical three-alert acceptance. No audit fix, package
+replacement/downgrade or live install was attempted; functional code gates do not establish
+dependency security. All unresolved follow-ups remain only in the shared findings ledger.
+
