@@ -66,7 +66,7 @@ describe('enqueueSignals batch cap vs the REFRESH button payload', () => {
     expect(enqueueMock.mock.calls[0][0]).toHaveLength(MAX_SIGNAL_BATCH);
     enqueueMock.mockClear();
     await expect(caller.enqueueSignals(batch(MAX_SIGNAL_BATCH + 1)))
-      .rejects.toThrow(new RegExp(`too_big|<=\s*${MAX_SIGNAL_BATCH}`));
+      .rejects.toThrow(new RegExp(`"code":\\s*"too_big"[\\s\\S]*"maximum":\\s*${MAX_SIGNAL_BATCH}\\b`));
     expect(enqueueMock).not.toHaveBeenCalled();
   });
 
