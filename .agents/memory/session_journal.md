@@ -439,3 +439,19 @@ network policy (AF-20260928-10), so no connector in this batch has seen a live r
 - An endpoint reachability probe is not isolation: worker tests read production-style tables
   or skipped rather than binding the real connector through pg_db. The empty test database
   exposed this. Test-only private rows must be queried through the real endpoint as well.
+- Integrating concurrently published documentation requires merging by stable ledger ID,
+  not keeping one whole file and losing the other session's financial or verification evidence.
+  Source main 752f1b45 and documentation main 9f967244 are both in the isolated branch.
+- Source-derived safety guards must recognize a refactor's actual execution spelling. Moving
+  qualified private DROP statements from dbRun to tx.run exposed a missing scan vocabulary;
+  extend the census and its non-vacuity controls together, rather than deleting the check.
+- Fixture timeout continuation recurred across percentile, resolved-label, digest, provider
+  selection and edge-router cases. Await bounded transactions with the same rows/defaults;
+  a later focused pass does not erase a failed full gate. AF-20261026-04/-06 hold evidence.
+- Docker healthy is not a database query-back: in the same incident SELECT 1 responded once,
+  metadata reads stalled, and a later bounded connection handshake timed out. Record these
+  separately rather than asserting one universal outage or restarting an unowned service.
+- The merged full Python run was interrupted at 79 percent after this stall, not passed.
+  Supplemental source/mocked checks can verify scanner/bootstrap controls without a database,
+  but cannot satisfy the user's fully-green-local condition. AF-20261026-07 owns recovery;
+  AF-20261025-33 owns review delivery and the separately user-owned runtime activation.

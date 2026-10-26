@@ -12035,3 +12035,50 @@ had existed only on this machine), `bharat-server` restarted with the user's app
   fan-out. Twice this session a full vitest run exited 0 while reporting failures; every one was attributed
   (worktree has no venv, CRLF checkout, junction module resolution, a concurrent agent editing tests mid-run) and
   re-run green where the environment was right.
+
+## 2026-10-26 — Dependency-security integrated validation checkpoint
+
+The user approved integrating current main before review delivery. Isolated security commits
+86a28a7d and 7cd3880d were combined with published code main 752f1b45 and the later
+documentation-only main 9f967244; integration head is 4fb3e7a3. Documentation conflicts were
+resolved by stable finding ID, preserving the published financial findings and this batch's
+owned verification evidence. Shared-checkout source, index and services were not changed by
+these branch operations; other sessions' ongoing scoring edits remain outside this batch.
+
+Typecheck, frontend build, npm audit including development tooling, npm dependency-tree
+validation, read-only production schema comparison, document counts and recurring-bug checks
+passed. Full Vitest results remain honestly red: first 2,175 passed / four failures / 46 gated
+skips, then 2,177 passed / three failures / 46 gated skips. Focused 62- and 37-test passes are
+not replacements for those full gates. The latter failures were two edge-router fixture
+timeouts and the old safety scanner's dbRun-only non-vacuity expression. All original fixture
+scenarios, assertions and budgets remain; transaction/drop-call coverage was extended rather
+than removing the safety check. AF-20261026-04/-06 carry the evidence and regression controls.
+
+The full Python suite was started against the merged source and a dedicated test database
+after Node exited, with no simultaneous broad Node gate. Its earlier-baseline run stopped at
+83 percent for integration and is explicitly not a pass. Current verification/delivery state
+is owned only by AF-20261025-33 and AF-20261026-01..06 in the shared root ledger. No review
+push, live dependency installation, service restart or production stock-data write occurred
+at this checkpoint; no scoring formula or promotion gate was changed.
+
+## 2026-10-26 — Security gate blocked by database responsiveness
+
+The complete merged-source Python run stopped advancing at 79 percent. Its CPU remained
+almost unchanged during the quiet interval. Separate read-only pg_stat_activity/pg_settings
+queries also stopped returning; an earlier SELECT 1 responded, but a later fresh connection
+to the dedicated test database failed with connect_timeout=5. Docker's summary labelled
+Timescale healthy and Redis unhealthy, while deeper read-only inspection did not complete.
+These observations establish a verification blocker, not its root cause or proof that every
+production request failed. AF-20261026-07 records the operator-owned recovery boundary.
+
+Only this batch's stalled pytest and diagnostic command sessions were interrupted. The owned
+pytest interpreter PIDs were subsequently absent; no production process was restarted or
+terminated. The incomplete run is not a pass. A deliberately separate, source/mocked-only
+Vitest invocation then passed 27 controls in six files, including the actual safety scanner
+and its transaction-call cases. Its ignored logs/security-source-only.config.ts contains no
+database setup and is supplemental evidence only; the checked-in full test configuration and
+all original budgets remain unchanged. Latest typecheck, findings/backlog and document checks
+pass. Full suites must run after database responsiveness is restored before any review push.
+
+This is a local source checkpoint, not deployment or complete audit closure. No review branch
+was pushed, no live dependency installed, and no recommendation/scoring change promoted.

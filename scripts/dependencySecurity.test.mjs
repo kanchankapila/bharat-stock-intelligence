@@ -78,7 +78,7 @@ describe('dependency security and test-runner migration', () => {
   });
 
   it('keeps digest and Trendlyne fixture writes inside awaited transactions', () => {
-    for (const file of ['signalAccuracyDigest.test.ts', 'trendlyneDailyFetchTopN.test.ts']) {
+    for (const file of ['signalAccuracyDigest.test.ts', 'trendlyneDailyFetchTopN.test.ts', 'edgeRouter.test.ts']) {
       const source = readFileSync(new URL(`../src/server/__tests__/${file}`, import.meta.url), 'utf8');
       expect(source, file).toContain('await dbTransaction(');
       expect(source, file).not.toContain('await dbRun(');
