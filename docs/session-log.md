@@ -12005,3 +12005,26 @@ Asked to audit the recommendation process and change it where evidence supports 
   benchmark makes any large bucket win (right skew) — use the same-tier MEAN; the canonical harness's
   open-to-open convention shrinks a real open-to-close edge, so report both; and one of two instruments
   counting the analyst dates was wrong (12 vs 32) — a third, independent count settled it.
+
+## 2026-10-26 (evening) — data-in-scoring audit: what feeds the ranker, what is collected but unused
+
+Commits `a07d068a` (generated_at-dated ranker sweep, cockpit null-not-zero) and `d4114520` (this audit). All
+measurement ran read-only after the 15:30 close (the afternoon outage, AF-20261026-48, is why).
+
+- **Input health (every ranker input, latest session):** all fresh to 10-23/10-26; INDIAVIX, DL predictions,
+  recommendation_log at 10-23; block/institutional deals at 10-22. Screener membership tables carry no
+  timestamp column, so their freshness cannot be monitored per row.
+- **technical engine is sparse, not broken (AF-20261026-50):** `signal_score` is 0 on 92-99% of rows since
+  July because `technical_signals` became a full-universe feature table; 94% of names tie at 47.5. Measured
+  anyway: most consistent component (o2c1 IC +0.034, t 6.8, 38/42); zeroing it hurts (t -3.65). Kept.
+- **screener re-add (AF-20261026-51):** pre-registered 0.10 arm, +0.002 IC at o2c1 only, nothing at 5d. Declined.
+- **concall tone (AF-20261026-52):** 475-call event study, no edge (t 0.40 / 0.83, halves flip).
+- **ROE (AF-20261008-15 re-verified):** quality gate sees ROE for 318 names; the built fallback flag would add
+  1,874 but changes scores, so it stays a shadow-arm EVIDENCE item.
+- **Unwired sources inventoried (AF-20261026-54):** carry/PCR (measured, AF-20261025-08) first; MC analyst
+  ratings and TL F&O buildup testable; superstar/eco-calendar too shallow; NSE short-selling and
+  participant OI not ingested anywhere and absent from the registry.
+- **Doc drift fixed (AF-20261026-53):** RULE ZERO step 3 named `unique_urls.txt`, deleted in `c2ceae0e`;
+  repointed to `urls_v2.db`; docNumbers' silent "unavailable" row removed; guarded in `docClaims.test.ts`.
+- **Learned:** a uniform-looking engine is not a degenerate one: measure the drop before "fixing" ties. And
+  a check that cannot find its input must fail or be removed, not print "unavailable" and pass.
