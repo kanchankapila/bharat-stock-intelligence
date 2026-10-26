@@ -1701,6 +1701,20 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; sk
      '--scores', 'unified_score,screener_stock_score,ml_score,confluence_score,technical_score,dl_score,cs_score,breakout_score,smart_money_score',
      '--horizons', '5,10,21', '--by-regime', '--persist'], 15 * 60_000)
     .catch(e => T.fail('factor_edge (unified engines)', e));
+  // AF-20261026-46: the run above dates each ranking by computed_at -- the ENTRY session it is for
+  // -- so its entry lands one session late (measurement.md), it uses close entry, and it never
+  // grades 1 session, the horizon the pre-open/intraday surfaces act on. This run dates by
+  // generated_at (factor_edge converts it to the IST evening it was produced), enters at the next
+  // session's open, adds h=1, and persists under its own table_name
+  // ('unified_recommendations__open_entry__generated_at') so the two conventions never share a
+  // history. Both run side by side until ~10 sessions confirm the 5/10/21 readings agree within
+  // noise; only then retire the computed_at run above.
+  await runPython('factor_edge.py',
+    ['--table', 'unified_recommendations', '--date-col', 'generated_at', '--entry', 'open',
+     '--history-label', 'generated_at',
+     '--scores', 'unified_score,ml_score,confluence_score,technical_score,breakout_score',
+     '--horizons', '1,5,10,21', '--by-regime', '--persist'], 15 * 60_000)
+    .catch(e => T.fail('factor_edge (unified engines, generated_at open entry)', e));
 
   // Equal-weight cross-sectional composite of the 6 raw engines -> engine_composite_scores.
   // Persisted so it ACCUMULATES and can be graded honestly; graded immediately below.

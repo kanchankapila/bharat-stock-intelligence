@@ -24,6 +24,7 @@ AND hit_AUC>=0.55; otherwise "no edge". Momentum-style scores are expected to in
 mean-reverting regimes, so read IC sign alongside AUC.
 """
 import argparse
+import re
 import sys
 import warnings
 
@@ -207,8 +208,22 @@ def _ensure_history(con):
     con.commit()
 
 
+def history_table_name(table, entry, label=None):
+    """`factor_edge_history.table_name` for a run. Each measurement convention gets its own name so
+    two conventions never share one history column: open entry is suffixed `__open_entry`, and an
+    optional `label` (e.g. the date column, when it differs from the table's established one) adds
+    a further suffix (AF-20261026-46). The label is interpolated into a stored identifier, so it
+    is restricted to [a-z0-9_]."""
+    name = table if entry == "close" else f"{table}__open_entry"
+    if label is None:
+        return name
+    if not re.fullmatch(r"[a-z0-9_]+", label or ""):
+        raise ValueError(f"history label must match [a-z0-9_]+, got {label!r}")
+    return f"{name}__{label}"
+
+
 def run(table, scores, symbol_col, date_col, horizons, by_regime, min_per_date, min_n, quantiles,
-        persist=False, entry="close"):
+        persist=False, entry="close", history_label=None):
     con = connect()
     if persist:
         _ensure_history(con)
@@ -219,7 +234,7 @@ def run(table, scores, symbol_col, date_col, horizons, by_regime, min_per_date, 
     # the same shape as this repo's label_definition collision in signal_outcomes, where two
     # structurally different label rules shared a table and produced 88-91% vs 41-44% win
     # rates that were read as skill. Open-entry rows get their own suffixed table_name.
-    history_table = table if entry == "close" else f"{table}__open_entry"
+    history_table = history_table_name(table, entry, history_label)
     df = _load(con, table, symbol_col, date_col, scores)
     print(f"[factor_edge] {table}: rows={len(df)} symbols={df.symbol.nunique()} "
           f"dates={df.date.nunique()} span={df.date.min().date()}..{df.date.max().date()}")
@@ -318,7 +333,11 @@ if __name__ == "__main__":
                          "'open' is measurement.md's panel spec: enter at d+1's open, exit N "
                          "sessions later at the open. Open-entry results persist under "
                          "table_name '<table>__open_entry' so the two conventions never mix.")
+    ap.add_argument("--history-label", default=None,
+                    help="extra suffix on the persisted table_name ([a-z0-9_]+), for a run whose "
+                         "convention differs from the table's established one, e.g. a different "
+                         "--date-col. Keeps the two histories apart (AF-20261026-46).")
     a = ap.parse_args()
     run(a.table, [s.strip() for s in a.scores.split(",")], a.symbol_col, a.date_col,
         [int(h) for h in a.horizons.split(",")], a.by_regime, a.min_per_date, a.min_n, a.quantiles,
-        a.persist, a.entry)
+        a.persist, a.entry, a.history_label)

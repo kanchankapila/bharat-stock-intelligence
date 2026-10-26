@@ -24,6 +24,14 @@ describe('docClaims', () => {
     for (const dead of ['screener', 'cs', 'dl', 'smart_money']) expect(ctx).toContain(dead);
   });
 
+  it('the URL-corpus files the docs send agents to exist (unique_urls.txt was deleted in c2ceae0e)', () => {
+    const docs = ['CLAUDE.md', 'CONTEXT.md', 'AGENTS.md', '.claude/rules/data-sources.md', '.claude/rules/bugs-data-layer.md'];
+    const named = docs.flatMap(d => read(d).split('\n').filter(l => /URLs|corpus/.test(l))
+      .flatMap(l => [...l.matchAll(/`([\w.-]+\.(?:txt|db))`/g)].map(m => `${d}: ${m[1]}`)));
+    expect(named.length).toBeGreaterThan(0);
+    expect(named.filter(n => !existsSync(path.join(root, n.split(': ')[1])))).toEqual([]);
+  });
+
   it('scoring-authority.md documents that conviction_level is direction-agnostic', () => {
     expect(read('.claude/rules/scoring-authority.md')).toMatch(/direction-agnostic/i);
   });

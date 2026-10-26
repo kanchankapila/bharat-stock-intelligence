@@ -12082,3 +12082,53 @@ pass. Full suites must run after database responsiveness is restored before any 
 
 This is a local source checkpoint, not deployment or complete audit closure. No review branch
 was pushed, no live dependency installed, and no recommendation/scoring change promoted.
+## 2026-10-26 — recommendation audit: breakout removed from the blend; measurement.md re-verified
+
+Asked to audit the recommendation process and change it where evidence supports it, and to check
+`measurement.md` for stale claims. One scoring change, made on measured evidence; everything else recorded.
+
+- **AF-20261026-44 — `breakout` zeroed in all five regimes** (freed weight split proportionally over
+  ml/confluence/technical). Its 5-15% weight rested only on the classifier's own AUC for a >=6%-move label
+  (a volatility label; `model_registry` still records 0.68-0.70 per retrain). On 41 post-change ranker dates,
+  graded on the next tradeable session, `breakout_score` reads rank IC -0.035 (t -2.9, 12/41 positive).
+  Replay on identical rows (`scripts/measure_blend_arms.py`, pre-registered both-halves rule): o2c IC
+  +0.0073 (t +4.86, 33/41, both halves), o2o +0.0026 (t +1.80), 5-session +0.0051 (t +1.91), every observed
+  regime positive. Thresholds not retuned (score sd 14.5 -> 14.7). BULL/CRASH extrapolated. Goes live at the
+  next ranker run; re-verify after the 2026-10-26 22:30 IST run.
+- **AF-20261026-45 — label economics (EVIDENCE):** vs a same-liquidity MEAN benchmark, nothing clears costs as
+  a one-session trade; at 5 sessions only Buy clears cost (+39.6bps net); Strong Buy is not demonstrably better
+  than Buy; short calls are right in direction but net negative and mostly unshortable. Not acted on: a
+  threshold change on the same 41 days would stack two fits on one sample.
+- **AF-20261026-46 — the scheduled grader of the ranking never grades 1 session and dates by `computed_at`**
+  (one session late). Harness change must reproduce known readings first; EVIDENCE.
+- **AF-20261026-47 — `measurement.md` stale claims corrected in place** (elapsed forecasts, DL registrations,
+  sentinel rows, analyst trio — graded today, no edge — harness freshness, a self-contradiction, "confluence
+  carries the ranker"). Immunized: `scripts/staleForecasts.mjs` in `doc:numbers:check` flags any `~DATE`
+  forecast in a rule file that has passed with no outcome on its line (pre-fix file: 5 flagged; fixed: 0).
+- Measurement lessons hit and named: an all-universe benchmark credits liquid names ~+27bps; a MEDIAN
+  benchmark makes any large bucket win (right skew) — use the same-tier MEAN; the canonical harness's
+  open-to-open convention shrinks a real open-to-close edge, so report both; and one of two instruments
+  counting the analyst dates was wrong (12 vs 32) — a third, independent count settled it.
+
+## 2026-10-26 (evening) — data-in-scoring audit: what feeds the ranker, what is collected but unused
+
+Commits `a07d068a` (generated_at-dated ranker sweep, cockpit null-not-zero) and `d4114520` (this audit). All
+measurement ran read-only after the 15:30 close (the afternoon outage, AF-20261026-48, is why).
+
+- **Input health (every ranker input, latest session):** all fresh to 10-23/10-26; INDIAVIX, DL predictions,
+  recommendation_log at 10-23; block/institutional deals at 10-22. Screener membership tables carry no
+  timestamp column, so their freshness cannot be monitored per row.
+- **technical engine is sparse, not broken (AF-20261026-50):** `signal_score` is 0 on 92-99% of rows since
+  July because `technical_signals` became a full-universe feature table; 94% of names tie at 47.5. Measured
+  anyway: most consistent component (o2c1 IC +0.034, t 6.8, 38/42); zeroing it hurts (t -3.65). Kept.
+- **screener re-add (AF-20261026-51):** pre-registered 0.10 arm, +0.002 IC at o2c1 only, nothing at 5d. Declined.
+- **concall tone (AF-20261026-52):** 475-call event study, no edge (t 0.40 / 0.83, halves flip).
+- **ROE (AF-20261008-15 re-verified):** quality gate sees ROE for 318 names; the built fallback flag would add
+  1,874 but changes scores, so it stays a shadow-arm EVIDENCE item.
+- **Unwired sources inventoried (AF-20261026-54):** carry/PCR (measured, AF-20261025-08) first; MC analyst
+  ratings and TL F&O buildup testable; superstar/eco-calendar too shallow; NSE short-selling and
+  participant OI not ingested anywhere and absent from the registry.
+- **Doc drift fixed (AF-20261026-53):** RULE ZERO step 3 named `unique_urls.txt`, deleted in `c2ceae0e`;
+  repointed to `urls_v2.db`; docNumbers' silent "unavailable" row removed; guarded in `docClaims.test.ts`.
+- **Learned:** a uniform-looking engine is not a degenerate one: measure the drop before "fixing" ties. And
+  a check that cannot find its input must fail or be removed, not print "unavailable" and pass.
