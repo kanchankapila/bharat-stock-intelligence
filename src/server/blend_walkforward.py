@@ -38,20 +38,25 @@ EMBARGO_SESSIONS = HORIZON + 3   # label maturity gap between estimate window an
 
 
 def _load_panel(con, since):
+    # Dated by generated_at's IST calendar day -- the evening the ranking was PRODUCED -- not by
+    # computed_at, which is the entry session it is FOR. With computed_at as the date, `fwd`'s
+    # next-session-open entry landed one session late (measurement.md; AF-20261026-46), so every
+    # verdict this harness printed graded a trade a user of that evening's ranking never made.
     df = pd.DataFrame(con.execute(
-        "SELECT symbol, computed_at AS date, regime, unified_score, "
+        "SELECT symbol, generated_at, regime, unified_score, "
         "screener_stock_score, ml_score, cs_score, confluence_score, "
         "technical_score, dl_score, breakout_score, smart_money_score "
-        "FROM unified_recommendations WHERE computed_at >= ?",
+        "FROM unified_recommendations WHERE generated_at >= ?",
         (since,)).fetchall(),
-        columns=["symbol", "date", "regime", "unified_score"] + list(ENGINE_TO_SCORE_COL.values()))
-    # computed_at carries a time-of-day; collapse to the session date so the
-    # dedupe below is per symbol-DAY (latest intraday re-stamp wins) and the
-    # join against stock_ohlcv.date (always midnight) keys align.
-    df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+        columns=["symbol", "generated_at", "regime", "unified_score"] + list(ENGINE_TO_SCORE_COL.values()))
+    ts = pd.to_datetime(df["generated_at"], utc=True)
+    df["date"] = ts.dt.tz_convert("Asia/Kolkata").dt.tz_localize(None).dt.normalize()
     for c in list(ENGINE_TO_SCORE_COL.values()) + ["unified_score"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    df = df.drop_duplicates(subset=["symbol", "date"], keep="last")
+    # Latest run per symbol-day wins, by explicit order (row order from SELECT is unspecified).
+    df = (df.assign(_ts=ts).sort_values("_ts")
+            .drop_duplicates(subset=["symbol", "date"], keep="last")
+            .drop(columns=["_ts", "generated_at"]))
     return df
 
 

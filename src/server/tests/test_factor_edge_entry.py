@@ -83,3 +83,30 @@ class TestHistoryTableSeparation:
         src = open(fe.__file__, encoding="utf-8").read()
         assert '__open_entry' in src
         assert 'history_table' in src
+
+
+class TestHistoryLabel:
+    """AF-20261026-46. The daily sweep dated unified_recommendations by `computed_at` (the entry
+    session), which measurement.md documents as a one-session lag. Re-dating it by `generated_at`
+    is a different convention, so its persisted rows need their own table_name: two dating
+    conventions in one history column is the label collision this file's open-entry suffix exists
+    to prevent."""
+
+    def test_default_naming_is_unchanged(self):
+        import factor_edge as fe
+        assert fe.history_table_name("unified_recommendations", "close", None) == "unified_recommendations"
+        assert fe.history_table_name("unified_recommendations", "open", None) == "unified_recommendations__open_entry"
+
+    def test_a_label_gives_a_distinct_name_per_entry_convention(self):
+        import factor_edge as fe
+        a = fe.history_table_name("unified_recommendations", "open", "generated_at")
+        b = fe.history_table_name("unified_recommendations", "close", "generated_at")
+        assert a == "unified_recommendations__open_entry__generated_at"
+        assert b == "unified_recommendations__generated_at"
+        assert len({a, b, fe.history_table_name("unified_recommendations", "open", None)}) == 3
+
+    def test_a_label_cannot_smuggle_sql(self):
+        import factor_edge as fe, pytest
+        for bad in ("x; DROP TABLE t", "a-b", "", "A B"):
+            with pytest.raises(ValueError):
+                fe.history_table_name("unified_recommendations", "open", bad)

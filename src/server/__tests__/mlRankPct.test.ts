@@ -63,6 +63,19 @@ describe('mlRankPct', () => {
     await cacheDel('misc:trade-decision-cockpit');
   });
 
+  it('getTradeDecisionCockpitData reports news sentiment and smart money as unknown, not as a fabricated 0', async () => {
+    // AF-20261026-49: the news read selected a `symbol` column news_sentiment_items has never had
+    // (it stores symbols_json), so it failed every call into a bare catch, and smart money was
+    // hard-coded. Both reached the user as 0.00 / Rs 0 cr -- a reading, not an absence. They carry
+    // a constant weight in the composite either way, so reporting them as null changes no score.
+    await cacheDel('misc:trade-decision-cockpit');
+    const res: any = await caller.getTradeDecisionCockpitData();
+    const a = res.data.candidates.find((c: any) => c.symbol === 'RK_A');
+    expect(a.newsSentiment).toBeNull();
+    expect(a.smartMoneyCr).toBeNull();
+    await cacheDel('misc:trade-decision-cockpit');
+  });
+
   it('the per-stock and confluence readers carry it too', async () => {
     expect(((await caller.getTechnicalPredictions({ symbol: 'RK_B' })) as any).mlRankPct).toBe(33.3);
     const rows = await caller.getTechnicalConfluenceSignals({ date: day(1), minUnified: 0, minConfluence: 0 });
