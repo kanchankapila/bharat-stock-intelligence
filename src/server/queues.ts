@@ -1358,6 +1358,12 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   await runPython('accuracy_scorecard.py', ['--persist'], 10 * 60_000)
     .catch(e => T.fail('accuracy_scorecard', e));
 
+  // Frozen paper book (2026-10-27, AF-20261026-73): trades the ranking as a 10-name low-turnover long book
+  // after costs and grades it against 200 random books with the same mechanics. Same contract as the
+  // forward test (one app_settings snapshot, exits 2 on protocol drift); watched by `paper-book-freshness`.
+  await runPython('paper_book.py', ['--persist'], 10 * 60_000)
+    .catch(e => T.fail('paper_book', e));
+
   // Archive-only baseline observations cannot supply past consensus revisions.
   // This shadow report starts from actual receipt times and never changes a trading score.
   await runPython('earnings_revision_shadow.py', ['--persist'], 2 * 60_000)
