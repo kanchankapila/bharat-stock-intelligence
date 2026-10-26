@@ -11977,3 +11977,31 @@ had existed only on this machine), `bharat-server` restarted with the user's app
   fan-out. Twice this session a full vitest run exited 0 while reporting failures; every one was attributed
   (worktree has no venv, CRLF checkout, junction module resolution, a concurrent agent editing tests mid-run) and
   re-run green where the environment was right.
+
+## 2026-10-26 — recommendation audit: breakout removed from the blend; measurement.md re-verified
+
+Asked to audit the recommendation process and change it where evidence supports it, and to check
+`measurement.md` for stale claims. One scoring change, made on measured evidence; everything else recorded.
+
+- **AF-20261026-44 — `breakout` zeroed in all five regimes** (freed weight split proportionally over
+  ml/confluence/technical). Its 5-15% weight rested only on the classifier's own AUC for a >=6%-move label
+  (a volatility label; `model_registry` still records 0.68-0.70 per retrain). On 41 post-change ranker dates,
+  graded on the next tradeable session, `breakout_score` reads rank IC -0.035 (t -2.9, 12/41 positive).
+  Replay on identical rows (`scripts/measure_blend_arms.py`, pre-registered both-halves rule): o2c IC
+  +0.0073 (t +4.86, 33/41, both halves), o2o +0.0026 (t +1.80), 5-session +0.0051 (t +1.91), every observed
+  regime positive. Thresholds not retuned (score sd 14.5 -> 14.7). BULL/CRASH extrapolated. Goes live at the
+  next ranker run; re-verify after the 2026-10-26 22:30 IST run.
+- **AF-20261026-45 — label economics (EVIDENCE):** vs a same-liquidity MEAN benchmark, nothing clears costs as
+  a one-session trade; at 5 sessions only Buy clears cost (+39.6bps net); Strong Buy is not demonstrably better
+  than Buy; short calls are right in direction but net negative and mostly unshortable. Not acted on: a
+  threshold change on the same 41 days would stack two fits on one sample.
+- **AF-20261026-46 — the scheduled grader of the ranking never grades 1 session and dates by `computed_at`**
+  (one session late). Harness change must reproduce known readings first; EVIDENCE.
+- **AF-20261026-47 — `measurement.md` stale claims corrected in place** (elapsed forecasts, DL registrations,
+  sentinel rows, analyst trio — graded today, no edge — harness freshness, a self-contradiction, "confluence
+  carries the ranker"). Immunized: `scripts/staleForecasts.mjs` in `doc:numbers:check` flags any `~DATE`
+  forecast in a rule file that has passed with no outcome on its line (pre-fix file: 5 flagged; fixed: 0).
+- Measurement lessons hit and named: an all-universe benchmark credits liquid names ~+27bps; a MEDIAN
+  benchmark makes any large bucket win (right skew) — use the same-tier MEAN; the canonical harness's
+  open-to-open convention shrinks a real open-to-close edge, so report both; and one of two instruments
+  counting the analyst dates was wrong (12 vs 32) — a third, independent count settled it.

@@ -19,6 +19,7 @@ import { join, extname, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { quotesNumber } from './quotesNumber.mjs';
+import { findStaleForecasts } from './staleForecasts.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CHECK = process.argv.includes('--check');
@@ -149,6 +150,15 @@ if (CHECK) {
   }
   expect(claude, String(urlEndpoints), 'CLAUDE.md url_endpoints count');
 
+  // Elapsed `~DATE` forecasts in rule files with no outcome written back (AF-20261026-47).
+  const rulesDir = join(ROOT, '.claude', 'rules');
+  const today = new Date().toISOString().slice(0, 10);
+  for (const f of readdirSync(rulesDir).filter((n) => n.endsWith('.md'))) {
+    for (const s of findStaleForecasts(readFileSync(join(rulesDir, f), 'utf8'), today)) {
+      stale.push(`.claude/rules/${f}:${s.line}: forecast ~${s.date} has passed with no outcome on the line ` +
+        `(add ELAPSED/GRADED/SUPERSEDED with what happened, or drop the ~ if it is a historical date)`);
+    }
+  }
   if (stale.length) {
     console.error('\nSTALE DOC NUMBERS:\n  ' + stale.join('\n  ') +
       '\n\nUpdate each quoted figure to the re-derived value above, or fix the doc if it is correct.');
