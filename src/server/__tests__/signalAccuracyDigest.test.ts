@@ -8,7 +8,7 @@
 // assert it is actually in force instead of trusting a dead env var. See AF-20260917-19 and
 // recurring-bugs.md's "a test that can reach a side effect WILL perform it against production".
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 
 if (!process.env.VITEST_PG_SCHEMA) {
   throw new Error(
@@ -25,10 +25,7 @@ import type { AccuracyDigest } from '../signalAccuracyDigest';
 const { dbTransaction } = await import('../dbAsync');
 const SCHEMA = process.env.VITEST_PG_SCHEMA;
 
-async function seed(rows: {
-  stats?: Array<[string, number, number, string]>;
-  retro?: Array<[string, string, number, number, string | null, (number | null)?, (number | null)?]>;
-}) {
+beforeAll(async () => {
   // Schema-QUALIFIED on purpose (AF-20261004-02). The guard above proves the throwaway schema
   // exists, but an UNQUALIFIED `DROP TABLE x` resolves through search_path "<throwaway>",public to
   // the first schema that HAS x -- so when the throwaway copy was missing, the drop reached the
@@ -44,7 +41,16 @@ async function seed(rows: {
       wrong_call INTEGER DEFAULT 0, prior_classification TEXT,
       direction TEXT DEFAULT 'up', open_to_close_pct REAL, adt_20d DOUBLE PRECISION,
       PRIMARY KEY (symbol, date))`);
+  });
+});
 
+async function seed(rows: {
+  stats?: Array<[string, number, number, string]>;
+  retro?: Array<[string, string, number, number, string | null, (number | null)?, (number | null)?]>;
+}) {
+  await dbTransaction(async tx => {
+    await tx.run(`DELETE FROM "${SCHEMA}".high_flyer_daily_stats`);
+    await tx.run(`DELETE FROM "${SCHEMA}".high_flyer_retrospective`);
     if (rows.stats?.length) {
       await tx.run(
         `INSERT INTO "${SCHEMA}".high_flyer_daily_stats (date, universe_n, flyer_n, recall_json)
