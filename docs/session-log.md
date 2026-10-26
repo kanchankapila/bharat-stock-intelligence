@@ -12132,3 +12132,28 @@ measurement ran read-only after the 15:30 close (the afternoon outage, AF-202610
   repointed to `urls_v2.db`; docNumbers' silent "unavailable" row removed; guarded in `docClaims.test.ts`.
 - **Learned:** a uniform-looking engine is not a degenerate one: measure the drop before "fixing" ties. And
   a check that cannot find its input must fail or be removed, not print "unavailable" and pass.
+
+## 2026-10-26 — Security review branch: latest main and complete local gates
+
+Integrated committed main 5f2cdb69 into the isolated dependency-security branch at 9b691ea0.
+The first combined full Vitest run found one fresh-checkout defect: AF-20261026-53's
+replacement URL corpus, `urls_v2.db`, is gitignored and absent outside the shared checkout.
+The documentation now labels that file optional and points first to the registry/catalog;
+`docClaims.test.ts` tests the portable contract. The same review found that CONTEXT.md and
+its old test still called breakout a non-zero ranker input after AF-20261026-44 zeroed it.
+The dated text and test now match the committed base weights and runtime edge gate.
+AF-20261026-55/-56 record both fixes. No scoring code changed in this batch.
+
+The final serialized full suites passed against separate empty test databases: Python
+3,907 passed / 269 gated skips (`logs/pytest-dependency-security-2026-10-26-latest-main.xml`)
+and Vitest 2,193 passed / 46 gated skips
+(`logs/vitest-dependency-security-2026-10-26-final-full.json`). Typecheck, production build,
+findings/backlog checks, document inventory and npm audit including dev dependencies passed;
+the audit reports zero vulnerabilities. Bounded test-DB/catalog reads and Redis health PONG
+returned after the earlier stall, so AF-20261026-07 is closed as a validation blocker;
+AF-20261026-48 retains the separate unresolved host-outage investigation. The earlier partial
+runs and red test reports remain evidence, never substituted for these complete results.
+
+The review branch still needs a non-force push and exact-head remote CI readback. User-owned
+production installation, PM2 daemon/service activation and recommendation readback remain
+separate from these local gates. No production stock data was copied or changed here.
