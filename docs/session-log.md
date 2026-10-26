@@ -11945,3 +11945,61 @@ the user. This exceeds AF-20260925-04's historical three-alert acceptance. No au
 replacement/downgrade or live install was attempted; functional code gates do not establish
 dependency security. All unresolved follow-ups remain only in the shared findings ledger.
 
+## 2026-10-26 — Dependency-security remediation in isolation
+
+The user approved a separate worktree, including a Vitest major migration and replacement of
+the unpatched npm xlsx package. Changes are confined to
+`D:/Github/bharat-stock-intelligence.worktrees/dependency-security-2026-10-26`, with a real
+independent dependency installation and test-owned databases, not production fixtures. No .env
+was copied, no live dependencies were installed, and no service was restarted.
+
+The reproduced npm audit moved from thirty flagged package entries to zero after compatible
+updates, Vitest 5 and write-excel-file. Firebase remains on major 12: a bounded gRPC override
+resolved the residual advisory chain instead of accepting npm audit's proposed Firebase 9
+downgrade. The seven-sheet XLSX contract, all original metadata rows, literal formula-shaped
+text, XML escaping and write-failure propagation have regression coverage. An independent
+Python standard-library ZIP/XML readback also succeeded; no production Python package was
+installed for that check. The report's metadata arrays were preserved, not certified as a
+live scheduler inventory.
+
+A clean npm ci, typecheck, build, npm ls --all and audit including dev dependencies all passed.
+The audit gate explicitly includes development tooling even under NODE_ENV=production and is
+wired into CI. The first full Vitest run was not green: a fresh Windows checkout exposed a
+CRLF CLI hashbang broken by Vite SSR, and an LF-only queue source-scan boundary. Both original
+failures and failing policy controls were retained; after fixing physical LF plus checkout
+policy and normalizing the scan input, all twenty-one focused controls passed. Assertions and
+existing stock-test budgets were not relaxed. Full follow-up runs, including a broader Python
+run with setup errors under investigation, are recorded through AF-20261025-33 and
+AF-20261026-01, not a second pending queue.
+
+Remote CI 40197074464 for the prior review head 7e9cd7cd is completed/success across build,
+Python and API smoke jobs. AF-20261025-06 is closed for reviewed-history delivery only; it is
+not a claim of backend activation or dependency-security clearance. The production schema
+comparison was read-only and clean. Remote main and the live stock data remain unchanged.
+
+That was the initial checkpoint, not a claim that other sessions stopped working: another
+session subsequently merged remote main to 752f1b45 and restarted bharat-server at 02:12 IST.
+Read-only PM2 RPC/lifecycle evidence distinguishes this external action from this batch:
+the installed CLI is 7.0.4 while the in-memory daemon remains 7.0.3. No daemon update, restart,
+live install or production stock-data write was issued here. The official PM2 update contract
+requires an in-memory update separately from package installation; its dump/kill/resurrect path
+must not be folded into permission for restarting just one service.
+
+Current-main CI 40232289490 and Bharat Alpha CI 40232289465 are green for 752f1b45. Re-ran
+`scripts/verifyV7.mjs` against actual production responses after the observed restart: all five
+routes, flow direction, keyboard sorting, canonical stock card, chart and responsive checks
+passed with zero errors and no intercepted/fixture data. The real reader now includes
+generated_at independently of its target-session label. AF-20261025-27/-29 are closed for
+those served presentation contracts, not for recommendation edge.
+
+The broader Python run was retained as failed: 3,789 passed / 269 gated skips, two failures
+and ninety setup errors. All ninety errors share one pg_stat_statements UniqueViolation race;
+the two endpoint failures read missing public tables because the tests had no private fixture.
+AF-20261026-02/-03 record the shared bootstrap lock/stable extension homes and endpoint
+isolation repairs. Their ten targeted Python and nine TypeScript controls passed, including
+a real blocked initializer. A later full TypeScript rerun then exposed the same unfinished
+per-row fixture-write class in mlRankPct and an unnecessary real-driver teardown import.
+AF-20261026-04/-05 retain those failures, failing controls and bounded/registered-cleanup
+repairs. No original stock assertion, test timeout, production setting or score formula was
+relaxed. Heavy gates are being serialized; current status remains in the root ledger only.
+

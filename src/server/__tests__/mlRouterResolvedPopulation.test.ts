@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
-const { dbRun } = await import('../dbAsync');
+const { dbTransaction } = await import('../dbAsync');
 const { createCallerFactory } = await import('../trpc');
 const { appRouter } = await import('../router');
 
@@ -13,42 +13,48 @@ const caller = createCallerFactory(appRouter)({} as any);
 // h1+h5+h15, labelling a mostly-h1 number as h15.
 describe('ml.router resolved populations exclude PENDING and fabricated labels', () => {
   beforeEach(async () => {
-    await dbRun(`DELETE FROM recommendation_log WHERE symbol LIKE 'MLRT%'`);
-    await dbRun(`DELETE FROM signal_outcomes WHERE symbol LIKE 'MLRT%'`);
+    if (!process.env.VITEST_PG_SCHEMA?.startsWith('vitest_')) {
+      throw new Error('Resolved-population fixtures require a private Vitest schema');
+    }
+    await dbTransaction(async tx => {
+      await tx.run(`DELETE FROM recommendation_log WHERE symbol LIKE 'MLRT%'`);
+      await tx.run(`DELETE FROM signal_outcomes WHERE symbol LIKE 'MLRT%'`);
+    });
   });
 
-  const rec = (symbol: string, outcome: string, ret: number | null, exit: number | null) =>
-    dbRun(`INSERT INTO recommendation_log
+  const recs = (rows: [string, string, number | null, number | null][]) =>
+    dbTransaction(async tx => tx.run(`INSERT INTO recommendation_log
       (symbol, rec_type, signal_date, generated_at, entry_price, outcome, actual_return_pct,
        actual_exit_price, status, source, horizon_days)
-      VALUES (?, 'BUY', '2020-01-01', CURRENT_TIMESTAMP, 100, ?, ?, ?, 'RESOLVED', 'scoring_engine', 15)`,
-      [symbol, outcome, ret, exit]);
+      VALUES ${rows.map(() => "(?, 'BUY', '2020-01-01', CURRENT_TIMESTAMP, 100, ?, ?, ?, 'RESOLVED', 'scoring_engine', 15)").join(',')}`,
+      rows.flat()));
 
   it('getSignalQualityReport counts only graded recommendations', async () => {
-    await rec('MLRT1', 'WIN', 4, 104);
-    await rec('MLRT2', 'PENDING', null, null);
-    await rec('MLRT3', 'NEUTRAL', 0, null);      // expiry-fabricated flat label
+    await recs([
+      ['MLRT1', 'WIN', 4, 104],
+      ['MLRT2', 'PENDING', null, null],
+      ['MLRT3', 'NEUTRAL', 0, null],      // expiry-fabricated flat label
+    ]);
     const res = await caller.getSignalQualityReport({ horizonDays: 15 }) as any;
     expect(Number(res.recommendationStats.total)).toBe(1);
     expect(Number(res.recommendationStats.wins)).toBe(1);
   });
 
   it('getSignalReportCard reports each horizon under its own label', async () => {
-    await rec('MLRT4', 'WIN', 4, 104);
-    await rec('MLRT5', 'PENDING', null, null);
+    await recs([['MLRT4', 'WIN', 4, 104], ['MLRT5', 'PENDING', null, null]]);
     // Horizons no sibling test writes (they use 1/5/15): this file shares one throwaway schema
     // with every other unit test, so a count scoped to a horizon someone else populates is a
     // flake, not an assertion.
-    for (const [h, outcome] of [[21, 'LOSS'], [63, 'WIN']] as const) {
-      await dbRun(`INSERT INTO signal_outcomes
+    await dbTransaction(async tx => {
+      await tx.run(`INSERT INTO signal_outcomes
         (symbol, signal_date, horizon_days, entry_price, exit_price, outcome, return_pct,
          signal_source, label_definition)
-        VALUES (?, '2020-01-01', ?, 100, 104, ?, 4, 'technical', 'path_barrier')`,
-        [`MLRT${h}H`, h, outcome]);
-    }
-    await dbRun(`INSERT INTO signal_outcomes
+        VALUES ('MLRT21H', '2020-01-01', 21, 100, 104, 'LOSS', 4, 'technical', 'path_barrier'),
+               ('MLRT63H', '2020-01-01', 63, 100, 104, 'WIN', 4, 'technical', 'path_barrier')`);
+      await tx.run(`INSERT INTO signal_outcomes
       (symbol, signal_date, horizon_days, entry_price, outcome, return_pct, signal_source, label_definition)
       VALUES ('MLRTP', '2020-01-01', 126, 100, 'PENDING', NULL, 'technical', 'path_barrier')`);
+    });
 
     const res = await caller.getSignalReportCard({ horizonDays: 15 }) as any;
     const rows: any[] = res.outcomeSummary ?? [];

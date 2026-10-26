@@ -28,6 +28,23 @@ describe('pgClient', () => {
     expect(registry?.has(closePool)).toBe(true);
   });
 
+  it('rejects an unclean pool shutdown instead of passing after a warning', async () => {
+    await closePool();
+    vi.spyOn(getPool(), 'end').mockImplementation(() => new Promise<void>(() => {}));
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      const outcome = closePool().then(() => null, error => error);
+      await vi.advanceTimersByTimeAsync(2000);
+      const error = await outcome;
+      expect(error).toBeInstanceOf(Error);
+      expect(error?.message).toMatch(/did not settle within 2000ms/);
+    } finally {
+      vi.useRealTimers();
+      warning.mockRestore();
+    }
+  });
+
   it('withClient releases client after success', async () => {
     const result = await withClient(async (c) => {
       return 42;

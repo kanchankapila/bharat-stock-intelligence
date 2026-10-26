@@ -61,6 +61,9 @@ describe('dependency security and test-runner migration', () => {
     expect(seed).toContain('await dbTransaction(');
     expect(seed).not.toContain('await dbRun(');
     expect(seed.match(/INSERT INTO technical_signals/g)).toHaveLength(1);
+    const resolved = readFileSync(new URL('../src/server/__tests__/mlRouterResolvedPopulation.test.ts', import.meta.url), 'utf8');
+    expect(resolved).toContain('dbTransaction');
+    expect(resolved).not.toContain('await rec(');
   });
 
   it('fixes the Firebase gRPC chain without accepting the audit suggestion to downgrade Firebase', () => {
@@ -71,6 +74,15 @@ describe('dependency security and test-runner migration', () => {
     for (const [, pkg] of grpc) {
       const [major, minor, patch] = pkg.version.split('.').map(Number);
       expect(major > 1 || (major === 1 && (minor > 14 || (minor === 14 && patch >= 6)))).toBe(true);
+    }
+  });
+
+  it('keeps digest and Trendlyne fixture writes inside awaited transactions', () => {
+    for (const file of ['signalAccuracyDigest.test.ts', 'trendlyneDailyFetchTopN.test.ts']) {
+      const source = readFileSync(new URL(`../src/server/__tests__/${file}`, import.meta.url), 'utf8');
+      expect(source, file).toContain('await dbTransaction(');
+      expect(source, file).not.toContain('await dbRun(');
+      expect(source, file).not.toContain('await dbExec(');
     }
   });
 });

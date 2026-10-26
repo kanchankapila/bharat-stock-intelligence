@@ -168,7 +168,7 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   duplicate keys and wrong-window assertions. Batch the same fixture rows into bounded writes,
   preserve the scenarios/assertions/budgets, and await the actual writer/commit (not an early
   success object). A later isolated pass does not erase the failed full run. AF-20261025-30/32.
-  Recurred in `mlRankPct.test.ts` (2026-10-26): per-row fixture commits timed out and spilled
+  Recurred in `mlRankPct.test.ts` and `mlRouterResolvedPopulation.test.ts` (2026-10-26): per-row fixture commits timed out and spilled
   into the next case. Batch the same values/defaults in an awaited transaction; do not adjust
   ranking assertions or the hook budget. `dependencySecurity.test.mjs` guards the seed shape.
 
@@ -179,6 +179,11 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   driver. Never move the import to setup (it defeats vi.mock hoisting), skip real open pools,
   or swallow cleanup failures. `vitestPoolCleanup.test.ts` uses a throwing unused-module factory;
   `pgClient.test.ts` asserts actual pool registration. The production registration guard is VITEST.
+  Expiring the existing closePool budget must also REJECT, not print "NOT a clean shutdown"
+  and resolve successfully. Its real-module fake-clock control failed on that false-green path.
+  Import-time `pgEnsureColumns()` also started unawaited legacy DDL in mock-only suites. Under
+  Vitest the explicit schema bootstrap owns DDL, not facade imports; verify both this boundary
+  and unchanged normal startup with `scripts/dbAsyncBootstrap.test.ts`.
 
 - **A test process using the production logger can pollute the production incident record without
   touching production data.** Failure-path tests are supposed to emit errors (memory ceilings,

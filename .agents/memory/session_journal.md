@@ -410,3 +410,32 @@ network policy (AF-20260928-10), so no connector in this batch has seen a live r
   promise/error-propagation repair. Polling a row did not prove that the current run had committed.
 - Timeouts do not cancel async fixture writes. Batch the same private-schema dataset rather than
   weakening assertions or stock-test budgets; unfinished seeders can contaminate later cases.
+
+## 2026-10-26 — Approved dependency isolation
+
+- User approved a separate dependency-security batch, not a live install or service restart.
+  The worktree has its own real node_modules, no copied .env, and a dedicated initially empty
+  test database. The production Python interpreter is used read-only, without package changes.
+- Compatible updates, an explicit Vitest 5 mock/isolation migration and a write-only XLSX
+  replacement removed the reproduced npm audit findings. A bounded gRPC override retained
+  Firebase 12 instead of following npm audit's proposed downgrade to Firebase 9.
+- A fresh Windows checkout exposed CRLF defects invisible in the established checkout: native
+  Node accepted a CLI that Vite SSR made syntactically invalid by inserting code before its
+  hashbang. Attribute policy plus actual physical LF are both necessary; a policy edit does
+  not normalize an already checked-out file. AF-20261026-01 holds verification evidence.
+- AF-20261025-33 remains the single owner of dependency verification/delivery/activation state.
+  No separate skill, model-specific or worktree-specific pending queue was created.
+
+- The shared checkout/ref advanced independently to 752f1b45 during testing; another session's
+  staged ledger content must not be committed/reset along with this work. Keep dependency source
+  and delivery commits in the isolated branch and preserve root tracking edits by owned hunk.
+- PM2 CLI and daemon are separate artifacts: read-only RPC found CLI 7.0.4 vs daemon 7.0.3.
+  A daemon update uses dump/kill/resurrect; the user's ownership of restarts is not permission
+  to perform that operation across every service. External backend restart at 02:12 IST was
+  observed, not performed here. Full production-only v7 readback then passed all five routes.
+- Extension metadata is DB-global despite schema-private fixtures. IF NOT EXISTS raced on
+  pg_extension_name_index once and poisoned ninety uses of one cached fixture. Both runners
+  now share an advisory bootstrap lock and stable public homes for newly created extensions.
+- An endpoint reachability probe is not isolation: worker tests read production-style tables
+  or skipped rather than binding the real connector through pg_db. The empty test database
+  exposed this. Test-only private rows must be queried through the real endpoint as well.
