@@ -12012,8 +12012,9 @@ Commits `a07d068a` (generated_at-dated ranker sweep, cockpit null-not-zero) and 
 measurement ran read-only after the 15:30 close (the afternoon outage, AF-20261026-48, is why).
 
 - **Input health (every ranker input, latest session):** all fresh to 10-23/10-26; INDIAVIX, DL predictions,
-  recommendation_log at 10-23; block/institutional deals at 10-22. Screener membership tables carry no
-  timestamp column, so their freshness cannot be monitored per row.
+  recommendation_log at 10-23; block/institutional deals at 10-22. CORRECTED later the same evening: the screener
+  membership tables DO carry `first_seen`/`last_seen` (the probe looked only for `fetched_at`-style names),
+  and freshness is monitored via the critical `screener-appearances-freshness` check.
 - **technical engine is sparse, not broken (AF-20261026-50):** `signal_score` is 0 on 92-99% of rows since
   July because `technical_signals` became a full-universe feature table; 94% of names tie at 47.5. Measured
   anyway: most consistent component (o2c1 IC +0.034, t 6.8, 38/42); zeroing it hurts (t -3.65). Kept.
@@ -12028,3 +12029,22 @@ measurement ran read-only after the 15:30 close (the afternoon outage, AF-202610
   repointed to `urls_v2.db`; docNumbers' silent "unavailable" row removed; guarded in `docClaims.test.ts`.
 - **Learned:** a uniform-looking engine is not a degenerate one: measure the drop before "fixing" ties. And
   a check that cannot find its input must fail or be removed, not print "unavailable" and pass.
+
+## 2026-10-26 (late) — input logic corrected; screeners, patterns, broker calls and ET Calls graded as trades
+
+- **Logic fixed, each measured first:** confluence sub-scores no longer COALESCE to 0 (median-imputed, absent
+  when empty; AF-20261026-70, live tonight, zero score change today); the fundamental overlay scores present
+  fields only and no longer rewards a missing D/E (AF-20261026-71, neutral in replay); the ROE fallback is on
+  by default (AF-20261008-15, helps in the full-coverage half). The last two go live on a `bharat-server` restart.
+- **Trade tests (AF-20261026-72):** buying on screener appearance loses (0 of 1,078 screeners reliably
+  profitable); chart patterns stop out 7:1; broker BUY calls lag the market after MoneyControl posts them;
+  consensus upside is a NEGATIVE factor; ET Calls are honest but a reader entering after publication has no edge.
+- **Built (AF-20261026-73): `paper_book.py`**, a frozen forward-graded 10-name low-turnover long book on the
+  ranking, judged against 200 random books with identical mechanics; protocol frozen 2026-10-27 00:00 IST before
+  the first forward session; nightly in `ml-daily-ops` + `paper-book-freshness`. Why this and not a strategy: carry
+  is real over 2021-2024 (IC +0.022, t 5.7) but ~3-8 bps/day against ~20 bps costs; the capitulation triple is
+  negative in 2026 and zero in liquid names; no past window can prove a ranking book. Trap recorded:
+  `stock_option_features_history.spot_proxy` is derived from the future, so carry must use the cash close.
+- **Learned:** grading an exit-on-signal-loss rule on closed trades only is survivorship (four "winning"
+  screeners vanished once open positions counted). Also: ledger IDs cited in code before the row exists can be
+  taken by a concurrent session (-55..-57 were); write the row first or re-check before committing.
