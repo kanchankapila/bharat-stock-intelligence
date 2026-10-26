@@ -12003,3 +12003,35 @@ AF-20261026-04/-05 retain those failures, failing controls and bounded/registere
 repairs. No original stock assertion, test timeout, production setting or score formula was
 relaxed. Heavy gates are being serialized; current status remains in the root ledger only.
 
+## 2026-10-26 — audit remediation via subagent-driven development; first positive directional evidence
+
+Executed the 2026-10-25 audit's open items as a 4-task plan (`docs/superpowers/plans/2026-10-25-audit-remediation.md`)
+in an isolated worktree (a concurrent Codex session was editing the main checkout), one implementer + one reviewer per
+task, then a whole-branch review and one fix wave. Merged as `752f1b45`, pushed (`2f29d3e5..752f1b45`, 96 commits that
+had existed only on this machine), `bharat-server` restarted with the user's approval, production study re-run.
+
+- **AF-20261025-08 decided: `f_cost_of_carry` survives open-to-close, roughly halved** — +0.188 (t 9.8) close-to-close
+  -> **+0.097 (t 5.7, 62/81 dates positive)** open-to-close; half was the unharvestable overnight gap. `f_so_pcr`
+  STRENGTHENS on o2c (+0.071, t 5.0). Delivery % is a null both ways. `f_rs_vs_nifty` is rank-identical to
+  `f_mom_21d` (RS against one benchmark is momentum minus a per-date constant). Still EVIDENCE: next is a cost-aware
+  F&O-panel backtest, not a weight change.
+- **AF-20261026-41: first joint Type I + Type II view (`call_confusion`)**, and the first positive directional evidence
+  in this record: on 49 independent same-day dates every leg beats its null by ~2-2.75pp (t 2.30-3.73), on open-to-close
+  too. A hit-rate edge, not a return edge — EVIDENCE, no threshold change.
+- **Corrected grading changed the picture:** among real movers, matched 3,683 vs opposite 3,229 (53.3%); the old grading
+  (Strong Sell as "no opinion") had shown opposite > matched.
+- **AF-20261026-40: the home REFRESH button was rejected on every click since 2026-08-15** (2,376 symbols vs `.max(200)`,
+  bare `catch {}`). Fixed with a shared `MAX_SIGNAL_BATCH`; `enqueueSignals` made admin-only (controller ruling,
+  honouring the 2026-08-07 retirement of anonymous LLM fan-out). Live: anonymous POST -> 401. The `ai-signals` idleness
+  itself is that deliberate retirement, so AF-20261025-07's "event-driven idle is not a failure" assumption holds.
+- **AF-20261025-07 closed live:** deployed `getStaleJobs()` returns exactly `dl-retrain-emergency` / `reason: failed`.
+- **AF-20261025-09 re-scoped:** NULL `signal_score` is 100% `technical`, a recorded deliberate decision
+  (`technical_analysis_engine.py:70-82`), so the score-quintile result describes non-technical sources only.
+- **New, open:** AF-20261026-42 (~850 rated names/day outside the study's eligible universe; 2026-10-13 only 614 —
+  source data normal), AF-20261026-43 (tRPC returns full stack traces because production `bharat-server` runs with
+  `NODE_ENV=development` — needs a user decision).
+- Process notes: the final review caught a test one setup-change away from enqueueing 200 real LLM jobs into production
+  Redis (now stubbed at the module boundary) and that the REFRESH fix would have silently reopened anonymous LLM
+  fan-out. Twice this session a full vitest run exited 0 while reporting failures; every one was attributed
+  (worktree has no venv, CRLF checkout, junction module resolution, a concurrent agent editing tests mid-run) and
+  re-run green where the environment was right.
