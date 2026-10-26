@@ -739,6 +739,14 @@ def _fund_mult(score):
     return 1.0
 
 
+def _finite_or_none(v):
+    """NULL and NaN/inf are both 'no reading' (NaN is truthy, so `v or 0` keeps it)."""
+    if v is None:
+        return None
+    v = float(v)
+    return v if math.isfinite(v) else None
+
+
 def _normalize_to_100(raw):
     """Percentile-rank normalization (0-100). Robust to outliers, unlike min-max which
     collapses the whole cluster toward 0 when a single extreme value sets the max."""
@@ -2275,10 +2283,8 @@ class UnifiedRanker:
         cutoff = as_of.trading_days_back(1, self.conn)[-1].isoformat()
         try:
             rows = self.conn.execute(
-                "SELECT symbol, "
-                "  (COALESCE(trend_alignment_score,0) + COALESCE(volume_score,0) "
-                "   + COALESCE(sector_strength_score,0) + COALESCE(fundamental_score,0)"
-                "  ) AS non_screener_score "
+                "SELECT symbol, trend_alignment_score, volume_score, sector_strength_score, "
+                "  fundamental_score "
                 "FROM confluence_signals "
                 "WHERE computed_at >= ? AND symbol NOT LIKE '%://%' AND LENGTH(symbol) <= 20 "
                 # The dict below keeps the LAST row per symbol: chronological order makes
@@ -2286,7 +2292,20 @@ class UnifiedRanker:
                 "ORDER BY symbol, computed_at ASC",
                 (cutoff,),
             ).fetchall()
-            raw = {r['symbol']: float(r['non_screener_score'] or 0) for r in rows}
+            # AF-20261026-70: 0 is a real reading on every sub-score scale, so a missing
+            # component is imputed at its cross-sectional median (neutral), and a row with no
+            # component carries no confluence information at all (absent, so _blend
+            # renormalizes) -- never COALESCE(col, 0), which ranked it as the worst stock.
+            cols = ('trend_alignment_score', 'volume_score', 'sector_strength_score', 'fundamental_score')
+            latest = {}
+            for r in rows:
+                latest[r['symbol']] = [_finite_or_none(r[c]) for c in cols]
+            medians = []
+            for i in range(len(cols)):
+                present = sorted(v[i] for v in latest.values() if v[i] is not None)
+                medians.append(present[len(present) // 2] if present else 0.0)
+            raw = {sym: sum(m if x is None else x for x, m in zip(vals, medians))
+                   for sym, vals in latest.items() if any(x is not None for x in vals)}
             return _normalize_to_100(raw)
         except Exception as e:
             self._degraded(f"[UnifiedRanker] _get_confluence_scores failed: {e}")
@@ -2304,8 +2323,11 @@ class UnifiedRanker:
                 "SELECT symbol, AVG(signal_score) AS s FROM technical_signals WHERE date >= ? GROUP BY symbol",
                 (cutoff,),
             ).fetchall()
-            # signal_score is a 0-10 composite; percentile-normalize to 0-100 so it is on the
-            # same scale as the other engines before blending.
+            # signal_score is a SPARSE pattern score: since 2026-07 technical_signals holds the whole
+            # universe and it is 0 ("no pattern today") on 92-99% of rows, with small negative and
+            # positive values otherwise (not the 0-10 range it once had). Percentile-normalize to
+            # 0-100; the ties are not a defect -- measured 2026-10-26, dropping the engine hurts
+            # (AF-20261026-50).
             return _normalize_to_100({r['symbol']: float(r['s'] or 0) for r in rows})
         except Exception as e:
             self._degraded(f"[UnifiedRanker] _get_technical_scores failed: {e}")

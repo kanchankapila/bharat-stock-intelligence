@@ -258,7 +258,7 @@ export function scoreStock(
   trendScore: number;
   volScore: number;
   sectorScore: number;
-  fundScore: number;
+  fundScore: number | null;
   bullishCount: number;
   bearishCount: number;
   // True when bearish screener weight outweighs bullish (rawScreener < 0 before the
@@ -329,22 +329,22 @@ export function scoreStock(
     : 4;
   sectorScore = Math.max(0, Math.min(8, sectorScore * rw.sector));
 
-  // E. Fundamental overlay (0–12)
-  let fundScore = 0;
-  if (fundamentals) {
-    if (fundamentals.piotroski_f_score >= 7)       fundScore += 4;
-    else if (fundamentals.piotroski_f_score >= 5)  fundScore += 2;
-    if (fundamentals.return_on_equity > 0.20)      fundScore += 3;
-    else if (fundamentals.return_on_equity > 0.12) fundScore += 1;
-    if (fundamentals.debt_to_equity < 0.5)         fundScore += 2;
-    if (fundamentals.revenue_growth > 0.15)        fundScore += 3;
-    else if (fundamentals.revenue_growth > 0.05)   fundScore += 1;
-  }
-  fundScore = Math.min(12, fundScore);
-  fundScore = Math.min(12, Math.round(fundScore * rw.fund * 100) / 100);
+  // E. Fundamental overlay (0–12). AF-20261026-71: points from PRESENT fields only, rescaled to the
+  // 0-12 range; no present field -> null (unified_ranker imputes the median). Missing used to score
+  // as bad, and `null < 0.5` is true in JS, so a missing debt_to_equity earned the low-debt bonus.
+  const num = (v: any) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+  let pts = 0, maxPts = 0;
+  const pio = num(fundamentals?.piotroski_f_score), roe = num(fundamentals?.return_on_equity);
+  const de = num(fundamentals?.debt_to_equity), rg = num(fundamentals?.revenue_growth);
+  if (pio !== null) { maxPts += 4; pts += pio >= 7 ? 4 : pio >= 5 ? 2 : 0; }
+  if (roe !== null) { maxPts += 3; pts += roe > 0.20 ? 3 : roe > 0.12 ? 1 : 0; }
+  if (de !== null)  { maxPts += 2; pts += de < 0.5 ? 2 : 0; }
+  if (rg !== null)  { maxPts += 3; pts += rg > 0.15 ? 3 : rg > 0.05 ? 1 : 0; }
+  const fundScore = maxPts === 0 ? null
+    : Math.min(12, Math.round((12 * pts / maxPts) * rw.fund * 100) / 100);
 
-  // Final score (max 105 → normalize to 100)
-  const raw = screenerComponent + trendScore + volScore + sectorScore + fundScore;
+  // Final score (max 105 → normalize to 100). A missing overlay adds nothing to this display total.
+  const raw = screenerComponent + trendScore + volScore + sectorScore + (fundScore ?? 0);
   const confluenceScore = Math.round(Math.min(100, raw / 105 * 100));
 
   // Reasoning

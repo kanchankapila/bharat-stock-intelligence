@@ -5,7 +5,9 @@ const { loadFundamentals } = await import('../quantScoringService');
 
 // Sub-project B.2: stock_fundamentals.return_on_equity (Yahoo) decayed to ~6% coverage;
 // investsights_fundamentals_history.return_on_equity is Pearson 0.96, same fraction scale.
-// Behind app_settings 'quant_roe_investsights_fallback' (default OFF) it fills ONLY the gaps.
+// It fills ONLY the gaps. Default ON since 2026-10-26 (AF-20261008-15: point-in-time replay of the
+// quality gate, 42 dates, no harm and +0.0026 5d liquid IC, t 3.0, in the half where coverage was
+// full); app_settings 'quant_roe_investsights_fallback' = false switches it off.
 beforeEach(async () => {
   for (const t of ['stock_fundamentals', 'investsights_fundamentals_history']) await dbExec(`DELETE FROM ${t}`);
   await dbExec(`DELETE FROM app_settings WHERE key = 'quant_roe_investsights_fallback'`);
@@ -21,8 +23,10 @@ const roe = async () => {
 };
 
 describe('loadFundamentals ROE investsights fallback', () => {
-  it('flag absent => ROE exactly as stored today', async () => {
-    expect(await roe()).toEqual({ has: 0.25, gap: null });
+  it('flag absent => gap filled (default on)', async () => {
+    const r = await roe();
+    expect(r.has).toBe(0.25);
+    expect(r.gap).toBeCloseTo(0.18, 5);
   });
 
   it('flag off => ROE exactly as stored today', async () => {

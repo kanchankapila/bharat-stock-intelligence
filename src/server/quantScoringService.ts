@@ -184,14 +184,15 @@ async function loadScreenerConfluence(): Promise<Map<string, {
 
 // ─── Fundamentals lookup (one-shot) ──────────────────────────────────────────
 
-// Yahoo's returnOnEquity decayed to ~6% coverage (AF-20260917-07). Behind this default-OFF flag
-// the gaps are filled from investsights_fundamentals_history (Pearson 0.96 vs yfinance, same
-// fraction scale; same SQL as fundamentals_snapshot.py). A present value is never overwritten.
+// Yahoo's returnOnEquity decayed to ~6% coverage (AF-20260917-07). The gaps are filled from
+// investsights_fundamentals_history (Pearson 0.96 vs yfinance, same fraction scale; same SQL as
+// fundamentals_snapshot.py). A present value is never overwritten. Default ON since 2026-10-26
+// (AF-20261008-15, point-in-time replay: no harm, small gain); setting the flag false turns it off.
 const ROE_FALLBACK_FLAG = 'quant_roe_investsights_fallback';
 
 export async function loadFundamentals(): Promise<Map<string, any>> {
   const flag = await dbGet('SELECT value FROM app_settings WHERE key = ?', [ROE_FALLBACK_FLAG]) as { value: string } | undefined;
-  const fallback = ['1', 'true', 'on', 'yes'].includes(String(flag?.value ?? '').trim().toLowerCase());
+  const fallback = !['0', 'false', 'off', 'no'].includes(String(flag?.value ?? '').trim().toLowerCase());
   const roe = fallback
     ? `COALESCE(sf.return_on_equity, (
          SELECT isf.return_on_equity FROM investsights_fundamentals_history isf
