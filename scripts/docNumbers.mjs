@@ -64,12 +64,6 @@ for (const f of tsServer) {
   consoleSites += (readFileSync(f, 'utf8').match(/console\.(log|info|warn|error|debug)\(/g) || []).length;
 }
 
-// unique_urls.txt is a static corpus in the repo root.
-const urlsFile = join(ROOT, 'unique_urls.txt');
-const uniqueUrls = existsSync(urlsFile)
-  ? readFileSync(urlsFile, 'utf8').split(/\r?\n/).filter((l) => l.trim()).length
-  : null;
-
 /** Read-only Postgres figure. Returns null (never a guess) if unavailable. */
 function dbScalar(sql) {
   const candidates = [
@@ -105,7 +99,6 @@ const figures = [
   ['rule files', rules.length, 'CLAUDE.md rules section'],
   ['rule files total size (KB)', (rulesBytes / 1024).toFixed(1), 'CLAUDE.md rules section'],
   ['raw console.* call sites in src/server', consoleSites, 'logger.ts comment'],
-  ['unique_urls.txt URLs', uniqueUrls, 'CLAUDE.md / DATA_SOURCE_INTEGRATION_GUIDE.md'],
   ['market_endpoint_registry rows', registryTotal, 'CLAUDE.md / CONTEXT.md'],
   ['  ...GET', registryGet, 'CLAUDE.md'],
   ['  ...POST', registryPost, 'CLAUDE.md'],

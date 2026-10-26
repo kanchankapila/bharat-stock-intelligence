@@ -141,6 +141,21 @@ magnitudes — mostly the return definition (open-to-open adds the next night's 
 verdict rule the ranker is still **"no edge"**: the rank IC is real, the hit-AUC stalls at ~0.51 (the
 "IC-real-but-AUC-stalls" shape below). Do not quote t 6.3 without that sentence.
 
+**Same panel, evening of 2026-10-26 — three follow-ups (AF-20261026-50..52), none changes a weight.**
+- **`technical` is sparse, not broken: keep it.** `technical_signals.signal_score` is 0 on 92-99% of rows
+  since July (the table became a full-universe feature table; non-zero = `detectSignals()` found a pattern),
+  so 94% of names tie at `technical_score` 47.5 on a ranker run. It is still the most consistent component:
+  o2c1 IC **+0.034, t +6.8, positive 38/42**. Zeroing it (`measure_blend_arms.py --drop technical`) makes the
+  blend WORSE: o2c1 delta -0.0041 (t -3.65), negative in both halves. Do not "fix" the ties.
+- **`screener` back at 0.10 (pre-registered single arm): passes the letter, fails on size.** o2c1 delta
+  **+0.0022** (t 3.07; 1st half +0.0016, 2nd +0.0028), r5 -0.0003 (t +0.40), o2o1 -0.0004. A +0.002 IC gain
+  confined to the next-session open-to-close, nothing at the 5-session hold the labels are used on, is not
+  worth a weight change. The 2026-08-30 zeroing stands.
+- **Concall tone (`concall_takeaways`, 475 events, 34 entry dates, entry = next open after the takeaway was
+  generated): NO EDGE.** Confident minus not-confident excess +0.08% at 1 session (t 0.40), +0.35% at 5
+  (t 0.83), sign flips between halves. Against the universe MEDIAN both groups read +0.1-0.7% — the
+  median-benchmark trap again; against the mean they are ~0.
+
 **What each label earns (excess vs the SAME-DAY, SAME-LIQUIDITY-DECILE MEAN, direction-signed).** Two traps
 were hit computing this and both are now named: an all-universe benchmark credits every liquid name ~+27bps
 (liquid beat illiquid in this window), and a MEDIAN benchmark makes any large bucket "win" on 40/41 days

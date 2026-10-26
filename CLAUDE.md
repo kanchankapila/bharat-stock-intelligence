@@ -75,7 +75,8 @@ A finding may stay **open** only for one of these reasons, stated in its row:
   1. Query the discovery registry first: `market_endpoint_registry` in Postgres (`bharat_intel` on `:5433`,
      3,408 endpoints: 2,864 GET / 544 POST; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`).
   2. The consolidated catalog `url_endpoints` (834 templates): `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server`.
-  3. The raw corpus `unique_urls.txt` / `urls_v2.db` (3,103 URLs) in the repo root.
+  3. The raw URL corpus `urls_v2.db` (SQLite: `url_catalog`, `url_data`) in the repo root. The older flat list
+     unique_urls.txt was deleted 2026-10-23 (`c2ceae0e`); read it with `git show c2ceae0e^:unique_urls.txt`.
   4. Grep the repo for sibling endpoints and probe route by route with the MINIMUM headers (start from none — adding a token can lower access).
   5. Only then ask the user, with the per-route breakdown and alternates ruled in or out — never "this vendor is dead".
 - **Depends on an earlier fix** — genuinely sequential; name the blocking row.
