@@ -156,6 +156,70 @@ verdict rule the ranker is still **"no edge"**: the rank IC is real, the hit-AUC
   (t 0.83), sign flips between halves. Against the universe MEDIAN both groups read +0.1-0.7% — the
   median-benchmark trap again; against the mean they are ~0.
 
+**Two input-logic corrections, each replayed point-in-time on the same 42-date panel before shipping (rule
+written first: ship unless the paired IC delta has t <= -2 in either half at o2c1 or r5).**
+- **Confluence fundamental overlay (AF-20261026-71):** missing fields scored as bad, and a missing D/E
+  earned the +2 low-debt bonus (`null < 0.5` is true in JS: 335 names vs 108 with a real low D/E). Fixed to
+  score present fields only, rescaled to 0-12, NULL when none (ranker imputes the median, AF-20261026-70).
+  NEW minus OLD on the same fundamentals snapshot: every delta within +/-0.002, no half reaches t -2
+  (o2c1 +0.0007, r5 +0.0009). Rebuilt input matches the stored one at rank corr 0.946. Neutral: shipped.
+- **ROE quality-gate fallback (AF-20261008-15):** the gate saw ROE for 318 names; the investsights
+  fallback fills 1,874 and adds the x0.8 negative-ROE demotion for ~226. Point-in-time
+  (`quant_scores_history`, investsights by `fetched_date`): no half below t -2; second half (full
+  coverage) helps everywhere, r5 liquid +0.0026 (t +3.00, better 20/21). Default flipped ON.
+
+**"Would following it as a trade have paid?" — 2026-10-26 (AF-20261026-72). Entry always AFTER the signal
+was visible, costs 0.32% delivery / 0.18% intraday, excess vs an equal-weight liquid basket over the same
+window.** Every source graded here loses or is unproven as a mechanical trade:
+- **Screener appearance -> exit (`screener_appearances`, 1.75M episodes, May-Oct).** 24% vanish before the
+  next open (untradeable). Liquid closed trades: median hold 1 session, net -0.50%, win 38%, excess -0.41%
+  (t -16, both halves). Bullish screeners lose MORE than bearish (Trendlyne -0.47% vs -0.33%). With ALL
+  trades counted (open ones marked at the last close): of 1,078 screeners, **0 reliably profitable, 136
+  reliably losing** (Bonferroni |t| >= 4.07 and same sign in both halves). Screeners flag a move after it
+  happened.
+- **TRAP, hit here: exit-on-signal-loss + closed-trades-only = survivorship.** "Sell when it leaves the
+  screener" closes winners (an upside screen drops a name when its price rises) and leaves losers open.
+  Closed-only, four Trendlyne Forecaster screens looked like real winners (t 4.4-6.2, both halves); with
+  open positions included "High upside potential by Forecaster" fell from +3.32% (t 6.15) to +0.96%
+  (t 1.2) and "Consensus Upside" from +0.89% (t 5.1) to -0.46% (t -2.0). Any exit rule driven by the signal
+  itself must be graded on ALL entries, open ones marked to market.
+- **Analyst consensus target upside as a factor (`feature_store.analyst_target_upside_pct`, 68 dates,
+  liquid): NEGATIVE.** o2c1 IC -0.023 (t -2.7), r5 -0.043, r20 -0.068 (4 eff dates); unchanged after
+  removing trailing 5d/21d return (o2c1 -0.030, t -3.9). corr(upside, trailing 21d return) = -0.36.
+- **MoneyControl broker BUY calls (`mc_broker_reco`, 1,790, entry after MC posts them):** 20-session excess
+  -1.22% (t -2.6), 60-session -1.27%, target hit within 60 sessions 21%; every broker with n >= 40 negative.
+- **MoneyControl chart patterns (`mc_chart_patterns`, 274 with dates and levels, daily bars, stop-first on
+  an ambiguous day):** 185 stops vs 26 targets, win 17%, net -2.34% (t -10), excess -1.51% (t -6); every
+  timeframe and pattern type with n >= 15 negative.
+- **ET Calls (ET precos API, 616 closed calls, NOT stored anywhere locally).** ET's arithmetic is honest
+  (claimed % = ours on every call; 95% of BUY/EXIT prices inside that day's range), but 17% of intraday
+  BUY prices were not available in the 15m bar at/after publication. At ET's prices: +0.89%/call (t 3.3).
+  As a READER entering after publication: median -0.12%, win 47%, halves +1.75% / -0.47% — no reliable
+  edge. Jyoti Budhia +0.41% -> -0.03% (slippage eats it); Foram Chheda -0.72%; DSIJ +6.4% mean but median
+  +1.5%, n=48, driven by a few 50-210-day holds in a rising tape.
+
+**Toward a book that makes money after costs — 2026-10-27 (AF-20261026-73).**
+- **Futures carry over 2021-01..2024-07 (`stock_option_features_history`, 788 dates, 163 names; pre-registered,
+  direction fixed from 2026).** TRAP first: that table's `spot_proxy` is DERIVED from the future
+  (`F * exp(-rT)`, `nse_fo_bhav_history_fetcher.py`), so `forward / spot_proxy` is a constant 6.5%
+  annualised; carry must use the `stock_ohlcv` close. Result: next-session open-to-close IC **+0.022, t +5.7
+  on 779 independent dates, positive every year** — real, and it matches 2026. But the pre-registered
+  long-only book FAILS: top quintile, 5/10/21-session holds, excess -0.11% / -0.27% / +0.09% per period
+  (73-77% turnover). Sized: top quintile beats the F&O universe by +3.2 bps/day gross, long-short +7.7 bps/day
+  (t 3.9), against ~20 bps per futures round trip (`indian_market_costs`, STT 0.05% post Finance Act 2026).
+  **Real and untradeable at retail cost.** Do not wire it as a standalone trade.
+- **Capitulation triple, re-checked at 0.183% intraday cost (was validated at 0.15%):** full history
+  +0.47%/day, t 3.32 (ADTV >= Rs5cr), but **2026 YTD -0.14%/day (win 38%), out-of-sample since 2026-08-21
+  -0.02%/day, and at ADTV >= Rs25cr zero over the whole history (+0.01%/day)**. The edge was a 2021, small-cap
+  phenomenon. Not currently tradeable; `trade-desk/references/edge-inventory.md` updated.
+- **Selective long book on the ranking (`paper_book.py`, protocol frozen 2026-10-27 00:00 IST, hash
+  a0dcc6ca6fd1cef2).** 10 names, enter top 2% liquid, exit below top 25% (or 21 sessions unless still top),
+  16 bps/side, graded against 200 sticky-random books with identical mechanics. Retrospective 51 sessions
+  (NOT evidence): reblend_no_ml +8.98% excess, beats 96% of random books, halves +0.66%/+8.32%; published
+  +0.89%, beats 66%. A 10-name random book ranged -3.8%..+7.4% over the same window, which is why only the
+  forward block decides. PROVEN requires >= 60 forward sessions, above the null's 95th percentile, both
+  halves positive — earliest possible ~2027-01-22.
+
 **What each label earns (excess vs the SAME-DAY, SAME-LIQUIDITY-DECILE MEAN, direction-signed).** Two traps
 were hit computing this and both are now named: an all-universe benchmark credits every liquid name ~+27bps
 (liquid beat illiquid in this window), and a MEDIAN benchmark makes any large bucket "win" on 40/41 days

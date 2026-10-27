@@ -1901,6 +1901,21 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'paper-book-freshness',
+    label: 'paper_book_report snapshot (frozen paper book vs random books, written by ml-daily-ops)',
+    category: 'scoring',
+    critical: false,
+    // Same reason as forward-test-report-freshness: the paper book is only evidence if it accumulates.
+    sql: `SELECT "updatedAt" AS last_date FROM app_settings WHERE key = 'paper_book_report'`,
+    evaluate: (row, now) => {
+      const stale = tradingDaysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'No paper_book_report snapshot yet - run paper_book.py --persist (ml-daily-ops does this nightly)' };
+      if (stale > 6) return { status: 'fail', detail: `paper_book_report snapshot is ${fmtDays(stale)} old - the paper book has stopped accumulating` };
+      if (stale > 3) return { status: 'warn', detail: `paper_book_report snapshot is ${fmtDays(stale)} old` };
+      return { status: 'pass', detail: `paper_book_report snapshot ${fmtDays(stale)} old` };
+    },
+  },
+  {
     id: 'q2-drift-shadow-arm-freshness',
     label: 'q2_drift_shadow_arm snapshot (pre-registered post-results drift arm, written by q2-drift-shadow-arm)',
     category: 'scoring',

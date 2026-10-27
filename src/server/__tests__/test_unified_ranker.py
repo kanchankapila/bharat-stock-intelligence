@@ -1291,8 +1291,9 @@ class TestConfluenceUrlSymbolGuard:
         conn.execute("INSERT INTO market_regimes (date, regime, regime_prob) VALUES (date('now'),'BULL',0.8)")
         for symbol, score in rows:
             conn.execute(
-                "INSERT INTO confluence_signals (symbol, computed_at, confluence_score) VALUES (?, datetime('now'), ?)",
-                (symbol, score),
+                "INSERT INTO confluence_signals (symbol, computed_at, confluence_score, trend_alignment_score) "
+                "VALUES (?, datetime('now'), ?, ?)",
+                (symbol, score, score),
             )
         conn.commit()
         return ranker, conn, csv_path
@@ -1374,10 +1375,29 @@ class TestConfluenceScoresDecorrelation:
         assert scores['B'] == pytest.approx(25.0)
         assert scores['A'] > scores['B']
 
-    def test_null_sub_score_columns_treated_as_zero_not_excluded(self):
-        """A row written before this fix (or by any writer that only ever sets
-        confluence_score) has NULL sub-score columns -- these must be treated as zero
-        contribution, not silently dropped or crash the query."""
+    def test_null_sub_score_is_imputed_at_its_median_not_scored_as_zero(self):
+        """AF-20261026-70: 0 is a real reading on every sub-score scale (fundamental 0-12), so
+        COALESCE(col, 0) scored a stock with MISSING fundamentals as having the worst ones. A
+        missing component is neutral: the cross-sectional median of that component."""
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        ranker = UnifiedRanker(conn=conn)
+        conn.execute(
+            "INSERT INTO confluence_signals (symbol, computed_at, trend_alignment_score, volume_score, "
+            " sector_strength_score) VALUES ('NOFUND', datetime('now'), 15, 10, 8)"
+        )
+        self._seed(conn, 'HIGH', confluence_score=0, trend=15, vol=10, sector=8, fund=12)
+        self._seed(conn, 'MID', confluence_score=0, trend=15, vol=10, sector=8, fund=4)
+        self._seed(conn, 'LOW', confluence_score=0, trend=15, vol=10, sector=8, fund=2)
+        scores = ranker._get_confluence_scores()
+        # median fundamental of the present rows is 4 -> NOFUND ties MID, beats LOW.
+        assert scores['NOFUND'] == pytest.approx(scores['MID'])
+        assert scores['NOFUND'] > scores['LOW']
+
+    def test_all_null_sub_scores_leave_the_engine_absent_for_that_symbol(self):
+        """A row with no sub-score at all carries no confluence information: the symbol is
+        left out of the map so _blend renormalizes over its other engines (the same absence
+        contract as _finite_engine_map), instead of being ranked as the worst stock."""
         from unified_ranker import UnifiedRanker
         conn = make_db()
         ranker = UnifiedRanker(conn=conn)
@@ -1388,8 +1408,8 @@ class TestConfluenceScoresDecorrelation:
         self._seed(conn, 'REAL', confluence_score=20, trend=15, vol=10, sector=8, fund=12)
         conn.commit()
         scores = ranker._get_confluence_scores()
-        assert 'LEGACY' in scores and 'REAL' in scores
-        assert scores['REAL'] > scores['LEGACY']  # REAL's real sub-scores beat LEGACY's all-NULL 0
+        assert 'REAL' in scores
+        assert 'LEGACY' not in scores
 
 
 class TestUIGradeRanking:

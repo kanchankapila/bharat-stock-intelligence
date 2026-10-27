@@ -77,6 +77,23 @@ def ensure_schema() -> None:
     """)
 
 
+_CF_PARTS = ["trend_alignment_score", "volume_score", "sector_strength_score", "fundamental_score"]
+
+
+def _confluence_ns(rows: pd.DataFrame) -> pd.DataFrame:
+    """Sum of the four non-screener sub-scores per (symbol, date). A missing component is imputed
+    at its per-date median and a row with none is dropped -- the unified_ranker rule
+    (AF-20261026-70/71); a SQL `a + b + NULL` would null the total and drop the stock."""
+    if rows.empty:
+        return pd.DataFrame(columns=["symbol", "date", "confluence_ns"])
+    parts = rows[_CF_PARTS].apply(pd.to_numeric, errors="coerce")
+    keep = parts.notna().any(axis=1)
+    parts = parts.fillna(parts.groupby(rows["date"]).transform("median"))
+    out = rows.loc[keep, ["symbol", "date"]].copy()
+    out["confluence_ns"] = parts[keep].sum(axis=1)
+    return out.reset_index(drop=True)
+
+
 def load_panel(start: str) -> pd.DataFrame:
     """Raw engines joined on (symbol, date). Reads the RAW tables, deliberately not
     unified_recommendations' stored copies -- those are a session staler (a pre-market run can
@@ -89,16 +106,16 @@ def load_panel(start: str) -> pd.DataFrame:
         "FROM deep_learning_predictions WHERE prediction_date::date >= ?", (start,))
     # Earliest snapshot per (symbol, date): confluence_signals is a 30-min intraday table, and
     # taking anything but the first row of the day would use information the morning did not have.
-    cf = read_df("""
-        SELECT symbol, date, AVG(comp) AS confluence_ns FROM (
-            SELECT symbol, computed_at::date AS date,
-                   (trend_alignment_score + volume_score + sector_strength_score
-                    + fundamental_score) AS comp,
+    cf = _confluence_ns(read_df("""
+        SELECT symbol, date, trend_alignment_score, volume_score, sector_strength_score,
+               fundamental_score FROM (
+            SELECT symbol, computed_at::date AS date, trend_alignment_score, volume_score,
+                   sector_strength_score, fundamental_score,
                    ROW_NUMBER() OVER (PARTITION BY symbol, computed_at::date
                                       ORDER BY computed_at) rn
             FROM confluence_signals WHERE computed_at::date >= ?
-        ) t WHERE rn = 1 GROUP BY symbol, date
-    """, (start,))
+        ) t WHERE rn = 1
+    """, (start,)))
 
     for d in (ts, dl, cf):
         if not d.empty:

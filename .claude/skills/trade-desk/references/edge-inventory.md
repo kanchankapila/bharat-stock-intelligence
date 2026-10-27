@@ -10,7 +10,7 @@ reproduce, t=1.73" on a re-run with no code change).
 
 | Setup | Construct | Result | Notes |
 |---|---|---|---|
-| **capitulation triple** | `gap_down` AND `open_eq_low` AND `top_loser` on session D → long at D+1 open, exit D+1 close | **+0.53%/day excess, net 15bps, t=+3.61, p=0.0003, 425 dates, 6/6 years positive** | Robust: winsorizing *strengthens* it (t 3.69–3.94); dropping the 3 most extreme days still t=3.25. ~1.5 signals/day when it fires. Thin — not capacity-proven at scale. |
+| **capitulation triple** | `gap_down` AND `open_eq_low` AND `top_loser` on session D → long at D+1 open, exit D+1 close | **+0.53%/day excess, net 15bps, t=+3.61, p=0.0003, 425 dates, 6/6 years positive** | Robust: winsorizing *strengthens* it (t 3.69–3.94); dropping the 3 most extreme days still t=3.25. ~1.5 signals/day when it fires. Thin — not capacity-proven at scale. **RE-CHECKED 2026-10-27 at the current 0.183% intraday cost (Finance Act 2026 STT): full history still +0.47%/day, t 3.32, but 2026 YTD is NEGATIVE (-0.14%/day, median -0.59%, win 38%, 68 signal-days), out-of-sample since 2026-08-21 -0.02%/day, and at ADTV >= Rs25cr the edge is zero over the whole history (+0.01%/day, t 0.04; 2023-2026 every year negative). Treat as UNPROVEN in the current tape: say so before sizing any trade on it (AF-20261026-73).** |
 
 That is the entire list.
 
@@ -20,7 +20,18 @@ That is the entire list.
   turnover traps (~90–93% one-way turnover per period). The triple works *because* it is
   rare and narrow; loosening any leg lands you in these rows.
 - **Momentum, all short horizons.** `momentum_21d`/`63d`/`reversal_21d` negative to t=−3.96.
-  `momentum_12_1` t=1.10, not significant.
+  (`momentum_12_1` is NOT dead — see "Positive after costs, not proven" below.)
+
+## Positive after costs, not proven — monthly delivery books (`factor_backtest.py`, 21d, 25bps/side)
+
+- **`momentum_12_1`**: re-run 2026-09-26 +0.79%/month net excess over the equal-weight ≥₹1cr
+  universe, t=1.61, 55 periods, 4/5 years positive, CAGR 18.2%, Sharpe 0.75, 35% turnover.
+  Decaying (2025 +0.37, 2026 +0.02 per month).
+- **`value_book_to_price`**: +0.78%/month, t=1.99; vendor book-value history may be restated
+  retrospectively (possible look-ahead). Also decaying to ~0 in 2025-2026.
+
+Neither clears a multiple-testing bar (~t=3). Unlike every short-horizon setup above, their
+low turnover means costs do not eat them. Re-run both before quoting.
 - **The whole oversold/overbought technical family.** 14 of 23 `feature_store` columns clear
   a Bonferroni bar and *every one of them is negative*: `stoch_d` −9.28, `williams_r` −9.02,
   `stoch_k` −9.00, `cci` −7.57, `di_plus` −7.34, `dist_sma20_pct` −6.40, `vwap_dist_pct`
