@@ -30,20 +30,21 @@ function testFiles(): string[] {
   return readdirSync(TESTS_DIR).filter((f) => f.endsWith('.test.ts'));
 }
 
+function dropStatements(src: string) {
+  return src.split('\n')
+    .map((line, i) => ({ line: line.trim(), n: i + 1 }))
+    // Transaction handles execute the same SQL as the standalone facade.
+    .filter(({ line }) => /\b(dbRun|dbAll|dbGet|dbExec|execute|query)\s*\(|\.\s*(run|exec)\s*\(/.test(line))
+    .filter(({ line }) => /\bDROP\s+TABLE\b/i.test(line));
+}
+
 describe('tests must not be able to drop production tables', () => {
   it('every test issuing DROP TABLE asserts it is inside the throwaway schema', () => {
     const offenders: string[] = [];
 
     for (const file of testFiles()) {
       const src = readFileSync(path.join(TESTS_DIR, file), 'utf8');
-      const lines = src.split('\n');
-
-      const drops = lines
-        .map((line, i) => ({ line: line.trim(), n: i + 1 }))
-        // Only statements actually sent to the DB. A DROP inside a string being asserted on
-        // (pgClient.test.ts checks that alterMigrationName REJECTS one) is not an execution.
-        .filter(({ line }) => /\b(dbRun|dbAll|dbGet|execute|query)\s*\(/.test(line))
-        .filter(({ line }) => /\bDROP\s+TABLE\b/i.test(line));
+      const drops = dropStatements(src);
 
       if (drops.length === 0) continue;
 
@@ -79,7 +80,18 @@ describe('tests must not be able to drop production tables', () => {
     // If signalAccuracyDigest.test.ts stops dropping tables the assertion below should be
     // deleted along with this test -- but it must never pass by silently matching nothing.
     const src = readFileSync(path.join(TESTS_DIR, 'signalAccuracyDigest.test.ts'), 'utf8');
-    expect(/\bdbRun\s*\(\s*['"`]DROP TABLE/i.test(src)).toBe(true);
+    expect(dropStatements(src).length).toBeGreaterThan(0);
     expect(src.includes(GUARD)).toBe(true);
+  });
+
+  it.each(['dbRun', 'dbExec', 'tx.run', 'tx.exec', 'client.query'])(
+    'recognizes unsafe drops through %s rather than silently ignoring them', call => {
+      expect(dropStatements(`await ${call}('DROP TABLE victim')`)).toHaveLength(1);
+      expect(dropStatements(`await ${call}('SELECT 1')`)).toEqual([]);
+    },
+  );
+
+  it('does not treat a rejected SQL argument as a database execution', () => {
+    expect(dropStatements("expect(() => alterMigrationName('DROP TABLE foo')).toThrow()")).toEqual([]);
   });
 });

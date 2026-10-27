@@ -303,12 +303,12 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   **Mandatory Sequence whenever an endpoint fails or a new source is needed:**
   1. Query `market_endpoint_registry` in PostgreSQL (`bharat_intel` on `:5433`, 3,408 live working endpoints; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`).
   2. Check `url_endpoints` (830 templates) via `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>`.
-  3. Inspect `unique_urls.txt` (3,103 raw URLs) and `DATA_FETCHING_GUIDE.md` for proven headers/payloads.
+  3. If present, inspect the optional local raw URL corpus `urls_v2.db` (gitignored and absent from fresh checkouts). With full Git history, the deleted flat list is available via `git show c2ceae0e^:unique_urls.txt`; inspect `DATA_FETCHING_GUIDE.md` for proven headers/payloads.
   4. Grep the repo for sibling endpoints and probe each route by route.
   5. **THEN ask**, with the per-route breakdown. Asking first is cheap, but reporting "vendors are dead" when active endpoints exist in the 3,000+ registry or in-tree is a documented failure mode.
 
 - **Declaring a source dead or building web scrapers from scratch without checking the 3,000+ discovery registry.**
-  **Tell:** Concluding an API is permanently dead or attempting external browser scraping when an active alternative or updated route already exists in `market_endpoint_registry` (3,408 live endpoints) or `unique_urls.txt` (3,103 URLs).
+  **Tell:** Concluding an API is permanently dead or attempting external browser scraping when an active alternative or updated route already exists in `market_endpoint_registry` (3,408 live endpoints) or the raw URL corpus `urls_v2.db`.
   **Fix:** Always run a discovery registry query (`SELECT provider, target_url, use_case FROM market_endpoint_registry WHERE ...`) or `--find-alternates` before proposing new scrapers or declaring data unobtainable.
 
 - **A vendor payload can be byte-identical for two different query params — check before relying

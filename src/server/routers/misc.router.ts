@@ -493,17 +493,11 @@ export const miscRouter = router({
           }
         } catch { /* unified_recommendations not yet populated -- cockpit still works on its own inputs */ }
 
-        let newsSentiment: Array<Record<string, unknown>> = [];
-        try {
-          newsSentiment = await dbAll<any>(`SELECT symbol, sentiment_score FROM news_sentiment_items WHERE published_at >= datetime('now', '-7 days') ORDER BY published_at DESC`);
-        } catch { /* table may not exist */ }
-
-        const sentimentMap = new Map<string, number[]>();
-        for (const n of newsSentiment) {
-          const sym = n.symbol as string;
-          if (!sentimentMap.has(sym)) sentimentMap.set(sym, []);
-          sentimentMap.get(sym)!.push(n.sentiment_score as number);
-        }
+        // AF-20261026-49: a 7-day news read used to sit here. It selected `symbol` from
+        // news_sentiment_items, which has only ever had `symbols_json`, so it failed on every call
+        // into a bare catch and the cockpit has never had news. It is not repaired, deliberately:
+        // measurement.md grades news sentiment as having no next-day edge (IC -0.03), so wiring it
+        // in would add a measured-useless input. News and smart money are reported as unknown.
 
         // Heuristic fallback — only used when technical_signals.win_probability is NULL
         const heuristicWinProb = (sig: Record<string, unknown>): number => {
@@ -530,7 +524,6 @@ export const miscRouter = router({
         const symbolMap = new Map<string, {
           sig: Record<string, unknown>;
           quant: Record<string, unknown> | undefined;
-          avgSentiment: number;
           sector: string;
           winProb: number;
           winProbSource: 'calibrated' | 'raw' | 'heuristic';
@@ -539,7 +532,6 @@ export const miscRouter = router({
         for (const sig of signals) {
           const sym = sig.symbol as string;
           if (symbolMap.has(sym)) continue; // keep first (most recent)
-          const scores = sentimentMap.get(sym) || [];
           // Prefer ML-calibrated win_probability stored by the scoring engine; fall back to heuristic.
           // Was reading sig.win_probability (raw) despite this comment — ts.* already carries
           // calibrated_win_probability, it just wasn't selected here (2026-07-18 gating follow-up).
@@ -551,7 +543,6 @@ export const miscRouter = router({
             winProbSource,
             sig,
             quant: quantMap.get(sym),
-            avgSentiment: scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0,
             sector: (sig.sector as string) || 'Unknown',
             winProb,
           });
@@ -564,7 +555,10 @@ export const miscRouter = router({
           const techScore  = quant ? (quant.technical_score  as number) || 0 : winProb * 100;
           const fundScore  = quant ? (quant.fundamental_score as number) || 0 : 50;
           const momScore   = quant ? (quant.momentum_score    as number) || 0 : winProb * 80;
-          const sentScore  = data.avgSentiment > 0 ? 60 + data.avgSentiment * 40 : 50;
+          // No news or smart-money input exists for this desk (AF-20261026-49). The neutral 50s keep
+          // compositeScore -- and so every actionAdvice threshold -- exactly as it has always been;
+          // they are not readings and are reported to the client as null below.
+          const sentScore  = 50;
           const smartScore = 50;
           const compositeScore = techScore * 0.40 + fundScore * 0.20 + momScore * 0.20 + sentScore * 0.10 + smartScore * 0.10;
 
@@ -601,14 +595,14 @@ export const miscRouter = router({
             mlRankPct: (sig.mlRankPct as number | null) ?? null,
             techSignalCount: 1,
             quantRank: Math.round(100 - fundScore),
-            smartMoneyCr: 0,
-            newsSentiment: parseFloat(data.avgSentiment.toFixed(2)),
+            smartMoneyCr: null,
+            newsSentiment: null,
             factors: {
               technical:   parseFloat(techScore.toFixed(1)),
               fundamental: parseFloat(fundScore.toFixed(1)),
               momentum:    parseFloat(momScore.toFixed(1)),
-              sentiment:   parseFloat(sentScore.toFixed(1)),
-              smartMoney:  parseFloat(smartScore.toFixed(1)),
+              sentiment:   null,
+              smartMoney:  null,
             },
             entryPrice, targetPrice, stopLoss,
             rsi:         sig.rsi        ?? null,

@@ -11945,6 +11945,64 @@ the user. This exceeds AF-20260925-04's historical three-alert acceptance. No au
 replacement/downgrade or live install was attempted; functional code gates do not establish
 dependency security. All unresolved follow-ups remain only in the shared findings ledger.
 
+## 2026-10-26 — Dependency-security remediation in isolation
+
+The user approved a separate worktree, including a Vitest major migration and replacement of
+the unpatched npm xlsx package. Changes are confined to
+`D:/Github/bharat-stock-intelligence.worktrees/dependency-security-2026-10-26`, with a real
+independent dependency installation and test-owned databases, not production fixtures. No .env
+was copied, no live dependencies were installed, and no service was restarted.
+
+The reproduced npm audit moved from thirty flagged package entries to zero after compatible
+updates, Vitest 5 and write-excel-file. Firebase remains on major 12: a bounded gRPC override
+resolved the residual advisory chain instead of accepting npm audit's proposed Firebase 9
+downgrade. The seven-sheet XLSX contract, all original metadata rows, literal formula-shaped
+text, XML escaping and write-failure propagation have regression coverage. An independent
+Python standard-library ZIP/XML readback also succeeded; no production Python package was
+installed for that check. The report's metadata arrays were preserved, not certified as a
+live scheduler inventory.
+
+A clean npm ci, typecheck, build, npm ls --all and audit including dev dependencies all passed.
+The audit gate explicitly includes development tooling even under NODE_ENV=production and is
+wired into CI. The first full Vitest run was not green: a fresh Windows checkout exposed a
+CRLF CLI hashbang broken by Vite SSR, and an LF-only queue source-scan boundary. Both original
+failures and failing policy controls were retained; after fixing physical LF plus checkout
+policy and normalizing the scan input, all twenty-one focused controls passed. Assertions and
+existing stock-test budgets were not relaxed. Full follow-up runs, including a broader Python
+run with setup errors under investigation, are recorded through AF-20261025-33 and
+AF-20261026-01, not a second pending queue.
+
+Remote CI 40197074464 for the prior review head 7e9cd7cd is completed/success across build,
+Python and API smoke jobs. AF-20261025-06 is closed for reviewed-history delivery only; it is
+not a claim of backend activation or dependency-security clearance. The production schema
+comparison was read-only and clean. Remote main and the live stock data remain unchanged.
+
+That was the initial checkpoint, not a claim that other sessions stopped working: another
+session subsequently merged remote main to 752f1b45 and restarted bharat-server at 02:12 IST.
+Read-only PM2 RPC/lifecycle evidence distinguishes this external action from this batch:
+the installed CLI is 7.0.4 while the in-memory daemon remains 7.0.3. No daemon update, restart,
+live install or production stock-data write was issued here. The official PM2 update contract
+requires an in-memory update separately from package installation; its dump/kill/resurrect path
+must not be folded into permission for restarting just one service.
+
+Current-main CI 40232289490 and Bharat Alpha CI 40232289465 are green for 752f1b45. Re-ran
+`scripts/verifyV7.mjs` against actual production responses after the observed restart: all five
+routes, flow direction, keyboard sorting, canonical stock card, chart and responsive checks
+passed with zero errors and no intercepted/fixture data. The real reader now includes
+generated_at independently of its target-session label. AF-20261025-27/-29 are closed for
+those served presentation contracts, not for recommendation edge.
+
+The broader Python run was retained as failed: 3,789 passed / 269 gated skips, two failures
+and ninety setup errors. All ninety errors share one pg_stat_statements UniqueViolation race;
+the two endpoint failures read missing public tables because the tests had no private fixture.
+AF-20261026-02/-03 record the shared bootstrap lock/stable extension homes and endpoint
+isolation repairs. Their ten targeted Python and nine TypeScript controls passed, including
+a real blocked initializer. A later full TypeScript rerun then exposed the same unfinished
+per-row fixture-write class in mlRankPct and an unnecessary real-driver teardown import.
+AF-20261026-04/-05 retain those failures, failing controls and bounded/registered-cleanup
+repairs. No original stock assertion, test timeout, production setting or score formula was
+relaxed. Heavy gates are being serialized; current status remains in the root ledger only.
+
 ## 2026-10-26 — audit remediation via subagent-driven development; first positive directional evidence
 
 Executed the 2026-10-25 audit's open items as a 4-task plan (`docs/superpowers/plans/2026-10-25-audit-remediation.md`)
@@ -11977,3 +12035,125 @@ had existed only on this machine), `bharat-server` restarted with the user's app
   fan-out. Twice this session a full vitest run exited 0 while reporting failures; every one was attributed
   (worktree has no venv, CRLF checkout, junction module resolution, a concurrent agent editing tests mid-run) and
   re-run green where the environment was right.
+
+## 2026-10-26 — Dependency-security integrated validation checkpoint
+
+The user approved integrating current main before review delivery. Isolated security commits
+86a28a7d and 7cd3880d were combined with published code main 752f1b45 and the later
+documentation-only main 9f967244; integration head is 4fb3e7a3. Documentation conflicts were
+resolved by stable finding ID, preserving the published financial findings and this batch's
+owned verification evidence. Shared-checkout source, index and services were not changed by
+these branch operations; other sessions' ongoing scoring edits remain outside this batch.
+
+Typecheck, frontend build, npm audit including development tooling, npm dependency-tree
+validation, read-only production schema comparison, document counts and recurring-bug checks
+passed. Full Vitest results remain honestly red: first 2,175 passed / four failures / 46 gated
+skips, then 2,177 passed / three failures / 46 gated skips. Focused 62- and 37-test passes are
+not replacements for those full gates. The latter failures were two edge-router fixture
+timeouts and the old safety scanner's dbRun-only non-vacuity expression. All original fixture
+scenarios, assertions and budgets remain; transaction/drop-call coverage was extended rather
+than removing the safety check. AF-20261026-04/-06 carry the evidence and regression controls.
+
+The full Python suite was started against the merged source and a dedicated test database
+after Node exited, with no simultaneous broad Node gate. Its earlier-baseline run stopped at
+83 percent for integration and is explicitly not a pass. Current verification/delivery state
+is owned only by AF-20261025-33 and AF-20261026-01..06 in the shared root ledger. No review
+push, live dependency installation, service restart or production stock-data write occurred
+at this checkpoint; no scoring formula or promotion gate was changed.
+
+## 2026-10-26 — Security gate blocked by database responsiveness
+
+The complete merged-source Python run stopped advancing at 79 percent. Its CPU remained
+almost unchanged during the quiet interval. Separate read-only pg_stat_activity/pg_settings
+queries also stopped returning; an earlier SELECT 1 responded, but a later fresh connection
+to the dedicated test database failed with connect_timeout=5. Docker's summary labelled
+Timescale healthy and Redis unhealthy, while deeper read-only inspection did not complete.
+These observations establish a verification blocker, not its root cause or proof that every
+production request failed. AF-20261026-07 records the operator-owned recovery boundary.
+
+Only this batch's stalled pytest and diagnostic command sessions were interrupted. The owned
+pytest interpreter PIDs were subsequently absent; no production process was restarted or
+terminated. The incomplete run is not a pass. A deliberately separate, source/mocked-only
+Vitest invocation then passed 27 controls in six files, including the actual safety scanner
+and its transaction-call cases. Its ignored logs/security-source-only.config.ts contains no
+database setup and is supplemental evidence only; the checked-in full test configuration and
+all original budgets remain unchanged. Latest typecheck, findings/backlog and document checks
+pass. Full suites must run after database responsiveness is restored before any review push.
+
+This is a local source checkpoint, not deployment or complete audit closure. No review branch
+was pushed, no live dependency installed, and no recommendation/scoring change promoted.
+## 2026-10-26 — recommendation audit: breakout removed from the blend; measurement.md re-verified
+
+Asked to audit the recommendation process and change it where evidence supports it, and to check
+`measurement.md` for stale claims. One scoring change, made on measured evidence; everything else recorded.
+
+- **AF-20261026-44 — `breakout` zeroed in all five regimes** (freed weight split proportionally over
+  ml/confluence/technical). Its 5-15% weight rested only on the classifier's own AUC for a >=6%-move label
+  (a volatility label; `model_registry` still records 0.68-0.70 per retrain). On 41 post-change ranker dates,
+  graded on the next tradeable session, `breakout_score` reads rank IC -0.035 (t -2.9, 12/41 positive).
+  Replay on identical rows (`scripts/measure_blend_arms.py`, pre-registered both-halves rule): o2c IC
+  +0.0073 (t +4.86, 33/41, both halves), o2o +0.0026 (t +1.80), 5-session +0.0051 (t +1.91), every observed
+  regime positive. Thresholds not retuned (score sd 14.5 -> 14.7). BULL/CRASH extrapolated. Goes live at the
+  next ranker run; re-verify after the 2026-10-26 22:30 IST run.
+- **AF-20261026-45 — label economics (EVIDENCE):** vs a same-liquidity MEAN benchmark, nothing clears costs as
+  a one-session trade; at 5 sessions only Buy clears cost (+39.6bps net); Strong Buy is not demonstrably better
+  than Buy; short calls are right in direction but net negative and mostly unshortable. Not acted on: a
+  threshold change on the same 41 days would stack two fits on one sample.
+- **AF-20261026-46 — the scheduled grader of the ranking never grades 1 session and dates by `computed_at`**
+  (one session late). Harness change must reproduce known readings first; EVIDENCE.
+- **AF-20261026-47 — `measurement.md` stale claims corrected in place** (elapsed forecasts, DL registrations,
+  sentinel rows, analyst trio — graded today, no edge — harness freshness, a self-contradiction, "confluence
+  carries the ranker"). Immunized: `scripts/staleForecasts.mjs` in `doc:numbers:check` flags any `~DATE`
+  forecast in a rule file that has passed with no outcome on its line (pre-fix file: 5 flagged; fixed: 0).
+- Measurement lessons hit and named: an all-universe benchmark credits liquid names ~+27bps; a MEDIAN
+  benchmark makes any large bucket win (right skew) — use the same-tier MEAN; the canonical harness's
+  open-to-open convention shrinks a real open-to-close edge, so report both; and one of two instruments
+  counting the analyst dates was wrong (12 vs 32) — a third, independent count settled it.
+
+## 2026-10-26 (evening) — data-in-scoring audit: what feeds the ranker, what is collected but unused
+
+Commits `a07d068a` (generated_at-dated ranker sweep, cockpit null-not-zero) and `d4114520` (this audit). All
+measurement ran read-only after the 15:30 close (the afternoon outage, AF-20261026-48, is why).
+
+- **Input health (every ranker input, latest session):** all fresh to 10-23/10-26; INDIAVIX, DL predictions,
+  recommendation_log at 10-23; block/institutional deals at 10-22. Screener membership tables carry no
+  timestamp column, so their freshness cannot be monitored per row.
+- **technical engine is sparse, not broken (AF-20261026-50):** `signal_score` is 0 on 92-99% of rows since
+  July because `technical_signals` became a full-universe feature table; 94% of names tie at 47.5. Measured
+  anyway: most consistent component (o2c1 IC +0.034, t 6.8, 38/42); zeroing it hurts (t -3.65). Kept.
+- **screener re-add (AF-20261026-51):** pre-registered 0.10 arm, +0.002 IC at o2c1 only, nothing at 5d. Declined.
+- **concall tone (AF-20261026-52):** 475-call event study, no edge (t 0.40 / 0.83, halves flip).
+- **ROE (AF-20261008-15 re-verified):** quality gate sees ROE for 318 names; the built fallback flag would add
+  1,874 but changes scores, so it stays a shadow-arm EVIDENCE item.
+- **Unwired sources inventoried (AF-20261026-54):** carry/PCR (measured, AF-20261025-08) first; MC analyst
+  ratings and TL F&O buildup testable; superstar/eco-calendar too shallow; NSE short-selling and
+  participant OI not ingested anywhere and absent from the registry.
+- **Doc drift fixed (AF-20261026-53):** RULE ZERO step 3 named `unique_urls.txt`, deleted in `c2ceae0e`;
+  repointed to `urls_v2.db`; docNumbers' silent "unavailable" row removed; guarded in `docClaims.test.ts`.
+- **Learned:** a uniform-looking engine is not a degenerate one: measure the drop before "fixing" ties. And
+  a check that cannot find its input must fail or be removed, not print "unavailable" and pass.
+
+## 2026-10-26 — Security review branch: latest main and complete local gates
+
+Integrated committed main 5f2cdb69 into the isolated dependency-security branch at 9b691ea0.
+The first combined full Vitest run found one fresh-checkout defect: AF-20261026-53's
+replacement URL corpus, `urls_v2.db`, is gitignored and absent outside the shared checkout.
+The documentation now labels that file optional and points first to the registry/catalog;
+`docClaims.test.ts` tests the portable contract. The same review found that CONTEXT.md and
+its old test still called breakout a non-zero ranker input after AF-20261026-44 zeroed it.
+The dated text and test now match the committed base weights and runtime edge gate.
+AF-20261026-55/-56 record both fixes. No scoring code changed in this batch.
+
+The final serialized full suites passed against separate empty test databases: Python
+3,907 passed / 269 gated skips (`logs/pytest-dependency-security-2026-10-26-latest-main.xml`)
+and Vitest 2,193 passed / 46 gated skips
+(`logs/vitest-dependency-security-2026-10-26-final-full.json`). Typecheck, production build,
+findings/backlog checks, document inventory and npm audit including dev dependencies passed;
+the audit reports zero vulnerabilities. Bounded test-DB/catalog reads and Redis health PONG
+returned after the earlier stall, so AF-20261026-07 is closed as a validation blocker;
+AF-20261026-48 retains the separate unresolved host-outage investigation. The earlier partial
+runs and red test reports remain evidence, never substituted for these complete results.
+
+The review branch still needs a non-force push and exact-head remote CI readback. User-owned
+production installation, PM2 daemon/service activation and recommendation readback remain
+separate from these local gates. No production stock data was copied or changed here.

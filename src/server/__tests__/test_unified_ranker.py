@@ -591,11 +591,34 @@ class TestUnifiedRankerRun:
         assert REGIME_WEIGHTS['CRASH']['screener'] <= 0.20 + 1e-9
         for regime, weights in REGIME_WEIGHTS.items():
             assert abs(sum(weights.values()) - 1.0) < 1e-9, f"{regime} weights don't sum to 1"
-        # breakout is PINNED by an independent audit-derived ceiling; a proportional
-        # redistribution must never scale it up. Pinning it here means a future reshuffle that
-        # forgets the exclusion fails on this line rather than silently breaching the ceiling.
+        # breakout ZEROED 2026-10-26 (AF-20261026-44). Its 0.05-0.15 weight rested only on the
+        # classifier's SELF-REPORTED purged-OOF AUC 0.61 for P(>=6% up-move in 10d) -- a label
+        # that rewards volatility, not direction (ml-model-bugs.md). Graded on realised returns
+        # over 41 ranker dates it is ANTI-predictive (next-session open-to-close rank IC -0.035,
+        # t -2.9, positive on 12/41), and a replay on identical rows lifted the blend's IC by
+        # +0.0073 (t +4.9, better on 33/41, both halves, every observed regime). Raising it
+        # again needs a realised-return reading, not a model's own metric.
         assert [REGIME_WEIGHTS[r]['breakout'] for r in
-                ('BULL', 'BEAR', 'HIGH_VOL', 'CRASH', 'SIDEWAYS')] == [0.15, 0.05, 0.10, 0.05, 0.13]
+                ('BULL', 'BEAR', 'HIGH_VOL', 'CRASH', 'SIDEWAYS')] == [0.0, 0.0, 0.0, 0.0, 0.0]
+
+    def test_breakout_removal_redistributes_proportionally_not_a_hidden_reweight(self):
+        """Zeroing breakout must be a pure removal: the freed weight goes to ml/confluence/
+        technical in proportion to their PRIOR weights, so their ratios within each regime are
+        unchanged. A replay only supports the removal; any change to those ratios would be a
+        second, unmeasured reweighting riding along with it."""
+        from unified_ranker import REGIME_WEIGHTS
+        prior = {  # REGIME_WEIGHTS immediately before 2026-10-26 (git show d3fe4151:src/server/unified_ranker.py)
+            'BULL':     (0.184783, 0.369565, 0.295652),
+            'BEAR':     (0.236786, 0.473574, 0.23964),
+            'HIGH_VOL': (0.12857, 0.257143, 0.514287),
+            'CRASH':    (0.267188, 0.415624, 0.267188),
+            'SIDEWAYS': (0.204705, 0.409413, 0.255882),
+        }
+        for regime, (ml, conf, tech) in prior.items():
+            w = REGIME_WEIGHTS[regime]
+            assert abs(w['ml'] / w['confluence'] - ml / conf) < 1e-4, regime
+            assert abs(w['technical'] / w['confluence'] - tech / conf) < 1e-4, regime
+            assert abs(w['ml'] + w['confluence'] + w['technical'] - 1.0) < 1e-9, regime
 
 
 class TestIncompleteGeometryIsNotPublishedAsATradePlan:
