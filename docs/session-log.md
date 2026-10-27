@@ -12048,3 +12048,10 @@ measurement ran read-only after the 15:30 close (the afternoon outage, AF-202610
 - **Learned:** grading an exit-on-signal-loss rule on closed trades only is survivorship (four "winning"
   screeners vanished once open positions counted). Also: ledger IDs cited in code before the row exists can be
   taken by a concurrent session (-55..-57 were); write the row first or re-check before committing.
+
+## 2026-10-27 (evening) — monthly factors re-run against a buyable index (NIFTY500)
+
+- **Deployed:** `npm run build` + `pm2 restart bharat-server` (08:57 IST, HTTP 200): nightly paper book, ROE/fundamentals fixes and the cockpit `newsSentiment: null` fix are live.
+- **Changed:** `factor_backtest.py` now grades each rebalance window against NIFTY500 (price-only, asof close) and prints the index's CAGR/Sharpe/max DD (`894b7d61`, AF-20261027-07). Edge inventory corrected (`7bcf1be0`).
+- **Measured (21d, top-50, 25 bps/side):** momentum_12_1 CAGR 17.9% / Sharpe 0.74 / DD -21.8% vs NIFTY500 8.0% / 0.63 / -13.4%, excess t 1.29; value_book_to_price 24.7% / 0.94 / -27.0% vs 11.2% / 0.84 / -14.0%, excess t 1.77; low_vol loses to both benchmarks (t -3.31 vs index). Rows in `measurement.md` "Already tested".
+- **Learned:** the equal-weight universe is a harder benchmark than the index in this sample (~11-18%/yr vs 8-11%), so beating the index is mostly the small/mid-cap tilt, not the factor; the factor's own evidence is the vs-universe t, still under 2 at 25 bps. Three docs carried three verdicts for one factor; quote `measurement.md` only.
