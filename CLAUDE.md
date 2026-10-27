@@ -174,9 +174,7 @@ db/schema.postgres.sql   schema of record, generated from live (`npm run schema:
 Component, procedure and table inventories are deliberately **not** listed — they rot. Grep the source.
 v1 (`src/v1/V1Routes.tsx`) is the only legacy route tree. A reference to "six dashboards", `dashboardVersion` or a shell
 name (`V2AppShell`, `V6Shell`) is stale; a fix lands in v1 or it does not ship. A second, newer terminal, TALA
-(`src/tala/`, mounted at `/tala/*` in `src/main.tsx`), also exists. The user explicitly approved retaining
-the existing v7 Pro routes (`/v7-*`, `src/components/v7/`) on 2026-10-25; these are mounted in v1's route tree
-with their own shell, not a new ranking authority. Do not add another surface. **Before editing a component, confirm a
+(`src/tala/`, mounted at `/tala/*` in `src/main.tsx`), also exists. The user directed removal of the v7 Pro routes and component tree on 2026-10-27. Do not add another surface. **Before editing a component, confirm a
 route renders it** (grep its import): `BuyRecommendationsPage.tsx` is imported by nothing, and honesty fixes landed there on
 2026-10-08 that no user could see.
 

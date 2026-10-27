@@ -15,7 +15,7 @@
  * mobile drawer and CommandPalette, so one check covers all three surfaces.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const SRC = path.resolve(__dirname, '..');
@@ -69,6 +69,14 @@ describe('sidebar navigation is complete and every entry resolves', () => {
       'orphaned-route class. Add a NAV_GROUPS entry (as /details needed), or add the route to ' +
       'NON_NAV_ROUTES with the reason it cannot be a nav entry.',
     ).toEqual([]);
+  });
+
+  it('the retired v7 surface has no route, navigation, shell bypass or component tree', () => {
+    expect(routePaths().filter((route) => route.startsWith('v7-'))).toEqual([]);
+    expect(navIds().filter((id) => id.startsWith('v7-'))).toEqual([]);
+    expect(v1Routes).not.toContain('components/v7/');
+    expect(readFileSync(path.join(SRC, 'App.tsx'), 'utf8')).not.toContain('const isV7');
+    expect(existsSync(path.join(SRC, 'components', 'v7'))).toBe(false);
   });
 
   it('the retired v5 shell entry has not come back', () => {
