@@ -60,6 +60,9 @@ roughly that against a total-return benchmark, and a long/short spread is unaffe
 
 RESULTS AS OF 2026-08-10 (14 factors, 53 monthly rebalances, top-50, 25bps/side)
 --------------------------------------------------------------------------------
+STALE -- kept for the reasoning, not the numbers. Later re-runs put momentum_12_1 at t=1.61 and
+value_book_to_price at t=1.99, i.e. NOT significant; current verdicts live in
+.claude/rules/measurement.md ("Already tested"). Quote that table, never this one.
 Read this before adding a factor, because the pattern is consistent and it is the opposite
 of what "more signal = better" would predict.
 
@@ -1390,6 +1393,7 @@ def run_backtest(panel: pd.DataFrame,
 
         periods.append({
             'date': d0,
+            'exit_date': d1,
             'gross_pct': gross,
             'cost_pct': cost * 100,
             'net_pct': gross - cost * 100,
@@ -1509,6 +1513,49 @@ def load_nifty_close(start: str, end: str | None = None) -> pd.Series:
     return pd.Series(df['close'].astype(float).values, index=pd.DatetimeIndex(pd.to_datetime(df['date'])))
 
 
+BUYABLE_INDEX = 'NIFTY500'
+
+
+def load_index_close(name: str = BUYABLE_INDEX) -> pd.Series:
+    """Daily price-index close (no dividends, like the strategy leg) from marketsmojo_index_history."""
+    df = read_df("SELECT date, price FROM marketsmojo_index_history WHERE name = ? AND price > 0 "
+                 "ORDER BY date", [name])
+    return pd.Series(df['price'].astype(float).values, index=pd.DatetimeIndex(pd.to_datetime(df['date'])))
+
+
+def index_benchmark(periods: pd.DataFrame, close: pd.Series, name: str, rebalance_days: int) -> dict:
+    """The same book against a BUYABLE index over each rebalance-to-rebalance window.
+
+    The universe mean answers "is it skill"; this answers "does it beat an index fund". Index moves
+    are close(entry date) -> close(exit date), each taken as the last close on or before that date,
+    so a missing index day never borrows a later print. The strategy enters/exits at the next open,
+    so each end differs by one overnight gap -- unbiased noise over a 21-session hold.
+    """
+    close = close.sort_index()
+    a = close.asof(pd.DatetimeIndex(pd.to_datetime(periods['date'])))
+    b = close.asof(pd.DatetimeIndex(pd.to_datetime(periods['exit_date'])))
+    df = pd.DataFrame({'date': periods['date'].values, 'net': periods['net_pct'].values,
+                       'idx': (b.values / a.values - 1) * 100}).dropna()
+    per_yr = 252.0 / rebalance_days
+    idx, ex = df['idx'], df['net'] - df['idx']
+    curve = (1 + idx / 100).cumprod()
+    yrs = len(df) / per_yr
+    t = float(ex.mean() / (ex.std() / math.sqrt(len(ex)))) if len(ex) >= 2 and ex.std() > 0 else float('nan')
+    yearly = ex.groupby(pd.to_datetime(df['date']).dt.year).mean()
+    return {
+        'index_name': name,
+        'index_periods': int(len(df)),
+        'index_per_period_pct': round(float(idx.mean()), 4) if len(df) else float('nan'),
+        'net_excess_vs_index_pct': round(float(ex.mean()), 4) if len(df) else float('nan'),
+        'excess_vs_index_t_stat': round(t, 2),
+        'pct_periods_beating_index': round(float((ex > 0).mean() * 100), 1) if len(df) else float('nan'),
+        'years_positive_vs_index': f"{int((yearly > 0).sum())}/{len(yearly)}",
+        'index_cagr_pct': round(float((curve.iloc[-1] ** (1 / yrs) - 1) * 100), 2) if len(df) else float('nan'),
+        'index_sharpe': round(float(idx.mean() / idx.std() * math.sqrt(per_yr)), 2) if len(df) > 1 and idx.std() > 0 else float('nan'),
+        'index_max_drawdown_pct': round(float((curve / curve.cummax() - 1).min() * 100), 2) if len(df) else float('nan'),
+    }
+
+
 def regime_breakdown(periods: pd.DataFrame, labels: pd.Series, min_periods: int = 12) -> list[dict]:
     """Net excess vs the universe grouped by the regime in force at each rebalance date.
 
@@ -1552,6 +1599,12 @@ def _print(r: dict) -> None:
               'years_positive'):
         print(f"  {k:<32} {r[k]}")
     print(f"  {'excess_by_year_pct':<32} {r['excess_by_year_pct']}")
+    if 'index_name' in r:
+        print(f"  -- vs {r['index_name']} (buyable, price-only, same windows) --")
+        for k in ('index_periods', 'index_per_period_pct', 'net_excess_vs_index_pct',
+                  'excess_vs_index_t_stat', 'pct_periods_beating_index', 'years_positive_vs_index',
+                  'index_cagr_pct', 'index_sharpe', 'index_max_drawdown_pct'):
+            print(f"  {k:<32} {r[k]}")
     if r['clamped_returns']:
         print(f"  {'clamped_returns':<32} {r['clamped_returns']}  <-- data-quality guard fired")
 
@@ -1809,6 +1862,7 @@ def main() -> None:
     exit_by_date = index_exit_prices(panel)  # full-panel exit prices, likewise
     last_alive = index_last_alive(panel)     # survival map, likewise
     factors = _select_factors(a.factor, external_score_loaded=bool(a.scores_col))
+    idx_close = load_index_close()
 
     out = []
     for f in factors:
@@ -1819,6 +1873,8 @@ def main() -> None:
         except Exception as e:                              # noqa: BLE001
             print(f"[FactorBacktest] {f}: FAILED -- {e}", file=sys.stderr)
             continue
+        if len(idx_close):
+            r.update(index_benchmark(r['_periods_df'], idx_close, BUYABLE_INDEX, a.rebalance))
         out.append(r)
         if not a.json:
             _print(r)
@@ -1833,9 +1889,10 @@ def main() -> None:
                          indent=2, default=str))
     elif len(out) > 1:
         cols = ['factor', 'net_excess_vs_universe_pct', 'excess_t_stat', 'net_per_period_pct',
-                'avg_oneway_turnover', 'annual_cost_drag_pct', 'sharpe_net', 'max_drawdown_pct']
+                'avg_oneway_turnover', 'annual_cost_drag_pct', 'sharpe_net', 'max_drawdown_pct',
+                'net_excess_vs_index_pct', 'excess_vs_index_t_stat']
         print(f"\n{'='*78}\nRANKED BY NET EXCESS vs UNIVERSE\n{'='*78}")
-        print(pd.DataFrame([{c: r[c] for c in cols} for r in out])
+        print(pd.DataFrame([{c: r.get(c) for c in cols} for r in out])
               .sort_values('net_excess_vs_universe_pct', ascending=False)
               .to_string(index=False))
         print("\nNothing with |t| < 2 is evidence of anything. Sweep --cost-bps before "
