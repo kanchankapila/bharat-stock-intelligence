@@ -20,7 +20,18 @@ That is the entire list.
   turnover traps (~90–93% one-way turnover per period). The triple works *because* it is
   rare and narrow; loosening any leg lands you in these rows.
 - **Momentum, all short horizons.** `momentum_21d`/`63d`/`reversal_21d` negative to t=−3.96.
-  `momentum_12_1` t=1.10, not significant.
+  (`momentum_12_1` is NOT dead — see "Positive after costs, not proven" below.)
+
+## Positive after costs, not proven — monthly delivery books (`factor_backtest.py`, 21d, 25bps/side)
+
+- **`momentum_12_1`**: re-run 2026-09-26 +0.79%/month net excess over the equal-weight ≥₹1cr
+  universe, t=1.61, 55 periods, 4/5 years positive, CAGR 18.2%, Sharpe 0.75, 35% turnover.
+  Decaying (2025 +0.37, 2026 +0.02 per month).
+- **`value_book_to_price`**: +0.78%/month, t=1.99; vendor book-value history may be restated
+  retrospectively (possible look-ahead). Also decaying to ~0 in 2025-2026.
+
+Neither clears a multiple-testing bar (~t=3). Unlike every short-horizon setup above, their
+low turnover means costs do not eat them. Re-run both before quoting.
 - **The whole oversold/overbought technical family.** 14 of 23 `feature_store` columns clear
   a Bonferroni bar and *every one of them is negative*: `stoch_d` −9.28, `williams_r` −9.02,
   `stoch_k` −9.00, `cci` −7.57, `di_plus` −7.34, `dist_sma20_pct` −6.40, `vwap_dist_pct`
