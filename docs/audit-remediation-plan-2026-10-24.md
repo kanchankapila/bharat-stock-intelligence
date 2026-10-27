@@ -4,6 +4,10 @@
 
 Track every unresolved ledger candidate and every newly discovered failure. A textual claim of closure is a reconciliation candidate until its code, regression guard and live result are checked. No promise of an error-free codebase or profitable trading is evidence. User authorization includes implementation, migrations, replay/backfills, commits and deployment; it does not supply missing credentials or create future market outcomes.
 
+## Current status — 2026-10-27
+
+**Incomplete.** The progress section below records completed October 24 work, not closure of this program. `docs/audit-findings.md` is the current shared backlog for every agent and model. Dependency-security and tRPC stack-trace repairs are in [draft PR #127](https://github.com/kanchankapila/bharat-stock-intelligence/pull/127) at `01422d8e`; the complete local Vitest gate and exact-head CI passed. The study-universe correction is in [draft PR #128](https://github.com/kanchankapila/bharat-stock-intelligence/pull/128) at code commit `dcc424e6`, with full local Python and Vitest validation, exact-head CI success, and a read-only 50-date production replay. Neither PR has been integrated or activated in production. The user owns the server restart, after which the API needs a live HTTP readback; the study also needs a persisted rerun. The October 26 ranker wrote 2,362 production rows, but its breakout-weight closure still needs exact stored-score and bucket reconciliation. Several model and trading-edge findings require future independent windows; host settings, off-host backup credentials, and new-source choices require user input. Do not mark the program complete from source tests or historical progress alone.
+
 ## Execution plan
 
 1. Reconcile the complete ledger, debt comments, active route/API surfaces, scripts, tables and jobs. Preserve unrelated working-tree changes. Record owner, next action, evidence and unblock condition for every candidate.
