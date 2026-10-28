@@ -17,10 +17,12 @@
 import { pgQuery, pgExecute, pgClient, pgEnsureColumns } from './pgClient';
 import { translateSql } from './sqlTranslate';
 
-// Run column guard once per process start. Idempotent — each ALTER uses IF NOT EXISTS.
-pgEnsureColumns().catch(err =>
-  console.error('[DB] pgEnsureColumns error (non-fatal):', (err as Error).message)
-);
+// Tests bootstrap the complete schema explicitly; import-time DDL would outlive fixtures.
+if (!process.env.VITEST) {
+  pgEnsureColumns().catch(err =>
+    console.error('[DB] pgEnsureColumns error (non-fatal):', (err as Error).message)
+  );
+}
 
 export interface RunResult {
   changes: number;

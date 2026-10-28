@@ -10,27 +10,21 @@ import pytest
 from fastapi.testclient import TestClient
 from worker_service import app
 
-# NOT conftest.pg_available(): that checks reachability via PGTEST_* (pg_test_support._pg_dsn),
-# but every endpoint here goes through db_compat.connect(), which reads POSTGRES_*/POSTGRES_URL
-# instead -- a different env-var convention pointing at a different port. CI's python-tests job
-# deliberately sets only PGTEST_* (db_compat.py: "so a stray production URL can never redirect a
-# schema-creating run"), so POSTGRES_PORT is unset there and db_compat falls back to its hardcoded
-# default of 5433 -- which isn't the job's Postgres service (mapped to 5432). pg_available() said
-# "reachable" (true, on 5432) while every test here then failed with connection refused on 5433.
-# Gate on the same connector the code under test actually uses, so this skips exactly when
-# db_compat has nothing to connect to, regardless of which env-var convention supplied it.
-def _db_compat_available() -> bool:
-    try:
-        from db_compat import connect
-        connect().close()
-        return True
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(not _db_compat_available(), reason="Postgres (via db_compat) required")
+# Bind the real endpoint connector to a PGTEST-owned private schema. A collection-time
+# reachability probe neither creates its tables nor prevents reading production.
+pytestmark = pytest.mark.usefixtures('pg_db')
 
 client = TestClient(app)
+
+
+def test_endpoints_use_private_test_schema():
+    from db_compat import connect
+    conn = connect()
+    try:
+        row = conn.execute('SELECT current_schema() AS name').fetchone()
+        assert row['name'].startswith('pytest_'), row
+    finally:
+        conn.close()
 
 
 def test_health_check():
@@ -41,7 +35,12 @@ def test_health_check():
     assert data["db"] == "ok"
 
 
-def test_mcp_tools_endpoint():
+def test_mcp_tools_endpoint(pg_db_conn):
+    pg_db_conn.execute(
+        'INSERT INTO job_heartbeat (job_name, last_status, last_error) VALUES (?, ?, ?)',
+        ('ZZ_TEST_WORKER', 'failed', 'isolated-probe'),
+    )
+    pg_db_conn.commit()
     payload = {
         "tool_name": "inspect_ingestion_health",
         "arguments": {}
@@ -50,6 +49,8 @@ def test_mcp_tools_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert "result" in data
+    assert data['result']['heartbeats'][0]['job_name'] == 'ZZ_TEST_WORKER'
+    assert data['result']['heartbeats'][0]['last_error'] == 'isolated-probe'
 
 
 def test_decision_tools_endpoint_is_read_only():
@@ -68,11 +69,17 @@ def test_decision_tools_endpoint_is_read_only():
     assert "read-only" in response.json()["detail"]
 
 
-def test_risk_summary_endpoint():
+def test_risk_summary_endpoint(pg_db_conn):
+    pg_db_conn.execute(
+        'INSERT INTO stock_scores (symbol, timeframe, score) VALUES (?, ?, ?)',
+        ('TATAMOTORS', 'SWING', 42.5),
+    )
+    pg_db_conn.commit()
     response = client.post("/signals/risk-summary", json={"symbol": "TATAMOTORS"})
     assert response.status_code == 200
     data = response.json()
     assert data["symbol"] == "TATAMOTORS"
+    assert data['stock_scores']['score'] == 42.5
 
 
 def test_dlq_endpoint_is_retired():

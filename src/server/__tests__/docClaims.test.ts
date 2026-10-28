@@ -17,19 +17,26 @@ describe('docClaims', () => {
     expect(ctx).toContain('0.2-8.2');
   });
 
-  it('CONTEXT.md marks which ranker engines carry non-zero weight', () => {
+  it('CONTEXT.md marks the current base-weighted and zero-weight ranker engines', () => {
     const ctx = read('CONTEXT.md');
     expect(ctx).toMatch(/weight 0\.0|zero-weight/i);
-    for (const live of ['ml', 'confluence', 'technical', 'breakout']) expect(ctx).toContain(live);
-    for (const dead of ['screener', 'cs', 'dl', 'smart_money']) expect(ctx).toContain(dead);
+    expect(ctx).toMatch(/`ml`, `confluence` and\s+`technical` are non-zero/);
+    expect(ctx).toMatch(/`breakout`, `screener`, `cs`, `dl` and `smart_money` have weight 0\.0/);
+    expect(ctx).toMatch(/runtime edge gate can reduce an engine's actual\s+contribution/);
   });
 
-  it('the URL-corpus files the docs send agents to exist (unique_urls.txt was deleted in c2ceae0e)', () => {
+  it('docs identify the ignored URL corpus as optional in a fresh checkout', () => {
     const docs = ['CLAUDE.md', 'CONTEXT.md', 'AGENTS.md', '.claude/rules/data-sources.md', '.claude/rules/bugs-data-layer.md'];
     const named = docs.flatMap(d => read(d).split('\n').filter(l => /URLs|corpus/.test(l))
       .flatMap(l => [...l.matchAll(/`([\w.-]+\.(?:txt|db))`/g)].map(m => `${d}: ${m[1]}`)));
     expect(named.length).toBeGreaterThan(0);
-    expect(named.filter(n => !existsSync(path.join(root, n.split(': ')[1])))).toEqual([]);
+    expect(read('.gitignore')).toMatch(/^urls_v2\.db$/m);
+    for (const doc of ['CLAUDE.md', '.claude/rules/data-sources.md', '.claude/rules/bugs-data-layer.md']) {
+      const source = read(doc);
+      expect(source).toMatch(/optional local[\s\S]{0,100}`urls_v2\.db`/);
+      expect(source).toContain('git show c2ceae0e^:unique_urls.txt');
+    }
+    expect(named.filter(n => n.split(': ')[1] !== 'urls_v2.db' && !existsSync(path.join(root, n.split(': ')[1])))).toEqual([]);
   });
 
   it('scoring-authority.md documents that conviction_level is direction-agnostic', () => {

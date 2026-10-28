@@ -15,7 +15,7 @@
  * mobile drawer and CommandPalette, so one check covers all three surfaces.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const SRC = path.resolve(__dirname, '..');
@@ -29,6 +29,11 @@ const v1Routes = readFileSync(path.join(SRC, 'v1', 'V1Routes.tsx'), 'utf8');
 const NON_NAV_ROUTES: Record<string, string> = {
   'buy-recs': 'legacy alias — <Navigate to="/alpha" replace>',
   'alpha-cockpit': 'legacy alias — <Navigate to="/alpha" replace>',
+  'v7-dashboard': 'retired UI alias to the active dashboard',
+  'v7-top-picks': 'retired UI alias to canonical alpha picks',
+  'v7-screener': 'retired UI alias to the active screener',
+  'v7-signals': 'retired UI alias to the active signals page',
+  'v7-stock': 'retired UI alias to stock intelligence; symbol links use /details',
 };
 
 function navIds(): string[] {
@@ -69,6 +74,26 @@ describe('sidebar navigation is complete and every entry resolves', () => {
       'orphaned-route class. Add a NAV_GROUPS entry (as /details needed), or add the route to ' +
       'NON_NAV_ROUTES with the reason it cannot be a nav entry.',
     ).toEqual([]);
+  });
+
+  it('retired v7 links redirect to active pages without restoring the v7 UI', () => {
+    const aliases = {
+      'v7-dashboard': 'dashboard',
+      'v7-top-picks': 'alpha',
+      'v7-screener': 'screener',
+      'v7-signals': 'signals',
+      'v7-stock': 'stock-intelligence-hub',
+    };
+    expect(routePaths().filter((route) => route.startsWith('v7-')).sort()).toEqual(Object.keys(aliases).sort());
+    for (const [from, to] of Object.entries(aliases)) {
+      expect(v1Routes).toContain(`path="/${from}" element={<Navigate to="/${to}" replace />}`);
+    }
+    expect(v1Routes).toContain('path="/v7-stock/:symbol" element={<RetiredV7StockRedirect />}');
+    expect(v1Routes).toContain('`/details?symbol=${encodeURIComponent(symbol)}`');
+    expect(navIds().filter((id) => id.startsWith('v7-'))).toEqual([]);
+    expect(v1Routes).not.toContain('components/v7/');
+    expect(readFileSync(path.join(SRC, 'App.tsx'), 'utf8')).not.toContain('const isV7');
+    expect(existsSync(path.join(SRC, 'components', 'v7'))).toBe(false);
   });
 
   it('the retired v5 shell entry has not come back', () => {

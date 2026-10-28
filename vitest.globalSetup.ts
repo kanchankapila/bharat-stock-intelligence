@@ -41,6 +41,20 @@ function dsn() {
 
 let schema: string | null = null;
 
+export async function bootstrapTestExtensions(client: pg.Client, ddl: string) {
+  // IF NOT EXISTS can still race on pg_extension_name_index. Python uses this same
+  // DB-scoped session lock; public-owned extensions survive either runner's teardown.
+  await client.query("SELECT pg_advisory_lock(hashtext('bsi_test_extensions'), 0)");
+  try {
+    const extensions = [...new Set(Array.from(ddl.matchAll(/CREATE EXTENSION IF NOT EXISTS (\w+)/g), m => m[1]))].sort();
+    for (const ext of extensions) {
+      await client.query(`CREATE EXTENSION IF NOT EXISTS "${ext}" WITH SCHEMA public`);
+    }
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtext('bsi_test_extensions'), 0)");
+  }
+}
+
 export async function setup() {
   schema = `vitest_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
   const client = new pg.Client({ ...dsn(), connectionTimeoutMillis: 10_000 });
@@ -87,6 +101,12 @@ export async function setup() {
     '',
   );
 
+  try {
+    await bootstrapTestExtensions(client, ddl);
+  } catch (err) {
+    await client.end();
+    throw err;
+  }
   await client.query(`CREATE SCHEMA "${schema}"`);
   // Stamp the schema with its own birth time, then reap anything older than REAP_AFTER_MS.
   // teardown() drops this run's schema, but a run KILLED before teardown (a timeout, a Ctrl+C,

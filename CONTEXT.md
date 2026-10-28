@@ -37,12 +37,12 @@ External data providers
   -> Express/tRPC APIs and WebSocket -> the React application, Telegram, and chatbot surfaces
 ```
 
-`unified_ranker.py` blends eight engines, but only four are live: `ml`, `confluence`, `technical` and
-`breakout` carry non-zero weight. `screener`, `cs`, `dl` and `smart_money` carry weight 0.0 in every
-regime (`REGIME_WEIGHTS`; zeroed after ablations, `dl` paused by user decision 2026-09-13). Their keys and reporting
-columns are kept, so a zero-weight engine still writes scores that no recommendation depends on. Treat
-those four as stored telemetry, not as ranking inputs, and read the weights from `REGIME_WEIGHTS` rather
-than from this paragraph before relying on it.
+`unified_ranker.py` stores eight engine slots. The base weights for `ml`, `confluence` and
+`technical` are non-zero in every regime; the runtime edge gate can reduce an engine's actual
+contribution further. `breakout`, `screener`, `cs`, `dl` and `smart_money` have weight 0.0 in every
+regime (`REGIME_WEIGHTS`; `breakout` was zeroed after a realised-return replay on 2026-10-26,
+and `dl` was paused by user decision 2026-09-13). Their keys and reporting columns remain for
+telemetry. Read the current weights and gates from the code before relying on this dated summary.
 
 Outcome resolution, backtests, model evaluation, and monitoring provide feedback for research and
 operations. Do not assume every source follows this exact path or that a feedback loop is
