@@ -1916,6 +1916,24 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'earnings-preview-freshness',
+    label: 'earnings preview snapshot + append-only forecast log (earnings_preview.py, ml-daily-ops)',
+    category: 'fundamentals',
+    critical: false,
+    // The page reads the app_settings snapshot; earnings_preview_snapshots is the pre-result forecast log
+    // that grades it. Off-season nights can legitimately log zero rows, so the log's age is reported, not gated.
+    sql: `SELECT (SELECT "updatedAt" FROM app_settings WHERE key = 'earnings_preview') AS last_date,
+                 (SELECT MAX(created_at) FROM earnings_preview_snapshots) AS last_logged`,
+    evaluate: (row, now) => {
+      const stale = tradingDaysStale(row?.last_date, now);
+      const logged = row?.last_logged ? ` (last forecast logged ${String(row.last_logged).slice(0, 10)})` : ' (no forecast logged yet)';
+      if (stale == null) return { status: 'warn', detail: `No earnings_preview snapshot yet - run earnings_preview.py --persist${logged}` };
+      if (stale > 6) return { status: 'fail', detail: `earnings_preview snapshot is ${fmtDays(stale)} old${logged}` };
+      if (stale > 3) return { status: 'warn', detail: `earnings_preview snapshot is ${fmtDays(stale)} old${logged}` };
+      return { status: 'pass', detail: `earnings_preview snapshot ${fmtDays(stale)} old${logged}` };
+    },
+  },
+  {
     id: 'q2-drift-shadow-arm-freshness',
     label: 'q2_drift_shadow_arm snapshot (pre-registered post-results drift arm, written by q2-drift-shadow-arm)',
     category: 'scoring',

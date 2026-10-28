@@ -40,6 +40,7 @@ const DashboardPage           = React.lazy(() => import('../components/Dashboard
 const SuperstarPortfolio      = React.lazy(() => import('../components/SuperstarPortfolio'));
 const SmartMoneyPage          = React.lazy(() => import('../components/SmartMoneyPage'));
 const EarningsPage            = React.lazy(() => import('../components/EarningsPage'));
+const EarningsPreviewPage     = React.lazy(() => import('../components/EarningsPreviewPage'));
 const TradeDecisionCockpit    = React.lazy(() => import('../components/TradeDecisionCockpit'));
 const HedgeFundResearch       = React.lazy(() => import('../components/HedgeFundResearch'));
 const SignalIntelligence      = React.lazy(() => import('../components/SignalIntelligence'));
@@ -233,6 +234,7 @@ const V1Routes = ({
                                 </V1PageFrame>
                             } />
                             <Route path="/earnings" element={<EarningsPage onSelectStock={onSelectStock} />} />
+                            <Route path="/earnings-preview" element={<EarningsPreviewPage onSelectStock={onSelectStock} />} />
                             <Route path="/earnings-desk" element={
                                 <V1PageFrame title="Earnings Pulse" kicker="RESULTS · ESTIMATES · SURPRISES">
                                     <EarningsPulseDeskPage onSelectSymbol={onSelectStock} />

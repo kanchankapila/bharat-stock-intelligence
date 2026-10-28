@@ -244,6 +244,14 @@ Demote a combination when its **live** spread turns negative over ≥20 trading 
 AUC 0.66, live AUC **0.3778** over 47,559 resolved rows — anti-predictive, its best picks the
 worst performers. Held-out score is not transfer. Gate on live outcomes.
 
+Before reading any combination's spread, run two instrument checks. **Zero-control:** the same
+statistic for an equal-size random pick list from the same tradeable subset must come out about
+zero; if it doesn't, the benchmark is wrong (mean vs median, or a liquidity mismatch), not the
+combination. **Power:** report independent trading days, not rows. A combination with too few
+days is LOW-DATA, not "dead". Before waiting for more days, check whether
+`screener_membership_snapshot` / `live_screener_appearances` already hold a deeper history for the
+same tags.
+
 Never retune weights on a day's losses. A single bad day is noise at these sample sizes, and
 `measurement.md` is explicit that reweighting is not a fix when no component has a
 demonstrated edge.

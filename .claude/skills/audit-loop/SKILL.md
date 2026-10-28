@@ -85,6 +85,24 @@ stopped at N instances when a static check immediately found N+4 more.
   files). Fold whatever's still open into this run's triage — a pending item nobody re-reads is
   indistinguishable from a closed one.
 
+- **The instruments themselves — before reading any verdict.** Audit the graders, scanners and scorers
+  that produced the findings before you accept what they say. A defect in a grader is worse than the
+  same defect in the thing it grades, because it also removes the means of noticing. Every liveness and
+  freshness check stays green: the instrument runs fine and answers the wrong question. Four cheap
+  checks:
+  1. **Every value reaches a branch.** For any categorical input, enumerate the label's full domain and
+     confirm each value maps somewhere. The tell is an asymmetric map where one pole handles more tiers
+     than the other: `{"buy", "strong buy"}` vs only `"sell"` dropped 31.6% of directional calls
+     (AF-20261025-02).
+  2. **Buckets sum to the population.** Any bucket named for an absence ("not flagged", "unknown", "no
+     opinion") must be split by cause before its size is read.
+  3. **Re-derive one published number** from the raw tables and compare.
+  4. **A repo-wide scan states what it believes the repo is.** Print the number of files scanned,
+     exclude `.claude/worktrees/`, every virtualenv (`venv`, `.venv`, `backend-python/venv`) and vendored
+     trees, and halt when the count is far above `git ls-files`. **An identical non-trivial count across
+     many unrelated items means a duplicated tree, not a pattern.** Five stale worktrees once made
+     ~30 tables read `writes=6`.
+
 A gap in any inventory is itself a finding — give it its own ledger row rather than silently
 narrowing the sweep to whatever the input audit happened to include.
 
@@ -153,6 +171,14 @@ to step 2's INVESTIGATE lane, not the fix lane.
 Say out loud how many landed in each lane. A run where everything is FIX means the triage wasn't
 applied.
 
+**An EVIDENCE verdict of "no edge" or "inconclusive" needs two checks before it is written down.**
+(1) **Power:** state the number of *independent* observations (overlapping windows: about dates ÷
+horizon). Below the harness's own floor, the reading is LOW-DATA, a fact about the experiment, not
+"measured and found nothing". (2) **Substrate:** before calling it calendar-blocked, inventory the
+depth of every table that could feed the same measurement, **per column, not per table**. Once, a
+42-date scored table gave about 4 independent windows, while `feature_store` held 1,439 dates with
+the labels already stored. A row is only calendar-blocked once that inventory comes back empty.
+
 ## 3. Fix, one finding at a time
 
 For each FIX-lane item, in this order — none of these steps is optional:
@@ -178,6 +204,18 @@ Then the three this repo added because the above were not enough:
   code path, then `SELECT` the rows and confirm they are what you claimed. The 2026-08-13
   `recommendation_log` fix is only known to have worked because the count went 0/1,584 →
   1,492/1,584 in a live query.
+- **Silencing a failing datasource call is not a fix until capture is preserved.** Before removing
+  or default-disabling a provider call that errors, run `data-sources.md`'s replacement sequence.
+  Then prove one of two things: an equivalent current route is wired and writing rows, or the source
+  is intentionally retired with its consumer impact recorded in the ledger. A lower log count is not
+  the completion test; rows written by the repaired path are. Once, a quiet run collected less data
+  while four equivalent routes existed on the vendor's current API.
+- **Ask what the broken state has been enforcing.** Before a FIX restores a path, search the
+  ledger, `session-log.md` and commit messages for a deliberate retirement or restriction of that
+  feature. When a bug has lived long enough, it is the system's real policy. A 71-day-broken button
+  had been the only thing blocking an anonymous fan-out to a costly API that the owner had closed on
+  purpose. Restore the function without restoring the exposure (an auth gate, a cap), and say so in
+  the row.
 - **If live verification shows regression, revert — don't leave it half-applied.** Undo the
   change, re-run this step's check stack to confirm the revert itself is clean, and reopen the
   ledger row as still-open with what was tried and why it made things worse. A fix that is
@@ -203,6 +241,11 @@ including feature-history/input repairs. Unit tests and a live plumbing PASS are
   representative names. Compare both versions; investigate near-identical or collapsed output
   instead of treating a successful backfill as validation. No new numeric acceptance bar is
   implied by this diagnostic checklist.
+- **Zero-control the benchmark first:** compute the same excess statistic for a group that
+  should score zero (the neutral bucket, or an equal-size random sample) before reading any other.
+  If it is not near zero, the benchmark is broken, not the strategy. Match the benchmark on
+  liquidity tier and compare mean to mean. A neutral 68% Hold bucket once "beat" a same-decile
+  median on 40 of 41 days at t 11.8, because skewed returns put any group's mean above the median.
 - Grade executable returns net of turnover-dependent costs/slippage against the declared
   benchmark using the predeclared primary metric and untouched holdout. Keep a candidate
   shadow-only when that evidence does not support promotion; do not tune a gate to pass it.
@@ -280,6 +323,15 @@ backend-python/venv/Scripts/python.exe -m pytest src/server/__tests__/ src/serve
 npm run schema:drift
 npm run findings:check
 ```
+
+**Attribute every failure before owning or dismissing it.** Read the summary line, not only the exit
+code: a runner can exit 0 while printing `6 failed`. Other sessions edit this repo live, so a suite
+result describes a tree at an instant, and neither is exclusively yours. Cheapest first:
+`git status` the failing files (yours?); compare their mtime with the run's start (edited
+mid-run?); re-run each failing file alone (passes alone = contention, the classic
+timeout-not-assertion signature). Only failures that survive isolation, in files you touched, are
+yours. For a small change, a targeted run over the edited module's dependents is the primary
+evidence and the full suite is the sweep.
 
 All five must exit **0** — a skipped-Postgres-file warning counts as failure, not a pass
 (`recurring-bugs.md`'s pytest exit-code fix: a run that skipped every DB-dependent test used to
