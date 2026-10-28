@@ -317,8 +317,7 @@ function istIsWeekday(t: number): boolean {
 async function probeIdleGapDates(newest: string, todayIst: string): Promise<{ scanned: Set<string>; idle: Set<string> }> {
   try {
     const rows = await dbAll(
-      `SELECT DISTINCT date::text AS d FROM technical_signals
-       WHERE date::text > ? AND date::text < ? LIMIT 20`,
+      `SELECT DISTINCT date::text AS d FROM technical_signals WHERE date > ?::date AND date < ?::date LIMIT 20`,
       [newest, todayIst],
     ) as Array<{ d?: string | null }>;
     const scanned = new Set(
@@ -348,7 +347,8 @@ export async function getRecentTradingSessions(now: Date = new Date()): Promise<
   const window = await (async (): Promise<TradingSessionWindow | null> => {
     try {
       const rows = await dbAll(
-        `SELECT DISTINCT date::text AS d FROM stock_ohlcv ORDER BY d DESC LIMIT ${SESSIONS_WINDOW}`,
+        // Bounded so the hypertable excludes old chunks; 31 days holds 10 sessions across any holiday run.
+        `SELECT DISTINCT date::text AS d FROM stock_ohlcv WHERE date >= current_date - 31 ORDER BY d DESC LIMIT ${SESSIONS_WINDOW}`,
       ) as Array<{ d?: string | null }>;
       const dates = (rows ?? [])
         .map(r => String(r?.d ?? '').slice(0, 10))

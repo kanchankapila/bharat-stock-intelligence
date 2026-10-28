@@ -32,6 +32,11 @@ describe('docClaims', () => {
     expect(named.filter(n => !existsSync(path.join(root, n.split(': ')[1])))).toEqual([]);
   });
 
+  it('CLAUDE.md does not describe the retired v7 pages as retained (AF-20261027-08)', () => {
+    const claude = read('CLAUDE.md');
+    expect(claude).not.toMatch(/approved retaining[\s\S]{0,40}v7/);
+  });
+
   it('scoring-authority.md documents that conviction_level is direction-agnostic', () => {
     expect(read('.claude/rules/scoring-authority.md')).toMatch(/direction-agnostic/i);
   });

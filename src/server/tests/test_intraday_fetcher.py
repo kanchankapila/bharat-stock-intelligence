@@ -286,6 +286,18 @@ class TestRunDb:
         assert n == 6   # 3 bars × 2 symbols
         assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv").fetchone()[0] == 6
 
+    def test_bars_are_written_in_batches_not_one_round_trip_per_row(self, monkeypatch):
+        """db_compat.executemany sends one round trip per row: 6.2M single-row intraday_ohlcv
+        INSERTs in pg_stat_statements over 2.3 days (2026-10-28)."""
+        con = _make_db([("INFY", "IT"), ("TCS", "TCS01")])
+
+        def _per_row(*_a, **_k):
+            raise AssertionError("bars written through per-row executemany")
+
+        monkeypatch.setattr(itf, "executemany", _per_row, raising=False)
+        assert itf.run(fetch_fn=_good_fetch) == 6
+        assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv").fetchone()[0] == 6
+
     def test_upsert_same_bars_no_duplicate(self):
         con = _make_db([("INFY", "IT")])
         itf.run(fetch_fn=_good_fetch)
@@ -301,6 +313,22 @@ class TestRunDb:
         n = itf.run(fetch_fn=_good_fetch)
         assert n == 6   # both INFY and NOCOVER fetched by raw symbol
         assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv WHERE symbol='NOCOVER'").fetchone()[0] == 3
+
+    def test_skips_symbols_that_are_not_active(self):
+        """nse_stocks keeps retired aliases (INDUSIND, KOTAK, LARSEN...) as INACTIVE/DELISTED;
+        fetching them failed on every run and filled stderr with 24 'all sources failed' lines
+        that hid real failures (2026-10-28)."""
+        con = _make_db([("INDUSINDBK", "IIB"), ("INDUSIND", "IIB")])
+        con.execute("UPDATE nse_stocks SET status = 'INACTIVE' WHERE symbol = 'INDUSIND'")
+        con.commit()
+        seen = []
+
+        def _capturing_fetch(sym, from_ts, to_ts):
+            seen.append(sym)
+            return _good_fetch(sym, from_ts, to_ts)
+
+        itf.run(fetch_fn=_capturing_fetch)
+        assert seen == ["INDUSINDBK"]
 
     def test_fetch_called_with_raw_symbol_not_mcsymbol(self):
         """Regression test for the bug this fetcher shipped with: passing mcsymbol (e.g.

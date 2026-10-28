@@ -10,7 +10,7 @@ import gc
 
 # Must be set before torch/cuBLAS initialises
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")  # torch>=2.9 name
 
 try:
     import torch

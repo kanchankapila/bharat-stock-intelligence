@@ -162,7 +162,8 @@ interface TableFreshnessConfig {
 }
 
 function makeFreshnessCheck(cfg: TableFreshnessConfig): DataQualityCheck {
-  const col = cfg.nativeDateColumn ? `${cfg.dateColumn}::text` : cfg.dateColumn;
+  // Cast the aggregate, not the column: MAX(col::text) cannot use an index on col.
+  const maxCol = cfg.nativeDateColumn ? `MAX(${cfg.dateColumn})::text` : `MAX(${cfg.dateColumn})`;
   const useTradingDays = cfg.tradingDayAware !== false;
   return {
     id: cfg.id,
@@ -170,10 +171,10 @@ function makeFreshnessCheck(cfg: TableFreshnessConfig): DataQualityCheck {
     category: cfg.category,
     critical: cfg.critical,
     sql: cfg.writerJob
-      ? `SELECT MAX(${col}) AS last_date,
+      ? `SELECT ${maxCol} AS last_date,
                 (SELECT to_timestamp(last_success_at / 1000.0) FROM job_heartbeat WHERE job_name = '${cfg.writerJob}') AS writer_ran_at
          FROM ${cfg.table}`
-      : `SELECT MAX(${col}) AS last_date FROM ${cfg.table}`,
+      : `SELECT ${maxCol} AS last_date FROM ${cfg.table}`,
     evaluate: (row, now) => {
       const staleFn = useTradingDays ? tradingDaysStale : daysStale;
       let stale = staleFn(row?.last_date, now);

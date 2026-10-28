@@ -208,7 +208,7 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
       {/* ML Probability */}
       {signal.ml_breakout_probability != null && (
         <div className="flex items-center gap-3">
-          <div className="text-[10px] text-slate-500 font-display uppercase tracking-widest">ML Breakout Prob</div>
+          <div className="text-[10px] text-slate-500 font-display uppercase tracking-widest">ML Breakout Score (model output, not probability)</div>
           <div className={cn('text-sm font-bold',
             signal.ml_breakout_probability > 0.7 ? 'text-emerald-400' :
             signal.ml_breakout_probability > 0.5 ? 'text-amber-400' : 'text-slate-400'
