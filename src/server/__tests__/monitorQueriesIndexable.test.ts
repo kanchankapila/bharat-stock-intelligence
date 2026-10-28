@@ -41,10 +41,12 @@ describe('monitoring probes are index-friendly', () => {
     expect(lines.filter(l => !/WHERE date >=? /.test(l)).map(l => l.trim())).toEqual([]);
   });
 
-  it('the schema indexes every column a hot freshness/status probe aggregates', () => {
+  it('the current schema or the pending migration indexes every hot probe column', () => {
     const schema = fs.readFileSync(path.resolve(serverDir, '..', '..', 'db', 'schema.postgres.sql'), 'utf8');
+    const migration = fs.readFileSync(path.resolve(serverDir, '..', '..', 'migrations', '20261028120000_monitor-probe-indexes.sql'), 'utf8');
     const indexed = (table: string, cols: string[]) =>
-      new RegExp(`ON public\\.${table} USING btree \\(${cols.map(c => `"?${c}"?`).join('(?: DESC)?, ')}(?: DESC)?[,)]`).test(schema);
+      new RegExp(`ON public\\.${table} USING btree \\(${cols.map(c => `"?${c}"?`).join('(?: DESC)?, ')}(?: DESC)?[,)]`).test(schema)
+      || new RegExp(`^\\s*CREATE\\s+INDEX\\s+IF\\s+NOT\\s+EXISTS\\s+\\w+\\s+ON\\s+${table}\\s*\\(\\s*${cols.map(c => `"?${c}"?`).join('\\s*,\\s*')}\\s*\\)`, 'im').test(migration);
     const required: Array<[string, string[]]> = [
       ['signal_outcomes', ['signal_source', 'horizon_days', 'computed_at']],
       ['niftytrader_live_screener_snapshots', ['captured_at']],

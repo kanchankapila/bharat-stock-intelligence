@@ -10,6 +10,7 @@ import os
 import sys
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import confluence_ml_engine as cme
@@ -201,6 +202,25 @@ class TestPromotionGate:
     matching ml_ensemble.py/live_screener_ml_ranker.py: only promote if the new CV AUC beats
     the active model's by >= PROMOTION_MARGIN, or there is no active model yet."""
 
+    @pytest.fixture(autouse=True)
+    def finite_cv(self, monkeypatch):
+        monkeypatch.setattr(cme, 'cross_val_score', lambda *a, **kw: np.array([0.6, 0.65]))
+
+    @pytest.mark.parametrize('baseline', [None, 0.99])
+    @pytest.mark.parametrize('invalid', [np.nan, np.inf])
+    def test_nonfinite_cv_never_promotes_even_without_baseline_or_with_override(self, monkeypatch, tmp_path, baseline, invalid):
+        monkeypatch.setattr(cme, 'build_training_data', lambda conn: _synthetic_training_set())
+        monkeypatch.setattr(cme, 'cross_val_score', lambda *a, **kw: np.array([0.6, invalid]))
+        monkeypatch.setattr(cme, 'MODEL_DIR', str(tmp_path))
+        monkeypatch.setattr(cme, 'MODEL_PATH', str(tmp_path / 'live.pkl'))
+        monkeypatch.setattr(cme, 'CANDIDATE_PATH', str(tmp_path / 'candidate.pkl'))
+        monkeypatch.setattr(cme, 'staleness_override_applies', lambda *a: (True, 42.0))
+        conn = _FakeRegistryConn(baseline_auc=baseline, rejections=100)
+
+        assert cme.train(conn) is False
+        assert not os.path.exists(cme.MODEL_PATH)
+        assert not any('INSERT INTO model_registry' in sql for sql, _ in conn.executed)
+
     def test_no_baseline_always_promotes(self, monkeypatch, tmp_path):
         monkeypatch.setattr(cme, "build_training_data", lambda conn: _synthetic_training_set())
         monkeypatch.setattr(cme, "MODEL_DIR", str(tmp_path))
@@ -243,6 +263,10 @@ class TestConfluenceMlStalenessOverride:
     CV-leakage fix (commit aa5862d2, ~46min later) and carries a leak-inflated AUC (0.777) that
     every honest post-fix retrain since has been rejected against. Wired to
     model_promotion.staleness_override_applies, mirroring ml_ensemble.py/cs_ranker.py."""
+
+    @pytest.fixture(autouse=True)
+    def finite_cv(self, monkeypatch):
+        monkeypatch.setattr(cme, 'cross_val_score', lambda *a, **kw: np.array([0.6, 0.65]))
 
     def test_stale_unbeaten_baseline_with_enough_rejections_is_overridden(self, monkeypatch, tmp_path):
         monkeypatch.setattr(cme, "build_training_data", lambda conn: _synthetic_training_set())
