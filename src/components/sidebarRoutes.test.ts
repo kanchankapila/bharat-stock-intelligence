@@ -29,6 +29,11 @@ const v1Routes = readFileSync(path.join(SRC, 'v1', 'V1Routes.tsx'), 'utf8');
 const NON_NAV_ROUTES: Record<string, string> = {
   'buy-recs': 'legacy alias — <Navigate to="/alpha" replace>',
   'alpha-cockpit': 'legacy alias — <Navigate to="/alpha" replace>',
+  'v7-dashboard': 'retired UI alias to the active dashboard',
+  'v7-top-picks': 'retired UI alias to canonical alpha picks',
+  'v7-screener': 'retired UI alias to the active screener',
+  'v7-signals': 'retired UI alias to the active signals page',
+  'v7-stock': 'retired UI alias to stock intelligence; symbol links use /details',
 };
 
 function navIds(): string[] {
@@ -71,8 +76,20 @@ describe('sidebar navigation is complete and every entry resolves', () => {
     ).toEqual([]);
   });
 
-  it('the retired v7 surface has no route, navigation, shell bypass or component tree', () => {
-    expect(routePaths().filter((route) => route.startsWith('v7-'))).toEqual([]);
+  it('retired v7 links redirect to active pages without restoring the v7 UI', () => {
+    const aliases = {
+      'v7-dashboard': 'dashboard',
+      'v7-top-picks': 'alpha',
+      'v7-screener': 'screener',
+      'v7-signals': 'signals',
+      'v7-stock': 'stock-intelligence-hub',
+    };
+    expect(routePaths().filter((route) => route.startsWith('v7-')).sort()).toEqual(Object.keys(aliases).sort());
+    for (const [from, to] of Object.entries(aliases)) {
+      expect(v1Routes).toContain(`path="/${from}" element={<Navigate to="/${to}" replace />}`);
+    }
+    expect(v1Routes).toContain('path="/v7-stock/:symbol" element={<RetiredV7StockRedirect />}');
+    expect(v1Routes).toContain('`/details?symbol=${encodeURIComponent(symbol)}`');
     expect(navIds().filter((id) => id.startsWith('v7-'))).toEqual([]);
     expect(v1Routes).not.toContain('components/v7/');
     expect(readFileSync(path.join(SRC, 'App.tsx'), 'utf8')).not.toContain('const isV7');
