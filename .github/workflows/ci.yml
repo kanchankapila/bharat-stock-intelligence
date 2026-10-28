@@ -116,9 +116,10 @@ jobs:
       # already resolved the default (CUDA) wheel, and the CPU install that followed
       # found the requirement satisfied and did nothing — silently, exit 0.
       # Measured 2026-08-13 with `uv pip install --dry-run`: the CPU index resolves
-      # 0 nvidia/cuda packages, `sentence-transformers==5.5.1` off the default index
-      # resolves 18. So every run of this job was downloading and caching several GB
-      # of CUDA libraries onto a runner with no GPU, under a step named "CPU torch".
+      # 0 nvidia/cuda packages; the then-current `sentence-transformers==5.5.1`
+      # off the default index resolved 18. So every run of this job was downloading
+      # and caching several GB of CUDA libraries onto a runner with no GPU, under a
+      # step named "CPU torch".
       # Installing CPU torch FIRST is what makes it the build everything else
       # resolves against. Do not reorder these two lines.
       - name: Install dependencies (CPU torch — no CUDA runner in CI)

@@ -76,8 +76,9 @@ torch>=2.9.1
 # "fixed" by editing this pin to match: the venv is the thing that has to move, and a
 # `pip install` into the production venv needs its services stopped first because a locked
 # .pyd from a running process aborts the install. See the AF row for the exact command.
-# CHECKED 2026-09-28 before writing tonight's steps: the ONLY consumer is sentence-transformers
-# 5.5.1 (`transformers <6.0.0,>=4.41.0`), which accepts 5.9.0 / 5.10.1 / 5.14.1 alike. So the
+# CHECKED 2026-09-28 before writing tonight's steps: the ONLY consumer is sentence-transformers.
+# UPDATED 2026-10-28: 6.0.1 requires `transformers <6.0.0,>=5.0.0` and accepts 5.9.0 /
+# 5.10.1 / 5.14.1 alike. So the
 # sync target stays the declared 5.10.1 -- a draft repair step naming 5.14.1 was wrong (it would
 # have moved the venv further from the manifest, not closer) and is withdrawn here.
 transformers==5.10.1
@@ -112,7 +113,10 @@ langgraph==1.2.5
 langchain-community==0.4.2
 langchain-google-genai==4.2.5
 chromadb==1.5.9
-sentence-transformers==5.5.1
+# GHSA-jhr6-gm9c-rqjv lists 5.6.0 as patched, but 5.6.1 still only warns and permits
+# local custom code with trust_remote_code=False. Version 6.0.1 actually rejects it.
+# The chatbot's two Chroma constructors use the fixed all-MiniLM-L6-v2 model name.
+sentence-transformers==6.0.1
 duckduckgo-search==8.1.1
 pytest==9.1.0
 pytest-asyncio==1.4.0
