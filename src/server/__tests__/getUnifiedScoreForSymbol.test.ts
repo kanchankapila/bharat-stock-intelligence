@@ -27,7 +27,7 @@ describe('getUnifiedScoreForSymbol', () => {
     await dbRun(`
       INSERT INTO technical_signals (symbol, date, win_probability, rsi, is_nifty50, asm_flag)
       VALUES (?, ?, ?, ?, ?, ?)
-    `, ['TEST', '2026-08-01', 0.62, 71, 1, 0]);
+    `, ['TEST', new Date().toISOString().slice(0, 10), 0.62, 71, 1, 0]);
 
     const result = await caller.getUnifiedScoreForSymbol({ symbol: 'TEST' });
     expect(result).toBeTruthy();

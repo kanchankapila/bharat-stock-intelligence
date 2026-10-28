@@ -1,4 +1,4 @@
-# Line-ending policy — keep shell scripts LF on every platform.
+# Line-ending policy — keep shell scripts and imported Node CLIs LF on every platform.
 #
 # Why this file exists: `.claude/settings.json` wires `.claude/hooks/session-start.sh`
 # as the SessionStart hook and invokes it through bash. Git for Windows defaults to
@@ -8,6 +8,8 @@
 # hint simply never appear), and re-checking-out the file re-breaks it. Pinning eol=lf
 # in the repository is the only fix that survives checkouts on Windows.
 #
-# Only shell scripts need this: `.mjs` hooks run under node, and JSON/Markdown are
-# whitespace-insensitive, so they are deliberately left to core.autocrlf.
+# Node itself accepts CRLF, but Vite 6's SSR hashbang matcher does not: it inserts
+# imports before a CRLF hashbang and produces invalid JavaScript. Pin imported .mjs
+# CLIs too; JSON/Markdown remain deliberately left to core.autocrlf.
 *.sh text eol=lf
+*.mjs text eol=lf

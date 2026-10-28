@@ -86,6 +86,8 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   or an age, not in `NEVER_FILL`. Check by recomputing the value from its source table, not by counting rows.
 - **A latest-day join on `MAX(date)` over a table that is written in partial scans.** The day's first scan can hold 18% of the universe with
   NULL model outputs; readers then show blanks or fall to a heuristic. Use `technicalSignalsDate.ts` (`LATEST_COMPLETE_TS_DATE_SQL`).
+  Per-symbol `ORDER BY date DESC` has the same defect: both stock-detail readers needed the completed-grid selector in AF-20261028-12.
+  Return and display the feature snapshot date so an older complete grid is not mistaken for a current quote.
 - **`mcsymbol` joins in SQL form.** The dict-comprehension guard misses `JOIN nse_stocks ns ON ns.mcsymbol = ...`; use `MC_TO_SYMBOL_SQL`.
 - **`pd.DataFrame(rows, columns=[...])` where `rows` are dict rows** selects keys by name and returns all-NaN for any label that is not a key.
   Build the frame from the rows, then rename.
@@ -303,7 +305,7 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   **Mandatory Sequence whenever an endpoint fails or a new source is needed:**
   1. Query `market_endpoint_registry` in PostgreSQL (`bharat_intel` on `:5433`, 3,408 live working endpoints; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`).
   2. Check `url_endpoints` (830 templates) via `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>`.
-  3. Inspect the raw URL corpus `urls_v2.db` (the flat list was deleted 2026-10-23: `git show c2ceae0e^:unique_urls.txt`) and `DATA_FETCHING_GUIDE.md` for proven headers/payloads.
+  3. If present, inspect the optional local raw URL corpus `urls_v2.db` (gitignored and absent from fresh checkouts). With full Git history, the deleted flat list is available via `git show c2ceae0e^:unique_urls.txt`; inspect `DATA_FETCHING_GUIDE.md` for proven headers/payloads.
   4. Grep the repo for sibling endpoints and probe each route by route.
   5. **THEN ask**, with the per-route breakdown. Asking first is cheap, but reporting "vendors are dead" when active endpoints exist in the 3,000+ registry or in-tree is a documented failure mode.
 

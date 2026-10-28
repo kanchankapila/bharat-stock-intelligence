@@ -8,7 +8,7 @@
 // assert it is actually in force instead of trusting a dead env var. See AF-20260917-19 and
 // recurring-bugs.md's "a test that can reach a side effect WILL perform it against production".
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 
 if (!process.env.VITEST_PG_SCHEMA) {
   throw new Error(
@@ -22,42 +22,53 @@ const { buildAccuracyDigest, formatAccuracyDigest, formatAccuracyScorecard, RECA
   '../signalAccuracyDigest'
 );
 import type { AccuracyDigest } from '../signalAccuracyDigest';
-const { dbRun } = await import('../dbAsync');
+const { dbTransaction } = await import('../dbAsync');
 const SCHEMA = process.env.VITEST_PG_SCHEMA;
+
+beforeAll(async () => {
+  // Schema-QUALIFIED on purpose (AF-20261004-02). The guard above proves the throwaway schema
+  // exists, but an UNQUALIFIED `DROP TABLE x` resolves through search_path "<throwaway>",public to
+  // the first schema that HAS x -- so when the throwaway copy was missing, the drop reached the
+  // PRODUCTION table (it happened again on 2026-10-04). A qualified name cannot.
+  await dbTransaction(async tx => {
+    await tx.run(`DROP TABLE IF EXISTS "${SCHEMA}".high_flyer_daily_stats`);
+    await tx.run(`DROP TABLE IF EXISTS "${SCHEMA}".high_flyer_retrospective`);
+    await tx.run(`CREATE TABLE "${SCHEMA}".high_flyer_daily_stats (
+      date TEXT PRIMARY KEY, universe_n INTEGER, flyer_n INTEGER,
+      recall_json TEXT, precursor_counts_json TEXT, computed_at TEXT)`);
+    await tx.run(`CREATE TABLE "${SCHEMA}".high_flyer_retrospective (
+      symbol TEXT NOT NULL, date TEXT NOT NULL, return_pct REAL NOT NULL,
+      wrong_call INTEGER DEFAULT 0, prior_classification TEXT,
+      direction TEXT DEFAULT 'up', open_to_close_pct REAL, adt_20d DOUBLE PRECISION,
+      PRIMARY KEY (symbol, date))`);
+  });
+});
 
 async function seed(rows: {
   stats?: Array<[string, number, number, string]>;
   retro?: Array<[string, string, number, number, string | null, (number | null)?, (number | null)?]>;
 }) {
-  // Schema-QUALIFIED on purpose (AF-20261004-02). The guard above proves the throwaway schema
-  // exists, but an UNQUALIFIED `DROP TABLE x` resolves through search_path "<throwaway>",public to
-  // the first schema that HAS x -- so when the throwaway copy was missing, the drop reached the
-  // PRODUCTION table (it happened again on 2026-10-04). A qualified name cannot.
-  await dbRun(`DROP TABLE IF EXISTS "${SCHEMA}".high_flyer_daily_stats`);
-  await dbRun(`DROP TABLE IF EXISTS "${SCHEMA}".high_flyer_retrospective`);
-  await dbRun(`CREATE TABLE "${SCHEMA}".high_flyer_daily_stats (
-    date TEXT PRIMARY KEY, universe_n INTEGER, flyer_n INTEGER,
-    recall_json TEXT, precursor_counts_json TEXT, computed_at TEXT)`);
-  await dbRun(`CREATE TABLE "${SCHEMA}".high_flyer_retrospective (
-    symbol TEXT NOT NULL, date TEXT NOT NULL, return_pct REAL NOT NULL,
-    wrong_call INTEGER DEFAULT 0, prior_classification TEXT,
-    direction TEXT DEFAULT 'up', open_to_close_pct REAL, adt_20d DOUBLE PRECISION,
-    PRIMARY KEY (symbol, date))`);
-
-  for (const [date, universe, flyers, recallJson] of rows.stats ?? []) {
-    await dbRun(
-      `INSERT INTO "${SCHEMA}".high_flyer_daily_stats (date, universe_n, flyer_n, recall_json) VALUES (?,?,?,?)`,
-      [date, universe, flyers, recallJson]
-    );
-  }
-  for (const [symbol, date, ret, wrong, prior, o2c, adt] of rows.retro ?? []) {
-    await dbRun(
-      `INSERT INTO "${SCHEMA}".high_flyer_retrospective (symbol, date, return_pct, wrong_call, prior_classification, direction, open_to_close_pct, adt_20d) VALUES (?,?,?,?,?,?,?,?)`,
-      // direction mirrors the real writer: _process_day stamps 'up' for a flyer and 'down' for
-      // a diver, and the sign of return_pct is what distinguishes them.
-      [symbol, date, ret, wrong, prior, ret >= 0 ? 'up' : 'down', o2c ?? null, adt ?? null]
-    );
-  }
+  await dbTransaction(async tx => {
+    await tx.run(`DELETE FROM "${SCHEMA}".high_flyer_daily_stats`);
+    await tx.run(`DELETE FROM "${SCHEMA}".high_flyer_retrospective`);
+    if (rows.stats?.length) {
+      await tx.run(
+        `INSERT INTO "${SCHEMA}".high_flyer_daily_stats (date, universe_n, flyer_n, recall_json)
+         VALUES ${rows.stats.map(() => '(?,?,?,?)').join(',')}`,
+        rows.stats.flat()
+      );
+    }
+    if (rows.retro?.length) {
+      await tx.run(
+        `INSERT INTO "${SCHEMA}".high_flyer_retrospective (symbol, date, return_pct, wrong_call, prior_classification, direction, open_to_close_pct, adt_20d)
+         VALUES ${rows.retro.map(() => '(?,?,?,?,?,?,?,?)').join(',')}`,
+        // direction mirrors the real writer: _process_day stamps 'up' for a flyer and 'down' for
+        // a diver, and the sign of return_pct is what distinguishes them.
+        rows.retro.flatMap(([symbol, date, ret, wrong, prior, o2c, adt]) =>
+          [symbol, date, ret, wrong, prior, ret >= 0 ? 'up' : 'down', o2c ?? null, adt ?? null])
+      );
+    }
+  });
 }
 
 const RECALL = (o: Record<string, unknown>) => JSON.stringify(o);

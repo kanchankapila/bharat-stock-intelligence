@@ -1,23 +1,22 @@
-const XLSX=require('xlsx'),fs=require('fs'),path=require('path');
+const writeExcelFile=require('write-excel-file/node'),fs=require('fs'),path=require('path');
+const defaultOutputPath=path.join(__dirname,'..','docs','job-schedule-report.xlsx');
+async function generateJobReport({outputPath=defaultOutputPath,now=new Date()}={}) {
 const a=require('./job-data-a.cjs');
 const {b,p}=require('./job-data-b.cjs');
 const bullmqJobs=[...a,...b];
 const pm2Jobs=p;
 const allJobs=[...bullmqJobs,...pm2Jobs];
-const wb=XLSX.utils.book_new();
+const sheets=[];
 const hd=['#','Job Name','Label','Category','Frequency','IST Trigger Time','Data Fetched','Data Source','URLs'];
-const sdata=[['BHARAT STOCK INTELLIGENCE - JOB SCHEDULE REPORT'],['Generated: '+new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' IST'],[],hd];
+const sdata=[['BHARAT STOCK INTELLIGENCE - JOB SCHEDULE REPORT'],['Generated: '+now.toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' IST'],[],hd];
 allJobs.forEach((job,i)=>{sdata.push([i+1,job.name,job.label,job.category,job.frequency,job.scheduleIST,job.dataFetched,job.dataSource,job.urls]);});
-const ws1=XLSX.utils.aoa_to_sheet(sdata);
-ws1['!cols']=[{wch:4},{wch:28},{wch:30},{wch:14},{wch:14},{wch:28},{wch:45},{wch:22},{wch:65}];
-XLSX.utils.book_append_sheet(wb,ws1,'All Jobs Summary');
+const columns=[4,28,30,14,14,28,45,22,65].map(width=>({width}));
+sheets.push({data:sdata,sheet:'All Jobs Summary',columns});
 const addSheet=(name,filterFn)=>{
   const data=allJobs.filter(filterFn);
   const s=[[name],[],['#','name','label','category','frequency','scheduleIST','dataFetched','dataSource','urls']];
   data.forEach((job,i)=>{s.push([i+1,job.name,job.label,job.category,job.frequency,job.scheduleIST,job.dataFetched,job.dataSource,job.urls]);});
-  const ws=XLSX.utils.aoa_to_sheet(s);
-  ws['!cols']=[{wch:4},{wch:28},{wch:30},{wch:14},{wch:14},{wch:28},{wch:45},{wch:22},{wch:65}];
-  XLSX.utils.book_append_sheet(wb,ws,name);
+  sheets.push({data:s,sheet:name,columns});
 };
 addSheet('Intraday',j=>j.category==='Intraday');
 addSheet('Screener Syncs',j=>j.category==='Screener Sync');
@@ -57,11 +56,15 @@ dsData.push(['MarketsMojo','https://frapi.marketsmojo.com/market_marketoverview/
 dsData.push(['MarketsMojo','https://frapi.marketsmojo.com/market_Gainersloser/getData?exchange=0&type={0|1}','Gainers/losers','marketsmojo_fetchers']);
 dsData.push(['Yahoo Finance','https://query1.finance.yahoo.com/v8/finance/chart/{SYMBOL}.NS (yfinance)','OHLCV history (adjusted)','stock-refresh']);
 dsData.push(['Sensibull','https://oxide.sensibull.com/v1/compute/cache/fii_dii_cash','FII/DII cash data','fii_dii_fetcher']);
-const wsDS=XLSX.utils.aoa_to_sheet(dsData);
-wsDS['!cols']=[{wch:18},{wch:85},{wch:60},{wch:35}];
-XLSX.utils.book_append_sheet(wb,wsDS,'Data Sources');
-const os=path.join(__dirname,'..','docs');
-if(!fs.existsSync(os))fs.mkdirSync(os,{recursive:true});
-XLSX.writeFile(wb,path.join(os,'job-schedule-report.xlsx'));
-console.log('Report generated: docs/job-schedule-report.xlsx');
-console.log('Total: '+allJobs.length+' jobs (BullMQ: '+bullmqJobs.length+', PM2: '+pm2Jobs.length+')');
+sheets.push({data:dsData,sheet:'Data Sources',columns:[18,85,60,35].map(width=>({width}))});
+if(outputPath===defaultOutputPath)fs.mkdirSync(path.dirname(outputPath),{recursive:true});
+await writeExcelFile(sheets).toFile(outputPath);
+return {outputPath,jobCount:allJobs.length,bullmqJobCount:bullmqJobs.length,pm2JobCount:pm2Jobs.length};
+}
+module.exports={generateJobReport};
+if(require.main===module) {
+  generateJobReport({outputPath:process.argv[2]||defaultOutputPath}).then(result=>{
+    console.log('Report generated: '+result.outputPath);
+    console.log('Total: '+result.jobCount+' jobs (BullMQ: '+result.bullmqJobCount+', PM2: '+result.pm2JobCount+')');
+  }).catch(error=>{console.error(error);process.exitCode=1;});
+}

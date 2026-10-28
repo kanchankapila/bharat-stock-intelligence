@@ -17,6 +17,7 @@
 // guards against is someone editing one INSERT and not the other two, which a text check catches
 // exactly as well as an integration test would.
 import { readFileSync, readdirSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 
@@ -48,18 +49,22 @@ describe('screener_appearances.appeared_at', () => {
     });
   }
 
-  it('SYNCS covers EVERY file that writes screener_appearances (derived, not hand-listed)', () => {
+  it('SYNCS covers EVERY file that writes screener_appearances (derived, not hand-listed)', async () => {
     // The check that would have caught trendlyneScreener.ts on day one. Scans the server source
     // for the INSERT rather than trusting SYNCS, so adding a 5th provider fails here until it is
     // added above -- instead of silently writing NULL appeared_at forever.
     const dir = join(__dirname, '..');
-    const writers = readdirSync(dir)
-      .filter(f => f.endsWith('.ts'))
-      .filter(f => readFileSync(join(dir, f), 'utf8')
-        .includes('INSERT OR IGNORE INTO screener_appearances'));
+    const sourceFiles = readdirSync(dir).filter(f => f.endsWith('.ts'));
+    const contents = await Promise.all(sourceFiles.map(async f => ({
+      file: f,
+      source: await readFile(join(dir, f), 'utf8'),
+    })));
+    const writers = contents
+      .filter(({ source }) => source.includes('INSERT OR IGNORE INTO screener_appearances'))
+      .map(({ file }) => file);
     expect(writers.length).toBeGreaterThan(0);         // guards against the scan silently matching nothing
     expect(writers.sort()).toEqual(SYNCS.map(([f]) => f).sort());
-  });
+  }, 15_000);
 
   // Only the Postgres snapshot is asserted now. This used to also check db.ts's SQLite
   // schema-of-record; that file was renamed to db.sqlite-legacy.ts and unwired by

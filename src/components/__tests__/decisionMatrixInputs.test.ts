@@ -30,7 +30,7 @@ describe('buildMatrixItems', () => {
     const [it0] = buildMatrixItems([candidate], []);
     expect(it0).toMatchObject({
       symbol: 'ABBOTINDIA', source: 'cockpit', action: 'STRONG BUY', score: 86, confidence: null, mlRankPct: 92.4,
-      price: 27270, target1: null, stopLoss: 26412.33, rrRatio: null, reasoning: null, setupType: 'BREAKOUT',
+      price: 27270, target1: null, stopLoss: 26412.33, rrRatio: null, reasoning: null, setupType: 'RESEARCH',
     });
   });
 

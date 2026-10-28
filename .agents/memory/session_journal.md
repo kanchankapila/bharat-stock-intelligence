@@ -424,3 +424,48 @@ network policy (AF-20260928-10), so no connector in this batch has seen a live r
   instrument-first rules.
 - Concurrent session: the v7 deletions in the working tree are not this session's work. AF-20261025-29's
   `findings:check` failure comes from them.
+
+## 2026-10-26 — Approved dependency isolation
+
+- User approved a separate dependency-security batch, not a live install or service restart.
+  The worktree has its own real node_modules, no copied .env, and a dedicated initially empty
+  test database. The production Python interpreter is used read-only, without package changes.
+- Compatible updates, an explicit Vitest 5 mock/isolation migration and a write-only XLSX
+  replacement removed the reproduced npm audit findings. A bounded gRPC override retained
+  Firebase 12 instead of following npm audit's proposed downgrade to Firebase 9.
+- A fresh Windows checkout exposed CRLF defects invisible in the established checkout: native
+  Node accepted a CLI that Vite SSR made syntactically invalid by inserting code before its
+  hashbang. Attribute policy plus actual physical LF are both necessary; a policy edit does
+  not normalize an already checked-out file. AF-20261026-01 holds verification evidence.
+- AF-20261025-33 remains the single owner of dependency verification/delivery/activation state.
+  No separate skill, model-specific or worktree-specific pending queue was created.
+
+- The shared checkout/ref advanced independently to 752f1b45 during testing; another session's
+  staged ledger content must not be committed/reset along with this work. Keep dependency source
+  and delivery commits in the isolated branch and preserve root tracking edits by owned hunk.
+- PM2 CLI and daemon are separate artifacts: read-only RPC found CLI 7.0.4 vs daemon 7.0.3.
+  A daemon update uses dump/kill/resurrect; the user's ownership of restarts is not permission
+  to perform that operation across every service. External backend restart at 02:12 IST was
+  observed, not performed here. Full production-only v7 readback then passed all five routes.
+- Extension metadata is DB-global despite schema-private fixtures. IF NOT EXISTS raced on
+  pg_extension_name_index once and poisoned ninety uses of one cached fixture. Both runners
+  now share an advisory bootstrap lock and stable public homes for newly created extensions.
+- An endpoint reachability probe is not isolation: worker tests read production-style tables
+  or skipped rather than binding the real connector through pg_db. The empty test database
+  exposed this. Test-only private rows must be queried through the real endpoint as well.
+- Integrating concurrently published documentation requires merging by stable ledger ID,
+  not keeping one whole file and losing the other session's financial or verification evidence.
+  Source main 752f1b45 and documentation main 9f967244 are both in the isolated branch.
+- Source-derived safety guards must recognize a refactor's actual execution spelling. Moving
+  qualified private DROP statements from dbRun to tx.run exposed a missing scan vocabulary;
+  extend the census and its non-vacuity controls together, rather than deleting the check.
+- Fixture timeout continuation recurred across percentile, resolved-label, digest, provider
+  selection and edge-router cases. Await bounded transactions with the same rows/defaults;
+  a later focused pass does not erase a failed full gate. AF-20261026-04/-06 hold evidence.
+- Docker healthy is not a database query-back: in the same incident SELECT 1 responded once,
+  metadata reads stalled, and a later bounded connection handshake timed out. Record these
+  separately rather than asserting one universal outage or restarting an unowned service.
+- The merged full Python run was interrupted at 79 percent after this stall, not passed.
+  Supplemental source/mocked checks can verify scanner/bootstrap controls without a database,
+  but cannot satisfy the user's fully-green-local condition. AF-20261026-07 owns recovery;
+  AF-20261025-33 owns review delivery and the separately user-owned runtime activation.

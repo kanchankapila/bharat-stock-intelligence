@@ -28,8 +28,9 @@ feature, a constraint or a model is underperforming.
 2. **The scripts** — `graphify query "<thing> backfill"`, or grep for `backfill_*`, `*_sync`,
    `*_fetcher`. This repo has ~210 Python modules; somebody has usually already solved it.
 3. **`market_endpoint_registry`** (3,408 live endpoints), the `url_endpoints` catalog (830
-   templates), the raw URL corpus `urls_v2.db` (the flat unique_urls.txt list was deleted 2026-10-23,
-   `git show c2ceae0e^:unique_urls.txt`) — see the discovery-registry section.
+   templates), and, if present, the optional local raw URL corpus `urls_v2.db` (gitignored and absent
+   from fresh checkouts). With full Git history, the deleted flat list remains available through
+   `git show c2ceae0e^:unique_urls.txt` — see the discovery-registry section.
 4. **The vendor APIs already wired in** — MoneyControl, Trendlyne, NiftyTrader, MarketsMojo,
    InvestSights all expose far more than the fields currently consumed.
 

@@ -1094,7 +1094,7 @@ def apply_correlation_cap(weights: dict, clusters: dict,
 # where expected_edge_pct is the symbol's expected return above risk-free rate.
 # For simplicity, we use a platform-wide default edge estimate that can be
 # overridden per symbol if the ML ensemble provides one.
-DEFAULT_EXPECTED_EDGE_PCT = 5.0  # 5% expected edge (conservative for Indian equities)
+DEFAULT_EXPECTED_EDGE_PCT = 5.0  # Legacy sizing assumption; not a measured or horizon-specific edge.
 MAX_COST_TO_EDGE_RATIO = 0.5     # if costs exceed 50% of expected edge, halve the size
 
 
@@ -1140,6 +1140,12 @@ def apply_cost_penalty(
             # Costs are manageable — small reduction
             adjusted[sym] = size * (1.0 - 0.3 * ratio)
     return adjusted
+
+
+def count_cost_zeroed(before: dict, after: dict) -> int:
+    """Count positive positions eliminated by the penalty, excluding already-zero entries."""
+    return sum(1 for symbol, size in before.items()
+               if size > 0 and symbol in after and after[symbol] == 0)
 
 
 # Bounded score-fallback for directionless stocks (2026-08-05 pipeline-review finding,
@@ -3148,7 +3154,7 @@ class UnifiedRanker:
                     fired['actionable_without_plan_veto'] += 1
             strength = _directional_strength(unified, classification)
 
-            # #6 position size: back the stronger of the two validated edges — the López de Prado
+            # #6 position size: use the stronger of two unvalidated sizing inputs — the López de Prado
             # bet on the calibrated ML meta-label, OR a cross-sectional breakout tilt — inverse-vol
             # weighted, longs only. Breakout is additive (max, not a multiplier) because the ML bet
             # is ~0 in BULL/SIDEWAYS where win-prob has no edge, and a multiplier on 0 stays 0.
@@ -3168,7 +3174,7 @@ class UnifiedRanker:
                 fired['breakout_ACTUALLY_BINDS'] += 1
             bet = max(ml_bet, bo_bet)
             vol = max(VOL_FLOOR_PCT, (qm or {}).get('vol') or DEFAULT_VOL_PCT)
-            # Confidence coupling: bet/vol is the validated risk core; this can only shrink it,
+            # Confidence coupling: bet/vol is a sizing heuristic; this can only shrink it,
             # so a marginal Buy or a thin-coverage row is sized below an equally-probable but
             # better-supported one instead of identically to it. Counted, not assumed -- if the
             # haircut never binds it is dead weight and this counter says so.
@@ -3329,8 +3335,9 @@ class UnifiedRanker:
             # the sizing penalty consumed rather than recomputing it in a reader.
             r['est_cost_bps'] = round(cost * 10_000, 2) if cost is not None else None
         if cost_map:
-            raw_sizes = apply_cost_penalty(raw_sizes, cost_map)
-            penalized = sum(1 for s in raw_sizes.values() if s == 0)
+            adjusted_sizes = apply_cost_penalty(raw_sizes, cost_map)
+            penalized = count_cost_zeroed(raw_sizes, adjusted_sizes)
+            raw_sizes = adjusted_sizes
             if penalized:
                 print(f"[UnifiedRanker] cost penalty zeroed {penalized} symbols (costs >= expected edge)",
                       file=sys.stderr)

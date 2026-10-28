@@ -569,38 +569,56 @@ export const miscRouter = router({
           const derivedStop   = sma50 ? Math.max(sma50 * 0.985, cmp * 0.95) : cmp * 0.95;
           const derivedTarget = cmp * 1.10;
 
-          const entryPrice  = levels ? (levels.entry  as number) : parseFloat(derivedEntry.toFixed(2));
-          const stopLoss    = levels ? (levels.stopLoss as number) : parseFloat(derivedStop.toFixed(2));
-          const targetPrice = levels ? (levels.target  as number) : parseFloat(derivedTarget.toFixed(2));
-
-          const actionAdvice = compositeScore >= 70 ? 'STRONG BUY'
-            : compositeScore >= 60 ? 'BUY'
-            : compositeScore >= 50 ? 'WATCH'
-            : 'HOLD';
+          const proposedEntry  = levels ? (levels.entry as number | null) : parseFloat(derivedEntry.toFixed(2));
+          const proposedStop   = levels ? (levels.stopLoss as number | null) : parseFloat(derivedStop.toFixed(2));
+          const proposedTarget = levels ? (levels.target as number | null) : parseFloat(derivedTarget.toFixed(2));
+          // Do not publish partial or inverted long plans, including stale upstream levels.
+          const validPlan = proposedEntry != null && proposedStop != null && proposedTarget != null
+            && [proposedEntry, proposedStop, proposedTarget].every(v => Number.isFinite(v) && v > 0)
+            && proposedStop < proposedEntry && proposedTarget > proposedEntry;
+          const entryPrice = validPlan ? proposedEntry : null;
+          const stopLoss = validPlan ? proposedStop : null;
+          const targetPrice = validPlan ? proposedTarget : null;
 
           // Canonical cross-source rank, read-only context alongside this desk's own
           // compositeScore -- see the comment above unifiedMap's query.
           const ur = unifiedMap.get(symbol);
+          // The desk composite is not a validated directional model. Its ordering remains
+          // research-only; only the canonical classification can supply the action label.
+          const canonicalLabels = new Set(['STRONG BUY', 'BUY', 'HOLD', 'SELL', 'STRONG SELL']);
+          const canonicalAdvice = ur?.classification?.toUpperCase() ?? '';
+          const actionAdvice = canonicalLabels.has(canonicalAdvice) ? canonicalAdvice : 'WATCH';
+          let techSignalCount: number | null = null;
+          if (typeof sig.signals_json === 'string') {
+            try {
+              const parsed: unknown = JSON.parse(sig.signals_json);
+              if (Array.isArray(parsed)) techSignalCount = parsed.length;
+            } catch { /* a malformed signal list is unknown, not zero */ }
+          }
 
           return {
             symbol, name: getStockMapping(symbol)?.name || symbol, sector: data.sector,
             advice: actionAdvice, actionAdvice,
             compositeScore: parseFloat(compositeScore.toFixed(1)),
+            scoreResearchOnly: true,
             unifiedScore: ur?.unified_score ?? null,
             unifiedClassification: ur?.classification ?? null,
             unifiedConvictionLevel: ur?.conviction_level ?? null,
             mlWinProbability: parseFloat((winProb * 100).toFixed(1)),
-            mlProbability:    parseFloat((winProb * 100).toFixed(1)),
+            mlProbability:    winProbSource === 'heuristic' ? null : parseFloat((winProb * 100).toFixed(1)),
+            researchScore:    parseFloat((winProb * 100).toFixed(1)),
             winProbSource,
             mlRankPct: (sig.mlRankPct as number | null) ?? null,
-            techSignalCount: 1,
-            quantRank: Math.round(100 - fundScore),
+            techSignalCount,
+            quantRank: null,
             smartMoneyCr: null,
             newsSentiment: null,
             factors: {
-              technical:   parseFloat(techScore.toFixed(1)),
-              fundamental: parseFloat(fundScore.toFixed(1)),
-              momentum:    parseFloat(momScore.toFixed(1)),
+              // The desk score reused stock_scores.score for both fundamental and momentum;
+              // those aliases are not independent factor readings.
+              technical:   null,
+              fundamental: null,
+              momentum:    null,
               sentiment:   null,
               smartMoney:  null,
             },
@@ -614,22 +632,24 @@ export const miscRouter = router({
             volumeRatio: sig.volume_ratio ?? null,
             cmp, changePct: (sig.change_pct as number) || 0,
             aiInsight:   (sig.ai_insight as string)  || null,
-            signalsJson: (sig.signals_json as string) || '[]',
+            signalsJson: (sig.signals_json as string | null) ?? null,
           };
         });
 
         candidates.sort((a, b) => b.compositeScore - a.compositeScore);
         const top20 = candidates.slice(0, 20);
-        const bullish = candidates.filter(c => c.mlProbability > 55).length;
+        const bullish = candidates.filter(c => c.researchScore > 55).length;
         const total   = candidates.length;
-        const advDecRatio = total > 0 ? parseFloat((bullish / Math.max(1, total - bullish)).toFixed(2)) : 1;
-        const avgWinProbability = candidates.length
-          ? parseFloat((candidates.reduce((s, c) => s + c.mlProbability, 0) / candidates.length).toFixed(1))
-          : 0;
-        const verdict = top20.length >= 3 && avgWinProbability >= 52 ? 'TRADE' : 'NO TRADE';
-        const verdictReason = verdict === 'TRADE'
-          ? `${top20.length} setups · avg model score ${avgWinProbability} (not a hit rate, AF-20261008-45) · ${bullish}/${total} stocks bullish`
-          : top20.length < 3 ? 'Insufficient setups — run Technical Signal Scan first' : 'Average model score below threshold';
+        // This is a model-score threshold ratio, not market advance/decline breadth.
+        const researchThresholdRatio = total > 0 ? parseFloat((bullish / Math.max(1, total - bullish)).toFixed(2)) : null;
+        const avgResearchScore = candidates.length
+          ? parseFloat((candidates.reduce((s, c) => s + c.researchScore, 0) / candidates.length).toFixed(1))
+          : null;
+        // The old 52 threshold used a score whose hit probabilities fail calibration and
+        // whose trading edge is unproven. Keep the research data, but do not turn it into
+        // a live trade/no-trade signal without an independently validated rule.
+        const verdict = 'NO TRADE';
+        const verdictReason = 'No independently validated cockpit trade signal; use canonical calls as research.';
 
         // `signals` is ORDER BY date DESC first, so signals[0].date is the most recent
         // technical_signals scan date any candidate here is grounded in -- surfaced to the
@@ -640,12 +660,12 @@ export const miscRouter = router({
         return {
           success: true,
           data: {
-            marketOverview: { verdict, verdictReason, advDecRatio, avgWinProbability, activeSignalsCount: candidates.length, asOfDate },
+            marketOverview: { verdict, verdictReason, advDecRatio: null, modelThresholdRatio: null, researchThresholdRatio, avgWinProbability: null, avgResearchScore, activeSignalsCount: candidates.length, asOfDate },
             candidates: top20,
           },
         };
       } catch (err) {
-        return { success: false, data: { marketOverview: { verdict: 'NO TRADE', verdictReason: 'Data unavailable', advDecRatio: 1, avgWinProbability: 0, activeSignalsCount: 0 }, candidates: [] } };
+        return { success: false, data: { marketOverview: { verdict: 'NO TRADE', verdictReason: 'Data unavailable', advDecRatio: null, modelThresholdRatio: null, researchThresholdRatio: null, avgWinProbability: null, avgResearchScore: null, activeSignalsCount: 0 }, candidates: [] } };
       }
     }, 45)),
 

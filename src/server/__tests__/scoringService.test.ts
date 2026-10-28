@@ -22,7 +22,7 @@ const insertRec = (symbol: string, score: number, klass: string, bull: number, b
      screener_stock_score, ml_score, confluence_score, technical_score, dl_score, position_size_pct, timeframe)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [symbol, computedAt, 'BULL', score, 'B_MEDIUM', klass, bull, bear,
          JSON.stringify(['technical_breakout', 'fundamental_quality']), `reason for ${symbol}`,
-         20, 30, 10, 95, 15, sizePct, timeframe]); // technical_score is the max -> top_domain = 'Technical'
+         20, 30, 10, 95, 15, sizePct, timeframe]);
 
 describe('getTopRatedStocks reroute to unified_recommendations', () => {
   it('returns the canonical ranking (latest day, by score desc) mapped to the ScoredStock shape', async () => {
@@ -35,8 +35,10 @@ describe('getTopRatedStocks reroute to unified_recommendations', () => {
     const rows = await getTopRatedStocks(10, 'long_term') as any[];
 
     expect(rows.map(r => r.symbol)).toEqual(['AAA', 'BBB']);
-    // suggested portfolio weight (#6) must surface to the UI
-    expect(rows[0].position_size_pct).toBe(4.2);
+    // An unvalidated weight remains research data, not a recommended allocation.
+    expect(rows[0].position_size_pct).toBeNull();
+    expect(rows[0].research_position_size_pct).toBe(4.2);
+    expect(rows[0].position_sizing_status).toBe('UNVALIDATED');
     expect(rows[0].score).toBe(90);
     expect(rows[0].classification).toBe('Strong Buy');
     expect(rows[0].positive_count).toBe(10);
@@ -45,8 +47,15 @@ describe('getTopRatedStocks reroute to unified_recommendations', () => {
     expect(rows[0].reasons.length).toBeGreaterThan(0);
     // A ranking score is not a calibrated probability or confidence percentage.
     expect(rows[0]).not.toHaveProperty('confidence');
-    // "Driver: {top_domain}" must not render undefined; highest engine component wins
-    expect(rows[0].top_domain).toBe('Technical');
+    // Raw component magnitudes are not weighted, normalized contributions.
+    expect(rows[0].top_domain).toBeUndefined();
+  });
+
+  it('does not identify a paused high-scoring engine as a recommendation driver', async () => {
+    await insertRec('PAUSED', 90, 'Strong Buy', 2, 0, '2026-10-27');
+    await dbRun('UPDATE unified_recommendations SET dl_score = ? WHERE symbol = ?', [99, 'PAUSED']);
+    const rows = await getTopRatedStocks(10, 'long_term') as any[];
+    expect(rows[0].top_domain).toBeUndefined();
   });
 
   it('filters other and unspecified horizons before applying the limit', async () => {
