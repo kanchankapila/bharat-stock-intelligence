@@ -460,6 +460,25 @@ CREATE TABLE IF NOT EXISTS "early_hours_predictions" (
 );
 CREATE INDEX idx_ehp_date ON public.early_hours_predictions USING btree (date DESC);
 
+-- ── earnings_preview_snapshots ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "earnings_preview_snapshots" (
+  "as_of_date" DATE NOT NULL,
+  "symbol" TEXT NOT NULL,
+  "period_end" DATE NOT NULL,
+  "model_version" TEXT NOT NULL,
+  "expected_date" DATE,
+  "score" DOUBLE PRECISION,
+  "score_eq" DOUBLE PRECISION,
+  "score_learned" DOUBLE PRECISION,
+  "score_pct" DOUBLE PRECISION,
+  "decile" INTEGER,
+  "n_features" INTEGER NOT NULL,
+  "features" JSONB NOT NULL,
+  "created_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY ("as_of_date", "symbol", "period_end", "model_version")
+);
+CREATE INDEX idx_earnings_preview_snapshots_period ON public.earnings_preview_snapshots USING btree (period_end, model_version, symbol);
+
 -- ── eco_calendar ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "eco_calendar" (
   "calendar_id" TEXT NOT NULL PRIMARY KEY,

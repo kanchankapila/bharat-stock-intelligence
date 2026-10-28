@@ -1364,6 +1364,13 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   await runPython('paper_book.py', ['--persist'], 10 * 60_000)
     .catch(e => T.fail('paper_book', e));
 
+  // Results-season preview (2026-10-27): rebuilds every quarterly result since 2023-03 point-in-time, grades the
+  // frozen ep-v2 forecast walk-forward, scores the next 21 days of reporters and appends them to
+  // earnings_preview_snapshots so each call is graded against the result it preceded. Research only: never
+  // writes a ranking or component score; exits 2 on protocol drift. ~95 s measured against the live DB.
+  await runPython('earnings_preview.py', ['--persist'], 6 * 60_000)
+    .catch(e => T.fail('earnings_preview', e));
+
   // Archive-only baseline observations cannot supply past consensus revisions.
   // This shadow report starts from actual receipt times and never changes a trading score.
   await runPython('earnings_revision_shadow.py', ['--persist'], 2 * 60_000)

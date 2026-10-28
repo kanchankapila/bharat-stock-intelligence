@@ -36,6 +36,14 @@ Exit code 0 = clear (WARNs allowed), 1 = at least one FAIL.
 - **SKIP** — `--full`-only checks not run; run `--full` before any commit that touches
   `src/server` or frontend code.
 
+**Two readings mean the instrument, not the system.** (1) A PASS from a check that grades
+something (an accuracy digest, a scorecard, a per-stage verdict) is only as good as the grader.
+Before relying on one, confirm every label value reaches a branch (an asymmetric
+`{"buy", "strong buy"}` vs `"sell"` map hid 31.6% of calls with every check green) and that its
+buckets sum to the population. (2) When a count comes out identical across many unrelated items,
+suspect a duplicated tree (stale `.claude/worktrees/`, a scanned virtualenv) before believing the
+pattern. Compare the files scanned against `git ls-files`.
+
 ## What it covers (four lanes)
 
 1. **Code** — regression guards for every AF fix that has a static signature (429 retry,

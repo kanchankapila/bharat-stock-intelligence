@@ -86,6 +86,8 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   or an age, not in `NEVER_FILL`. Check by recomputing the value from its source table, not by counting rows.
 - **A latest-day join on `MAX(date)` over a table that is written in partial scans.** The day's first scan can hold 18% of the universe with
   NULL model outputs; readers then show blanks or fall to a heuristic. Use `technicalSignalsDate.ts` (`LATEST_COMPLETE_TS_DATE_SQL`).
+  Per-symbol `ORDER BY date DESC` has the same defect: both stock-detail readers needed the completed-grid selector in AF-20261028-12.
+  Return and display the feature snapshot date so an older complete grid is not mistaken for a current quote.
 - **`mcsymbol` joins in SQL form.** The dict-comprehension guard misses `JOIN nse_stocks ns ON ns.mcsymbol = ...`; use `MC_TO_SYMBOL_SQL`.
 - **`pd.DataFrame(rows, columns=[...])` where `rows` are dict rows** selects keys by name and returns all-NaN for any label that is not a key.
   Build the frame from the rows, then rename.

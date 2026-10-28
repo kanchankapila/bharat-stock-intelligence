@@ -8,7 +8,7 @@ import { alphaQuant } from "../alphaQuantClient";
 import { router, publicProcedure, adminProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { fetchWithCache } from "../cacheService";
-import { ML_RANK_PCT_SQL, mlRankPctFor } from "../technicalSignalsDate";
+import { LATEST_COMPLETE_TS_DATE_SQL, ML_RANK_PCT_SQL, mlRankPctFor } from "../technicalSignalsDate";
 
 // Next calendar day (UTC) as a 'YYYY-MM-DD' string, used to build a half-open [d, d+1) range
 // for getTechnicalConfluenceSignals below -- extracted so month/year-boundary correctness is
@@ -42,10 +42,10 @@ export const technicalsRouter = router({
       // sma50/sma200 nor win_probability -- 5 of 7 "Technical Signal Snapshot" tiles on
       // v4's StockIntelligencePage (including win_probability, the platform's central ML
       // output) silently never rendered. technical_signals is the actively-maintained
-      // table with all of those columns; ORDER BY date DESC LIMIT 1 replaces the legacy
-      // table's symbol-only PK, which had guaranteed exactly one row per symbol.
+      // table with all of those columns. Use the latest complete grid: a newer partial
+      // scan can have fresh prices but none of the slow financial or model features.
       const row = await dbGet<any>(
-        'SELECT * FROM technical_signals WHERE symbol = ? ORDER BY date DESC LIMIT 1',
+        `SELECT * FROM technical_signals WHERE symbol = ? AND date = ${LATEST_COMPLETE_TS_DATE_SQL} LIMIT 1`,
         [input.symbol]
       );
       if (!row) return null;

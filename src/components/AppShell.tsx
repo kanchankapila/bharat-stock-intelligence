@@ -96,6 +96,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Users,      label: 'Money Flow',  id: 'money-flow'  },
       { icon: Calendar,   label: 'Earnings',    id: 'earnings'    },
       { icon: Calendar,   label: 'Earnings Desk', id: 'earnings-desk' },
+      { icon: Calendar,   label: 'Earnings Preview', id: 'earnings-preview' },
       { icon: Shield,     label: 'Risk',        id: 'risk'        },
     ],
   },

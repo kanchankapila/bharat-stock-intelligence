@@ -11,6 +11,7 @@ import { RiskMetricsDashboard } from './RiskMetricsDashboard';
 import { ActivityFeed } from './ActivityFeed';
 import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
 import { LegacyScoreBanner } from './CanonicalSourceNote';
+import { parseDecisionMatrixInputs } from './decisionMatrixInputs';
 
 const fmt = (n: number | null | undefined, dec = 2) =>
   n == null ? '—' : n.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
@@ -67,9 +68,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
   const bankNifty = indices.find((i: any) => /bank.?nifty/i.test(i.name) || i.symbol === 'NIFTY BANK');
   const sensex   = indices.find((i: any) => /sensex/i.test(i.name) || i.symbol === 'BSE SENSEX');
 
-  const adData: any = adRes || {};
-  const advances = adData.advances ?? adData.advancing ?? null;
-  const declines = adData.declines ?? adData.declining ?? null;
+  const { advances, declines } = parseDecisionMatrixInputs({ adRes });
 
   const sectors: any[] = (sectorRes as any)?.sectors || (sectorRes as any)?.data || [];
   const gainers: any[] = (moversRes as any)?.gainers || (moversRes as any)?.topGainers || [];
@@ -95,7 +94,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
   return (
     <div className="p-4 space-y-4 max-w-screen-2xl mx-auto">
 
-      <LegacyScoreBanner note="This cockpit's STRONG BUY/BUY/WATCH/HOLD verdict is a hand-rolled blend (technical + fundamental + momentum + sentiment) computed separately from the unified cross-engine model -- check Alpha / Buy Recs for the canonical, regime-aware view of the same stocks." />
+      <LegacyScoreBanner note="Candidates are ordered by an unvalidated research score. Action labels use the canonical ranking; the cockpit trade switch has no independently validated edge." />
 
       {/* ── Market Pulse Strip ─────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
@@ -103,8 +102,8 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
           { label: 'Nifty 50',    v: nifty?.lastPrice    ?? nifty?.price,    chg: nifty?.change,    pct: nifty?.pChange    ?? nifty?.changePct },
           { label: 'Bank Nifty',  v: bankNifty?.lastPrice ?? bankNifty?.price, chg: bankNifty?.change, pct: bankNifty?.pChange ?? bankNifty?.changePct },
           { label: 'Sensex',      v: sensex?.lastPrice   ?? sensex?.price,   chg: sensex?.change,   pct: sensex?.pChange   ?? sensex?.changePct },
-          { label: 'Adv / Dec',   v: advances != null && declines != null ? `${advances}/${declines}` : null, pct: advances != null && declines != null ? (advances - declines) / Math.max(1, advances + declines) * 100 : null, plain: true },
-          { label: 'PCR',         v: pcr != null ? fmt(pcr, 2) : null, pct: pcr != null ? (pcr - 1) * 100 : null, plain: true },
+          { label: 'Adv / Dec (NSE)', v: advances != null && declines != null ? `${advances}/${declines}` : null, pct: advances != null && declines != null ? (advances - declines) / Math.max(1, advances + declines) * 100 : null, plain: true },
+          { label: 'PCR',         v: pcr != null ? fmt(pcr, 2) : null, pct: null, plain: true },
           { label: 'Sentiment',   v: sentimentScore != null ? `${sentimentScore > 0 ? '+' : ''}${fmt(sentimentScore, 1)}` : null, pct: sentimentScore, plain: true },
         ].map((item, i) => (
           <div key={i} className={cn(
@@ -124,9 +123,12 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                 )}
                 {item.pct != null && item.plain && (
                   <p className={cn('text-[10px] font-bold', pctColor(item.pct as number))}>
-                    {(item.pct as number) > 0 ? 'Bullish' : (item.pct as number) < 0 ? 'Bearish' : 'Neutral'}
+                    {item.label === 'Adv / Dec (NSE)'
+                      ? (item.pct as number) > 0 ? 'More advances' : (item.pct as number) < 0 ? 'More declines' : 'Equal counts'
+                      : (item.pct as number) > 0 ? 'Bullish' : (item.pct as number) < 0 ? 'Bearish' : 'Neutral'}
                   </p>
                 )}
+                {item.label === 'Adv / Dec (NSE)' && <p className="text-[9px] text-slate-500">Snapshot age unavailable</p>}
               </>
             ) : (
               <p className="v1-data-value text-slate-600 mt-0.5">—</p>
@@ -148,7 +150,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
             : <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />}
           <div>
             <span className="text-xs font-black font-display uppercase tracking-wide">
-              {isTradeActive ? 'Trade Signal Active' : 'Risk-Off — No Trade'}
+              {isTradeActive ? 'Trade Signal Active' : 'No Verified Trade Signal'}
             </span>
             <p className="text-[10px] text-slate-400 font-medium mt-0.5">
               {overview.verdictReason || 'Run technical scans from the Signals tab to populate candidates.'}
@@ -168,7 +170,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
         </div>
         <div className="flex items-center gap-3 shrink-0">
           <span className="text-[10px] font-bold text-slate-400 hidden sm:block">
-            {overview.activeSignalsCount ?? candidates.length} signals · A/D {overview.advDecRatio ?? '—'}x · Model avg {overview.avgWinProbability ?? '—'} (not a hit rate)
+            {overview.activeSignalsCount ?? candidates.length} signals · Research score avg {overview.avgResearchScore ?? '—'} (includes heuristics)
           </span>
           <button onClick={() => refetch()} title={dataUpdatedAt > 0 ? `Last fetched ${formatISTWithLocal(dataUpdatedAt)}` : 'Refresh'}
             className="p-2 bg-slate-800/60 hover:bg-slate-800 border border-slate-700/50 rounded-lg text-slate-400 transition-all">
@@ -185,7 +187,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800/50">
             <div>
               <h3 className="v1-title-card">Trade Candidates</h3>
-              <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">Ranked by composite quant score · click row for detail</p>
+              <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">Ranked by research score · click row for detail</p>
             </div>
             <span className="text-[9px] bg-slate-800 text-slate-300 font-bold px-2 py-0.5 rounded uppercase">
               Top {candidates.length}
@@ -364,16 +366,13 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
 
               {/* PCR + Sentiment */}
               <div className="grid grid-cols-2 gap-2">
-                <div className={cn(pcr != null && pcr > 1.2 ? 'v1-card-up' : pcr != null && pcr < 0.8 ? 'v1-card-down' : 'v1-card-neutral', 'p-3')}>
+                <div className="v1-card-neutral p-3">
                   <p className="text-[9px] font-bold text-slate-500 font-display uppercase tracking-wider">Put/Call Ratio</p>
-                  <p className={cn('text-lg font-black tabular-nums mt-0.5',
-                    pcr != null && pcr > 1.2 ? 'text-emerald-400'
-                    : pcr != null && pcr < 0.8 ? 'text-rose-400'
-                    : 'text-white')}>
+                  <p className="text-lg font-black tabular-nums mt-0.5 text-white">
                     {pcr != null ? fmt(pcr, 2) : '—'}
                   </p>
                   <p className="text-[9px] text-slate-500 mt-0.5">
-                    {pcr == null ? '' : pcr > 1.2 ? 'Contrarian Bull' : pcr < 0.8 ? 'Contrarian Bear' : 'Neutral'}
+                    {pcr == null ? '' : 'Context only; direction is not established'}
                   </p>
                 </div>
                 <div className={cn(sentimentScore != null && sentimentScore > 0 ? 'v1-card-up' : sentimentScore != null && sentimentScore < 0 ? 'v1-card-down' : 'v1-card-neutral', 'p-3')}>
@@ -569,23 +568,13 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                     })()}
                   </div>
 
-                  {/* Factor Bars */}
-                  {/* Fixed 2026-07-30 (Finding #97, full-stack audit): only "ML Win Prob"
-                      below is a validated backend score; the other 4 are ad hoc linear
-                      transforms invented client-side with no calibration
-                      (techSignalCount*25, 100-quantRank, 50+smartMoneyCr*5,
-                      50+newsSentiment*50) -- they used to render with equal visual weight,
-                      implying a validated 5-factor model backs this trade decision when it
-                      doesn't. Kept the same underlying values (a backend rewrite of these
-                      transforms is a separate, larger initiative) but now visually and
-                      textually distinguishes the one real model score from the 4 raw/
-                      derived heuristics per the audit's minimum-bar recommendation. */}
+                  {/* Research inputs are shown as counts or missing values, not invented factor scores. */}
                   <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3 space-y-2">
                     <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-wider">Factor Breakdown</p>
                     {[
                       { label: 'ML rank (percentile, not a win chance)', v: selectedCand.mlRankPct ?? null, text: mlRankLabel(selectedCand.mlRankPct) ?? '—', color: 'bg-indigo-500', isModel: true },
-                      { label: 'Technical Signals (derived)', v: Math.min(100, (selectedCand.techSignalCount ?? 0) * 25), color: 'bg-emerald-500', isModel: false },
-                      { label: 'Quant Rank (derived)', v: Math.max(0, 100 - (selectedCand.quantRank ?? 100)), color: 'bg-amber-500', isModel: false },
+                      { label: 'Technical signal count', v: null, text: selectedCand.techSignalCount == null ? '—' : String(selectedCand.techSignalCount), color: 'bg-emerald-500', isModel: false },
+                      { label: 'Quant rank', v: null, text: '—', color: 'bg-amber-500', isModel: false },
                       // null = no input for this desk (AF-20261026-49): render '—', never a bar at 50
                       { label: 'Smart Money (derived)', v: selectedCand.smartMoneyCr == null ? null : Math.min(100, Math.max(0, 50 + selectedCand.smartMoneyCr * 5)), color: 'bg-pink-500', isModel: false },
                       { label: 'News Sentiment (derived)', v: selectedCand.newsSentiment == null ? null : Math.min(100, Math.max(0, 50 + selectedCand.newsSentiment * 50)), color: 'bg-indigo-500', isModel: false },

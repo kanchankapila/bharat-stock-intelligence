@@ -12177,6 +12177,35 @@ separate from these local gates. No production stock data was copied or changed 
   screeners vanished once open positions counted). Also: ledger IDs cited in code before the row exists can be
   taken by a concurrent session (-55..-57 were); write the row first or re-check before committing.
 
+## 2026-10-27 — Earnings Preview: results strength forecastable, the price reaction is not
+
+- **Asked:** a results-season page showing which stocks look set for good results (all earnings, news and
+  analyst data), backtested against actual outcomes and improving over time.
+- **Sources reviewed:** 33 earnings-related tables plus options, news, insider and shareholding. Used and rejected
+  sources (with reasons) are recorded in AF-20261027-05 and on the page's Data sources tab.
+- **Built:**
+  - `earnings_preview.py` rebuilds every quarterly result since 2023-03 point-in-time. The event clock is the
+    first NSE broadcast; a broadcast after 15:30 IST reacts the next session.
+  - It scores the next 21 days of reporters and appends each call to `earnings_preview_snapshots` (new migration)
+    so it is graded against the result it preceded.
+  - Wiring: nightly in `ml-daily-ops`, DQ check `earnings-preview-freshness`, tRPC `getEarningsPreview` /
+    `getEarningsPreviewLog`, and the page `/earnings-preview` (Upcoming, Reported, Backtest & learning, Sources).
+- **Measured** (`measurement.md` 2026-10-27):
+  - ep-v1's pre-registered price primary failed (IC -0.013).
+  - The same inputs forecast reported PAT growth: equal-weight IC +0.24; walk-forward learned IC +0.41,
+    promoted by the pre-stated rule.
+  - The price reaction stays unforecastable. The 20d run-up lead goes to a forward test (AF-20261027-06).
+  - ep-v3, the same day: v2's live weights gave one-season analyst revisions 9-12%, so a feature now needs 3
+    closed seasons before it earns weight. Learned IC +0.392, still promoted. Protocol hashes are kept per version.
+  - The first scheduled run (ml-daily-ops, 2026-10-27 21:34 IST) logged 482 ep-v3 forecasts.
+- **Skill review installed:** five repo skills (`audit-loop`, `repo-doctor`, `e2e-lifecycle-check`,
+  `screener-combo-predictor`, `trade-desk`) gained "check the instrument first" rules: grader audit, zero-control
+  benchmark, power and deeper data before "no edge", the duplicated-tree tell, capture-preserving datasource fixes,
+  load-bearing bugs, and suite-failure attribution.
+- **Learned:** good results that the market could predict are already in the price, so "will report strongly"
+  and "will rise on results" need separate claims. A protocol that fails its primary gets a version bump with the
+  failure recorded inside it, never an in-place re-tune.
+
 ## 2026-10-27 (evening) — monthly factors re-run against a buyable index (NIFTY500)
 
 - **Deployed:** `npm run build` + `pm2 restart bharat-server` (08:57 IST, HTTP 200): nightly paper book, ROE/fundamentals fixes and the cockpit `newsSentiment: null` fix are live.
@@ -12194,3 +12223,11 @@ separate from these local gates. No production stock data was copied or changed 
 
 - **Observed live, read-only:** The production API returned TCS canonical score 62.36 with generated_at 2026-10-27T17:00:02Z and 329 OHLC bars. `/v7-stock/TCS` rendered no h1 and no v7 shell, exposing a blank saved deep link after the root's uncommitted v7 deletion (AF-20261028-02). This was real production data, with no response fixtures or interception.
 - **Changed in isolated branch:** Retired v7 page URLs redirect to active v1 destinations; a symbol link preserves the symbol through `/details?symbol=`. No v7 UI, dedicated shell or navigation was restored. Focused route-contract 5/5, TypeScript, production build and full Vitest 2,176/46 declared skips pass. Built-preview browser readback passed all seven redirects including encoded M&M, with zero v7 shells. The active live `/details?symbol=TCS` target rendered a TCS heading with no page error. Exact-head CI and live redirect readback remain pending for this follow-up.
+
+## 2026-10-28 - recommendation and stock-data honesty audit
+
+- **Observed:** On the sampled live cockpit response, six of 20 long plans had inverted stops, and 16 of 20 desk labels contradicted canonical Hold. The displayed A/D was a model-threshold ratio. Stock details could select incomplete same-day financial features. The Top Rated driver could name a zero-weight engine. AF-20261028-05 and -08 through -12 capture the source and production readbacks.
+- **Changed in the isolated review branch:** Withhold invalid long plans and unvalidated Top Rated allocations; use canonical action labels, label the desk score as research, abstain from its unverified trade switch, show actual provider breadth with age unavailable, remove unsupported PCR direction labels and component-driver claims, select completed technical grids and expose their date, and require both intraday feeds to be fresh before claiming live status. Fix the ranker cost-zero monitor without changing its sizing formula.
+- **Investigated:** An exploratory production-history sizing comparison used matched positive-sized buys, prior-session liquidity and ten non-overlapping five-session windows. It is low-data, excludes missing opens and is not a causal attribution; the read-only calculation is in `scripts/research_sizing_20261028.py`. No post-change forward windows were available. No score or weight was tuned from this sample (AF-20261028-06 and -07).
+- **Data integrity:** Full-suite warnings led to production read-only checks: 179 suspect zero closes in the most recent 253 observations across three symbols. Among other flagged bars, 8,499 positive closes were fabricated closed sessions, while 580 had other reasons in the past year. The on-demand institutional engine removes the known non-sessions, skips histories with invalid or other quarantined recent bars, and reports them without erasing rows owned by the separate canonical writer (AF-20261028-15). A read-only same-snapshot replay (`scripts/research_quant_quarantine_20261028.py`) withheld 80 previously eligible names; of 2,335 names in both versions, median absolute momentum-score change was 0.759 points and the old/new top-50 overlap was 44. This does not measure realized returns or full composite ranks. Deployment and historical-row provenance remain open.
+- **Verification and activation:** The full Python suite passed 3,947 tests with 269 opt-in live-datasource skips after the quarantine guard. Full Vitest passed 2,189 tests with 46 skips; TypeScript and the production build passed. An earlier full Vitest run had two timeouts; both passed separately, then the complete rerun passed with unchanged timeouts. Coordinated live readback remains pending; the user reserved the server restart.

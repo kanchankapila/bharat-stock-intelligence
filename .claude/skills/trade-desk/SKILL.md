@@ -171,6 +171,13 @@ fix fills or trade more liquid names; do not conclude the setup is dead.
 
 `report` refuses a verdict below ~40 trade dates. Respect that. Five green trades is what
 makes people size up, and it is statistically indistinguishable from nothing.
+Below that floor the honest label is LOW-DATA, not "the setup failed". Name the independent trade
+dates behind any verdict you quote.
+
+**Check the benchmark before trusting the excess.** The grading benchmark must give about zero for
+a group picked with no information: an equal-size random set of same-liquidity names on the same
+dates. Compare mean to mean and match the liquidity tier. Against an all-universe median, every
+liquid bucket once showed ~+27 bps from liquidity alone.
 
 **Kill switch:** if the 95% CI upper bound on realized excess is below zero, stop trading
 the setup and diagnose. `report` prints this as `STOP`.

@@ -411,6 +411,20 @@ network policy (AF-20260928-10), so no connector in this batch has seen a live r
 - Timeouts do not cancel async fixture writes. Batch the same private-schema dataset rather than
   weakening assertions or stock-test budgets; unfinished seeders can contaminate later cases.
 
+## 2026-10-27 — Earnings Preview (AF-20261027-05/-06)
+
+- Built `earnings_preview.py`, the `earnings_preview_snapshots` log (migration 20261027120000, applied), a nightly
+  ml-daily-ops step, DQ `earnings-preview-freshness`, edge.router `getEarningsPreview`/`getEarningsPreviewLog`, and
+  the `/earnings-preview` page. First persist: 372 forecasts as of the 2026-10-26 close.
+- Measured: ep-v1's pre-registered price primary failed (IC -0.013). Reported profit growth is forecastable
+  (learned walk-forward IC +0.41, promoted). The price reaction is not. The run-up lead is forward-only until
+  about 2027-02-20.
+- ep-v3 (live) requires 3 closed seasons per feature before it earns weight: learned IC +0.392. The first
+  nightly run logged 482 forecasts on 2026-10-27. Five repo skills gained the review's
+  instrument-first rules.
+- Concurrent session: the v7 deletions in the working tree are not this session's work. AF-20261025-29's
+  `findings:check` failure comes from them.
+
 ## 2026-10-26 — Approved dependency isolation
 
 - User approved a separate dependency-security batch, not a live install or service restart.

@@ -82,6 +82,31 @@ export const edgeRouter = router({
     };
   }),
 
+  // Results-season preview (earnings_preview.py, nightly in ml-daily-ops). Research only: not a ranking.
+  getEarningsPreview: publicProcedure.query(async () => {
+    const rows = await dbAll<{ key: string; value: string | null; asof: string | null }>(
+      `SELECT key, value, CAST("updatedAt" AS TEXT) AS asof FROM app_settings
+       WHERE key IN ('earnings_preview', 'earnings_preview_backtest')`);
+    const get = (k: string) => rows.find(r => r.key === k);
+    return {
+      live: parsePyJson<Record<string, any>>(get('earnings_preview')?.value),
+      liveAsOf: get('earnings_preview')?.asof ?? null,
+      backtest: parsePyJson<Record<string, any>>(get('earnings_preview_backtest')?.value),
+      backtestAsOf: get('earnings_preview_backtest')?.asof ?? null,
+    };
+  }),
+
+  // Every forecast logged for one company before its results, newest first: how the call moved as the date neared.
+  getEarningsPreviewLog: publicProcedure
+    .input(z.object({ symbol: z.string().min(1).max(32) }))
+    .query(async ({ input }) => dbAll<{ as_of_date: string; period_end: string; expected_date: string | null;
+                                       score: number | null; score_pct: number | null; decile: number | null;
+                                       n_features: number; model_version: string }>(
+      `SELECT CAST(as_of_date AS TEXT) AS as_of_date, CAST(period_end AS TEXT) AS period_end,
+              CAST(expected_date AS TEXT) AS expected_date, score, score_pct, decile, n_features, model_version
+       FROM earnings_preview_snapshots WHERE symbol = ? ORDER BY created_at DESC, as_of_date DESC LIMIT 60`,
+      [input.symbol.toUpperCase()])),
+
   getWhatChanged: publicProcedure.query(async () => {
     const latestRow = await dbGet<{ d: string | null }>('SELECT CAST(MAX(computed_at) AS TEXT) AS d FROM unified_recommendations');
     const latest = latestRow?.d ?? null;

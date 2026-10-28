@@ -17,7 +17,9 @@ interface ScoredStock {
   confidence?: number;
   classification?: string;
   top_domain?: string;
-  position_size_pct?: number;
+  position_size_pct?: number | null;
+  research_position_size_pct?: number | null;
+  position_sizing_status?: 'UNVALIDATED';
   adt_cr?: number | null;
   liquidity?: 'ok' | 'thin' | 'untradable' | null;
   positive_count?: number;
@@ -122,15 +124,15 @@ const RankingList: React.FC<{
                     <span className="text-[10px] font-black text-indigo-500/80 uppercase tracking-tighter bg-indigo-500/5 px-1.5 py-0.5 rounded italic">Driver: {stock.top_domain ?? 'Unknown'}</span>
                     {(stock.liquidity === 'thin' || stock.liquidity === 'untradable') && (
                       <span
-                        title={`~30-session average turnover ${stock.adt_cr != null ? stock.adt_cr.toFixed(2) : '?'} Rs cr/day. Measured: the ranking's edge is concentrated in names under Rs 10 cr/day, where entries are not reliably fillable.`}
+                        title={`~30-session average turnover ${stock.adt_cr != null ? stock.adt_cr.toFixed(2) : '?'} Rs cr/day. Thin turnover can make entries difficult to fill.`}
                         className={cn("text-[10px] font-black uppercase tracking-tighter px-1.5 py-0.5 rounded italic",
                           stock.liquidity === 'untradable' ? "text-rose-400 bg-rose-500/10" : "text-amber-400 bg-amber-500/10")}
                       >
                         {stock.liquidity === 'untradable' ? 'Not tradable' : 'Thin'}
                       </span>
                     )}
-                    {(stock.position_size_pct ?? 0) > 0 && (
-                      <span className="text-[10px] font-black text-emerald-400 uppercase tracking-tighter bg-emerald-500/10 px-1.5 py-0.5 rounded italic">Weight: {stock.position_size_pct!.toFixed(1)}%</span>
+                    {stock.position_sizing_status === 'UNVALIDATED' && (stock.research_position_size_pct ?? 0) > 0 && (
+                      <span title="The stored model allocation has not been validated against forward returns and costs." className="text-[10px] font-black text-amber-400 uppercase tracking-tighter bg-amber-500/10 px-1.5 py-0.5 rounded italic">Sizing unvalidated</span>
                     )}
                   </div>
                 </div>

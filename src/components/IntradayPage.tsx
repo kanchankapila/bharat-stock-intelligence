@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { intradayFeedsAreLive } from './intradayFreshness';
 import {
   Zap, TrendingUp, TrendingDown, Target, ShieldAlert, Gauge,
   ArrowUpDown, Search, Radio, Activity, Flame, ChevronRight,
@@ -77,13 +78,14 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
   const rows = (recsQ.data?.rows ?? []) as IntradayRec[];
   const breadth = (breadthQ.data?.breadth ?? null) as unknown as BreadthRow | null;
   const dailyRegime = breadthQ.data?.dailyRegime ?? null;
-  const intradayRegime = rows[0]?.intraday_regime ?? breadth?.risk_tilt ?? 'NEUTRAL';
+  const intradayRegime = rows[0]?.intraday_regime ?? breadth?.risk_tilt ?? null;
   const tilt = tiltOf(intradayRegime);
+  const knownTilt = intradayRegime != null && Object.prototype.hasOwnProperty.call(TILT, intradayRegime);
   // Both feeds run off intraday capture that can silently go stale (server restart, missed
   // cycle) with no other signal of that — don't badge "live" unless the data backs it up.
   const breadthStale = breadthQ.data ? breadthQ.data.isStale : false;
-  const recsStale = recsQ.data ? recsQ.data.isStale : false;
-  const isLive = !breadthStale && !recsStale;
+  const feedError = breadthQ.isError || recsQ.isError;
+  const isLive = intradayFeedsAreLive(breadthQ.data, recsQ.data, feedError);
 
   const filtered = useMemo(() => {
     let r = rows;
@@ -110,15 +112,15 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
                   <span className={cn('w-2 h-2 rounded-full animate-pulse', tilt.dot)} /> live
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 ml-2 text-amber-500" title="Breadth or ranking data is older than expected — showing the last available read.">
-                  <span className="w-2 h-2 rounded-full bg-amber-500" /> stale
+                <span className="inline-flex items-center gap-1.5 ml-2 text-amber-500" title="Breadth or ranking data is unavailable or older than expected.">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" /> {breadthQ.data && recsQ.data && !feedError ? 'stale' : 'unavailable'}
                   {recsQ.data?.ageMinutes != null && ` · rec ${recsQ.data.ageMinutes}m old`}
                 </span>
               )}
             </div>
             <div className="mt-3 flex items-end gap-4 flex-wrap">
               <h1 className={cn('text-5xl md:text-6xl font-black tracking-tight leading-none', tilt.text)}>
-                {tilt.label}
+                {knownTilt ? tilt.label : 'Unavailable'}
               </h1>
               <div className="pb-1.5 text-sm text-slate-400">
                 intraday regime nowcast
@@ -128,8 +130,8 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
               </div>
             </div>
             <p className="mt-3 max-w-xl text-sm text-slate-400 leading-relaxed">
-              A separate ranker over intraday-classified screeners and the breakout edge, gated by a
-              live breadth nowcast. Fully isolated from the positional book.
+              A separate ranker using intraday-classified screeners, breakout inputs and a breadth
+              nowcast. Its ranking is separate from the positional book; profitability is not established.
             </p>
           </div>
 

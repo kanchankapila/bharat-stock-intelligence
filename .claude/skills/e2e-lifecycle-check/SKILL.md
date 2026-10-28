@@ -47,6 +47,14 @@ useless in both directions.
 values. It says nothing about whether they predict anything — `unified_score`'s 5d rank IC is
 ~0.0001 (`.claude/rules/measurement.md`). Never cite a PASS here as evidence of accuracy.
 
+**When a stage reports an outcome or accuracy number, read the instrument before the number.**
+- The outcome/grading stages are graders. Confirm every label tier maps to a direction (both
+  `strong` tiers, not one) and that their buckets sum to the population.
+- Read an excess return only after the same benchmark gives about zero for the neutral bucket. A
+  mean-vs-median or all-universe benchmark manufactures "edge" for every bucket.
+- A null reading over a short panel is LOW-DATA (independent windows ≈ dates ÷ horizon), not "no
+  edge". Say which, and name a deeper table for the same measurement if one exists.
+
 ## What it covers (27 stages)
 
 Calls `unified_ranker.py`'s **own** getters rather than reimplementing their SQL (a test that
