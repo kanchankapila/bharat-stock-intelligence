@@ -24,7 +24,7 @@ interface ConfluenceSignal {
   trend_alignment_score: number;
   volume_score: number;
   sector_strength_score: number;
-  fundamental_score: number;
+  fundamental_score: number | null;
   ml_breakout_probability?: number;
   suggested_timeframe: string;
   entry_zone_low?: number;
@@ -84,7 +84,16 @@ function ScoreRing({ score }: { score: number }) {
 
 // ─── Factor Bar ──────────────────────────────────────────────────────────────
 
-function FactorBar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
+function FactorBar({ label, value, max, color }: { label: string; value: number | null; max: number; color: string }) {
+  if (value == null) {
+    // AF-20261026-71: no fundamentals on file is unknown, not a 0 reading.
+    return (
+      <div className="flex justify-between text-[10px]">
+        <span className="text-slate-400">{label}</span>
+        <span className="text-slate-500 font-data">—</span>
+      </div>
+    );
+  }
   const pct = Math.round((value / max) * 100);
   return (
     <div className="space-y-1">

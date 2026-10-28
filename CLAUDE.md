@@ -1,8 +1,8 @@
 # Bharat Stock Intelligence — Claude Instructions
 
 Real-time Indian stock market (NSE/BSE) research and decision-support platform. Express + tRPC
-backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, 320 non-test Python modules
-in `src/server/` (89 `*_fetcher.py` plus ML engines, jobs and helpers; 797 `.py` files including tests).
+backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, 321 non-test Python modules
+in `src/server/` (89 `*_fetcher.py` plus ML engines, jobs and helpers; 802 `.py` files including tests).
 
 **What the product is for, and the contracts a change must preserve: `CONTEXT.md`.** This file is the
 operating manual (rules, checks, workflow). `AGENTS.md` is only the inventory of skills, commands,
@@ -75,7 +75,9 @@ A finding may stay **open** only for one of these reasons, stated in its row:
   1. Query the discovery registry first: `market_endpoint_registry` in Postgres (`bharat_intel` on `:5433`,
      3,408 endpoints: 2,864 GET / 544 POST; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`).
   2. The consolidated catalog `url_endpoints` (834 templates): `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server`.
-  3. The raw corpus `unique_urls.txt` / `urls_v2.db` (3,103 URLs) in the repo root.
+  3. If present, inspect the optional local raw URL corpus `urls_v2.db` (SQLite: `url_catalog`, `url_data`).
+     It is gitignored and absent from fresh checkouts. The older flat list was deleted 2026-10-23
+     (`c2ceae0e`); with full Git history, read it using `git show c2ceae0e^:unique_urls.txt`.
   4. Grep the repo for sibling endpoints and probe route by route with the MINIMUM headers (start from none — adding a token can lower access).
   5. Only then ask the user, with the per-route breakdown and alternates ruled in or out — never "this vendor is dead".
 - **Depends on an earlier fix** — genuinely sequential; name the blocking row.
@@ -172,9 +174,7 @@ db/schema.postgres.sql   schema of record, generated from live (`npm run schema:
 Component, procedure and table inventories are deliberately **not** listed — they rot. Grep the source.
 v1 (`src/v1/V1Routes.tsx`) is the only legacy route tree. A reference to "six dashboards", `dashboardVersion` or a shell
 name (`V2AppShell`, `V6Shell`) is stale; a fix lands in v1 or it does not ship. A second, newer terminal, TALA
-(`src/tala/`, mounted at `/tala/*` in `src/main.tsx`), also exists. The user explicitly approved retaining
-the existing v7 Pro routes (`/v7-*`, `src/components/v7/`) on 2026-10-25; these are mounted in v1's route tree
-with their own shell, not a new ranking authority. Do not add another surface. **Before editing a component, confirm a
+(`src/tala/`, mounted at `/tala/*` in `src/main.tsx`), also exists. The user directed retirement of the v7 Pro UI and component tree on 2026-10-27. Only redirect aliases for saved `/v7-*` URLs remain in v1; they lead to active v1 pages. Do not add another surface. **Before editing a component, confirm a
 route renders it** (grep its import): `BuyRecommendationsPage.tsx` is imported by nothing, and honesty fixes landed there on
 2026-10-08 that no user could see.
 

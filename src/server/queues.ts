@@ -1358,6 +1358,12 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   await runPython('accuracy_scorecard.py', ['--persist'], 10 * 60_000)
     .catch(e => T.fail('accuracy_scorecard', e));
 
+  // Frozen paper book (2026-10-27, AF-20261026-73): trades the ranking as a 10-name low-turnover long book
+  // after costs and grades it against 200 random books with the same mechanics. Same contract as the
+  // forward test (one app_settings snapshot, exits 2 on protocol drift); watched by `paper-book-freshness`.
+  await runPython('paper_book.py', ['--persist'], 10 * 60_000)
+    .catch(e => T.fail('paper_book', e));
+
   // Archive-only baseline observations cannot supply past consensus revisions.
   // This shadow report starts from actual receipt times and never changes a trading score.
   await runPython('earnings_revision_shadow.py', ['--persist'], 2 * 60_000)
@@ -1701,6 +1707,20 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; sk
      '--scores', 'unified_score,screener_stock_score,ml_score,confluence_score,technical_score,dl_score,cs_score,breakout_score,smart_money_score',
      '--horizons', '5,10,21', '--by-regime', '--persist'], 15 * 60_000)
     .catch(e => T.fail('factor_edge (unified engines)', e));
+  // AF-20261026-46: the run above dates each ranking by computed_at -- the ENTRY session it is for
+  // -- so its entry lands one session late (measurement.md), it uses close entry, and it never
+  // grades 1 session, the horizon the pre-open/intraday surfaces act on. This run dates by
+  // generated_at (factor_edge converts it to the IST evening it was produced), enters at the next
+  // session's open, adds h=1, and persists under its own table_name
+  // ('unified_recommendations__open_entry__generated_at') so the two conventions never share a
+  // history. Both run side by side until ~10 sessions confirm the 5/10/21 readings agree within
+  // noise; only then retire the computed_at run above.
+  await runPython('factor_edge.py',
+    ['--table', 'unified_recommendations', '--date-col', 'generated_at', '--entry', 'open',
+     '--history-label', 'generated_at',
+     '--scores', 'unified_score,ml_score,confluence_score,technical_score,breakout_score',
+     '--horizons', '1,5,10,21', '--by-regime', '--persist'], 15 * 60_000)
+    .catch(e => T.fail('factor_edge (unified engines, generated_at open entry)', e));
 
   // Equal-weight cross-sectional composite of the 6 raw engines -> engine_composite_scores.
   // Persisted so it ACCUMULATES and can be graded honestly; graded immediately below.

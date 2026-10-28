@@ -89,11 +89,167 @@ Full incident narrative and investigation detail behind every claim below:
 used to sit at the top of this file was moved there on 2026-09-04, verbatim — nothing was deleted,
 only relocated, so a fact missing here is one line away in history, not lost).
 
-## Snapshot — every line below re-verified live on 2026-09-10
+## Snapshot — re-verified live 2026-09-10; partial live refresh 2026-10-26 (first subsection)
 
 This section is a dated status board, not a verdict list. A claim carrying an older date elsewhere
 in this file is not wrong, it is *unrefreshed* — check the date before quoting it, and re-run
 rather than assume. Full narrative for anything here: `docs/measurement-history.md`.
+
+### 2026-10-26 — ranker re-graded on 41 post-change dates; `breakout` zeroed; stale claims corrected
+
+Panel: every `unified_recommendations` run 2026-08-10..10-15 (41 dates, ~2,030 names/date), **dated by
+`generated_at` in IST** and graded on the NEXT session it could be acted on. Reproduce with
+`scripts/measure_blend_arms.py` (read-only). h=1 dates are independent; 5-session t uses every 5th date.
+
+**Component rank IC, next-session open-to-close (o2c) / open-to-open (o2o, the `factor_edge --entry open`
+convention):**
+
+| engine | o2c IC | t | positive | o2o IC | live weight |
+|---|---|---|---|---|---|
+| `technical_score` | +0.0335 | +6.61 | 37/41 | — | yes |
+| `confluence_score` | +0.0428 | +3.60 | 32/41 | — | yes |
+| `ml_score` | +0.0287 | +2.74 | 24/37 | — | yes (gated to neutral by calibration) |
+| **`breakout_score`** | **-0.0346** | **-2.92** | **12/41** | -0.0110 (t -0.93) | **was 0.05-0.15 -> now 0.0** |
+| `screener_stock_score` | +0.0331 | +5.60 | 34/41 | — | 0.0 (re-adding it was tested and adds nothing; not changed) |
+| `fundamental_score` | +0.0232 | +3.89 | 29/41 | — | not an engine |
+| `dl_score` / `smart_money` / `cs` | +0.001 / -0.005 / -0.038 | — | — | — | 0.0 |
+
+**`breakout` ZEROED (AF-20261026-44).** Its weight rested only on the classifier's own purged-OOF AUC
+(0.61; `model_registry` still records 0.68-0.70 on every 2026-10 retrain) for a ">=6% up-move" label — a
+volatility label, the "AUC can be excellent and useless" class. Replay on identical rows (blend_walkforward's
+exact `_normalize_to_100` / `_blend` mirrors; post-blend vetoes not replayed, BASE-vs-stored rank corr 0.60),
+paired per-date IC delta of the new weights over the old, pre-registered to count only if positive in BOTH halves:
+
+| return | all | t | better | 1st half | 2nd half | liquid (ADT >= Rs 1 cr) |
+|---|---|---|---|---|---|---|
+| next-session o2c | +0.0073 | +4.86 | 33/41 | +0.0088 (17/20) | +0.0059 (16/21) | +0.0093, t +4.27 |
+| next-session o2o | +0.0026 | +1.80 | 24/41 | +0.0027 (12/20) | +0.0025 (12/21) | +0.0045, t +2.13 |
+| 5-session hold | +0.0051 | +1.91 | 29/41 | +0.0047 | +0.0055 | +0.0059 |
+
+Positive under every return definition, in both halves, and in every regime that occurred (BEAR 8/10,
+HIGH_VOL 4/4, SIDEWAYS 21/27). **Size it honestly: strong only on open-to-close (t 4.9); modest on the
+canonical harness's open-to-open (t 1.8).** BULL and CRASH never occurred in the panel — their removal is
+extrapolated. Score sd 14.5 -> 14.7, so the 70/80/30/20 class thresholds were NOT retuned. Top-decile mean
+excess -1.3bps (t -0.45) at 1 session, -16.9bps (t -0.85, 9 windows) at 5: not significant.
+**Population boundary: rows generated from the 2026-10-26 evening run onward carry no breakout contribution —
+never pool them with earlier rows.**
+
+**Canonical harness, same panel (`factor_edge.py --date-col computed_at --entry open`, run 2026-10-26, not
+persisted):** `unified_score` 1d +0.017/0.508 (48 dates, "no edge" by the AUC >= 0.55 bar), 5d +0.036/0.517
+(eff 8.8, LOW-DATA); `breakout_score` 1d **-0.018**, 5d **-0.009**. Same signs as above, smaller
+magnitudes — mostly the return definition (open-to-open adds the next night's gap). By this file's own
+verdict rule the ranker is still **"no edge"**: the rank IC is real, the hit-AUC stalls at ~0.51 (the
+"IC-real-but-AUC-stalls" shape below). Do not quote t 6.3 without that sentence.
+
+**Same panel, evening of 2026-10-26 — three follow-ups (AF-20261026-50..52), none changes a weight.**
+- **`technical` is sparse, not broken: keep it.** `technical_signals.signal_score` is 0 on 92-99% of rows
+  since July (the table became a full-universe feature table; non-zero = `detectSignals()` found a pattern),
+  so 94% of names tie at `technical_score` 47.5 on a ranker run. It is still the most consistent component:
+  o2c1 IC **+0.034, t +6.8, positive 38/42**. Zeroing it (`measure_blend_arms.py --drop technical`) makes the
+  blend WORSE: o2c1 delta -0.0041 (t -3.65), negative in both halves. Do not "fix" the ties.
+- **`screener` back at 0.10 (pre-registered single arm): passes the letter, fails on size.** o2c1 delta
+  **+0.0022** (t 3.07; 1st half +0.0016, 2nd +0.0028), r5 -0.0003 (t +0.40), o2o1 -0.0004. A +0.002 IC gain
+  confined to the next-session open-to-close, nothing at the 5-session hold the labels are used on, is not
+  worth a weight change. The 2026-08-30 zeroing stands.
+- **Concall tone (`concall_takeaways`, 475 events, 34 entry dates, entry = next open after the takeaway was
+  generated): NO EDGE.** Confident minus not-confident excess +0.08% at 1 session (t 0.40), +0.35% at 5
+  (t 0.83), sign flips between halves. Against the universe MEDIAN both groups read +0.1-0.7% — the
+  median-benchmark trap again; against the mean they are ~0.
+
+**Two input-logic corrections, each replayed point-in-time on the same 42-date panel before shipping (rule
+written first: ship unless the paired IC delta has t <= -2 in either half at o2c1 or r5).**
+- **Confluence fundamental overlay (AF-20261026-71):** missing fields scored as bad, and a missing D/E
+  earned the +2 low-debt bonus (`null < 0.5` is true in JS: 335 names vs 108 with a real low D/E). Fixed to
+  score present fields only, rescaled to 0-12, NULL when none (ranker imputes the median, AF-20261026-70).
+  NEW minus OLD on the same fundamentals snapshot: every delta within +/-0.002, no half reaches t -2
+  (o2c1 +0.0007, r5 +0.0009). Rebuilt input matches the stored one at rank corr 0.946. Neutral: shipped.
+- **ROE quality-gate fallback (AF-20261008-15):** the gate saw ROE for 318 names; the investsights
+  fallback fills 1,874 and adds the x0.8 negative-ROE demotion for ~226. Point-in-time
+  (`quant_scores_history`, investsights by `fetched_date`): no half below t -2; second half (full
+  coverage) helps everywhere, r5 liquid +0.0026 (t +3.00, better 20/21). Default flipped ON.
+
+**"Would following it as a trade have paid?" — 2026-10-26 (AF-20261026-72). Entry always AFTER the signal
+was visible, costs 0.32% delivery / 0.18% intraday, excess vs an equal-weight liquid basket over the same
+window.** Every source graded here loses or is unproven as a mechanical trade:
+- **Screener appearance -> exit (`screener_appearances`, 1.75M episodes, May-Oct).** 24% vanish before the
+  next open (untradeable). Liquid closed trades: median hold 1 session, net -0.50%, win 38%, excess -0.41%
+  (t -16, both halves). Bullish screeners lose MORE than bearish (Trendlyne -0.47% vs -0.33%). With ALL
+  trades counted (open ones marked at the last close): of 1,078 screeners, **0 reliably profitable, 136
+  reliably losing** (Bonferroni |t| >= 4.07 and same sign in both halves). Screeners flag a move after it
+  happened.
+- **TRAP, hit here: exit-on-signal-loss + closed-trades-only = survivorship.** "Sell when it leaves the
+  screener" closes winners (an upside screen drops a name when its price rises) and leaves losers open.
+  Closed-only, four Trendlyne Forecaster screens looked like real winners (t 4.4-6.2, both halves); with
+  open positions included "High upside potential by Forecaster" fell from +3.32% (t 6.15) to +0.96%
+  (t 1.2) and "Consensus Upside" from +0.89% (t 5.1) to -0.46% (t -2.0). Any exit rule driven by the signal
+  itself must be graded on ALL entries, open ones marked to market.
+- **Analyst consensus target upside as a factor (`feature_store.analyst_target_upside_pct`, 68 dates,
+  liquid): NEGATIVE.** o2c1 IC -0.023 (t -2.7), r5 -0.043, r20 -0.068 (4 eff dates); unchanged after
+  removing trailing 5d/21d return (o2c1 -0.030, t -3.9). corr(upside, trailing 21d return) = -0.36.
+- **MoneyControl broker BUY calls (`mc_broker_reco`, 1,790, entry after MC posts them):** 20-session excess
+  -1.22% (t -2.6), 60-session -1.27%, target hit within 60 sessions 21%; every broker with n >= 40 negative.
+- **MoneyControl chart patterns (`mc_chart_patterns`, 274 with dates and levels, daily bars, stop-first on
+  an ambiguous day):** 185 stops vs 26 targets, win 17%, net -2.34% (t -10), excess -1.51% (t -6); every
+  timeframe and pattern type with n >= 15 negative.
+- **ET Calls (ET precos API, 616 closed calls, NOT stored anywhere locally).** ET's arithmetic is honest
+  (claimed % = ours on every call; 95% of BUY/EXIT prices inside that day's range), but 17% of intraday
+  BUY prices were not available in the 15m bar at/after publication. At ET's prices: +0.89%/call (t 3.3).
+  As a READER entering after publication: median -0.12%, win 47%, halves +1.75% / -0.47% — no reliable
+  edge. Jyoti Budhia +0.41% -> -0.03% (slippage eats it); Foram Chheda -0.72%; DSIJ +6.4% mean but median
+  +1.5%, n=48, driven by a few 50-210-day holds in a rising tape.
+
+**Toward a book that makes money after costs — 2026-10-27 (AF-20261026-73).**
+- **Futures carry over 2021-01..2024-07 (`stock_option_features_history`, 788 dates, 163 names; pre-registered,
+  direction fixed from 2026).** TRAP first: that table's `spot_proxy` is DERIVED from the future
+  (`F * exp(-rT)`, `nse_fo_bhav_history_fetcher.py`), so `forward / spot_proxy` is a constant 6.5%
+  annualised; carry must use the `stock_ohlcv` close. Result: next-session open-to-close IC **+0.022, t +5.7
+  on 779 independent dates, positive every year** — real, and it matches 2026. But the pre-registered
+  long-only book FAILS: top quintile, 5/10/21-session holds, excess -0.11% / -0.27% / +0.09% per period
+  (73-77% turnover). Sized: top quintile beats the F&O universe by +3.2 bps/day gross, long-short +7.7 bps/day
+  (t 3.9), against ~20 bps per futures round trip (`indian_market_costs`, STT 0.05% post Finance Act 2026).
+  **Real and untradeable at retail cost.** Do not wire it as a standalone trade.
+- **Capitulation triple, re-checked at 0.183% intraday cost (was validated at 0.15%):** full history
+  +0.47%/day, t 3.32 (ADTV >= Rs5cr), but **2026 YTD -0.14%/day (win 38%), out-of-sample since 2026-08-21
+  -0.02%/day, and at ADTV >= Rs25cr zero over the whole history (+0.01%/day)**. The edge was a 2021, small-cap
+  phenomenon. Not currently tradeable; `trade-desk/references/edge-inventory.md` updated.
+- **Selective long book on the ranking (`paper_book.py`, protocol frozen 2026-10-27 00:00 IST, hash
+  a0dcc6ca6fd1cef2).** 10 names, enter top 2% liquid, exit below top 25% (or 21 sessions unless still top),
+  16 bps/side, graded against 200 sticky-random books with identical mechanics. Retrospective 51 sessions
+  (NOT evidence): reblend_no_ml +8.98% excess, beats 96% of random books, halves +0.66%/+8.32%; published
+  +0.89%, beats 66%. A 10-name random book ranged -3.8%..+7.4% over the same window, which is why only the
+  forward block decides. PROVEN requires >= 60 forward sessions, above the null's 95th percentile, both
+  halves positive — earliest possible ~2027-01-22.
+
+**What each label earns (excess vs the SAME-DAY, SAME-LIQUIDITY-DECILE MEAN, direction-signed).** Two traps
+were hit computing this and both are now named: an all-universe benchmark credits every liquid name ~+27bps
+(liquid beat illiquid in this window), and a MEDIAN benchmark makes any large bucket "win" on 40/41 days
+because returns are right-skewed — use the tier MEAN.
+
+| label | next session | 5 sessions | t (5s) | median cost | 5s net of cost |
+|---|---|---|---|---|---|
+| Strong Buy | +3.1bps | +17.8bps | +0.33 | 37bps | **-18.8** |
+| **Buy** | +6.1bps | **+77.7bps** | **+3.48** | 38bps | **+39.6** (but liquid >= Rs 10 cr: +19.0 gross, below cost) |
+| Hold | +1.9bps | +6.9bps | +1.42 | 48bps | -41.0 |
+| Sell (short) | +6.9bps | +41.4bps | +3.57 | 47bps | -5.4 |
+| Strong Sell (short) | +9.0bps | +24.2bps | +1.15 | 66bps | -41.3 |
+
+- **No label clears costs as a one-session trade.** Only **Buy at a 5-session hold** clears its estimated
+  cost, and mostly in less-liquid names.
+- **Strong Buy is not demonstrably better than Buy** (paired: -6.1bps t -0.38 at 1 session; -36.7bps
+  t -0.94 at 5). The higher label earns no extra confidence. EVIDENCE, not acted on — a threshold change
+  measured on the same 41 days as the weight change would be stacking two fits on one sample.
+- **Short calls are directionally right but not tradeable as stated:** Sell beats costs by -5.4bps net, and
+  Strong Sell's median ADT is Rs 0.76 cr — mostly names that cannot be shorted in the cash market.
+
+**Stale claims corrected the same day (each marked in place below):** the "clean post-change panel
+completes 2026-09-28" forecast (elapsed — 41 dates now); "DL nothing registered since 09-20" (weekly
+retrains resumed, none promoted); the 8 `dl_model_performance` sentinel rows (0 left); the analyst-revision
+trio "must not be graded yet, ~2026-10" (graded today: no edge); `factor_edge_history` freshness (and the
+sweep never grades h=1); the `movement_probability` line that contradicted its own graded verdict; and
+"`confluence` carries the ranker and it is not close" (technical is as strong and more consistent at h=1).
+**Harness defect found:** `blend_walkforward.py` and the daily sweep date `unified_recommendations` by
+`computed_at` — this file's own documented one-session trap. It enters a session late (conservative, not a
+leak) and grades a different trade than the live one. Its prior verdicts stand as "measured one session late".
 
 ### 2026-10-25 — the five open EVIDENCE items measured (AF-20261021-02/-03/-04/-08/-09); four refuted their own hypothesis
 
@@ -510,7 +666,7 @@ post-reclass 8→14) plus one NEW finding: most `job_heartbeat` rows are registe
   (24 dates, re-counted live 2026-09-10) but the cs/smart_money zeroing landed 2026-08-31, so only
   **8** of those dates were generated under today's weights; a clean post-change panel needs ~12
   more sessions (**19 of them now exist — live count 2026-09-27, so the clean post-change panel
-  completes 2026-09-28**); (3) ~~no cost-aware `factor_backtest.py` pass has ever been run on
+  completes 2026-09-28** — ELAPSED: by 2026-10-26 there are 41 gradeable post-change dates, see the 2026-10-26 subsection); (3) ~~no cost-aware `factor_backtest.py` pass has ever been run on
   `unified_score`.~~ **FIRST PASS TAKEN 2026-09-27 — see "The ranker, cost-aware" below.**
   An IC of 0.05 is not money — `win_probability` had a real IC too and
   still failed at 83.4% turnover.
@@ -581,12 +737,12 @@ because `run_backtest()` only accepts factors computed from the `stock_ohlcv` pa
   (re-verified live 2026-09-30, `model_registry` `model_type='deep_learning'`, 15d horizon):
   `cv_roc_auc` 0.5057 (09-12 10:32), **0.5177 (09-12 20:59, the `is_active=1` row)**, 0.5119
   (09-13), 0.5208 (09-20); the held-out series in `dl_model_performance` (lstm_v4/v6) matches.
-  Nothing has registered since 09-20: `dl-trainer` failed 3× on 2026-09-28/29 (AF-20260927-20,
+  **WAS ->** nothing had registered since 09-20 (live 2026-10-26: weekly retrains resumed, registered 10-04/11/18/25 at cv 0.5182/0.5145/0.5262/0.5223, none promoted; the 2026-09-12 v5 row at 0.5177 is still `is_active=1`, so the range below stands). Earlier: `dl-trainer` failed 3× on 2026-09-28/29 (AF-20260927-20,
   AF-20260929-01). Quote DL as "~0.51-0.52 purged-CV AUC, i.e. no demonstrated edge" — never
   any pre-09-10 figure in `dl_model_config.json`, and never a CV AUC as forward-return evidence
   (`ml-model-bugs.md`). `dl` ranker weight stays PAUSED at 0.0 (AF-20260913-05).
   ⚠ 8 `dl_model_performance` rows (ids 77..186, 2026-08-24..09-09, `model_version='current'`)
-  still carry the test sentinel `roc_auc=0.58 / directional_accuracy=0.55` — AF-20260930-01.
+  still carry the test sentinel `roc_auc=0.58 / directional_accuracy=0.55` — AF-20260930-01. **RESOLVED by 2026-10-26: 0 rows match that sentinel pair live.**
 - **Engine dispersion now PASSES at 0% collapse — the "ml 80%, WARN" story is retired.**
   `dq:check`'s `ur-engine-dispersion-collapse` reads live: *"ml 0%, dl 0%, technical 0% of last 10
   dates (baseline 2026-08-22: dl 39%, ml 34%, technical 18%)"*, status **pass**.
@@ -622,18 +778,18 @@ because `run_backtest()` only accepts factors computed from the `stock_ohlcv` pa
   `eps_revision_3m_pct` 2,288 rows, `target_revision_3m_pct` 3,065, `analyst_count_chg` 3,116,
   spanning 2026-09-07..2026-09-10 across **3 distinct dates**. The 2026-09-05 prediction ("the
   first real rows land Monday 2026-09-08") held exactly. **Still ungraded, and must not be graded
-  yet** — ~20 dates are needed, so ~2026-10.
+  yet** — ~20 dates are needed, so ~2026-10. **GRADED 2026-10-26 (32 dates in the table, 30 gradeable at 1d; `factor_edge.py --entry open`, not persisted): NO EDGE** — 1d rank_IC/AUC `eps_revision_3m_pct` +0.012/0.509, `target_revision_3m_pct` +0.000/0.503, `analyst_count_chg` +0.004/0.504; 5d/10d LOW-DATA (eff 5.2/2.1) and flat-to-negative; `eps_revision_3m_pct`'s top-50 LOSES to the universe mean at every horizon (median-beater).
 - **`movement_probability` and `stock_futures_oi_history` are no longer "under the floor" —
   both graded.** movement_probability: 2026-09-11 open-entry, **no edge** (see the Snapshot
   bullet above; WAS -> "15 dates, neither gradeable yet"). OI history: **21 dates** as of
   2026-09-20, graded 2026-09-19 — `basis` 1d +0.139/0.565 is the lead reading (see Snapshot).
 - **`screener_momentum_score`'s post-reclassification panel is at 14 dates** (WAS -> 8 on
-  2026-09-10, ~4 on 2026-09-04). Still under the 20-date floor; clears ~2026-09-29/10-06 —
+  2026-09-10, ~4 on 2026-09-04). Still under the 20-date floor; clears ~2026-09-29/10-06 (ELAPSED 2026-10-26: not re-graded since 2026-09-11 — gradeable now, re-run `factor_edge.py`) —
   genuinely calendar-blocked, not neglected.
 
 ### Harness state
 
-- **`factor_edge_history` is fresh:** latest `run_at` **2026-09-19T12:17 IST** (WAS ->
+- **`factor_edge_history` is fresh:** (live 2026-10-26: latest `run_at` **2026-10-24T12:48**, **4,602 rows across 14 tables**, 37 run-days. The sweep grades `unified_recommendations` at **5/10/21 only, close entry, dated by `computed_at`** — the 1-session horizon has never been graded on a schedule; the only 1d rows are a manual 2026-08-29 run under the old weights. Older figures follow.) latest `run_at` **2026-09-19T12:17 IST** (WAS ->
   2026-09-10T18:59) — now **3,022 rows across 12 distinct `table_name` values** (WAS -> 1,571/11).
   The 2026-09-19 12:15–12:17 run is an **automated daily sweep** (it graded
   `stock_futures_oi_history` for the first time and refreshed all `unified_recommendations`
@@ -758,7 +914,7 @@ Any cross-sectional forward-return measurement on this data:
 - **`ml_breakout_probability`** (a sub-engine feeding `confluence_ml_engine.py`, native label = `signal_outcomes` WIN/LOSS h=7) clears `USABLE` outright — IC +0.082, AUC 0.553, n=44 dates (**last read 2026-08-29**). The strongest previously-ungraded result measured on this platform; has zero downstream readers today (advisory only), and has not yet had the cost-aware `factor_backtest.py` follow-up `win_probability` got. **The +0.082/0.553 figure is a NATIVE-LABEL reading and has NOT been refreshed since 2026-08-29.** A separate 2026-09-10 grading against the generic forward-return grid (`--entry open`, persisted — newly possible only because `factor_edge.py` could not read this table's `timestamptz` date column until that day's fix) reads **no edge at every horizon**: 5d +0.044/0.524 (48 dates), 10d +0.056/0.533 (43 dates), 21d +0.059/0.542 (32 dates), on a population that has grown to 73 dates / 5.88M rows. **These two readings do not contradict each other — they grade different targets**, and this file's own history records that grading an engine against the generic grid instead of its native label was the original first-pass mistake. The honest summary is: USABLE against its own label as of 2026-08-29, no edge against forward returns as of 2026-09-10.
 - **`breakout_probability`** (native label = fwd-10d max return ≥ +6%) reads IC +0.153/AUC 0.583 at 19 dates against that native label (**last read 2026-08-29, still not refreshed**) — one date short of `MIN_DATES_RELIABLE` at the time. **Graded against the generic forward-return grid on 2026-09-10** (`--entry open`, persisted) it is now well-powered and reads **no edge**: 5d +0.001/0.505 (39 dates), 10d +0.023/0.506 (34 dates), 21d +0.024/0.516 (23 dates). Same caveat as `ml_breakout_probability` directly above — the native-label and generic-grid numbers measure different targets and neither refutes the other; what can be said is that nothing about this column predicts plain forward returns.
 - **`breakout_classifier.py`'s feature set was extended with delivery/sector/options candidates and measured live 2026-09-02** — both testable candidates came back null, so `FEATURE_COLS` was left unchanged (still the original 22). Sector-relative return moved purged-OOF AUC 0.6130→0.6131 and held-out test AUC 0.6399→0.6402 — noise. Delivery% moved OOF AUC not at all. Options OI was judged too sparse to measure. Reproducible via `--sector-ablation`/`--delivery-ablation` if the universe/regime mix changes materially.
-- **`movement_probability`** had a real train/serve-skew bug (fixed 2026-08-20; every value written before that date is tainted). Post-fix population: **15 dates as of 2026-09-10** (was ~11 on 2026-09-04, 7 on 2026-08-29), spanning 2026-08-20..2026-09-09 — still under the ~20-date floor, so still not gradeable. Re-check the exact count with a fresh join once you are about to grade it; the count above is a distinct-date read on the post-fix window, not the canonical harness's own matched-date output, which will be lower.
+- **`movement_probability`** had a real train/serve-skew bug (fixed 2026-08-20; every value written before that date is tainted). Post-fix population: **15 dates as of 2026-09-10** (was ~11 on 2026-09-04, 7 on 2026-08-29), spanning 2026-08-20..2026-09-09 — still under the ~20-date floor, so still not gradeable. **SUPERSEDED — this contradicted the Populations section: `movement_probability` WAS graded 2026-09-11 (open entry), NO EDGE. Quote that verdict, not this count.** Re-check the exact count with a fresh join once you are about to grade it; the count above is a distinct-date read on the post-fix window, not the canonical harness's own matched-date output, which will be lower.
 - **The IC-real-but-AUC-stalls-near-0.52 shape recurs across 7+ architecturally unrelated engines** (`win_probability`, `cs_score`, `ml_breakout_probability`, `prob_up_5d`@15d, the confluence composite, `engine_composite_scores`). Tested directly (Gaussian-copula simulation matched to each engine's measured IC): for most horizons the measured AUC is exactly what that IC mechanically implies — this is a property of the correlation magnitude at this sample size, not a fixable measurement artifact. Raising it needs IC ≥ ~0.15, not a better classifier or a different AUC threshold. The engines really are independent (max pairwise Spearman rho 0.29 on a z-scored panel) — the shared ceiling is not redundancy.
 - **`_blend` normalizes all 8 engines onto the same 0–100 scale before averaging** (fixed 2026-08-22). `ZERO_DISPERSION_MIN_SD = 5.0` is calibrated for this 0–100 scale only — applying it to a raw 0–1 probability column (e.g. `win_probability`) will read nearly every engine as collapsed; this has already produced one confidently-wrong ablation result. **There is now also a per-engine override, `ZERO_DISPERSION_MIN_SD_BY_ENGINE = {"ml": 3.0}` (`unified_ranker.py:562`, read live 2026-09-10), which this file had never recorded** — so the global 5.0 is NOT the bar that applies to `ml`. Quoting 5.0 for `ml` inverts the verdict: ml's per-date sd over the last 10 ranker dates is 3.217-4.647, i.e. 10/10 collapsed at 5.0 and 0/10 at the live 3.0.
 - **`calibrated_win_probability`'s 2–7 distinct-value collapse on days when the day's raw `win_probability` spread lands inside one isotonic step is NOT a defect — do not "fix" it.** Tested directly: tie-breaking within a collapsed band to restore raw ordering costs 23% of h=5 IC for +0.007 at h=21 — the collapse is the isotonic fit correctly discarding within-band ordering that doesn't predict at 5d. Monitored by `ur-engine-dispersion-collapse` (**warn >= 75%, fail >= 90%** — the "warns 60%/fails 80%" this line used to quote was itself the stale `dataQualityChecks.ts` comment corrected on 2026-09-05, contradicted three sentences later in this very bullet) and `ur-engine-score-zero-not-null`. **Last read 2026-08-29**: `ml`'s collapse rate over the last 10 ranker dates was 80%, and `dq:check` reported WARN not FAIL. **Resolved 2026-09-05 — there was no discrepancy to chase:** the 80% "documented fail threshold" came from a STALE COMMENT in `dataQualityChecks.ts` (it claimed warn 60 / fail 80); `evaluate()` has always used **warn >= 75%, fail >= 90%**, so WARN at 80% was correct behaviour. The comment has been corrected; the code was deliberately left alone, since this same file establishes that `ml`'s collapse is the isotonic fit working as intended and must not be "fixed". **SUPERSEDED 2026-09-10 — the check now PASSES at 0%.** Live read: *"ml 0%, dl 0%, technical 0% of last 10 dates (baseline 2026-08-22: dl 39%, ml 34%, technical 18%)"*, status `pass`. The change is not a change in ml's behaviour but in the bar applied to it — the per-engine `ZERO_DISPERSION_MIN_SD_BY_ENGINE = {"ml": 3.0}` override (see `_blend` entry above). ml's measured sd is 3.217-4.647, unchanged in character from the 2026-09-05 read; only the threshold moved. The substantive finding — that the banding is the isotonic fit working as intended and must not be "fixed" — is unaffected.
@@ -806,14 +962,14 @@ Any cross-sectional forward-return measurement on this data:
   grows with horizon. Regime split (2026-09-19 sweep + prior runs): SIDEWAYS and HIGH_VOL
   positive at all horizons (HIGH_VOL 21d +0.173/0.590 on 5 dates), BEAR negative at all
   horizons (5d -0.191, 10d -0.144, 21d -0.111 — LOW-DATA). No reweighting conclusion.
-- **MEASURED 2026-09-10 — all four live engine scores graded together on `unified_recommendations` (`--entry open`, persisted). `confluence` is carrying the ranker and it is not close:**
+- **MEASURED 2026-09-10 — all four live engine scores graded together on `unified_recommendations` (`--entry open`, persisted). `confluence` is carrying the ranker and it is not close [SUPERSEDED 2026-10-26: on 41 post-change dates at the next session `technical_score` is as strong and more consistent — see the 2026-10-26 subsection]:**
 
       confluence_score   5d +0.084/0.542   10d +0.113/0.558   21d +0.168/0.583
       technical_score    5d +0.024/0.509   10d +0.017/0.506   21d +0.013/0.503
       ml_score           5d +0.021/0.503   10d +0.026/0.506   21d -0.013/0.500
       dl_score           5d +0.007/0.506   10d -0.008/0.496   21d -0.008/0.494
 
-  **Every row is LOW-DATA** (18 dates at 5d, 13 at 10d, and only **2** at 21d — the 21d column is barely more than an anecdote and must not be quoted on its own). Two things worth noting and neither is yet actionable: `confluence_score` is both the strongest-reading engine AND already the highest-weighted one in `REGIME_WEIGHTS` (0.30-0.378), so this is consistent with the current weights rather than an argument to change them; and `dl_score` reads at or below zero at 10d/21d, which is expected given its walk-forward was only fixed on 2026-09-10 (AF-20260910-08) and no honestly-trained DL model has shipped yet. Re-run once the panel clears 20 dates under stable post-2026-08-31 weights (~2026-09-26/29) before drawing any reweighting conclusion. This supersedes the older "t=+2.13 at 1d on 12 dates" note for `technical`, which was never refreshed.
+  **Every row is LOW-DATA** (18 dates at 5d, 13 at 10d, and only **2** at 21d — the 21d column is barely more than an anecdote and must not be quoted on its own). Two things worth noting and neither is yet actionable: `confluence_score` is both the strongest-reading engine AND already the highest-weighted one in `REGIME_WEIGHTS` (0.30-0.378), so this is consistent with the current weights rather than an argument to change them; and `dl_score` reads at or below zero at 10d/21d, which is expected given its walk-forward was only fixed on 2026-09-10 (AF-20260910-08) and no honestly-trained DL model has shipped yet. Re-run once the panel clears 20 dates under stable post-2026-08-31 weights (~2026-09-26/29; ELAPSED — 41 post-change dates existed on 2026-10-26, see that subsection) before drawing any reweighting conclusion. This supersedes the older "t=+2.13 at 1d on 12 dates" note for `technical`, which was never refreshed.
 - **`earnings_beat_yoy`/`earnings_beat_qoq`, `screener_breadth`, the 3 named results screeners** — all underpowered (3–27 periods), genuinely calendar-blocked until ~12+ months of history exists in their source tables.
 - **⚠ CORRECTION 2026-09-25 — this bullet and the Snapshot "models" bullet attributed the Pair's champion and rejected challengers to `cs_ranker`. They are `exit_policy`'s.** Live `model_registry`: `exit_policy` has 1 active row (id 312, trained 2026-09-01 12:34, `cv_roc_auc` 1.8021 = MFE holdout MAE, `cv_accuracy` 1.2761 = MAE holdout MAE) and 16 inactive (latest 2026-09-19) — those are the "champion 20260901_123532" and the rejected 1.9981/2.1444/2.0750/1.9907/2.0725 challengers below. **`cs_ranker` (LightGBM Regressor) has 35 registrations, ZERO active, latest 2026-08-29: it was deliberately deactivated and unscheduled 2026-08-31 (commit `9ceb4e72`, live CV 0.176, worse than random; `queues.ts:1622`, `jobRegistry.ts:248`), so it has no champion and no further retrains. `online_sgd` (95 registrations, 0 active, latest 08-30) was retired the same day (live AUC 0.5017).** Do not read "no active cs_ranker / online_sgd row" as a bug, and do not attribute the Pair numbers to cs_ranker. Original text follows unedited:
 - **`cs_ranker` has had TWO further retrains since this was written, both REJECTED — and the metric this row quotes cannot be read out of `model_registry.cv_roc_auc` (checked live 2026-09-10).** The active `GradientBoosting Regressor Pair` is dated 2026-09-01 with `cv_roc_auc` **1.8021**; the two challengers since read 1.9981 (2026-09-06) and 2.1444 (2026-09-10), both `is_active = 0`. Those values are all **> 1, so they are not AUCs** — for this model type the column holds some error-style metric (lower better), which makes the rejections internally consistent (1.80 < 1.99 < 2.14) but means the "0.176 vs 0.161/0.161/0.133" figures in the original note came from somewhere else (they match the rho series recorded in `ml-model-bugs.md`, not this column). **Do not compare the two sets of numbers.** Still flagged, still not confirmed as a bug, and the underlying caution stands: a self-reported metric on a thin date-split holdout is exactly what this file says not to trust. 12 registrations existed for this pair as of 2026-09-10 (WAS count); **three more Pair challengers have been rejected since — 2.0750 (09-11), 1.9907 (09-14), 2.0725 (09-19), all `is_active=0`; champion still 20260901_123532 (1.8021)** — see the Snapshot models bullet. `model_registry` overall holds **343 registrations** (2026-09-20).
@@ -834,11 +990,11 @@ any row: `docs/measurement-history.md`.
 | Factor | Result | Verdict |
 |---|---|---|
 | **`high_flyer_candidates` two-tail daily learner** (active equity, prior-20-session ADT >= Rs10cr, next-session open-to-close, NIFTY50-relative, 30bp costs) | Corrected walk-forward replay: 1,230 candidates / 41 dates; gross -0.2375%/day (t=-1.23), excess -0.1377% (t=-0.80), **net excess -0.4377%/day (t=-2.55)**. | **No edge; shadow-only.** Daily storage/learning continues, but the API withholds names until >=40 dates, positive cost-aware excess and t>=2.0. Winner-only and pooled-cross-section lifts are prohibited for promotion. |
-| `momentum_12_1` | **Re-run 2026-09-26: net excess +0.7889%/period, t=1.61, 55 periods/4.58yr, 35.2% turnover, 4/5 years positive, CAGR 18.2%, Sharpe 0.75.** WAS -> +0.686%/period, t=1.45 (bit-identical across 2026-08-23/08-27/08-29). The drift is the panel growing, not a harness change — this run was used as the reproduce-a-known-result check before trusting the harness for the 2026-09-26 reversal re-runs, and the verdict is unchanged. (`factor_backtest.py --factor momentum_12_1 --rebalance 21 --top-k 50 --cost-bps 25`.) The older "+0.53%/mo, t=1.10" is stale and matched no reproduction. | still not significant, but the closest thing to a survivor among the price factors — note it is the only one whose turnover (35%) is low enough that costs are not the binding constraint |
-| `value_book_to_price` | +0.78%/mo, t=1.99 (post-fix) | not significant; vendor history may be retrospectively restated |
+| `momentum_12_1` | **Re-run 2026-10-27 (25 bps/side, 56 periods/4.67yr): vs universe +0.80%/period, t=1.67, 3/5 years; vs NIFTY500 (buyable, price-only, same windows) +0.96%/period, t=1.29, 3/5 years, beats it in 57% of periods; CAGR 17.9% vs index 8.0%, Sharpe 0.74 vs 0.63, max DD -21.8% vs -13.4%. At 16 bps/side: t=1.80 vs universe, 1.38 vs index. 74 clamped returns (data guard).** Earlier: **Re-run 2026-09-26: net excess +0.7889%/period, t=1.61, 55 periods/4.58yr, 35.2% turnover, 4/5 years positive, CAGR 18.2%, Sharpe 0.75.** WAS -> +0.686%/period, t=1.45 (bit-identical across 2026-08-23/08-27/08-29). The drift is the panel growing, not a harness change — this run was used as the reproduce-a-known-result check before trusting the harness for the 2026-09-26 reversal re-runs, and the verdict is unchanged. (`factor_backtest.py --factor momentum_12_1 --rebalance 21 --top-k 50 --cost-bps 25`.) The older "+0.53%/mo, t=1.10" is stale and matched no reproduction. | still not significant, but the closest thing to a survivor among the price factors — note it is the only one whose turnover (35%) is low enough that costs are not the binding constraint |
+| `value_book_to_price` | **Re-run 2026-10-27 (25 bps/side, 68 periods/5.67yr): vs universe +0.75%/period, t=1.96, 4/6 years, but 2025 -0.14 and 2026 -0.44; vs NIFTY500 +1.19%/period, t=1.77, 5/6 years; CAGR 24.7% vs index 11.2%, Sharpe 0.94 vs 0.84, max DD -27.0% vs -14.0%. At 16 bps/side t=2.09 vs universe (the harness prints "significant" at |t|>2; that is not a multiple-testing bar), 1.84 vs index.** Earlier: +0.78%/mo, t=1.99 (post-fix) | not significant; vendor history may be retrospectively restated; negative vs the universe in 2025-26 |
 | `insider_net` | net excess +0.29%/period, t=1.73 (re-run 2026-08-12, superseding the earlier +0.48%/t=2.05 which did not reproduce) | not significant |
 | `momentum_21d` / `63d` / `reversal_21d` | negative, t up to −3.96 | dead |
-| `high_vol` / `low_vol` | both negative (−1.21, −1.66) | **both tails lose**; the middle outperforms |
+| `high_vol` / `low_vol` | both negative (−1.21, −1.66). **`low_vol` re-run 2026-10-27 (25 bps/side, 67 periods): -1.56%/period vs universe (t -2.83), -1.07% vs NIFTY500 (t -3.31, 0/6 years), CAGR -2.4% vs index 10.5%: it loses to the index too, so the loss is not an artifact of the equal-weight benchmark.** | **both tails lose**; the middle outperforms |
 | `delivery_spike` / `delivery_trend` | t=−1.08 / −1.43 | dead |
 | **`delivery_pct` (raw level, NOT the derived spike/trend above)** | quintile spread +0.19pp/day, t=+7.82 — but **long-only top-50 net excess −1.04%/period at 21d/25bps and −0.15%/period at 5d/15bps, t=−1.48 both** | **dead as a long-only factor** despite a real directional signal in the spread |
 | `ticket_size` (institutional proxy) | −0.67%, t=−2.36 | significantly **inverted** |
@@ -901,7 +1057,7 @@ any row: `docs/measurement-history.md`.
 
 - **Fundamentals, analyst, ownership and earnings factors**: still calendar-constrained, but **re-counted live 2026-09-10 — `fundamentals_history` now holds 56 distinct dates (2026-06-30..2026-09-09) across 2,232 symbols, not the ~30 this line used to claim.** Still only 1-2 independent quarterly observations, so the constraint is unchanged in substance. **A backfill route now exists and is worth costing before waiting another quarter:** `trendlyne_pe_history` holds **4.16M rows back to 2013-12-24**, with **2,997 distinct dates across 1,940 symbols BEFORE `fundamentals_history` even begins** (`trendlyne_pb_history` is comparable at 4.21M rows). `_merge_fundamentals` already does a correct point-in-time `merge_asof`, so the machinery is in place. **The one thing to verify first:** vendor valuation history can be retrospectively restated, which would inject look-ahead into a point-in-time join — check a known historical snapshot against an independent source before building on it. This is the single largest available unblock in this section.
 - **FnO / positioning (long/short buildup, short covering)**: built (`mc_stock_futures_oi_fetcher.py`, `stock_futures_oi_history`, composite-keyed `(source, symbol, date, expiry)`, scheduled daily, live-graded LOW-DATA at **14 dates as of 2026-09-10**, was 9 on 2026-09-04) — see "Standing architecture facts" above. Not yet enough dates to verdict; ~6 more sessions to the floor.
-- Of 60 symbol+date tables audited 2026-08-11, only 9 have enough history to test anything at all; the other 35 start ~2026-06-30.
+- Of 60 symbol+date tables audited 2026-08-11, only 9 have enough history to test anything at all; the other 35 start around 2026-06-30.
 - **REGIME_WEIGHTS re-check, 2026-08-25**: `blend_walkforward.py` re-run across all 46 available sessions — TILT alternative still fails its pre-declared bar (dIC −0.0003). Weights confirmed unchanged. **Live-reverified again 2026-09-10**: `screener`, `cs` AND `smart_money` are all still 0.0 in every one of the five regimes — a validation, not an improvement, do not cite it as one.
 - **`technical_signals.date` is TEXT→DATE** (migration `20260825120000`, applied via a manual single-statement rerun after node-pg-migrate's sql-file runner silently executed only the file's first statement). Writers unaffected; `db/schema.postgres.sql` updated so new throwaway test schemas get DATE natively. A migration's ledger row proves execution of *a* statement, not necessarily the one you meant — verify the effect via `information_schema`, never the tool's exit code alone.
 
@@ -1013,7 +1169,7 @@ any row: `docs/measurement-history.md`.
     Overlap Correction.
   - `ext_t80_tech_score` 5d +0.053 / 10d +0.087 / 21d +0.153, 51 dates but eff 10.2 / 4.6 / 1.7 → `LOW-DATA`; promising and unproven.
   - `screener_momentum_score` post-reclass (since 2026-08-31, 21 dates) 1d IC **-0.023**, AUC 0.486 → `no edge`, negative sign.
-  - Analyst revision trio is still at 18 dates (< `MIN_DATES_RELIABLE`=20): not gradeable before ~2026-10-08.
+  - Analyst revision trio is still at 18 dates (< `MIN_DATES_RELIABLE`=20): not gradeable before ~2026-10-08. **GRADED 2026-10-26: no edge** (see the analyst bullet under Populations).
 
 - **2026-10-05 — `signal_type_priors` 15% blend REMOVED from `scoring_engine.py` (AF-20261001-47).** Test: for each technical signal type with >=100 graded outcomes since 2026-08-15, rank-correlate its stored Beta posterior mean with the mean realized `return_pct`. h5: 10 types, prior range 0.51-0.75, Spearman +0.236 (p=0.51) mean / +0.382 (p=0.28) median; h15: 9 types, -0.200 (p=0.61) / -0.433 (p=0.24). No relationship and the sign flips between horizons; the top-prior type (PCR_EXTREME, 0.67) realizes -1.64% (h5) / -4.02% (h15). The posteriors have counts in the 10^5 (EMA_BULL_STACK 223,120/161,168), so they shrink nothing - they are each type's frozen win rate under the path-barrier label, which this file records as a volatility detector. `SIGNAL_TYPE_PRIOR_WEIGHT = 0.0`; guarded by `test_scoring_signal_type_prior_blend_off.py`. This is a removal of an uninformative input, not a reweighting toward an edge.
 - **2026-10-05 — technical outcomes are overwhelmingly universe-wide labels, not trades (AF-20261001-13).** Since 2026-09-01, of graded h5 `technical` outcomes 36,506 carry signal_score 0-1 (no setup), 2,475 score 2-4, and **none reach 5** (the scan's actionable bar); avg return -1.26% / -0.76% for those buckets (median -1.89% / -1.40%). The 21,374-STOP_LOSS-vs-3,241-WIN September figure is the market's own drift over a down tape applied to every symbol, not signal skill. Score 2-4 beats 0-1 by ~0.5pp at both horizons (monotone but both negative in absolute terms; excess vs the universe not yet computed). Trade-performance statistics must filter to published setups (score >= 2 with levels); the universe-wide rows remain a calibration/benchmark dataset and feed the RL gate, which is a trend-negative filter in practice (it is why RELIANCE/TCS/INFY are absent from the latest ranking).
@@ -1109,7 +1265,7 @@ any row: `docs/measurement-history.md`.
   - **Sentiment adds nothing:** only 11.6% of exchange events have |score| >= 0.2; sentiment-signed returns after entry -0.04% (t -0.65).
   - **We could not enter faster anyway:** the NSE feed is polled every 15 minutes with a median 13-minute lag.
   - **Coverage:** the NSE API `/api/corporate-announcements` is NOT ingested (a single GET with only `User-Agent: Mozilla/5.0` returned 200 with native symbol, exchange timestamp and date-range history); the RSS we use drops ~35% of filings (company name does not map to a symbol), has no history before 2026-08-12 and relies on title parsing. `NSE Financial Results` RSS has 3 rows ever; BSE rows arrive ~92 days late (cause not found). ET Top Stories and FT entity tagging is 4% / 3%. 12.7% of symbol-links are the same story from another source within 30 minutes. NSE item timestamps are the exchange's own (95.9% agree within 5 minutes where the URL carries one).
-  - **Conclusion:** intraday news is not capturable by this platform; the more plausible edge is multi-day drift after results, which needs a surprise measure (XBRL from `nse_results_filings` plus consensus) and the Q2 season (~2026-10-10 to 11-14) as the pre-registered next test.
+  - **Conclusion:** intraday news is not capturable by this platform; the more plausible edge is multi-day drift after results, which needs a surprise measure (XBRL from `nse_results_filings` plus consensus) and the Q2 season (roughly 2026-10-10 to 11-14) as the pre-registered next test.
 
 - **2026-10-10 — RESULTS of the pre-registered tests on the backfilled data (AF-20261008-33; bar |t| >= 2.58, definitions fixed before any result was seen).**
   Harness check reproduced momentum_12_1 +0.7889%/period t 1.61; random control IC -0.009. Next-open entry after the knowable time (63.6% of results are broadcast after 15:30 IST and count as next-session events), non-overlapping windows, 0.30% on actual turnover, survivorship-reduced panel. Scripts `p_tests.py`, `p_diag.py`; report `audit_P_preregistered_tests.md` (review scratchpad).

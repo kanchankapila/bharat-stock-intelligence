@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-const { dbExec, dbRun, dbGet, dbAll } = await import('../dbAsync');
+const { dbTransaction } = await import('../dbAsync');
 const { getTrendlyneMetricSymbols } = await import('../trendlyneDailyFetchService');
 
 /**
@@ -11,40 +11,52 @@ const { getTrendlyneMetricSymbols } = await import('../trendlyneDailyFetchServic
  * same rate budget. Restricted to the top-N by market cap instead.
  */
 describe('getTrendlyneMetricSymbols (top-N by market cap)', () => {
+  async function seed(rows: [string, string, string, number | null, string | null][]) {
+    if (!process.env.VITEST_PG_SCHEMA?.startsWith('vitest_')) {
+      throw new Error('Trendlyne fixtures require a private Vitest schema');
+    }
+    await dbTransaction(async tx => {
+      await tx.run('DELETE FROM nse_stocks');
+      if (rows.length) await tx.run(
+        `INSERT INTO nse_stocks (symbol, name, status, market_cap, tlid)
+         VALUES ${rows.map(() => '(?,?,?,?,?)').join(',')}`, rows.flat());
+    });
+  }
+
   it('ranks by market_cap DESC and respects the limit', async () => {
-    await dbExec('DELETE FROM nse_stocks');
-    const insert = "INSERT INTO nse_stocks (symbol, name, status, market_cap, tlid) VALUES (?, ?, 'ACTIVE', ?, ?)";
-    await dbRun(insert, ['SMALLCO', 'Small Co', 1000, '1001']);
-    await dbRun(insert, ['BIGCO', 'Big Co', 500000, '1002']);
-    await dbRun(insert, ['MIDCO', 'Mid Co', 50000, '1003']);
+    await seed([
+      ['SMALLCO', 'Small Co', 'ACTIVE', 1000, '1001'],
+      ['BIGCO', 'Big Co', 'ACTIVE', 500000, '1002'],
+      ['MIDCO', 'Mid Co', 'ACTIVE', 50000, '1003'],
+    ]);
 
     const symbols = await getTrendlyneMetricSymbols(2);
     expect(symbols).toEqual(['BIGCO', 'MIDCO']);
   });
 
   it('excludes rows with no market_cap and inactive symbols', async () => {
-    await dbExec('DELETE FROM nse_stocks');
-    const insert = "INSERT INTO nse_stocks (symbol, name, status, market_cap, tlid) VALUES (?, ?, ?, ?, ?)";
-    await dbRun(insert, ['NOCAP', 'No Cap Co', 'ACTIVE', null, '1010']);
-    await dbRun(insert, ['DELISTED', 'Delisted Co', 'DELISTED', 999999, '1011']);
-    await dbRun(insert, ['REALCO', 'Real Co', 'ACTIVE', 1000, '1012']);
+    await seed([
+      ['NOCAP', 'No Cap Co', 'ACTIVE', null, '1010'],
+      ['DELISTED', 'Delisted Co', 'DELISTED', 999999, '1011'],
+      ['REALCO', 'Real Co', 'ACTIVE', 1000, '1012'],
+    ]);
 
     const symbols = await getTrendlyneMetricSymbols(10);
     expect(symbols).toEqual(['REALCO']);
   });
 
   it('excludes symbols whose supposed Trendlyne id is missing or is just the NSE symbol', async () => {
-    await dbExec('DELETE FROM nse_stocks');
-    const insert = "INSERT INTO nse_stocks (symbol, name, status, market_cap, tlid) VALUES (?, ?, 'ACTIVE', ?, ?)";
-    await dbRun(insert, ['VALID', 'Valid Co', 1000, '12345']);
-    await dbRun(insert, ['LMW', 'LMW Ltd', 900, 'LMW']);
-    await dbRun(insert, ['MISSING', 'Missing Id Co', 800, null]);
+    await seed([
+      ['VALID', 'Valid Co', 'ACTIVE', 1000, '12345'],
+      ['LMW', 'LMW Ltd', 'ACTIVE', 900, 'LMW'],
+      ['MISSING', 'Missing Id Co', 'ACTIVE', 800, null],
+    ]);
 
     expect(await getTrendlyneMetricSymbols(10)).toEqual(['VALID']);
   });
 
   it('falls back to the full universe when nse_stocks has no market-cap-ranked rows', async () => {
-    await dbExec('DELETE FROM nse_stocks');
+    await seed([]);
     const symbols = await getTrendlyneMetricSymbols(5);
     // Falls back to stockData (stocklist.ts) — real symbols, not empty.
     expect(symbols.length).toBeGreaterThan(0);

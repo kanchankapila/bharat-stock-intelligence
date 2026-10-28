@@ -6,6 +6,13 @@ import { makeRateLimiter } from "./internalAuth";
 
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
+  errorFormatter({ shape }) {
+    // The server may run with NODE_ENV=development. Never send its stack or
+    // filesystem paths to clients, regardless of that process setting.
+    const data = { ...shape.data };
+    delete data.stack;
+    return { ...shape, data };
+  },
 });
 
 export const router = t.router;

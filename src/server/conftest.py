@@ -44,6 +44,7 @@ from pg_test_support import (  # noqa: E402
     _sa_url,
     drain_memory_conns,
     drop_throwaway_schema,
+    ensure_test_extensions,
     pg_available,
     pg_memory_conn,  # noqa: F401  -- re-exported for tests that import it from conftest
 )
@@ -229,21 +230,7 @@ def _apply_schema(cur, schema: str) -> None:
     # give the CREATE EXTENSION statements a creation schema every apply can see; the
     # schema-first DDL path is re-pinned immediately below, before any DDL runs, and this
     # connection executes nothing else. The test-body connections are untouched.
-    cur.execute("SET search_path TO public")
-    ext_names = sorted(set(re.findall(r"CREATE EXTENSION IF NOT EXISTS (\w+)", ddl)))
-    ext_schemas = set()
-    for ext in ext_names:
-        cur.execute(
-            "SELECT n.nspname FROM pg_extension e "
-            "JOIN pg_namespace n ON n.oid = e.extnamespace WHERE e.extname = %s",
-            (ext,),
-        )
-        row = cur.fetchone()
-        if row is None:
-            cur.execute(f'CREATE EXTENSION IF NOT EXISTS "{ext}"')
-            ext_schemas.add("public")
-        else:
-            ext_schemas.add(row[0])
+    ext_schemas = ensure_test_extensions(cur, ddl)
     # search-path-public-exempt: DDL APPLICATION ONLY -- the schema creates GIN trigram
     # indexes and `gin_trgm_ops` is the pg_trgm extension's operator class, which lives in
     # `public`; without it every apply dies with `operator class "gin_trgm_ops" does not exist`

@@ -206,12 +206,13 @@ class TestArmMetrics:
 
 # ── loaders against a real (throwaway) Postgres schema ───────────────────────────
 
-REC_COLS = ("symbol, computed_at, regime, unified_score, conviction_level, "
+REC_COLS = ("symbol, computed_at, generated_at, regime, unified_score, conviction_level, "
             + ", ".join(ENGINE_TO_SCORE_COL.values()))
 
 
-def _rec_row(sym, date, regime="BULL"):
-    vals = [sym, date, regime, 50.0, "B_STRONG"]
+def _rec_row(sym, date, regime="BULL", generated_at=None):
+    # generated_at defaults to the same instant read as UTC; the dating tests pass it explicitly.
+    vals = [sym, date, generated_at or f"{date} +00", regime, 50.0, "B_STRONG"]
     vals += [float(abs(hash(f"{sym}{c}")) % 100) for c in ENGINE_TO_SCORE_COL]
     return tuple(vals)
 
@@ -226,7 +227,7 @@ def _exec_many(con, sql, rows):
 
 
 def _insert_recs(con, rows):
-    ph = ", ".join(["?"] * (5 + len(ENGINE_TO_SCORE_COL)))
+    ph = ", ".join(["?"] * (6 + len(ENGINE_TO_SCORE_COL)))
     _exec_many(con, f"INSERT INTO unified_recommendations ({REC_COLS}) VALUES ({ph})", rows)
 
 
@@ -244,7 +245,8 @@ class TestLoadersPg:
         early = list(_rec_row("AAA", "2026-08-10 09:30"))
         late = list(early)
         late[1] = "2026-08-10 15:45"
-        late[3] = 99.0                       # the LATER stamp must win keep="last"
+        late[2] = "2026-08-10 15:45 +00"     # the loader orders by generated_at
+        late[REC_COLS.split(", ").index("unified_score")] = 99.0   # the LATER stamp must win
 
         _insert_recs(con, [_rec_row("BBB", "2026-08-10 09:30"),
                            tuple(early), tuple(late)])
@@ -253,6 +255,16 @@ class TestLoadersPg:
         assert len(panel) == 2 and len(aaa) == 1
         assert float(aaa.iloc[0]["unified_score"]) == 99.0
         assert pd.to_numeric(panel["unified_score"], errors="coerce").notna().all()
+
+    def test_load_panel_dates_a_row_by_the_IST_evening_it_was_generated(self, pg_db_conn):
+        """AF-20261026-46. computed_at is the ENTRY session the ranking is for; dating by it put
+        the harness one session late (measurement.md). A run generated 2026-08-10 22:30 IST
+        (17:00Z) for the 08-11 session must be dated 08-10, so its open-entry forward return
+        starts at the 08-11 open -- the trade a user of that evening's ranking could make."""
+        con = pg_db_conn
+        _insert_recs(con, [_rec_row("AAA", "2026-08-11", generated_at="2026-08-10 17:00:00+00")])
+        panel = bw._load_panel(con, "2026-01-01")
+        assert panel.iloc[0]["date"] == pd.Timestamp("2026-08-10")
 
     def test_load_panel_since_filter(self, pg_db_conn):
         con = pg_db_conn
@@ -307,7 +319,8 @@ def _plant_world(con, n_sym=60, n_days=90, seed=11):
             ds = d.strftime("%Y-%m-%d")
             # rises through the day's cross-section as quality matures...
             tech = 100.0 * (i + j * n_sym) / (n_sym * n_days)
-            vals = [sym, ds, "SIDEWAYS", 50.0, "B_STRONG"]
+            # generated the evening of session ds (22:30 IST), so the loader dates it ds
+            vals = [sym, ds, f"{ds} 17:00:00+00", "SIDEWAYS", 50.0, "B_STRONG"]
             for k, eng in enumerate(ENGINE_TO_SCORE_COL):
                 # ...into every engine, at distinct positive scales (order kept)
                 vals.append(tech * (0.8 + 0.05 * k))

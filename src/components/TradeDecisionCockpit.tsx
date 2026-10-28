@@ -586,8 +586,9 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                       { label: 'ML rank (percentile, not a win chance)', v: selectedCand.mlRankPct ?? null, text: mlRankLabel(selectedCand.mlRankPct) ?? '—', color: 'bg-indigo-500', isModel: true },
                       { label: 'Technical Signals (derived)', v: Math.min(100, (selectedCand.techSignalCount ?? 0) * 25), color: 'bg-emerald-500', isModel: false },
                       { label: 'Quant Rank (derived)', v: Math.max(0, 100 - (selectedCand.quantRank ?? 100)), color: 'bg-amber-500', isModel: false },
-                      { label: 'Smart Money (derived)', v: Math.min(100, Math.max(0, 50 + (selectedCand.smartMoneyCr ?? 0) * 5)), color: 'bg-pink-500', isModel: false },
-                      { label: 'News Sentiment (derived)', v: Math.min(100, Math.max(0, 50 + (selectedCand.newsSentiment ?? 0) * 50)), color: 'bg-indigo-500', isModel: false },
+                      // null = no input for this desk (AF-20261026-49): render '—', never a bar at 50
+                      { label: 'Smart Money (derived)', v: selectedCand.smartMoneyCr == null ? null : Math.min(100, Math.max(0, 50 + selectedCand.smartMoneyCr * 5)), color: 'bg-pink-500', isModel: false },
+                      { label: 'News Sentiment (derived)', v: selectedCand.newsSentiment == null ? null : Math.min(100, Math.max(0, 50 + selectedCand.newsSentiment * 50)), color: 'bg-indigo-500', isModel: false },
                     ].map((f, i) => (
                       <div key={i} title={f.isModel ? ML_RANK_TOOLTIP : 'Rule-of-thumb or client-side heuristic, not a model score'}>
                         <div className="flex justify-between text-[9px] font-bold mb-0.5">

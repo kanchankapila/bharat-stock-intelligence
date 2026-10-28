@@ -1,23 +1,16 @@
 import { afterAll } from 'vitest';
 
-// Vitest isolates the module registry PER TEST FILE, so pgClient's module-level `pool` cache is
-// fresh in every one of them -- each file that touches the DB builds its OWN Pool (max 22,
-// idleTimeoutMillis 20_000) and nothing ever closed it. `singleFork: true` means they all pile
-// up inside one process, faster than the 20s idle reaper drains them.
-//
-// Measured 2026-08-16 against the real instance (max_connections = 60, 3 reserved): a bare
-// `vitest run --project unit` peaked at 69 connections, which is why pgEnsureColumns was
-// printing "sorry, too many clients already". It is logged non-fatal, so the suite stayed green
-// while an unknown number of column-ensure calls silently did not happen -- the "looks healthy,
-// is actually broken" shape, not a cosmetic warning. With this hook the same run peaks at 20.
-//
-// The import MUST be lazy. A top-level `import { closePool } from './src/server/pgClient'` puts
-// the real pgClient (and the real `pg`) into the registry before the test file runs, which
-// silently defeats pgClient.test.ts's `vi.mock('pg', ...)` -- its `await import('../pgClient')`
-// then gets the already-cached unmocked module and 4 of its tests fail. Importing inside the
-// hook resolves after the file's mocks are established, so a mocking file just gets its own
-// mocked module back, where `pool` was never built and closePool() is a no-op.
-afterAll(async () => {
-  const { closePool } = await import('./src/server/pgClient');
-  await closePool();
-});
+// Each module instance registers its own cleanup only when it opens a pool. Importing
+// pgClient here (even lazily) needlessly loads the real driver at teardown in mock-only
+// suites and can exceed the hook budget. Registration also survives vi.resetModules.
+export async function cleanupTestPools(): Promise<void> {
+  const registry = (globalThis as any)[Symbol.for('bsi.vitest.pool-cleanups')] as Set<() => Promise<void>> | undefined;
+  if (!registry) return;
+  const cleanups = [...registry];
+  registry.clear();
+  const results = await Promise.allSettled(cleanups.map(async cleanup => cleanup()));
+  const errors = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map(result => result.reason);
+  if (errors.length) throw new AggregateError(errors, 'Test Postgres pool cleanup failed');
+}
+
+afterAll(cleanupTestPools);

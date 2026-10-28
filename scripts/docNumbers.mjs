@@ -19,6 +19,7 @@ import { join, extname, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { quotesNumber } from './quotesNumber.mjs';
+import { findStaleForecasts } from './staleForecasts.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CHECK = process.argv.includes('--check');
@@ -63,12 +64,6 @@ for (const f of tsServer) {
   consoleSites += (readFileSync(f, 'utf8').match(/console\.(log|info|warn|error|debug)\(/g) || []).length;
 }
 
-// unique_urls.txt is a static corpus in the repo root.
-const urlsFile = join(ROOT, 'unique_urls.txt');
-const uniqueUrls = existsSync(urlsFile)
-  ? readFileSync(urlsFile, 'utf8').split(/\r?\n/).filter((l) => l.trim()).length
-  : null;
-
 /** Read-only Postgres figure. Returns null (never a guess) if unavailable. */
 function dbScalar(sql) {
   const candidates = [
@@ -104,7 +99,6 @@ const figures = [
   ['rule files', rules.length, 'CLAUDE.md rules section'],
   ['rule files total size (KB)', (rulesBytes / 1024).toFixed(1), 'CLAUDE.md rules section'],
   ['raw console.* call sites in src/server', consoleSites, 'logger.ts comment'],
-  ['unique_urls.txt URLs', uniqueUrls, 'CLAUDE.md / DATA_SOURCE_INTEGRATION_GUIDE.md'],
   ['market_endpoint_registry rows', registryTotal, 'CLAUDE.md / CONTEXT.md'],
   ['  ...GET', registryGet, 'CLAUDE.md'],
   ['  ...POST', registryPost, 'CLAUDE.md'],
@@ -149,6 +143,15 @@ if (CHECK) {
   }
   expect(claude, String(urlEndpoints), 'CLAUDE.md url_endpoints count');
 
+  // Elapsed `~DATE` forecasts in rule files with no outcome written back (AF-20261026-47).
+  const rulesDir = join(ROOT, '.claude', 'rules');
+  const today = new Date().toISOString().slice(0, 10);
+  for (const f of readdirSync(rulesDir).filter((n) => n.endsWith('.md'))) {
+    for (const s of findStaleForecasts(readFileSync(join(rulesDir, f), 'utf8'), today)) {
+      stale.push(`.claude/rules/${f}:${s.line}: forecast ~${s.date} has passed with no outcome on the line ` +
+        `(add ELAPSED/GRADED/SUPERSEDED with what happened, or drop the ~ if it is a historical date)`);
+    }
+  }
   if (stale.length) {
     console.error('\nSTALE DOC NUMBERS:\n  ' + stale.join('\n  ') +
       '\n\nUpdate each quoted figure to the re-derived value above, or fix the doc if it is correct.');

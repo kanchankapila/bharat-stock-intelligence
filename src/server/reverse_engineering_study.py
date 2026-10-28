@@ -168,6 +168,10 @@ def load_eligible_universe(engine, event_dates) -> pd.DataFrame:
     Membership comes from NSE's historical bhavcopy, not today's active master.  The current
     master is used only as a durable instrument-identity veto for known ETFs; an absent master
     row is retained so delisted equities are not removed retrospectively.
+
+    ADT uses 20 prior observed bars and tolerates one suspect/missing-volume bar inside them.
+    That bar contributes nothing to the average. Requiring 20/20 clean barred 876 liquid names
+    on 2026-10-13 and distorted 18 sessions after NSE's 2026-09-14 suspect batch.
     """
     dates = sorted({pd.Timestamp(d).strftime("%Y-%m-%d") for d in event_dates})
     cols = ["symbol", "trade_date", "fwd_ret", "intraday_ret", "adt20_cr"]
@@ -180,6 +184,8 @@ def load_eligible_universe(engine, event_dates) -> pd.DataFrame:
         " SELECT symbol, date, is_suspect, open, close, volume,"
         " LAG(close) OVER (PARTITION BY symbol ORDER BY date) AS prev_close,"
         " LAG(COALESCE(is_suspect, 0)) OVER (PARTITION BY symbol ORDER BY date) AS prev_suspect,"
+        " COUNT(*) OVER (PARTITION BY symbol ORDER BY date"
+        "          ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS prior_rows,"
         " AVG(CASE WHEN COALESCE(is_suspect, 0)=0 AND close > 0 AND volume IS NOT NULL"
         "          THEN close * volume END) OVER (PARTITION BY symbol ORDER BY date"
         "          ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) / 10000000.0 AS adt20_cr,"
@@ -194,7 +200,8 @@ def load_eligible_universe(engine, event_dates) -> pd.DataFrame:
         " FROM bars b"
         f" WHERE b.date IN ({date_sql})"
         " AND COALESCE(b.is_suspect, 1)=0 AND COALESCE(b.prev_suspect, 1)=0"
-        " AND b.open > 0 AND b.close > 0 AND b.prev_close > 0 AND b.adt_obs=20"
+        " AND b.open > 0 AND b.close > 0 AND b.prev_close > 0"
+        " AND b.prior_rows=20 AND b.adt_obs>=19"
         f" AND b.adt20_cr >= {MIN_ADT_CR}"
         " AND EXISTS (SELECT 1 FROM nse_universe_history u"
         "             WHERE u.date=b.date AND u.symbol=b.symbol AND u.series='EQ')"

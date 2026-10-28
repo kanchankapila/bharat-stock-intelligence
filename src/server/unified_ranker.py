@@ -82,6 +82,9 @@ HORIZON_MULT = {
     'medium_term': 1.05,
 }
 
+# HISTORICAL (superseded 2026-10-26 -- breakout is now 0.0 in every regime; see the block under
+# REGIME_WEIGHTS). The claim below was a MODEL'S OWN metric, never a realised-return reading, and
+# realised returns contradicted it. Kept so the reasoning that produced the old weights is legible.
 # `breakout` is the breakout classifier's P(>=6% up-move in 10d) — the one component with
 # proven durable out-of-sample edge (5yr purged-OOF AUC 0.61, top-decile 1.47x base rate). It
 # is weighted heavier in momentum regimes (BULL/SIDEWAYS/HIGH_VOL) where cross-sectional
@@ -408,14 +411,30 @@ def plan_is_current(last_close, stop, target) -> bool:
 
 
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.0, 'ml': 0.184783, 'cs': 0.0, 'confluence': 0.369565, 'technical': 0.295652, 'dl': 0.0, 'breakout': 0.15, 'smart_money': 0.0},
-    'BEAR':     {'screener': 0.0, 'ml': 0.236786, 'cs': 0.0, 'confluence': 0.473574, 'technical': 0.23964, 'dl': 0.0, 'breakout': 0.05, 'smart_money': 0.0},
-    'HIGH_VOL': {'screener': 0.0, 'ml': 0.12857, 'cs': 0.0, 'confluence': 0.257143, 'technical': 0.514287, 'dl': 0.0, 'breakout': 0.10, 'smart_money': 0.0},
-    'CRASH':    {'screener': 0.0, 'ml': 0.267188, 'cs': 0.0, 'confluence': 0.415624, 'technical': 0.267188, 'dl': 0.0, 'breakout': 0.05, 'smart_money': 0.0},
+    'BULL':     {'screener': 0.0, 'ml': 0.217392, 'cs': 0.0, 'confluence': 0.434782, 'technical': 0.347826, 'dl': 0.0, 'breakout': 0.0, 'smart_money': 0.0},
+    'BEAR':     {'screener': 0.0, 'ml': 0.249248, 'cs': 0.0, 'confluence': 0.498499, 'technical': 0.252253, 'dl': 0.0, 'breakout': 0.0, 'smart_money': 0.0},
+    'HIGH_VOL': {'screener': 0.0, 'ml': 0.142856, 'cs': 0.0, 'confluence': 0.285714, 'technical': 0.57143, 'dl': 0.0, 'breakout': 0.0, 'smart_money': 0.0},
+    'CRASH':    {'screener': 0.0, 'ml': 0.281251, 'cs': 0.0, 'confluence': 0.437498, 'technical': 0.281251, 'dl': 0.0, 'breakout': 0.0, 'smart_money': 0.0},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
     # a rangebound tape (lean slightly less on momentum than BULL).
-    'SIDEWAYS': {'screener': 0.0, 'ml': 0.204705, 'cs': 0.0, 'confluence': 0.409413, 'technical': 0.255882, 'dl': 0.0, 'breakout': 0.13, 'smart_money': 0.0},
+    'SIDEWAYS': {'screener': 0.0, 'ml': 0.235293, 'cs': 0.0, 'confluence': 0.47059, 'technical': 0.294117, 'dl': 0.0, 'breakout': 0.0, 'smart_money': 0.0},
 }
+# breakout ZEROED 2026-10-26 (AF-20261026-44), sixth engine-weight removal, same procedure as the
+# others: key kept at 0.0, freed weight redistributed proportionally over ml/confluence/technical
+# (ratios among them unchanged, pinned by test_breakout_removal_redistributes_proportionally...).
+# Evidence (scripts/measure_blend_arms.py, 41 ranker dates 2026-08-10..10-15, graded on the NEXT
+# session it could be acted on): breakout_score alone is ANTI-predictive -- open-to-close rank IC
+# -0.035 (t -2.9, positive on 12/41 dates), and -0.018 over a 5-session hold. Replaying the blend on
+# identical rows without it lifted rank IC +0.0073 (t +4.9, better on 33/41; first half 17/20,
+# second half 16/21) and the liquid-name IC 0.013 -> 0.022 (t +4.3); every observed regime improved
+# (BEAR 8/10, HIGH_VOL 4/4, SIDEWAYS 21/27). Score sd 14.5 -> 14.7, so the absolute 70/80/30/20
+# class thresholds need no retune. Top-decile mean excess moved -1.3bps (t -0.45) at 1 session and
+# -16.9bps (t -0.85, 9 disjoint windows) at 5 -- not significant, and consistent with breakout
+# adding variance to both tails rather than direction. BULL and CRASH never occurred in the panel,
+# so their removal is extrapolated from the other three regimes; re-check when they do.
+# The old weight rested only on the classifier's SELF-REPORTED purged-OOF AUC 0.61 for
+# P(>=6% up-move in 10d) -- a big-move label scores volatility, not profit (ml-model-bugs.md:
+# "AUC can be excellent and useless"). Restore only from a realised-return reading.
 # dl PAUSED to 0.0 2026-09-13 by user decision (AF-20260913-05), pending the rebuild+retrain in
 # AF-20260913-02 -- a pause, not a verdict on the engine. Evidence: dl_score read no edge on
 # unified_recommendations (+0.007 rank IC @5d, measurement.md 2026-09-10), and with inference
@@ -718,6 +737,14 @@ def _fund_mult(score):
     if score < 40:
         return 0.7
     return 1.0
+
+
+def _finite_or_none(v):
+    """NULL and NaN/inf are both 'no reading' (NaN is truthy, so `v or 0` keeps it)."""
+    if v is None:
+        return None
+    v = float(v)
+    return v if math.isfinite(v) else None
 
 
 def _normalize_to_100(raw):
@@ -2256,10 +2283,8 @@ class UnifiedRanker:
         cutoff = as_of.trading_days_back(1, self.conn)[-1].isoformat()
         try:
             rows = self.conn.execute(
-                "SELECT symbol, "
-                "  (COALESCE(trend_alignment_score,0) + COALESCE(volume_score,0) "
-                "   + COALESCE(sector_strength_score,0) + COALESCE(fundamental_score,0)"
-                "  ) AS non_screener_score "
+                "SELECT symbol, trend_alignment_score, volume_score, sector_strength_score, "
+                "  fundamental_score "
                 "FROM confluence_signals "
                 "WHERE computed_at >= ? AND symbol NOT LIKE '%://%' AND LENGTH(symbol) <= 20 "
                 # The dict below keeps the LAST row per symbol: chronological order makes
@@ -2267,7 +2292,20 @@ class UnifiedRanker:
                 "ORDER BY symbol, computed_at ASC",
                 (cutoff,),
             ).fetchall()
-            raw = {r['symbol']: float(r['non_screener_score'] or 0) for r in rows}
+            # AF-20261026-70: 0 is a real reading on every sub-score scale, so a missing
+            # component is imputed at its cross-sectional median (neutral), and a row with no
+            # component carries no confluence information at all (absent, so _blend
+            # renormalizes) -- never COALESCE(col, 0), which ranked it as the worst stock.
+            cols = ('trend_alignment_score', 'volume_score', 'sector_strength_score', 'fundamental_score')
+            latest = {}
+            for r in rows:
+                latest[r['symbol']] = [_finite_or_none(r[c]) for c in cols]
+            medians = []
+            for i in range(len(cols)):
+                present = sorted(v[i] for v in latest.values() if v[i] is not None)
+                medians.append(present[len(present) // 2] if present else 0.0)
+            raw = {sym: sum(m if x is None else x for x, m in zip(vals, medians))
+                   for sym, vals in latest.items() if any(x is not None for x in vals)}
             return _normalize_to_100(raw)
         except Exception as e:
             self._degraded(f"[UnifiedRanker] _get_confluence_scores failed: {e}")
@@ -2285,8 +2323,11 @@ class UnifiedRanker:
                 "SELECT symbol, AVG(signal_score) AS s FROM technical_signals WHERE date >= ? GROUP BY symbol",
                 (cutoff,),
             ).fetchall()
-            # signal_score is a 0-10 composite; percentile-normalize to 0-100 so it is on the
-            # same scale as the other engines before blending.
+            # signal_score is a SPARSE pattern score: since 2026-07 technical_signals holds the whole
+            # universe and it is 0 ("no pattern today") on 92-99% of rows, with small negative and
+            # positive values otherwise (not the 0-10 range it once had). Percentile-normalize to
+            # 0-100; the ties are not a defect -- measured 2026-10-26, dropping the engine hurts
+            # (AF-20261026-50).
             return _normalize_to_100({r['symbol']: float(r['s'] or 0) for r in rows})
         except Exception as e:
             self._degraded(f"[UnifiedRanker] _get_technical_scores failed: {e}")
