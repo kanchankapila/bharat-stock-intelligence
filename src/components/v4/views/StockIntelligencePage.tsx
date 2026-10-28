@@ -1080,6 +1080,7 @@ const StockHeaderCard: React.FC<{
       )}
 
       <StockTagRow p={tagData} className="border-t border-slate-800/60 pt-2" />
+      {predictions?.date && <p className="text-[9px] text-slate-500">Technical feature snapshot: {String(predictions.date)}</p>}
       <ScreenerChips symbol={symbol} />
     </div>
   );

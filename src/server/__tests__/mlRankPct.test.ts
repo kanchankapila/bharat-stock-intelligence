@@ -59,6 +59,22 @@ describe('mlRankPct', () => {
     expect(detail).toHaveProperty('generated_at'); // session label is not the production timestamp
   });
 
+  it('stock detail uses the complete feature grid instead of a newer partial row', async () => {
+    await dbTransaction(async tx => {
+      await tx.run('DELETE FROM unified_recommendations');
+      await tx.run(`INSERT INTO unified_recommendations
+        (symbol, computed_at, regime, unified_score, conviction_level, classification)
+        VALUES (?, '2026-10-27', 'BULL', 75, 'A_HIGH', 'Buy')`, ['RK_A']);
+      await tx.run('UPDATE technical_signals SET fcf_yield_approx = ?, interest_coverage = ? WHERE symbol = ? AND date = ?',
+        [3.5, 20, 'RK_A', day(1)]);
+    });
+    invalidateUrLatestAt();
+    const detail: any = await caller.getUnifiedScoreForSymbol({ symbol: 'RK_A' });
+    expect.soft(detail).toMatchObject({ feature_as_of: day(1), fcf_yield: 3.5, interest_coverage: 20, win_probability: 0.9 });
+    const predictions: any = await caller.getTechnicalPredictions({ symbol: 'RK_A' });
+    expect.soft(predictions).toMatchObject({ date: day(1), fcf_yield_approx: 3.5, interest_coverage: 20, win_probability: 0.9 });
+  });
+
   it('getTradeDecisionCockpitData carries mlRankPct beside an unchanged winProbSource', async () => {
     await cacheDel('misc:trade-decision-cockpit');
     const res: any = await caller.getTradeDecisionCockpitData();
@@ -66,6 +82,10 @@ describe('mlRankPct', () => {
     for (const [s, want] of Object.entries(EXPECTED)) expect((bySym.get(s) as any)?.mlRankPct, s).toBe(want);
     expect((bySym.get('RK_A') as any).winProbSource).toBe('raw');
     expect((bySym.get('RK_A') as any).mlProbability).toBe(90);
+    expect((bySym.get('RK_E') as any).winProbSource).toBe('heuristic');
+    expect((bySym.get('RK_E') as any).mlProbability).toBeNull();
+    expect((bySym.get('RK_E') as any).researchScore).toEqual(expect.any(Number));
+    expect(res.data.marketOverview.avgWinProbability).toBeNull();
     await cacheDel('misc:trade-decision-cockpit');
   });
 
@@ -79,6 +99,75 @@ describe('mlRankPct', () => {
     const a = res.data.candidates.find((c: any) => c.symbol === 'RK_A');
     expect(a.newsSentiment).toBeNull();
     expect(a.smartMoneyCr).toBeNull();
+    await cacheDel('misc:trade-decision-cockpit');
+  });
+
+  it('withholds invalid long geometry while retaining a valid fallback plan', async () => {
+    await dbTransaction(async tx => {
+      await tx.run('DELETE FROM unified_signals WHERE symbol IN (?, ?, ?, ?)', ['RK_A', 'RK_B', 'RK_C', 'RK_D']);
+      await tx.run('UPDATE technical_signals SET sma50 = ? WHERE symbol = ? AND date = ?', [120, 'RK_A', day(1)]);
+      await tx.run('UPDATE technical_signals SET sma50 = ? WHERE symbol = ? AND date = ?', [90, 'RK_B', day(1)]);
+      await tx.run(`INSERT INTO unified_signals
+        (symbol, signal_source, signal_type, entry_price, stop_loss, target_price, confidence_score, signal_generated_at)
+        VALUES (?, 'screener', 'BUY', 100, 105, 110, 90, now()), (?, 'screener', 'BUY', 100, 90, 110, 90, now())`,
+      ['RK_C', 'RK_D']);
+    });
+    await cacheDel('misc:trade-decision-cockpit');
+    const res: any = await caller.getTradeDecisionCockpitData();
+    const a = res.data.candidates.find((c: any) => c.symbol === 'RK_A');
+    const b = res.data.candidates.find((c: any) => c.symbol === 'RK_B');
+    const c = res.data.candidates.find((c: any) => c.symbol === 'RK_C');
+    const d = res.data.candidates.find((c: any) => c.symbol === 'RK_D');
+    expect.soft(a).toMatchObject({ entryPrice: null, stopLoss: null, targetPrice: null });
+    expect(b).toMatchObject({ entryPrice: 100, stopLoss: 95, targetPrice: 110 });
+    expect.soft(c).toMatchObject({ entryPrice: null, stopLoss: null, targetPrice: null });
+    expect(d).toMatchObject({ entryPrice: 100, stopLoss: 90, targetPrice: 110 });
+    await cacheDel('misc:trade-decision-cockpit');
+  });
+
+  it('does not report a model-threshold ratio as market advance/decline breadth', async () => {
+    await cacheDel('misc:trade-decision-cockpit');
+    const res: any = await caller.getTradeDecisionCockpitData();
+    expect(res.data.marketOverview.advDecRatio).toBeNull();
+    expect(res.data.marketOverview.modelThresholdRatio).toBeNull();
+    expect(res.data.marketOverview.researchThresholdRatio).toEqual(expect.any(Number));
+    await cacheDel('misc:trade-decision-cockpit');
+  });
+
+  it('uses the canonical call and abstains from the unvalidated cockpit trade switch', async () => {
+    await dbTransaction(async tx => {
+      await tx.run('DELETE FROM unified_recommendations');
+      await tx.run(`INSERT INTO unified_recommendations
+        (symbol, computed_at, regime, unified_score, conviction_level, classification)
+        VALUES (?, '2026-10-27', 'BULL', 55, 'D_MARGINAL', 'Hold'),
+               (?, '2026-10-27', 'BULL', 75, 'A_HIGH', 'Buy')`, ['RK_A', 'RK_B']);
+      await tx.run('UPDATE technical_signals SET calibrated_win_probability = ? WHERE date = ? AND cmp > 0', [0.9, day(1)]);
+    });
+    invalidateUrLatestAt();
+    await cacheDel('misc:trade-decision-cockpit');
+    const res: any = await caller.getTradeDecisionCockpitData();
+    const bySymbol = new Map(res.data.candidates.map((c: any) => [c.symbol, c]));
+    expect.soft((bySymbol.get('RK_A') as any).actionAdvice).toBe('HOLD');
+    expect.soft((bySymbol.get('RK_B') as any).actionAdvice).toBe('BUY');
+    expect.soft((bySymbol.get('RK_C') as any).actionAdvice).toBe('WATCH');
+    expect.soft(res.data.marketOverview.verdict).toBe('NO TRADE');
+    expect.soft((bySymbol.get('RK_A') as any).techSignalCount).toBeNull();
+    expect.soft((bySymbol.get('RK_A') as any).quantRank).toBeNull();
+    expect((bySymbol.get('RK_A') as any).factors).toMatchObject({ technical: null, fundamental: null, momentum: null });
+    await cacheDel('misc:trade-decision-cockpit');
+  });
+
+  it('counts a real signal list and leaves a malformed list unknown', async () => {
+    await dbTransaction(async tx => {
+      await tx.run('UPDATE technical_signals SET signals_json = ? WHERE symbol = ? AND date = ?',
+        [JSON.stringify([{ type: 'A' }, { type: 'B' }]), 'RK_A', day(1)]);
+      await tx.run('UPDATE technical_signals SET signals_json = ? WHERE symbol = ? AND date = ?',
+        ['not-json', 'RK_B', day(1)]);
+    });
+    await cacheDel('misc:trade-decision-cockpit');
+    const res: any = await caller.getTradeDecisionCockpitData();
+    expect(res.data.candidates.find((c: any) => c.symbol === 'RK_A').techSignalCount).toBe(2);
+    expect(res.data.candidates.find((c: any) => c.symbol === 'RK_B').techSignalCount).toBeNull();
     await cacheDel('misc:trade-decision-cockpit');
   });
 

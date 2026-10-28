@@ -55,6 +55,7 @@ export const WhyThisPick: React.FC<{ symbol: string; timeframe?: 'long_term' | '
         </div>}
         {engines.length > 0 && <div>
           <p className="text-[9px] font-bold text-slate-500 font-display uppercase tracking-wider mb-2">Available engine scores{score.engine_coverage_count != null && <span className="normal-case text-slate-600"> · {score.engine_coverage_count} active engines contributed</span>}</p>
+          <p className="text-[9px] text-slate-500 mb-2">Raw scores may include inactive engines; their contributions to this ranking are unavailable.</p>
           <div className="space-y-2">{engines.map((engine) => <div key={engine.key} className="flex items-center gap-3">
             <span className="text-[10px] text-slate-400 w-28 shrink-0">{engine.label}</span>
             <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden"><div className="h-full rounded-full bg-indigo-500" style={{ width: `${Math.max(0, Math.min(100, engine.value))}%` }} /></div>

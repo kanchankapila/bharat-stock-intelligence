@@ -875,6 +875,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             );
           })()}
           {unifiedScore && <StockTagRow p={unifiedScore} className="pt-1 border-t border-slate-800/60" />}
+          {unifiedScore?.feature_as_of && <p className="text-[9px] text-slate-500">Technical feature snapshot: {String(unifiedScore.feature_as_of)}</p>}
         </div>
       )}
 

@@ -77,9 +77,48 @@ class TestMaxDrawdownSignConvention:
         assert row["max_drawdown_1y"] == pytest.approx(0.0)
 
     def test_drawdown_is_never_negative(self):
-        for closes in ([100.0] * 260, [100.0 - i for i in range(260)],
+        for closes in ([100.0] * 260, [100.0 - i * 0.25 for i in range(260)],
                        [100.0 + (i % 3) for i in range(260)]):
             assert _features(closes)["max_drawdown_1y"] >= 0
+
+    @pytest.mark.parametrize('invalid', [0.0, -1.0, float('nan'), float('inf')])
+    def test_invalid_recent_close_withholds_only_affected_symbol(self, invalid):
+        bad = _frame([100.0] * 200 + [invalid] + [100.0] * 59, "BAD")
+        good = _frame([100.0] * 260, "GOOD")
+        engine = InstitutionalQuantEngine.__new__(InstitutionalQuantEngine)
+        result = engine.compute_momentum_features(pd.concat([bad, good], ignore_index=True))
+        assert result["symbol"].tolist() == ["GOOD"]
+
+    def test_old_invalid_close_outside_lookback_does_not_suppress_features(self):
+        assert _features([0.0] + [100.0] * 260)["max_drawdown_1y"] == 0
+
+    def test_positive_quarantined_bar_withholds_affected_symbol(self):
+        bad = _frame([100.0] * 260, 'BAD')
+        bad.loc[200, 'is_suspect'] = 1
+        bad.loc[200, 'suspect_reason'] = 'absent_from_official_bhavcopy'
+        good = _frame([100.0] * 260, 'GOOD')
+        engine = InstitutionalQuantEngine.__new__(InstitutionalQuantEngine)
+        result = engine.compute_momentum_features(pd.concat([bad, good], ignore_index=True))
+        assert result['symbol'].tolist() == ['GOOD']
+
+    def test_closed_session_ghost_does_not_count_as_trading_bar(self):
+        clean = _frame([100.0 + i for i in range(260)])
+        ghost = clean.iloc[[-1]].copy()
+        ghost['date'] = ghost['date'] + pd.Timedelta(days=1)
+        ghost['close'] = 999.0
+        ghost['is_suspect'] = 1
+        ghost['suspect_reason'] = 'closed session: universe-wide flat zero-volume bar'
+        engine = InstitutionalQuantEngine.__new__(InstitutionalQuantEngine)
+        expected = engine.compute_momentum_features(clean).iloc[0]
+        actual = engine.compute_momentum_features(pd.concat([clean, ghost], ignore_index=True)).iloc[0]
+        assert actual['return_1w'] == pytest.approx(expected['return_1w'])
+        assert actual['ohlcv_days'] == expected['ohlcv_days']
+
+    def test_run_fails_before_saving_when_all_histories_are_invalid(self):
+        engine = InstitutionalQuantEngine.__new__(InstitutionalQuantEngine)
+        engine.load_ohlcv = lambda min_days: _frame([100.0] * 259 + [0.0])
+        with pytest.raises(ValueError, match="quant_scores was not updated"):
+            engine.run()
 
     def test_uses_the_running_peak_not_the_window_open(self):
         # Rises to 200, then falls to 100: a -50% drawdown, not the -0% a

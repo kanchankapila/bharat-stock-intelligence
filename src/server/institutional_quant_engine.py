@@ -17,12 +17,22 @@ import os
 import math
 import datetime
 import argparse
+import sys
 import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
 from db_compat import get_engine
+from ohlcv_quality import CLOSED_SESSION_REASON
 from risk_free_rate import get_risk_free_annual
+
+
+def _without_closed_sessions(frame: pd.DataFrame) -> pd.DataFrame:
+    """Remove known fabricated non-sessions without bridging suspect real-session bars."""
+    if 'is_suspect' not in frame or 'suspect_reason' not in frame:
+        return frame
+    closed = (frame['is_suspect'].eq(1) & frame['suspect_reason'].eq(CLOSED_SESSION_REASON)).fillna(False)
+    return frame.loc[~closed]
 
 
 def risk_free_annual() -> float:
@@ -49,9 +59,10 @@ class InstitutionalQuantEngine:
         """Load all OHLCV rows, return only symbols with ≥ min_days history."""
         with self.engine.connect() as conn:
             df = pd.read_sql(
-                "SELECT symbol, date, close, volume FROM stock_ohlcv ORDER BY symbol, date ASC",
+                "SELECT symbol, date, close, volume, is_suspect, suspect_reason FROM stock_ohlcv ORDER BY symbol, date ASC",
                 conn,
             )
+        df = _without_closed_sessions(df)
         df['date'] = pd.to_datetime(df['date'])
         counts = df.groupby('symbol')['date'].count()
         eligible = counts[counts >= min_days].index
@@ -81,9 +92,19 @@ class InstitutionalQuantEngine:
         """Per-symbol returns over standard horizons + above-SMA200 flag."""
         risk_free_pct = get_risk_free_annual() * 100  # resolved once per run, not per symbol
         records = []
+        invalid_symbols = []
         for symbol, grp in ohlcv.groupby('symbol'):
-            closes = grp.sort_values('date')['close'].values
+            ordered = _without_closed_sessions(grp.sort_values('date'))
+            closes = pd.to_numeric(ordered['close'], errors='coerce').to_numpy(dtype=float)
             n      = len(closes)
+            # Do not bridge or rank invalid recent bars as if they were traded prices. The
+            # on-demand engine shares quant_scores with a separate canonical writer: omit the
+            # affected symbols rather than deleting or overwriting the other writer's rows.
+            window = closes[-253:]
+            suspect = 'is_suspect' in ordered and ordered['is_suspect'].tail(253).eq(1).any()
+            if n == 0 or suspect or not np.isfinite(window).all() or (window <= 0).any():
+                invalid_symbols.append(symbol)
+                continue
             last   = closes[-1]
 
             def ret(days):
@@ -133,6 +154,9 @@ class InstitutionalQuantEngine:
                 'max_drawdown_1y':  max_dd,
                 'ohlcv_days':       n,
             })
+        if invalid_symbols:
+            print(f"[QuantEngine] withheld {len(invalid_symbols)} symbols with invalid or quarantined bars in the last 253 observations",
+                  file=sys.stderr)
         return pd.DataFrame(records)
 
     # ------------------------------------------------------------------
@@ -192,6 +216,8 @@ class InstitutionalQuantEngine:
         print(f"[QuantEngine] {ohlcv['symbol'].nunique()} symbols with >=63 days OHLCV")
 
         mom     = self.compute_momentum_features(ohlcv)
+        if mom.empty:
+            raise ValueError('No symbols have usable price histories; quant_scores was not updated')
         fund    = self.load_fundamentals()
         screener = self.load_screener_confluence()
 

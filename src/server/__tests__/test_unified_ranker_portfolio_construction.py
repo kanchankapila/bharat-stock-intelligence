@@ -6,6 +6,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from unified_ranker import (
+    apply_cost_penalty,
+    count_cost_zeroed,
     normalize_position_sizes,
     factor_crowding_multiplier,
     cluster_by_correlation,
@@ -18,6 +20,14 @@ from unified_ranker import (
     FACTOR_CROWDING_THRESHOLD,
     FACTOR_CROWDING_DISCOUNT,
 )
+
+
+def test_cost_zero_monitor_counts_only_previously_positive_positions():
+    before = {'not_a_buy': 0.0, 'eliminated': 1.0, 'reduced': 2.0, 'no_cost': 1.0}
+    after = apply_cost_penalty(before, {'eliminated': 0.05, 'reduced': 0.01})
+    assert after['eliminated'] == 0
+    assert 0 < after['reduced'] < before['reduced']
+    assert count_cost_zeroed(before, after) == 1
 
 
 class TestSectorExposureCap:

@@ -19,7 +19,9 @@ export interface ScoredStock {
   reasons: Array<{ name: string; sentiment: string; source: string }>;
   last_updated: string;
   top_domain?: string;
-  position_size_pct?: number;   // #6 suggested portfolio weight (0 for non-buys)
+  position_size_pct?: number | null;
+  research_position_size_pct?: number | null;
+  position_sizing_status?: 'UNVALIDATED';
   adt_cr?: number | null;       // ~30-session avg daily turnover, Rs crore
   liquidity?: LiquidityTier | null; // label only; never changes score/classification (AF-20261015-10)
 }
@@ -93,26 +95,8 @@ function mapRecToScoredStock(rec: any): ScoredStock {
   if (reasons.length === 0 && rec.trade_reasoning) {
     reasons = [{ name: rec.trade_reasoning, sentiment, source: 'unified' }];
   }
-  // Only scores that actually EXIST are eligible to be the "top domain".
-  //
-  // These used to be `rec.screener_stock_score ?? 0` etc. Since unified_ranker writes NULL
-  // (not 0) for an engine that returned nothing -- deliberately, so the UI can tell "n/a"
-  // from a real 0 (AF-20260818-31) -- the old default turned every absent engine into a
-  // legitimate-looking 0. On a row where all five are NULL the reduce then returned the
-  // FIRST element, so every such stock was labelled "Screener" purely because Screener is
-  // listed first, not because it scored highest. Filtering before the reduce means a
-  // cold-start row reports no top domain instead of a fabricated winner.
-  const domains: Array<[string, number]> = ([
-    ['Screener',   rec.screener_stock_score],
-    ['ML',         rec.ml_score],
-    ['Confluence', rec.confluence_score],
-    ['Technical',  rec.technical_score],
-    ['DL',         rec.dl_score],
-  ] as Array<[string, number | null | undefined]>)
-    .filter((d): d is [string, number] => d[1] != null);
-  const top_domain = domains.length > 0
-    ? domains.reduce((a, b) => (b[1] > a[1] ? b : a))[0]
-    : undefined;
+  // Stored raw scores are not the normalized, gated and weighted contributions to this row.
+  // A paused engine can have the largest raw value, so no driver can be inferred from them.
   return {
     symbol:         rec.symbol,
     timeframe:      rec.timeframe ?? 'UNSPECIFIED',
@@ -123,8 +107,9 @@ function mapRecToScoredStock(rec: any): ScoredStock {
     negative_count: rec.bearish_screener_count ?? 0,
     reasons,
     last_updated:   rec.generated_at ?? rec.computed_at,
-    top_domain,
-    position_size_pct: rec.position_size_pct ?? 0,
+    position_size_pct: null,
+    research_position_size_pct: Number.isFinite(rec.position_size_pct) ? rec.position_size_pct : null,
+    position_sizing_status: 'UNVALIDATED',
     adt_cr:         rec.adt_cr != null ? Number(rec.adt_cr) : null,
     liquidity:      liquidityTier(rec.adt_cr != null ? Number(rec.adt_cr) : null),
   };
