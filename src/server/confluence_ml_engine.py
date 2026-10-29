@@ -275,6 +275,9 @@ def train(conn):
     model.fit(X, y)
 
     auc_scores = cross_val_score(model, X, y, cv=cv, scoring='roc_auc')
+    if len(auc_scores) == 0 or not np.isfinite(auc_scores).all() or np.any((auc_scores < 0) | (auc_scores > 1)):
+        print('[ML] Cross-validation returned an invalid AUC; refusing model promotion.')
+        return False
     new_auc = float(auc_scores.mean())
     print(f'[ML] CV AUC: {new_auc:.3f} +/- {auc_scores.std():.3f}  '
           f'(TimeSeriesSplit n_splits={n_splits}, embargo={embargo} rows)')

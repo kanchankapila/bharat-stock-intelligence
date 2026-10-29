@@ -147,6 +147,86 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
     return {'fit': True, 'n': len(rows), 'updated': updated, 'regimes': regimes_meta}
 
 
+# Shadow arm (AF-20261008-17 / AF-20261001-48): one isotonic fit PER HORIZON instead of the pooled
+# fit above, which fits one number to three base rates and counts a signal up to three times.
+# Written only to calibration_shadow -- nothing reads it for scoring -- so it can be graded forward
+# against the live column before it replaces anything. Same point-in-time rule as the live fit.
+_SHADOW_DDL = """
+CREATE TABLE IF NOT EXISTS calibration_shadow (
+    symbol        TEXT NOT NULL,
+    date          DATE NOT NULL,
+    horizon_days  INTEGER NOT NULL,
+    prob          DOUBLE PRECISION NOT NULL,
+    fit_max       TEXT NOT NULL,
+    fitted_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (symbol, date, horizon_days)
+)"""
+
+
+_IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+
+
+def _now_ist() -> _dt.datetime:
+    return _dt.datetime.now(_IST)
+
+
+def _next_open_ist(day: str) -> _dt.datetime:
+    # Next weekday 09:15 with no holiday calendar: a holiday only makes the cutoff stricter.
+    d = _dt.date.fromisoformat(day) + _dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d += _dt.timedelta(days=1)
+    return _dt.datetime.combine(d, _dt.time(9, 15), tzinfo=_IST)
+
+
+def shadow_recalibrate_per_horizon(conn: ConnWrapper, min_samples: int = 200) -> dict:
+    """Freeze predictions for the latest scored signal date only, and only before the next session
+    opens. Anchored on the data, not the wall clock: ml-daily-ops finishes after midnight IST on
+    some nights, and a clock anchor wrote nothing for those dates (AF-20261029-02)."""
+    conn.execute(_SHADOW_DDL)
+    rows = conn.execute("""
+        SELECT so.horizon_days AS h, ts.date AS d, ts.win_probability AS p,
+               CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
+        FROM signal_outcomes so
+        JOIN technical_signals ts ON ts.symbol = so.symbol AND so.signal_date = ts.date
+        WHERE so.outcome IN ('WIN', 'LOSS', 'STOP_LOSS') AND ts.win_probability IS NOT NULL
+          AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
+    """).fetchall()
+    by_h: dict = {}
+    for r in rows:
+        p = float(r['p'])
+        if math.isfinite(p) and 0 <= p <= 1:
+            by_h.setdefault(int(r['h']), []).append(r)
+    out = {}
+    latest = conn.execute(
+        "SELECT MAX(date) AS d FROM technical_signals "
+        "WHERE win_probability IS NOT NULL AND win_probability <> 0.5").fetchone()['d']
+    if latest is None or _now_ist() >= _next_open_ist(str(latest)[:10]):
+        print(f"[CalibrationShadow] latest signal date {latest} is past its next open; nothing frozen")
+        conn.commit()
+        return out
+    latest = str(latest)[:10]
+    for h, hr in sorted(by_h.items()):
+        ys = [int(r['y']) for r in hr]
+        if len(hr) < min_samples or len(set(ys)) < 2:
+            out[h] = {'fit': False, 'n': len(hr)}
+            continue
+        ir = fit_calibrator([float(r['p']) for r in hr], ys)
+        fit_max = max(str(r['d'])[:10] for r in hr)
+        sigs = conn.execute(
+            "SELECT symbol, date, win_probability FROM technical_signals "
+            "WHERE win_probability IS NOT NULL AND win_probability <> 0.5 AND date > ? AND date >= ?",
+            (fit_max, latest)).fetchall()
+        writes = [(s['symbol'], s['date'], h, calibrate(ir, float(s['win_probability'])), fit_max)
+                  for s in sigs if math.isfinite(float(s['win_probability'])) and 0 <= float(s['win_probability']) <= 1]
+        executemany_batched(conn, """
+            INSERT INTO calibration_shadow (symbol, date, horizon_days, prob, fit_max) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (symbol, date, horizon_days) DO NOTHING""", writes)
+        out[h] = {'fit': True, 'n': len(hr), 'fit_max': fit_max, 'written': len(writes)}
+        print(f"[CalibrationShadow] h={h} fit on {len(hr)} outcomes through {fit_max}; {len(writes)} rows")
+    conn.commit()
+    return out
+
+
 # ── Horizon-stratified AUC ───────────────────────────────────────────────────
 # signal_outcomes holds one row per (symbol, signal_date, horizon_days), and the WIN rate is a
 # property of the HORIZON, not just the model: measured live 2026-09-24 on the technical-source
@@ -674,6 +754,7 @@ def run():
         regime_readiness(conn)
         per_regime_auc(conn)
         persist_regime_edge_status(conn)
+        shadow_recalibrate_per_horizon(conn)  # last: the live outputs above are written even if it fails
     finally:
         conn.close()
 

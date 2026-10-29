@@ -26,17 +26,22 @@ describe('docClaims', () => {
   });
 
   it('docs identify the ignored URL corpus as optional in a fresh checkout', () => {
-    const docs = ['CLAUDE.md', 'CONTEXT.md', 'AGENTS.md', '.claude/rules/data-sources.md', '.claude/rules/bugs-data-layer.md'];
+    const docs = ['CLAUDE.md', 'CONTEXT.md', 'AGENTS.md', '.claude/rules/findings-ledger.md', '.claude/rules/data-sources.md', '.claude/rules/bugs-data-layer.md'];
     const named = docs.flatMap(d => read(d).split('\n').filter(l => /URLs|corpus/.test(l))
       .flatMap(l => [...l.matchAll(/`([\w.-]+\.(?:txt|db))`/g)].map(m => `${d}: ${m[1]}`)));
     expect(named.length).toBeGreaterThan(0);
     expect(read('.gitignore')).toMatch(/^urls_v2\.db$/m);
-    for (const doc of ['CLAUDE.md', '.claude/rules/data-sources.md', '.claude/rules/bugs-data-layer.md']) {
+    for (const doc of ['.claude/rules/findings-ledger.md', '.claude/rules/data-sources.md', '.claude/rules/bugs-data-layer.md']) {
       const source = read(doc);
       expect(source).toMatch(/optional local[\s\S]{0,100}`urls_v2\.db`/);
       expect(source).toContain('git show c2ceae0e^:unique_urls.txt');
     }
     expect(named.filter(n => n.split(': ')[1] !== 'urls_v2.db' && !existsSync(path.join(root, n.split(': ')[1])))).toEqual([]);
+  });
+
+  it('CLAUDE.md does not describe the retired v7 pages as retained (AF-20261027-08)', () => {
+    const claude = read('CLAUDE.md');
+    expect(claude).not.toMatch(/approved retaining[\s\S]{0,40}v7/);
   });
 
   it('scoring-authority.md documents that conviction_level is direction-agnostic', () => {

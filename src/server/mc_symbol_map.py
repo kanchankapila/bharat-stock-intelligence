@@ -72,13 +72,20 @@ def build_mc_to_symbol(rows: Iterable, *, log=None) -> dict[str, str]:
 # MoneyControl row to every symbol sharing the code (A-03, 2026-10-08: Bajaj Finance -> BAJAJST,
 # Adani Power -> EMPOWER). Join this derived table instead: columns (mcsymbol, symbol).
 # test_mc_symbol_map.py asserts it drops exactly what build_mc_to_symbol drops.
+# Only listed names compete for a code: retired INACTIVE/DELISTED aliases (KOTAK and MAHINDRA on
+# KMF, INDUSIND on IIB) made 10 live codes look ambiguous and dropped their data (2026-10-29).
 MC_TO_SYMBOL_SQL = """(
     SELECT TRIM(mcsymbol) AS mcsymbol, MIN(TRIM(symbol)) AS symbol
     FROM nse_stocks
-    WHERE TRIM(mcsymbol) <> '' AND TRIM(symbol) <> ''
+    WHERE TRIM(mcsymbol) <> '' AND TRIM(symbol) <> '' AND status = 'ACTIVE'
     GROUP BY TRIM(mcsymbol)
     HAVING COUNT(DISTINCT TRIM(symbol)) = 1
 )"""
+
+
+# The rows build_mc_to_symbol callers feed it: the same ACTIVE-only universe as MC_TO_SYMBOL_SQL.
+MC_MAP_ROWS_SQL = ("SELECT symbol, mcsymbol FROM nse_stocks "
+                   "WHERE mcsymbol IS NOT NULL AND mcsymbol != '' AND status = 'ACTIVE'")
 
 
 def ambiguous_mc_codes(rows: Iterable) -> dict[str, list[str]]:

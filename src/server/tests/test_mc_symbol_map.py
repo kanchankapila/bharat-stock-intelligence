@@ -132,12 +132,38 @@ def test_sql_map_drops_exactly_what_build_mc_to_symbol_drops():
     from mc_symbol_map import MC_TO_SYMBOL_SQL
 
     conn = pg_memory_conn()
-    conn.execute("CREATE TABLE nse_stocks (symbol TEXT, mcsymbol TEXT)")
+    conn.execute("CREATE TABLE nse_stocks (symbol TEXT, mcsymbol TEXT, status TEXT)")
     for sym, code in ROWS + [("BLANK", ""), ("NOCODE", None)]:
-        conn.execute("INSERT INTO nse_stocks VALUES (?, ?)", (sym, code))
+        conn.execute("INSERT INTO nse_stocks VALUES (?, ?, 'ACTIVE')", (sym, code))
     got = dict((r[0], r[1]) for r in conn.execute(
         f"SELECT mcsymbol, symbol FROM {MC_TO_SYMBOL_SQL} m").fetchall())
     assert got == build_mc_to_symbol(ROWS) == {"RI": "RELIANCE", "TCS": "TCS"}
+
+
+def test_retired_aliases_do_not_make_a_live_code_ambiguous():
+    """2026-10-29: INACTIVE aliases sharing a code (KOTAK, MAHINDRA on KMF; INDUSIND on IIB) made
+    10 live codes look ambiguous, so KOTAKBANK, INDUSINDBK, LT, NESTLEIND, SHRIRAMFIN, IDEA,
+    UNITDSPR, OBEROIRLTY... lost their MoneyControl data (INDUSINDBK broker upside 0/21 days)."""
+    from pg_test_support import pg_memory_conn
+    from mc_symbol_map import MC_TO_SYMBOL_SQL, MC_MAP_ROWS_SQL
+
+    conn = pg_memory_conn()
+    conn.execute("CREATE TABLE nse_stocks (symbol TEXT, mcsymbol TEXT, status TEXT)")
+    for sym, code, status in [("KOTAK", "KMF", "INACTIVE"), ("MAHINDRA", "KMF", "INACTIVE"),
+                              ("KOTAKBANK", "KMF", "ACTIVE"), ("AARTIIND", "AI", "ACTIVE"),
+                              ("ARCHIDPLY", "AI", "ACTIVE"), ("OLDCO", "OC", "DELISTED")]:
+        conn.execute("INSERT INTO nse_stocks VALUES (?, ?, ?)", (sym, code, status))
+    sql_map = dict((r[0], r[1]) for r in conn.execute(
+        f"SELECT mcsymbol, symbol FROM {MC_TO_SYMBOL_SQL} m").fetchall())
+    py_map = build_mc_to_symbol(conn.execute(MC_MAP_ROWS_SQL).fetchall())
+    assert sql_map == py_map == {"KMF": "KOTAKBANK"}
+
+
+def test_every_builder_call_site_reads_the_shared_active_rows_query():
+    root = pathlib.Path(__file__).resolve().parents[1]
+    for name in ("eps_surprise_fetcher.py", "mc_techscanner_fetcher.py", "mc_earnings_fetcher.py"):
+        body = (root / name).read_text(encoding="utf-8", errors="replace")
+        assert "MC_MAP_ROWS_SQL" in body, f"{name} builds the MoneyControl map from its own nse_stocks query"
 
 
 def test_the_scan_above_is_not_vacuous():

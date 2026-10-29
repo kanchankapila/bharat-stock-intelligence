@@ -449,6 +449,9 @@ export interface RepeatableJobConfig {
   jobName: string;
   data?: any;
   repeat: { pattern: string } | { every: number };
+  /** When set, the stored schedule is cleared and not re-added (the worker still runs a manual
+   *  enqueue). For a job that can only fail in the current environment, e.g. a missing API key. */
+  unscheduledReason?: string;
   /** Optional — matches addJobWithCatchup/BullMQ's own API. A few original call sites (e.g.
    *  confluence-compute/outcomes) never set one; the repeatable-cleanup loop still matches by
    *  jobName in that case, so omitting it is safe and must not be defaulted to an invented value. */
@@ -599,18 +602,32 @@ export async function registerRepeatableJob(
   }
 
   const repeatables = await queue.getRepeatableJobs();
-  for (const r of repeatables) {
+  const toRemove = cfg.unscheduledReason
+    ? repeatables.filter(r => r.name === cfg.jobName)
+    : repeatables;
+  for (const r of toRemove) {
     await queue.removeRepeatableByKey(r.key);
   }
 
-  await addJobWithCatchup(queue, cfg.jobName, cfg.data ?? {}, {
-    repeat: cfg.repeat,
-    jobId: cfg.jobId,
-    removeOnComplete: cfg.removeOnComplete,
-    removeOnFail: cfg.removeOnFail,
-    attempts: cfg.attempts,
-    backoff: cfg.backoff,
-  });
+  if (cfg.unscheduledReason) {
+    const disabledKeys = new Set(toRemove.map(r => r.key));
+    const delayed = await queue.getJobs(['delayed'], 0, -1);
+    for (const job of delayed) {
+      if (job.name === cfg.jobName && job.repeatJobKey && disabledKeys.has(job.repeatJobKey)) {
+        await job.remove();
+      }
+    }
+    console.log(`[QUEUE] ${cfg.queueName}: ${cfg.jobName} left unscheduled -- ${cfg.unscheduledReason}`);
+  } else {
+    await addJobWithCatchup(queue, cfg.jobName, cfg.data ?? {}, {
+      repeat: cfg.repeat,
+      jobId: cfg.jobId,
+      removeOnComplete: cfg.removeOnComplete,
+      removeOnFail: cfg.removeOnFail,
+      attempts: cfg.attempts,
+      backoff: cfg.backoff,
+    });
+  }
 
   // BullMQ's Worker constructor validates several of its options (observed live:
   // maxStalledCount specifically throws "must be greater or equal than 0") rather than

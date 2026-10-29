@@ -21,6 +21,7 @@ from db_compat import connect
 # Index series stored alongside stocks in intraday_ohlcv -- excluded from the stock ranking.
 from intraday_fetcher import _INDEX_SYMBOLS
 from unified_ranker import (
+    CAT_BASE_WT,
     compute_screener_stock_scores,
     bet_size_from_probability,
     normalize_position_sizes,
@@ -68,6 +69,12 @@ TARGET_PCT_FLOOR, TARGET_PCT_CAP = 0.008, 0.05   # 0.8%–5%
 # Queued measurement: re-run the 256-config sweep described under EMISSION_GATE with W_SCREENER = 0
 # (cost-aware, same horizon) and change the constants only on that result.
 W_BREAKOUT, W_SCREENER, W_REVERSAL = 0.20, 0.40, 0.40
+
+# AF-20261025-01 shadow arm. The intraday membership's categories are absent from CAT_BASE_WT, so
+# the live screener score is a constant 50. This repaired score is written to history only, never
+# blended, until ~20 sessions grade it against the live one.
+SHADOW_CAT_WT = {**CAT_BASE_WT, 'intraday': CAT_BASE_WT['technical_momentum'],
+                 'momentum': CAT_BASE_WT['technical_momentum'], 'technical': CAT_BASE_WT['technical_trend']}
 
 # Regime tilt — applied to both the final score AND (unlike before) position sizing, so a
 # RISK_OFF regime actually shrinks exposure instead of just relabeling the same full-size bet.
@@ -609,6 +616,7 @@ class IntradayRanker:
     def run(self):
         membership = self._intraday_membership()
         screener_scores, bull_counts, bear_counts = compute_screener_stock_scores(membership, {})
+        screener_shadow, _, _ = compute_screener_stock_scores(membership, {}, cat_weights=SHADOW_CAT_WT)
         breakout_scores = self._breakout_scores()
         reversal_scores = self._reversal_scores()
         news_scores = self._news_sentiment()
@@ -703,6 +711,7 @@ class IntradayRanker:
                 "conviction": _conviction(score, classification), "classification": classification,
                 "raw_classification": raw_classification,
                 "screener_score": round(s_sc, 2) if s_sc is not None else None,
+                "screener_score_shadow": round(screener_shadow[sym], 2) if sym in screener_shadow else None,
                 "breakout_score": round(b_sc, 2) if b_sc is not None else None,
                 "reversal_score": round(r_sc, 2) if r_sc is not None else None,
                 "news_sentiment": round(news, 3) if news is not None else None,
@@ -841,13 +850,14 @@ class IntradayRanker:
                 """INSERT INTO intraday_recommendations_history
                    (symbol, computed_at, cycle_at, intraday_regime, intraday_score, conviction_level,
                     classification, screener_score, breakout_score, news_sentiment, bullish_count,
-                    bearish_count, cmp, entry_price, stop_loss, target_1, risk_reward, position_size_pct)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    bearish_count, cmp, entry_price, stop_loss, target_1, risk_reward, position_size_pct,
+                    screener_score_shadow)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(symbol, cycle_at) DO NOTHING""",
                 (r["symbol"], today, cycle_at, regime, r["score"], r["conviction"], r["raw_classification"],
                  r["screener_score"], r["breakout_score"], r["news_sentiment"], r["bull"], r["bear"],
                  hist_entry, hist_entry, hist_stop, hist_target, hist_rr,
-                 r["position_size_pct"]),
+                 r["position_size_pct"], r["screener_score_shadow"]),
             )
         self.conn.commit()
         buys = sum(1 for r in rows if r["classification"] in ("Strong Buy", "Buy"))

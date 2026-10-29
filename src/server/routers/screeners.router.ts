@@ -359,7 +359,9 @@ export const screenersRouter = router({
         conditions.push('bearish_screener_count = 0');
       }
       if (input.conviction !== 'ALL') {
-        conditions.push('conviction_level = ?');
+        // conviction_level is direction-agnostic (S_ELITE is also Strong Sell, AF-20261021-01);
+        // on this bullish-screener page a conviction tier means the buy side.
+        conditions.push("conviction_level = ? AND classification IN ('Buy', 'Strong Buy')");
         params.push(input.conviction);
       }
       params.push(input.limit);

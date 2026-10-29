@@ -130,7 +130,7 @@ describe('DATA_QUALITY_CHECKS registry', () => {
   it('measures label and intraday freshness from write timestamps, not logical dates', () => {
     const excursions = DATA_QUALITY_CHECKS.find(c => c.id === 'signal-excursions-freshness')!;
     const breadth = DATA_QUALITY_CHECKS.find(c => c.id === 'intraday-breadth-snapshots-freshness')!;
-    expect(excursions.sql).toMatch(/MAX\(computed_at::text\).*signal_excursions/is);
+    expect(excursions.sql).toMatch(/MAX\(computed_at\)::text.*signal_excursions/is);
     expect(excursions.sql).not.toMatch(/MAX\(signal_date/);
     expect(breadth.sql).toMatch(/MAX\(snapshot_at\).*intraday_breadth_snapshots/is);
     expect(breadth.sql).not.toMatch(/MAX\(date::text\)/);
@@ -575,6 +575,13 @@ describe('individual evaluate() functions', () => {
     expect(check.evaluate({ last_date: new Date(now).toISOString() }, now).status).toBe('pass');
   });
 
+  it('calibration-shadow-integrity distinguishes empty, valid and retroactive records', () => {
+    const check = byId('calibration-shadow-integrity');
+    expect(check.evaluate({ total: 0, invalid: 0 }, now).status).toBe('warn');
+    expect(check.evaluate({ total: 3, invalid: 0 }, now).status).toBe('pass');
+    expect(check.evaluate({ total: 3, invalid: 1 }, now).status).toBe('fail');
+  });
+
   it('technical-signals-financial-ratio-delivery passes at the measured healthy-session baseline', () => {
     const r = byId('technical-signals-financial-ratio-delivery').evaluate(
       { total: 2133, fcf_n: 1624, coverage_n: 1589, roce_n: 1589, measured_date: '2026-10-22' }, now,
@@ -918,9 +925,10 @@ describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCh
     expect(byId('confluence-signals-freshness').evaluate({ last_date: satMorning }, now).status).toBe('fail');
   });
 
-  it('nativeDateColumn casts the date column to ::text in the generated SQL', () => {
+  it('nativeDateColumn casts the aggregate to ::text in the generated SQL', () => {
     // macro_asset_prices.date is a native Postgres DATE column (see stock_ohlcv precedent).
-    expect(byId('macro-asset-prices-freshness').sql).toMatch(/date::text/);
+    // The cast sits outside MAX() so an index on the column stays usable.
+    expect(byId('macro-asset-prices-freshness').sql).toMatch(/MAX\(date\)::text/);
   });
 
   it('news-sentiment-freshness is NOT trading-day-aware (news lands 7 days a week) and does not absorb a weekend gap', () => {

@@ -12,6 +12,7 @@ import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { getStockMapping, getStockMappingByTLId, getStockMappingByName } from './stockMapping';
 import { delay } from './lib/async';
 import { getAtrBarriers, type Barriers } from './atrBarriers';
+import { cacheGet, cacheSet } from './cacheService';
 
 const TRENDLYNE_BASE_URL = 'https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/';
 
@@ -1373,6 +1374,29 @@ export function getTrendlyneScreenerCategories() {
  * with no price can never be traded or graded (AF-20260930-16), so a code is kept only if it is
  * currently priced; otherwise the Trendlyne id/name mapping is tried, under the same rule.
  */
+/** How long a never-signalled intraday screener keeps being scanned before it is cold-dropped. */
+export const INTRADAY_TRIAL_MS = 7 * 24 * 3600_000;
+/** The trial record expires after this, so a dropped screener is re-tried periodically. */
+const INTRADAY_TRIAL_TTL_S = 90 * 24 * 3600;
+const trialKey = (name: string) => `intraday-screener-trial:${name}`;
+
+/** Active (signalled in the window) screeners, plus never-signalled ones still inside their trial. */
+export function selectIntradayScreeners<T extends { screener_name: string }>(
+  all: T[], activeNames: Set<string>, everSignaled: Set<string>,
+  trialStarts: Map<string, number>, now: number,
+): { scan: T[]; newTrials: Array<[string, number]> } {
+  const newTrials: Array<[string, number]> = [];
+  const scan = all.filter(s => {
+    const name = s.screener_name;
+    if (activeNames.has(name)) return true;
+    if (everSignaled.has(name)) return false;
+    const started = trialStarts.get(name);
+    if (started === undefined) { newTrials.push([name, now]); return true; }
+    return now - started < INTRADAY_TRIAL_MS;
+  });
+  return { scan, newTrials };
+}
+
 export function resolveTradeableSymbol(
   stock: { symbol?: string; stockId?: string; name?: string },
   priced: Set<string>,
@@ -1474,10 +1498,14 @@ export async function runIntradayScreenerScan(): Promise<{
     `) as { screener_name: string }[];
     const everSignaled = new Set(everSignaledRows.map(r => r.screener_name));
 
-    const filtered = allScreeners.filter((s: any) => {
-      const name: string = s.screener_name;
-      return activeNames.has(name) || !everSignaled.has(name);
-    });
+    const trialStarts = new Map<string, number>();
+    for (const s of allScreeners) {
+      if (activeNames.has(s.screener_name) || everSignaled.has(s.screener_name)) continue;
+      const started = await cacheGet<number>(trialKey(s.screener_name));
+      if (typeof started === 'number') trialStarts.set(s.screener_name, started);
+    }
+    const { scan: filtered, newTrials } = selectIntradayScreeners(allScreeners, activeNames, everSignaled, trialStarts, Date.now());
+    for (const [name, at] of newTrials) await cacheSet(trialKey(name), at, INTRADAY_TRIAL_TTL_S);
 
     console.log(`⚡ [INTRADAY SCAN] ${filtered.length}/${allScreeners.length} intraday screeners active (${allScreeners.length - filtered.length} cold-dropped).`);
 
@@ -1498,8 +1526,12 @@ export async function runIntradayScreenerScan(): Promise<{
       // 2. Fetch stock constituents — short-TTL cache instead of a hard bypass, so two
       // overlapping scan cycles within the TTL window don't double-hit Trendlyne.
       const result = await fetchTrendlyneScreenerData(screenpk, name, 0, false, TRENDLYNE_CONFIG.INTRADAY_CACHE_TTL_MS);
-      if (!result.success || !result.data || result.data.length === 0) {
-        console.log(`⚠️ [INTRADAY SCAN] No stocks found or scan failed for: ${name}`);
+      if (!result.success) {
+        console.log(`⚠️ [INTRADAY SCAN] Fetch failed for: ${name} (PK ${screenpk})`);
+        continue;
+      }
+      if (!result.data || result.data.length === 0) {
+        console.log(`[INTRADAY SCAN] No stocks matched: ${name}`);
         continue;
       }
 

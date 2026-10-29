@@ -279,6 +279,9 @@ export const scoringRouter = router({
         LEFT JOIN unified_recommendations ur
           ON ur.symbol = r.symbol
           AND ur.computed_at = ?
+          -- Long setups: only a buy-side canonical row may corroborate or supply levels
+          -- (conviction_level alone is direction-agnostic, AF-20261021-01).
+          AND ur.classification IN ('Buy', 'Strong Buy')
         WHERE r.rn = 1
           AND qs.piotroski_f_score >= 7
           AND qs.above_sma200 = 1

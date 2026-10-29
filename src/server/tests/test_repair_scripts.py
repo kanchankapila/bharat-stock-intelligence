@@ -82,7 +82,7 @@ def test_phantom_apply_deletes_only_closed_days(pg_conn, dump):
 # ── (b) eps_surprise_history on ambiguous / misattributed mcsymbols ──────────
 
 def _seed_eps(conn):
-    conn.execute("CREATE TABLE nse_stocks (symbol TEXT, mcsymbol TEXT)")
+    conn.execute("CREATE TABLE nse_stocks (symbol TEXT, mcsymbol TEXT, status TEXT DEFAULT 'ACTIVE')")
     conn.executemany("INSERT INTO nse_stocks VALUES (?,?)",
                      [('KOTAKBANK', 'KMF'), ('MAHINDRA', 'KMF'), ('INFY', 'INF01')])
     conn.execute("CREATE TABLE eps_surprise_history (scid TEXT, symbol TEXT, quarter TEXT, "
@@ -109,7 +109,7 @@ def test_eps_dry_run_then_apply(pg_conn, dump, capsys):
 # ── (a) point-in-time countdown / shocker recompute ──────────────────────────
 
 def _seed_clocks(conn):
-    conn.execute("CREATE TABLE nse_stocks (symbol TEXT, mcsymbol TEXT)")
+    conn.execute("CREATE TABLE nse_stocks (symbol TEXT, mcsymbol TEXT, status TEXT DEFAULT 'ACTIVE')")
     conn.executemany("INSERT INTO nse_stocks VALUES (?,?)", [('INFY', 'INF01'), ('TCS', 'TCS1')])
     conn.execute("CREATE TABLE stock_earnings_dates (scid TEXT, result_date DATE, fetched_at TEXT)")
     conn.executemany("INSERT INTO stock_earnings_dates VALUES (?,?,?)", [

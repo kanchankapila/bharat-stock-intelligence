@@ -407,6 +407,9 @@ export async function registerSyncJobs(connection: any) {
     // 15:30 IST close and clear of the 22:00-23:35 IST EOD job cluster) -- found in the 2026-07-30
     // fifth full-stack-audit pass.
     repeat: { pattern: '30 15 * * *' }, // Daily (all 7 days), 15:30 UTC = 21:00 IST
+    // Every run fails without the AI key (AF-20261017-08); user chose 2026-10-29 to unschedule
+    // until one is configured. Setting GEMINI_API_KEY and restarting re-enables it.
+    unscheduledReason: process.env.GEMINI_API_KEY ? undefined : 'GEMINI_API_KEY not set (AF-20261017-08)',
     jobId: 'company-profiles-sync-daily',
     removeOnComplete: 3,
     removeOnFail: 3,

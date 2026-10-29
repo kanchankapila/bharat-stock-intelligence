@@ -12082,6 +12082,7 @@ pass. Full suites must run after database responsiveness is restored before any 
 
 This is a local source checkpoint, not deployment or complete audit closure. No review branch
 was pushed, no live dependency installed, and no recommendation/scoring change promoted.
+
 ## 2026-10-26 — recommendation audit: breakout removed from the blend; measurement.md re-verified
 
 Asked to audit the recommendation process and change it where evidence supports it, and to check
@@ -12158,6 +12159,20 @@ runs and red test reports remain evidence, never substituted for these complete 
 The review branch still needs a non-force push and exact-head remote CI readback. User-owned
 production installation, PM2 daemon/service activation and recommendation readback remain
 separate from these local gates. No production stock data was copied or changed here.
+
+## 2026-10-26 — Security review delivery
+
+After the final documentation edits, full Vitest passed again (2,193 passed, 46 gated skips).
+Commit 39971952 was pushed without force to `codex/dependency-security-2026-10-26`.
+GitHub CI run 40338877930 finished success for that exact SHA in all three jobs: Python,
+build/test (including dependency security), and smoke. The remote branch readback matches
+39971952. Remote main remained 9f967244, while this review branch includes the newer local
+main 5f2cdb69 that the user asked to integrate. No PR or main push was made.
+
+The security work is reviewable but not live. The default branch still reports its older
+dependency advisories; installation, main integration, PM2 daemon/service activation and
+post-activation query-back remain user-owned. AF-20261025-33 is the single shared pending row.
+
 ## 2026-10-26 (late) — input logic corrected; screeners, patterns, broker calls and ET Calls graded as trades
 
 - **Logic fixed, each measured first:** confluence sub-scores no longer COALESCE to 0 (median-imputed, absent
@@ -12231,3 +12246,20 @@ separate from these local gates. No production stock data was copied or changed 
 - **Investigated:** An exploratory production-history sizing comparison used matched positive-sized buys, prior-session liquidity and ten non-overlapping five-session windows. It is low-data, excludes missing opens and is not a causal attribution; the read-only calculation is in `scripts/research_sizing_20261028.py`. No post-change forward windows were available. No score or weight was tuned from this sample (AF-20261028-06 and -07).
 - **Data integrity:** Full-suite warnings led to production read-only checks: 179 suspect zero closes in the most recent 253 observations across three symbols. Among other flagged bars, 8,499 positive closes were fabricated closed sessions, while 580 had other reasons in the past year. The on-demand institutional engine removes the known non-sessions, skips histories with invalid or other quarantined recent bars, and reports them without erasing rows owned by the separate canonical writer (AF-20261028-15). A read-only same-snapshot replay (`scripts/research_quant_quarantine_20261028.py`) withheld 80 previously eligible names; of 2,335 names in both versions, median absolute momentum-score change was 0.759 points and the old/new top-50 overlap was 44. This does not measure realized returns or full composite ranks. Deployment and historical-row provenance remain open.
 - **Verification and activation:** The full Python suite passed 3,947 tests with 269 opt-in live-datasource skips after the quarantine guard. Full Vitest passed 2,189 tests with 46 skips; TypeScript and the production build passed. An earlier full Vitest run had two timeouts; both passed separately, then the complete rerun passed with unchanged timeouts. Coordinated live readback remains pending; the user reserved the server restart.
+
+## 2026-10-29 ? production integration audit follow-up
+
+- Reconciled the shared findings ledger with the concurrent production-worktree audit and preserved remote history. The monitoring regression now validates the current schema or the explicitly pending index migration; a passing source test does not imply the migration is installed. Production schema drift was clean before the migration.
+- Read-only production quality checks still report accuracy-calibration, endpoint-age, a single unparsed filing, corporate-action gaps, static monitoring and intentionally neutralized ML warnings. The split repair was dry-run only; production data was not rewritten.
+
+- Follow-up: reproduced a non-finite confluence AUC activating a model without a baseline. The isolated source rejects invalid CV folds before promotion; full validation and activation remain open. The Node lockfile now selects patched @hono/node-server 2.1.5 and npm audit reports zero vulnerabilities. The hypertable repair backup contract requires verification before production writes.
+
+- Follow-up in an isolated worktree: cross-sectional ranker promotion now refuses missing, non-finite or out-of-range held-out correlation before writing a model. The NaN/no-baseline negative control reproduced an unsafe promotion before the guard; 33 focused ranker tests pass. Corrected an invalid docstring escape; warnings-as-errors compilation passes. Full Python validation and deployment remain pending.
+- Follow-up full isolated Python gate: 3,964 passed, 269 opt-in skipped, 72 warnings in 23m03s. The prior invalid-escape warning is gone.
+## 2026-10-29 - merged and activated recommendation audit
+
+- **Merged:** PR #131 at `b4bf2a50`; exact-head and post-merge GitHub CI passed. The shared root had concurrent uncommitted work, so a separate checkout captured that source, merged the release, and verified the combined tree before a checked patch was applied to the live root. The root remains dirty and its Git HEAD is not remote main; no stash or reset was used.
+- **Validated:** Combined TypeScript and production builds passed; 116 affected Python tests passed. The full combined Vitest run passed 2,204 tests and skipped 46, with one existing failure: the 14 monitoring indexes in AF-20261028-16 have not been applied or regenerated. That failure also reproduced on the pre-release live checkout. The PR-only full Python and Vitest gates and remote CI were green.
+- **Deployed:** Installed the merged Node dependencies and rebuilt; restarted only `bharat-server` at 2026-10-28 23:59 IST (PID 35056), health HTTP 200. The existing NODE_ENV=development Vite mode remains unchanged. Production earnings-preview data is present; its migration was already recorded as applied. The unrelated monitoring-index migration was not run.
+- **Production readback:** The cockpit returned 20 candidates, zero invalid long plans, zero canonical-action disagreements and three withheld plans; a real browser displayed the missing-plan notice for ADANIENSOL. Both ANANDRATHI detail readers returned the complete 2026-10-28 feature date, FCF yield 1.0111 and interest coverage 36.35. Eight Top Rated rows exposed no unsupported driver or suggested allocation. The intraday UI marked its old snapshot stale; the old TCS v7 URL redirected to the active page. Anonymous enqueueSignals returned 401 without a stack.
+- **Still open:** Point-in-time and cost-aware return validation, position sizing and calibration remain evidence-gated; the on-demand quant guard was not run as a production writer. Source is live for future on-demand runs, but historical-row provenance and live write/readback remain open (AF-20261028-15). PR #130's Python dependency fix and the monitoring-index migration remain separate.

@@ -27,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-from mc_symbol_map import build_mc_to_symbol
+from mc_symbol_map import MC_MAP_ROWS_SQL, build_mc_to_symbol
 from db_compat import connect
 from as_of import logical_write_floor
 import sys
@@ -105,7 +105,7 @@ def run() -> int:
     # 2026-09-18), so `{r["mcsymbol"]: r["symbol"] for r in ...}` silently keeps whichever row
     # came last -- e.g. KMF -> {KOTAK, KOTAKBANK, MAHINDRA}. See mc_symbol_map (AF-20260918-02).
     sc2sym = build_mc_to_symbol(conn.execute(
-        "SELECT symbol, mcsymbol FROM nse_stocks WHERE mcsymbol IS NOT NULL AND mcsymbol != ''"
+        MC_MAP_ROWS_SQL
     ).fetchall(), log=print)
 
     session = requests.Session()

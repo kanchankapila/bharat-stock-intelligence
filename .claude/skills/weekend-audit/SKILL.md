@@ -256,6 +256,12 @@ reported as green; the 2026-08-15 baseline run skipped lanes 5 and 6 and says so
 Close each entry with **New this week / Unchanged from last week / Fixed and live-verified**. A
 finding unchanged across 3 runs is its own finding — escalate it rather than letting it roll.
 
+**Before forwarding any check's pass/fail verdict into the report or the handoff, check the grader
+that produced it**: every label value reaches a branch, its buckets sum to the population, and its
+verdict actually varies. Use `audit-loop`'s "The instruments themselves" step (§0); don't restate it
+here. A grader defect is worse than the same defect in what it grades, because every freshness and
+liveness check stays green.
+
 State plainly what is red, what got worse *since last weekend* (the part no other tool in this
 repo can tell you), and what you deliberately did not fix. Only claim a lane passed if its command
 actually ran — a skipped lane is reported as skipped, never as green.

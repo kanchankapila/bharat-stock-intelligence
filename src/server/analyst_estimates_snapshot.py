@@ -200,7 +200,7 @@ def _fetch_symbol_hybrid(symbol: str, mcsymbol: str, session: requests.Session) 
 _SELECT_SYMBOLS = """
     SELECT DISTINCT symbol, mcsymbol
     FROM nse_stocks
-    WHERE mcsymbol IS NOT NULL AND mcsymbol != ''
+    WHERE mcsymbol IS NOT NULL AND mcsymbol != '' AND status = 'ACTIVE'
 """
 _SELECT_SYMBOLS_FILTER = """
     SELECT symbol, mcsymbol

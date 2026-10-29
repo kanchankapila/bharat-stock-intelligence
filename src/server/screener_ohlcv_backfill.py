@@ -39,7 +39,7 @@ def get_missing_symbols(conn) -> list[str]:
             SELECT 1 FROM stock_ohlcv o WHERE o.symbol = sa.symbol
         )
         AND EXISTS (
-            SELECT 1 FROM nse_stocks ns WHERE ns.symbol = sa.symbol
+            SELECT 1 FROM nse_stocks ns WHERE ns.symbol = sa.symbol AND ns.status = 'ACTIVE'
         )
         ORDER BY sa.symbol
     """).fetchall()
