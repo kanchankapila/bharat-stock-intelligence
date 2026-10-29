@@ -57,9 +57,9 @@ yfinance==1.3.0
 # `pip check` red AND this line re-breaks the venv on the next install. Grading every release
 # against all four consumers (google-genai <17.0,>=13.0.0; langgraph-sdk <16,>=14; langsmith
 # >=15.0; yfinance >=13.0): 16.x/17.x rejected by langgraph-sdk, 14.2 rejected by langsmith, so
-# 15.0.1 is the newest release satisfying all four, and that is what the repair installs. Note
-# langgraph-sdk and langsmith appear NOWHERE in this manifest -- they belong to the Hermes/MCP
-# stack sharing the venv, which is why their constraints bind invisibly. The 4 orphaned ~* dirs
+# 15.0.1 is the newest release satisfying all four, and that is what the repair installs.
+# At the time, langgraph-sdk and langsmith were absent from this manifest; the SDK is now pinned
+# for GHSA-3fx2-cqw9-xr3c, while langsmith remains a transitive dependency. The 4 orphaned ~* dirs
 # (~ebsockets, ~ebsockets-16.0.dist-info, ~url_cffi, ~yarrow) were deleted 2026-09-28, so pip no
 # longer prints "Ignoring invalid distribution".
 websockets==15.0.1
@@ -109,7 +109,8 @@ curl_cffi==0.16.2
 nse==3.2.1
 hmmlearn==0.3.3
 langchain==1.3.9
-langgraph==1.2.5
+langgraph==1.2.14
+langgraph-sdk==0.4.10
 langchain-community==0.4.2
 langchain-google-genai==4.2.5
 chromadb==1.5.9
