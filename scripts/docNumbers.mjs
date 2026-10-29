@@ -9,6 +9,7 @@
  *
  * Usage:  node scripts/docNumbers.mjs            # human-readable report
  *         node scripts/docNumbers.mjs --check    # exit 1 if a doc is stale (for CI)
+ *         node scripts/docNumbers.mjs --check --offline # check filesystem counts only
  *
  * FS-derived figures need no database. The Postgres figures are read through the
  * repo's own read-only helper and reported as "unavailable" if it cannot connect --
@@ -66,6 +67,7 @@ for (const f of tsServer) {
 
 /** Read-only Postgres figure. Returns null (never a guess) if unavailable. */
 function dbScalar(sql) {
+  if (process.argv.includes('--offline')) return null;
   const candidates = [
     [join(ROOT, 'backend-python', 'venv', 'Scripts', 'python.exe'), join(ROOT, 'scripts', 'sql.py')],
     [join(ROOT, 'backend-python', 'venv', 'bin', 'python'), join(ROOT, 'scripts', 'sql.py')],
@@ -137,12 +139,12 @@ if (CHECK) {
   expect(loggerSrc, String(consoleSites), 'logger.ts console.* call-site count');
   // The registry method split is written with thousands separators ("2,864 GET / 544 POST"),
   // so match the grouped form rather than the bare integer.
-  if (registryGet !== null) {
+  if (registryGet !== null && registryPost !== null && registryTotal !== null) {
     const grouped = (n) => n.toLocaleString('en-US');
     expect(ledgerRule, `${grouped(registryGet)} GET / ${registryPost} POST`, 'findings-ledger.md registry method split');
     expect(ledgerRule, grouped(registryTotal), 'findings-ledger.md registry total');
   }
-  expect(ledgerRule, String(urlEndpoints), 'findings-ledger.md url_endpoints count');
+  expect(ledgerRule, urlEndpoints === null ? null : String(urlEndpoints), 'findings-ledger.md url_endpoints count');
 
   // Elapsed `~DATE` forecasts in rule files with no outcome written back (AF-20261026-47).
   const rulesDir = join(ROOT, '.claude', 'rules');

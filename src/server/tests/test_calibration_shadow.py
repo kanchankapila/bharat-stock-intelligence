@@ -7,6 +7,7 @@ than the base rate at every horizon. The shadow fits one calibrator per horizon 
 own table, never to technical_signals, so it can be graded forward before it replaces anything.
 """
 import sqlite3
+import datetime
 
 from pg_test_support import pg_memory_conn
 from ml_calibration import recalibrate_win_probabilities, shadow_recalibrate_per_horizon
@@ -32,7 +33,8 @@ def make_db():
                          (sym, day, 'WIN' if i < 60 else 'LOSS'))
             conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,15,?)",
                          (sym, day, 'WIN' if i < 10 else 'STOP_LOSS'))
-    conn.execute("INSERT INTO technical_signals (symbol,date,win_probability) VALUES ('PROBE','2026-02-15',0.7)")
+    today_ist = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30))).date().isoformat()
+    conn.execute("INSERT INTO technical_signals (symbol,date,win_probability) VALUES ('PROBE',?,0.7)", (today_ist,))
     conn.commit()
     return conn
 
@@ -71,3 +73,21 @@ def test_rerun_is_idempotent():
     first = shadow(conn)
     shadow_recalibrate_per_horizon(conn)
     assert shadow(conn) == first
+
+
+def test_shadow_does_not_backfill_past_signals_after_they_could_be_graded():
+    conn = make_db()
+    conn.execute("INSERT INTO technical_signals (symbol,date,win_probability) VALUES ('PAST','2026-02-15',0.7)")
+    conn.commit()
+    shadow_recalibrate_per_horizon(conn)
+    assert {s for s, _ in shadow(conn)} == {'PROBE'}
+
+
+def test_existing_shadow_prediction_is_immutable_on_refit():
+    conn = make_db()
+    shadow_recalibrate_per_horizon(conn)
+    before = shadow(conn)
+    conn.execute("UPDATE signal_outcomes SET outcome='WIN' WHERE horizon_days=15 AND symbol LIKE 'S0.7_%'")
+    conn.commit()
+    shadow_recalibrate_per_horizon(conn)
+    assert shadow(conn) == before

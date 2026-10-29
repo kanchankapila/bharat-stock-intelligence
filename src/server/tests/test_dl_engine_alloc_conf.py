@@ -18,10 +18,7 @@ SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
 def test_cuda_allocation_after_import_prints_no_deprecation_warning():
-    # finbert_news_sentiment.py sets CUDA_VISIBLE_DEVICES=-1 at import; once another test imports it,
-    # a child would inherit "no GPU". Drop it, as test_finbert_news_sentiment_cpu.py does.
-    env = {k: v for k, v in os.environ.items()
-           if k not in ("PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_ALLOC_CONF", "CUDA_VISIBLE_DEVICES")}
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_ALLOC_CONF")}
     proc = subprocess.run(
         [sys.executable, "-c", "import dl_engine, torch; torch.zeros(1, device='cuda'); print('ok')"],
         cwd=SERVER_DIR, env=env, capture_output=True, text=True, timeout=300,

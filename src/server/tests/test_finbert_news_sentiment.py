@@ -3,7 +3,10 @@ import sys
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from finbert_news_sentiment import score_batch
+# FinBERT's standalone script hides CUDA on import. Restore the test runner's environment
+# after collection so unrelated subprocess tests inherit the runner's actual device policy.
+with patch.dict(os.environ):
+    from finbert_news_sentiment import score_batch
 
 
 def _fake_predict(sentiment, score, available=True):

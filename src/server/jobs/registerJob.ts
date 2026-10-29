@@ -602,12 +602,21 @@ export async function registerRepeatableJob(
   }
 
   const repeatables = await queue.getRepeatableJobs();
-  for (const r of repeatables) {
+  const toRemove = cfg.unscheduledReason
+    ? repeatables.filter(r => r.name === cfg.jobName)
+    : repeatables;
+  for (const r of toRemove) {
     await queue.removeRepeatableByKey(r.key);
   }
 
   if (cfg.unscheduledReason) {
-    await queue.drain(true); // the delayed next occurrence outlives its repeatable (see SCHEDULER_PAUSED)
+    const disabledKeys = new Set(toRemove.map(r => r.key));
+    const delayed = await queue.getJobs(['delayed'], 0, -1);
+    for (const job of delayed) {
+      if (job.name === cfg.jobName && job.repeatJobKey && disabledKeys.has(job.repeatJobKey)) {
+        await job.remove();
+      }
+    }
     console.log(`[QUEUE] ${cfg.queueName}: ${cfg.jobName} left unscheduled -- ${cfg.unscheduledReason}`);
   } else {
     await addJobWithCatchup(queue, cfg.jobName, cfg.data ?? {}, {

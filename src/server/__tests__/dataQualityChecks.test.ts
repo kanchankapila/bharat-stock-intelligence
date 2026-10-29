@@ -575,6 +575,13 @@ describe('individual evaluate() functions', () => {
     expect(check.evaluate({ last_date: new Date(now).toISOString() }, now).status).toBe('pass');
   });
 
+  it('calibration-shadow-integrity distinguishes empty, valid and retroactive records', () => {
+    const check = byId('calibration-shadow-integrity');
+    expect(check.evaluate({ total: 0, invalid: 0 }, now).status).toBe('warn');
+    expect(check.evaluate({ total: 3, invalid: 0 }, now).status).toBe('pass');
+    expect(check.evaluate({ total: 3, invalid: 1 }, now).status).toBe('fail');
+  });
+
   it('technical-signals-financial-ratio-delivery passes at the measured healthy-session baseline', () => {
     const r = byId('technical-signals-financial-ratio-delivery').evaluate(
       { total: 2133, fcf_n: 1624, coverage_n: 1589, roce_n: 1589, measured_date: '2026-10-22' }, now,

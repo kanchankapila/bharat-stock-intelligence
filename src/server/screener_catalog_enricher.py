@@ -54,7 +54,7 @@ _REGEX_SPECIAL = set(r"()*+?[]{}^$|\\")
 
 
 def _safe_pattern(pat: str) -> str:
-    """If pattern has regex special chars, use as-is. Otherwise replace '.' with [\s\-_]?."""
+    r"""If pattern has regex special chars, use as-is. Otherwise replace '.' with [\s\-_]?."""
     if any(c in pat for c in _REGEX_SPECIAL):
         return pat
     return re.escape(pat).replace(r"\.", r"[\s\-_]?")

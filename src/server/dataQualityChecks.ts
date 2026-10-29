@@ -2040,6 +2040,24 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'calibration-shadow-integrity',
+    label: 'Frozen calibration shadow predictions have valid probabilities and non-retroactive dates',
+    category: 'scoring',
+    critical: false,
+    sql: `SELECT COUNT(*) AS total,
+                 COUNT(*) FILTER (WHERE prob < 0 OR prob > 1 OR prob::text IN ('NaN', 'Infinity', '-Infinity')
+                   OR fit_max >= date::text OR date < (fitted_at AT TIME ZONE 'Asia/Kolkata')::date) AS invalid,
+                 MAX(fitted_at) AS latest_fit
+          FROM calibration_shadow WHERE fitted_at >= NOW() - INTERVAL '30 days'`,
+    evaluate: (row) => {
+      const total = Number(row?.total) || 0;
+      const invalid = Number(row?.invalid) || 0;
+      if (invalid) return { status: 'fail', detail: `${invalid}/${total} calibration shadow predictions have invalid or retroactive inputs` };
+      if (!total) return { status: 'warn', detail: 'No frozen calibration shadow predictions in the past 30 days; forward grading is not available' };
+      return { status: 'pass', detail: `${total} recent frozen calibration shadow predictions checked; latest fit ${row?.latest_fit ?? 'unknown'}` };
+    },
+  },
+  {
     id: 'ranker-input-snapshot-freshness',
     label: 'ranker_input_snapshot archive (immutable point-in-time ranker inputs, trailing step of unified-ranker)',
     category: 'scoring',

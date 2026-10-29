@@ -87,4 +87,3 @@ route renders it** (grep its import): `BuyRecommendationsPage.tsx` is imported b
 - **Restart-orphaned jobs are auto-requeued**: `reclaimStaleActiveJobs` → `requeueOrphanedJob` fails a job left `active`
   by a dead worker and queues a guarded make-up (skipped if the regular slot fires within 90 min or one is pending; orphans
   older than 48h are alert-only). On boot look for `orphanRequeue: true` / `isCatchup: true` before assuming a long `active` job is lost.
-

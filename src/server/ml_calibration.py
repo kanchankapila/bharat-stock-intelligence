@@ -175,9 +175,11 @@ def shadow_recalibrate_per_horizon(conn: ConnWrapper, min_samples: int = 200) ->
     """).fetchall()
     by_h: dict = {}
     for r in rows:
-        if not math.isnan(float(r['p'])):
+        p = float(r['p'])
+        if math.isfinite(p) and 0 <= p <= 1:
             by_h.setdefault(int(r['h']), []).append(r)
     out = {}
+    today_ist = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30))).date().isoformat()
     for h, hr in sorted(by_h.items()):
         ys = [int(r['y']) for r in hr]
         if len(hr) < min_samples or len(set(ys)) < 2:
@@ -187,14 +189,13 @@ def shadow_recalibrate_per_horizon(conn: ConnWrapper, min_samples: int = 200) ->
         fit_max = max(str(r['d'])[:10] for r in hr)
         sigs = conn.execute(
             "SELECT symbol, date, win_probability FROM technical_signals "
-            "WHERE win_probability IS NOT NULL AND win_probability <> 0.5 AND date > ?", (fit_max,)).fetchall()
+            "WHERE win_probability IS NOT NULL AND win_probability <> 0.5 AND date > ? AND date >= ?",
+            (fit_max, today_ist)).fetchall()
         writes = [(s['symbol'], s['date'], h, calibrate(ir, float(s['win_probability'])), fit_max)
-                  for s in sigs if not math.isnan(float(s['win_probability']))]
+                  for s in sigs if math.isfinite(float(s['win_probability'])) and 0 <= float(s['win_probability']) <= 1]
         executemany_batched(conn, """
             INSERT INTO calibration_shadow (symbol, date, horizon_days, prob, fit_max) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT (symbol, date, horizon_days) DO UPDATE SET
-              prob = excluded.prob, fit_max = excluded.fit_max, fitted_at = now()
-            WHERE calibration_shadow.prob IS DISTINCT FROM excluded.prob""", writes)
+            ON CONFLICT (symbol, date, horizon_days) DO NOTHING""", writes)
         out[h] = {'fit': True, 'n': len(hr), 'fit_max': fit_max, 'written': len(writes)}
         print(f"[CalibrationShadow] h={h} fit on {len(hr)} outcomes through {fit_max}; {len(writes)} rows")
     conn.commit()
