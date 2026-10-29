@@ -230,6 +230,18 @@ CREATE TABLE IF NOT EXISTS "bulk_deals" (
 );
 CREATE INDEX idx_bulk_sym_date ON public.bulk_deals USING btree (symbol, date DESC);
 
+-- ── calibration_shadow ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "calibration_shadow" (
+  "symbol" TEXT NOT NULL,
+  "date" DATE NOT NULL,
+  "horizon_days" INTEGER NOT NULL,
+  "prob" DOUBLE PRECISION NOT NULL,
+  "fit_max" TEXT NOT NULL,
+  "fitted_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY ("symbol", "date", "horizon_days")
+);
+CREATE INDEX idx_calibration_shadow_fitted_at ON public.calibration_shadow USING btree (fitted_at);
+
 -- ── company_profiles ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "company_profiles" (
   "symbol" TEXT NOT NULL PRIMARY KEY,
