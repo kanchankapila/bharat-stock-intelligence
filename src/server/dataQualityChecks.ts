@@ -2046,7 +2046,10 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     critical: false,
     sql: `SELECT COUNT(*) AS total,
                  COUNT(*) FILTER (WHERE prob < 0 OR prob > 1 OR prob::text IN ('NaN', 'Infinity', '-Infinity')
-                   OR fit_max >= date::text OR date < (fitted_at AT TIME ZONE 'Asia/Kolkata')::date) AS invalid,
+                   OR fit_max >= date::text
+                   -- retroactive = fitted at/after the next weekday's 09:15 IST open (AF-20261029-02)
+                   OR fitted_at >= ((date + CASE EXTRACT(ISODOW FROM date)::int WHEN 5 THEN 3 WHEN 6 THEN 2 ELSE 1 END)
+                                    + TIME '09:15') AT TIME ZONE 'Asia/Kolkata') AS invalid,
                  MAX(fitted_at) AS latest_fit
           FROM calibration_shadow WHERE fitted_at >= NOW() - INTERVAL '30 days'`,
     evaluate: (row) => {

@@ -469,3 +469,24 @@ network policy (AF-20260928-10), so no connector in this batch has seen a live r
   Supplemental source/mocked checks can verify scanner/bootstrap controls without a database,
   but cannot satisfy the user's fully-green-local condition. AF-20261026-07 owns recovery;
   AF-20261025-33 owns review delivery and the separately user-owned runtime activation.
+
+## 2026-10-26 — Latest-main security gate
+
+- Commit 9b691ea0 merged main 5f2cdb69 into the isolated security branch. Full Python now
+  passes 3,907 tests with 269 gated skips; full Vitest passes 2,193 with 46 gated skips.
+  Typecheck, build, document/backlog checks and npm security audit also pass. AF-20261026-07
+  is closed as a validation blocker; AF-20261026-48 owns the separate outage investigation.
+- A local gitignored URL corpus can make a doc-check test pass in the shared checkout but fail
+  in a fresh worktree and CI. AF-20261026-55 makes the corpus optional and tests that contract.
+  Main's breakout zero-weight change also left CONTEXT.md and its assertion stale;
+  AF-20261026-56 repairs the dated claim without changing ranker code.
+- Review push, remote CI and user-owned live activation stay in AF-20261025-33. Full local
+  test success is not a production install, service restart or trading-edge measurement.
+- Review branch codex/dependency-security-2026-10-26 was non-force pushed at 39971952.
+  Exact-head CI 40338877930 passed Python, build/test (including dependency audit), and smoke.
+  Remote main remains 9f967244; this branch includes local main 5f2cdb69. AF-20261025-33
+  now awaits review integration and user-owned runtime activation, not another local gate.
+
+## 2026-10-29 - PR 131 activation
+
+PR #131 merged as b4bf2a50. The reviewed source was integrated with the dirty live checkout through a checked isolated staging merge; bharat-server restarted at 2026-10-28 23:59 IST and production HTTP/browser readbacks passed. The root checkout remains dirty and is not Git-synchronized to remote main. Deployment evidence and remaining research are in docs/audit-findings.md (AF-20261028-03 and -05 through -15); see docs/session-log.md for checks and the pre-existing monitor-index test failure.

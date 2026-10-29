@@ -13,7 +13,10 @@ from pg_test_support import pg_memory_conn
 from ml_calibration import recalibrate_win_probabilities, shadow_recalibrate_per_horizon
 
 
-def make_db():
+IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
+
+def make_db(probe_date=None):
     conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
@@ -33,8 +36,8 @@ def make_db():
                          (sym, day, 'WIN' if i < 60 else 'LOSS'))
             conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,15,?)",
                          (sym, day, 'WIN' if i < 10 else 'STOP_LOSS'))
-    today_ist = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30))).date().isoformat()
-    conn.execute("INSERT INTO technical_signals (symbol,date,win_probability) VALUES ('PROBE',?,0.7)", (today_ist,))
+    probe_date = probe_date or datetime.datetime.now(IST).date().isoformat()
+    conn.execute("INSERT INTO technical_signals (symbol,date,win_probability) VALUES ('PROBE',?,0.7)", (probe_date,))
     conn.commit()
     return conn
 
@@ -81,6 +84,28 @@ def test_shadow_does_not_backfill_past_signals_after_they_could_be_graded():
     conn.commit()
     shadow_recalibrate_per_horizon(conn)
     assert {s for s, _ in shadow(conn)} == {'PROBE'}
+
+
+def _run_at(monkeypatch, probe_date, ist_wall_clock):
+    import ml_calibration
+    monkeypatch.setattr(ml_calibration, "_now_ist",
+                        lambda: datetime.datetime.fromisoformat(ist_wall_clock).replace(tzinfo=IST), raising=False)
+    conn = make_db(probe_date)
+    shadow_recalibrate_per_horizon(conn)
+    return {s for s, _ in shadow(conn)}
+
+
+def test_catch_up_run_after_midnight_still_freezes_the_latest_signal_date(monkeypatch):
+    # AF-20261029-02: ml-daily-ops finished after midnight IST on 8 successful runs in 120 days.
+    assert _run_at(monkeypatch, "2026-03-02", "2026-03-03 02:30") == {"PROBE"}
+
+
+def test_run_after_the_next_session_opens_writes_nothing(monkeypatch):
+    assert _run_at(monkeypatch, "2026-03-02", "2026-03-03 09:20") == set()
+
+
+def test_friday_signal_fitted_on_saturday_is_still_before_the_next_open(monkeypatch):
+    assert _run_at(monkeypatch, "2026-03-06", "2026-03-07 11:00") == {"PROBE"}
 
 
 def test_existing_shadow_prediction_is_immutable_on_refit():
