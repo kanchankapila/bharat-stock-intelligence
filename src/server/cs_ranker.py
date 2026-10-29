@@ -315,6 +315,13 @@ def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
     promotion decision compares a correctly-measured rho against a baseline measured the old,
     imbalance-prone way, which is an apples-to-oranges comparison the gate has no way to detect.
     """
+    try:
+        new_rho = float(m['spearman_rho'])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError('[CSRanker] Missing or invalid held-out rank correlation; refusing promotion') from exc
+    if not np.isfinite(new_rho) or not -1 <= new_rho <= 1:
+        raise ValueError('[CSRanker] Invalid held-out rank correlation; refusing promotion')
+
     import json
     version  = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
     feats    = m.get('feature_names', [])
@@ -326,7 +333,6 @@ def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
 
     baseline_row = _active_cs_baseline_row(conn)
     baseline_rho = baseline_row['rho'] if baseline_row else None
-    new_rho = m['spearman_rho']
     clears_bar = clears_promotion_bar(new_rho, baseline_rho, CS_PROMOTION_MARGIN)
 
     # Staleness override (2026-08-06): a baseline whose rho predates a leak/bug fix (e.g. the
