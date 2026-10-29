@@ -147,6 +147,60 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
     return {'fit': True, 'n': len(rows), 'updated': updated, 'regimes': regimes_meta}
 
 
+# Shadow arm (AF-20261008-17 / AF-20261001-48): one isotonic fit PER HORIZON instead of the pooled
+# fit above, which fits one number to three base rates and counts a signal up to three times.
+# Written only to calibration_shadow -- nothing reads it for scoring -- so it can be graded forward
+# against the live column before it replaces anything. Same point-in-time rule as the live fit.
+_SHADOW_DDL = """
+CREATE TABLE IF NOT EXISTS calibration_shadow (
+    symbol        TEXT NOT NULL,
+    date          DATE NOT NULL,
+    horizon_days  INTEGER NOT NULL,
+    prob          DOUBLE PRECISION NOT NULL,
+    fit_max       TEXT NOT NULL,
+    fitted_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (symbol, date, horizon_days)
+)"""
+
+
+def shadow_recalibrate_per_horizon(conn: ConnWrapper, min_samples: int = 200) -> dict:
+    conn.execute(_SHADOW_DDL)
+    rows = conn.execute("""
+        SELECT so.horizon_days AS h, ts.date AS d, ts.win_probability AS p,
+               CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
+        FROM signal_outcomes so
+        JOIN technical_signals ts ON ts.symbol = so.symbol AND so.signal_date = ts.date
+        WHERE so.outcome IN ('WIN', 'LOSS', 'STOP_LOSS') AND ts.win_probability IS NOT NULL
+          AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
+    """).fetchall()
+    by_h: dict = {}
+    for r in rows:
+        if not math.isnan(float(r['p'])):
+            by_h.setdefault(int(r['h']), []).append(r)
+    out = {}
+    for h, hr in sorted(by_h.items()):
+        ys = [int(r['y']) for r in hr]
+        if len(hr) < min_samples or len(set(ys)) < 2:
+            out[h] = {'fit': False, 'n': len(hr)}
+            continue
+        ir = fit_calibrator([float(r['p']) for r in hr], ys)
+        fit_max = max(str(r['d'])[:10] for r in hr)
+        sigs = conn.execute(
+            "SELECT symbol, date, win_probability FROM technical_signals "
+            "WHERE win_probability IS NOT NULL AND win_probability <> 0.5 AND date > ?", (fit_max,)).fetchall()
+        writes = [(s['symbol'], s['date'], h, calibrate(ir, float(s['win_probability'])), fit_max)
+                  for s in sigs if not math.isnan(float(s['win_probability']))]
+        executemany_batched(conn, """
+            INSERT INTO calibration_shadow (symbol, date, horizon_days, prob, fit_max) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (symbol, date, horizon_days) DO UPDATE SET
+              prob = excluded.prob, fit_max = excluded.fit_max, fitted_at = now()
+            WHERE calibration_shadow.prob IS DISTINCT FROM excluded.prob""", writes)
+        out[h] = {'fit': True, 'n': len(hr), 'fit_max': fit_max, 'written': len(writes)}
+        print(f"[CalibrationShadow] h={h} fit on {len(hr)} outcomes through {fit_max}; {len(writes)} rows")
+    conn.commit()
+    return out
+
+
 # ── Horizon-stratified AUC ───────────────────────────────────────────────────
 # signal_outcomes holds one row per (symbol, signal_date, horizon_days), and the WIN rate is a
 # property of the HORIZON, not just the model: measured live 2026-09-24 on the technical-source
@@ -674,6 +728,7 @@ def run():
         regime_readiness(conn)
         per_regime_auc(conn)
         persist_regime_edge_status(conn)
+        shadow_recalibrate_per_horizon(conn)  # last: the live outputs above are written even if it fails
     finally:
         conn.close()
 

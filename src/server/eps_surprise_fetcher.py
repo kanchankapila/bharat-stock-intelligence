@@ -34,7 +34,7 @@ from pydantic import BaseModel
 import argparse
 import sys
 
-from mc_symbol_map import build_mc_to_symbol
+from mc_symbol_map import MC_MAP_ROWS_SQL, build_mc_to_symbol
 from db_compat import connect, translate, use_postgres, read_df, executemany
 from fetch_utils import retry_get
 
@@ -422,7 +422,7 @@ def main() -> None:
 
     # Build mcsymbol → NSE symbol map
     mc_map_rows = con.execute(
-        "SELECT symbol, mcsymbol FROM nse_stocks WHERE mcsymbol IS NOT NULL AND mcsymbol != ''"
+        MC_MAP_ROWS_SQL
     ).fetchall()
     # NOT a dict comprehension: 62 mcsymbols map to more than one NSE symbol (measured live
     # 2026-09-18), and the last row silently wins -- KMF -> {KOTAK, KOTAKBANK, MAHINDRA} would

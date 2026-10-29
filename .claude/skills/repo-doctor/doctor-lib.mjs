@@ -153,3 +153,12 @@ export function classifyLatestDq(rows) {
   }
   return { status: 'PASS', detail: summary };
 }
+
+// AF-20261028-20: pm2-out.log reached 387 MB in two months with no rotation module. A live log far
+// above pm2-logrotate's 50 MB max_size means rotation is not running even if the module exists.
+export function logRotationVerdict({ moduleInstalled, logBytes }) {
+  const mb = Math.round((logBytes ?? 0) / 1e6);
+  if (!moduleInstalled) return { status: 'FAIL', detail: `pm2-logrotate not installed; pm2-out.log ${mb} MB` };
+  if ((logBytes ?? 0) > 200e6) return { status: 'FAIL', detail: `pm2-out.log ${mb} MB: rotation is not running` };
+  return { status: 'PASS', detail: `pm2-logrotate installed; pm2-out.log ${mb} MB` };
+}

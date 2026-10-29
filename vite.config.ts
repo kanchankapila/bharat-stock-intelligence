@@ -129,6 +129,9 @@ export default defineConfig(({mode}) => {
       },
     },
     test: {
+      // Preserve the v3 mock lifecycle and separate project transforms during the v5 migration.
+      clearMocks: false,
+      sharedViteServer: false,
       // Two projects, and the split is a correctness boundary, not organisation.
       //
       // `unit` runs against a private throwaway Postgres schema (vitest.globalSetup.ts creates
@@ -155,7 +158,9 @@ export default defineConfig(({mode}) => {
             // max_connections. See vitest.setup.ts.
             setupFiles: ['./vitest.setup.ts'],
             pool: 'forks',
-            poolOptions: { forks: { singleFork: true } },
+            maxWorkers: 1,
+            fileParallelism: false,
+            isolate: true,
           },
         },
         {
@@ -172,7 +177,9 @@ export default defineConfig(({mode}) => {
             // `await import('../pgClient')` can read the leaked value.
             setupFiles: ['./vitest.setup.live.ts', './vitest.setup.ts'],
             pool: 'forks',
-            poolOptions: { forks: { singleFork: true } },
+            maxWorkers: 1,
+            fileParallelism: false,
+            isolate: true,
           },
         },
       ],
@@ -180,7 +187,9 @@ export default defineConfig(({mode}) => {
       // `UNIQUE _migrations.name`. Restated per-project above; kept here for a bare
       // `vitest --project` invocation.
       pool: 'forks',
-      poolOptions: { forks: { singleFork: true } },
+      maxWorkers: 1,
+      fileParallelism: false,
+      isolate: true,
       // .claude/worktrees/ holds other concurrent sessions' checkouts of this same repo, so
       // vitest was collecting a stale duplicate of every test file in each of them -- 1,010
       // test files instead of ~93, most of the run's wall-clock, and failures from other

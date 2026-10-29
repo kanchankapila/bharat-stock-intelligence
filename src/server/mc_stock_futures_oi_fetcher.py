@@ -203,7 +203,7 @@ def load_mc_symbol_map(symbols: list[str] | None = None) -> dict:
     convention -- MC's scId is opaque (data-sources.md)."""
     rows = query_all(
         "SELECT symbol, mcsymbol FROM nse_stocks "
-        "WHERE mcsymbol IS NOT NULL AND mcsymbol != ''"
+        "WHERE mcsymbol IS NOT NULL AND mcsymbol != '' AND status = 'ACTIVE'"
     )
     m = {r["symbol"]: r["mcsymbol"] for r in rows}
     if symbols:

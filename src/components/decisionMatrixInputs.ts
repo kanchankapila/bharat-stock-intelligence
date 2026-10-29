@@ -99,7 +99,8 @@ export function buildMatrixItems(candidates: any[], picks: any[]): MatrixItem[] 
       target2: null,
       stopLoss: num(c.stopLoss),
       reasoning: c.aiInsight ?? null,
-      setupType: (num(c.factors?.momentum) ?? 0) > 80 ? 'BREAKOUT' : 'QUANT_ALPHA',
+      // The cockpit score is research-only and does not identify a validated strategy.
+      setupType: 'RESEARCH',
     });
   }
   return [...out.values()];

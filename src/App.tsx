@@ -306,10 +306,6 @@ export default function App() {
   );
 
 
-  // V7 Pro pages bring their own shell (V7Shell renders the sidebar/topbar); stacking the
-  // outer AppShell on top would put two sidebars on screen, so /v7-* paths render the route
-  // tree directly — AppShell-only chrome (ticker tape, command palette) skips with it.
-  const isV7 = location.pathname.startsWith('/v7-');
   const routesContent = (
     <>
       <AnimatePresence mode="wait">
@@ -335,24 +331,20 @@ export default function App() {
 
   return (
     <>
-      {isV7 ? (
-        routesContent
-      ) : (
-        <AppShell
-          user={user}
-          onLogin={handleLogin}
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          stocks={stocks}
-          onSelectStock={handleSelectStock}
-          displayIndices={displayIndices}
-          onSelectIndexByName={handleSelectIndexByName}
-          dataUpdatedAt={stocksUpdatedAt}
-        >
-          <TickerTapeWidget />
-          {routesContent}
-        </AppShell>
-      )}
+      <AppShell
+        user={user}
+        onLogin={handleLogin}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        stocks={stocks}
+        onSelectStock={handleSelectStock}
+        displayIndices={displayIndices}
+        onSelectIndexByName={handleSelectIndexByName}
+        dataUpdatedAt={stocksUpdatedAt}
+      >
+        <TickerTapeWidget />
+        {routesContent}
+      </AppShell>
 
       <SlideOutDrawer
         symbol={drawerSymbol}

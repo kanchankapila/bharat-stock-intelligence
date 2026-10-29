@@ -83,6 +83,13 @@ export function getPool(): Pool {
       connectionTimeoutMillis: 15_000,  // more resilient to startup spikes
     });
     pool.on('error', (err) => console.error('[PG] idle client error:', err.message));
+    if (process.env.VITEST) {
+      // Do not make teardown import this driver into suites that never opened a pool.
+      // Distinct module instances after vi.resetModules each need their own cleanup.
+      const key = Symbol.for('bsi.vitest.pool-cleanups');
+      const registry = ((globalThis as any)[key] ??= new Set<() => Promise<void>>());
+      registry.add(closePool);
+    }
   }
   return pool;
 }
@@ -692,8 +699,8 @@ export async function closePool(): Promise<void> {
       }),
     ]);
     if (result === timedOut) {
-      console.warn(
-        '[pgClient] closePool: pool.end() did not settle within 2000ms — one or more clients ' +
+      throw new Error(
+        `[pgClient] closePool: pool.end() did not settle within 2000ms (total=${p.totalCount}, idle=${p.idleCount}, waiting=${p.waitingCount}) — one or more clients ` +
         'were still checked out, so this was NOT a clean shutdown. Two causes, both real: a ' +
         'caller that never released (use withClient/dbTransaction, which release in a finally), ' +
         'or — more often here — a query still in flight because a test timed out at the vitest ' +

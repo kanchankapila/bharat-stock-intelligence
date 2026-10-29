@@ -317,7 +317,7 @@ export const commandCenterRouter = router({
       // materializing every symbol's full ~300-column row for the latest date just to join
       // down to this one symbol. This is likely the single highest-traffic per-symbol endpoint
       // in the app (every stock-detail page load). Split into two indexed point lookups run
-      // in parallel instead: `ur` by (symbol, computed_at) and `ts` by symbol, latest date only.
+      // in parallel: `ur` by (symbol, computed_at) and `ts` on the latest complete grid.
       const [ur, ts, ontologyClaim] = await Promise.all([
         dbGet<any>(`
           SELECT symbol, unified_score, conviction_level, timeframe, sector,
@@ -330,7 +330,7 @@ export const commandCenterRouter = router({
           WHERE symbol = ? AND computed_at = ?
         `, [input.symbol, latest ?? '']),
         dbGet<any>(`
-          SELECT win_probability, signal_type, rsi, cmp, change_pct,
+          SELECT date AS feature_as_of, win_probability, signal_type, rsi, cmp, change_pct,
                  eps_surprise_q1, eps_surprise_q2, eps_beat_streak, eps_miss_after_streak,
                  fcf_yield_approx AS fcf_yield, fcf_basis, interest_coverage, fcf_positive, debt_coverage_risk,
                  delivery_trend_30d, block_deal_flag, block_deal_direction,
@@ -341,8 +341,7 @@ export const commandCenterRouter = router({
                  asm_flag, gsm_stage, is_nifty50, nifty_tier,
                  days_to_next_results
           FROM technical_signals
-          WHERE symbol = ?
-          ORDER BY date DESC
+          WHERE symbol = ? AND date = ${LATEST_COMPLETE_TS_DATE_SQL}
           LIMIT 1
         `, [input.symbol]),
         dbGet<any>(`
@@ -375,6 +374,7 @@ export const commandCenterRouter = router({
       return {
         ...ur,
         ...(ts ?? {}),
+        feature_as_of: ts?.feature_as_of ?? null,
         ontologyClaim: ontologyClaim ?? null,
         mlRankPct: await mlRankPctFor(input.symbol),
       };

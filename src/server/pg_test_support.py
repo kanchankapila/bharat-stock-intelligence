@@ -12,6 +12,7 @@ conftest.py imports from this module and owns the pytest-facing surface (fixture
 
 import os
 import pathlib
+import re
 import uuid
 from urllib.parse import quote_plus
 
@@ -36,6 +37,35 @@ assert SCHEMA_SQL.exists(), f"schema.postgres.sql not found at {SCHEMA_SQL}"
 # form -- Postgres tags the two forms differently in pg_locks (field2/field3 differ), so this
 # cannot collide with a cron-overlap lock even by coincidence.
 PG_TEST_SCHEMA_LOCK_NS = 913_070_042
+
+
+def ensure_test_extensions(cur, ddl: str) -> set[str]:
+    """Bootstrap DB-global extensions before applying disposable schema-local DDL.
+
+    IF NOT EXISTS is not concurrency-safe. Share this session lock with Vitest, and
+    install missing extensions in public so a test teardown cannot drop a sibling's.
+    """
+    cur.execute("SELECT pg_advisory_lock(hashtext('bsi_test_extensions'), 0)")
+    try:
+        # search-path-public-exempt: extension DDL only, before the private schema DDL;
+        # test-body connections keep their private-schema-only search_path.
+        cur.execute("SET search_path TO public")
+        homes = set()
+        for ext in sorted(set(re.findall(r"CREATE EXTENSION IF NOT EXISTS (\w+)", ddl))):
+            cur.execute(
+                "SELECT n.nspname FROM pg_extension e "
+                "JOIN pg_namespace n ON n.oid = e.extnamespace WHERE e.extname = %s",
+                (ext,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                cur.execute(f'CREATE EXTENSION IF NOT EXISTS "{ext}" WITH SCHEMA public')
+                homes.add("public")
+            else:
+                homes.add(row[0])
+        return homes
+    finally:
+        cur.execute("SELECT pg_advisory_unlock(hashtext('bsi_test_extensions'), 0)")
 
 
 def _pg_dsn() -> dict:

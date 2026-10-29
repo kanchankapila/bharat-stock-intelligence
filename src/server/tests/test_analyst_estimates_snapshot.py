@@ -211,7 +211,7 @@ def _make_db(symbols_with_mc: list):
         );
     """)
     for symbol, mcsymbol in symbols_with_mc:
-        con.execute("INSERT INTO nse_stocks (symbol, mcsymbol) VALUES (?, ?)", (symbol, mcsymbol))
+        con.execute("INSERT INTO nse_stocks (symbol, mcsymbol, status) VALUES (?, ?, 'ACTIVE')", (symbol, mcsymbol))
     con.commit()
     return con
 

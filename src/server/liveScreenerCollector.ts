@@ -1,6 +1,16 @@
-import { dbRun, dbTransaction } from './dbAsync';
+import { dbRun, dbTransaction, type DbTx } from './dbAsync';
+import { bulkUpsert, rowGroups } from './dbBulk';
 import { fetchLiveMarketScreener } from './marketIntelService';
 import { telegramService } from './telegramService';
+
+/** One multi-row INSERT per filter instead of one statement per appearance. */
+export async function writeFilterAppearances(tx: DbTx, runId: unknown, filter: string, records: any[]): Promise<void> {
+  const rows = records
+    .filter(item => item.symbol_name)
+    .map(item => [runId, item.symbol_name, filter, item.last_trade_price || 0, item.change_per || 0, item.volume || 0]);
+  await bulkUpsert(tx, rows, 6, n =>
+    `INSERT INTO live_screener_appearances (run_id, symbol, filter_key, price, change_per, volume) VALUES ${rowGroups(n, 6)}`);
+}
 
 export const LIVE_SCREENER_FILTERS = [
   "todayNR7",
@@ -111,22 +121,7 @@ export async function runLiveScreenerCollection() {
 
       const records = res.resultData || [];
       if (records.length > 0) {
-        await dbTransaction(async (tx) => {
-          for (const item of records) {
-            const symbol = item.symbol_name;
-            const price = item.last_trade_price || 0;
-            const changePer = item.change_per || 0;
-            const volume = item.volume || 0;
-
-            if (symbol) {
-              await tx.run(
-                `INSERT INTO live_screener_appearances (run_id, symbol, filter_key, price, change_per, volume)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                [runId, symbol, filter, price, changePer, volume]
-              );
-            }
-          }
-        });
+        await dbTransaction(tx => writeFilterAppearances(tx, runId, filter, records));
       }
 
       completed++;

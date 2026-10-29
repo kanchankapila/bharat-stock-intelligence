@@ -163,7 +163,7 @@ _DDL = {
             known_at TIMESTAMP)""",
     "nse_stocks": """
         CREATE TABLE IF NOT EXISTS nse_stocks (
-            symbol TEXT, mcsymbol TEXT)""",
+            symbol TEXT, mcsymbol TEXT, status TEXT DEFAULT 'ACTIVE')""",
     "mc_scid_map": """
         CREATE TABLE IF NOT EXISTS mc_scid_map (
             scid TEXT PRIMARY KEY, symbol TEXT NOT NULL, stock_name TEXT,

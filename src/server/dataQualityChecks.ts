@@ -162,7 +162,8 @@ interface TableFreshnessConfig {
 }
 
 function makeFreshnessCheck(cfg: TableFreshnessConfig): DataQualityCheck {
-  const col = cfg.nativeDateColumn ? `${cfg.dateColumn}::text` : cfg.dateColumn;
+  // Cast the aggregate, not the column: MAX(col::text) cannot use an index on col.
+  const maxCol = cfg.nativeDateColumn ? `MAX(${cfg.dateColumn})::text` : `MAX(${cfg.dateColumn})`;
   const useTradingDays = cfg.tradingDayAware !== false;
   return {
     id: cfg.id,
@@ -170,10 +171,10 @@ function makeFreshnessCheck(cfg: TableFreshnessConfig): DataQualityCheck {
     category: cfg.category,
     critical: cfg.critical,
     sql: cfg.writerJob
-      ? `SELECT MAX(${col}) AS last_date,
+      ? `SELECT ${maxCol} AS last_date,
                 (SELECT to_timestamp(last_success_at / 1000.0) FROM job_heartbeat WHERE job_name = '${cfg.writerJob}') AS writer_ran_at
          FROM ${cfg.table}`
-      : `SELECT MAX(${col}) AS last_date FROM ${cfg.table}`,
+      : `SELECT ${maxCol} AS last_date FROM ${cfg.table}`,
     evaluate: (row, now) => {
       const staleFn = useTradingDays ? tradingDaysStale : daysStale;
       let stale = staleFn(row?.last_date, now);
@@ -1205,6 +1206,45 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
           `${String(row?.symbols ?? '').slice(0, 300)} -- run: python scripts/repair/flag_ghost_bars.py ` +
           `(then --apply --dump-path <pg_dump of stock_ohlcv>)`,
       };
+    },
+  },
+  {
+    id: 'ohlcv-bhavcopy-coverage',
+    label: 'stock_ohlcv has a bar for every active symbol the latest complete bhavcopy traded',
+    category: 'ohlcv',
+    critical: true,
+    // AF-20260903-01: Yahoo's batch EOD sync dropped 412 of 2,550 symbols (RELIANCE included) with
+    // only a console.warn. reconcile-stock-ohlcv backfills from the bhavcopy; this is the alarm if it
+    // stops. Judged on the latest complete file BEFORE today, so it never fires in the gap between
+    // the file landing and the reconcile that runs right after it.
+    sql: `WITH d AS (
+            SELECT date FROM nse_universe_history
+            WHERE date >= current_date - 14 AND date < current_date
+            GROUP BY date HAVING COUNT(DISTINCT symbol) >= 1500
+            ORDER BY date DESC LIMIT 1
+          ),
+          t AS (
+            SELECT h.symbol, COALESCE(m.is_nifty50, 0) = 1 AS n50 FROM nse_universe_history h
+            JOIN d ON h.date = d.date
+            JOIN nse_stocks m ON m.symbol = h.symbol AND m.status = 'ACTIVE'
+            WHERE h.close > 0 AND COALESCE(h.series, 'EQ') = 'EQ'
+          )
+          SELECT (SELECT date::text FROM d) AS trade_date, COUNT(*) AS traded,
+                 COUNT(*) FILTER (WHERE o.symbol IS NULL) AS missing,
+                 COUNT(*) FILTER (WHERE o.symbol IS NULL AND t.n50) AS nifty50_missing,
+                 STRING_AGG(t.symbol, ' ' ORDER BY t.symbol) FILTER (WHERE o.symbol IS NULL) AS symbols
+          FROM t LEFT JOIN stock_ohlcv o ON o.symbol = t.symbol AND o.date = (SELECT date FROM d)`,
+    evaluate: (row) => {
+      const traded = Number(row?.traded) || 0;
+      const missing = Number(row?.missing) || 0;
+      const n50 = Number(row?.nifty50_missing) || 0;
+      if (!row?.trade_date || traded === 0) {
+        return { status: 'warn', detail: 'no complete bhavcopy in the last 14 days to judge coverage against' };
+      }
+      if (missing === 0) return { status: 'pass', detail: `all ${traded} active traded symbols have a ${row.trade_date} bar` };
+      const detail = `${missing} of ${traded} active symbols traded on ${row.trade_date} (bhavcopy) have no stock_ohlcv bar` +
+        `${n50 ? `, ${n50} in NIFTY 50` : ''}: ${String(row?.symbols ?? '').slice(0, 300)} -- check reconcile-stock-ohlcv`;
+      return { status: n50 > 0 || missing >= traded * 0.01 ? 'fail' : 'warn', detail };
     },
   },
 
@@ -3509,6 +3549,28 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
 
+  {
+    id: 'pg-tables-analyzed',
+    label: 'large tables carry planner statistics (no stats reset left unrepaired)',
+    category: 'infra',
+    critical: false,
+    // AF-20261028-22: the unclean 2026-10-26 stop reset the cumulative statistics (177 of 267
+    // tables with no analyze time) and autoanalyze ran late until a manual VACUUM (ANALYZE).
+    // Sized by pg_class.reltuples, which survives a crash; n_live_tup is zeroed by one.
+    sql: `SELECT COUNT(*) AS big,
+                 COUNT(*) FILTER (WHERE COALESCE(s.last_autoanalyze, s.last_analyze) IS NULL) AS unanalyzed,
+                 STRING_AGG(s.relname, ' ' ORDER BY c.reltuples DESC)
+                   FILTER (WHERE COALESCE(s.last_autoanalyze, s.last_analyze) IS NULL) AS sample
+          FROM pg_stat_user_tables s JOIN pg_class c ON c.oid = s.relid
+          WHERE s.schemaname = 'public' AND c.reltuples > 10000`,
+    evaluate: (row) => {
+      const big = Number(row?.big) || 0;
+      const n = Number(row?.unanalyzed) || 0;
+      if (n === 0) return { status: 'pass', detail: `all ${big} large tables have been analyzed` };
+      const detail = `${n} of ${big} large tables were never analyzed (${String(row?.sample ?? '').slice(0, 200)}) -- after an unclean restart run VACUUM (ANALYZE)`;
+      return { status: n >= big * 0.5 ? 'fail' : 'warn', detail };
+    },
+  },
   {
     id: 'pg-backup-recency',
     label: 'Postgres logical backup was fully readable at write time',

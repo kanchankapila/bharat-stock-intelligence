@@ -176,7 +176,7 @@ def build_bse_to_nse_map(conn) -> dict[str, dict]:
 
     try:
         df = read_df(
-            "SELECT DISTINCT symbol, isin FROM nse_stocks WHERE isin IS NOT NULL"
+            "SELECT DISTINCT symbol, isin FROM nse_stocks WHERE isin IS NOT NULL AND status = 'ACTIVE'"
         )
         if not df.empty:
             for _, row in df.iterrows():

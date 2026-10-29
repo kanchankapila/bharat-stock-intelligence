@@ -6,6 +6,7 @@ import {
   latestExpectedNseDailyRun,
   latestExpectedNseIntradaySlot,
   latestNseSessionDate,
+  logRotationVerdict,
   unrecoveredFailureRows,
 } from './doctor-lib.mjs';
 
@@ -120,5 +121,18 @@ describe('repo-doctor secret hygiene', () => {
     expect(source).toContain("queuesSource.includes('settleTrendlyneBatch('");
     expect(source).toContain('trendlyneGraceMinutes >= 12 * 60');
     expect(source).toContain("batchSource.includes('missing batch state for')");
+  });
+});
+
+// AF-20261028-20: pm2-out.log grew to 387 MB over two months with no rotation module installed.
+describe('repo-doctor pm2 log rotation', () => {
+  it('fails when the rotation module is missing', () => {
+    expect(logRotationVerdict({ moduleInstalled: false, logBytes: 1e6 }).status).toBe('FAIL');
+  });
+  it('fails when the live log has outgrown rotation', () => {
+    expect(logRotationVerdict({ moduleInstalled: true, logBytes: 387e6 }).status).toBe('FAIL');
+  });
+  it('passes with the module installed and a small live log', () => {
+    expect(logRotationVerdict({ moduleInstalled: true, logBytes: 1.4e6 }).status).toBe('PASS');
   });
 });

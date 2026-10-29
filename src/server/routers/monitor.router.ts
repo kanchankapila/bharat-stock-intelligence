@@ -145,7 +145,9 @@ async function probeLastRunAt(scriptId: ScriptId): Promise<string | null> {
   let row: any;
   switch (scriptId) {
     case 'technical-scan':
-      row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals");
+      // Every computed_at probe on a big daily table is date-bounded: unbounded it scanned the
+      // whole table (feature_store 51s, 2026-10-28). A run older than 31 days is stale either way.
+      row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals WHERE date >= current_date - 31");
       break;
     case 'confluence-compute':
       row = await dbGet("SELECT MAX(computed_at) as t FROM confluence_signals");
@@ -172,10 +174,10 @@ async function probeLastRunAt(scriptId: ScriptId): Promise<string | null> {
       row = await dbGet("SELECT MAX(fetched_at) as t FROM fii_dii_flow");
       break;
     case 'finbert-scorer':
-      row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals WHERE news_sentiment_score IS NOT NULL");
+      row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals WHERE date >= current_date - 31 AND news_sentiment_score IS NOT NULL");
       break;
     case 'ml-ensemble-score':
-      row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals WHERE win_probability IS NOT NULL");
+      row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals WHERE date >= current_date - 31 AND win_probability IS NOT NULL");
       break;
     case 'ml-ensemble-train':
       row = await dbGet("SELECT MAX(trained_at) as t FROM model_registry WHERE model_name='ensemble'");
@@ -190,7 +192,7 @@ async function probeLastRunAt(scriptId: ScriptId): Promise<string | null> {
       row = await dbGet("SELECT MAX(computed_at) as t FROM market_regimes");
       break;
     case 'feature-engineering':
-      row = await dbGet("SELECT MAX(computed_at) as t FROM feature_store");
+      row = await dbGet("SELECT MAX(computed_at) as t FROM feature_store WHERE date >= current_date - 31");
       break;
     case 'reward-engine':
       row = await dbGet("SELECT MAX(last_updated) as t FROM signal_type_weights");

@@ -90,7 +90,7 @@ def test_cohort_lift_excludes_symbols_outside_point_in_time_eligible_universe():
     assert row["factor_n"] == 40
 
 
-def test_eligible_universe_requires_twenty_prior_clean_bars_and_excludes_etfs(pg_schema):
+def test_eligible_universe_tolerates_one_suspect_bar_but_not_short_history_or_etfs(pg_schema):
     from sqlalchemy import create_engine
     from pg_test_support import _sa_url
 
@@ -102,8 +102,10 @@ def test_eligible_universe_requires_twenty_prior_clean_bars_and_excludes_etfs(pg
     cur.execute("CREATE TABLE nse_stocks (symbol TEXT PRIMARY KEY, instrument_type TEXT)")
     days = pd.bdate_range("2026-09-01", periods=21)
     full = [
-        (symbol, day.date().isoformat(), 100.0 + k, 100.0 + k, 200_000.0, 0)
-        for symbol in ("HISTORICAL_EQ", "KNOWN_ETF")
+        (symbol, day.date().isoformat(), 100.0 + k, 100.0 + k, 200_000.0,
+         int((symbol == "ONE_BAD_BAR" and k == 0)
+             or (symbol == "TWO_BAD_BARS" and k in (0, 1))))
+        for symbol in ("HISTORICAL_EQ", "KNOWN_ETF", "ONE_BAD_BAR", "TWO_BAD_BARS")
         for k, day in enumerate(days)
     ]
     short = [
@@ -113,7 +115,8 @@ def test_eligible_universe_requires_twenty_prior_clean_bars_and_excludes_etfs(pg
     cur.executemany("INSERT INTO stock_ohlcv VALUES (%s,%s,%s,%s,%s,%s)", full + short)
     event_date = days[-1].date().isoformat()
     cur.executemany("INSERT INTO nse_universe_history VALUES (%s,%s,'EQ')", [
-        (symbol, event_date) for symbol in ("HISTORICAL_EQ", "KNOWN_ETF", "SHORT_HISTORY")
+        (symbol, event_date) for symbol in
+        ("HISTORICAL_EQ", "KNOWN_ETF", "ONE_BAD_BAR", "TWO_BAD_BARS", "SHORT_HISTORY")
     ])
     cur.execute("INSERT INTO nse_stocks VALUES ('KNOWN_ETF','etf')")
 
@@ -123,8 +126,8 @@ def test_eligible_universe_requires_twenty_prior_clean_bars_and_excludes_etfs(pg
     finally:
         engine.dispose()
 
-    assert result["symbol"].tolist() == ["HISTORICAL_EQ"]
-    assert result.iloc[0]["adt20_cr"] > 1.0
+    assert set(result["symbol"]) == {"HISTORICAL_EQ", "ONE_BAD_BAR"}
+    assert (result["adt20_cr"] > 1.0).all()
 
 
 def test_session_authority_drops_vendor_bars_on_a_non_trading_date():

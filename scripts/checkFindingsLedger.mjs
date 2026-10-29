@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Keep LF: Vite SSR imports this CLI and does not recognize a CRLF hashbang.
 // Validates docs/audit-findings.md against the "fix it, test it, in the same pass" rule
 // (CLAUDE.md "Resolve findings, don't just log them"; added 2026-09-30 at the user's request).
 //

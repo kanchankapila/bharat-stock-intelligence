@@ -23,6 +23,7 @@ import {
   latestExpectedNseDailyRun,
   latestExpectedNseIntradaySlot,
   latestNseSessionDate,
+  logRotationVerdict,
   unrecoveredFailureRows,
 } from './doctor-lib.mjs';
 
@@ -111,6 +112,14 @@ const managedTakeover = portGuard.includes('owner[0] == expected_service')
   && portGuard.includes('owner[1] != os.getpid()')
   && portGuard.includes('_terminate_process(owner[1])')
   && minUptimeMs > 300_000;
+{
+  // AF-20261028-20
+  const home = process.env.USERPROFILE || process.env.HOME || '';
+  let logBytes = 0;
+  try { logBytes = fs.statSync(path.join(ROOT, 'logs', 'pm2-out.log')).size; } catch { /* no log yet */ }
+  const v = logRotationVerdict({ moduleInstalled: fs.existsSync(path.join(home, '.pm2', 'modules', 'pm2-logrotate')), logBytes });
+  check('pm2-log-rotation', 'infra', v.status, v.detail);
+}
 check('pm2-python-orphan-takeover', 'code', managedTakeover ? 'PASS' : 'FAIL',
   managedTakeover
     ? `same-service PID takeover present; PM2 min_uptime ${minUptimeMs}ms exceeds the 300000ms guard`

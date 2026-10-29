@@ -80,7 +80,7 @@ def _http_get(url: str):
     return _get_session().get(url, timeout=10)
 
 
-from db_compat import execute, executemany, query_all
+from db_compat import execute, executemany_batched, get_engine, query_all
 
 _IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 
@@ -121,7 +121,7 @@ _INDEX_SYMBOLS = {
 _SELECT_SYMBOLS = """
     SELECT DISTINCT symbol
     FROM nse_stocks
-    WHERE symbol IS NOT NULL AND symbol != ''
+    WHERE symbol IS NOT NULL AND symbol != '' AND status = 'ACTIVE'
 """
 _SELECT_SYMBOLS_FILTER = """
     SELECT symbol
@@ -141,6 +141,14 @@ _UPSERT = """
         volume = excluded.volume,
         vwap   = excluded.vwap
 """
+
+
+def _upsert_bars(bars):
+    """One symbol's bars in one transaction and one round trip (plain executemany is one per row)."""
+    with get_engine().begin() as conn:
+        executemany_batched(conn, _UPSERT, [
+            (b["symbol"], b["datetime"], b["open"], b["high"], b["low"],
+             b["close"], b["volume"], b["vwap"], b["interval"]) for b in bars])
 
 # Minutes per bar, keyed by the `interval` label written to intraday_ohlcv. Used to reject
 # off-grid bars (see _is_on_grid).
@@ -411,11 +419,7 @@ def run(
         nonlocal total, failed
         bars = parse_bars(data, symbol, known_open_days=known_open.get(symbol))
         if bars:
-            executemany(
-                _UPSERT,
-                [(b["symbol"], b["datetime"], b["open"], b["high"],
-                  b["low"], b["close"], b["volume"], b["vwap"], b["interval"]) for b in bars],
-            )
+            _upsert_bars(bars)
             total += len(bars)
             if source:
                 from_source[source] += 1
@@ -495,11 +499,7 @@ def run(
                 data = None
             bars = parse_bars(data, internal, known_open_days=known_open.get(internal))
             if bars:
-                executemany(
-                    _UPSERT,
-                    [(b["symbol"], b["datetime"], b["open"], b["high"], b["low"],
-                      b["close"], b["volume"], b["vwap"], b["interval"]) for b in bars],
-                )
+                _upsert_bars(bars)
                 total += len(bars)
                 idx_ok += 1
 

@@ -333,7 +333,7 @@ export const UltimateDecisionMatrix: React.FC<Props> = ({
           <motion.div key="matrix" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
             <div className="flex flex-wrap items-center gap-2 bg-slate-900/40 p-3 rounded-xl border border-slate-800/60 text-xs">
               <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">SETUPS:</span>
-              {['ALL', 'BREAKOUT', 'QUANT_ALPHA', 'SMART_MONEY', 'FNO_BUILDUP'].map(st => (
+              {['ALL', 'RESEARCH', 'BREAKOUT', 'QUANT_ALPHA', 'SMART_MONEY', 'FNO_BUILDUP'].map(st => (
                 <button
                   key={st}
                   onClick={() => setStrategyFilter(st)}

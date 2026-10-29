@@ -1139,6 +1139,7 @@ CREATE TABLE IF NOT EXISTS "intraday_recommendations_history" (
   "target_1" DOUBLE PRECISION,
   "risk_reward" DOUBLE PRECISION,
   "position_size_pct" DOUBLE PRECISION,
+  "screener_score_shadow" DOUBLE PRECISION,
   PRIMARY KEY ("symbol", "cycle_at")
 );
 CREATE INDEX idx_irh_symbol_date ON public.intraday_recommendations_history USING btree (symbol, computed_at, cycle_at);
@@ -1209,6 +1210,7 @@ CREATE TABLE IF NOT EXISTS "investsights_factor_scores" (
   "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "fetched_date")
 );
+CREATE INDEX idx_isfs_fetched_date ON public.investsights_factor_scores USING btree (fetched_date);
 
 -- ── investsights_fundamentals_history ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "investsights_fundamentals_history" (
@@ -1255,6 +1257,7 @@ CREATE TABLE IF NOT EXISTS "investsights_fundamentals_history" (
   "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "fetched_date")
 );
+CREATE INDEX idx_isfh_fetched_date ON public.investsights_fundamentals_history USING btree (fetched_date);
 
 -- ── investsights_pe_band_history ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "investsights_pe_band_history" (
@@ -1480,6 +1483,7 @@ CREATE TABLE IF NOT EXISTS "live_screener_ml_scores" (
   "computed_at" TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY ("run_id", "symbol")
 );
+CREATE INDEX idx_lsml_scores_computed_at ON public.live_screener_ml_scores USING btree (computed_at);
 CREATE INDEX idx_lsms_run ON public.live_screener_ml_scores USING btree (run_id);
 
 -- ── live_screener_outcomes ─────────────────────────────────────────────
@@ -1629,6 +1633,7 @@ CREATE TABLE IF NOT EXISTS "market_decision_event" (
 );
 CREATE INDEX idx_market_decision_event_status ON public.market_decision_event USING btree (decision_status, generated_at DESC);
 CREATE INDEX idx_market_decision_event_symbol ON public.market_decision_event USING btree (symbol, generated_at DESC);
+CREATE INDEX idx_mdev_created_at ON public.market_decision_event USING btree (created_at);
 
 -- ── market_decision_evidence ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "market_decision_evidence" (
@@ -1647,6 +1652,7 @@ CREATE TABLE IF NOT EXISTS "market_decision_evidence" (
   PRIMARY KEY ("decision_key", "evidence_key")
 );
 CREATE INDEX idx_market_decision_evidence_relation ON public.market_decision_evidence USING btree (decision_key, relation);
+CREATE INDEX idx_mde_available_at ON public.market_decision_evidence USING btree (available_at);
 
 -- ── market_decision_outcome ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "market_decision_outcome" (
@@ -1879,6 +1885,7 @@ CREATE TABLE IF NOT EXISTS "marketsmojo_financials_history" (
   PRIMARY KEY ("symbol", "statement", "period_label", "line_item")
 );
 CREATE INDEX idx_marketsmojo_financials_history_symbol ON public.marketsmojo_financials_history USING btree (symbol);
+CREATE INDEX idx_mojo_fin_hist_fetched_at ON public.marketsmojo_financials_history USING btree (fetched_at);
 
 -- ── marketsmojo_fintrend_history ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "marketsmojo_fintrend_history" (
@@ -2077,6 +2084,7 @@ CREATE TABLE IF NOT EXISTS "mc_general_metrics" (
   "fetched_at" TEXT NOT NULL,
   PRIMARY KEY ("symbol", "source_api", "metric_group", "metric_name", "fetched_at")
 );
+CREATE INDEX idx_mcgm_source_fetched_at ON public.mc_general_metrics USING btree (source_api, fetched_at);
 
 -- ── mc_global_snapshot ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "mc_global_snapshot" (
@@ -2384,6 +2392,7 @@ CREATE TABLE IF NOT EXISTS "mover_snapshots" (
   "payload_json" TEXT,
   PRIMARY KEY ("source", "trade_date", "symbol")
 );
+CREATE INDEX idx_mover_snapshots_trade_date ON public.mover_snapshots USING btree (trade_date);
 
 -- ── mover_study_results ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "mover_study_results" (
@@ -2429,6 +2438,7 @@ CREATE TABLE IF NOT EXISTS "news_articles" (
   "symbols" TEXT,
   "timestamp" TIMESTAMPTZ DEFAULT now()
 );
+CREATE INDEX idx_news_articles_timestamp ON public.news_articles USING btree ("timestamp");
 
 -- ── news_sentiment_items ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "news_sentiment_items" (
@@ -2483,6 +2493,7 @@ CREATE TABLE IF NOT EXISTS "niftytrader_live_screener_snapshots" (
   "payload_json" TEXT,
   "created_at" TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_nt_live_screener_captured_at ON public.niftytrader_live_screener_snapshots USING btree (captured_at);
 CREATE INDEX idx_nt_live_screener_filter_date ON public.niftytrader_live_screener_snapshots USING btree (filter_name, trade_date, captured_at);
 
 -- ── nse_bulk_block_deals ─────────────────────────────────────────────
@@ -3444,6 +3455,7 @@ CREATE TABLE IF NOT EXISTS "signal_excursions" (
 );
 CREATE INDEX idx_sexc_date ON public.signal_excursions USING btree (signal_date DESC);
 CREATE INDEX idx_sexc_sym ON public.signal_excursions USING btree (symbol);
+CREATE INDEX idx_signal_excursions_computed_at ON public.signal_excursions USING btree (computed_at);
 
 -- ── signal_outcomes ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "signal_outcomes" (
@@ -3469,6 +3481,7 @@ CREATE INDEX idx_sout_date ON public.signal_outcomes USING btree (signal_date DE
 CREATE INDEX idx_sout_horizon ON public.signal_outcomes USING btree (horizon_days, signal_date DESC);
 CREATE INDEX idx_sout_outcome ON public.signal_outcomes USING btree (outcome);
 CREATE INDEX idx_sout_source ON public.signal_outcomes USING btree (signal_source);
+CREATE INDEX idx_sout_source_horizon_computed ON public.signal_outcomes USING btree (signal_source, horizon_days, computed_at);
 CREATE INDEX idx_sout_sym ON public.signal_outcomes USING btree (symbol);
 CREATE INDEX idx_sout_symbol_date ON public.signal_outcomes USING btree (symbol, signal_date);
 
@@ -4664,6 +4677,7 @@ CREATE TABLE IF NOT EXISTS "trendlyne_pb_history" (
   "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "date")
 );
+CREATE INDEX idx_tl_pb_hist_fetched_at ON public.trendlyne_pb_history USING btree (fetched_at);
 CREATE INDEX idx_tlpb_sym ON public.trendlyne_pb_history USING btree (symbol, date DESC);
 
 -- ── trendlyne_pe_history ─────────────────────────────────────────────
@@ -4674,6 +4688,7 @@ CREATE TABLE IF NOT EXISTS "trendlyne_pe_history" (
   "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "date")
 );
+CREATE INDEX idx_tl_pe_hist_fetched_at ON public.trendlyne_pe_history USING btree (fetched_at);
 CREATE INDEX idx_tlpe_sym ON public.trendlyne_pe_history USING btree (symbol, date DESC);
 
 -- ── trendlyne_price_analysis ─────────────────────────────────────────────

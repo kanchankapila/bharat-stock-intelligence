@@ -28,7 +28,7 @@ from curl_cffi import requests as cffi_req
 
 from db_compat import connect
 from as_of import logical_trading_date
-from mc_symbol_map import MC_TO_SYMBOL_SQL, build_mc_to_symbol
+from mc_symbol_map import MC_MAP_ROWS_SQL, MC_TO_SYMBOL_SQL, build_mc_to_symbol
 
 # ── Constants ────────────────────────────────────────────────────────────────────
 
@@ -741,7 +741,7 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> int:
       mc_eps_vs_cons   — % vs analyst consensus (positive=beat, negative=miss)
     """
     cur = con.cursor()
-    cur.execute("SELECT symbol, mcsymbol FROM nse_stocks WHERE mcsymbol IS NOT NULL AND mcsymbol != ''")
+    cur.execute(MC_MAP_ROWS_SQL)
     scid_map = build_mc_to_symbol(cur.fetchall(), log=print)
 
     # symbol → (beat_label, beat_pct, type_priority)

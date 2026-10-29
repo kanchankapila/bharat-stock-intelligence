@@ -26,7 +26,7 @@ TODAY = "2026-10-08"
 def _conn(monkeypatch, nse_rows):
     monkeypatch.setattr(mef, "logical_trading_date", lambda: TODAY)
     conn = pg_memory_conn()
-    conn.execute("CREATE TABLE nse_stocks (symbol TEXT, mcsymbol TEXT)")
+    conn.execute("CREATE TABLE nse_stocks (symbol TEXT, mcsymbol TEXT, status TEXT DEFAULT 'ACTIVE')")
     conn.execute("""CREATE TABLE technical_signals (
         symbol TEXT, date DATE, days_to_next_results BIGINT,
         earnings_shocker_flag BIGINT, earnings_shocker_gain DOUBLE PRECISION,

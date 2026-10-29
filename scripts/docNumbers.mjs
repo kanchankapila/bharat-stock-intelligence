@@ -99,10 +99,10 @@ const figures = [
   ['rule files', rules.length, 'CLAUDE.md rules section'],
   ['rule files total size (KB)', (rulesBytes / 1024).toFixed(1), 'CLAUDE.md rules section'],
   ['raw console.* call sites in src/server', consoleSites, 'logger.ts comment'],
-  ['market_endpoint_registry rows', registryTotal, 'CLAUDE.md / CONTEXT.md'],
-  ['  ...GET', registryGet, 'CLAUDE.md'],
-  ['  ...POST', registryPost, 'CLAUDE.md'],
-  ['url_endpoints rows (= distinct templates)', urlEndpoints, 'CLAUDE.md'],
+  ['market_endpoint_registry rows', registryTotal, 'findings-ledger.md / CONTEXT.md'],
+  ['  ...GET', registryGet, 'findings-ledger.md'],
+  ['  ...POST', registryPost, 'findings-ledger.md'],
+  ['url_endpoints rows (= distinct templates)', urlEndpoints, 'findings-ledger.md'],
 ];
 
 console.log('Inventory numbers re-derived ' + new Date().toISOString().slice(0, 10) + '\n');
@@ -117,6 +117,7 @@ for (const [label, value, where] of figures) {
 // unreachable so a developer without a running database still gets a useful check.
 if (CHECK) {
   const claude = readFileSync(join(ROOT, 'CLAUDE.md'), 'utf8');
+  const ledgerRule = readFileSync(join(ROOT, '.claude/rules/findings-ledger.md'), 'utf8');
   const context = readFileSync(join(ROOT, 'CONTEXT.md'), 'utf8');
   const stale = [];
   // Digit-boundary match lives in quotesNumber.mjs (unit-tested there).
@@ -138,10 +139,10 @@ if (CHECK) {
   // so match the grouped form rather than the bare integer.
   if (registryGet !== null) {
     const grouped = (n) => n.toLocaleString('en-US');
-    expect(claude, `${grouped(registryGet)} GET / ${registryPost} POST`, 'CLAUDE.md registry method split');
-    expect(claude, grouped(registryTotal), 'CLAUDE.md registry total');
+    expect(ledgerRule, `${grouped(registryGet)} GET / ${registryPost} POST`, 'findings-ledger.md registry method split');
+    expect(ledgerRule, grouped(registryTotal), 'findings-ledger.md registry total');
   }
-  expect(claude, String(urlEndpoints), 'CLAUDE.md url_endpoints count');
+  expect(ledgerRule, String(urlEndpoints), 'findings-ledger.md url_endpoints count');
 
   // Elapsed `~DATE` forecasts in rule files with no outcome written back (AF-20261026-47).
   const rulesDir = join(ROOT, '.claude', 'rules');

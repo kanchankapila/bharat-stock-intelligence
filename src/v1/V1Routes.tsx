@@ -1,21 +1,12 @@
 
 import React from 'react';
-import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 
 // --- Page Fallback ---
 import { PageFallback } from '../components/PageFallback';
 import { V1PageFrame } from '../components/v1/V1PageFrame';
 import { Globe, Activity } from 'lucide-react';
-
-// --- V7 Pro routes (trading-analyst frontend) ---
-import { V7Layout } from '../components/v7/V7Routes';
-const V7Dashboard   = React.lazy(() => import('../components/v7/pages/Dashboard').then((m) => ({ default: m.DashboardPage })));
-const V7TopPicks    = React.lazy(() => import('../components/v7/pages/TopPicks').then((m) => ({ default: m.TopPicksPage })));
-const V7Screener    = React.lazy(() => import('../components/v7/pages/Screener').then((m) => ({ default: m.ScreenerPage })));
-const V7StockDetail = React.lazy(() => import('../components/v7/pages/StockDetail').then((m) => ({ default: m.StockDetailPage })));
-const V7Signals     = React.lazy(() => import('../components/v7/pages/Signals').then((m) => ({ default: m.SignalsPage })));
-
 
 // --- Lazy-loaded V1 page components ---
 const TrendlyneScreenerPanel = React.lazy(() => import('../components/TrendlyneScreenerPanel'));
@@ -102,6 +93,13 @@ const SignalReviewPage         = React.lazy(() => import('../components/v5/pages
 const V2Settings               = React.lazy(() => import('../components/v2/views/settings/V2Settings').then(m => ({ default: m.V2Settings })));
 
 
+// Preserve saved v7 stock links while the retired UI is gone. The v1 details route already
+// accepts a symbol query and renders the active stock deep-dive.
+const RetiredV7StockRedirect = () => {
+    const { symbol } = useParams<{ symbol: string }>();
+    return <Navigate to={symbol ? `/details?symbol=${encodeURIComponent(symbol)}` : '/stock-intelligence-hub'} replace />;
+};
+
 // This component will receive all the props App.tsx was passing down
 const V1Routes = ({
     stocks,
@@ -152,6 +150,13 @@ const V1Routes = ({
                     </React.Suspense>
                 </motion.div>
             } />
+            {/* Retired v7 URLs remain redirects so saved links cannot render a blank shell. */}
+            <Route path="/v7-dashboard" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/v7-top-picks" element={<Navigate to="/alpha" replace />} />
+            <Route path="/v7-screener" element={<Navigate to="/screener" replace />} />
+            <Route path="/v7-signals" element={<Navigate to="/signals" replace />} />
+            <Route path="/v7-stock" element={<Navigate to="/stock-intelligence-hub" replace />} />
+            <Route path="/v7-stock/:symbol" element={<RetiredV7StockRedirect />} />
             <Route path="/*" element={
                 <motion.div
                     key={activeTab}
@@ -364,17 +369,6 @@ const V1Routes = ({
                             } />
                             <Route path="/alpha-cockpit" element={<Navigate to="/alpha" replace />} />
 
-                            {/* ─── V7 Pro: trading-analyst frontend (own shell, App.tsx skips the
-                                 AppShell chrome on /v7-* paths so V7Shell is the only sidebar).
-                                 Flat ids keep sidebarRoutes.test.ts's [a-z0-9-]+ scan honest. ─── */}
-                            <Route element={<V7Layout />}>
-                              <Route path="/v7-dashboard" element={<V7Dashboard />} />
-                              <Route path="/v7-top-picks" element={<V7TopPicks />} />
-                              <Route path="/v7-screener" element={<V7Screener />} />
-                              <Route path="/v7-signals" element={<V7Signals />} />
-                              <Route path="/v7-stock" element={<V7StockDetail />} />
-                              <Route path="/v7-stock/:symbol" element={<V7StockDetail />} />
-                            </Route>
                         </Routes>
                     </React.Suspense>
                 </motion.div>
