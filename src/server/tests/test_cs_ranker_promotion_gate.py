@@ -7,6 +7,7 @@ beats the active model's by >= CS_PROMOTION_MARGIN, or there is no active model 
 """
 import os
 import sys
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import cs_ranker as csr
@@ -77,6 +78,19 @@ def _fake_trained_model(rho):
 
 
 class TestCsRankerPromotionGate:
+    @pytest.mark.parametrize('rho', [float('nan'), float('inf'), float('-inf'), 1.01, -1.01])
+    @pytest.mark.parametrize('baseline', [None, 0.2])
+    def test_invalid_held_out_ic_never_activates_even_with_override(self, monkeypatch, tmp_path, rho, baseline):
+        monkeypatch.setattr(csr, 'CS_MODEL_PATH', str(tmp_path / 'live.pkl'))
+        monkeypatch.setattr(csr, 'CS_CANDIDATE_PATH', str(tmp_path / 'candidate.pkl'))
+        monkeypatch.setattr(csr, 'staleness_override_applies', lambda *a: (True, 42.0))
+        conn = _FakeConn(baseline_rho=baseline, rejections=100)
+
+        with pytest.raises(ValueError, match='held-out'):
+            csr._register_cs_model(conn, _fake_trained_model(rho))
+        assert not os.path.exists(csr.CS_MODEL_PATH)
+        assert conn.cur.executed == []
+
     def test_no_baseline_always_promotes(self, monkeypatch, tmp_path):
         monkeypatch.setattr(csr, "MODELS_DIR", str(tmp_path))
         monkeypatch.setattr(csr, "CS_MODEL_PATH", str(tmp_path / "cs_ranker.pkl"))

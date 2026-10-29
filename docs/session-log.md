@@ -12238,3 +12238,6 @@ separate from these local gates. No production stock data was copied or changed 
 - Read-only production quality checks still report accuracy-calibration, endpoint-age, a single unparsed filing, corporate-action gaps, static monitoring and intentionally neutralized ML warnings. The split repair was dry-run only; production data was not rewritten.
 
 - Follow-up: reproduced a non-finite confluence AUC activating a model without a baseline. The isolated source rejects invalid CV folds before promotion; full validation and activation remain open. The Node lockfile now selects patched @hono/node-server 2.1.5 and npm audit reports zero vulnerabilities. The hypertable repair backup contract requires verification before production writes.
+
+- Follow-up in an isolated worktree: cross-sectional ranker promotion now refuses missing, non-finite or out-of-range held-out correlation before writing a model. The NaN/no-baseline negative control reproduced an unsafe promotion before the guard; 33 focused ranker tests pass. Corrected an invalid docstring escape; warnings-as-errors compilation passes. Full Python validation and deployment remain pending.
+- Follow-up full isolated Python gate: 3,964 passed, 269 opt-in skipped, 72 warnings in 23m03s. The prior invalid-escape warning is gone.
