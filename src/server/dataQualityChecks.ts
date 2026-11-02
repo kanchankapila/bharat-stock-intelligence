@@ -1787,6 +1787,26 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   })),
   {
+    // AF-20260927-20: the retrain's exit code and heartbeat read the same at 9% of the universe
+    // as at 100%, so a run that trained 207 of 2,216 symbols was green for weeks. 0.95 leaves room
+    // for symbols with no usable windows; no full-universe run exists yet to measure that against.
+    id: 'dl-training-coverage',
+    label: 'BiLSTM retrain trained on the universe',
+    category: 'ml',
+    critical: false,
+    sql: `SELECT notes, trained_at FROM model_registry WHERE model_name = 'BiLSTM' ORDER BY id DESC LIMIT 1`,
+    evaluate: (row) => {
+      if (!row) return { status: 'warn', detail: 'No BiLSTM retrain in model_registry' };
+      let coverage: { symbols_requested?: number; symbols_trained?: number; training_stop_reason?: string | null } | null = null;
+      try { coverage = row.notes ? JSON.parse(row.notes) : null; } catch { coverage = null; }
+      if (!coverage?.symbols_requested) return { status: 'warn', detail: 'Latest BiLSTM retrain recorded no coverage' };
+      const { symbols_requested: requested, symbols_trained: trained = 0, training_stop_reason: reason } = coverage;
+      const detail = `Latest BiLSTM retrain trained ${trained} of ${requested} symbols (${(100 * trained / requested).toFixed(1)}%)`;
+      if (trained / requested < 0.95) return { status: 'warn', detail: reason ? `${detail}, stopped by ${reason}` : detail };
+      return { status: 'pass', detail };
+    },
+  },
+  {
     id: 'feature-store-freshness',
     label: 'feature_store freshness',
     category: 'ml',

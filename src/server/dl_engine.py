@@ -57,6 +57,7 @@ except (ImportError, OSError) as _torch_err:
 import json
 import math
 import pickle
+import random
 import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -766,14 +767,20 @@ def _count_nonfinite_params(state_dict) -> int:
 def train_lstm(version: int = 1) -> Dict:
     """Train BiLSTM on all symbols with >= 252 days, streaming in chunks to bound RAM."""
     con = connect()
-    symbols = [r[0] for r in con.execute(
+    symbols = sorted(r[0] for r in con.execute(
         "SELECT DISTINCT symbol FROM feature_store "
         "GROUP BY symbol HAVING COUNT(*) >= 252"
-    ).fetchall()]
+    ).fetchall())
     con.close()  # release before the multi-hour training loop — a PG connection held idle that
                  # long gets reaped server-side ("server closed the connection unexpectedly"),
                  # which silently failed every retrain. load_symbol_sequences() below opens its
                  # own pooled connection per call, so nothing needs this one during training.
+
+    # Seeded by version: a budget that cuts the run must leave a sample of the universe, not its
+    # alphabetical head (20MICRONS..., every run until AF-20260927-20), and the sample must be
+    # reproducible from the version that trained on it.
+    training_order = list(symbols)
+    random.Random(version).shuffle(training_order)
 
     print(f"[DL] Training BiLSTM on {len(symbols)} symbols (chunk size {_CHUNK_SIZE})...")
 
@@ -786,6 +793,8 @@ def train_lstm(version: int = 1) -> Dict:
     chunk_X, chunk_y5, chunk_y15, chunk_yr5 = [], [], [], []
     total_seqs = 0
     chunks_skipped_oom = 0
+    symbols_trained = 0
+    sequences_trained = 0
 
     # CUDA-OOM resilience (AF-20260927-20). This box trains on an 8GB GeForce in WDDM mode,
     # where the Windows desktop shares VRAM -- mid-run, a kernel can fail with
@@ -814,7 +823,7 @@ def train_lstm(version: int = 1) -> Dict:
                 release_cuda_memory()
 
     def _flush_chunk():
-        nonlocal total_seqs, chunks_skipped_oom
+        nonlocal total_seqs, chunks_skipped_oom, symbols_trained, sequences_trained
         if not chunk_X:
             return
         X_c   = np.concatenate(chunk_X)
@@ -825,6 +834,8 @@ def train_lstm(version: int = 1) -> Dict:
         print(f"[DL]   chunk: {len(X_c)} seqs, {X_c.nbytes // 1024 // 1024} MB")
         try:
             _fit_chunk(X_c, y5_c, y15_c, yr5_c)
+            symbols_trained += len(chunk_X)
+            sequences_trained += len(X_c)
         except RuntimeError as e:
             if not _is_cuda_oom(e):
                 raise
@@ -848,25 +859,48 @@ def train_lstm(version: int = 1) -> Dict:
     # column count via _resolve_input_width().
     load_budget = float(os.environ.get("DL_LOAD_BUDGET_SEC", str(90 * 60)))
     load_deadline = time.monotonic() + load_budget if load_budget > 0 else None
+    # The wall-clock bound on the fit, deliberately keeping the 90 minutes the load deadline was
+    # enforcing by accident: this job has only ever finished in ~3h because that deadline ran
+    # during chunk fits. ~45 min/chunk x 22 chunks is ~18h on the shared GPU, across evening jobs
+    # and the exclusive heavy slot, so a longer run is a choice to make here, not a side effect.
+    train_budget = float(os.environ.get("DL_TRAIN_BUDGET_SEC", str(90 * 60)))
+    train_deadline = time.monotonic() + train_budget if train_budget > 0 else None
+    stop_reason = None
 
     def _load(sym):
         X, y5, y15, yr5, _ = load_symbol_sequences(sym, n_features=N_FEATURES)
         return (X, y5, y15, yr5) if len(X) > 0 else None
 
     loaded = 0
-    for X, y5, y15, yr5 in load_sequences_bounded(symbols, _load, deadline=load_deadline):
+    sequences = load_sequences_bounded(training_order, _load, deadline=load_deadline)
+    for X, y5, y15, yr5 in sequences:
         chunk_X.append(X); chunk_y5.append(y5)
         chunk_y15.append(y15); chunk_yr5.append(yr5)
         loaded += 1
         if loaded % _CHUNK_SIZE == 0:
             _flush_chunk()
+            if train_deadline is not None and time.monotonic() >= train_deadline:
+                stop_reason = "train_budget"
+                break
+    sequences.close()  # releases the window of loaded-but-unread symbols before validation
 
     _flush_chunk()  # remaining symbols
 
     if total_seqs == 0:
         return {"error": "no training data"}
 
+    coverage = {
+        "symbols_requested": len(symbols),
+        "symbols_trained": symbols_trained,
+        "training_coverage": symbols_trained / len(symbols),
+        "sequences_trained": sequences_trained,
+        "training_stop_reason": stop_reason,
+    }
     print(f"[DL] Total sequences trained: {total_seqs}")
+    if stop_reason:
+        print(f"[DL] Training budget reached -- trained {symbols_trained} of {len(symbols)} symbols "
+              f"({coverage['training_coverage']:.1%}); raise DL_TRAIN_BUDGET_SEC to cover more.",
+              file=sys.stderr)
     if chunks_skipped_oom:
         print(f"[DL] WARNING: {chunks_skipped_oom} chunk(s) were skipped after repeated CUDA OOM "
               f"-- the model trained on a reduced universe; the quality gate should judge the "
@@ -885,7 +919,7 @@ def train_lstm(version: int = 1) -> Dict:
     # sequence there would hand 78-wide validation rows to an 85-wide model and the size
     # mismatch would be swallowed as "validation failed (non-fatal)".
     metrics: Dict = {"directional_accuracy": float("nan"), "roc_auc": float("nan")}
-    val_symbols = symbols[:min(50, len(symbols))]
+    val_symbols = symbols[:min(50, len(symbols))]  # the SORTED head: the champion's roc_auc was read on these
     val_X, val_y5, val_y15, val_yr5, val_dates = [], [], [], [], []
 
     def _load_val(sym):
@@ -909,6 +943,7 @@ def train_lstm(version: int = 1) -> Dict:
             # let the quality gate rely on training stability instead.
             print(f"[DL] Walk-forward validation failed (non-fatal): {e}")
             print(f"[DL] Training completed successfully; metrics unavailable")
+    metrics.update(coverage)
 
     # Persist held-out metrics so monitoring finally sees what training computed. Before
     # 2026-08-24 NOTHING wrote dl_model_performance's directional_accuracy/roc_auc columns

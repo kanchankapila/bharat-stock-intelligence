@@ -305,6 +305,36 @@ def pg_memory_conn():
     return ConnWrapper(sa_conn)
 
 
+def reset_throwaway_schema(cur, schema: str) -> None:
+    """Empty a session schema between tests, truncating only the tables that hold rows.
+
+    TRUNCATE rewrites a file for every table, index and TOAST relation it names: measured over
+    267 tables, 3.65s per test against 0.04s to find the dirty ones (AF-20261030-12). A used
+    sequence is restarted on its own, since a test that inserted then deleted leaves an empty
+    table this skips, and the contract here has always been RESTART IDENTITY on everything.
+    """
+    cur.execute(
+        "SELECT format('%%I.%%I', schemaname, tablename) FROM pg_tables WHERE schemaname = %s",
+        (schema,),
+    )
+    tables = [row[0] for row in cur.fetchall()]
+    if tables:
+        cur.execute(
+            " UNION ALL ".join(f"SELECT %s::text WHERE EXISTS (SELECT 1 FROM {t})" for t in tables),
+            tables,
+        )
+        dirty = [row[0] for row in cur.fetchall()]
+        if dirty:
+            cur.execute(f"TRUNCATE {', '.join(dirty)} RESTART IDENTITY CASCADE")
+    cur.execute(
+        "SELECT format('%%I.%%I', schemaname, sequencename) FROM pg_sequences "
+        "WHERE schemaname = %s AND last_value IS NOT NULL",
+        (schema,),
+    )
+    for (sequence,) in cur.fetchall():
+        cur.execute(f"ALTER SEQUENCE {sequence} RESTART")
+
+
 def drop_throwaway_schema(admin, schema: str) -> None:
     """DROP a throwaway test schema, evicting anything still holding locks inside it first.
 

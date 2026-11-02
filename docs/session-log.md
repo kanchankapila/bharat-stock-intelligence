@@ -12267,3 +12267,10 @@ post-activation query-back remain user-owned. AF-20261025-33 is the single share
 ## 2026-10-29 ? post-merge dependency verification
 
 - Prepared LangGraph 1.2.14 and SDK 0.4.10 in an isolated overlay. Both SDK path-encoding tests fail on the installed 0.4.2 and pass on the patched version. The chatbot suite passed 54 tests; the full isolated Python gate passed 3,985 tests with 269 opt-in skips. The existing package wheels match all installed RECORD hashes for rollback. Production installation and review remain pending.
+
+## 2026-11-02 - Weekly retrain coverage and full-gate memory stops
+
+- **Retrain, AF-20260927-20.** Root cause: the 90-minute load deadline ran during chunk fits. Every retained run loaded exactly 207 symbols (once 307), the alphabetical head of the universe, and the queue read success. The real loader does 373 symbols/min. Load budget now charges loading only; `DL_TRAIN_BUDGET_SEC` (default 90 min) bounds the fit at a chunk boundary; training order is seeded and shuffled; the validation panel is unchanged; coverage is persisted to `model_registry.notes` and read by the `dl-training-coverage` check. Serving verified on v5. Runtime and coverage are deliberately unchanged by default: full coverage is roughly 18h, which is the user's decision.
+- **Full Python gate, AF-20261030-12.** Green for the first time under `scripts/pytest_memory_guard.py`: 4,034 passed, 271 skipped (269 live_datasource, 2 CUDA), 0 failed, 11m19s. A per-test trace found no suite leak. The stops were WSL file cache, the 15-minute FinBERT job, and one-time CUDA/oneDNN costs. `pg_db` now truncates only tables holding rows.
+- **New, AF-20261102-01.** Host memory pressure remains a user decision (`autoMemoryReclaim`, FinBERT reload cadence). Service growth over days was not measured: the host had just rebooted.
+- **Scope:** this session's hunks only, committed by explicit path and not pushed. No migration applied. The tree also carries another session's uncommitted work, which stays uncommitted.

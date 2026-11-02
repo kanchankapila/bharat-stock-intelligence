@@ -121,3 +121,53 @@ class TestUnreachablePostgresCannotExitZero:
         """Don't overwrite a real failure's status with our own -- 2 (interrupted), 3
         (internal error) and 4 (usage error) all mean something specific to a CI reader."""
         assert self._finish({"src/server/tests/test_anything.py"}, 3) == 3
+
+
+def _raw_cursor():
+    import psycopg2
+    from pg_test_support import _pg_dsn
+
+    conn = psycopg2.connect(**_pg_dsn())
+    conn.autocommit = True
+    return conn, conn.cursor()
+
+
+def _relfilenode(cur, schema, table):
+    cur.execute("SELECT pg_relation_filenode(format('%%I.%%I', %s::text, %s::text)::regclass)", (schema, table))
+    return cur.fetchone()[0]
+
+
+def test_reset_truncates_only_the_tables_a_test_touched(pg_db):
+    """TRUNCATE rewrites a file per relation: 3.65s per test across ~270 tables, nearly all empty,
+    against 0.04s to find the dirty ones (AF-20261030-12). A new filenode is TRUNCATE's trace."""
+    from pg_test_support import reset_throwaway_schema
+
+    conn, cur = _raw_cursor()
+    try:
+        touched_before = _relfilenode(cur, pg_db, "app_settings")
+        untouched_before = _relfilenode(cur, pg_db, "nse_stocks")
+        cur.execute(f'INSERT INTO "{pg_db}".app_settings (key, value) VALUES (%s, %s)', ("k", "v"))
+        reset_throwaway_schema(cur, pg_db)
+        cur.execute(f'SELECT count(*) FROM "{pg_db}".app_settings')
+        assert cur.fetchone()[0] == 0
+        assert _relfilenode(cur, pg_db, "app_settings") != touched_before
+        assert _relfilenode(cur, pg_db, "nse_stocks") == untouched_before
+    finally:
+        conn.close()
+
+
+def test_reset_restarts_a_sequence_even_when_its_table_ended_up_empty(pg_db):
+    """The per-test contract was RESTART IDENTITY on everything. A test that inserted and deleted
+    leaves an empty table the probe skips, with its sequence still advanced."""
+    from pg_test_support import reset_throwaway_schema
+
+    conn, cur = _raw_cursor()
+    try:
+        cur.execute("SELECT sequencename FROM pg_sequences WHERE schemaname = %s LIMIT 1", (pg_db,))
+        seq = cur.fetchone()[0]
+        cur.execute(f'SELECT nextval(\'"{pg_db}"."{seq}"\')')
+        reset_throwaway_schema(cur, pg_db)
+        cur.execute(f'SELECT nextval(\'"{pg_db}"."{seq}"\')')
+        assert cur.fetchone()[0] == 1
+    finally:
+        conn.close()

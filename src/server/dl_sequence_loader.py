@@ -39,12 +39,17 @@ def load_sequences_bounded(
 ) -> Iterator[T]:
     """Yield each symbol's loaded sequences, in completion order, skipping failures.
 
-    `deadline` is a `time.monotonic()` timestamp. Past it, no further symbols are submitted and
-    whatever has already loaded is yielded. That bound is the point: `train_lstm()` is called
-    IN-PROCESS by `dl_trainer.py`, so `_run()`'s 1800s subprocess cap does not apply to it and
-    nothing bounded it except the 24h BullMQ lock. Degrading to "train on the symbols that
-    loaded" is strictly better than being killed with nothing to show -- which is exactly what
-    happened on 2026-09-05.
+    `deadline` is a `time.monotonic()` timestamp bounding LOADING time. Past it, no further
+    symbols are submitted and whatever has already loaded is yielded. That bound is the point:
+    `train_lstm()` is called IN-PROCESS by `dl_trainer.py`, so `_run()`'s 1800s subprocess cap
+    does not apply to it and nothing bounded it except the 24h BullMQ lock. Degrading to "train
+    on the symbols that loaded" is strictly better than being killed with nothing to show --
+    which is exactly what happened on 2026-09-05.
+
+    Time the consumer holds a yielded item is not charged to it (AF-20260927-20). It used to be,
+    so a chunk's GPU fit spent the budget: every retrain stopped at exactly 207 symbols, two
+    100-symbol chunks plus the 7 still in flight, and the ledger read that as a slow loader for
+    five weeks. Bounding the consumer's own work is the consumer's job (DL_TRAIN_BUDGET_SEC).
 
     At most `max_in_flight` symbols (default 2 x max_workers) are loading or loaded-but-unread
     at any moment; the next is submitted only as one is yielded. The consumer trains a chunk on
@@ -69,9 +74,13 @@ def load_sequences_bounded(
     # would always pass and the bound would never fire -- the first version of this did exactly
     # that and the test caught it.
     _SKIPPED = object()
+    # Set while the consumer holds an item. A window slot queued before the pause runs during it,
+    # before the deadline has moved, so workers must read this frozen clock rather than the wall.
+    paused_at: Optional[float] = None
 
     def _guarded(sym: str):
-        if deadline is not None and time.monotonic() >= deadline:
+        now = paused_at if paused_at is not None else time.monotonic()
+        if deadline is not None and now >= deadline:
             return _SKIPPED
         return loader(sym)
 
@@ -106,7 +115,11 @@ def load_sequences_bounded(
                 # rather than relying on truthiness -- `if result:` raises ValueError on an ndarray.
                 if hasattr(result, "__len__") and len(result) == 0:
                     continue
+                paused_at = time.monotonic()
                 yield result
+                if deadline is not None:
+                    deadline += time.monotonic() - paused_at
+                paused_at = None
             _top_up()
     finally:
         pool.shutdown(wait=True, cancel_futures=True)

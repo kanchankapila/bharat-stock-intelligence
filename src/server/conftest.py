@@ -44,6 +44,7 @@ from pg_test_support import (  # noqa: E402
     _sa_url,
     drain_memory_conns,
     drop_throwaway_schema,
+    reset_throwaway_schema,
     ensure_test_extensions,
     pg_available,
     pg_memory_conn,  # noqa: F401  -- re-exported for tests that import it from conftest
@@ -296,17 +297,7 @@ def pg_db(_pg_session_schema, monkeypatch):
     conn = psycopg2.connect(**_pg_dsn())
     conn.autocommit = True
     cur = conn.cursor()
-    # `%%I` -- a literal % must be doubled in a psycopg2 query that also carries a %s parameter,
-    # or the driver reads `%I` as a placeholder and raises "tuple index out of range".
-    # recurring-bugs.md's "raw % placeholder" entry, hit while writing this fixture.
-    cur.execute(
-        "SELECT string_agg(format('%%I.%%I', schemaname, tablename), ', ') "
-        "FROM pg_tables WHERE schemaname = %s",
-        (schema,),
-    )
-    (tables,) = cur.fetchone()
-    if tables:
-        cur.execute(f"TRUNCATE {tables} RESTART IDENTITY CASCADE")
+    reset_throwaway_schema(cur, schema)
     conn.close()
 
     monkeypatch.setenv("USE_POSTGRES", "true")

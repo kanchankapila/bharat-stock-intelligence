@@ -490,3 +490,15 @@ network policy (AF-20260928-10), so no connector in this batch has seen a live r
 ## 2026-10-29 - PR 131 activation
 
 PR #131 merged as b4bf2a50. The reviewed source was integrated with the dirty live checkout through a checked isolated staging merge; bharat-server restarted at 2026-10-28 23:59 IST and production HTTP/browser readbacks passed. The root checkout remains dirty and is not Git-synchronized to remote main. Deployment evidence and remaining research are in docs/audit-findings.md (AF-20261028-03 and -05 through -15); see docs/session-log.md for checks and the pre-existing monitor-index test failure.
+
+## 2026-11-02 - Weekly retrain 207 and the memory stops
+
+- 207 was never a rate. Subtract the universe from the skip count in the retained logs before believing
+  "2.3 symbols/min": eight universe sizes all leave 207, one leaves 307. Real loader: 373 symbols/min.
+- The load deadline's accidental effect was bounding a ~18h job to ~3h. Asked what it was enforcing before
+  removing it, so the bound survives as `DL_TRAIN_BUDGET_SEC` and the coverage decision stays the user's.
+- Memory: per-test private bytes plus host available in one CSV ended a five-session argument. No suite leak.
+  File cache, FinBERT every 15 min, one-time CUDA and oneDNN costs. Truncate-all was measured and rejected as
+  a memory cause (13 MB per 10), then fixed for speed anyway.
+- `CUDA_VISIBLE_DEVICES=` (empty) makes dl_engine raise at import on this box; `-1` is the working mask.
+- AF-20260927-20 stays open (Sunday's run, plus the budget decision). AF-20261030-12 closed. AF-20261102-01 new.

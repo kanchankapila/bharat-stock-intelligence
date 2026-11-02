@@ -15,6 +15,7 @@ _record_model_registry(), tested here in isolation — mirrors cs_ranker.py's
 _register_cs_model / test_cs_ranker_promotion_gate.py pattern exactly, since this is the same
 bug class (Finding #17: unconditional promotion, never-deactivated prior row).
 """
+import json
 import os
 import sys
 import weakref
@@ -63,7 +64,7 @@ class TestRecordModelRegistry:
         insert_calls = [c for c in conn.cur.executed if "INSERT INTO model_registry" in c[0]]
         assert len(insert_calls) == 1
         params = insert_calls[0][1]
-        assert params == ("BiLSTM", "4", "deep_learning", 0.60, 0.55, -1, 1)
+        assert params == ("BiLSTM", "4", "deep_learning", 0.60, 0.55, -1, None, 1)
         assert conn.committed == 1
 
     def test_not_promoted_never_deactivates_and_logs_inactive(self):
@@ -92,6 +93,24 @@ class TestRecordModelRegistry:
         sql, params = deactivate_call
         assert params == ("BiLSTM",)
         assert "model_name=?" in sql
+
+
+    def test_coverage_is_persisted_on_the_row(self):
+        """AF-20260927-20: the queue said success over 207 of 2,216 symbols and the row carried
+        training_samples=-1 and no notes, so nothing downstream could see the shortfall."""
+        conn = _FakeConn()
+        dlt._record_model_registry(conn, new_version=6, auc=0.51, acc=0.50, promoted=False, metrics={
+            "symbols_requested": 2216, "symbols_trained": 200, "training_coverage": 200 / 2216,
+            "sequences_trained": 240000, "training_stop_reason": "train_budget", "roc_auc": 0.51,
+        })
+        params = [c for c in conn.cur.executed if "INSERT INTO model_registry" in c[0]][0][1]
+        assert params[5] == 240000
+        notes = json.loads(params[6])
+        assert notes["symbols_trained"] == 200
+        assert notes["symbols_requested"] == 2216
+        assert notes["training_stop_reason"] == "train_budget"
+        assert "roc_auc" not in notes
+        assert params[-1] == 0
 
 
 class TestStaleLockThreshold:

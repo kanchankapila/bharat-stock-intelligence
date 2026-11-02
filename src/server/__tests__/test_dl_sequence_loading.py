@@ -121,3 +121,45 @@ def test_parallelism_actually_overlaps_io():
     elapsed = time.monotonic() - t0
     assert len(out) == 8
     assert elapsed < 0.6, f"4 workers over 8 x 0.1s should be ~0.2s, got {elapsed:.2f}s"
+
+
+def test_consumer_pause_is_not_charged_to_the_load_deadline():
+    """AF-20260927-20: every dl-retrain-weekly loaded exactly 207 symbols (two 100-symbol chunks
+    + 7 in flight) because the budget ran while the trainer held the generator for a chunk's GPU
+    fit. Instant loader, slow consumer: nothing here is slow to LOAD."""
+    symbols = [f"S{i}" for i in range(6)]
+    got = []
+    for item in load_sequences_bounded(symbols, lambda s: s, max_workers=1, max_in_flight=2,
+                                       deadline=time.monotonic() + 0.15):
+        got.append(item)
+        time.sleep(0.2)
+    assert sorted(got) == sorted(symbols)
+
+
+def test_task_queued_during_a_consumer_pause_is_not_skipped():
+    """A window slot submitted before the pause starts running DURING it, and the deadline only
+    moves on resume, so the worker's own check has to see a frozen clock too."""
+    def slowish(sym):
+        time.sleep(0.05)
+        return sym
+    symbols = [f"S{i}" for i in range(4)]
+    got = []
+    for item in load_sequences_bounded(symbols, slowish, max_workers=1, max_in_flight=4,
+                                       deadline=time.monotonic() + 0.1):
+        got.append(item)
+        time.sleep(0.4)
+    assert sorted(got) == sorted(symbols)
+
+
+def test_deadline_still_bounds_a_slow_loader_behind_a_slow_consumer():
+    """Non-vacuity: the budget must still fire on loading time, or it bounds nothing."""
+    def slow(sym):
+        time.sleep(0.1)
+        return sym
+    symbols = [f"S{i}" for i in range(40)]
+    got = []
+    for item in load_sequences_bounded(symbols, slow, max_workers=1, max_in_flight=1,
+                                       deadline=time.monotonic() + 0.35):
+        got.append(item)
+        time.sleep(0.02)
+    assert 0 < len(got) < len(symbols)

@@ -162,6 +162,8 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 
 ## Testing
 
+- **A host-memory guard stop names the test it interrupted, not the cause, and a stopping test that changes every run is the tell.** Four sessions read 13-25% stops as a possible suite leak (AF-20261030-12). A per-test trace of the process's private bytes plus host available separates them in one run: pytest was flat while `vmmemWSL` grew, and the stops landed on the clock (16:30:01, ~16:46, 17:00:31), the slots of a ~2.5 GB job scheduled every 15 minutes. **Check three things before suspecting tests: the wall-clock time of the stop against `peakMemMb` in the app log, the WSL VM's file cache (Linux `free -m` shows it; Windows cannot reclaim it while the VM is busy), and whether a jump repeats (run the call six times; a plateau is a one-time library cost).** Never lower the stop line to get a pass. Use `scripts/pytest_memory_guard.py`. A hypothesis you like still needs its disconfirming run: per-test TRUNCATE looked guilty and measured 13 MB.
+
 - **A test timeout does not cancel its unfinished async fixture.** Per-row autocommit seeders
   in accuracy/timeframe coverage tests exceeded their budgets under shared Postgres I/O load;
   the timed-out timeframe seed then continued into later cases after their cleanup, producing

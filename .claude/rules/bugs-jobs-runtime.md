@@ -286,6 +286,7 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   unmeasurable, grep the process-manager's stdout log as well as the application log**, and
   before raising any budget, check whether the SUCCESSFUL runs have actually moved.
 
+- **A deadline that keeps running while the consumer of a generator works bounds the consumer, not the loader, and the shortfall reads as a slow source.** `dl_sequence_loader`'s 90-minute deadline ran during each chunk's GPU fit, so every `dl-retrain-weekly` loaded exactly 207 of ~2,200 symbols (2 x 100-symbol chunks + 7 in flight, once 307) for weeks, while the ledger recorded "~2.3 symbols/min under memory pressure". The real loader does 373 symbols/min (AF-20260927-20). **Tell: the same count across runs of different sizes is a step function, so subtract the totals before dividing by time; a rate derived from one is not a measurement.** And **ask what the broken bound was enforcing before removing it**: this one was the only thing keeping a ~18h job at ~3h. Split it into two honest budgets instead of silently changing runtime. Stop on a budget only with a representative order: this run's survivors were the alphabetical head.
 - **A generator fed by an executor that has EVERY task submitted is not bounded by how slowly
   its consumer reads — the pool keeps working while the generator is suspended, and every
   finished result sits in memory unread.** `dl_sequence_loader.load_sequences_bounded` did

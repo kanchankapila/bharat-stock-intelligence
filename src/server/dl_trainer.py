@@ -130,7 +130,11 @@ def _set_setting(con: ConnWrapper, key: str, value: str):
     con.commit()
 
 
-def _record_model_registry(con: ConnWrapper, new_version: int, auc, acc, promoted: bool) -> None:
+_COVERAGE_KEYS = ("symbols_requested", "symbols_trained", "training_coverage", "training_stop_reason")
+
+
+def _record_model_registry(con: ConnWrapper, new_version: int, auc, acc, promoted: bool,
+                           metrics: dict = None) -> None:
     """Write this training attempt's model_registry row, deactivating the prior active
     BiLSTM row iff this one was actually promoted (mirrors cs_ranker.py's
     _register_cs_model / ml_ensemble.py's champion-challenger bookkeeping). Split out from
@@ -140,7 +144,12 @@ def _record_model_registry(con: ConnWrapper, new_version: int, auc, acc, promote
     Previously this INSERT ran unconditionally with is_active based on a gate that treated
     NaN metrics as an automatic pass, and never deactivated the previous row either way —
     every version from v4 through v18 was left with is_active=1 in model_registry forever.
+
+    `notes` carries the coverage the dl-training-coverage data-quality check reads: the job
+    heartbeat only proves the script exited 0, and that exit reads the same at 9% of the universe.
     """
+    metrics = metrics or {}
+    notes = json.dumps({k: metrics[k] for k in _COVERAGE_KEYS}) if "symbols_requested" in metrics else None
     if promoted:
         con.execute(
             "UPDATE model_registry SET is_active=0 WHERE model_name=? AND is_active=1",
@@ -149,9 +158,10 @@ def _record_model_registry(con: ConnWrapper, new_version: int, auc, acc, promote
     con.execute(
         """INSERT INTO model_registry
            (model_name, model_version, model_type, cv_roc_auc, cv_accuracy,
-            training_samples, is_active, trained_at)
-           VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
-        ("BiLSTM", str(new_version), "deep_learning", auc, acc, -1, 1 if promoted else 0),
+            training_samples, notes, is_active, trained_at)
+           VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
+        ("BiLSTM", str(new_version), "deep_learning", auc, acc,
+         metrics.get("sequences_trained", -1), notes, 1 if promoted else 0),
     )
     con.commit()
 
@@ -384,7 +394,7 @@ def retrain_models(trigger: str = "scheduled") -> dict:
         with steps.step("record_and_regime_retrain"):
             con2 = connect()
             try:
-                _record_model_registry(con2, new_version, auc, acc, result["promoted"])
+                _record_model_registry(con2, new_version, auc, acc, result["promoted"], metrics)
 
                 # Step 6: Regime retrain — piggybacks on the weekly schedule since nothing
                 # fires trigger="monthly" (dead code path); without this the HMM model
