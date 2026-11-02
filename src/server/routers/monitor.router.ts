@@ -406,6 +406,23 @@ export async function getSystemStatus(now: Date = new Date()) {
   }
 
   return Promise.all(MONITOR_SCRIPTS.map(async s => {
+    const disabledReason = (s as any).disabledReason as string | undefined;
+    if (disabledReason) {
+      const heartbeatName = (s as any).heartbeatName ?? s.id;
+      const hb = heartbeatByName.get(heartbeatName);
+      return {
+        ...s,
+        lastRunAt: hb?.lastRunAt ?? null,
+        lastSuccessAt: hb?.lastSuccessAt ?? null,
+        lastFailureAt: hb?.lastStatus === 'failed' ? hb.lastRunAt : null,
+        nextScheduledAt: null,
+        runCount: hb?.runCount ?? 0,
+        failCount: hb?.failCount ?? 0,
+        runState: 'disabled' as const,
+        stats: {},
+        error: null,
+      };
+    }
     // getScriptStats(s.id) depends on nothing getLastRunAt(s.id) computes -- these were awaited
     // sequentially per script (2 round trips deep) despite being fully independent. Across the
     // ~30 scripts in MONITOR_SCRIPTS this whole map is already running concurrently (Promise.all
@@ -446,7 +463,7 @@ export async function getSystemStatus(now: Date = new Date()) {
     const stateKey = `monitor_${s.id}`;
     const rawState = runStates[stateKey];
     const hb = heartbeatByName.get(heartbeatName);
-    let runState: 'never' | 'running' | 'success' | 'failed' | 'stale' = 'never';
+    let runState: 'never' | 'running' | 'success' | 'failed' | 'stale' | 'disabled' = 'never';
 
     // Fresh DB-freshness evidence (dbLastRunAt/storedRanAt) wins over the app_settings
     // 'running' flag: scripts driven by a BullMQ worker (e.g. technical-scan) never flip
@@ -544,6 +561,9 @@ export const monitorRouter = router({
     .mutation(async ({ input }) => {
       const script = MONITOR_SCRIPTS.find(s => s.id === input.scriptId);
       if (!script) throw new Error(`Unknown script: ${input.scriptId}`);
+      if ((script as any).disabledReason) {
+        throw new Error(`${script.label} is disabled: ${(script as any).disabledReason}`);
+      }
 
       const stateKey = `monitor_${script.id}`;
       const upsertState = async (val: string) => {

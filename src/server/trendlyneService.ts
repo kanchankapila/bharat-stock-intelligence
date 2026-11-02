@@ -252,7 +252,7 @@ export async function fetchTrendlyneStockMetrics(symbol: string) {
     if (!response.ok) {
       // WAF / upstream errors are retryable -- throw so BullMQ's attempts + backoff kick in.
       // Non-WAF 4xx (e.g. 404 for a dead tlid) are not retried.
-      if ([403, 429, 500].includes(response.status)) {
+      if ([403, 405, 429, 500].includes(response.status)) {
         markTrendlyneStockMetricsBlocked(
           String(response.status) as TrendlyneStockMetricsBlockReason,
         );

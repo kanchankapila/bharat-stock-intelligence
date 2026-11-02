@@ -232,7 +232,7 @@ server.tool(
         markdown += `## 📈 Technical Signaling & Predictor Setup\n`;
         const setup = techSignals || dailyTech;
         markdown += `* **Trend:** **${setup.trend || "Neutral"}** | **RSI:** ${setup.rsi?.toFixed(2) || "N/A"}\n`;
-        markdown += `* **Win Probability:** ${setup.win_probability ? `${(setup.win_probability * 100).toFixed(1)}%` : "N/A"}\n`;
+        markdown += "* Win probability unavailable: model outputs are not validated as trade win probabilities.\n";
         if (setup.entry_price || setup.cmp) {
           markdown += `* **Entry Trigger Zone:** ₹${setup.entry_price || setup.entry_zone || setup.cmp}\n`;
           markdown += `* **Institutional Target:** ₹${setup.target_price || setup.targets || "N/A"}\n`;

@@ -17,6 +17,23 @@ const ROW = (o: Record<string, unknown>) => ({
 });
 
 describe('formatForwardTestLine', () => {
+  it('reads Python non-finite tokens in other horizons without discarding a real five-day result', () => {
+    const raw = REPORT({ since: '2026-10-06', calls: 100,
+      tiers: { '5': [ROW({ dates: 10, eff_dates: 2, hit_rate: 0.4, base_hit: 0.45, mean_excess_pct: -1 })],
+        '21': [{ metric: '__RAW_NAN__' }] } }).replace('"__RAW_NAN__"', 'NaN');
+    const line = formatForwardTestLine(raw);
+    expect(line).toContain('LOW-DATA');
+    expect(line).toContain('40%');
+    expect(line).toContain('2.0 independent windows');
+  });
+
+  it('does not turn unavailable metrics into zero performance', () => {
+    const line = formatForwardTestLine(REPORT({ since: '2026-10-06', calls: 100,
+      tiers: { '5': [ROW({ dates: 10, eff_dates: 2, hit_rate: null, base_hit: null, mean_excess_pct: null })] } }));
+    expect(line).toContain('n/a');
+    expect(line).not.toContain('0%');
+    expect(line).not.toContain('0.00%');
+  });
   it('says plainly that there is no verified edge when the forward test has no closed windows', () => {
     const line = formatForwardTestLine(REPORT({ since: '2026-10-06', calls: 0, tiers: {} }));
     expect(line).toMatch(/no verified edge yet/i);

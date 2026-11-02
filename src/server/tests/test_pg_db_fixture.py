@@ -18,6 +18,19 @@ if SERVER_DIR not in sys.path:
     sys.path.insert(0, SERVER_DIR)
 
 
+def test_pg_dsn_requires_explicit_database(monkeypatch):
+    from pg_test_support import _pg_dsn
+
+    monkeypatch.delenv('PGTEST_DB', raising=False)
+    with pytest.raises(RuntimeError, match='Set PGTEST_DB explicitly'):
+        _pg_dsn()
+    monkeypatch.setenv('PGTEST_DB', '  ')
+    with pytest.raises(RuntimeError, match='Set PGTEST_DB explicitly'):
+        _pg_dsn()
+    monkeypatch.setenv('PGTEST_DB', 'dedicated_test_db')
+    assert _pg_dsn()['dbname'] == 'dedicated_test_db'
+
+
 def test_the_production_schema_is_present(pg_db_conn):
     """A converted test can delete its hand-rolled DDL because the real shape is already here."""
     rows = pg_db_conn.execute(

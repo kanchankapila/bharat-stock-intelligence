@@ -75,12 +75,15 @@ def _pg_dsn() -> dict:
     runner provides, and a stray production URL in the environment should not silently redirect
     a schema-creating test at it.
     """
+    database = os.environ.get("PGTEST_DB", "").strip()
+    if not database:
+        raise RuntimeError("Set PGTEST_DB explicitly to the intended test database before running database tests.")
     return dict(
         host=os.environ.get("PGTEST_HOST", PG["host"]),
         port=int(os.environ.get("PGTEST_PORT", PG["port"])),
         user=os.environ.get("PGTEST_USER", PG["user"]),
         password=os.environ.get("PGTEST_PASSWORD", PG["password"]),
-        dbname=os.environ.get("PGTEST_DB", PG["dbname"]),
+        dbname=database,
     )
 
 

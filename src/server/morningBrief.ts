@@ -19,6 +19,7 @@
  * a count into a doc or comment").
  */
 import { dbGet } from './dbAsync';
+import { parsePythonJson } from './parsePythonJson';
 import { telegramService } from './telegramService';
 import { buildAccuracyDigest, formatAccuracyScorecard } from './signalAccuracyDigest';
 import {
@@ -43,10 +44,12 @@ interface TierRow {
 }
 
 const pct = (v: unknown) => {
+  if (v == null) return 'n/a';
   const n = Number(v);
   return Number.isFinite(n) ? `${Math.round(n * 100)}%` : 'n/a';
 };
 const num = (v: unknown, dp: number) => {
+  if (v == null) return 'n/a';
   const n = Number(v);
   return Number.isFinite(n) ? n.toFixed(dp) : 'n/a';
 };
@@ -60,7 +63,7 @@ const num = (v: unknown, dp: number) => {
 export function formatForwardTestLine(raw: string | null | undefined): string {
   let forward: Record<string, unknown> | null = null;
   try {
-    const parsed = raw ? JSON.parse(raw) : null;
+    const parsed = parsePythonJson<{ blocks?: Record<string, unknown> }>(raw);
     const blocks = (parsed?.blocks ?? {}) as Record<string, unknown>;
     forward = (blocks.forward ?? null) as Record<string, unknown> | null;
   } catch {
@@ -84,8 +87,9 @@ export function formatForwardTestLine(raw: string | null | undefined): string {
   const verdict = row.verdict ?? 'LOW-DATA';
   const head = `Forward test (frozen, since ${since}, ${num(row.eff_dates, 1)} independent windows): ` +
     `*${verdict}*`;
+  const netExcess = num(row.mean_excess_pct, 2);
   const body = `beat the universe ${pct(row.hit_rate)} of the time vs ${pct(row.base_hit)} by chance, ` +
-    `net excess ${num(row.mean_excess_pct, 2)}%/${REPORT_HORIZON}d after costs`;
+    `net excess ${netExcess === 'n/a' ? netExcess : `${netExcess}%`}/${REPORT_HORIZON}d after costs`;
   return verdict === 'LOW-DATA'
     ? `⚠ ${head} — ${body}. Not yet evidence either way.`
     : `${head} — ${body}.`;

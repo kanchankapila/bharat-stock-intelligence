@@ -18,6 +18,8 @@ sys.path.insert(0, SERVER_DIR)
 
 import analyst_estimates_snapshot as aes
 
+_OPEN_TEST_CONNECTIONS = []
+
 
 # ── Pure-function tests ───────────────────────────────────────────────────────
 
@@ -165,6 +167,8 @@ def _restore_db_env():
     os.environ.pop("DATABASE_URL", None)
     yield
     import db_compat
+    while _OPEN_TEST_CONNECTIONS:
+        _OPEN_TEST_CONNECTIONS.pop().close()
     # MUST precede the DROP: pooled connections still scoped to this schema hold
     # AccessShareLocks on its tables, and DROP SCHEMA CASCADE needs AccessExclusiveLock.
     # reload() alone abandons the old engine cache with its sockets open. See dispose_engines().
@@ -188,6 +192,7 @@ def _make_db(symbols_with_mc: list):
     importlib.reload(db_compat)
     importlib.reload(aes)
     con = db_compat.connect()
+    _OPEN_TEST_CONNECTIONS.append(con)
     con.executescript("""
         CREATE TABLE nse_stocks (
             symbol TEXT PRIMARY KEY, mcsymbol TEXT, name TEXT,
@@ -247,6 +252,19 @@ class TestRunDb:
         ).fetchone()[0]
         assert count == 1
 
+    def test_failed_update_keeps_existing_snapshot(self):
+        con = _make_db([("RELIANCE", "RL")])
+        try:
+            aes.run(as_of="2026-06-22", fetch_fn=_good_fetch)
+            con.execute("ALTER TABLE analyst_estimates_history ADD CONSTRAINT target_ceiling CHECK (target_mean < 3000)")
+            con.commit()
+            with pytest.raises(Exception):
+                aes.run(as_of="2026-06-22", fetch_fn=lambda code: {**_good_fetch(code), 'target_mean': 4000})
+            row = con.execute("SELECT target_mean FROM analyst_estimates_history WHERE symbol='RELIANCE'").fetchone()
+            assert row is not None and row[0] == pytest.approx(2100.0)
+        finally:
+            con.close()
+
     def test_different_dates_keep_separate_rows(self):
         con = _make_db([("RELIANCE", "RL")])
         aes.run(as_of="2026-06-21", fetch_fn=_good_fetch)
@@ -259,6 +277,17 @@ class TestRunDb:
         n = aes.run(as_of="2026-06-22", fetch_fn=_empty_fetch)
         assert n == 0
         assert con.execute("SELECT COUNT(*) FROM analyst_estimates_history").fetchone()[0] == 0
+
+    def test_no_data_symbol_does_not_block_a_covered_symbol(self, capsys):
+        con = _make_db([("NOCOVER", "NC01"), ("RELIANCE", "RL")])
+        try:
+            def fetch(code):
+                return _empty_fetch(code) if code == 'NC01' else _good_fetch(code)
+            assert aes.run(as_of='2026-06-22', fetch_fn=fetch) == 1
+            assert con.execute('SELECT symbol FROM analyst_estimates_history').fetchone()[0] == 'RELIANCE'
+            assert 'skipped_no_values=1' in capsys.readouterr().out
+        finally:
+            con.close()
 
     def test_stores_correct_field_values(self):
         con = _make_db([("RELIANCE", "RL")])

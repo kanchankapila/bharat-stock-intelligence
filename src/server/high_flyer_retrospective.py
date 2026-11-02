@@ -409,33 +409,55 @@ def _candidate_edge_rows(day: str) -> pd.DataFrame:
 
 # ── I/O + orchestration ──────────────────────────────────────────────────────
 
-def _load_predicted_sets(con, day: str, prev_day: str) -> dict:
+def _session_open_utc(day: str) -> pd.Timestamp:
+    return (pd.Timestamp(day).tz_localize('Asia/Kolkata') +
+            pd.Timedelta(hours=9, minutes=15)).tz_convert('UTC')
+
+
+def _symbols_observed_before_open(df: pd.DataFrame, cutoff: pd.Timestamp) -> set:
+    if df.empty:
+        return set()
+    # Naive/invalid timestamps do not establish when the system knew the value.
+    raw = df['computed_at'].astype('string')
+    zoned = raw.str.contains(r'(?:Z|[+-]\d{2}(?::?\d{2})?)$', regex=True, na=False)
+    observed = pd.to_datetime(raw.where(zoned), format='mixed', utc=True, errors='coerce')
+    return set(df.loc[observed < cutoff, 'symbol'])
+
+
+def _load_predicted_sets(con, day: str, prev_day: str, prior_class=None) -> dict:
     """Symbols each source had flagged BEFORE the session of `day`."""
     sets = {}
-    df = read_df(
-        "SELECT symbol FROM unified_recommendations WHERE computed_at = "
-        "(SELECT MAX(computed_at) FROM unified_recommendations WHERE computed_at < ?) "
-        "AND classification LIKE '%Buy%'", (day,))
-    sets["unified"] = set(df["symbol"]) if not df.empty else set()
+    cutoff = _session_open_utc(day)
+    prior = prior_class if prior_class is not None else _load_prior_classification(con, day)
+    sets["unified"] = {symbol for symbol, classification in prior.items()
+                       if classification in _BUY_CLASSES}
     df = read_df(
         "SELECT DISTINCT symbol FROM unified_signals "
-        "WHERE signal_date >= ? AND signal_date < ?",
-        ((pd.Timestamp(day) - pd.Timedelta(days=5)).strftime("%Y-%m-%d"), day))
+        "WHERE signal_date >= ? AND signal_date < ? AND signal_generated_at < ? AND created_at < ?",
+        ((pd.Timestamp(day) - pd.Timedelta(days=5)).strftime("%Y-%m-%d"), day,
+         cutoff.isoformat(), cutoff.isoformat()))
     sets["signals"] = set(df["symbol"]) if not df.empty else set()
-    df = read_df("SELECT symbol FROM early_hours_predictions WHERE date = ?", (day,))
-    sets["early_hours"] = set(df["symbol"]) if not df.empty else set()
-    df = read_df("SELECT symbol FROM high_flyer_candidates WHERE date = ?", (prev_day,))
-    sets["candidates"] = set(df["symbol"]) if not df.empty else set()
+    df = read_df("SELECT symbol, computed_at FROM early_hours_predictions WHERE date = ?", (day,))
+    sets["early_hours"] = _symbols_observed_before_open(df, cutoff)
+    df = read_df("SELECT symbol, computed_at FROM high_flyer_candidates WHERE date = ?", (prev_day,))
+    sets["candidates"] = _symbols_observed_before_open(df, cutoff)
     return sets
 
 
-def _load_prior_classification(con, day: str) -> dict:
-    """symbol -> unified_recommendations.classification as of the run immediately before
-    `day`'s session (same MAX(computed_at) < day convention as _load_predicted_sets)."""
+def _load_prior_batch(con, day: str) -> tuple[dict, str | None]:
+    """Classifications and identity of the last batch available before the session opens."""
+    cutoff = _session_open_utc(day).isoformat()
     df = read_df(
-        "SELECT symbol, classification FROM unified_recommendations WHERE computed_at = "
-        "(SELECT MAX(computed_at) FROM unified_recommendations WHERE computed_at < ?)", (day,))
-    return dict(zip(df["symbol"], df["classification"])) if not df.empty else {}
+        "SELECT symbol, classification, generated_at FROM unified_recommendations_history WHERE generated_at = "
+        "(SELECT MAX(generated_at) FROM unified_recommendations_history "
+        "WHERE computed_at <= ? AND generated_at < ?)", (day, cutoff))
+    if df.empty:
+        return {}, None
+    return dict(zip(df["symbol"], df["classification"])), pd.Timestamp(df.iloc[0]["generated_at"]).isoformat()
+
+
+def _load_prior_classification(con, day: str) -> dict:
+    return _load_prior_batch(con, day)[0]
 
 
 def run(target_date: str | None = None, backfill: int = 0) -> dict:
@@ -492,8 +514,8 @@ def _process_day(con, close, volume, open_px, day, prev_day) -> dict:
     flyers = detect_flyers(close, volume, day)
     divers = detect_divers(close, volume, day)
     entry = entry_metrics(close, volume, open_px, day).set_index("symbol")
-    predicted = _load_predicted_sets(con, day, prev_day)
-    prior_class = _load_prior_classification(con, day)
+    prior_class, prior_generated_at = _load_prior_batch(con, day)
+    predicted = _load_predicted_sets(con, day, prev_day, prior_class)
 
     # Precursor flags as of the PREVIOUS session, whole universe
     px_flags = ohlcv_precursor_flags(close, volume, prev_day)
@@ -556,6 +578,8 @@ def _process_day(con, close, volume, open_px, day, prev_day) -> dict:
     n_fly = len(flyers)
     recall = {k: round(v / n_fly, 3) if n_fly else None for k, v in recall_hits.items()}
     recall["any"] = round(any_hits / n_fly, 3) if n_fly else None
+    recall["recommendation_basis"] = "pre_open_history_v1"
+    recall["recommendation_generated_at"] = prior_generated_at
     # Precision: of everything a source had flagged, how much actually flew — recall
     # alone rewards firehoses (a source flagging 2000 names "catches" most flyers).
     tradeable = set(close.columns[close.loc[:day].ffill().iloc[-1] >= MIN_PRICE])

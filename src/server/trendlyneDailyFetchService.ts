@@ -3,6 +3,7 @@ import { getAllStocks } from './stockMapping';
 import { fetchTrendlyneStockMetrics } from './trendlyneService';
 import { dbAll, dbRun } from './dbAsync';
 import { trendlyneChildJobId } from './trendlyneDailyBatch';
+import { TRENDLYNE_STOCK_METRICS_BLOCK_COOLDOWN_MS } from './trendlyneTechnicalCircuit';
 
 const DEFAULT_WINDOW_HOURS = 12;
 const MAX_WINDOW_HOURS = 24;
@@ -121,8 +122,11 @@ export async function enqueueTrendlyneMetricsFetchJobs(
       { symbol, ...(batchId ? { batchId } : {}) },
       {
         delay,
-        attempts: 2,
-        backoff: { type: 'exponential', delay: 5000 },
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: TRENDLYNE_STOCK_METRICS_BLOCK_COOLDOWN_MS + 60_000,
+        },
         jobId: batchId ? trendlyneChildJobId(batchId, symbol) : undefined,
         removeOnComplete: batchId ? { age: 24 * 60 * 60, count: 5000 } : true,
         removeOnFail: 3,

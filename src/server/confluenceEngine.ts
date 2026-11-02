@@ -350,8 +350,10 @@ export function scoreStock(
   // Reasoning
   const parts: string[] = [];
   if (bullishCount > 0) {
-    const top3 = data.screenerNames.slice(0, 3).join(', ');
-    parts.push(`${bullishCount} bullish scanner${bullishCount > 1 ? 's' : ''} (${top3})`);
+    const top3 = data.screenerNames
+      .filter((name, i) => name && data.screenerClasses[i]?.sentiment === 'bullish')
+      .slice(0, 3).join(', ');
+    parts.push(`${bullishCount} bullish scanner${bullishCount > 1 ? 's' : ''}${top3 ? ` (${top3})` : ''}`);
   }
   if (quant?.above_sma200 === 1) parts.push('above 200-day SMA');
   if (volRatio > 1.5) parts.push(`${volRatio.toFixed(1)}x relative volume`);

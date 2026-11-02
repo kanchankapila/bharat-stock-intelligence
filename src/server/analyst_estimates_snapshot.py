@@ -3,16 +3,18 @@ Analyst Estimates Snapshotter
 ==============================
 Fetches analyst consensus, price targets, and EPS estimates from MoneyControl
 for all NSE stocks that have an mcsymbol in the nse_stocks table. Writes
-point-in-time snapshots into analyst_estimates_history(symbol, as_of_date, ...)
-so ml_ensemble.load_training_data can join them as-of each signal_date (leak-free).
+date-keyed snapshots into analyst_estimates_history(symbol, as_of_date, ...).
+Same-day updates replace the prior row, so this table alone cannot reconstruct an
+earlier intraday observation or establish availability before a decision cutoff.
 
 Run:  python analyst_estimates_snapshot.py
-      python analyst_estimates_snapshot.py --as-of 2026-06-22
+      python analyst_estimates_snapshot.py --as-of YYYY-MM-DD  # current IST date only
       python analyst_estimates_snapshot.py --symbols RELIANCE,TCS
 """
 
 import argparse
 import datetime
+import threading
 from typing import Callable, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -123,32 +125,108 @@ def parse_earnings_forecast(data: Optional[dict]) -> dict:
 
 # ── HTTP fetch ────────────────────────────────────────────────────────────────
 
-def _mc_get(url: str, session: requests.Session) -> Optional[dict]:
+class SourceHealth:
+    """Per-run, thread-safe source health; an explicit rate limit opens only that source."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.yahoo_limited = False
+        self.mc_limited = False
+        self.mc_circuit_open = False
+        self.mc_consecutive_errors = 0
+        self.mc_attempts = 0
+        self.mc_errors = 0
+        self.mc_no_content = 0
+        self.yahoo_errors = 0
+
+    def record(self, source: str, kind: str, detail: str = '') -> None:
+        with self.lock:
+            if source == 'mc':
+                if kind == 'attempt': self.mc_attempts += 1
+                elif kind == 'empty':
+                    self.mc_no_content += 1
+                    self.mc_consecutive_errors = 0
+                elif kind == 'success': self.mc_consecutive_errors = 0
+                elif kind == 'error':
+                    self.mc_errors += 1
+                    self.mc_consecutive_errors += 1
+                    if self.mc_consecutive_errors >= 20: self.mc_circuit_open = True
+                elif kind == 'limited':
+                    self.mc_errors += 1
+                    self.mc_limited = True
+                count = self.mc_errors
+            else:
+                if kind == 'limited': self.yahoo_limited = True
+                self.yahoo_errors += 1
+                count = self.yahoo_errors
+        # Bound repeated messages; the final summary retains total counts.
+        if kind in ('error', 'limited') and count <= 3:
+            print(f'[AnalystEstimates] {source} {kind}: {detail}', file=sys.stderr)
+
+    def blocked(self, source: str) -> bool:
+        with self.lock:
+            return (self.mc_limited or self.mc_circuit_open) if source == 'mc' else self.yahoo_limited
+
+    def degraded(self) -> bool:
+        with self.lock:
+            return (self.yahoo_limited or self.mc_limited or self.mc_circuit_open or
+                    (self.mc_errors >= 20 and self.mc_errors * 5 >= self.mc_attempts))
+
+    def summary(self) -> str:
+        with self.lock:
+            return (f'mc_attempts={self.mc_attempts} mc_no_content={self.mc_no_content} '
+                    f'mc_errors={self.mc_errors} mc_rate_limited={self.mc_limited} '
+                    f'mc_circuit_open={self.mc_circuit_open} '
+                    f'yahoo_errors={self.yahoo_errors} yahoo_rate_limited={self.yahoo_limited}')
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    status = getattr(getattr(exc, 'response', None), 'status_code', None)
+    msg = str(exc).lower()
+    return status == 429 or 'too many requests' in msg or 'rate limit' in msg
+
+
+def _mc_get(url: str, session: requests.Session, health: Optional[SourceHealth] = None) -> Optional[dict]:
     """Fetch a MoneyControl JSON endpoint; return the .data payload or None."""
     try:
-        resp = retry_get(session, url, headers=_MC_HEADERS, timeout=10)
+        if health and health.blocked('mc'):
+            return None
+        if health:
+            health.record('mc', 'attempt')
+        resp = retry_get(session, url, headers=_MC_HEADERS, timeout=10, stop_statuses={429})
+        # HTTP 204 is a valid no-content response for stocks without provider coverage.
+        if resp.status_code == 204:
+            if health: health.record('mc', 'empty')
+            return None
         j = resp.json()
+        if not isinstance(j, dict):
+            raise ValueError('MoneyControl response is not a JSON object')
+        if health:
+            health.record('mc', 'success')
         if j.get("success") == 1:
             return j.get("data")
     except Exception as exc:
         # Returns None, which callers read as "MC has no data for this symbol" -- that is also
         # what a 403/timeout/malformed payload looks like. Without this the symbol silently
         # falls back to the Yahoo path (or to NULL columns) with no trace of why.
-        print(f"[AnalystEstimates] MC fetch failed for {url.split('/')[-1][:40]}: {exc}",
-              file=sys.stderr)
+        if health:
+            endpoint = url.split('/')[-1][:120]
+            health.record('mc', 'limited' if _is_rate_limit(exc) else 'error', f'{endpoint}: {str(exc)[:160]}')
+        else:
+            print(f"[AnalystEstimates] MC fetch failed: {exc}", file=sys.stderr)
     return None
 
 
-def _fetch_symbol(mcsymbol: str, session: requests.Session) -> dict:
+def _fetch_symbol(mcsymbol: str, session: requests.Session, health: Optional[SourceHealth] = None) -> dict:
     """Fetch and merge analyst-rating + price-forecast + earnings-forecast for one stock."""
     result: dict = {}
-    result.update(parse_analyst_rating(_mc_get(_URL_ANALYST.format(scId=mcsymbol), session)))
-    result.update(parse_price_forecast(_mc_get(_URL_PRICE.format(scId=mcsymbol), session)))
-    result.update(parse_earnings_forecast(_mc_get(_URL_EARNINGS.format(scId=mcsymbol), session)))
+    result.update(parse_analyst_rating(_mc_get(_URL_ANALYST.format(scId=mcsymbol), session, health)))
+    result.update(parse_price_forecast(_mc_get(_URL_PRICE.format(scId=mcsymbol), session, health)))
+    result.update(parse_earnings_forecast(_mc_get(_URL_EARNINGS.format(scId=mcsymbol), session, health)))
     return result
 
 
-def _fetch_symbol_hybrid(symbol: str, mcsymbol: str, session: requests.Session) -> dict:
+def _fetch_symbol_hybrid(symbol: str, mcsymbol: str, session: requests.Session,
+                         health: Optional[SourceHealth] = None) -> dict:
     """Fast hybrid fetcher: structured direct engine with MoneyControl fallback."""
     result: dict = {
         "n_analysts": None, "final_rating": None, "buy_count": None,
@@ -157,6 +235,8 @@ def _fetch_symbol_hybrid(symbol: str, mcsymbol: str, session: requests.Session) 
         "revenue_est_next": None
     }
     try:
+        if health and health.blocked('yahoo'):
+            raise _SourcePaused()
         import yfinance as yf
         t = yf.Ticker(f"{symbol}.NS")
         info = t.info or {}
@@ -180,20 +260,29 @@ def _fetch_symbol_hybrid(symbol: str, mcsymbol: str, session: requests.Session) 
             # training. Real counts arrive from the MoneyControl merge below
             # whenever MC has the symbol; if neither source has them they stay
             # NULL (honest unknown), never fabricated.
+    except _SourcePaused:
+        pass
     except Exception as exc:
         # Yahoo path failed; MC fills the gaps below. Logged rather than swallowed because the
         # result is a HALF-POPULATED estimate row, and "which of the two sources failed" is
         # exactly what an audit needs to tell a vendor outage from a parser regression.
-        print(f"[AnalystEstimates] Yahoo parse failed: {exc}", file=sys.stderr)
+        if health:
+            health.record('yahoo', 'limited' if _is_rate_limit(exc) else 'error', str(exc)[:200])
+        else:
+            print(f"[AnalystEstimates] Yahoo parse failed: {exc}", file=sys.stderr)
 
     if (result["target_mean"] is None or result["n_analysts"] is None
             or result["eps_est_next"] is None or result["buy_count"] is None) and mcsymbol:
-        mc_res = _fetch_symbol(mcsymbol, session)
+        mc_res = _fetch_symbol(mcsymbol, session, health)
         for k, v in mc_res.items():
             if result.get(k) is None and v is not None:
                 result[k] = v
 
     return result
+
+
+class _SourcePaused(Exception):
+    """Internal control flow for a source that explicitly rate-limited this run."""
 
 # ── SQL ───────────────────────────────────────────────────────────────────────
 
@@ -208,16 +297,27 @@ _SELECT_SYMBOLS_FILTER = """
     WHERE mcsymbol IS NOT NULL AND mcsymbol != ''
       AND symbol IN ({placeholders})
 """
-_DELETE = "DELETE FROM analyst_estimates_history WHERE symbol = ? AND as_of_date = ?"
 _INSERT = """
     INSERT INTO analyst_estimates_history
         (symbol, as_of_date, n_analysts, final_rating, buy_count, hold_count, sell_count,
          target_high, target_mean, target_low, eps_est_next, revenue_est_next)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (symbol, as_of_date) DO UPDATE SET
+        n_analysts = EXCLUDED.n_analysts, final_rating = EXCLUDED.final_rating,
+        buy_count = EXCLUDED.buy_count, hold_count = EXCLUDED.hold_count,
+        sell_count = EXCLUDED.sell_count, target_high = EXCLUDED.target_high,
+        target_mean = EXCLUDED.target_mean, target_low = EXCLUDED.target_low,
+        eps_est_next = EXCLUDED.eps_est_next, revenue_est_next = EXCLUDED.revenue_est_next,
+        captured_at = now()
 """
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+
+def _today_ist() -> str:
+    return (datetime.datetime.now(datetime.timezone.utc) +
+            datetime.timedelta(hours=5, minutes=30)).date().isoformat()
+
 
 def run(
     as_of: Optional[str] = None,
@@ -225,11 +325,14 @@ def run(
     fetch_fn: Optional[Callable] = None,
 ) -> int:
     """Snapshot analyst estimates for `symbols` (or all NSE stocks with mcsymbol).
-    Idempotent per (symbol, as_of_date): deletes then re-inserts today's row.
+    Idempotent per (symbol, as_of_date): atomically replaces today's row.
     `fetch_fn(mcsymbol) -> dict` is injectable for tests; defaults to live MC fetch.
     Returns count of rows written."""
-    as_of  = as_of  or datetime.date.today().isoformat()
     use_live = fetch_fn is None
+    today = _today_ist()
+    as_of = as_of or today
+    if use_live and as_of != today:
+        raise ValueError('Live analyst estimates can only be captured for the current IST date')
 
     if symbols:
         placeholders = ",".join(["?"] * len(symbols))
@@ -240,18 +343,23 @@ def run(
     else:
         rows = query_all(_SELECT_SYMBOLS)
 
+    if use_live and not rows:
+        raise RuntimeError('No active MoneyControl-mapped symbols for analyst estimates')
+
     session = requests.Session()
     session.headers.update(_MC_HEADERS)
 
     written = 0
     done = 0
+    skipped_no_values = 0
+    health = SourceHealth() if use_live else None
 
     def _process_one(row):
         symbol, mcsymbol = row["symbol"], row["mcsymbol"]
         if fetch_fn:
             fields = fetch_fn(mcsymbol)
         else:
-            fields = _fetch_symbol_hybrid(symbol, mcsymbol, session)
+            fields = _fetch_symbol_hybrid(symbol, mcsymbol, session, health)
         return symbol, fields
 
     workers = 12 if use_live else len(rows) or 1
@@ -261,9 +369,9 @@ def run(
             symbol, fields = fut.result()
             done += 1
             if all(v is None for v in fields.values()):
+                skipped_no_values += 1
                 continue
 
-            execute(_DELETE, (symbol, as_of))
             execute(_INSERT, (
                 symbol, as_of,
                 fields.get("n_analysts"),
@@ -279,7 +387,12 @@ def run(
             ))
             written += 1
 
-    print(f"[ANALYST-SNAP] Wrote {written}/{len(rows)} analyst snapshots as_of {as_of}.")
+    print(f"[ANALYST-SNAP] Wrote {written}/{len(rows)} analyst snapshots as_of {as_of}; "
+          f"skipped_no_values={skipped_no_values} (no coverage or source failure).")
+    if health:
+        print(f'[ANALYST-SNAP] source health: {health.summary()}')
+        if health.degraded() or (rows and not written):
+            raise RuntimeError(f'Analyst estimates source degraded; partial snapshots retained: {health.summary()}')
     return written
 
 

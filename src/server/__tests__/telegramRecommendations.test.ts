@@ -124,6 +124,20 @@ describe('splitForTelegram', () => {
 });
 
 describe('renderDigest', () => {
+  it('does not attach a stale hard-coded denominator to active engine coverage', () => {
+    const text = renderDigest(digest({ longTerm: [pick({ engineCoverage: 2 })] }));
+    expect(text).toContain('2 contributing engines');
+    expect(text).not.toContain('2/7 engines');
+  });
+  it('does not label unverified scanner examples as bullish or display raw JSON reasons', () => {
+    const text = renderDigest(digest({ longTerm: [
+      pick({ symbol: 'ABC', reason: 'ABC: 2 bullish scanners (Week CCI Bearish, Bullish breakout), above 200-day SMA.' }),
+      pick({ symbol: 'XYZ', reason: '{"name": "raw news item", "sentiment": "positive"}' }),
+    ] }));
+    expect(text).not.toContain('Week CCI Bearish');
+    expect(text).not.toContain('raw news item');
+    expect(text).toContain('above 200-day SMA');
+  });
   it('states the horizon for every pick', () => {
     const text = renderDigest(digest());
     expect(text).toContain('Horizon:');

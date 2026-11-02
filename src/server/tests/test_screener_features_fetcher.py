@@ -12,6 +12,7 @@ here is high blast-radius.
 """
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import screener_features_fetcher as sff
@@ -170,10 +171,40 @@ class TestMembershipSnapshotSourceDisambiguation:
             create_sql.split()
         )
 
-        inserts = [(sql, params) for sql, params in conn.executed if "INSERT INTO" in sql]
+        inserts = [(sql, params) for sql, params in conn.executed if "INSERT INTO screener_membership_snapshot" in sql]
         assert len(inserts) == 2
         assert "source" in inserts[0][0]
         assert {params for _, params in inserts} == {
             ("2026-10-09", "INFY", "moneycontrol", "173"),
             ("2026-10-09", "INFY", "etnow", "173"),
         }
+
+
+def test_same_day_memberships_are_kept_as_separate_timestamped_runs(pg_db_conn):
+    sff.snapshot_membership(pg_db_conn, '2026-10-29', {'AAA': [('trendlyne', '1')]})
+    sff.snapshot_membership(pg_db_conn, '2026-10-29', {'AAA': [('trendlyne', '2')]})
+    runs = pg_db_conn.execute(
+        "SELECT captured_at, memberships FROM screener_membership_runs ORDER BY id"
+    ).fetchall()
+    assert len(runs) == 2
+    assert runs[0]['captured_at'] is not None
+    assert runs[1]['captured_at'] >= runs[0]['captured_at']
+    assert runs[0]['memberships'] == [['AAA', 'trendlyne', '1']]
+    assert runs[1]['memberships'] == [['AAA', 'trendlyne', '2']]
+
+
+def test_membership_runs_migration_creates_capture_table_idempotently(pg_db_conn):
+    # pg_db_conn uses an isolated test schema, never the production tables.
+    pg_db_conn.execute('DROP TABLE screener_membership_runs')
+    migration = Path(__file__).resolve().parents[3] / 'migrations' / '20261030090100_screener-membership-runs.sql'
+    for _ in range(2):
+        for statement in migration.read_text(encoding='utf-8').split(';'):
+            if statement.strip():
+                pg_db_conn.execute(statement)
+    sff.snapshot_membership(pg_db_conn, '2026-10-29', {'AAA': [('trendlyne', '1')]})
+    row = pg_db_conn.execute(
+        'SELECT membership_count, memberships, captured_at FROM screener_membership_runs'
+    ).fetchone()
+    assert row['membership_count'] == 1
+    assert row['memberships'] == [['AAA', 'trendlyne', '1']]
+    assert row['captured_at'] is not None

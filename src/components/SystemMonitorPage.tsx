@@ -5,7 +5,7 @@ import {
   Zap, Database, Brain, BarChart2, AlertTriangle, XCircle,
 } from 'lucide-react';
 
-type RunState = 'never' | 'running' | 'success' | 'failed' | 'stale';
+type RunState = 'never' | 'running' | 'success' | 'failed' | 'stale' | 'disabled';
 
 interface ScriptStatus {
   id: string;
@@ -21,6 +21,7 @@ interface ScriptStatus {
   runCount?: number;
   failCount?: number;
   runState: RunState;
+  disabledReason?: string;
   stats: Record<string, string | number | null>;
   error: string | null;
 }
@@ -74,6 +75,7 @@ const STATE_CONFIG: Record<RunState, { label: string; color: string; bg: string;
   success: { label: 'OK',        color: 'text-emerald-400',bg: 'bg-emerald-900/30',border: 'border-emerald-700/40', card: 'v1-card-up',      pill: 'v1-stat-pill-up',      icon: CheckCircle },
   failed:  { label: 'Failed',    color: 'text-rose-400',   bg: 'bg-rose-900/30',   border: 'border-rose-700/40',    card: 'v1-card-down',    pill: 'v1-stat-pill-down',    icon: XCircle },
   stale:   { label: 'Stale',     color: 'text-amber-400',  bg: 'bg-amber-900/30',  border: 'border-amber-700/40',   card: 'v1-card-neutral', pill: 'v1-stat-pill-neutral', icon: AlertTriangle },
+  disabled:{ label: 'Disabled',  color: 'text-slate-400',  bg: 'bg-slate-800',      border: 'border-slate-700',      card: 'v1-card-accent',  pill: 'v1-stat-pill',         icon: AlertCircle },
 };
 
 const CATEGORY_ICON: Record<string, any> = {
@@ -91,6 +93,7 @@ function ScriptCard({ script, onTrigger, triggering }: {
   const StateIcon = state.icon;
   const CatIcon = CATEGORY_ICON[script.category] || Activity;
   const isRunning = script.runState === 'running' || triggering;
+  const isDisabled = script.runState === 'disabled';
 
   return (
     <div className={`${state.card} p-4 flex flex-col gap-3`}>
@@ -134,6 +137,12 @@ function ScriptCard({ script, onTrigger, triggering }: {
         </div>
       )}
 
+      {script.disabledReason && (
+        <div className="text-[11px] text-slate-300 bg-slate-800/70 rounded px-2 py-1 font-data whitespace-pre-wrap break-words leading-snug">
+          {script.disabledReason}
+        </div>
+      )}
+
       {/* Footer */}
       <div className="flex items-end justify-between mt-auto pt-1 border-t border-slate-800">
         <div className="flex flex-col gap-0.5 text-[10px]">
@@ -159,14 +168,14 @@ function ScriptCard({ script, onTrigger, triggering }: {
 
         <button
           onClick={() => onTrigger(script.id)}
-          disabled={isRunning}
+          disabled={isRunning || isDisabled}
           className="v1-btn-primary text-[11px] gap-1.5 px-3 py-1.5"
         >
           {isRunning
             ? <RefreshCw className="w-3 h-3 animate-spin" />
             : <Play className="w-3 h-3" />
           }
-          {isRunning ? 'Running...' : 'Run Now'}
+          {isDisabled ? 'Disabled' : isRunning ? 'Running...' : 'Run Now'}
         </button>
       </div>
     </div>
@@ -219,6 +228,7 @@ export default function SystemMonitorPage() {
     failed:  (scripts || []).filter(s => s.runState === 'failed').length,
     running: (scripts || []).filter(s => s.runState === 'running').length,
     never:   (scripts || []).filter(s => s.runState === 'never').length,
+    disabled:(scripts || []).filter(s => s.runState === 'disabled').length,
   };
 
   return (
@@ -258,13 +268,14 @@ export default function SystemMonitorPage() {
       </div>
 
       {/* Summary bar */}
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         {[
           { label: 'OK',      val: summary.ok,      state: STATE_CONFIG.success },
           { label: 'Running', val: summary.running, state: STATE_CONFIG.running },
           { label: 'Stale',   val: summary.stale,   state: STATE_CONFIG.stale },
           { label: 'Failed',  val: summary.failed,  state: STATE_CONFIG.failed },
           { label: 'Never',   val: summary.never,   state: STATE_CONFIG.never },
+          { label: 'Disabled',val: summary.disabled,state: STATE_CONFIG.disabled },
         ].map(({ label, val, state: s }) => (
           <div key={label} className={`${s.pill} flex-row items-center gap-2 p-3`}>
             <s.icon className={`w-4 h-4 ${s.color} shrink-0 ${label === 'Running' && val > 0 ? 'animate-spin' : ''}`} />

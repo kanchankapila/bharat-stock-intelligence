@@ -29,13 +29,15 @@ import { randomUUID } from 'crypto';
 import path from 'path';
 import pg from 'pg';
 
-function dsn() {
+export function dsn() {
+  const database = process.env.PGTEST_DB?.trim();
+  if (!database) throw new Error('Set PGTEST_DB explicitly to the intended test database before running Vitest.');
   return {
     host: process.env.PGTEST_HOST || '127.0.0.1',
     port: Number(process.env.PGTEST_PORT || 5433),
     user: process.env.PGTEST_USER || 'bharat',
     password: process.env.PGTEST_PASSWORD || 'bharat',
-    database: process.env.PGTEST_DB || 'bharat_intel',
+    database,
   };
 }
 

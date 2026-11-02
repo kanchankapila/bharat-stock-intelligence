@@ -41,6 +41,9 @@ beforeAll(async () => {
       wrong_call INTEGER DEFAULT 0, prior_classification TEXT,
       direction TEXT DEFAULT 'up', open_to_close_pct REAL, adt_20d DOUBLE PRECISION,
       PRIMARY KEY (symbol, date))`);
+    await tx.run(`CREATE TABLE IF NOT EXISTS "${SCHEMA}".unified_recommendations_history (
+      symbol TEXT NOT NULL, computed_at TEXT NOT NULL, generated_at TIMESTAMPTZ NOT NULL,
+      classification TEXT, PRIMARY KEY (symbol, generated_at))`);
   });
 });
 
@@ -51,6 +54,7 @@ async function seed(rows: {
   await dbTransaction(async tx => {
     await tx.run(`DELETE FROM "${SCHEMA}".high_flyer_daily_stats`);
     await tx.run(`DELETE FROM "${SCHEMA}".high_flyer_retrospective`);
+    await tx.run(`DELETE FROM "${SCHEMA}".unified_recommendations_history`);
     if (rows.stats?.length) {
       await tx.run(
         `INSERT INTO "${SCHEMA}".high_flyer_daily_stats (date, universe_n, flyer_n, recall_json)
@@ -76,6 +80,37 @@ const RECALL = (o: Record<string, unknown>) => JSON.stringify(o);
 describe('buildAccuracyDigest', () => {
   beforeEach(async () => {
     await seed({});
+  });
+
+  it('counts ratings from the same latest pre-open batch that grades the report', async () => {
+    await seed({ stats: [['2026-08-11', 2000, 4, RECALL({
+      recommendation_basis: 'pre_open_history_v1', recommendation_generated_at: '2026-08-10T17:00:00Z',
+    })]] });
+    await dbTransaction(async tx => {
+      await tx.run(`INSERT INTO "${SCHEMA}".unified_recommendations_history
+        (symbol,computed_at,generated_at,classification) VALUES
+        ('AAA','2026-08-10','2026-08-09T17:00:00Z','Strong Buy'),
+        ('AAA','2026-08-11','2026-08-10T17:00:00Z','Sell'),
+        ('BBB','2026-08-11','2026-08-10T17:00:00Z','Buy'),
+        ('AAA','2026-08-11','2026-08-11T03:45:00Z','Strong Buy')`);
+    });
+    expect(await buildAccuracyDigest()).toMatchObject({ sellRatedN: 1, buyRatedN: 1 });
+  });
+
+  it('flags historical reports that lack proof of the pre-open batch', async () => {
+    await seed({ stats: [['2026-08-11', 2000, 4, RECALL({})]] });
+    const digest = await buildAccuracyDigest();
+    expect(digest?.priorTimingVerified).toBe(false);
+    expect(formatAccuracyDigest(digest!)).toContain('Prior-call timing is unverified');
+  });
+
+  it('labels a trend containing dates without a verified pre-open batch', async () => {
+    await seed({ stats: [
+      ['2026-08-11', 2000, 4, RECALL({ unified: 0.2, recommendation_basis: 'pre_open_history_v1',
+        recommendation_generated_at: '2026-08-10T17:00:00Z' })],
+      ['2026-08-10', 2000, 4, RECALL({ unified: 0.1 })],
+    ] });
+    expect(formatAccuracyDigest((await buildAccuracyDigest())!)).toContain('some dates use unverified timing');
   });
 
   it('returns null when the retrospective has never run', async () => {
@@ -135,6 +170,13 @@ describe('buildAccuracyDigest', () => {
     expect((await buildAccuracyDigest())!.recallOwn).toBeNull();
   });
 
+  it('keeps explicitly null recall and precision unavailable', async () => {
+    await seed({ stats: [['2026-08-11', 2000, 0, RECALL({ unified: null, precision: { unified: null } })]] });
+    const digest = await buildAccuracyDigest();
+    expect(digest).toMatchObject({ recallOwn: null, precisionOwn: null });
+    expect(digest!.trend[0].recall).toBeNull();
+  });
+
   it('buckets today\'s flyers/divers by their prior call into correct/wrong/neutral', async () => {
     await seed({
       stats: [['2026-08-11', 2000, 9, RECALL({ any: 0.2, diver_n: 6 })]],
@@ -179,6 +221,12 @@ const base: AccuracyDigest = {
 };
 
 describe('formatAccuracyDigest', () => {
+  it('discloses the large-mover and close-to-close scope', () => {
+    const out = formatAccuracyDigest(base);
+    expect(out).toMatch(/large.mover/i);
+    expect(out).toMatch(/close.to.close/i);
+    expect(out).toMatch(/not.*overall.*accuracy/i);
+  });
   it('flags recall below the floor with an alarm marker', () => {
     const low = formatAccuracyDigest({ ...base, recallOwn: RECALL_ALERT_FLOOR - 0.01 });
     expect(low).toContain('🚨');

@@ -49,7 +49,7 @@ import { fetchTrendlyneChecklist } from './trendlyneService';
 import { pythonApi } from './pythonApi';
 import { recordHeartbeat, startHeartbeatMonitor, bullJobDurationMs } from './jobHeartbeat';
 import { startJobWatchdog, buildDailyDigest } from './jobWatchdog';
-import { telegramService, sanitizeMarkdown } from './telegramService';
+import { telegramService, sanitizeMarkdown, sanitizeMarkdownWithCode } from './telegramService';
 import { sendAccuracyDigest } from './signalAccuracyDigest';
 
 // Keep the literal failed-heartbeat write for this aggregate in one place. The worker has
@@ -3532,11 +3532,11 @@ export async function initQueues(): Promise<boolean> {
         const lines = [`📊 *Daily Data-Integrity Report*`, `${passed}/${results.length} checks passed.`];
         if (failed.length) {
           lines.push('', '*Failures:*');
-          for (const r of failed) lines.push(`${r.critical ? '🚨' : '⚠️'} \`${sanitizeMarkdown(r.label)}\` — ${sanitizeMarkdown(r.detail)}`);
+          for (const r of failed) lines.push(`${r.critical ? '🚨' : '⚠️'} \`${sanitizeMarkdown(r.label)}\` — ${sanitizeMarkdownWithCode(r.detail)}`);
         }
         if (warned.length) {
           lines.push('', '*Warnings:*');
-          for (const r of warned) lines.push(`⚠️ \`${sanitizeMarkdown(r.label)}\` — ${sanitizeMarkdown(r.detail)}`);
+          for (const r of warned) lines.push(`⚠️ \`${sanitizeMarkdown(r.label)}\` — ${sanitizeMarkdownWithCode(r.detail)}`);
         }
         if (untrackedFailures.length) {
           // Deliberately a WARNING section, never a throw source: unlike the DQ checks above

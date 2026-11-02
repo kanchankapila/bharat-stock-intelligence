@@ -13,6 +13,14 @@ export function sanitizeMarkdown(text: string | null | undefined): string {
   return text.replace(/[_*`[\]]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+/** Preserve explicitly marked command spans; sanitize all surrounding free text. */
+export function sanitizeMarkdownWithCode(text: string | null | undefined): string {
+  if (!text) return '';
+  return text.split(/(`[^`\r\n]+`)/g)
+    .map(part => /^`[^`\r\n]+`$/.test(part) ? part : sanitizeMarkdown(part))
+    .filter(Boolean).join(' ');
+}
+
 export class TelegramNotificationService {
   private _settingsCache: { botToken: string; chatId: string; enabled: boolean } | null = null;
 

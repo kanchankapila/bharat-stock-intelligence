@@ -23,7 +23,9 @@ export const pythonApi = {
     post('/api/score-pending'),
 
   resolveOutcomes: (horizon: number) =>
-    post('/api/resolve-outcomes', { horizon }),
+    // The 1d resolver completed just after the former five-minute client deadline
+    // on 2026-10-29. Allow headroom while retaining the no-duplicate timeout guard.
+    post('/api/resolve-outcomes', { horizon }, 10 * 60_000),
 
   trainDL: () =>
     post('/api/train-dl', {}, 6 * 60 * 60_000),

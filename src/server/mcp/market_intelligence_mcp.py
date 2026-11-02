@@ -49,12 +49,16 @@ def get_top_conviction_picks(limit: int = 10, min_score: float = 60.0) -> List[D
     try:
         rows = conn.execute(
             """
-            SELECT symbol, unified_score, classification, conviction_level,
-                   target_1 AS target_price, stop_loss, generated_at
+            SELECT symbol, computed_at, unified_score, classification, conviction_level,
+                   target_1 AS target_price, stop_loss, generated_at, valid_until,
+                   CASE WHEN valid_until IS NULL THEN 'UNKNOWN'
+                        WHEN valid_until > CURRENT_TIMESTAMP THEN 'ACTIVE'
+                        ELSE 'EXPIRED' END AS plan_status
             FROM unified_recommendations
-            WHERE unified_score >= ?
+            WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
+              AND unified_score >= ?
               AND POSITION('BUY' IN UPPER(COALESCE(classification, ''))) > 0
-            ORDER BY unified_score DESC
+            ORDER BY unified_score DESC, symbol ASC
             LIMIT ?
             """,
             [min_score, limit],
@@ -80,6 +84,10 @@ def analyze_stock_risk(symbol: str) -> Dict[str, Any]:
             "symbol": symbol,
             "stock_scores": dict(score_row) if score_row else None,
             "technical_signals": dict(tech_row) if tech_row else None,
+            "probability_note": (
+                "Win probability fields are model outputs, not validated trade win probabilities; "
+                "do not use them for position sizing or as a probability of profit."
+            ),
         }
     finally:
         conn.close()

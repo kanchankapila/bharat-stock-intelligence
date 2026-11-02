@@ -62,6 +62,7 @@ def ensure_schema(conn) -> None:
             seq_number      TEXT,
             xbrl_url        TEXT,
             fetched_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            first_observed_at TIMESTAMPTZ DEFAULT clock_timestamp(),
             PRIMARY KEY (symbol, period_end, period, consolidated, broadcast_ts)
         )""")
     conn.commit()

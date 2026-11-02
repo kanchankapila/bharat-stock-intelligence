@@ -28,3 +28,20 @@ describe('confluence sector slot label', () => {
     expect(r.sectorScore).toBeCloseTo(95 / 100 * 8 * 0.9, 5); // SIDEWAYS default regime weight
   });
 });
+
+describe('confluence screener explanation', () => {
+  it('names only screeners classified as bullish in the bullish examples', () => {
+    const scored = scoreStock({
+      symbol: 'ABC', screenerIds: ['a', 'b', 'c'],
+      screenerNames: ['Week CCI Bearish', 'Bullish breakout', 'Target price below current'],
+      screenerClasses: [
+        { weight: 1, sentiment: 'bearish', category: 'technical', timeframe: 'swing' },
+        { weight: 5, sentiment: 'bullish', category: 'technical', timeframe: 'swing' },
+        { weight: 1, sentiment: 'neutral', category: 'valuation', timeframe: 'swing' },
+      ],
+    }, null, null, null, null);
+    expect(scored.reasoning).toContain('Bullish breakout');
+    expect(scored.reasoning).not.toContain('Week CCI Bearish');
+    expect(scored.reasoning).not.toContain('Target price below current');
+  });
+});

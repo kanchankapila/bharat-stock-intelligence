@@ -11,7 +11,7 @@ export const TRENDLYNE_TA_BLOCK_COOLDOWN_MS = 10 * 60 * 1000;
 export const TRENDLYNE_STOCK_METRICS_BLOCK_COOLDOWN_MS = 10 * 60 * 1000;
 
 export type TrendlyneTaBlockReason = '403' | '405' | '429';
-export type TrendlyneStockMetricsBlockReason = '403' | '429' | '500';
+export type TrendlyneStockMetricsBlockReason = '403' | '405' | '429' | '500';
 
 export interface TrendlyneTaCircuitState {
   open: boolean;

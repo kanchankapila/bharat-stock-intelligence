@@ -55,6 +55,26 @@ describe('daysStale', () => {
   });
 });
 
+describe('timestamped screener membership run integrity', () => {
+  it('warns when the latest run is missing or empty and fails on a mismatched count', () => {
+    const check = DATA_QUALITY_CHECKS.find(c => c.id === 'screener-membership-run-integrity')!;
+    expect(check.evaluate(undefined, new Date()).status).toBe('warn');
+    expect(check.evaluate({ membership_count: 0, actual_count: 0 }, new Date()).status).toBe('warn');
+    expect(check.evaluate({ membership_count: 3, actual_count: 2 }, new Date()).status).toBe('fail');
+    expect(check.evaluate({ membership_count: 3, actual_count: 3 }, new Date()).status).toBe('pass');
+  });
+});
+
+describe('XBRL observation integrity', () => {
+  it('warns before the first capture and checks the latest identity without claiming coverage', () => {
+    const check = DATA_QUALITY_CHECKS.find(c => c.id === 'xbrl-observation-latest-integrity')!;
+    expect(check.evaluate(undefined, new Date()).status).toBe('warn');
+    expect(check.evaluate({ identity_consistent: false }, new Date()).status).toBe('fail');
+    expect(check.evaluate({ identity_consistent: true }, new Date()).status).toBe('pass');
+    expect(check.evaluate({ identity_consistent: true }, new Date()).detail).toContain('coverage is not established');
+  });
+});
+
 describe('tradingDaysStale', () => {
   it('returns null for missing/unparseable values, same as daysStale', () => {
     const now = new Date('2026-08-03T12:00:00Z');
@@ -161,9 +181,13 @@ describe('DATA_QUALITY_CHECKS registry', () => {
     const check = DATA_QUALITY_CHECKS.find(c => c.id === 'market-endpoint-validation-age')!;
     expect(check).toBeDefined();
     expect(check.sql).toMatch(/validated_at/);
+    expect(check.sql).toMatch(/FILTER\s*\(/i);
     const now = new Date('2026-10-15T12:00:00Z');
-    expect(check.evaluate({ last_validated_at: '2026-10-14T12:00:00Z' }, now).status).toBe('pass');
-    const stale = check.evaluate({ last_validated_at: '2026-09-13T12:00:00Z' }, now);
+    expect(check.evaluate({ total: 10, recent: 10, last_validated_at: '2026-10-14T12:00:00Z' }, now).status).toBe('pass');
+    const partial = check.evaluate({ total: 10, recent: 1, last_validated_at: '2026-10-14T12:00:00Z' }, now);
+    expect(partial.status).toBe('warn');
+    expect(partial.detail).toContain('1/10');
+    const stale = check.evaluate({ total: 10, recent: 0, last_validated_at: '2026-09-13T12:00:00Z' }, now);
     expect(stale.status).toBe('warn');
     expect(stale.detail).toContain('discovery evidence');
     expect(stale.detail).not.toContain('currently working');
@@ -1164,6 +1188,15 @@ describe('pg-backup-recency', () => {
     );
     expect(r.status).toBe('warn');
     expect(r.detail).toMatch(/MOST RECENT run failed/);
+  });
+
+  it('keeps the fatal error after lengthy pg_dump warnings', () => {
+    const r = byId('pg-backup-recency').evaluate(
+      { last_status: 'failed', last_run_at: daysAgo(0.2), last_success_at: daysAgo(1.2),
+        last_error: `${'circular foreign key warning; '.repeat(30)}There is not enough space on the disk.` },
+      now,
+    );
+    expect(r.detail).toContain('not enough space on the disk');
   });
 
   it('does NOT weekend-adjust — a Saturday disk loss costs as much as a Tuesday one', () => {

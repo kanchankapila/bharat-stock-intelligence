@@ -34,8 +34,19 @@ describe('getSystemStatus (extracted)', () => {
     const status = await getSystemStatus();
     expect(status.length).toBe(MONITOR_SCRIPTS.length);
     for (const s of status) {
-      expect(['never', 'running', 'success', 'failed', 'stale']).toContain(s.runState);
+      expect(['never', 'running', 'success', 'failed', 'stale', 'disabled']).toContain(s.runState);
     }
+  });
+
+  it('does not report the intentionally unscheduled company-profile job as failed without a key', async () => {
+    const status = await getSystemStatus(new Date('2026-11-02T01:30:00Z'));
+    const profiles = status.find(s => s.id === 'company-profiles-sync');
+
+    expect(process.env.GEMINI_API_KEY).toBeFalsy();
+    expect(profiles).toMatchObject({
+      runState: 'disabled',
+      disabledReason: 'GEMINI_API_KEY not set (AF-20261017-08)',
+    });
   });
 
   it('does not permanently flag a date-only cron entry stale on the same day as its own success', async () => {

@@ -4,6 +4,8 @@ DB tests run against a throwaway Postgres schema (pg_conn), never production."""
 import json
 import os
 import sys
+import time
+from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -14,6 +16,37 @@ import nse_pit_fetcher as pit  # noqa: E402
 import nse_results_filings_fetcher as res  # noqa: E402
 import nse_shareholding_master_fetcher as shp  # noqa: E402
 from nse_filings_common import IST, NseBlocked, NseClient, NseFetchError, SymbolResolver  # noqa: E402
+
+
+def test_result_filing_first_observed_is_immutable_and_legacy_remains_unknown(pg_db_conn):
+    row = {key: None for key in res.COLUMNS}
+    row.update(symbol='AAA', period_end='2026-09-30', period='Quarterly',
+               consolidated='S', broadcast_ts='2026-10-28T14:00:00Z')
+    transaction_start = pg_db_conn.execute('SELECT transaction_timestamp()').fetchone()[0]
+    time.sleep(0.05)  # observation occurs after the connection's transaction began
+    res.upsert(pg_db_conn, [row])
+    first = pg_db_conn.execute("SELECT first_observed_at FROM nse_results_filings WHERE symbol='AAA'").fetchone()[0]
+    assert first is not None
+    assert first > transaction_start
+    res.upsert(pg_db_conn, [row])
+    assert pg_db_conn.execute("SELECT first_observed_at FROM nse_results_filings WHERE symbol='AAA'").fetchone()[0] == first
+    pg_db_conn.execute("UPDATE nse_results_filings SET first_observed_at=NULL WHERE symbol='AAA'")
+    pg_db_conn.commit()
+    res.upsert(pg_db_conn, [row])
+    assert pg_db_conn.execute("SELECT first_observed_at FROM nse_results_filings WHERE symbol='AAA'").fetchone()[0] is None
+
+
+def test_first_observed_migration_does_not_invent_history(pg_db_conn):
+    pg_db_conn.execute("ALTER TABLE nse_results_filings DROP COLUMN first_observed_at")
+    pg_db_conn.execute(
+        "INSERT INTO nse_results_filings (symbol,period_end,period,consolidated,broadcast_ts) "
+        "VALUES ('LEGACY','2026-09-30','Quarterly','S','2026-10-28T14:00:00Z')"
+    )
+    migration = Path(__file__).resolve().parents[3] / 'migrations' / '20261030090000_filing-first-observed.sql'
+    for statement in migration.read_text(encoding='utf-8').split(';'):
+        if statement.strip():
+            pg_db_conn.execute(statement)
+    assert pg_db_conn.execute("SELECT first_observed_at FROM nse_results_filings WHERE symbol='LEGACY'").fetchone()[0] is None
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures")
 

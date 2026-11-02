@@ -3,21 +3,11 @@ import { dbAll, dbGet } from '../dbAsync';
 import { router, publicProcedure } from '../trpc';
 import { LATEST_COMPLETE_TS_DATE_SQL } from '../technicalSignalsDate';
 import { calendarBlockedUntil, MIN_DATES_RELIABLE, type ForwardTestReport } from '../../lib/callState';
+import { parsePythonJson as parsePyJson } from '../parsePythonJson';
 
 // Read-only honesty surfaces (spec 2026-10-08 section 2.D). Nothing here writes or scores.
 
 const BUY = new Set(['Buy', 'Strong Buy']);
-
-// forward_test_report.py writes json.dumps(..., default=str), which emits bare NaN/Infinity.
-// Consume quoted JSON tokens first so explanatory text and keys remain byte-for-byte intact.
-function parsePyJson<T = any>(text: string | null | undefined): T | null {
-  if (!text) return null;
-  try {
-    const normalized = text.replace(/"(?:\\.|[^"\\])*"|-?\b(?:NaN|Infinity)\b/g,
-      token => token.startsWith('"') ? token : 'null');
-    return JSON.parse(normalized) as T;
-  } catch { return null; }
-}
 
 type SnapRow = { symbol: string; classification: string | null; unified_score: number | null; valid_until: string | Date | null };
 

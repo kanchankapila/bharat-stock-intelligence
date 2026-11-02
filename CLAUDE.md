@@ -2,7 +2,7 @@
 
 Real-time Indian stock market (NSE/BSE) research and decision-support platform. Express + tRPC
 backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, 322 non-test Python modules
-in `src/server/` (89 `*_fetcher.py` plus ML engines, jobs and helpers; 811 `.py` files including tests).
+in `src/server/` (89 `*_fetcher.py` plus ML engines, jobs and helpers; 813 `.py` files including tests).
 
 What the product is for and the contracts a change must preserve: `CONTEXT.md`. Skills, commands,
 subagents and hooks: `AGENTS.md`. Services, layout, hook enforcement and full architecture notes:
@@ -43,6 +43,9 @@ the full rules, the dead-vendor lookup order and the shared-backlog contract are
 ## Definition of done
 
 Not done until the relevant check has actually run and passed — claiming "done" without one is this repo's most repeated failure.
+Set `PGTEST_DB` explicitly to a dedicated test database before running database-backed Vitest or
+pytest gates. An explicit name alone does not verify that the database is safe; check the target
+first. CI sets its own isolated service database. Live datasource canaries have a separate contract.
 
 ```bash
 npx tsc --noEmit                                    # any .ts change

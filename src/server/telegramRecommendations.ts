@@ -107,6 +107,12 @@ function fmtPrice(v: number | null): string {
   return `${v.toFixed(2)}`;
 }
 
+/** Older stored narratives can mix bearish names into bullish examples or be raw JSON. */
+function safePickReason(reason: string | null): string | null {
+  if (!reason || /^\s*\[?\s*\{/.test(reason)) return null;
+  return reason.replace(/(\b\d+\s+bullish scanners?)\s*\([^)]*\)/gi, '$1');
+}
+
 /**
  * Rows the ranker classifies as actionable. `unified_ranker._classify` emits title-case
  * labels ('Strong Buy'/'Buy'), NOT the SCREAMING_CASE enum the table's name suggests --
@@ -316,7 +322,7 @@ function renderPick(p: Pick, idx: number): string {
   const scoreBits: string[] = [];
   if (p.score != null && Number.isFinite(p.score)) scoreBits.push(`Score ${p.score.toFixed(1)}/100`);
   if (p.conviction) scoreBits.push(`Conviction ${sanitizeMarkdown(p.conviction)}`);
-  if (p.engineCoverage != null) scoreBits.push(`${p.engineCoverage}/7 engines`);
+  if (p.engineCoverage != null) scoreBits.push(`${p.engineCoverage} contributing engines`);
   if (scoreBits.length) lines.push(`📊 ${scoreBits.join(' · ')}`);
 
   if (p.executionWarning) lines.push(`⚠️ ${sanitizeMarkdown(p.executionWarning)}`);
@@ -328,7 +334,8 @@ function renderPick(p: Pick, idx: number): string {
     lines.push(`💰 Entry ${fmtPrice(p.entry)} · SL ${fmtPrice(p.stopLoss)} · Target ${fmtPrice(p.target)}${rr}`);
   }
 
-  if (p.reason) lines.push(`💡 Why: _${truncateWords(sanitizeMarkdown(p.reason), 320)}_`);
+  const reason = safePickReason(p.reason);
+  if (reason) lines.push(`💡 Why: _${truncateWords(sanitizeMarkdown(reason), 320)}_`);
 
   if (p.screeners.length) {
     const shown = p.screeners.slice(0, MAX_SCREENERS_PER_PICK);

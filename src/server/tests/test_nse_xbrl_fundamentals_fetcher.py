@@ -12,6 +12,7 @@ network. DB tests run against a throwaway Postgres schema (pg_conn), never produ
 import os
 import sys
 from datetime import date, datetime
+from pathlib import Path
 
 import pytest
 
@@ -256,6 +257,51 @@ class TestCrawl:
         xf.crawl(pg_conn, c, sel)
         xf.crawl(pg_conn, c, sel)
         assert pg_conn.execute("SELECT COUNT(*) FROM nse_filing_financials").fetchone()[0] == 1
+        # Repeated receipts are separate observations even when their content is identical.
+        assert pg_conn.execute("SELECT COUNT(*) FROM nse_filing_financial_observations").fetchone()[0] == 2
+
+    def test_reparsed_values_preserve_the_previous_observation(self, pg_conn):
+        xf.ensure_schema(pg_conn)
+        filing = dict(symbol='INFY', period_end=date(2026, 6, 30),
+                      broadcast_ts=datetime.fromisoformat('2026-07-01T12:00:00+00:00'),
+                      consolidated='Consolidated', filing_period='Integrated',
+                      relating_to='Original', xbrl_url='https://n/xbrl/INFY_C.xml')
+        row = xf._row(filing, {'pat': 100.0}, None)
+        xf.upsert(pg_conn, [row])
+        xf.upsert(pg_conn, [{**row, 'pat': 125.0}])
+        versions = pg_conn.execute(
+            "SELECT payload, observed_at FROM nse_filing_financial_observations ORDER BY id"
+        ).fetchall()
+        assert [v[0]['pat'] for v in versions] == [100.0, 125.0]
+        assert versions[0][1] <= versions[1][1]
+        assert pg_conn.execute('SELECT pat FROM nse_filing_financials').fetchone()[0] == 125.0
+
+    def test_observation_write_failure_does_not_commit_current_financials(self, pg_conn):
+        xf.ensure_schema(pg_conn)
+        pg_conn.execute('DROP TABLE nse_filing_financial_observations')
+        pg_conn.commit()
+        filing = dict(symbol='INFY', period_end=date(2026, 6, 30),
+                      broadcast_ts=datetime.fromisoformat('2026-07-01T12:00:00+00:00'),
+                      consolidated='Consolidated', filing_period='Integrated',
+                      relating_to='Original', xbrl_url='https://n/xbrl/INFY_C.xml')
+        with pytest.raises(Exception):
+            xf.upsert(pg_conn, [xf._row(filing, {'pat': 100.0}, None)])
+        pg_conn.rollback()
+        assert pg_conn.execute('SELECT COUNT(*) FROM nse_filing_financials').fetchone()[0] == 0
+
+    def test_observation_migration_is_idempotent(self, pg_conn):
+        pg_conn.execute('CREATE TABLE nse_filing_financials (symbol TEXT PRIMARY KEY)')
+        pg_conn.execute("INSERT INTO nse_filing_financials VALUES ('LEGACY')")
+        migration = Path(__file__).resolve().parents[3] / 'migrations' / '20261030100000_xbrl-observations.sql'
+        for _ in range(2):
+            for statement in migration.read_text(encoding='utf-8').split(';'):
+                if statement.strip():
+                    pg_conn.execute(statement)
+        assert pg_conn.execute(
+            "SELECT to_regclass('nse_filing_financial_observations') IS NOT NULL"
+        ).fetchone()[0]
+        assert pg_conn.execute('SELECT COUNT(*) FROM nse_filing_financial_observations').fetchone()[0] == 0
+        assert pg_conn.execute('SELECT symbol FROM nse_filing_financials').fetchone()[0] == 'LEGACY'
 
     def test_html_page_is_transient_not_recorded_and_sustained_failures_stop(self, pg_conn):
         _filings_table(pg_conn, LISTING)

@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const { dbTransaction } = await import('../dbAsync');
-const { getTrendlyneMetricSymbols } = await import('../trendlyneDailyFetchService');
+const { enqueueTrendlyneMetricsFetchJobs, getTrendlyneMetricSymbols } =
+  await import('../trendlyneDailyFetchService');
+const { TRENDLYNE_STOCK_METRICS_BLOCK_COOLDOWN_MS } =
+  await import('../trendlyneTechnicalCircuit');
 
 /**
  * 2026-08-04 job-timing audit: trendlyne-daily-fetch used to pre-warm fetchTrendlyneStockMetrics's
@@ -61,5 +64,16 @@ describe('getTrendlyneMetricSymbols (top-N by market cap)', () => {
     // Falls back to stockData (stocklist.ts) — real symbols, not empty.
     expect(symbols.length).toBeGreaterThan(0);
     expect(symbols.every(s => s === s.toUpperCase())).toBe(true);
+  });
+
+  it('retries after the stock-metrics WAF cooldown instead of inside it', async () => {
+    const add = vi.fn().mockResolvedValue(undefined);
+
+    await enqueueTrendlyneMetricsFetchJobs({ add } as any, ['AAA'], 0, 'batch');
+
+    const options = add.mock.calls[0][2];
+    expect(options.attempts).toBeGreaterThanOrEqual(3);
+    expect(options.backoff).toMatchObject({ type: 'exponential' });
+    expect(options.backoff.delay).toBeGreaterThan(TRENDLYNE_STOCK_METRICS_BLOCK_COOLDOWN_MS);
   });
 });

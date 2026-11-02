@@ -378,6 +378,9 @@ export const MONITOR_SCRIPTS = [
     staleLimitHours: 360,
     cronPatterns: ['30 15 * * *'],
     graceMinutes: 100,
+    disabledReason: process.env.GEMINI_API_KEY
+      ? undefined
+      : 'GEMINI_API_KEY not set (AF-20261017-08)',
   },
   {
     id: 'trendlyne-fundamentals',

@@ -676,8 +676,10 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // Also has no live_datasource test (test_screener_features_fetcher.py exists but only
   // covers the date-anchor regression, never calls the real API) -- flagged separately, not
   // fixed here (a test needs a real API call this session hasn't verified against).
-  { id: 'screener-membership-snapshot-freshness', label: 'screener_membership_snapshot (point-in-time screener membership, currently unconsumed)',
+  { id: 'screener-membership-snapshot-freshness', label: 'date-only screener membership (capture time unverified)',
     category: 'signals', critical: false, table: 'screener_membership_snapshot', dateColumn: 'as_of_date', warnDays: 3, failDays: 5 },
+  { id: 'screener-membership-runs-freshness', label: 'timestamped screener membership run captures',
+    category: 'signals', critical: false, table: 'screener_membership_runs', dateColumn: 'captured_at', warnDays: 3, failDays: 5 },
   { id: 'intraday-recommendations-freshness', label: 'intraday_recommendations',
     category: 'signals', critical: false, table: 'intraday_recommendations', dateColumn: 'computed_at', warnDays: 3, failDays: 5 },
   // Found 2026-08-13: live_screener_appearances/live_screener_runs (42 NiftyTrader filters +
@@ -911,7 +913,10 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
  * agreement with the tagged checks so neither half can drift or grow silently.
  */
 export const DQ_STATIC_PROPERTY_CHECK_IDS: ReadonlySet<string> = new Set([
+  'fundamental-observation-writer-contract',
+  'market-endpoint-tick-label-honesty',
   'signal-source-case-collision',
+  'signal-source-table-coverage',
   'signal-outcomes-label-definition-consistent',
   'quant-scores-history-column-parity',
 ]);
@@ -959,6 +964,47 @@ const RETIRED_TECHNICAL_SIGNAL_COLUMNS_SQL = Object.keys(RETIRED_TECHNICAL_SIGNA
 export const CANONICAL_TIMEFRAMES = ['INTRADAY', 'SWING', 'POSITIONAL'] as const;
 
 export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
+  {
+    id: 'xbrl-observation-latest-integrity',
+    label: 'Latest XBRL observation has a consistent identity',
+    category: 'signals',
+    critical: false,
+    sql: `SELECT symbol, source_url,
+                 COALESCE(jsonb_typeof(payload) = 'object'
+                   AND payload->>'symbol' = symbol
+                   AND payload->>'source_url' = source_url
+                   AND payload->>'period_end' = to_char(period_end, 'YYYY-MM-DD')
+                   AND payload->>'filing_period' = filing_period, false) AS identity_consistent
+            FROM nse_filing_financial_observations ORDER BY id DESC LIMIT 1`,
+    evaluate: (row) => {
+      if (!row) return { status: 'warn', detail: 'No prospective XBRL observation captured yet; waiting for a new parse.' };
+      return row.identity_consistent === true
+        ? { status: 'pass', detail: 'Latest XBRL observation identity matches its payload; coverage is not established.' }
+        : { status: 'fail', detail: 'Latest XBRL observation identity does not match its payload.' };
+    },
+  },
+  {
+    id: 'screener-membership-run-integrity',
+    label: 'Latest timestamped screener membership run has consistent count',
+    category: 'signals',
+    critical: false,
+    sql: `SELECT membership_count,
+                 CASE WHEN jsonb_typeof(memberships) = 'array'
+                      THEN jsonb_array_length(memberships) ELSE NULL END AS actual_count
+            FROM screener_membership_runs ORDER BY captured_at DESC, id DESC LIMIT 1`,
+    evaluate: (row) => {
+      if (!row) return { status: 'warn', detail: 'No timestamped membership run captured yet.' };
+      if (row.membership_count == null || row.actual_count == null ||
+          !Number.isFinite(Number(row.membership_count)) || !Number.isFinite(Number(row.actual_count)) ||
+          Number(row.membership_count) < 0 || Number(row.membership_count) !== Number(row.actual_count)) {
+        return { status: 'fail', detail: 'Latest membership count does not match its captured array.' };
+      }
+      const count = Number(row.membership_count);
+      return count === 0
+        ? { status: 'warn', detail: 'Latest membership run is empty.' }
+        : { status: 'pass', detail: `Latest membership run has ${count} captured entries.` };
+    },
+  },
   // ── OHLCV ──────────────────────────────────────────────────────────────
   {
     id: 'ohlcv-freshness-coverage',
@@ -1098,7 +1144,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // in step. This check exists because the upstream calendar guard (isTradingHolidayToday)
     // returns false on ANY fetch error, i.e. fails OPEN: one network blip on a holiday
     // reinstates the bug, and only the data's shape reveals it.
-    sql: `SELECT
+    sql: `SELECT current_date::text AS as_of,
             (SELECT COUNT(*) FROM (
                SELECT date FROM stock_ohlcv
                WHERE date >= current_date - 90
@@ -1119,7 +1165,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
             `Run: python data_integrity_repair.py --closed-sessions --holidays (AF-20260911-15)`,
         };
       }
-      return { status: 'pass', detail: 'no unflagged closed-session bars in the last 90d' };
+      return { status: 'pass', detail: `no unflagged closed-session bars in the 90d window ending ${row?.as_of ?? 'unknown'}` };
     },
   },
   {
@@ -1142,7 +1188,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // matches the writer's POST_EXIT_GRACE_DAYS -- keep the two in step. Bounded to the last
     // 60 days: the purge owns history, this check watches the present, and the bound keeps the
     // join SARGable for chunk exclusion on the hypertable.
-    sql: `SELECT COUNT(*) AS symbols, COALESCE(SUM(n), 0) AS bars FROM (
+    sql: `SELECT current_date::text AS as_of, COUNT(*) AS symbols, COALESCE(SUM(n), 0) AS bars FROM (
             SELECT o.symbol, COUNT(*) AS n
             FROM stock_ohlcv o
             JOIN (SELECT symbol, MAX(date) AS last_trade FROM nse_universe_history GROUP BY symbol) u
@@ -1155,7 +1201,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       const symbols = Number(row?.symbols) || 0;
       const bars = Number(row?.bars) || 0;
       if (symbols === 0) {
-        return { status: 'pass', detail: 'no bars past any symbol\'s exchange-record last trade (60d window)' };
+        return { status: 'pass', detail: `no bars past any symbol's exchange-record last trade (60d window ending ${row?.as_of ?? 'unknown'})` };
       }
       if (bars > 200 || symbols > 10) {
         return {
@@ -1644,6 +1690,8 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'signal-source-case-collision covers every table with a signal_source column',
     category: 'signals',
     critical: false,
+    // Schema invariant: the checked count changes immediately if another table gains this column.
+    assertsStaticProperty: true,
     // Derives the table list from the schema instead of trusting the hand-written UNION above.
     // Without this, adding a sixth signal_source table leaves the collision check silently
     // partial — which is exactly how the first version of it passed while a real collision sat
@@ -1873,13 +1921,15 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'unified_recommendations.conviction_level enum integrity',
     category: 'scoring',
     critical: false,
-    sql: `SELECT COUNT(*) AS bad FROM unified_recommendations
-          WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
-          AND conviction_level NOT IN ('S_ELITE','A_HIGH','B_MEDIUM','C_LOW','D_MARGINAL')`,
+    sql: `SELECT COUNT(*) AS total,
+                 COUNT(*) FILTER (WHERE conviction_level NOT IN ('S_ELITE','A_HIGH','B_MEDIUM','C_LOW','D_MARGINAL')) AS bad,
+                 MAX(computed_at) AS latest_batch
+          FROM unified_recommendations
+          WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)`,
     evaluate: (row) => {
       const bad = Number(row?.bad) || 0;
       if (bad > 0) return { status: 'fail', detail: `${bad} rows have an unrecognized conviction_level` };
-      return { status: 'pass', detail: 'All conviction_level values are within the known enum' };
+      return { status: 'pass', detail: `All ${Number(row?.total) || 0} conviction_level values in batch ${row?.latest_batch ?? 'unknown'} are within the known enum` };
     },
   },
   // ── Regression guards for the four defects the 2026-08-11 audit found live ──────────
@@ -1896,9 +1946,12 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // (_restrict_to_tradeable_universe) but the historical rows survived, because run() purges
     // only the computed_at it is writing. A ghost can never be graded or traded, and it
     // silently biases every measurement taken over the table.
-    sql: `SELECT COUNT(*) AS ghosts
-          FROM unified_recommendations u
-          WHERE NOT EXISTS (SELECT 1 FROM stock_ohlcv s WHERE s.symbol = u.symbol)`,
+    sql: `SELECT COUNT(*) AS total,
+                 COUNT(*) FILTER (WHERE NOT EXISTS (
+                   SELECT 1 FROM stock_ohlcv s WHERE s.symbol = u.symbol
+                 )) AS ghosts,
+                 MAX(computed_at) AS latest_batch
+          FROM unified_recommendations u`,
     evaluate: (row) => {
       const ghosts = Number(row?.ghosts) || 0;
       if (ghosts > 0) return {
@@ -1906,7 +1959,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         detail: `${ghosts} rows name a symbol with no stock_ohlcv history at all — ` +
                 `run: python data_integrity_repair.py --ghost-recommendations`,
       };
-      return { status: 'pass', detail: 'Every ranked symbol has price history' };
+      return { status: 'pass', detail: `All ${Number(row?.total) || 0} ranked rows through ${row?.latest_batch ?? 'unknown'} name symbols with price history` };
     },
   },
   {
@@ -2136,7 +2189,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (stale == null) return { status: 'fail', detail: 'No earnings_revision_shadow snapshot; the research consumer has not run' };
       if (stale > 6) return { status: 'fail', detail: `Research snapshot ${fmtDays(stale)} old` };
       if (stale > 3) return { status: 'warn', detail: `Research snapshot ${fmtDays(stale)} old` };
-      return { status: 'pass', detail: 'Research consumer is accumulating observations; this is not an alpha promotion' };
+      return { status: 'pass', detail: `Research snapshot ${row?.last_date ?? 'unknown'} is ${fmtDays(stale)} old; accumulating observations is not an alpha promotion` };
     },
   },
   {
@@ -2144,6 +2197,8 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'all four mutable fundamental projections retain observation triggers',
     category: 'fundamentals',
     critical: false,
+    // Trigger presence is a schema invariant; a migration changes the count immediately.
+    assertsStaticProperty: true,
     sql: `SELECT COUNT(DISTINCT c.relname) AS covered FROM pg_trigger t
           JOIN pg_class c ON c.oid = t.tgrelid
           JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -3542,7 +3597,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
                  (SELECT string_agg(key, ', ' ORDER BY key) FROM nd) AS newly_dead_cols,
                  (SELECT string_agg(key, ', ' ORDER BY key) FROM rd) AS retired_dead_cols,
                  (SELECT COUNT(*) FROM recent_d)                     AS recent_dates,
-                 (SELECT COUNT(*) FROM ref_d)                        AS ref_dates`,
+                 (SELECT COUNT(*) FROM ref_d)                        AS ref_dates,
+                 (SELECT MAX(date)::text FROM recent_d)              AS recent_max,
+                 (SELECT MAX(date)::text FROM ref_d)                 AS ref_max`,
     evaluate: (row) => {
       const recentDates = Number(row?.recent_dates ?? 0);
       const refDates    = Number(row?.ref_dates ?? 0);
@@ -3568,8 +3625,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (count === 0) {
         return {
           status: 'pass',
-          detail: `No unexplained feature column stopped being written: everything populated in the prior ` +
-                  `${refDates} dates is still landing within the last ${recentDates}.${retirementNote}`,
+          detail: `No unexplained feature column stopped being written: everything populated through ` +
+                  `${row?.ref_max ?? 'unknown'} in the prior ${refDates} dates is still landing through ` +
+                  `${row?.recent_max ?? 'unknown'} in the last ${recentDates}.${retirementNote}`,
         };
       }
       const detail = `${count} feature column(s) written during the prior ${refDates} dates are ` +
@@ -3664,14 +3722,14 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
           status: 'fail',
           detail: `Last verified Postgres backup was ${d} days ago. Recovery point is now ${d} ` +
                   `days of data. Last status '${row.last_status}'` +
-                  (row.last_error ? `: ${String(row.last_error).slice(0, 300)}` : '.'),
+                  (row.last_error ? `: ${String(row.last_error).slice(-300)}` : '.'),
         };
       }
       if (row.last_status !== 'success') {
         return {
           status: 'warn',
           detail: `A verified backup exists from ${d} days ago, but the MOST RECENT run failed: ` +
-                  `${String(row.last_error ?? '').slice(0, 300)}`,
+                  `${String(row.last_error ?? '').slice(-300)}`,
         };
       }
       if (sinceSuccess > 26 / 24) {
@@ -3993,6 +4051,8 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'Endpoint registry does not call polled HTTP snapshots exchange tick feeds',
     category: 'reference',
     critical: false,
+    // Registry-taxonomy invariant; a mislabeled row changes the count immediately.
+    assertsStaticProperty: true,
     sql: `SELECT COUNT(*)::int AS bad
             FROM market_endpoint_registry
            WHERE update_frequency = 'REALTIME_TICK'
@@ -4016,18 +4076,31 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // `is_working` / `http_status_code` in market_endpoint_registry were captured when each URL was
     // last probed (validated_at), not on a schedule. Anything that reads them as "currently
     // working" is reading a dated snapshot; this makes the age visible instead of implied.
-    sql: `SELECT MAX(validated_at) AS last_validated_at FROM market_endpoint_registry`,
+    sql: `SELECT COUNT(*)::int AS total,
+                 COUNT(*) FILTER (
+                   WHERE validated_at >= NOW() - INTERVAL '30 days'
+                 )::int AS recent,
+                 MAX(validated_at) AS last_validated_at
+            FROM market_endpoint_registry`,
     evaluate: (row, now) => {
       const at = now instanceof Date ? now : new Date();
+      const total = Number(row?.total ?? 0);
+      const recent = Number(row?.recent ?? 0);
       const last = row?.last_validated_at ? new Date(row.last_validated_at as string).getTime() : NaN;
-      if (!Number.isFinite(last)) {
+      if (total === 0 || !Number.isFinite(last)) {
         return { status: 'warn', detail: 'No endpoint in the registry carries a validated_at; its status columns are unvalidated discovery evidence.' };
       }
       const days = Math.floor((at.getTime() - last) / 86_400_000);
+      if (recent < total) {
+        return {
+          status: 'warn',
+          detail: `${recent}/${total} endpoint registry rows were validated in the last 30d; the remainder are stale discovery evidence (latest validation ${days}d ago).`,
+        };
+      }
       if (days > 30) {
         return { status: 'warn', detail: `Endpoint registry was last validated ${days}d ago: its is_working/status columns are discovery evidence from then, not current health.` };
       }
-      return { status: 'pass', detail: `Endpoint registry validated ${days}d ago.` };
+      return { status: 'pass', detail: `All ${total} endpoint registry rows validated within 30d (latest ${days}d ago).` };
     },
   },
 

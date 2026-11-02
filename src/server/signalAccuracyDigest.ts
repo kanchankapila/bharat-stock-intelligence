@@ -62,6 +62,8 @@ export interface AccuracyDigest {
    *  denominators the wrong-direction counts have to be judged against. */
   sellRatedN: number;
   buyRatedN: number;
+  /** Whether the retrospective identified a batch actually published before the open. */
+  priorTimingVerified?: boolean;
   /** Of today's flyers, how many trade at or above TRADEABLE_ADT. The rest are names the
    *  measurement can see and a reader cannot buy. */
   liquidFlyers: number;
@@ -72,7 +74,7 @@ export interface AccuracyDigest {
   confirmedMeanOpenToClosePct: number | null;
   wrongBearish: number;
   wrongBullish: number;
-  trend: Array<{ date: string; recall: number | null }>;
+  trend: Array<{ date: string; recall: number | null; timingVerified?: boolean }>;
   worstCalls: Array<{ symbol: string; returnPct: number; priorClassification: string }>;
   flyerCalls: PriorCallBuckets;
   diverCalls: PriorCallBuckets;
@@ -176,18 +178,25 @@ export async function buildAccuracyDigest(): Promise<AccuracyDigest | null> {
     [today.date, MAX_NAMED]
   );
 
-  // Denominators for the wrong-direction counts. Same run the retrospective's
-  // _load_prior_classification used (MAX(computed_at) < day), so the counts and the named
+  // Denominators must use the exact batch frozen by the retrospective, not a later
+  // backfill or a different generation. Historical rows without a basis marker retain
+  // their original denominator and are explicitly disclosed as timing-unverified.
   // wrong calls describe the same ranking. AF-20261007-03: without these, "15 wrong calls"
   // is a number with no scale — 298 Sell-rated names at a 6.5% base flyer rate are EXPECTED
   // to throw ~19 rallies, so 15 was better than chance and the report called it a failure.
-  const rated = await dbAll<{ classification: string | null; c: number }>(
-    `SELECT classification, COUNT(*)::int AS c
-       FROM unified_recommendations
-      WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations WHERE computed_at < ?)
-      GROUP BY classification`,
-    [today.date]
-  );
+  const newBasis = recall.recommendation_basis === 'pre_open_history_v1';
+  const stamp = typeof recall.recommendation_generated_at === 'string' ? recall.recommendation_generated_at : null;
+  const stampMs = stamp ? Date.parse(stamp) : NaN;
+  const openMs = Date.parse(`${today.date}T03:45:00Z`);
+  const priorTimingVerified = newBasis && Number.isFinite(stampMs) && Number.isFinite(openMs) && stampMs < openMs;
+  const rated = newBasis
+    ? (priorTimingVerified ? await dbAll<{ classification: string | null; c: number }>(
+      `SELECT classification, COUNT(*)::int AS c FROM unified_recommendations_history
+       WHERE generated_at = ? GROUP BY classification`, [stamp]) : [])
+    : await dbAll<{ classification: string | null; c: number }>(
+      `SELECT classification, COUNT(*)::int AS c FROM unified_recommendations
+       WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations WHERE computed_at < ?)
+       GROUP BY classification`, [today.date]);
   let sellRatedN = 0;
   let buyRatedN = 0;
   for (const r of rated) {
@@ -220,6 +229,7 @@ export async function buildAccuracyDigest(): Promise<AccuracyDigest | null> {
 
   const precision = (recall.precision ?? {}) as Record<string, unknown>;
   return {
+    priorTimingVerified,
     date: today.date,
     flyers: finiteOr(today.flyer_n, 0),
     divers: finiteOr(recall.diver_n, 0),
@@ -229,8 +239,8 @@ export async function buildAccuracyDigest(): Promise<AccuracyDigest | null> {
     // measured 2026-10-06 that set held 2,101 of 2,424 ranked names, so recall.any was 1.0
     // on all seven days of the trend line. A metric pinned at its maximum cannot fail, so
     // it cannot inform. recall.unified moved 0.139-0.219 over the same week.
-    recallOwn: Number.isFinite(Number(recall.unified)) ? Number(recall.unified) : null,
-    precisionOwn: Number.isFinite(Number(precision.unified)) ? Number(precision.unified) : null,
+    recallOwn: finiteOrNull(recall.unified),
+    precisionOwn: finiteOrNull(precision.unified),
     sellRatedN,
     buyRatedN,
     liquidFlyers: finiteOr(cap.liquid_flyers, 0),
@@ -242,7 +252,11 @@ export async function buildAccuracyDigest(): Promise<AccuracyDigest | null> {
       const r = parseRecall(s.recall_json);
       return {
         date: s.date,
-        recall: Number.isFinite(Number(r.unified)) ? Number(r.unified) : null,
+        recall: finiteOrNull(r.unified),
+        timingVerified: r.recommendation_basis === 'pre_open_history_v1' &&
+          typeof r.recommendation_generated_at === 'string' &&
+          Number.isFinite(Date.parse(r.recommendation_generated_at)) &&
+          Date.parse(r.recommendation_generated_at) < Date.parse(`${s.date}T03:45:00Z`),
       };
     }),
     worstCalls: worst.map(w => ({
@@ -320,6 +334,8 @@ export function formatAccuracyScorecard(d: AccuracyDigest): string {
       `(caught ${pct(d.recallOwn)} of the movers; ${pct(d.precisionOwn)} of our Buy calls ` +
       `flew vs a ${pct(base)} base rate).`,
   ];
+  lines.push('Large-mover diagnostic using close-to-close moves; not overall recommendation accuracy.');
+  if (d.priorTimingVerified === false) lines.push('Prior-call timing is unverified; historical labels may differ from the pre-open ranking.');
   const wrong = d.wrongBearish + d.wrongBullish;
   const exp = expectedWrongByChance(d);
   lines.push(
@@ -335,6 +351,8 @@ export function formatAccuracyDigest(d: AccuracyDigest): string {
 
   const alarm = d.recallOwn !== null && d.recallOwn < RECALL_ALERT_FLOOR;
   lines.push(`${alarm ? '🚨' : '📊'} *Signal Accuracy* — ${sanitizeMarkdown(d.date)}`);
+  if (d.priorTimingVerified === false) lines.push('⚠ Prior-call timing is unverified; historical labels may differ from the pre-open ranking.');
+  lines.push('Large-mover diagnostic using close-to-close moves; not overall recommendation accuracy.');
   lines.push('');
   lines.push(`Flyers today: ${d.flyers}  ·  Divers: ${d.divers}  ·  base rate ${pct(base)}`);
   // Our own ranking only. The union over all four sources was 100% every day (AF-20261007-01).
@@ -413,7 +431,9 @@ export function formatAccuracyDigest(d: AccuracyDigest): string {
     .map(t => (t.recall === null ? '·' : `${Math.round(t.recall * 100)}`))
     .join(' ');
   lines.push('');
-  lines.push(`${TREND_DAYS}d recall (our ranking): ${trend}`);
+  const trendCaveat = d.trend.some(t => t.timingVerified === false)
+    ? '; some dates use unverified timing' : '';
+  lines.push(`${TREND_DAYS}d recall (our ranking${trendCaveat}): ${trend}`);
 
   return lines.join('\n');
 }

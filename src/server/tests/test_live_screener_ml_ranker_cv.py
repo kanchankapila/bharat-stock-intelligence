@@ -53,6 +53,20 @@ class TestTimeSeriesSplitHasEmbargoGap:
         monkeypatch.setattr(lsmr, "CANDIDATE_PATH", str(tmp_path / "model_candidate.pkl"))
         monkeypatch.setattr(lsmr, "_load_active_metrics", lambda: None)
         monkeypatch.setattr(lsmr, "execute", lambda *a, **k: None)
+        # This test uses a synthetic panel; querying production bars or live AUC is both
+        # irrelevant to the embargo contract and unsafe under shared-host memory pressure.
+        unexpected_reads = []
+        def reject_db_read(*args, **kwargs):
+            unexpected_reads.append(args)
+            raise AssertionError('synthetic training test must not query a database')
+        monkeypatch.setattr(lsmr, "read_df", reject_db_read)
+        monkeypatch.setattr(lsmr, "_live_auc", lambda: (None, 0))
+        monkeypatch.setattr(lsmr, "_load_reversal_features", lambda frame:
+            frame[['run_id', 'symbol']].assign(vwap_deviation_pct=0.0, intraday_range_pos=0.5))
+        # Exercise the real LightGBM training path without spawning every host CPU thread.
+        real_make_model = lsmr._make_model
+        monkeypatch.setattr(lsmr, "_make_model", lambda spw:
+            real_make_model(spw).set_params(n_jobs=1))
 
         captured_splits = {}
         from sklearn.model_selection import TimeSeriesSplit
@@ -66,6 +80,7 @@ class TestTimeSeriesSplitHasEmbargoGap:
 
         lsmr.train()
 
+        assert not unexpected_reads, 'synthetic training unexpectedly attempted database reads'
         assert captured_splits.get("gap") == 1, (
             "live_screener_ml_ranker.py's TimeSeriesSplit must pass gap=1 for consistency with "
             "every other CV site in this codebase (ml_ensemble.py/cs_ranker.py/"

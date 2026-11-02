@@ -31,10 +31,60 @@ def test_analyze_stock_risk(pg_db_conn):
     assert res["result"]["symbol"] == "RELIANCE"
 
 
+def test_risk_profile_identifies_probability_fields_as_unvalidated(pg_db_conn):
+    pg_db_conn.execute(
+        "INSERT INTO technical_signals (symbol, date, win_probability, calibrated_win_probability) "
+        "VALUES ('RELIANCE', '2026-10-28', 0.8, 0.7)"
+    )
+    pg_db_conn.commit()
+    risk = handle_mcp_request("analyze_stock_risk", {"symbol": "RELIANCE"})["result"]
+    assert risk["technical_signals"]["win_probability"] == pytest.approx(0.8)
+    assert "not validated" in risk["probability_note"].lower()
+
+
 def test_top_conviction_uses_current_recommendation_columns(pg_db_conn):
     res = handle_mcp_request("get_top_conviction_picks", {"limit": 1})
     assert "result" in res
     assert isinstance(res["result"], list)
+
+
+def test_top_conviction_reads_only_latest_batch_and_never_falls_back(pg_db_conn):
+    pg_db_conn.execute(
+        "INSERT INTO unified_recommendations "
+        "(symbol, computed_at, regime, unified_score, conviction_level, classification) VALUES "
+        "('OLD', '2026-10-01', 'BULL', 99, 'S_ELITE', 'Strong Buy'), "
+        "('NEW', '2026-10-02', 'BULL', 75, 'A_HIGH', 'Buy'), "
+        "('SELL', '2026-10-02', 'BULL', 95, 'S_ELITE', 'Strong Sell')"
+    )
+    pg_db_conn.commit()
+    picks = handle_mcp_request("get_top_conviction_picks", {"limit": 10})["result"]
+    assert [p["symbol"] for p in picks] == ["NEW"]
+    assert picks[0]["computed_at"] == "2026-10-02"
+
+    # A latest batch containing no buys must not revive an older recommendation.
+    pg_db_conn.execute(
+        "INSERT INTO unified_recommendations "
+        "(symbol, computed_at, regime, unified_score, conviction_level, classification) "
+        "VALUES ('HOLD', '2026-10-03', 'BULL', 50, 'C', 'Hold')"
+    )
+    pg_db_conn.commit()
+    assert handle_mcp_request("get_top_conviction_picks", {"limit": 10})["result"] == []
+
+
+def test_top_conviction_discloses_trade_plan_expiry(pg_db_conn):
+    pg_db_conn.execute(
+        "INSERT INTO unified_recommendations "
+        "(symbol, computed_at, regime, unified_score, conviction_level, classification, valid_until) VALUES "
+        "('EXPIRED', '2026-10-02', 'BULL', 90, 'S_ELITE', 'Strong Buy', '2000-01-01T00:00:00Z'), "
+        "('ACTIVE', '2026-10-02', 'BULL', 80, 'A_HIGH', 'Buy', '2100-01-01T00:00:00Z'), "
+        "('UNKNOWN', '2026-10-02', 'BULL', 70, 'A_HIGH', 'Buy', NULL)"
+    )
+    pg_db_conn.commit()
+    picks = handle_mcp_request("get_top_conviction_picks", {"limit": 10})["result"]
+    assert {p["symbol"]: p["plan_status"] for p in picks} == {
+        "EXPIRED": "EXPIRED", "ACTIVE": "ACTIVE", "UNKNOWN": "UNKNOWN"
+    }
+    assert picks[0]["valid_until"] is not None
 
 
 def test_entity_graph_is_available_on_the_decision_surface(monkeypatch):

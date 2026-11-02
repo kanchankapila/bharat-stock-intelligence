@@ -108,6 +108,50 @@ class TestDetectDivers:
         assert out.iloc[0]["new_52w_high"] == 1   # column reused to mean "new low" for divers
 
 
+def test_prior_calls_use_latest_frozen_batch_published_before_market_open(pg_db_conn):
+    pg_db_conn.execute(
+        "INSERT INTO unified_recommendations "
+        "(symbol, computed_at, regime, unified_score, conviction_level, classification) "
+        "VALUES ('AAA','2026-10-28','BULL',90,'S','Strong Buy')"
+    )
+    pg_db_conn.execute(
+        "INSERT INTO unified_recommendations_history "
+        "(symbol,computed_at,generated_at,classification) VALUES "
+        "('AAA','2026-10-28','2026-10-27T17:00:00Z','Strong Buy'), "
+        "('AAA','2026-10-29','2026-10-28T17:00:00Z','Sell'), "
+        "('BBB','2026-10-29','2026-10-28T17:00:00Z','Buy'), "
+        "('AAA','2026-10-29','2026-10-29T03:45:00Z','Strong Buy')"
+    )
+    pg_db_conn.commit()
+    assert hfr._load_prior_classification(pg_db_conn, '2026-10-29') == {'AAA': 'Sell', 'BBB': 'Buy'}
+    assert hfr._load_predicted_sets(pg_db_conn, '2026-10-29', '2026-10-28')['unified'] == {'BBB'}
+
+
+def test_prediction_sources_exclude_post_open_and_unknown_observation_times(pg_db_conn):
+    pg_db_conn.execute(
+        "INSERT INTO early_hours_predictions (symbol,date,score,computed_at) VALUES "
+        "('EARLY','2026-10-29',1,'2026-10-29T03:40:00Z'), "
+        "('LATE','2026-10-29',1,'2026-10-29T03:46:00Z'), "
+        "('UNKNOWN','2026-10-29',1,NULL)"
+    )
+    pg_db_conn.execute(
+        "INSERT INTO high_flyer_candidates (symbol,date,score,computed_at) VALUES "
+        "('BEFORE','2026-10-28',1,'2026-10-28T17:00:00Z'), "
+        "('AFTER','2026-10-28',1,'2026-10-29T04:00:00Z')"
+    )
+    pg_db_conn.execute(
+        "INSERT INTO unified_signals (symbol,signal_source,signal_type,signal_date,signal_generated_at,created_at) VALUES "
+        "('ON_TIME','technical','Bullish','2026-10-28T00:00:00Z','2026-10-28T17:00:00Z','2026-10-28T17:00:00Z'), "
+        "('BACKDATED','technical','Bullish','2026-10-28T00:00:00Z','2026-10-29T04:00:00Z','2026-10-29T04:00:00Z'), "
+        "('BACKFILLED','technical','Bullish','2026-10-28T00:00:00Z','2026-10-28T17:00:00Z','2026-10-29T04:00:00Z')"
+    )
+    pg_db_conn.commit()
+    sources = hfr._load_predicted_sets(pg_db_conn, '2026-10-29', '2026-10-28')
+    assert sources['early_hours'] == {'EARLY'}
+    assert sources['candidates'] == {'BEFORE'}
+    assert sources['signals'] == {'ON_TIME'}
+
+
 class TestWrongDirectionClassSets:
     """Guards against the exact string-matching typo class this repo has hit before
     (e.g. querying 'BUY' against a title-case 'Buy' column silently matches nothing)."""
