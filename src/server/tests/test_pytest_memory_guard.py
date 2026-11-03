@@ -73,3 +73,25 @@ def test_plugin_turns_onednn_off():
         assert torch.backends.mkldnn.enabled is False
     finally:
         torch.backends.mkldnn.enabled = before
+
+
+def test_a_slow_reclaim_does_not_kill_the_guard_and_orphan_pytest(monkeypatch):
+    """The reclaim's `sync` outlasted its timeout on 2026-11-03: the guard died and pytest ran on with nothing watching."""
+    class Pytest:
+        returncode = 0
+        polls = iter([None, None, 0])
+
+        def poll(self):
+            return next(self.polls)
+
+    def slow_reclaim(cmd, **kwargs):
+        raise guard.subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+    monkeypatch.setenv("PGTEST_DB", "bharat_pgtest")
+    monkeypatch.setattr(guard.subprocess, "Popen", lambda *a, **k: Pytest())
+    monkeypatch.setattr(guard.subprocess, "run", slow_reclaim)
+    monkeypatch.setattr(guard.time, "sleep", lambda _: None)
+    monkeypatch.setattr(guard, "available_bytes", lambda: 2.5 * GIB)
+    monkeypatch.setattr(guard, "next_action", lambda *a: "reclaim")
+
+    assert guard.main() == 0

@@ -101,7 +101,10 @@ def main() -> int:
         now = time.monotonic()
         action = next_action(available_bytes(), now, last_reclaim)
         if action == "reclaim":
-            subprocess.run(RECLAIM_COMMAND, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=60)
+            try:
+                subprocess.run(RECLAIM_COMMAND, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=60)
+            except subprocess.TimeoutExpired:
+                pass                                  # dying here would leave pytest running with nothing watching it
             last_reclaim = now
             reclaims += 1
         elif action == "stop":
