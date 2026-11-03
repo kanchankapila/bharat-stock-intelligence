@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 export const RULE_START = '2026-09-30';
 // From here a FIX-lane row cannot stay open on EVIDENCE: the lane says the fix is known.
-export const FIX_RULE_START = '2026-11-03';
+export const FIX_RULE_START = '2026-11-04';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // An artifact that can fail: a test file, a scanner/check script, or a named static check.

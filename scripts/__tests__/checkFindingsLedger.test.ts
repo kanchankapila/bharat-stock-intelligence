@@ -49,25 +49,31 @@ describe('checkFindingsLedger.validate', { timeout: 60_000 }, () => {
     const row = (found: string, lane: string, status: string) => table(`| AF-20261103-90 | ${found} | x | bug | ${lane} | ${status} | — | — |`);
 
     it('rejects a post-FIX_RULE_START open FIX row whose only reason is EVIDENCE', () => {
-      expect(validate(row('2026-11-03', 'FIX', 'EVIDENCE: the local fix passes')).join()).toMatch(/AF-20261103-90.*FIX row.*EVIDENCE/);
-      expect(validate(row('2026-11-03', 'fix', 'EVIDENCE: the local fix passes')).join()).toMatch(/FIX row.*EVIDENCE/);
+      expect(validate(row('2026-11-04', 'FIX', 'EVIDENCE: the local fix passes')).join()).toMatch(/AF-20261103-90.*FIX row.*EVIDENCE/);
+      expect(validate(row('2026-11-04', 'fix', 'EVIDENCE: the local fix passes')).join()).toMatch(/FIX row.*EVIDENCE/);
     });
 
     it('accepts DEPLOY-PENDING and a user decision on a FIX row', () => {
-      expect(validate(row('2026-11-03', 'FIX', 'DEPLOY-PENDING: needs pm2 restart'))).toEqual([]);
-      expect(validate(row('2026-11-03', 'FIX', 'needs a user decision: which vendor'))).toEqual([]);
+      expect(validate(row('2026-11-04', 'FIX', 'DEPLOY-PENDING: needs pm2 restart'))).toEqual([]);
+      expect(validate(row('2026-11-04', 'FIX', 'needs a user decision: which vendor'))).toEqual([]);
     });
 
     it('matches DEPLOY-PENDING as a case-sensitive token, not prose', () => {
-      expect(validate(row('2026-11-03', 'FIX', 'deploy pending, EVIDENCE only')).join()).toMatch(/FIX row.*EVIDENCE/);
+      expect(validate(row('2026-11-04', 'FIX', 'deploy pending, EVIDENCE only')).join()).toMatch(/FIX row.*EVIDENCE/);
     });
 
     it('still accepts EVIDENCE on an EVIDENCE-lane row', () => {
-      expect(validate(row('2026-11-03', 'EVIDENCE', 'Open - EVIDENCE: measure first'))).toEqual([]);
+      expect(validate(row('2026-11-04', 'EVIDENCE', 'Open - EVIDENCE: measure first'))).toEqual([]);
     });
 
     it('only warns for FIX rows found between RULE_START and FIX_RULE_START', () => {
       const r = validateDetailed(row('2026-10-20', 'FIX', 'EVIDENCE: the local fix passes'));
+      expect(r.problems).toEqual([]);
+      expect(r.warnings.join()).toMatch(/AF-20261103-90/);
+    });
+
+    it('only warns for a FIX row found on 2026-11-03', () => {
+      const r = validateDetailed(row('2026-11-03', 'FIX', 'EVIDENCE: the local fix passes'));
       expect(r.problems).toEqual([]);
       expect(r.warnings.join()).toMatch(/AF-20261103-90/);
     });
