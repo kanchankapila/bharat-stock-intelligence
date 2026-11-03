@@ -118,6 +118,15 @@ def test_no_sector_slot_arm_is_blank_where_the_rebuild_does_not_reproduce_the_st
     assert A.reblend_no_sector_slot(p).isna().all()
 
 
+def test_no_sector_slot_arm_is_blank_for_a_session_whose_slot_columns_are_all_nan_and_leaves_others_computed():
+    a, b = _slot_session(seed=3), _slot_session(seed=4)
+    b["session"] = pd.Timestamp("2026-10-29")
+    b[["cs_trend", "cs_vol", "cs_sector", "cs_fund"]] = np.nan       # sum(axis=1) skips NaN: confluence would be zeroed, not absent
+    p = pd.concat([a, b], ignore_index=True)
+    out = A.reblend_no_sector_slot(p)
+    assert out[p.session == b.session.iloc[0]].isna().all() and out[p.session == a.session.iloc[0]].notna().all()
+
+
 def test_no_sector_slot_arm_keeps_confluence_absent_where_the_ranker_had_none():
     p = _slot_session()
     p.loc[0, "confluence_score"] = np.nan

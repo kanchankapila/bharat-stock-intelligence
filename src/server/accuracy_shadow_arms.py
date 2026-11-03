@@ -70,7 +70,7 @@ def reblend_no_sector_slot(df: pd.DataFrame) -> pd.Series:
     for _, idx in df.groupby("session").groups.items():
         p, h = parts.loc[idx], has.loc[idx]
         full = _confluence_raw(p).where(h)
-        if h.sum() < 2 or full[h].rank().corr(df.loc[idx, "confluence_score"][h].rank()) < SLOT_REBUILD_MIN_RANK_CORR:
+        if h.sum() < 2 or not (full[h].rank().corr(df.loc[idx, "confluence_score"][h].rank()) >= SLOT_REBUILD_MIN_RANK_CORR):
             continue
         sub = df.loc[idx].assign(confluence_score=_confluence_raw(p.drop(columns="cs_sector")).where(h))
         out.loc[idx] = reblend(sub).to_numpy()
