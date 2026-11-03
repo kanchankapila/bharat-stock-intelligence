@@ -44,6 +44,22 @@ regime (`REGIME_WEIGHTS`; `breakout` was zeroed after a realised-return replay o
 and `dl` was paused by user decision 2026-09-13). Their keys and reporting columns remain for
 telemetry. Read the current weights and gates from the code before relying on this dated summary.
 
+Dated readback, 2026-11-02 ranker run (HIGH_VOL): `ml` does not reach the blend. Its `ml_score` had a
+standard deviation of 0.02 against the 3.0 floor in `ZERO_DISPERSION_MIN_SD_BY_ENGINE`, so
+`drop_zero_dispersion_engines` removed it and no row had `engine_coverage_count` above 2. The published
+score is therefore confluence plus technical only. Buy/Strong Buy counts also move with the regime
+label: 278-293 rows on the three BEAR runs of 2026-10-21..23 against 52-74 on the six HIGH_VOL runs of
+2026-10-26..11-02 (the `breakout` removal landed in the same window). Re-read `unified_recommendations`
+for the current picture.
+
+`position_size_pct` is not a function of the blended score. It is `max(ml_bet, bo_bet) / vol` times a
+confidence multiplier that only shrinks, then cost-penalised, normalised to the gross cap and capped per
+name, sector and correlation cluster (`src/server/unified_ranker.py`, "#6 position size"). `ml_bet` comes from the
+edge-adjusted ML win probability, which the dispersion floor does not gate, but it was about 0.0005 on
+2026-11-02. `bo_bet` is a top-quintile/decile breakout-percentile tilt from the `breakout` engine that is
+weight 0.0 in the blend, and it carried 95% of the sized weight that day. Strong Buy therefore does not
+size larger than Buy (1.04% vs 1.52% mean that day); do not read a size as conviction.
+
 Outcome resolution, backtests, model evaluation, and monitoring provide feedback for research and
 operations. Do not assume every source follows this exact path or that a feedback loop is
 autonomous; inspect the relevant writer, consumer, and job before changing one.
@@ -77,8 +93,15 @@ passed a cost-aware backtest. The longer-history deep-panel gradings (2021-2026,
 separate: no tier reaches AUC 0.55, and the F&O-eligible tier is indistinguishable from zero (see
 `.claude/rules/measurement.md`, 2026-10-21). Most published factors tested here are null or inverted on this data. The realistic goal is a
 modest, honestly-measured cross-sectional edge (rank IC of roughly 0.05-0.10), not high accuracy, and the
-system's job includes refusing to present an unproven ranking as trustworthy. Read
+system's job includes not presenting an unproven ranking as trustworthy. Read
 `.claude/rules/measurement.md` before proposing any reweighting — it is usually the wrong fix.
+
+What exists today is disclosure, not refusal: the Alpha banner (`src/components/AlphaHonesty.tsx`, `src/lib/callState.ts`),
+the "Unproven ranking" badge on `src/components/HighConvictionPage.tsx` and the forward-test line in the morning brief
+(`src/server/morningBrief.ts`) label the list as unvalidated while still showing it. The only suppression is the
+intraday engine's emission gate, and "NO TRADE TODAY" means the ranking produced no picks, not that the
+edge is unproven. An "honest refusal engine" (watch-list, no calls) appears only as an open decision in
+`docs/superpowers/specs/2026-10-19-full-data-honest-recommendations-design.md`; no code implements it.
 
 ## Contracts To Preserve
 - **One database:** PostgreSQL/TimescaleDB is the production database. Do not add a SQLite runtime
