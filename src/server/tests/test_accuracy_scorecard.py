@@ -52,6 +52,7 @@ def _seed(con, n_sym=40, n_sess=260, calls_last=40, seed=5):
     con.execute("CREATE TABLE unified_recommendations_history (symbol TEXT, generated_at TIMESTAMPTZ, regime TEXT, "
                 "unified_score DOUBLE PRECISION, classification TEXT, ml_score DOUBLE PRECISION, confluence_score DOUBLE PRECISION, "
                 "technical_score DOUBLE PRECISION, breakout_score DOUBLE PRECISION)")
+    con.execute("CREATE TABLE unified_recommendations (symbol TEXT, generated_at TIMESTAMPTZ, est_cost_bps DOUBLE PRECISION)")
     con.execute("CREATE TABLE technical_signals (symbol TEXT, date DATE, calibrated_win_probability DOUBLE PRECISION)")
     con.execute("CREATE TABLE signal_outcomes (symbol TEXT, signal_date DATE, horizon_days INTEGER, outcome TEXT, "
                 "signal_source TEXT, label_definition TEXT)")
@@ -61,15 +62,20 @@ def _seed(con, n_sym=40, n_sess=260, calls_last=40, seed=5):
         px = 100 * np.cumprod(1 + 0.01 * rng.normal(size=n_sess))
         rows += [(f"S{s}", d.date(), float(px[i]), float(px[i]), 2e7, 0) for i, d in enumerate(sess)]
     con.executemany("INSERT INTO stock_ohlcv VALUES (?,?,?,?,?,?)", rows)
-    urh, ts, so = [], [], []
+    urh, ur, ts, so = [], [], [], []
     for d in sess[-calls_last:]:
         for s in range(n_sym):
             g = pd.Timestamp(f"{d.date()} 22:00", tz="Asia/Kolkata").isoformat()
             e = rng.normal(size=4) * 20 + 50
             urh.append((f"S{s}", g, "SIDEWAYS", float(e.mean()), "Buy" if s < 8 else "Hold", *map(float, e)))
+            if s < 5:                                                    # S0-S3 costed at 100 bps, S4 NULL, the rest absent
+                ur.append((f"S{s}", g, 100.0 if s < 4 else None))
+            if s == 5:                                                   # another run's cost is not this call's own cost
+                ur.append(("S5", (pd.Timestamp(g) + pd.Timedelta(hours=1)).isoformat(), 999.0))
             ts.append((f"S{s}", d.date(), float(rng.random())))
             so.append((f"S{s}", d.date(), 5, "WIN" if rng.random() < 0.4 else "LOSS", "technical", "path_barrier"))
     con.executemany("INSERT INTO unified_recommendations_history VALUES (?,?,?,?,?,?,?,?,?)", urh)
+    con.executemany("INSERT INTO unified_recommendations VALUES (?,?,?)", ur)
     con.executemany("INSERT INTO technical_signals VALUES (?,?,?)", ts)
     con.executemany("INSERT INTO signal_outcomes VALUES (?,?,?,?,?,?)", so)
     con.commit()
@@ -167,3 +173,56 @@ def test_too_few_dates_for_two_independent_blocks_gives_no_ci_and_no_alert():
     assert tr["dates"] < 10 and tr["ci95"] is None and tr["low_data"] is True
     from accuracy_alerts import brier_alert
     assert brier_alert({"calibration": {"5": {"n": 1, "trailing": tr}}}) is None
+
+
+# ── AF-20261103-08: net results at each signal's own est_cost_bps, beside the flat costs ──
+
+def _costed_panel():
+    """One date, 40 names: A (100 bps) and B (NULL cost) are the published calls."""
+    fwd = [0.05, 0.90] + [0.0] * 38
+    return pd.DataFrame({"date": pd.Timestamp("2026-10-20"), "symbol": [f"S{i}" for i in range(40)], "score": range(40, 0, -1),
+                         "fwd": fwd, "buy": [True, True] + [False] * 38, "est_cost_bps": [100.0, None] + [40.0] * 38})
+
+
+def test_est_cost_of_100_bps_takes_one_percentage_point_and_null_stays_null():
+    net = S.net_at_own_cost(pd.Series([0.05, 0.05]), pd.Series([100.0, None]))
+    assert net[0] == pytest.approx(0.04)
+    assert np.isnan(net[1])                                         # missing cost is not zero cost
+
+
+def test_null_cost_call_is_excluded_from_the_own_cost_figure_and_counted_in_coverage():
+    p = _costed_panel()
+    u = p["fwd"].mean()
+    fig = S.own_cost_figures(p, "published", 5)
+    assert fig["excess_own_pct"] == pytest.approx((0.05 - 0.01 - u) * 100)     # B at +90% would swamp this as a zero-cost row
+    assert fig["excess_030_same_rows_pct"] == pytest.approx((0.05 - S.COST_LOW - u) * 100)
+    assert (fig["own_cost_calls"], fig["own_cost_missing"], fig["own_cost_coverage"]) == (1, 1, 0.5)
+    assert fig["own_cost_dates"] == 1 and fig["own_cost_low_data"] is True
+
+
+def test_a_selection_with_no_known_cost_has_no_own_cost_figure():
+    p = _costed_panel().assign(est_cost_bps=None)
+    fig = S.own_cost_figures(p, "published", 5)
+    assert np.isnan(fig["excess_own_pct"]) and np.isnan(fig["excess_030_same_rows_pct"])
+    assert (fig["own_cost_calls"], fig["own_cost_missing"], fig["own_cost_coverage"], fig["own_cost_dates"]) == (0, 2, 0.0, 0)
+
+
+def test_scorecard_rows_add_own_cost_keys_and_keep_every_existing_key():
+    from pg_test_support import pg_memory_conn
+    con = pg_memory_conn()
+    sess = _seed(con)
+    out = S.build_scorecard(con, str(sess[-40].date()))
+    con.execute("DELETE FROM unified_recommendations")
+    uncosted = S.build_scorecard(con, str(sess[-40].date()))
+    con.close()
+    assert uncosted["rows"] and all(r["own_cost_calls"] == 0 and r["excess_own_pct"] != r["excess_own_pct"] for r in uncosted["rows"])
+    assert [r["excess_030_pct"] for r in uncosted["rows"]] == [r["excess_030_pct"] for r in out["rows"]]     # costs move no existing key
+    assert out["cost_round_trip"] == [S.COST_FROZEN, S.COST_LOW]
+    r = next(r for r in out["rows"] if r["arm"] == "published" and r["tier"] == 1.0 and r["horizon"] == 5 and r["regime"] == "ALL")
+    existing = {"arm", "tier", "horizon", "floor", "regime", "dates", "eff_dates", "calls_per_date", "rank_ic", "ic_t_eff", "hit_rate",
+                "base_hit", "hit_lift", "hit_ci95", "excess_050_pct", "excess_030_pct", "t_eff", "payoff", "turnover", "verdict", "low_data"}
+    assert existing <= set(r)
+    assert abs(r["excess_030_pct"] - r["excess_050_pct"] - 0.20) < 1e-9
+    assert r["excess_030_same_rows_pct"] - r["excess_own_pct"] == pytest.approx(0.70)       # 100 bps own vs 30 flat
+    assert r["own_cost_calls"] == 4 * r["own_cost_dates"]                                   # S0-S3 only
+    assert r["own_cost_missing"] == 36 * r["own_cost_dates"]                                # S4's NULL, S5's other run, 34 with no row

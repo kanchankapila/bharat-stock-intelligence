@@ -10,7 +10,8 @@ and never touches its PROTOCOL; the frozen forward test remains the arbiter. Thi
   regimes   ALL; UP/DOWN = NIFTY50 close vs its own 200-session mean; BROAD/NARROW = share of names above their
             50-session mean >= 50%. Objective and point-in-time, deliberately NOT the HMM in market_regimes.
   per row   dates, independent windows, rank IC (+t over windows), hit rate, random-pick hit, lift +-95%,
-            net excess at the frozen 0.50% round trip and at 0.30%, payoff ratio, turnover, LOW-DATA flag
+            net excess at the frozen 0.50% round trip and at 0.30%, payoff ratio, turnover, LOW-DATA flag;
+            beside those, net excess at each call's own est_cost_bps with its coverage, and 0.30% on those same rows
   plus      a reliability table and Brier score for technical_signals.calibrated_win_probability against decisive
             signal_outcomes (technical, path_barrier) vs a TRAILING purged base rate (the alert's benchmark) and,
             descriptively, the same rows' hindsight base rate; IC series per arm; top-decile
@@ -128,19 +129,51 @@ def payoff_ratio(excess: np.ndarray) -> float:
     return float(w.mean() / -l.mean()) if len(w) and len(l) else float("nan")
 
 
+def _select(g: pd.DataFrame, tier) -> pd.DataFrame:
+    if tier == "published":
+        return g[g["buy"]]
+    return g.sort_values("score", ascending=False, kind="stable").head(max(1, math.ceil(tier * len(g))))
+
+
 def _selections(p: pd.DataFrame, tier, cost: float):
     """Per date (selected symbol set, per-call net excess) using selective_accuracy's own selection rule."""
     sets, ex = [], []
     for _, g in p.dropna(subset=["score", "fwd"]).groupby("date"):
         if len(g) < MIN_PER_DATE:
             continue
-        if tier == "published":
-            sel = g[g["buy"]]
-        else:
-            sel = g.sort_values("score", ascending=False, kind="stable").head(max(1, math.ceil(tier * len(g))))
+        sel = _select(g, tier)
         sets.append(set(sel["symbol"]))
         ex.append((sel["fwd"] - cost - g["fwd"].mean()).to_numpy())
     return sets, (np.concatenate(ex) if ex else np.array([]))
+
+
+def net_at_own_cost(fwd: pd.Series, est_cost_bps: pd.Series) -> pd.Series:
+    """Forward return (fraction) net of the call's own round trip. A missing cost stays missing, never zero cost."""
+    return fwd - pd.to_numeric(est_cost_bps, errors="coerce") / 10_000
+
+
+def own_cost_figures(p: pd.DataFrame, tier, horizon: int) -> dict:
+    """Net excess at each call's own est_cost_bps, only on calls that have one, plus 0.30% on those SAME calls: the
+    covered dates are a subset of the panel, so excess_030_pct is not comparable. Reporting only (AF-20261103-08)."""
+    calls = missing = 0
+    per_date = []
+    for _, g in p.dropna(subset=["score", "fwd"]).groupby("date"):
+        if len(g) < MIN_PER_DATE:
+            continue
+        sel = _select(g, tier)
+        net = net_at_own_cost(sel["fwd"], sel["est_cost_bps"]).dropna()
+        calls += len(net)
+        missing += len(sel) - len(net)
+        if len(net):
+            u = g["fwd"].mean()
+            per_date.append(((net - u).mean(), (sel.loc[net.index, "fwd"] - COST_LOW - u).mean()))
+    own, flat = np.array(per_date).T if per_date else (np.array([np.nan]), np.array([np.nan]))
+    eff = _effective_dates(len(per_date), horizon)
+    return {"excess_own_pct": float(own.mean() * 100), "excess_030_same_rows_pct": float(flat.mean() * 100),
+            "own_cost_calls": calls, "own_cost_missing": missing,
+            "own_cost_coverage": calls / (calls + missing) if calls + missing else float("nan"),
+            "own_cost_dates": len(per_date), "own_cost_eff_dates": float(eff),
+            "own_cost_low_data": bool(not (eff >= MIN_DATES_RELIABLE))}
 
 
 def _ic_stats(ic: pd.Series, horizon: int):
@@ -167,7 +200,8 @@ def grade_arm(p: pd.DataFrame, arm: str, horizon: int, floor: float, regime: str
                      "hit_lift": r["hit_lift"], "hit_ci95": r["hit_ci95"],
                      "excess_050_pct": r["mean_excess_pct"], "excess_030_pct": r["mean_excess_pct"] + (COST_FROZEN - COST_LOW) * 100,
                      "t_eff": r["t_eff"], "payoff": payoff_ratio(ex), "turnover": turnover(sets),
-                     "verdict": r["verdict"], "low_data": bool(not (r["eff_dates"] >= MIN_DATES_RELIABLE))})
+                     "verdict": r["verdict"], "low_data": bool(not (r["eff_dates"] >= MIN_DATES_RELIABLE)),
+                     **own_cost_figures(p, r["tier"], horizon)})
     return rows
 
 
@@ -185,7 +219,15 @@ def load_history(con, since: str) -> pd.DataFrame:
     for c in HIST_COLS[3:]:
         if c != "classification":
             df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df
+    # est_cost_bps is only on unified_recommendations. Matching the exact run keeps it point-in-time: a later run's cost
+    # never reaches an earlier call, and a call whose row was overwritten stays NULL. A second query and a left merge
+    # leave the history row order alone, because score ties break on row order and existing figures must not move.
+    costs = _frame(con.execute("SELECT symbol, generated_at, est_cost_bps FROM unified_recommendations "
+                               "WHERE generated_at >= ? AND est_cost_bps IS NOT NULL", (lo,)).fetchall(),
+                   ["symbol", "generated_at", "est_cost_bps"])
+    costs["generated_at"] = pd.to_datetime(costs["generated_at"], utc=True).dt.tz_convert("Asia/Kolkata")
+    costs["est_cost_bps"] = pd.to_numeric(costs["est_cost_bps"], errors="coerce")
+    return df.merge(costs, on=["symbol", "generated_at"], how="left")
 
 
 def load_market_state(con, since: str):
@@ -264,7 +306,7 @@ def build_scorecard(con, since: str) -> dict:
                 continue
             for h in HORIZONS:
                 for a in A.ARMS:
-                    p = sub[["date", "symbol", "buy", f"arm_{a}", f"fwd_{h}"]].rename(columns={f"arm_{a}": "score", f"fwd_{h}": "fwd"})
+                    p = sub[["date", "symbol", "buy", "est_cost_bps", f"arm_{a}", f"fwd_{h}"]].rename(columns={f"arm_{a}": "score", f"fwd_{h}": "fwd"})
                     out["rows"] += grade_arm(p, a, h, floor, regime)
                     if floor == FLOORS[0] and regime == "ALL":
                         ic = A.session_ic(p, p["score"], p["fwd"], date_col="date", min_n=MIN_PER_DATE)
@@ -304,7 +346,8 @@ def print_report(out: dict, floor: float = FLOORS[0], tiers=("published", 0.10))
           f"(retrospective; the frozen forward test {out['forward_test_protocol_hash']} is the arbiter)")
     print(f"floor Rs {floor / 1e7:.0f}cr ADT | hit = beat the equal-weight universe mean after 0.50% | lift = hit - random pick")
     print(f"{'arm':>17} {'tier':>9} {'h':>3} {'regime':>6} {'dates':>5} {'eff':>5} {'IC':>7} {'IC_t':>6} {'hit':>6} "
-          f"{'base':>6} {'lift':>7} {'+-95':>6} {'ex@.30':>7} {'ex@.50':>7} {'t_eff':>6} {'payoff':>6} {'turn':>5}  flag")
+          f"{'base':>6} {'lift':>7} {'+-95':>6} {'ex@.30':>7} {'ex@.50':>7} {'t_eff':>6} {'payoff':>6} {'turn':>5}  flag  "
+          f"| own cost: {'ex@own':>7} {'ex@.30':>7} {'calls':>6} {'null':>6} {'eff':>5}")
     for r in out["rows"]:
         if r["floor"] != floor or r["tier"] not in tiers:
             continue
@@ -312,7 +355,9 @@ def print_report(out: dict, floor: float = FLOORS[0], tiers=("published", 0.10))
               f"{f(r['rank_ic'], '+7.3f'):>7} {f(r['ic_t_eff'], '6.2f'):>6} {f(r['hit_rate'], '6.3f'):>6} "
               f"{f(r['base_hit'], '6.3f'):>6} {f(r['hit_lift'], '+7.3f'):>7} {f(r['hit_ci95'], '6.3f'):>6} "
               f"{f(r['excess_030_pct'], '+7.3f'):>7} {f(r['excess_050_pct'], '+7.3f'):>7} {f(r['t_eff'], '6.2f'):>6} "
-              f"{f(r['payoff'], '6.2f'):>6} {f(r['turnover'], '5.2f'):>5}  {'LOW-DATA' if r['low_data'] else r['verdict']}")
+              f"{f(r['payoff'], '6.2f'):>6} {f(r['turnover'], '5.2f'):>5}  {'LOW-DATA' if r['low_data'] else r['verdict']}  "
+              f"| {f(r['excess_own_pct'], '+7.3f'):>7} {f(r['excess_030_same_rows_pct'], '+7.3f'):>7} {r['own_cost_calls']:>6} "
+              f"{r['own_cost_missing']:>6} {r['own_cost_eff_dates']:5.1f}")
     for h, c in out["calibration"].items():
         if c["n"]:
             print(f"calibration {h}d: n={c['n']} mean predicted {c['mean_predicted']:.3f} vs decisive-WIN base {c['base_rate']:.3f}; "
