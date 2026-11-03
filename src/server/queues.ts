@@ -1008,11 +1008,18 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
     .catch(e => T.fail('earnings_beat_features', e));
 
   // Sector-global benchmark correlation (requires macro_asset_prices from global_macro_fetcher).
-  await runPython('sector_global_corr.py', [], 3 * 60_000)
+  // 3min -> 10min (2026-11-03): both the closed-day and evening chains hit the exact 180s
+  // ceiling while competing for technical_signals row locks. Standalone production readback is
+  // only 5s, so this is contention headroom, not permission for an unbounded query plan; it
+  // matches the neighbouring full-universe feature writers' existing 10-minute budget.
+  await runPython('sector_global_corr.py', [], 10 * 60_000)
     .catch(e => T.fail('sector_global_corr', e));
 
   // Historical Volatility (HV10/20/30/60d + IV-HV ratio) purely from stock_ohlcv — no new feed.
-  await runPython('hv_features.py', [], 3 * 60_000)
+  // The 2026-11-02 run reached this immediately after sector_global_corr timed out and then hit
+  // the same exact 180s ceiling. Its full 2,158-symbol production run is 10.4s standalone; give
+  // the scheduled writer the same lock-contention headroom rather than failing the parent job.
+  await runPython('hv_features.py', [], 10 * 60_000)
     .catch(e => T.fail('hv_features', e));
 
   // Analyst estimate revision drift (EPS + price-target 3m change) from analyst_estimates_history.
