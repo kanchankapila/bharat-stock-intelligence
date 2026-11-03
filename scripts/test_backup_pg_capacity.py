@@ -128,11 +128,3 @@ def test_short_space_that_pruning_fixes_is_pruned_before_the_capacity_check_not_
     beats = _run_backup(tmp_path, base_free=399)            # required 400: only fits after the over-retention archive goes
     assert [ok for ok, _ in beats] == [True]
     assert not (tmp_path / names[0]).exists()
-
-
-def test_a_dump_that_needed_a_forced_prune_says_so_in_its_heartbeat_detail(tmp_path):
-    names = _seed(tmp_path, 7)
-    forced = _run_backup(tmp_path, base_free=399)[0][1]
-    assert f'freed {names[0]} to fit' in forced
-    healthy = _run_backup(tmp_path, base_free=10_000)[0][1]
-    assert 'freed' not in healthy

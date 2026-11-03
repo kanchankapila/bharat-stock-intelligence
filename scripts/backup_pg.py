@@ -281,7 +281,7 @@ def _make_room_for_backup() -> list[Path]:
 def _backup_under_lock() -> None:
     _check_container()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    freed = _make_room_for_backup()
+    _make_room_for_backup()
     capacity_error = _capacity_problem()
     if capacity_error:
         _record_heartbeat(False, capacity_error)
@@ -338,8 +338,7 @@ def _backup_under_lock() -> None:
     os.replace(pending, out)
     print(f"[BACKUP] wrote {out} ({size_mb:.1f} MB), TOC verified")
     _prune()
-    forced = f"; freed {', '.join(p.name for p in freed)} to fit" if freed else ""
-    _record_heartbeat(True, f"{out.name} ({size_mb:.1f} MB){forced}")
+    _record_heartbeat(True, f"{out.name} ({size_mb:.1f} MB)")
 
 
 def _verify_dump(path: Path) -> tuple[bool, str]:
