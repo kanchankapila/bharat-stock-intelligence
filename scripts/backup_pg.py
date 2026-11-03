@@ -244,13 +244,17 @@ def backup() -> None:
         _backup_under_lock()
 
 
+def _required_bytes(prior_size: int) -> int:
+    return 2 * prior_size + BACKUP_RESERVE_BYTES
+
+
 def _capacity_problem() -> str | None:
     """Keep room for a new archive plus observed concurrent disk consumption."""
     archives = sorted(BACKUP_DIR.glob(f"{PG_DB}_*.dump"),
                       key=lambda path: path.stat().st_mtime, reverse=True)
     prior_size = archives[0].stat().st_size if archives else 0
     free = shutil.disk_usage(BACKUP_DIR).free
-    required = 2 * prior_size + BACKUP_RESERVE_BYTES
+    required = _required_bytes(prior_size)
     if free < required:
         return (f"Insufficient backup disk free space: {free} bytes available; "
                 f"need {required} bytes (twice latest archive plus reserve).")
@@ -263,7 +267,7 @@ def _make_room_for_backup() -> list[Path]:
                       key=lambda path: path.stat().st_mtime, reverse=True)
     if not archives:
         return []
-    required = 2 * archives[0].stat().st_size + BACKUP_RESERVE_BYTES
+    required = _required_bytes(archives[0].stat().st_size)
     free = shutil.disk_usage(BACKUP_DIR).free
     candidates = archives[max(RETENTION - 1, 1):]
     if free >= required or free + sum(p.stat().st_size for p in candidates) < required:
@@ -277,7 +281,7 @@ def _make_room_for_backup() -> list[Path]:
 def _backup_under_lock() -> None:
     _check_container()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    _make_room_for_backup()
+    freed = _make_room_for_backup()
     capacity_error = _capacity_problem()
     if capacity_error:
         _record_heartbeat(False, capacity_error)
@@ -334,7 +338,8 @@ def _backup_under_lock() -> None:
     os.replace(pending, out)
     print(f"[BACKUP] wrote {out} ({size_mb:.1f} MB), TOC verified")
     _prune()
-    _record_heartbeat(True, f"{out.name} ({size_mb:.1f} MB)")
+    forced = f"; freed {', '.join(p.name for p in freed)} to fit" if freed else ""
+    _record_heartbeat(True, f"{out.name} ({size_mb:.1f} MB){forced}")
 
 
 def _verify_dump(path: Path) -> tuple[bool, str]:

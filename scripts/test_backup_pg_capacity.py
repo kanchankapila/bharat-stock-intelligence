@@ -98,3 +98,41 @@ def test_below_retention_count_deletes_nothing(tmp_path):
     assert problem is not None
     assert set(names) <= _survivors(tmp_path)
     _others_survive(tmp_path)
+
+
+def _run_backup(tmp_path, base_free):
+    """_backup_under_lock with the container, dump, verification, prune and heartbeat stubbed; disk_usage tracks tmp_path."""
+    start = sum(p.stat().st_size for p in tmp_path.iterdir())
+
+    def usage(_path):
+        now = sum(p.stat().st_size for p in tmp_path.iterdir())
+        return type('Usage', (), {'free': base_free + start - now})()
+
+    beats = []
+    with patch.object(backup_pg, 'BACKUP_DIR', tmp_path), \
+         patch.object(backup_pg, 'PG_DB', 'bharat_intel'), \
+         patch.object(backup_pg, 'RETENTION', 7), \
+         patch.object(backup_pg, 'BACKUP_RESERVE_BYTES', 200), \
+         patch('backup_pg.shutil.disk_usage', side_effect=usage), \
+         patch.object(backup_pg, '_check_container'), \
+         patch.object(backup_pg, '_verify_dump', return_value=(True, '')), \
+         patch.object(backup_pg, '_prune'), \
+         patch.object(backup_pg, '_record_heartbeat', side_effect=lambda ok, detail: beats.append((ok, detail))), \
+         patch('backup_pg.subprocess.run', return_value=type('Proc', (), {'returncode': 0, 'stderr': b''})()):
+        backup_pg._backup_under_lock()
+    return beats
+
+
+def test_short_space_that_pruning_fixes_is_pruned_before_the_capacity_check_not_refused(tmp_path):
+    names = _seed(tmp_path, 7)
+    beats = _run_backup(tmp_path, base_free=399)            # required 400: only fits after the over-retention archive goes
+    assert [ok for ok, _ in beats] == [True]
+    assert not (tmp_path / names[0]).exists()
+
+
+def test_a_dump_that_needed_a_forced_prune_says_so_in_its_heartbeat_detail(tmp_path):
+    names = _seed(tmp_path, 7)
+    forced = _run_backup(tmp_path, base_free=399)[0][1]
+    assert f'freed {names[0]} to fit' in forced
+    healthy = _run_backup(tmp_path, base_free=10_000)[0][1]
+    assert 'freed' not in healthy
