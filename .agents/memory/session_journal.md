@@ -502,3 +502,8 @@ PR #131 merged as b4bf2a50. The reviewed source was integrated with the dirty li
   a memory cause (13 MB per 10), then fixed for speed anyway.
 - `CUDA_VISIBLE_DEVICES=` (empty) makes dl_engine raise at import on this box; `-1` is the working mask.
 - AF-20260927-20 stays open (Sunday's run, plus the budget decision). AF-20261030-12 closed. AF-20261102-01 new.
+
+## 2026-11-03 - Recommendation monitoring
+
+- AF-20261103-02 closed after the empty-population regression, deployment and production DQ readback. A constant healthy detail alone did not establish a frozen input; the check could fail on invalid dates but also passed an empty table.
+- AF-20261029-05 closed after current engine-worker and isolated test verification. The ten-stock lifecycle trace passed as a plumbing check, not an edge claim; 169 recommendation rows had at most three engine inputs. Model calibration and other scoring evidence remain in the shared ledger.
