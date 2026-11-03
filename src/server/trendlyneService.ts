@@ -1,4 +1,5 @@
 import { getStockMapping } from './stockMapping';
+import { lastTuesdayExpiry } from './fnoService';
 import { cacheGet, cacheSet } from './cacheService';
 import { fetchTrendlyneWithAuth } from './trendlyneAuthService';
 import { dbGet } from './dbAsync';
@@ -488,13 +489,7 @@ export async function fetchTrendlyneStockOptionChain(symbol: string, expiryDate?
       console.error('[TRENDLYNE OPTION CHAIN] Failed to fetch near expiry:', e);
     }
 
-    if (!expDate) {
-      const d = new Date();
-      const day = d.getDay();
-      const diff = (4 - day + 7) % 7;
-      const nextThursday = new Date(d.getTime() + diff * 24 * 60 * 60 * 1000);
-      expDate = nextThursday.toISOString().split('T')[0];
-    }
+    if (!expDate) expDate = lastTuesdayExpiry();
 
   }
 
