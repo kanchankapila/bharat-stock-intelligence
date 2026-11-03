@@ -21,6 +21,9 @@
 import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { rowGroups, bulkUpsert } from './dbBulk';
 import crypto from 'crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { fetchGlobalMarketData } from './globalMarketService';
 import { runPython } from './pythonRunner';
 import {
@@ -1050,27 +1053,41 @@ export async function runNewsSentimentCycle(): Promise<{
 
   await persistNewsRows(sentRows, legacyRows);
 
-  // AI enrichment for HIGH-impact items not yet AI-scored. 10 -> 25 (2026-08-13): at 10/cycle
-  // (15-min cadence -> 960/day) the 12,137-item backlog left after resetting the
-  // available=False fallback-poisoning bug (see finbert_news_sentiment.py) would take ~12.6
-  // days to clear even with zero new HIGH-impact arrivals. 25/cycle -> ~2,400/day, ~5 days --
-  // still conservative against the 180s runPython timeout (model load dominates cost, not
-  // per-item inference; this is a batch-size tuning knob, not a guaranteed-safe ceiling).
-  const highImpact = await dbAll(`
-    SELECT id, title, summary, category FROM news_sentiment_items
-    WHERE impact = 'HIGH' AND ai_scored = 0
-    ORDER BY fetched_at DESC LIMIT 25
-  `) as { id: string; title: string; summary: string; category: string }[];
-
-  if (highImpact.length > 0) {
-    await enrichWithFinBERT(highImpact);
-  }
+  await enrichPendingFinBERT();
 
   // Build and store market sentiment snapshot
   await buildMarketSentimentSnapshot();
 
   console.log(`[SENTIMENT] Cycle done: fetched=${fetched}, processed=${inserted}`);
   return { fetched, inserted, updated: 0 };
+}
+
+// FinBERT loads ~2.5GB per invocation and ran on every 15-min cycle with any unscored HIGH row
+// (~70-89 of 96 cycles/day, measured 2026-11-03). Unscored rows keep their keyword sentiment, which
+// is what every reader sees until FinBERT upgrades them, so batching to one load an hour only
+// delays the upgrade. Rows not scored in a skipped cycle stay ai_scored=0 and are picked up by the
+// next window because selection is every unscored HIGH row, not this cycle's arrivals.
+export const FINBERT_MIN_INTERVAL_MS = 60 * 60 * 1000;
+// Hourly arrivals over 14 days to 2026-11-03: p50 20, p95 114, max 765 (one bulk burst). 150 clears
+// p95. The payload travels in a file because 150 items exceed the Windows command-line limit.
+export const FINBERT_BATCH_LIMIT = 150;
+let lastFinbertAttemptMs: number | null = null;
+
+export function shouldRunFinBERT(nowMs: number, lastRunMs: number | null, pending: number): boolean {
+  if (pending <= 0) return false;
+  return lastRunMs === null || nowMs - lastRunMs >= FINBERT_MIN_INTERVAL_MS;
+}
+
+export async function enrichPendingFinBERT(nowMs = Date.now()): Promise<void> {
+  const highImpact = await dbAll(`
+    SELECT id, title, summary, category FROM news_sentiment_items
+    WHERE impact = 'HIGH' AND ai_scored = 0
+    ORDER BY fetched_at DESC LIMIT ${FINBERT_BATCH_LIMIT}
+  `) as { id: string; title: string; summary: string; category: string }[];
+
+  if (!shouldRunFinBERT(nowMs, lastFinbertAttemptMs, highImpact.length)) return;
+  lastFinbertAttemptMs = nowMs; // attempts, not successes: a failing model must not reload every cycle
+  await enrichWithFinBERT(highImpact);
 }
 
 // ─── FinBERT Enrichment for High-Impact News ──────────────────────────────────
@@ -1086,9 +1103,10 @@ export async function runNewsSentimentCycle(): Promise<{
 export async function enrichWithFinBERT(items: { id: string; title: string; summary: string; category: string }[]) {
   const markDoneSql = `UPDATE news_sentiment_items SET ai_scored=1, sentiment=?, sentiment_score=? WHERE id=?`;
   const payload = items.map(i => ({ id: i.id, title: i.title, summary: i.summary?.slice(0, 300) ?? '' }));
-  const b64 = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64');
+  const payloadFile = path.join(os.tmpdir(), `bsi-finbert-${process.pid}-${Date.now()}.json`);
 
   try {
+    await fs.promises.writeFile(payloadFile, JSON.stringify(payload), 'utf-8');
     // 60s -> 180s (2026-08-25): the 60s timeout fired repeatedly in pm2-err.log ("Timed out
     // after 60000ms (killed by timeout)") because model load dominates cost and competes for
     // RAM/CPU on a box that also runs the server, training and four other Python services.
@@ -1101,7 +1119,7 @@ export async function enrichWithFinBERT(items: { id: string; title: string; summ
     // predict 2.7s = 37s for a 1-item batch -- i.e. ~50-60s for the real 25-item cycle on an
     // idle host, so 180s was only ~3x, and RAM pressure multiplies torch load well past that.
     // 420s keeps ~7x over the measured baseline and still fits the 15-min cycle.
-    const { stdout } = await runPython('finbert_news_sentiment.py', [b64], 420_000);
+    const { stdout } = await runPython('finbert_news_sentiment.py', ['@' + payloadFile], 420_000);
     const jsonLine = stdout.trim().split('\n').pop() ?? '[]'; // model-load progress noise precedes it on some runs
     const results = JSON.parse(jsonLine) as { id: string; sentiment: string; score: number }[];
     for (const r of results) {
@@ -1109,6 +1127,8 @@ export async function enrichWithFinBERT(items: { id: string; title: string; summ
     }
   } catch (e) {
     console.error('[SENTIMENT] FinBERT enrichment failed:', (e as Error).message);
+  } finally {
+    await fs.promises.unlink(payloadFile).catch(() => {});
   }
 }
 

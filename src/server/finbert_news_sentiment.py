@@ -65,5 +65,10 @@ def score_batch(items: list[dict]) -> list[dict]:
 
 
 if __name__ == "__main__":
-    payload = json.loads(base64.b64decode(sys.argv[1]).decode("utf-8"))
+    arg = sys.argv[1]
+    if arg.startswith("@"):  # file path: a 150-item batch overflows the Windows command line
+        with open(arg[1:], encoding="utf-8") as fh:
+            payload = json.load(fh)
+    else:
+        payload = json.loads(base64.b64decode(arg).decode("utf-8"))
     print(json.dumps(score_batch(payload)))

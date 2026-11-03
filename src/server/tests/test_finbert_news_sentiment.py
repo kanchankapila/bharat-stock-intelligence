@@ -84,3 +84,41 @@ class TestScoreBatch:
             ])
         assert [r["id"] for r in out] == ["up"]
         assert out[0]["sentiment"] == "BEARISH"
+
+
+class TestMainPayloadTransport:
+    """A 150-item batch is ~70KB of base64, over the 32,767-char Windows command line, so the TS
+    caller passes '@<file>' instead of the base64 argument. Both forms must score the same."""
+
+    def _run_main(self, argv_payload):
+        import base64
+        import io
+        import json
+        import runpy
+        from contextlib import redirect_stdout
+
+        fake_nlp = MagicMock()
+        fake_nlp.FinBERTInference.return_value.predict.return_value = _fake_predict("bullish", 0.9)
+        buf = io.StringIO()
+        with patch.dict(sys.modules, {"nlp_engine": fake_nlp}), \
+                patch.object(sys, "argv", ["finbert_news_sentiment.py", argv_payload]), \
+                redirect_stdout(buf):
+            runpy.run_path(
+                os.path.join(os.path.dirname(__file__), "..", "finbert_news_sentiment.py"),
+                run_name="__main__",
+            )
+        return json.loads(buf.getvalue().strip().splitlines()[-1]), base64, json
+
+    def test_file_argument_scores_the_batch(self, tmp_path):
+        import json
+        f = tmp_path / "batch.json"
+        f.write_text(json.dumps([{"id": "a", "title": "Profit jumps ₹5", "summary": ""}]), encoding="utf-8")
+        out, _, _ = self._run_main("@" + str(f))
+        assert out == [{"id": "a", "sentiment": "BULLISH", "score": 0.9}]
+
+    def test_base64_argument_still_works(self):
+        import base64
+        import json
+        b64 = base64.b64encode(json.dumps([{"id": "b", "title": "t", "summary": ""}]).encode()).decode()
+        out, _, _ = self._run_main(b64)
+        assert out == [{"id": "b", "sentiment": "BULLISH", "score": 0.9}]
