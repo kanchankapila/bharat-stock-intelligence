@@ -54,6 +54,11 @@ export function objectiveRegime(closesNewestFirst: number[]) {
   return { label: distPct >= 0 ? 'ABOVE 200D MEAN' as const : 'BELOW 200D MEAN' as const, close: last, mean200: mean, distPct };
 }
 
+// The stored blob is ~370KB of per-arm rows and series; clients read only alerts and callState's verdict/status.
+function scorecardSummary(sc: Record<string, unknown> | null) {
+  return sc && { generated_at: sc.generated_at, alerts: sc.alerts, verdict: sc.verdict, status: sc.status };
+}
+
 export const edgeRouter = router({
   getEdgeStatus: publicProcedure.query(async () => {
     const rows = await dbAll<{ key: string; value: string | null; asof: string | null }>(
@@ -65,7 +70,7 @@ export const edgeRouter = router({
     return {
       forwardTest,
       forwardTestAsOf: get('forward_test_report')?.asof ?? null,
-      scorecard: parsePyJson<Record<string, unknown>>(get('accuracy_scorecard')?.value),
+      scorecard: scorecardSummary(parsePyJson<Record<string, unknown>>(get('accuracy_scorecard')?.value)),
       scorecardAsOf: get('accuracy_scorecard')?.asof ?? null,
       minIndependentWindows: MIN_DATES_RELIABLE,
       calendarBlockedUntil: Object.fromEntries([5, 10, 21].map(h => [String(h), calendarBlockedUntil(since, h)])) as Record<string, string | null>,
