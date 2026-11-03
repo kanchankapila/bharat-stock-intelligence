@@ -54,6 +54,7 @@ A finding may stay **open** only for one of these reasons, stated in its row:
   4. Grep the repo for sibling endpoints and probe route by route with the MINIMUM headers (start from none — adding a token can lower access).
   5. Only then ask the user, with the per-route breakdown and alternates ruled in or out — never "this vendor is dead".
 - **Depends on an earlier fix** — genuinely sequential; name the blocking row.
+- **DEPLOY-PENDING** — a FIX-lane fix is committed and waits only on a restart or migration; write the token in the Status cell (case-sensitive). Since 2026-11-03 `findings:check` fails an open FIX-lane row whose only reason is EVIDENCE (the lane says the fix is known); rows found 2026-09-30..2026-11-02 only warn.
 
 This applies equally to findings from a log sweep: a pm2 warning/error that means data was not written is a
 defect to fix now, whatever level it was logged at, including a step that exited 0. Re-verify any open row

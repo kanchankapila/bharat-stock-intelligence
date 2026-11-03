@@ -45,6 +45,39 @@ describe('checkFindingsLedger.validate', { timeout: 60_000 }, () => {
     expect(validate(table('| AF-20260930-94 | 2026-09-30 | x | bug | EVIDENCE | measuring first | — | — |'))).toEqual([]);
   });
 
+  describe('FIX rows cannot stay open on EVIDENCE', () => {
+    const row = (found: string, lane: string, status: string) => table(`| AF-20261103-90 | ${found} | x | bug | ${lane} | ${status} | — | — |`);
+
+    it('rejects a post-FIX_RULE_START open FIX row whose only reason is EVIDENCE', () => {
+      expect(validate(row('2026-11-03', 'FIX', 'EVIDENCE: the local fix passes')).join()).toMatch(/AF-20261103-90.*FIX row.*EVIDENCE/);
+      expect(validate(row('2026-11-03', 'fix', 'EVIDENCE: the local fix passes')).join()).toMatch(/FIX row.*EVIDENCE/);
+    });
+
+    it('accepts DEPLOY-PENDING and a user decision on a FIX row', () => {
+      expect(validate(row('2026-11-03', 'FIX', 'DEPLOY-PENDING: needs pm2 restart'))).toEqual([]);
+      expect(validate(row('2026-11-03', 'FIX', 'needs a user decision: which vendor'))).toEqual([]);
+    });
+
+    it('matches DEPLOY-PENDING as a case-sensitive token, not prose', () => {
+      expect(validate(row('2026-11-03', 'FIX', 'deploy pending, EVIDENCE only')).join()).toMatch(/FIX row.*EVIDENCE/);
+    });
+
+    it('still accepts EVIDENCE on an EVIDENCE-lane row', () => {
+      expect(validate(row('2026-11-03', 'EVIDENCE', 'Open - EVIDENCE: measure first'))).toEqual([]);
+    });
+
+    it('only warns for FIX rows found between RULE_START and FIX_RULE_START', () => {
+      const r = validateDetailed(row('2026-10-20', 'FIX', 'EVIDENCE: the local fix passes'));
+      expect(r.problems).toEqual([]);
+      expect(r.warnings.join()).toMatch(/AF-20261103-90/);
+    });
+
+    it('does not warn about a closed FIX row', () => {
+      const r = validateDetailed(table('| AF-20261103-91 | 2026-11-03 | x | bug | FIX | EVIDENCE noted | `test_nt_change_oi_fetcher.py` | 2026-11-03 |'));
+      expect(r).toEqual({ problems: [], warnings: [] });
+    });
+  });
+
   it('does not re-judge rows found before the rule started', () => {
     expect(validate(table('| AF-20260801-01 | 2026-08-01 | x | bug | FIX | fixed | — | 2026-08-01 |'))).toEqual([]);
   });
@@ -86,7 +119,7 @@ describe('checkFindingsLedger.validate', { timeout: 60_000 }, () => {
 
   it('the real ledger has no structural problems beyond the known-blocked rows', () => {
     const real = readFileSync(resolve(__dirname, '../../docs/audit-findings.md'), 'utf8');
-    const structural = (validate(real) as string[]).filter(p => !/cites no existing|none of the four reasons/.test(p));
+    const structural = (validate(real) as string[]).filter(p => !/cites no existing|none of the four reasons|FIX row/.test(p));
     const unexpected = structural.filter(p => !KNOWN_BLOCKED.some(id => p.includes(id)));
     expect(unexpected).toEqual([]);
     const stillBroken = KNOWN_BLOCKED.filter(id => structural.some(p => p.includes(id)));

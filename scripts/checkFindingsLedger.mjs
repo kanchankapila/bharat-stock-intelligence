@@ -14,6 +14,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const RULE_START = '2026-09-30';
+// From here a FIX-lane row cannot stay open on EVIDENCE: the lane says the fix is known.
+export const FIX_RULE_START = '2026-11-03';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // An artifact that can fail: a test file, a scanner/check script, or a named static check.
@@ -22,7 +24,10 @@ const ARTIFACT = /`?([\w./-]+?\.(?:test\.tsx?|test\.mjs|py|mjs|tsx?))(?![\w./-])
 // which is "needs a user decision" in practice.
 // "Fixed, pending the next live run/retrain" is committed-not-yet-verified-live: calendar-blocked
 // on the next scheduled run, and stated as such.
-const OPEN_REASON = /EVIDENCE|calendar[- ]blocked|needs? (?:a |the )?user|user decision|depends on|DEPENDS|(?:blocked|refused) by the auto-mode classifier|pending (?:the )?(?:next|live)/i;
+const NON_EVIDENCE_REASON = /calendar[- ]blocked|needs? (?:a |the )?user|user decision|depends on|DEPENDS|(?:blocked|refused) by the auto-mode classifier|pending (?:the )?(?:next|live)/i;
+// DEPLOY-PENDING: committed, waiting only on a restart or migration. Case-sensitive so the words in prose do not count.
+const DEPLOY_PENDING = /\bDEPLOY-PENDING\b/;
+const hasReason = (t, evidenceOk) => NON_EVIDENCE_REASON.test(t) || DEPLOY_PENDING.test(t) || (evidenceOk && /EVIDENCE/i.test(t));
 
 const SPLIT = /(?<!\\)\|/;
 const cells = line => line.split(SPLIT).slice(1, -1).map(c => c.trim());
@@ -110,8 +115,10 @@ export function validateDetailed(text) {
     if (isClosed && /FIX/i.test(lane) && !artifactExists(immunized)) {
       problems.push(`L${n} ${id}: closed FIX row cites no existing regression test/check in "Immunized" (${immunized.slice(0, 60) || 'empty'})`);
     }
-    if (!isClosed && !OPEN_REASON.test(`${lane} ${status}`)) {
+    if (!isClosed && !hasReason(`${lane} ${status}`, true)) {
       problems.push(`L${n} ${id}: open row states none of the four reasons (EVIDENCE / calendar-blocked / needs a user decision / depends on another row)`);
+    } else if (!isClosed && /^FIX/i.test(lane) && !hasReason(`${lane} ${status}`, false)) {
+      (found < FIX_RULE_START ? warnings : problems).push(`L${n} ${id}: open FIX row relies on EVIDENCE; a FIX row stays open only as DEPLOY-PENDING / calendar-blocked / needs a user decision / depends on another row`);
     }
   });
   return { problems, warnings };
@@ -120,7 +127,7 @@ export function validateDetailed(text) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const file = resolve(ROOT, process.argv[2] ?? 'docs/audit-findings.md');
   const { problems, warnings } = validateDetailed(readFileSync(file, 'utf8'));
-  for (const w of warnings) console.warn(`[findings:check] warn (pre-rule history): ${w}`);
+  for (const w of warnings) console.warn(`[findings:check] warn: ${w}`);
   if (problems.length) {
     console.error(`[findings:check] ${problems.length} problem(s) in ${file}:`);
     for (const p of problems) console.error(`  - ${p}`);
