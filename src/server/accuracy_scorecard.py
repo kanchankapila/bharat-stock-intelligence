@@ -306,8 +306,7 @@ def build_scorecard(con, since: str) -> dict:
     calls = calls.merge(vol.rename(columns={"date": "session"}), on=["symbol", "session"], how="left")
     try:
         calls = attach_confluence_parts(con, calls, sessions)
-    except Exception as e:                                  # a shadow arm must not take the scorecard (and its alerts) down
-        con.rollback()
+    except Exception as e:                                  # a shadow arm must not take the scorecard (and its alerts) down; db_compat rolls the aborted transaction back
         out["no_sector_slot_error"] = f"{type(e).__name__}: {e}"[:300]
     arms = A.arm_scores(calls, calls["vol20"])
     for a in A.ARMS:

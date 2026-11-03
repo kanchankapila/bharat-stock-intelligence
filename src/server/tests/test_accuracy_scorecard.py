@@ -286,3 +286,21 @@ def test_confluence_parts_read_is_bounded_to_the_calls_window_and_selects_only_t
     sql = seen[0]
     assert "computed_at >= ?" in sql and "computed_at <= ?" in sql
     assert "sector_strength_score" in sql and "*" not in sql
+
+
+def test_a_failing_confluence_read_leaves_the_connection_usable_and_the_scorecard_and_its_other_arms_intact():
+    from pg_test_support import pg_memory_conn
+    con = pg_memory_conn()
+    sess = _seed(con)
+    since = str(sess[-40].date())
+    good = S.build_scorecard(con, since)
+    con.execute("DROP TABLE confluence_signals")                       # the read now raises inside an open transaction
+    con.commit()
+    out = S.build_scorecard(con, since)                                # later queries only work if the handler rolled back
+    con.close()
+    assert "UndefinedTable" in out["no_sector_slot_error"] and "no_sector_slot_error" not in good
+    assert out["no_sector_slot"] == {"sessions_covered": 0, "sessions_excluded": 40, "excluded": out["no_sector_slot"]["excluded"]}
+    slot = [r for r in out["rows"] if r["arm"] == "reblend_no_sector_slot"]
+    assert all(r["dates"] == 0 for r in slot)                          # blank, not a different arm
+    keep = lambda sc: json.dumps(S._clean([r for r in sc["rows"] if r["arm"] != "reblend_no_sector_slot"]))   # NaN != NaN
+    assert keep(out) == keep(good)                                     # the other arms are exactly as with the read working
