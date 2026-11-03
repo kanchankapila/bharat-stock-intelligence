@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFnoChainBody, lastTuesdayExpiry } from '../fnoService';
+import { parseFnoChainBody, lastTuesdayExpiry, nextTuesdayExpiry } from '../fnoService';
 
 // Minimal fixture shaped like a real smartoptions.trendlyne.com/phoenix/api/fno/option/chain/
 // response (headers use `unique_name`, matching so_option_chain_fetcher.py's own convention).
@@ -73,5 +73,24 @@ describe('lastTuesdayExpiry (NSE monthly equity-F&O expiry)', () => {
       expect(got.getUTCDay()).toBe(2); // Tuesday
       expect(got.getTime()).toBeGreaterThanOrEqual(d.getTime());
     }
+  });
+});
+
+describe('nextTuesdayExpiry (getNearExpiry fallback)', () => {
+  it('rolls a Monday to the next day', () => {
+    expect(nextTuesdayExpiry(new Date('2026-11-02T00:00:00Z'))).toEqual({ iso: '2026-11-03', trendlyne: '03-nov-2026' });
+  });
+
+  it('returns a Tuesday as itself', () => {
+    expect(nextTuesdayExpiry(new Date('2026-11-03T06:00:00Z')).iso).toBe('2026-11-03');
+  });
+
+  it('rolls a Wednesday to the following Tuesday', () => {
+    expect(nextTuesdayExpiry(new Date('2026-11-04T06:00:00Z')).iso).toBe('2026-11-10');
+  });
+
+  it('uses one IST calendar day for iso and trendlyne between 00:00 and 05:30 IST', () => {
+    // 01:30 IST Wednesday is still Tuesday in UTC.
+    expect(nextTuesdayExpiry(new Date('2026-11-03T20:00:00Z'))).toEqual({ iso: '2026-11-10', trendlyne: '10-nov-2026' });
   });
 });

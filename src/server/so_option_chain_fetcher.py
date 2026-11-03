@@ -16,7 +16,7 @@ API: https://smartoptions.trendlyne.com/phoenix/api/fno/option/chain/
 
 expDate must be a valid upcoming expiry for the stock. Nearest expiry per symbol
 is fetched from nt_fno_expiry (populated by sync_nt_fno_symbols.py → NT expiry API)
-or falls back to the nearest upcoming Thursday (NSE weekly expiry).
+or falls back to the month's last Tuesday (NSE monthly equity-F&O expiry).
 
 Run:
   python so_option_chain_fetcher.py                # all F&O stocks, nearest expiry
@@ -168,7 +168,7 @@ def last_tuesday_expiry(today: _date | None = None) -> str:
 
 
 def _get_nearest_expiry(symbol: str, exchange: str = "NSE") -> str:
-    """Look up nearest upcoming expiry from nt_fno_expiry, fallback to nearest Thursday."""
+    """Look up nearest upcoming expiry from nt_fno_expiry, fallback to the month's last Tuesday."""
     today = _date.today().isoformat()
     try:
         rows = query_all(

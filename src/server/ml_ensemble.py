@@ -111,26 +111,29 @@ def _parse_signal_types(signals_json) -> set[str]:
 
 def _days_to_fno_expiry(dates: pd.Series) -> pd.Series:
     """Calendar days from each date to the NSE monthly F&O expiry (last Thursday of the
-    month). If the date is past this month's last Thursday, roll to next month's. Expiry
-    week pins price to max-pain and inflates gamma — a real, leak-free timing feature."""
-    def _last_thursday(year: int, month: int):
+    month before 2025-09, last Tuesday from then on). If the date is past this month's
+    expiry, roll to next month's. Expiry week pins price to max-pain and inflates gamma — a
+    real, leak-free timing feature."""
+    def _monthly_expiry(year: int, month: int):
         if month == 12:
             nxt = datetime.date(year + 1, 1, 1)
         else:
             nxt = datetime.date(year, month + 1, 1)
         last = nxt - datetime.timedelta(days=1)
-        # Thursday == weekday 3
-        last -= datetime.timedelta(days=(last.weekday() - 3) % 7)
-        return last
+        # ponytail: market holidays are not modelled, so a holiday-shifted expiry reads at most
+        # one session late (same as lastTuesdayExpiry); market_holidays is the upgrade path.
+        # Cutover is the repo-documented 2025-09 date (nse_fo_bhav_history_fetcher.py), unconfirmed in our data.
+        weekday = 3 if last < datetime.date(2025, 9, 1) else 1
+        return last - datetime.timedelta(days=(last.weekday() - weekday) % 7)
 
     def _dte(ts):
         if pd.isna(ts):
             return np.nan
         d = ts.date()
-        exp = _last_thursday(d.year, d.month)
+        exp = _monthly_expiry(d.year, d.month)
         if d > exp:
             ny, nm = (d.year + 1, 1) if d.month == 12 else (d.year, d.month + 1)
-            exp = _last_thursday(ny, nm)
+            exp = _monthly_expiry(ny, nm)
         return (exp - d).days
 
     return dates.apply(_dte)

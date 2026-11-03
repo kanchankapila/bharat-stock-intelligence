@@ -462,3 +462,28 @@ class TestIntradayMicrostructureFeatures:
         assert X['opening_range_break'].iloc[0]  == pytest.approx(1.0,  abs=0.01)
         assert X['vwap_deviation_pct'].iloc[1]   == pytest.approx(-2.1, abs=0.01)
         assert X['first_hour_vol_share'].iloc[2] == pytest.approx(0.5,  abs=0.01)
+
+
+class TestDaysToFnoExpiryDateAware:
+    """Monthly F&O expiry is the last Thursday before 2025-09-01 and the last Tuesday from then on."""
+
+    def _dte(self, dates):
+        from src.server.ml_ensemble import _days_to_fno_expiry
+        return list(_days_to_fno_expiry(pd.Series(pd.to_datetime(dates))))
+
+    def test_last_thursday_before_cutover(self):
+        assert self._dte(['2025-08-27']) == [1]
+
+    def test_rolls_into_first_tuesday_month(self):
+        # Aug-2025 expiry (Thu 28th) has passed; Sep-2025's is Tue the 30th -> 32 days.
+        assert self._dte(['2025-08-29']) == [32]
+
+    def test_last_tuesday_after_cutover(self):
+        assert self._dte(['2026-10-26', '2026-10-28']) == [1, 27]
+
+    def test_holiday_ceiling_reads_one_session_late(self):
+        # 2026-11-24 is a holiday, so the real expiry is Mon 2026-11-23; holidays are not modelled.
+        assert self._dte(['2026-11-23']) == [1]
+
+    def test_nat_stays_nan(self):
+        assert np.isnan(self._dte([None])[0])

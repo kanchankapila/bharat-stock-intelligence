@@ -181,6 +181,22 @@ export async function getFnOSignals(query: string): Promise<FnOResponse> {
   }
 }
 
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/**
+ * The next Tuesday on or after `from`, on the IST calendar day, as one date for both formats.
+ * Fallback for getNearExpiry: NSE F&O expires on Tuesdays since 2025-09 (the old next-Thursday
+ * fallback named a day nothing expires on).
+ */
+export function nextTuesdayExpiry(from: Date = new Date()): { iso: string; trendlyne: string } {
+  const ist = new Date(from.getTime() + 19800_000);
+  const t = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + ((2 - ist.getUTCDay() + 7) % 7)));
+  return {
+    iso: t.toISOString().slice(0, 10),
+    trendlyne: `${String(t.getUTCDate()).padStart(2, '0')}-${MONTHS[t.getUTCMonth()]}-${t.getUTCFullYear()}`,
+  };
+}
+
 let cachedExpiry: { iso: string; trendlyne: string } | null = null;
 let lastExpiryFetch = 0;
 
@@ -218,22 +234,8 @@ async function getNearExpiry() {
     console.error('[FNO] Failed to fetch near expiry:', e);
   }
   
-  // Dynamic next Thursday fallback
-  const d = new Date();
-  const day = d.getDay();
-  const diff = (4 - day + 7) % 7;
-  const nextThursday = new Date(d.getTime() + diff * 24 * 60 * 60 * 1000);
-  const dd = nextThursday.getDate().toString().padStart(2, '0');
-  const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-  const month = months[nextThursday.getMonth()];
-  const yyyy = nextThursday.getFullYear();
-  
-  return {
-    iso: nextThursday.toISOString().split('T')[0],
-    trendlyne: `${dd}-${month}-${yyyy}`
-  };
+  return nextTuesdayExpiry();
 }
-
 
 export async function getTrendlyneFnoScanners(mtype: 'options' | 'futures', screenType: string, instType?: string) {
   // Deliberately no `expDate` param -- Trendlyne's own filter endpoint auto-resolves it to
