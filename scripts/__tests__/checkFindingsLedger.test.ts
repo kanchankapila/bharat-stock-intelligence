@@ -51,6 +51,7 @@ describe('checkFindingsLedger.validate', { timeout: 60_000 }, () => {
     it('rejects a post-FIX_RULE_START open FIX row whose only reason is EVIDENCE', () => {
       expect(validate(row('2026-11-04', 'FIX', 'EVIDENCE: the local fix passes')).join()).toMatch(/AF-20261103-90.*FIX row.*EVIDENCE/);
       expect(validate(row('2026-11-04', 'fix', 'EVIDENCE: the local fix passes')).join()).toMatch(/FIX row.*EVIDENCE/);
+      expect(validate(row('2026-11-04', '**FIX**', 'EVIDENCE: the local fix passes')).join()).toMatch(/FIX row.*EVIDENCE/);
     });
 
     it('accepts DEPLOY-PENDING and a user decision on a FIX row', () => {

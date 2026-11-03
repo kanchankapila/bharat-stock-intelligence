@@ -117,7 +117,7 @@ export function validateDetailed(text) {
     }
     if (!isClosed && !hasReason(`${lane} ${status}`, true)) {
       problems.push(`L${n} ${id}: open row states none of the four reasons (EVIDENCE / calendar-blocked / needs a user decision / depends on another row)`);
-    } else if (!isClosed && /^FIX/i.test(lane) && !hasReason(`${lane} ${status}`, false)) {
+    } else if (!isClosed && /^FIX/i.test(lane.replace(/\*/g, "")) && !hasReason(`${lane} ${status}`, false)) {
       (found < FIX_RULE_START ? warnings : problems).push(`L${n} ${id}: open FIX row relies on EVIDENCE; a FIX row stays open only as DEPLOY-PENDING / calendar-blocked / needs a user decision / depends on another row`);
     }
   });
