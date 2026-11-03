@@ -507,3 +507,10 @@ PR #131 merged as b4bf2a50. The reviewed source was integrated with the dirty li
 
 - AF-20261103-02 closed after the empty-population regression, deployment and production DQ readback. A constant healthy detail alone did not establish a frozen input; the check could fail on invalid dates but also passed an empty table.
 - AF-20261029-05 closed after current engine-worker and isolated test verification. The ten-stock lifecycle trace passed as a plumbing check, not an edge claim; 169 recommendation rows had at most three engine inputs. Model calibration and other scoring evidence remain in the shared ledger.
+
+## 2026-11-03 - Gap fixes
+
+- Nine fixes landed on local main at c500136b, unpushed; bharat-server not restarted because another session's dirty TypeScript would load with it (AF-20261103-15).
+- Tonight's backup is the first real test of the forced prune. Read `pg-backup-nightly` after 23:15.
+- Before the 2026-11-07 retrain: compare the unpromoted HMM `.candidate` against live (AF-20261103-12).
+- A shadow-arm gate written `corr < MIN` passed NaN; new class in `bugs-data-layer.md`.

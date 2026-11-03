@@ -53,6 +53,7 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 
 | Signature | Why it breaks |
 |---|---|
+| A gate written as `if corr < MIN: skip` | **NaN compares False**, so a constant or empty input passes the gate and yields a confident wrong figure instead of a blank (2026-11-03, `accuracy_shadow_arms.py`, found only in the whole-branch review). Write `if not (corr >= MIN)`. |
 | `float(x or 0)` / `int(x or 0)` on a model-output column | **NaN is truthy** — `nan or 0` is `nan`. Use `math.isfinite`, and **skip** rather than coerce to 0 (coercing fabricates the worst possible score). |
 | 🤖 `x != x` to detect NaN in Postgres | Postgres defines `NaN = NaN` as TRUE for total btree ordering. The IEEE self-inequality matches nothing and reports "clean". (Plain Python `x != x` is correct and used on purpose in ~10 fetchers — the checker only flags the SQL form.) |
 | A NaN-detection test on SQLite | SQLite coerces NaN to NULL on insert, so the test passes against unfixed code. Use a throwaway Postgres schema. |
