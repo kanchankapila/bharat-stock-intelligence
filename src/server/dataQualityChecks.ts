@@ -1980,13 +1980,16 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // 2026-08-14 (a Friday) every night until that day's bar landed. Quarantined fabricated
     // closed-session bars do not establish that a session traded; a weekday is bad only once it
     // is in the past and still has no non-suspect OHLCV bar.
-    sql: `SELECT COUNT(DISTINCT u.computed_at) AS bad_days
-          FROM unified_recommendations u
-          WHERE EXTRACT(ISODOW FROM u.computed_at::date) IN (6, 7)
-             OR (u.computed_at::date < CURRENT_DATE AND NOT EXISTS (
+    sql: `WITH snapshot_days AS (
+            SELECT DISTINCT computed_at::date AS day FROM unified_recommendations
+          )
+          SELECT COUNT(*) AS total_days, MAX(u.day)::text AS latest_day,
+                 COUNT(*) FILTER (WHERE EXTRACT(ISODOW FROM u.day) IN (6, 7)
+             OR (u.day < CURRENT_DATE AND NOT EXISTS (
                SELECT 1 FROM stock_ohlcv s
-               WHERE s.date = u.computed_at::date AND COALESCE(s.is_suspect, 0) = 0
-                 ))`,
+               WHERE s.date = u.day AND COALESCE(s.is_suspect, 0) = 0
+                 ))) AS bad_days
+          FROM snapshot_days u`,
     evaluate: (row) => {
       const bad = Number(row?.bad_days) || 0;
       if (bad > 0) return {
@@ -1994,7 +1997,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         detail: `${bad} snapshot date(s) have no valid trading session — check as_of.logical_session_date(), ` +
                 `then: python data_integrity_repair.py --weekend-recommendations`,
       };
-      return { status: 'pass', detail: 'All snapshots are dated to real sessions' };
+      const total = Number(row?.total_days) || 0;
+      if (total === 0) return { status: 'warn', detail: 'No recommendation snapshot dates to check' };
+      return { status: 'pass', detail: `All ${total} snapshot dates through ${row?.latest_day ?? 'unknown'} are real sessions` };
     },
   },
   {

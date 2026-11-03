@@ -1241,8 +1241,19 @@ describe('audit regression guards (2026-08-11)', () => {
     const c = find('unified-recommendations-trading-day');
     expect(c.evaluate({ bad_days: 4 }, now).status).toBe('fail');
     expect(c.evaluate({ bad_days: 4 }, now).detail).toContain('logical_session_date');
-    expect(c.evaluate({ bad_days: 0 }, now).status).toBe('pass');
+    expect(c.evaluate({ bad_days: 0, total_days: 1, latest_day: '2026-10-30' }, now).status).toBe('pass');
     expect(c.sql).toContain('COALESCE(s.is_suspect, 0) = 0');
+  });
+
+  it('trading-day check reports the inspected population and does not pass an empty table', () => {
+    const c = find('unified-recommendations-trading-day');
+    expect(c.evaluate({ bad_days: 0, total_days: 0, latest_day: null }, now).status).not.toBe('pass');
+    const first = c.evaluate({ bad_days: 0, total_days: 12, latest_day: '2026-10-30' }, now);
+    const next = c.evaluate({ bad_days: 0, total_days: 13, latest_day: '2026-11-02' }, now);
+    expect(first.status).toBe('pass');
+    expect(first.detail).toContain('12');
+    expect(first.detail).toContain('2026-10-30');
+    expect(next.detail).not.toBe(first.detail);
   });
 
   it('technical-composite-age warns on the real 2026-10-04 shape and stays quiet on a refreshed table (AF-20261003-02)', () => {
