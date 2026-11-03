@@ -4,7 +4,7 @@ A sibling of forward_test_report.py. It imports that module's frozen machinery (
 next-session-OPEN entry, per-date winsorisation, the equal-weight benchmark, selective_accuracy, dates/h windows)
 and never touches its PROTOCOL; the frozen forward test remains the arbiter. This report adds breadth around it:
 
-  arms      published | reblend | reblend_vol_veto | reblend_no_ml | random_control   (accuracy_shadow_arms.py)
+  arms      published | reblend | reblend_vol_veto | reblend_no_ml | random_control | reblend_no_sector_slot   (accuracy_shadow_arms.py)
   tiers     top 1/5/10/25/100% of each session's liquid ranked set, plus Buy/Strong Buy as published
   horizons  5, 10, 21 sessions;  liquidity floors Rs 10cr and Rs 50cr trailing-20d ADT
   regimes   ALL; UP/DOWN = NIFTY50 close vs its own 200-session mean; BROAD/NARROW = share of names above their
@@ -230,6 +230,27 @@ def load_history(con, since: str) -> pd.DataFrame:
     return df.merge(costs, on=["symbol", "generated_at"], how="left")
 
 
+def attach_confluence_parts(con, calls: pd.DataFrame, sessions: pd.DatetimeIndex) -> pd.DataFrame:
+    """Add A.SLOT_COLS to each call: the four confluence sub-scores the ranker read for that run, i.e. per symbol the latest
+    confluence_signals row computed AT OR BEFORE the call (never after) and no earlier than the previous session's midnight
+    IST (unified_ranker._get_confluence_scores' window). One bounded read per distinct call time, four columns only: the
+    table is a ~6GB hypertable and an unbounded read decompressed it whole (memory_contention_root_causes_2026_09_30)."""
+    cols = ["trend_alignment_score", "volume_score", "sector_strength_score", "fundamental_score"]
+    sql = (f"SELECT DISTINCT ON (symbol) symbol, {', '.join(cols)} FROM confluence_signals "
+           "WHERE computed_at >= ? AND computed_at <= ? AND symbol NOT LIKE '%://%' AND LENGTH(symbol) <= 20 "
+           "ORDER BY symbol, computed_at DESC")
+    parts = []
+    for t in calls["generated_at"].drop_duplicates():
+        day = pd.Timestamp(t.tz_convert("Asia/Kolkata").date())
+        i = sessions.searchsorted(day, side="left") - 1
+        lo = pd.Timestamp(sessions[i] if i >= 0 else day - pd.Timedelta(days=5)).tz_localize("Asia/Kolkata")
+        rows = con.execute(sql, (lo.to_pydatetime(), t.to_pydatetime())).fetchall()
+        parts.append(_frame(rows, ["symbol", *cols]).assign(generated_at=t))
+    got = pd.concat(parts, ignore_index=True) if parts else _frame([], ["symbol", *cols, "generated_at"])
+    got = got.rename(columns=dict(zip(cols, A.SLOT_COLS)))
+    return calls.merge(got, on=["symbol", "generated_at"], how="left")     # left merge keeps the call order score ties break on
+
+
 def load_market_state(con, since: str):
     """(per-symbol 20d realised vol, per-date index regime, per-date breadth), all point-in-time."""
     start = (pd.Timestamp(since) - pd.Timedelta(days=120)).strftime("%Y-%m-%d")
@@ -283,9 +304,17 @@ def build_scorecard(con, since: str) -> dict:
         return out
     vol, idx_regime, breadth = load_market_state(con, since)
     calls = calls.merge(vol.rename(columns={"date": "session"}), on=["symbol", "session"], how="left")
+    try:
+        calls = attach_confluence_parts(con, calls, sessions)
+    except Exception as e:                                  # a shadow arm must not take the scorecard (and its alerts) down
+        con.rollback()
+        out["no_sector_slot_error"] = f"{type(e).__name__}: {e}"[:300]
     arms = A.arm_scores(calls, calls["vol20"])
     for a in A.ARMS:
         calls[f"arm_{a}"] = arms[a]
+    covered = calls["arm_reblend_no_sector_slot"].notna().groupby(calls["session"]).any()
+    out["no_sector_slot"] = {"sessions_covered": int(covered.sum()), "sessions_excluded": int((~covered).sum()),
+                             "excluded": [str(d.date()) for d in covered.index[~covered]]}
     calls["buy"] = calls["classification"].isin(["Buy", "Strong Buy"])
 
     disp = []

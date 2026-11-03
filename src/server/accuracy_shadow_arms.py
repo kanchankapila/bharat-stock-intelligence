@@ -10,8 +10,9 @@ Arms:
   reblend_vol_veto  reblend x0.7 on the top 20% of the session by 20-day realised vol (vol passed in)
   reblend_no_ml   reblend without the ml engine
   reblend_no_sector_slot  reblend with the confluence "sector" slot (the stock's own momentum, AF-20261008-24) taken out of the
-                  confluence engine. Not in ARMS: it needs the persisted confluence sub-scores as of each call
-                  (SLOT_COLS, from confluence_signals) and is blank for a session whose rebuild does not reproduce the stored score
+                  confluence engine. Needs the persisted confluence sub-scores as of each call (SLOT_COLS, from
+                  confluence_signals); NaN for a session whose rebuild does not reproduce the stored score, and for every
+                  session when the columns are absent
   random_control  the published scores shuffled within each session (same distribution, no information), seeded
 ponytail: the ranker's zero-dispersion engine drop, quality gate and red-flag vetoes are not replayed; `published` carries them.
 """
@@ -23,7 +24,7 @@ import pandas as pd
 from unified_ranker import REGIME_WEIGHTS
 
 ENGINES = ("ml", "confluence", "technical", "breakout")
-ARMS = ("published", "reblend", "reblend_vol_veto", "reblend_no_ml", "random_control")
+ARMS = ("published", "reblend", "reblend_vol_veto", "reblend_no_ml", "random_control", "reblend_no_sector_slot")
 VOL_VETO_TOP_SHARE = 0.20
 VOL_VETO_MULT = 0.7
 SLOT_COLS = ("cs_trend", "cs_vol", "cs_sector", "cs_fund")   # confluence_signals.{trend_alignment,volume,sector_strength,fundamental}_score
@@ -96,7 +97,9 @@ def random_control(df: pd.DataFrame, seed: int = 0) -> pd.Series:
 
 def arm_scores(df: pd.DataFrame, vol: pd.Series, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame({"published": published(df), "reblend": reblend(df), "reblend_vol_veto": reblend_vol_veto(df, vol),
-                         "reblend_no_ml": reblend_no_ml(df), "random_control": random_control(df, seed)}, index=df.index)
+                         "reblend_no_ml": reblend_no_ml(df), "random_control": random_control(df, seed),
+                         "reblend_no_sector_slot": (reblend_no_sector_slot(df) if set(SLOT_COLS) <= set(df.columns)
+                                                    else pd.Series(np.nan, index=df.index))}, index=df.index)
 
 
 def session_ic(df: pd.DataFrame, score: pd.Series, fwd: pd.Series, date_col: str = "session", min_n: int = 30) -> pd.Series:

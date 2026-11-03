@@ -124,3 +124,13 @@ def test_no_sector_slot_arm_keeps_confluence_absent_where_the_ranker_had_none():
     out = A.reblend_no_sector_slot(p)
     others = A.reblend(p.assign(confluence_score=np.nan))                # row 0 is blended over the other engines only
     assert out.notna().all() and abs(out[0] - others[0]) < 1e-9
+
+
+def test_new_arm_leaves_every_existing_arm_unchanged_and_is_blank_without_the_confluence_columns():
+    p = _panel(n_dates=3, n=20)
+    vol = pd.Series(np.linspace(0, 1, len(p)), index=p.index)
+    out = A.arm_scores(p, vol=vol, seed=3)
+    assert out["reblend_no_sector_slot"].isna().all()
+    withcols = p.assign(**{c: 1.0 for c in A.SLOT_COLS})
+    out2 = A.arm_scores(withcols, vol=vol, seed=3)
+    pd.testing.assert_frame_equal(out.drop(columns="reblend_no_sector_slot"), out2.drop(columns="reblend_no_sector_slot"))

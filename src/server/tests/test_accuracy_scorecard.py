@@ -56,17 +56,24 @@ def _seed(con, n_sym=40, n_sess=260, calls_last=40, seed=5):
     con.execute("CREATE TABLE technical_signals (symbol TEXT, date DATE, calibrated_win_probability DOUBLE PRECISION)")
     con.execute("CREATE TABLE signal_outcomes (symbol TEXT, signal_date DATE, horizon_days INTEGER, outcome TEXT, "
                 "signal_source TEXT, label_definition TEXT)")
+    con.execute("CREATE TABLE confluence_signals (symbol TEXT, computed_at TIMESTAMPTZ, trend_alignment_score DOUBLE PRECISION, "
+                "volume_score DOUBLE PRECISION, sector_strength_score DOUBLE PRECISION, fundamental_score DOUBLE PRECISION)")
     sess = pd.bdate_range("2025-06-02", periods=n_sess)
     rows = [("NIFTY50", d.date(), 100 + i, 100 + i, 1e6, 0) for i, d in enumerate(sess)]
     for s in range(n_sym):
         px = 100 * np.cumprod(1 + 0.01 * rng.normal(size=n_sess))
         rows += [(f"S{s}", d.date(), float(px[i]), float(px[i]), 2e7, 0) for i, d in enumerate(sess)]
     con.executemany("INSERT INTO stock_ohlcv VALUES (?,?,?,?,?,?)", rows)
-    urh, ur, ts, so = [], [], [], []
+    urh, ur, ts, so, cs = [], [], [], [], []
     for d in sess[-calls_last:]:
+        parts = np.column_stack([rng.uniform(0, 15, n_sym), rng.choice([0.0, 2.0, 5.0, 7.0, 10.0], n_sym),
+                                 rng.uniform(0, 8, n_sym), rng.uniform(0, 12, n_sym)])
+        conf = parts.sum(axis=1).argsort().argsort() / n_sym * 100        # the ranker's confluence_score: a rank of the four-term sum
         for s in range(n_sym):
             g = pd.Timestamp(f"{d.date()} 22:00", tz="Asia/Kolkata").isoformat()
             e = rng.normal(size=4) * 20 + 50
+            e[1] = conf[s]
+            cs.append((f"S{s}", (pd.Timestamp(g) - pd.Timedelta(minutes=30)).isoformat(), *map(float, parts[s])))
             urh.append((f"S{s}", g, "SIDEWAYS", float(e.mean()), "Buy" if s < 8 else "Hold", *map(float, e)))
             if s < 5:                                                    # S0-S3 costed at 100 bps, S4 NULL, the rest absent
                 ur.append((f"S{s}", g, 100.0 if s < 4 else None))
@@ -75,6 +82,7 @@ def _seed(con, n_sym=40, n_sess=260, calls_last=40, seed=5):
             ts.append((f"S{s}", d.date(), float(rng.random())))
             so.append((f"S{s}", d.date(), 5, "WIN" if rng.random() < 0.4 else "LOSS", "technical", "path_barrier"))
     con.executemany("INSERT INTO unified_recommendations_history VALUES (?,?,?,?,?,?,?,?,?)", urh)
+    con.executemany("INSERT INTO confluence_signals VALUES (?,?,?,?,?,?)", cs)
     con.executemany("INSERT INTO unified_recommendations VALUES (?,?,?)", ur)
     con.executemany("INSERT INTO technical_signals VALUES (?,?,?)", ts)
     con.executemany("INSERT INTO signal_outcomes VALUES (?,?,?,?,?,?)", so)
@@ -89,7 +97,8 @@ def test_end_to_end_on_a_throwaway_schema_and_persist_writes_one_row():
     since = str(sess[-40].date())
     out = S.build_scorecard(con, since)
     arms = {r["arm"] for r in out["rows"]}
-    assert arms == {"published", "reblend", "reblend_vol_veto", "reblend_no_ml", "random_control"}
+    assert arms == {"published", "reblend", "reblend_vol_veto", "reblend_no_ml", "random_control", "reblend_no_sector_slot"}
+    assert out["no_sector_slot"] == {"sessions_covered": 40, "sessions_excluded": 0, "excluded": []}
     assert {r["floor"] for r in out["rows"]} == {1e8, 5e8} or {r["floor"] for r in out["rows"]} == {1e8}
     pub = [r for r in out["rows"] if r["tier"] == "published"]
     assert pub and all(r["arm"] == "published" for r in pub)
@@ -226,3 +235,54 @@ def test_scorecard_rows_add_own_cost_keys_and_keep_every_existing_key():
     assert r["excess_030_same_rows_pct"] - r["excess_own_pct"] == pytest.approx(0.70)       # 100 bps own vs 30 flat
     assert r["own_cost_calls"] == 4 * r["own_cost_dates"]                                   # S0-S3 only
     assert r["own_cost_missing"] == 36 * r["own_cost_dates"]                                # S4's NULL, S5's other run, 34 with no row
+
+
+# -- reblend_no_sector_slot: the as-of read of the confluence sub-scores --
+
+def _cs_table(con):
+    con.execute("CREATE TABLE confluence_signals (symbol TEXT, computed_at TIMESTAMPTZ, trend_alignment_score DOUBLE PRECISION, "
+                "volume_score DOUBLE PRECISION, sector_strength_score DOUBLE PRECISION, fundamental_score DOUBLE PRECISION)")
+
+
+def test_confluence_parts_never_use_a_row_computed_after_the_call():
+    from pg_test_support import pg_memory_conn
+    con = pg_memory_conn()
+    _cs_table(con)
+    sess = pd.bdate_range("2026-10-26", periods=5)                        # Mon..Fri
+    call = pd.Timestamp("2026-10-29 22:00", tz="Asia/Kolkata")
+    at = lambda delta: (call + pd.Timedelta(hours=delta)).isoformat()
+    con.executemany("INSERT INTO confluence_signals VALUES (?,?,?,?,?,?)", [
+        ("A", (call - pd.Timedelta(days=3)).isoformat(), 1.0, 1.0, 1.0, 1.0),  # before the previous session: the ranker's window excludes it
+        ("A", at(-2), 2.0, 2.0, 2.0, 2.0),
+        ("A", at(-1), 3.0, 3.0, 3.0, 3.0),                                       # the latest row at or before the call
+        ("A", at(+1), 99.0, 99.0, 99.0, 99.0),                                   # computed AFTER the call: must never be used
+        ("B", at(+1), 99.0, 99.0, 99.0, 99.0),                                   # only a later row: no value
+        ("C", (call - pd.Timedelta(days=3)).isoformat(), 5.0, 5.0, 5.0, 5.0),    # only a stale row: no value
+    ])
+    con.commit()
+    calls = pd.DataFrame({"symbol": list("ABCD"), "generated_at": call, "session": pd.Timestamp("2026-10-29")})
+    got = S.attach_confluence_parts(con, calls, sess)
+    con.close()
+    assert list(got["symbol"]) == list("ABCD")                                   # row order untouched
+    assert list(got.loc[0, list(S.A.SLOT_COLS)]) == [3.0, 3.0, 3.0, 3.0]
+    assert got.loc[1:, list(S.A.SLOT_COLS)].isna().all().all()
+
+
+def test_confluence_parts_read_is_bounded_to_the_calls_window_and_selects_only_the_four_columns():
+    from pg_test_support import pg_memory_conn
+    con = pg_memory_conn()
+    _cs_table(con)
+    sess = pd.bdate_range("2026-10-26", periods=5)
+    call = pd.Timestamp("2026-10-29 22:00", tz="Asia/Kolkata")
+    seen = []
+    class Spy:
+        def execute(self, sql, params=()):
+            seen.append(sql)
+            return con.execute(sql, params)
+        def rollback(self):
+            con.rollback()
+    S.attach_confluence_parts(Spy(), pd.DataFrame({"symbol": ["A"], "generated_at": call, "session": pd.Timestamp("2026-10-29")}), sess)
+    con.close()
+    sql = seen[0]
+    assert "computed_at >= ?" in sql and "computed_at <= ?" in sql
+    assert "sector_strength_score" in sql and "*" not in sql
