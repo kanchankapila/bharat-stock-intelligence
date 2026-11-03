@@ -385,7 +385,8 @@ def print_report(out: dict, floor: float = FLOORS[0], tiers=("published", 0.10))
               f"{f(r['excess_030_pct'], '+7.3f'):>7} {f(r['excess_050_pct'], '+7.3f'):>7} {f(r['t_eff'], '6.2f'):>6} "
               f"{f(r['payoff'], '6.2f'):>6} {f(r['turnover'], '5.2f'):>5}  {'LOW-DATA' if r['low_data'] else r['verdict']}  "
               f"| {f(r['excess_own_pct'], '+7.3f'):>7} {f(r['excess_030_same_rows_pct'], '+7.3f'):>7} {r['own_cost_calls']:>6} "
-              f"{r['own_cost_missing']:>6} {r['own_cost_eff_dates']:5.1f}")
+              f"{r['own_cost_missing']:>6} {r['own_cost_eff_dates']:5.1f}"
+              f"{'  LOW-DATA' if r['own_cost_low_data'] else ''}")
     for h, c in out["calibration"].items():
         if c["n"]:
             print(f"calibration {h}d: n={c['n']} mean predicted {c['mean_predicted']:.3f} vs decisive-WIN base {c['base_rate']:.3f}; "

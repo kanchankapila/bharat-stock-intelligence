@@ -304,3 +304,20 @@ def test_a_failing_confluence_read_leaves_the_connection_usable_and_the_scorecar
     assert all(r["dates"] == 0 for r in slot)                          # blank, not a different arm
     keep = lambda sc: json.dumps(S._clean([r for r in sc["rows"] if r["arm"] != "reblend_no_sector_slot"]))   # NaN != NaN
     assert keep(out) == keep(good)                                     # the other arms are exactly as with the read working
+
+
+def test_printed_report_marks_own_cost_low_data_even_when_the_flat_cost_flag_is_not():
+    nan = float("nan")
+    row = dict(arm="published", tier="published", horizon=5, regime="ALL", floor=S.FLOORS[0], dates=60, eff_dates=40.0,
+               rank_ic=nan, ic_t_eff=nan, hit_rate=nan, base_hit=nan, hit_lift=nan, hit_ci95=nan, excess_030_pct=nan,
+               excess_050_pct=nan, t_eff=nan, payoff=nan, turnover=nan, low_data=False, verdict="NO EDGE",
+               excess_own_pct=nan, excess_030_same_rows_pct=nan, own_cost_calls=3, own_cost_missing=0,
+               own_cost_eff_dates=2.0, own_cost_low_data=True)
+    out = dict(since="2026-01-01", calls=1, sessions=1, forward_test_protocol_hash="h", rows=[row], calibration={})
+    import contextlib, io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        S.print_report(out)
+    line = [l for l in buf.getvalue().splitlines() if l.lstrip().startswith("published")][0]
+    flat, own = line.split("|")
+    assert "LOW-DATA" not in flat and "LOW-DATA" in own
