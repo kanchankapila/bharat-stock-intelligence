@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { router, publicProcedure, expensiveProcedure } from '../trpc';
 import { dbAll, dbGet } from '../dbAsync';
 import { fetchWithCache } from '../cacheService';
+import { getLatestNiftyRegime } from '../strategySignalsService';
 import {
   fetchAllIndianIndices,
   fetchSectorPerformance,
@@ -550,11 +551,7 @@ export const sectorsRouter = router({
       sectors.sort((a, b) => b.changePct - a.changePct);
 
       // Current market regime from technical_signals
-      const regimeRow = await dbGet<any>(`
-        SELECT nifty_regime FROM technical_signals
-        WHERE nifty_regime IS NOT NULL ORDER BY date DESC LIMIT 1
-      `);
-      const marketRegime = regimeRow?.nifty_regime || 'SIDEWAYS';
+      const marketRegime = await getLatestNiftyRegime();
 
       return {
         sectors,

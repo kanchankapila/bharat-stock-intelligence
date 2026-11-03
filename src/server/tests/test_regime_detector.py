@@ -382,6 +382,9 @@ class TestTrainHmmPromotionGate:
         assert result['promotion']['promoted'] is True
         assert hmm_path.read_bytes() != prior_bytes, "live model must be updated on improvement"
 
+        archives = list(tmp_path.glob("hmm_regime_*.pkl"))
+        assert len(archives) == 1 and archives[0].read_bytes() == prior_bytes,             "the replaced model must be archived byte-for-byte"
+
 
 class TestDegenerateTransitionGate:
     """2026-08-09 live audit: a real production retrain produced two states with means_ nearly

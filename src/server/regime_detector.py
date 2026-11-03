@@ -5,6 +5,9 @@ States: BULL | SIDEWAYS | HIGH_VOL | BEAR | CRASH
 Writes daily regime to market_regimes table.
 """
 
+import os
+import re
+import shutil
 import sys
 import json
 import pickle
@@ -230,6 +233,25 @@ def _log_likelihood_per_sample(model, scaler, X_raw: np.ndarray) -> float:
     return (ll_scaled - jacobian) / len(X_raw)
 
 
+HMM_ARCHIVE_KEEP = 12
+_ARCHIVE_RE = re.compile(r"hmm_regime_\d{8}_\d{6}\.pkl")
+
+
+def _write_model(target: Path, payload: dict) -> None:
+    """Write atomically; a promotion first archives the model it replaces (the old pickle
+    was overwritten in place, so a label change could never be replayed against its model)."""
+    if target == HMM_PATH and target.exists():
+        stamp = datetime.fromtimestamp(target.stat().st_mtime).strftime("%Y%m%d_%H%M%S")
+        shutil.copyfile(target, target.parent / f"hmm_regime_{stamp}.pkl")
+        old = sorted(p for p in target.parent.iterdir() if _ARCHIVE_RE.fullmatch(p.name))
+        for p in old[:-HMM_ARCHIVE_KEEP]:
+            p.unlink()
+    tmp = target.with_name(target.name + ".tmp")
+    with open(tmp, "wb") as f:
+        pickle.dump(payload, f)
+    os.replace(tmp, target)
+
+
 def train_hmm(lookback_days: int = 1260, holdout_days: int = 60, force: bool = False) -> dict:
     """Train 5-state Gaussian HMM on market features.
 
@@ -319,8 +341,7 @@ def train_hmm(lookback_days: int = 1260, holdout_days: int = 60, force: bool = F
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     payload = {"model": model, "scaler": scaler, "state_labels": state_labels}
     target = HMM_PATH if decision["promoted"] else HMM_PATH.parent / (HMM_PATH.name + ".candidate")
-    with open(target, "wb") as f:
-        pickle.dump(payload, f)
+    _write_model(target, payload)
 
     print(f"[HMM] Trained on {len(train_df)} days (holdout={effective_holdout}). "
           f"State labels: {state_labels}. Promotion: {decision}")

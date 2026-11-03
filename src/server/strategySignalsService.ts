@@ -111,14 +111,20 @@ export interface RegimeSectorSignal {
   regime: string;
 }
 
+// A date can carry two stamps (morning scan vs evening GRID run), so the newest write wins and
+// nifty_regime makes an exact tie deterministic.
+export async function getLatestNiftyRegime(): Promise<string> {
+  const row = await dbGet(`
+    SELECT nifty_regime FROM technical_signals
+    WHERE nifty_regime IS NOT NULL
+    ORDER BY date DESC, computed_at DESC NULLS LAST, nifty_regime LIMIT 1
+  `) as { nifty_regime: string } | undefined;
+  return row?.nifty_regime ?? 'SIDEWAYS';
+}
+
 export async function regimeSectorFilter(topNSectors = 3, minScore = 60, minWinProbability = 0.50): Promise<RegimeSectorSignal[]> {
   try {
-    const regimeRow = await dbGet(`
-      SELECT nifty_regime FROM technical_signals
-      WHERE nifty_regime IS NOT NULL
-      ORDER BY date DESC LIMIT 1
-    `) as { nifty_regime: string } | undefined;
-    const regime = regimeRow?.nifty_regime ?? 'SIDEWAYS';
+    const regime = await getLatestNiftyRegime();
 
     if (regime !== 'BULL') return [];
 
