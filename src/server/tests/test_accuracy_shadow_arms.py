@@ -78,3 +78,49 @@ def test_arm_scores_returns_every_arm():
     p = _panel(n_dates=3, n=20)
     out = A.arm_scores(p, vol=pd.Series(1.0, index=p.index), seed=3)
     assert set(out.columns) == set(A.ARMS) and len(out) == len(p)
+
+
+# ── reblend_no_sector_slot: the confluence "sector" slot is the stock's own momentum (AF-20261008-24) ──
+
+def _slot_session(n=40, seed=3):
+    """One session whose confluence_score is the ranker's own build: percentile of trend+vol+sector+fund."""
+    rng = np.random.default_rng(seed)
+    p = pd.DataFrame({
+        "session": pd.Timestamp("2026-10-30"), "symbol": [f"S{i}" for i in range(n)], "regime": "SIDEWAYS",
+        "cs_trend": rng.uniform(0, 15, n), "cs_vol": rng.choice([0.0, 2.0, 5.0, 7.0, 10.0], n),
+        "cs_sector": rng.uniform(0, 8, n), "cs_fund": rng.uniform(0, 12, n),
+        "ml_score": rng.normal(size=n), "technical_score": rng.normal(size=n), "breakout_score": rng.normal(size=n),
+        "unified_score": rng.normal(size=n), "classification": "Hold",
+    })
+    p["confluence_score"] = pd.Series(_normalize_to_100(dict(enumerate(p[["cs_trend", "cs_vol", "cs_sector", "cs_fund"]].sum(axis=1))))).values
+    return p
+
+
+def test_no_sector_slot_arm_is_the_reblend_with_exactly_the_slot_removed_from_confluence():
+    p = _slot_session()
+    ref = p.assign(confluence_score=pd.Series(_normalize_to_100(dict(enumerate(p.cs_trend + p.cs_vol + p.cs_fund)))).values)
+    assert np.allclose(A.reblend_no_sector_slot(p), A.reblend(ref))
+
+
+def test_no_sector_slot_arm_ranks_differently_when_own_momentum_is_the_only_difference():
+    p = _slot_session(n=6)
+    for c in ("cs_trend", "cs_vol", "cs_fund", "ml_score", "technical_score", "breakout_score"):
+        p[c] = 1.0
+    p["cs_sector"] = [8.0, 6.0, 4.0, 2.0, 1.0, 0.0]
+    p["confluence_score"] = pd.Series(_normalize_to_100(dict(enumerate(p.cs_trend + p.cs_vol + p.cs_sector + p.cs_fund)))).values
+    base, arm = A.reblend(p), A.reblend_no_sector_slot(p)
+    assert base.is_unique and arm.nunique() == 1                      # momentum was the whole spread; with the slot gone, a tie
+
+
+def test_no_sector_slot_arm_is_blank_where_the_rebuild_does_not_reproduce_the_stored_confluence_score():
+    p = _slot_session()
+    p["confluence_score"] = p["confluence_score"].to_numpy()[::-1]    # the stored score is not this rebuild's: no proxy
+    assert A.reblend_no_sector_slot(p).isna().all()
+
+
+def test_no_sector_slot_arm_keeps_confluence_absent_where_the_ranker_had_none():
+    p = _slot_session()
+    p.loc[0, "confluence_score"] = np.nan
+    out = A.reblend_no_sector_slot(p)
+    others = A.reblend(p.assign(confluence_score=np.nan))                # row 0 is blended over the other engines only
+    assert out.notna().all() and abs(out[0] - others[0]) < 1e-9

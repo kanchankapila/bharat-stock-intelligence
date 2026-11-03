@@ -9,6 +9,9 @@ Arms:
                   blended with the live REGIME_WEIGHTS, weights renormalised over the engines present for that symbol
   reblend_vol_veto  reblend x0.7 on the top 20% of the session by 20-day realised vol (vol passed in)
   reblend_no_ml   reblend without the ml engine
+  reblend_no_sector_slot  reblend with the confluence "sector" slot (the stock's own momentum, AF-20261008-24) taken out of the
+                  confluence engine. Not in ARMS: it needs the persisted confluence sub-scores as of each call
+                  (SLOT_COLS, from confluence_signals) and is blank for a session whose rebuild does not reproduce the stored score
   random_control  the published scores shuffled within each session (same distribution, no information), seeded
 ponytail: the ranker's zero-dispersion engine drop, quality gate and red-flag vetoes are not replayed; `published` carries them.
 """
@@ -23,6 +26,8 @@ ENGINES = ("ml", "confluence", "technical", "breakout")
 ARMS = ("published", "reblend", "reblend_vol_veto", "reblend_no_ml", "random_control")
 VOL_VETO_TOP_SHARE = 0.20
 VOL_VETO_MULT = 0.7
+SLOT_COLS = ("cs_trend", "cs_vol", "cs_sector", "cs_fund")   # confluence_signals.{trend_alignment,volume,sector_strength,fundamental}_score
+SLOT_REBUILD_MIN_RANK_CORR = 0.9999
 
 
 def _pct100(s: pd.Series) -> pd.Series:
@@ -47,6 +52,28 @@ def reblend(df: pd.DataFrame, drop=()) -> pd.Series:
 
 def reblend_no_ml(df: pd.DataFrame) -> pd.Series:
     return reblend(df, drop=("ml",)).rename("reblend_no_ml")
+
+
+def _confluence_raw(parts: pd.DataFrame) -> pd.Series:
+    # unified_ranker._get_confluence_scores: sum of the sub-scores, a missing one imputed at the cross-sectional median
+    return parts.fillna(parts.median()).sum(axis=1)
+
+
+def reblend_no_sector_slot(df: pd.DataFrame) -> pd.Series:
+    """reblend with cs_sector out of the confluence sum. The sub-scores are rebuilt as of each call, so a session is used
+    only if its trend+vol+sector+fund rebuild reproduces the stored confluence_score ranking; otherwise it is NaN
+    (a proxy would not be the slot's value, and a silent drop of the engine would be a different arm)."""
+    parts = df[list(SLOT_COLS)].apply(pd.to_numeric, errors="coerce")
+    has = df["confluence_score"].notna()
+    out = pd.Series(np.nan, index=df.index, name="reblend_no_sector_slot")
+    for _, idx in df.groupby("session").groups.items():
+        p, h = parts.loc[idx], has.loc[idx]
+        full = _confluence_raw(p).where(h)
+        if h.sum() < 2 or full[h].rank().corr(df.loc[idx, "confluence_score"][h].rank()) < SLOT_REBUILD_MIN_RANK_CORR:
+            continue
+        sub = df.loc[idx].assign(confluence_score=_confluence_raw(p.drop(columns="cs_sector")).where(h))
+        out.loc[idx] = reblend(sub).to_numpy()
+    return out
 
 
 def reblend_vol_veto(df: pd.DataFrame, vol: pd.Series) -> pd.Series:
