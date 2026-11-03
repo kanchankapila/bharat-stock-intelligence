@@ -257,9 +257,27 @@ def _capacity_problem() -> str | None:
     return None
 
 
+def _make_room_for_backup() -> list[Path]:
+    """Delete the archives _prune would remove after this dump, but only when that alone makes it fit."""
+    archives = sorted(BACKUP_DIR.glob(f"{PG_DB}_*.dump"),
+                      key=lambda path: path.stat().st_mtime, reverse=True)
+    if not archives:
+        return []
+    required = 2 * archives[0].stat().st_size + BACKUP_RESERVE_BYTES
+    free = shutil.disk_usage(BACKUP_DIR).free
+    candidates = archives[max(RETENTION - 1, 1):]
+    if free >= required or free + sum(p.stat().st_size for p in candidates) < required:
+        return []
+    for old in candidates:
+        old.unlink()
+        print(f"[BACKUP] pruned old backup {old.name} to make room for the next dump")
+    return candidates
+
+
 def _backup_under_lock() -> None:
     _check_container()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    _make_room_for_backup()
     capacity_error = _capacity_problem()
     if capacity_error:
         _record_heartbeat(False, capacity_error)
