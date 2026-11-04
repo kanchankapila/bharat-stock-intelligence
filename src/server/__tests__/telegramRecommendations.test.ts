@@ -138,6 +138,21 @@ describe('renderDigest', () => {
     expect(text).not.toContain('raw news item');
     expect(text).toContain('above 200-day SMA');
   });
+  it('removes complete nested scanner examples while preserving the rest of the reason', () => {
+    const text = renderDigest(digest({ longTerm: [pick({
+      reason: 'ABC: 44 bullish scanners (Trend (daily), Forecaster: Analysts estimate growth (YoY)), above 200-day SMA.',
+    })] }));
+    expect(text).not.toContain('Forecaster');
+    expect(text).not.toContain('YoY');
+    expect(text).toContain('44 bullish scanners, above 200-day SMA');
+  });
+  it('withholds an unclosed scanner example rather than leaking its contents', () => {
+    const text = renderDigest(digest({ longTerm: [pick({
+      reason: 'ABC: 2 bullish scanners (unverified (nested), above 200-day SMA',
+    })] }));
+    expect(text).not.toContain('unverified');
+    expect(text).not.toContain('Why:');
+  });
   it('states the horizon for every pick', () => {
     const text = renderDigest(digest());
     expect(text).toContain('Horizon:');

@@ -110,7 +110,22 @@ function fmtPrice(v: number | null): string {
 /** Older stored narratives can mix bearish names into bullish examples or be raw JSON. */
 function safePickReason(reason: string | null): string | null {
   if (!reason || /^\s*\[?\s*\{/.test(reason)) return null;
-  return reason.replace(/(\b\d+\s+bullish scanners?)\s*\([^)]*\)/gi, '$1');
+  const example = /\b\d+\s+bullish scanners?\s*\(/gi;
+  let match: RegExpExecArray | null;
+  while ((match = example.exec(reason)) !== null) {
+    const open = example.lastIndex - 1;
+    let depth = 1;
+    let end = open + 1;
+    while (end < reason.length && depth > 0) {
+      if (reason[end] === '(') depth++;
+      if (reason[end] === ')') depth--;
+      end++;
+    }
+    if (depth !== 0) return null;
+    reason = reason.slice(0, open).trimEnd() + reason.slice(end);
+    example.lastIndex = match.index;
+  }
+  return reason;
 }
 
 /**
