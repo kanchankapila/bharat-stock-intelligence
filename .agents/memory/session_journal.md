@@ -514,3 +514,10 @@ PR #131 merged as b4bf2a50. The reviewed source was integrated with the dirty li
 - Tonight's backup is the first real test of the forced prune. Read `pg-backup-nightly` after 23:15.
 - Before the 2026-11-07 retrain: compare the unpromoted HMM `.candidate` against live (AF-20261103-12).
 - A shadow-arm gate written `corr < MIN` passed NaN; new class in `bugs-data-layer.md`.
+
+## 2026-11-04 - Best-judgement pass
+
+- Backup: nightly job now writes to `C:/Users/amitk/bharat-backups-overflow` (`PG_BACKUP_DIR` in `.env`). Same physical SSD, so still no off-host copy. Read `pg-backup` heartbeat after 23:15.
+- Read tonight's 22:40 digest and tomorrow's 08:20 brief: the heading should say WATCH-LIST.
+- Before the 11-07 retrain: AF-20261103-12 has the comparison. After it, run the `nifty_regime` replay (-16). About 11-07 delete the 4 old dumps in `backups/` once C: holds 7.
+- `docker volume rm bharat_pgdata_pre_ts2_30_0_20260911` is checked and waiting on the user; the classifier refuses it for agents.
