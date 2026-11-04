@@ -1,4 +1,4 @@
-"""ranker_input_snapshot.py: nightly immutable, point-in-time copy of what unified_ranker.py read.
+"""ranker_input_snapshot.py: nightly immutable post-run archive of ranker-related inputs.
 
 Runs against the full production schema in a throwaway Postgres schema (pg_db_conn), so every
 input query is checked against real column names, and nothing touches production."""
@@ -28,7 +28,7 @@ def _seed(conn):
         "INSERT INTO technical_signals (symbol, date, win_probability, signal_score, hv_20d, cmp) VALUES "
         "('AAA', '2026-10-09', 'NaN'::float8, 6.5, 'Infinity'::float8, 100.0), "
         "('BBB', '2026-10-09', 0.61, 4.0, 0.22, 50.0), "
-        # after the ranker ran: a point-in-time copy must not contain it
+        # This date is after the ranker's anchor and is excluded by this query's date filter.
         "('AAA', '2026-10-12', 0.99, 9.9, 0.10, 101.0)")
     conn.execute("INSERT INTO stock_scores (symbol, timeframe, score) VALUES ('AAA', 'long_term', 70)")
     conn.execute("INSERT INTO nse_stocks (symbol, name, sector) VALUES ('AAA', 'A Ltd', 'IT'), ('BBB', 'B Ltd', 'Banks')")
@@ -82,6 +82,31 @@ def test_nan_and_inf_survive_the_round_trip(pg_db_conn, tmp_path):
     ts = pl.read_parquet(tmp_path / RUN_DATE / "technical_signals.parquet").filter(pl.col("symbol") == "AAA")
     assert math.isnan(ts["win_probability"][0]), "NaN became NULL or 0"
     assert math.isinf(ts["hv_20d"][0])
+
+
+def test_manifest_does_not_claim_mutable_inputs_are_point_in_time(pg_db_conn, tmp_path):
+    _seed(pg_db_conn)
+    pg_db_conn.execute("UPDATE stock_scores SET score = 1 WHERE symbol = 'AAA'")
+    pg_db_conn.commit()
+    assert _run(tmp_path) == 0
+    day = tmp_path / RUN_DATE
+    stock = pl.read_parquet(day / 'stock_scores.parquet').filter(pl.col('symbol') == 'AAA')
+    assert stock['score'][0] == 1
+    manifest = json.loads((day / 'manifest.json').read_text())
+    assert manifest['capture_semantics'] == 'unverified_database_observation'
+    assert manifest['decision_inputs_verified'] is False
+    assert manifest['git_dirty'] in (True, False, None)
+
+
+def test_manifest_reports_dirty_tree_without_claiming_unknown_is_clean(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(ris.subprocess, 'run', lambda *a, **k: SimpleNamespace(returncode=0, stdout=' M file.py\n'))
+    assert ris._git_dirty() is True
+    monkeypatch.setattr(ris.subprocess, 'run', lambda *a, **k: SimpleNamespace(returncode=0, stdout=''))
+    assert ris._git_dirty() is False
+    monkeypatch.setattr(ris.subprocess, 'run', lambda *a, **k: SimpleNamespace(returncode=1, stdout=''))
+    assert ris._git_dirty() is None
 
 
 def test_second_run_is_a_noop_and_changes_nothing(pg_db_conn, tmp_path, capsys):

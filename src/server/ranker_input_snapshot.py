@@ -1,4 +1,4 @@
-"""Immutable, point-in-time copy of every input unified_ranker.py read for one run.
+"""Post-run archive of inputs related to a unified_ranker.py run.
 
     python ranker_input_snapshot.py [--date YYYY-MM-DD] [--out-dir data/ranker_snapshots]
                                     [--persist] [--force] [--max-mb 200]
@@ -6,12 +6,14 @@
 Why: the ranker's inputs are mutated after the fact (technical_signals is rewritten by densify
 and backfills; quant_scores / stock_scores / screener membership are overwritten daily;
 recommendation_log.actual_return_pct and unified_signals.status are filled in later), so a run
-can never be replayed once the day has passed. Each night this writes what the ranker could see
-to <out-dir>/<date>/<input>.parquet plus manifest.json, and never rewrites a finished day.
+can never be replayed once the day has passed. Each night this archives observations to
+<out-dir>/<date>/<input>.parquet plus manifest.json, and never rewrites a finished day.
 
 --date is the ranker's run label (unified_recommendations.computed_at, default its MAX). Every
-window is anchored on that run's own generated_at, so rows written after the ranker ran are
-excluded. Files are written read-only; a day that already exists is a no-op (exit 0) unless
+window is anchored on that run's own generated_at where the source permits it. Several sources
+are mutable current-state tables and can change between the ranker read and this later archive;
+even a date-filtered row can have been updated since the run. These files do not prove the exact
+inputs available at the decision cutoff. Files are written read-only; a day that already exists is a no-op (exit 0) unless
 --force, which keeps the old copy as <date>.superseded.<utc-ts>.
 """
 from __future__ import annotations
@@ -227,6 +229,15 @@ def _git_commit() -> str:
         return "unknown"
 
 
+def _git_dirty() -> bool | None:
+    try:
+        result = subprocess.run(["git", "status", "--porcelain"], cwd=REPO_ROOT,
+                                capture_output=True, text=True, timeout=10)
+        return bool(result.stdout.strip()) if result.returncode == 0 else None
+    except Exception:
+        return None
+
+
 def resolve_run(conn, run_date: str | None) -> tuple[str, datetime | None]:
     if run_date is None:
         row = conn.execute("SELECT MAX(computed_at) AS d FROM unified_recommendations").fetchone()
@@ -325,7 +336,10 @@ def snapshot(conn, run_date: str | None = None, out_dir=DEFAULT_OUT_DIR, *, forc
         "anchor_date": params["d"].isoformat(),
         "ranker_generated_at": generated_at.isoformat() if generated_at else None,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "capture_semantics": "unverified_database_observation",
+        "decision_inputs_verified": False,
         "git_commit": _git_commit(),
+        "git_dirty": _git_dirty(),
         "estimated_mb": round(est_mb, 2),
         "tables": tables,
     }

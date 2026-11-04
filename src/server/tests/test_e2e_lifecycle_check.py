@@ -69,6 +69,38 @@ def test_outcome_smoke_queries_use_native_date_comparisons():
     assert '(CURRENT_DATE - 30)::text' not in source
 
 
+def test_contributing_coverage_uses_ranker_count_and_catches_unguarded_calls():
+    from e2e_lifecycle_check import contributing_coverage_stage
+
+    rows = [
+        {'engine_coverage_count': 1, 'classification': 'Hold'},
+        {'engine_coverage_count': 2, 'classification': 'Buy'},
+        {'engine_coverage_count': 2, 'classification': 'Strong Sell'},
+    ]
+    stage = contributing_coverage_stage(rows)
+    assert stage['alive'] is True
+    assert '1 with fewer than 2 contributing engines' in stage['note']
+    assert '0 directional' in stage['note']
+    rows[0]['classification'] = 'Sell'
+    assert contributing_coverage_stage(rows)['alive'] is False
+
+
+def test_contributing_coverage_fails_closed_for_missing_or_empty_counts():
+    from e2e_lifecycle_check import contributing_coverage_stage
+
+    assert contributing_coverage_stage([])['alive'] is False
+    assert contributing_coverage_stage([{'engine_coverage_count': None, 'classification': 'Hold'}])['alive'] is False
+
+
+def test_lifecycle_coverage_reads_the_persisted_ranker_count():
+    import inspect
+    from e2e_lifecycle_check import main
+
+    source = inspect.getsource(main)
+    assert 'SELECT engine_coverage_count, classification' in source
+    assert '_record(contributing_coverage_stage(cov_rows))' in source
+
+
 class TestAgeDays:
     def test_none(self):
         assert _age_days(None) is None

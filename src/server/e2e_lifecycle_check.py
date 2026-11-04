@@ -40,7 +40,7 @@ from pathlib import Path
 
 from db_compat import connect
 import as_of
-from unified_ranker import UnifiedRanker
+from unified_ranker import MIN_ACTIONABLE_ENGINE_COVERAGE, UnifiedRanker
 
 # A stage can keep its row count and still have collapsed (2,201 -> 40) -- bool(map) cannot see
 # that. Crude absolute floor rather than a per-stage ratio: legitimate universes here run
@@ -91,6 +91,20 @@ def stage_verdict(n_rows, degraded=False, age_days=None, max_age_days=None,
 def disabled_stage(name, reason):
     return {'stage': name, 'kind': 'engine', 'alive': True, 'disabled': True,
             'universe': 0, 'note': 'SKIPPED: ' + reason}
+
+
+def contributing_coverage_stage(rows):
+    """Inspect the ranker's persisted contributing-engine count, not raw telemetry."""
+    missing = sum(r['engine_coverage_count'] is None or r['engine_coverage_count'] < 0 for r in rows)
+    thin = [r for r in rows if r['engine_coverage_count'] is not None
+            and 0 <= r['engine_coverage_count'] < MIN_ACTIONABLE_ENGINE_COVERAGE]
+    directional = sum(r['classification'] != 'Hold' for r in thin)
+    return {
+        'stage': 'canonical:contributing engine coverage', 'kind': 'sql',
+        'alive': bool(rows) and not missing and not directional, 'universe': len(rows),
+        'note': (f'{len(thin)} with fewer than {MIN_ACTIONABLE_ENGINE_COVERAGE} contributing engines; '
+                 f'{directional} directional; {missing} missing or invalid coverage counts'),
+    }
 
 
 def pick_movers(rk, n):
@@ -334,27 +348,12 @@ def main():
                  'covered': sorted(s for s in symbols if isinstance(calls.get(s), dict)),
                  'missing': sorted(s for s in symbols if not isinstance(calls.get(s), dict))})
 
-        # An engine absent for a symbol is not neutral: _blend renormalizes over whichever
-        # engines are PRESENT, so a name scored on 3 sub-universes is not comparable to one
-        # scored on 7, and measurement.md's own blend A/B found coverage correlates with score
-        # (rho +0.28) with the 3-engine cohort averaging ~28 and 91 Sell / 0 Buy. Report the
-        # spread so a coverage collapse is visible here rather than only in a later audit.
         cov_rows = conn.execute("""
-            SELECT (ml_score IS NOT NULL)::int + (cs_score IS NOT NULL)::int
-                 + (confluence_score IS NOT NULL)::int + (technical_score IS NOT NULL)::int
-                 + (dl_score IS NOT NULL)::int + (breakout_score IS NOT NULL)::int
-                 + (screener_stock_score IS NOT NULL)::int
-                 + (smart_money_score IS NOT NULL)::int AS n_eng
+            SELECT engine_coverage_count, classification
             FROM unified_recommendations
             WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
         """).fetchall()
-        n_engines = [int(r['n_eng']) for r in cov_rows]
-        avg_eng = sum(n_engines) / len(n_engines) if n_engines else 0
-        thin = sum(1 for n in n_engines if n <= 3)
-        _record({'stage': 'canonical:engine coverage per symbol', 'kind': 'sql',
-                 'alive': avg_eng >= 5.0, 'universe': len(n_engines),
-                 'note': 'avg=%.2f/8 engines, %d symbol(s) on <=3 (blend renormalizes over '
-                         'those present, so thin rows are NOT comparable)' % (avg_eng, thin)})
+        _record(contributing_coverage_stage(cov_rows))
     except Exception as e:
         conn.rollback()
         failures.append('canonical:unified_recommendations')
