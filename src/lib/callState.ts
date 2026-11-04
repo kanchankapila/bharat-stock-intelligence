@@ -20,11 +20,9 @@ export function publishedTier(report: ForwardTestReport | null | undefined, hori
 
 export function deriveCallState(
   report: ForwardTestReport | null | undefined,
-  scorecard: Record<string, unknown> | null | undefined,
 ): { state: CallState; message: string; verdict: string | null } {
   const verdict = publishedTier(report)?.verdict ?? null;
-  const scVerdict = scorecard ? String(scorecard.verdict ?? scorecard.status ?? '') : '';
-  if (!verdict || verdict === 'LOW-DATA' || scVerdict === 'LOW-DATA') {
+  if (!verdict || verdict === 'LOW-DATA') {
     return {
       state: 'UNPROVEN', verdict,
       message: 'No verified edge yet. The frozen forward test has too few independent windows to say whether this ranking '

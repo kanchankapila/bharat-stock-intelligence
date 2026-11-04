@@ -31,13 +31,13 @@ describe('getEdgeStatus', () => {
     await dbTransaction(async tx => {
       await tx.run(`INSERT INTO app_settings (key, value, "updatedAt")
         VALUES ('forward_test_report', ?, '2026-10-08T15:57:04Z'),
-               ('accuracy_scorecard', '{"verdict":"LOW-DATA","n":12}', DEFAULT)`, [value]);
+               ('accuracy_scorecard', '{"generated_at":"2026-10-08","alerts":[],"n":12}', DEFAULT)`, [value]);
     });
     const r = await caller.getEdgeStatus();
     expect(r.forwardTest?.protocol_hash).toBe('13210b4e2c3ae688');
     expect(r.forwardTest?.blocks?.forward?.tiers?.['5']?.[0]?.hit_rate).toBeNull();
     expect(r.forwardTestAsOf).toMatch(/^2026-10-08/);
-    expect(r.scorecard).toEqual({ verdict: 'LOW-DATA' });
+    expect(r.scorecard).toEqual({ generated_at: '2026-10-08', alerts: [] });
     expect(r.calendarBlockedUntil['5']).toBe('2027-02-23');
     expect(r.minIndependentWindows).toBe(20);
   });

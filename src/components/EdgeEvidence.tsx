@@ -12,7 +12,7 @@ export function ForwardTestPanel() {
   const { data, isError } = trpc.getEdgeStatus.useQuery(undefined, DAILY);
   const ft = data?.forwardTest as ForwardTestReport | null | undefined;
   const block = ft?.blocks?.forward;
-  const call = deriveCallState(ft, data?.scorecard as Record<string, unknown> | null | undefined);
+  const call = deriveCallState(ft);
   return (
     <section className="v1-card p-4 space-y-3" aria-label="Forward test">
       <div>

@@ -54,9 +54,9 @@ export function objectiveRegime(closesNewestFirst: number[]) {
   return { label: distPct >= 0 ? 'ABOVE 200D MEAN' as const : 'BELOW 200D MEAN' as const, close: last, mean200: mean, distPct };
 }
 
-// The stored blob is ~370KB of per-arm rows and series; clients read only alerts and callState's verdict/status.
+// The stored blob is ~370KB of per-arm rows and series; clients read only alerts.
 function scorecardSummary(sc: Record<string, unknown> | null) {
-  return sc && { generated_at: sc.generated_at, alerts: sc.alerts, verdict: sc.verdict, status: sc.status };
+  return sc && { generated_at: sc.generated_at, alerts: sc.alerts };
 }
 
 export const edgeRouter = router({

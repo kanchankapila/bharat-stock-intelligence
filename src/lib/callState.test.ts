@@ -13,33 +13,29 @@ const report = (verdict: string, horizon = '5') => ({
 });
 
 describe('deriveCallState', () => {
-  it('is UNPROVEN when neither the forward test nor the scorecard exists', () => {
-    const s = deriveCallState(null, null);
+  it('is UNPROVEN when no forward test exists', () => {
+    const s = deriveCallState(null);
     expect(s.state).toBe('UNPROVEN');
     expect(s.message).toMatch(/watch-list/i);
   });
 
   it('is UNPROVEN when the published tier is LOW-DATA, even if a narrow tier says EDGE', () => {
-    expect(deriveCallState(report('LOW-DATA'), null).state).toBe('UNPROVEN');
-  });
-
-  it('is UNPROVEN when the scorecard is LOW-DATA although the forward test reads EDGE', () => {
-    expect(deriveCallState(report('EDGE'), { verdict: 'LOW-DATA' }).state).toBe('UNPROVEN');
+    expect(deriveCallState(report('LOW-DATA')).state).toBe('UNPROVEN');
   });
 
   it('is NO_CALL when the published tier shows no edge or a negative one', () => {
-    expect(deriveCallState(report('NO EDGE'), null).state).toBe('NO_CALL');
-    expect(deriveCallState(report('NEGATIVE'), null).state).toBe('NO_CALL');
+    expect(deriveCallState(report('NO EDGE')).state).toBe('NO_CALL');
+    expect(deriveCallState(report('NEGATIVE')).state).toBe('NO_CALL');
   });
 
   it('is EDGE only when the published 5d tier verdict is EDGE', () => {
-    const s = deriveCallState(report('EDGE'), null);
+    const s = deriveCallState(report('EDGE'));
     expect(s.state).toBe('EDGE');
     expect(s.message).toMatch(/rank/i);
   });
 
   it('is UNPROVEN when the report has no 5d published row', () => {
-    expect(deriveCallState(report('EDGE', '10'), null).state).toBe('UNPROVEN');
+    expect(deriveCallState(report('EDGE', '10')).state).toBe('UNPROVEN');
   });
 });
 

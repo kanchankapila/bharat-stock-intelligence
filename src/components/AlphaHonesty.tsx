@@ -10,7 +10,7 @@ const DAILY = { staleTime: 30 * 60_000, refetchOnWindowFocus: false } as const;
 export function EdgeCallBanner() {
   const { data } = trpc.getEdgeStatus.useQuery(undefined, DAILY);
   const ft = data?.forwardTest as ForwardTestReport | null | undefined;
-  const call = deriveCallState(ft, data?.scorecard as Record<string, unknown> | null | undefined);
+  const call = deriveCallState(ft);
   const tier = publishedTier(ft);
   const tone = call.state === 'EDGE'
     ? 'border-sky-500/30 bg-sky-500/[0.06] text-sky-100'
