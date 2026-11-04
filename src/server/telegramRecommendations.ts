@@ -16,6 +16,8 @@
 import { dbAll } from './dbAsync';
 import { telegramService, sanitizeMarkdown } from './telegramService';
 import { normaliseHorizon, type CanonicalHorizon } from './horizon';
+import { parsePythonJson } from './parsePythonJson';
+import { deriveCallState, type ForwardTestReport } from '../lib/callState';
 export { normaliseHorizon } from './horizon';
 
 /** Picks shown per horizon. Telegram caps a message at 4096 chars; see splitForTelegram. */
@@ -52,6 +54,7 @@ export interface DigestData {
   intradayGated: boolean;
   intradayGateReason: string | null;
   totalBuys: number;
+  call: ReturnType<typeof deriveCallState>;
 }
 
 /**
@@ -291,12 +294,24 @@ export async function fetchIntradayGateState(): Promise<{ gated: boolean; reason
   };
 }
 
+/** The web page's verdict rule. An honesty read must not stop the send, and unread means unproven. */
+export async function fetchCallState(): Promise<DigestData['call']> {
+  try {
+    const rows = await dbAll<{ value: string | null }>(`SELECT value FROM app_settings WHERE key = 'forward_test_report'`);
+    return deriveCallState(parsePythonJson<ForwardTestReport>(rows[0]?.value));
+  } catch (e) {
+    console.warn('[TelegramRecs] forward test snapshot unavailable:', (e as Error).message);
+    return deriveCallState(null);
+  }
+}
+
 export async function buildRecommendationsDigest(): Promise<DigestData> {
-  const [longTerm, engineIntraday, unifiedIntraday, gate] = await Promise.all([
+  const [longTerm, engineIntraday, unifiedIntraday, gate, call] = await Promise.all([
     fetchLongTermPicks(),
     fetchIntradayPicks(),
     fetchUnifiedIntradayPicks(),
     fetchIntradayGateState(),
+    fetchCallState(),
   ]);
 
   // Dedicated intraday engine first, then top up from the unified ranker's intraday-horizon
@@ -325,6 +340,7 @@ export async function buildRecommendationsDigest(): Promise<DigestData> {
     intradayGated: gate.gated,
     intradayGateReason: gate.reason,
     totalBuys: Number(meta[0]?.buys ?? 0),
+    call,
   };
 }
 
@@ -365,8 +381,9 @@ function renderPick(p: Pick, idx: number): string {
 
 export function renderDigest(d: DigestData): string {
   const out: string[] = [];
-  out.push('📈 *BHARAT STOCK INTELLIGENCE — DAILY PICKS*');
+  out.push(`📈 *BHARAT STOCK INTELLIGENCE — ${d.call.state === 'EDGE' ? 'DAILY PICKS' : 'DAILY WATCH-LIST'}*`);
   out.push(`_${d.date}${d.regime ? ` · Market regime: ${sanitizeMarkdown(d.regime)}` : ''}_`);
+  out.push(`_${sanitizeMarkdown(d.call.message)}_`);
 
   out.push('\n━━━━━━━━━━━━━━━━━━━━\n*🗓 POSITIONAL / SWING*');
   if (d.longTerm.length === 0) {
@@ -397,7 +414,7 @@ export function renderDigest(d: DigestData): string {
 
   out.push('\n━━━━━━━━━━━━━━━━━━━━');
   out.push(`_${d.totalBuys} buy-rated stocks in today's full ranking._`);
-  out.push('_The unified Buy / Strong Buy rating is a relative rank, not a calibrated win probability; check the forward-test verdict before acting._');
+  out.push('_The unified Buy / Strong Buy rating is a relative rank, not a calibrated win probability._');
   out.push('_Research output, not investment advice. Verify before trading._');
   return out.join('\n\n');
 }

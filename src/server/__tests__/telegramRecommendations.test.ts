@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { deriveCallState, type ForwardTestReport } from '../../lib/callState';
+import { dbAll } from '../dbAsync';
 import {
+  fetchCallState,
   normaliseHorizon,
   sanitizeMarkdown,
   truncateWords,
@@ -8,6 +11,11 @@ import {
   type DigestData,
   type Pick,
 } from '../telegramRecommendations';
+
+vi.mock('../dbAsync', async importOriginal => ({
+  ...(await importOriginal<typeof import('../dbAsync')>()),
+  dbAll: vi.fn(),
+}));
 
 function pick(over: Partial<Pick> = {}): Pick {
   return {
@@ -39,6 +47,7 @@ function digest(over: Partial<DigestData> = {}): DigestData {
     intradayGated: false,
     intradayGateReason: null,
     totalBuys: 427,
+    call: deriveCallState(null),
     ...over,
   };
 }
@@ -200,7 +209,26 @@ describe('renderDigest', () => {
   it('does not present a Strong Buy label as a calibrated success probability', () => {
     const text = renderDigest(digest());
     expect(text).toContain('relative rank, not a calibrated win probability');
-    expect(text).toContain('forward-test verdict');
+  });
+
+  it('calls an unproven list a watch-list and states the verdict before the first pick', () => {
+    const text = renderDigest(digest());
+    expect(text).toContain('DAILY WATCH-LIST');
+    expect(text).not.toContain('DAILY PICKS');
+    expect(text.indexOf('No verified edge yet')).toBeGreaterThan(-1);
+    expect(text.indexOf('No verified edge yet')).toBeLessThan(text.indexOf('POSITIONAL / SWING'));
+  });
+
+  it('says DAILY PICKS only when the frozen forward test reads EDGE', () => {
+    const report: ForwardTestReport = { blocks: { forward: { tiers: { 5: [{ tier: 'published', verdict: 'EDGE' }] } } } };
+    expect(renderDigest(digest({ call: deriveCallState(report) }))).toContain('DAILY PICKS');
+  });
+
+  it('reads the same verdict as the web page, and degrades to unproven when it cannot read one', async () => {
+    vi.mocked(dbAll).mockResolvedValueOnce([{ value: '{"blocks": {"forward": {"tiers": {"5": [{"tier": "published", "verdict": "NO EDGE"}]}}}}' }]);
+    expect((await fetchCallState()).state).toBe('NO_CALL');
+    vi.mocked(dbAll).mockRejectedValueOnce(new Error('db down'));
+    expect((await fetchCallState()).state).toBe('UNPROVEN');
   });
 
   it('explains an empty intraday section when the emission gate is closed', () => {
