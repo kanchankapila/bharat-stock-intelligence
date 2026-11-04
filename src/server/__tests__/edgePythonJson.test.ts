@@ -27,6 +27,6 @@ describe('edge report Python JSON boundary', () => {
   it('ships only the scorecard fields a client reads, not the per-arm rows and series', async () => {
     rows.mockResolvedValue([{ key: 'accuracy_scorecard', asof: null, value: JSON.stringify({ generated_at: '2026-11-03T21:00:00',
       alerts: [{ code: 'X' }], rows: [{ arm: 'published' }], ic_series: { a: 1 }, calibration: {}, verdict: 'LOW-DATA' }) }]);
-    expect((await caller.getEdgeStatus()).scorecard).toEqual({ generated_at: '2026-11-03T21:00:00', alerts: [{ code: 'X' }], verdict: 'LOW-DATA' });
+    expect((await caller.getEdgeStatus()).scorecard).toEqual({ generated_at: '2026-11-03T21:00:00', alerts: [{ code: 'X' }] });
   });
 });
