@@ -95,6 +95,19 @@ This section is a dated status board, not a verdict list. A claim carrying an ol
 in this file is not wrong, it is *unrefreshed* — check the date before quoting it, and re-run
 rather than assume. Full narrative for anything here: `docs/measurement-history.md`.
 
+### 2026-11-05 — what the Sell label is, and the confluence reference-population fix (AF-20261105-02/-03/-04, AF-20261030-05)
+
+Replay of `unified_recommendations_history`, 8 HIGH_VOL batches 2026-10-27..11-05. Stored score = `(confluence/3 + 2*technical_pct/3) x quality x high_vol x crowding`, x0.5 on a red flag; reproduces 2,140 of 2,143 two-engine rows within 1% on the 11-04 batch. Use stored confluence as is, since it is already a percentile.
+
+- **Under HIGH_VOL, Sell is made by penalties.** 2,004 of 2,143 names tie on technical, so their pre-penalty score is 31.5-64.7: they cannot reach 30 or 70 unaided. 646 of 651 Sell or Strong Sell labels were above 30 before penalties.
+- **Sell is a risk label, not a forecast of no rally.** 4%+ jump rate on 11-05: Sell 9.0%, Strong Sell 8.6%, Hold 8.0%, all 8.9%. Over 35 sessions Sell minus Hold -0.32pp/day (t -1.13, 15 of 35 days positive), while the 4%+ fall rate is higher for Sell in every regime (HIGH_VOL 7.88% vs 4.29%; BEAR 9.21% vs 6.38%; SIDEWAYS 5.91% vs 3.37%). Mover flags, not returns; 35 sessions in one falling tape.
+- **Results raise moves, not direction.** Names with results filed in the prior two sessions made a big move 18.0% of the time vs 9.5% (one day, 11-05).
+- **Effect of the reference and overlay fixes, 11-04 batch:** 229 of 2,140 labels change: Sell -> Hold 106, Hold -> Sell 66, Strong Sell -> Sell 26, Sell -> Strong Sell 21, Strong Buy -> Buy 6, Buy -> Hold 3, Hold -> Buy 1. Mean per batch: Sell 444 -> 406, Hold 1,438 -> 1,470, Buy 12 -> 16, Strong Buy 56 -> 52, Strong Sell 192 -> 197.
+- **Paired rank IC, new minus old, close-to-close excess against the batch mean:** 1 session -0.0009 (t -0.32, 7 batches, better 3 of 7); 5 sessions +0.0019 (t +0.56, 3 batches). Same ship rule as AF-20261026-71 (ship unless t <= -2 in either half): neutral, shipped. **This corrects defects; it does not add edge.** Moved cohorts: Sell -> Hold +0.14% / +0.80% (1 / 5 sessions), Hold -> Sell -0.26% / -0.35%; LOW-DATA, 3 overlapping 5-session windows, one rally included, so a sanity check only.
+- **Population boundary: rows generated after this change deploys use a tradeable-universe confluence percentile. Never pool them with earlier rows.**
+- **Trap:** the digest's +4% bar is not market-adjusted. On a +2.4% Nifty day 27 of the 58 wrong Sells beat the index by under 3 points.
+- **Uncommitted screener semantic policy, reviewed 2026-11-06 while another session was still editing it (read-only, current membership, policy as of 23:56 IST; not a return measurement):** 768 of 2,324 distinct catalog name/category/bias entries change label, 105 of them direct bullish/bearish flips. Red-flagged names 887 -> 828: 64 lose the x0.5 veto (28 ASM/GSM, 13 Low DVM, 9 Increasing Trading Activity; 30 of the 64 are Sell or Strong Sell today) and 5 gain it (Highly Pledged). 15 names lose every directional screener, so the coverage rule would make them Hold (2 are non-Hold today). No forward-return reading exists for this change; do not treat its labels as measured.
+
 ### 2026-11-05 — Phase 0 of the clean-slate rebuild (separate repo `bharat-edge`, branch `phase0-sdd`): H1 void, H2v2 ungradeable, H3 passes the letter only
 
 Full text: `D:/Github/bharat-edge-sdd/docs/phase0-verdict.md`; defect row AF-20261104-04. Recommendation (owner may overrule): Phase 1 only, as a research and risk tool with no calls.

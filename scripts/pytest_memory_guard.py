@@ -21,6 +21,9 @@ and flat through later folds, so it is not a leak (measured 2,315 MB vs 1,496 MB
 Production trains on the GPU and never takes this path.
 
     PGTEST_DB=<dedicated test db> backend-python/venv/Scripts/python.exe scripts/pytest_memory_guard.py
+
+It always runs the whole gate in THIS script's checkout: test paths you pass are added to the gate,
+not substituted for it, and your cwd is ignored. To gate another worktree, run that worktree's copy.
 """
 from __future__ import annotations
 

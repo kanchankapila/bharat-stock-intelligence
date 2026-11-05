@@ -101,7 +101,7 @@ def make_db():
             smart_money_score REAL,
             fundamental_score REAL, engine_coverage_count INTEGER, entry_zone_low REAL,
             stop_loss REAL, target_1 REAL, position_size_pct REAL, sector TEXT,
-            win_probability REAL,
+            win_probability REAL, penalties JSONB,
             PRIMARY KEY (symbol, generated_at)
         );
         CREATE TABLE unified_signals (
@@ -546,6 +546,18 @@ class TestUnifiedRankerRun:
         # persisted to the table too
         row = conn.execute("SELECT classification FROM unified_recommendations WHERE symbol='INFY'").fetchone()
         assert row['classification'] in ('Buy', 'Strong Buy')
+        os.unlink(csv_path)
+
+    def test_run_persists_penalties_to_history(self):
+        # AF-20261008-25: each row records what the penalties did, so the veto can be graded later.
+        import json, os
+        ranker, conn, csv_path = self._setup()
+        ranker.run()
+        row = conn.execute(
+            "SELECT penalties FROM unified_recommendations_history WHERE symbol='INFY'").fetchone()
+        p = row['penalties'] if isinstance(row['penalties'], dict) else json.loads(row['penalties'])
+        assert set(p) == {'pre_penalty_score', 'pre_penalty_class', 'quality', 'red_flag',
+                          'high_vol', 'crowding', 'fresh_result'}
         os.unlink(csv_path)
 
     def test_run_populates_reasoning_from_screeners(self):
@@ -1393,6 +1405,21 @@ class TestConfluenceScoresDecorrelation:
         # median fundamental of the present rows is 4 -> NOFUND ties MID, beats LOW.
         assert scores['NOFUND'] == pytest.approx(scores['MID'])
         assert scores['NOFUND'] > scores['LOW']
+
+    def test_percentile_reference_is_the_tradeable_universe(self):
+        """AF-20261105-02: ~2,200 untradeable rows with no data all impute to one raw value, so a
+        tradeable name crossing it jumped ~48 percentile points (HARIOMPIPE 69.0 -> 7.7, Hold ->
+        Sell) on a 5-point raw change. Rows the ranker cannot rate must not set the scale."""
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        ranker = UnifiedRanker(conn=conn)
+        self._seed(conn, 'LOW', confluence_score=0, trend=1, vol=0, sector=0, fund=0)
+        self._seed(conn, 'HIGH', confluence_score=0, trend=5, vol=0, sector=0, fund=0)
+        for i in range(6):
+            self._seed(conn, f'JUNK{i}', confluence_score=0, trend=3, vol=0, sector=0, fund=0)
+        ranker._restrict_to_tradeable_universe = lambda symbols: {'LOW', 'HIGH'}
+        scores = ranker._get_confluence_scores()
+        assert scores == pytest.approx({'LOW': 25.0, 'HIGH': 75.0})
 
     def test_all_null_sub_scores_leave_the_engine_absent_for_that_symbol(self):
         """A row with no sub-score at all carries no confluence information: the symbol is
@@ -2366,3 +2393,20 @@ class TestValidUntilAnchorsOnTheEntrySession:
         src = inspect.getsource(UnifiedRanker.run)
         assert 'session_date=' in src, \
             'run() must anchor valid_until on the session the ranking is FOR, not on wall-clock'
+
+
+class TestPenaltyRecord:
+    """AF-20261008-25 / AF-20261030-05: the veto was not persisted per row, so what each penalty
+    did to a label could not be graded retroactively."""
+
+    def test_penalty_that_creates_a_sell_is_visible(self):
+        from unified_ranker import penalty_record
+        r = penalty_record(59.27, quality=1.0, red_flag=True, high_vol=False, crowding=1.0,
+                           bull=6, bear=23, fresh_result=True)
+        assert r == {'pre_penalty_score': 59.27, 'pre_penalty_class': 'Hold', 'quality': 1.0,
+                     'red_flag': True, 'high_vol': False, 'crowding': 1.0, 'fresh_result': True}
+
+    def test_uses_the_same_rule_as_the_published_label(self):
+        from unified_ranker import penalty_record
+        assert penalty_record(25.0, 1.0, False, False, 1.0, 1, 1, False)['pre_penalty_class'] == 'Sell'
+        assert penalty_record(90.0, 1.0, False, False, 1.0, 0, 0, False)['pre_penalty_class'] == 'Hold'

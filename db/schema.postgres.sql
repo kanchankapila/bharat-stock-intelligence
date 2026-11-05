@@ -4957,6 +4957,7 @@ CREATE TABLE IF NOT EXISTS "unified_recommendations_history" (
   "sector" TEXT,
   "dl_score" DOUBLE PRECISION,
   "win_probability" DOUBLE PRECISION,
+  "penalties" JSONB,
   PRIMARY KEY ("symbol", "generated_at")
 );
 CREATE INDEX idx_urh_computed_generated ON public.unified_recommendations_history USING btree (computed_at, generated_at);

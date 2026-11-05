@@ -74,6 +74,10 @@ export interface AccuracyDigest {
   confirmedMeanOpenToClosePct: number | null;
   wrongBearish: number;
   wrongBullish: number;
+  /** Nifty's move that day, and how many wrong-direction calls still cleared the +/-4% mover
+   *  bar after removing it. The bar is absolute, so a broad rally fills the list by itself. */
+  marketPct?: number | null;
+  wrongBeyondMarket?: number | null;
   trend: Array<{ date: string; recall: number | null; timingVerified?: boolean }>;
   worstCalls: Array<{ symbol: string; returnPct: number; priorClassification: string }>;
   flyerCalls: PriorCallBuckets;
@@ -221,6 +225,21 @@ export async function buildAccuracyDigest(): Promise<AccuracyDigest | null> {
     [TRADEABLE_ADT, today.date]
   );
   const cap = capturable[0] ?? { confirmed_n: null, c2c: null, o2c: null, liquid_flyers: null };
+
+  const nifty = await dbAll<{ close: number; date: string }>(
+    `SELECT close, date::text AS date FROM stock_ohlcv
+      WHERE symbol = 'NIFTY50' AND date <= ?::date ORDER BY date DESC LIMIT 2`,
+    [today.date]
+  );
+  const marketPct = nifty.length === 2 && nifty[0].date === String(today.date).slice(0, 10) && Number(nifty[1].close) > 0
+    ? (Number(nifty[0].close) / Number(nifty[1].close) - 1) * 100
+    : null;
+  const beyond = marketPct === null ? [] : await dbAll<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM high_flyer_retrospective
+      WHERE date = ? AND wrong_call = 1
+        AND ((direction = 'up' AND return_pct - ? >= 4) OR (direction = 'down' AND return_pct - ? <= -4))`,
+    [today.date, marketPct, marketPct]
+  );
   // `Number(null)` is 0 and 0 IS finite, so a bare Number.isFinite guard turns SQL's NULL
   // (an AVG over no rows, or over rows written before AF-20261007-06) into a reported 0.00% —
   // the recurring-bugs.md NaN/null-coercion class in its null form. Check for null first.
@@ -248,6 +267,8 @@ export async function buildAccuracyDigest(): Promise<AccuracyDigest | null> {
     confirmedMeanOpenToClosePct: finiteOrNull(cap.o2c),
     wrongBearish: finiteOr(recall.wrong_bearish_miss, 0),
     wrongBullish: finiteOr(recall.wrong_bullish_miss, 0),
+    marketPct,
+    wrongBeyondMarket: marketPct === null ? null : finiteOr(beyond[0]?.n, 0),
     trend: stats.map(s => {
       const r = parseRecall(s.recall_json);
       return {
@@ -396,10 +417,15 @@ export function formatAccuracyDigest(d: AccuracyDigest): string {
     // name with a 6.5% daily chance of a +4% pop is EXPECTED to be "wrong" 6.5% of the time;
     // only an excess over that is evidence of anything.
     const verdict = exp === null ? ''
-      : observed > exp ? `  ← worse than chance (≈${Math.round(exp)})`
+      // AF-20261105-06: a count under chance varies by about sqrt(expected) a day; 62 against 57 is noise.
+      : observed > exp + 2 * Math.sqrt(exp) ? `  ← worse than chance (≈${Math.round(exp)})`
       : `  (≈${Math.round(exp)} expected by chance)`;
     lines.push(`Wrong-direction calls: *${observed}*${verdict}`);
     lines.push(`  ${d.wrongBearish} rated Sell then rallied · ${d.wrongBullish} rated Buy then fell`);
+    if (d.marketPct != null && d.wrongBeyondMarket != null) {
+      const sign = d.marketPct >= 0 ? '+' : '';
+      lines.push(`  ${d.wrongBeyondMarket} of ${observed} still moved 4%+ after removing Nifty ${sign}${d.marketPct.toFixed(1)}%`);
+    }
   }
 
   if (d.worstCalls.length) {

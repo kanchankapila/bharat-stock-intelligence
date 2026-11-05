@@ -334,11 +334,14 @@ export function scoreStock(
   // as bad, and `null < 0.5` is true in JS, so a missing debt_to_equity earned the low-debt bonus.
   const num = (v: any) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
   let pts = 0, maxPts = 0;
-  const pio = num(fundamentals?.piotroski_f_score), roe = num(fundamentals?.return_on_equity);
+  // AF-20261105-04: stock_fundamentals has no ROE for 78% of names; quant_scores carries the fallback.
+  const pio = num(fundamentals?.piotroski_f_score);
+  const roe = num(fundamentals?.return_on_equity) ?? num(quant?.return_on_equity);
   const de = num(fundamentals?.debt_to_equity), rg = num(fundamentals?.revenue_growth);
   if (pio !== null) { maxPts += 4; pts += pio >= 7 ? 4 : pio >= 5 ? 2 : 0; }
   if (roe !== null) { maxPts += 3; pts += roe > 0.20 ? 3 : roe > 0.12 ? 1 : 0; }
-  if (de !== null)  { maxPts += 2; pts += de < 0.5 ? 2 : 0; }
+  // debt_to_equity is stored in percent (median 28.6), so 0.5x is 50; `< 0.5` paid only 110 names.
+  if (de !== null)  { maxPts += 2; pts += de < 50 ? 2 : 0; }
   if (rg !== null)  { maxPts += 3; pts += rg > 0.15 ? 3 : rg > 0.05 ? 1 : 0; }
   const fundScore = maxPts === 0 ? null
     : Math.min(12, Math.round((12 * pts / maxPts) * rw.fund * 100) / 100);
@@ -382,6 +385,26 @@ export function scoreStock(
     timeframe: suggestTimeframe(confluenceScore, volRatio, bullishClasses),
     reasoning,
   };
+}
+
+/**
+ * YoY revenue growth from each symbol's latest exchange filing (AF-20261105-04). The vendor value
+ * syncs weekly and lags a filed quarter. The 120-day window keeps it from outliving the next quarter;
+ * the plausibility band rejects a filing pair whose units disagree, leaving the vendor value in place.
+ */
+export async function loadFilingRevenueGrowth(): Promise<Map<string, number>> {
+  const rows = await dbAll(`
+    SELECT DISTINCT ON (c.symbol) c.symbol, c.revenue / p.revenue - 1 AS growth
+    FROM nse_filing_financials c
+    JOIN nse_filing_financials p
+      ON p.symbol = c.symbol AND p.consolidated = c.consolidated
+     AND p.period_end = (c.period_end - interval '1 year')::date
+    WHERE c.revenue > 0 AND p.revenue > 0
+      AND c.broadcast_ts >= now() - interval '120 days'
+      AND c.revenue / p.revenue BETWEEN 0.05 AND 11
+    ORDER BY c.symbol, c.period_end DESC, c.consolidated DESC
+  `) as { symbol: string; growth: number }[];
+  return new Map(rows.map(r => [r.symbol, Number(r.growth)]));
 }
 
 // ─── Main: Compute Confluence for All Stocks ─────────────────────────────────
@@ -474,6 +497,9 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
   const fundMap = new Map<string, any>(
     (await dbAll('SELECT * FROM stock_fundamentals') as any[]).map((r: any) => [r.symbol, r])
   );
+  for (const [symbol, growth] of await loadFilingRevenueGrowth()) {
+    fundMap.set(symbol, { ...fundMap.get(symbol), revenue_growth: growth });
+  }
   const nseMap = new Map<string, any>(
     (await dbAll('SELECT symbol, sector, market_cap FROM nse_stocks') as any[]).map((r: any) => [r.symbol, r])
   );

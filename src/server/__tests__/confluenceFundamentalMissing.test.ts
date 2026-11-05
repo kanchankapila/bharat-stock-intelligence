@@ -35,9 +35,24 @@ describe('confluence fundamental overlay with missing fields', () => {
   });
 
   it('a complete row scores exactly as before', () => {
-    expect(fund({ piotroski_f_score: 7, return_on_equity: 0.25, debt_to_equity: 0.2, revenue_growth: 0.2 }))
+    expect(fund({ piotroski_f_score: 7, return_on_equity: 0.25, debt_to_equity: 20, revenue_growth: 0.2 }))
       .toBeCloseTo(w(12), 5);
-    expect(fund({ piotroski_f_score: 5, return_on_equity: 0.15, debt_to_equity: 0.9, revenue_growth: 0.1 }))
+    expect(fund({ piotroski_f_score: 5, return_on_equity: 0.15, debt_to_equity: 90, revenue_growth: 0.1 }))
       .toBeCloseTo(w(4), 5);
+  });
+});
+
+describe('confluence fundamental overlay inputs (AF-20261105-04)', () => {
+  const de = (v: number) => fund({ piotroski_f_score: null, return_on_equity: null, debt_to_equity: v, revenue_growth: null });
+
+  it('reads debt_to_equity as the percent stock_fundamentals stores, so 0.5x is 50', () => {
+    expect(de(30)).toBeCloseTo(w(12), 5);
+    expect(de(62)).toBe(0);
+  });
+
+  it('falls back to quant_scores ROE, because stock_fundamentals lacks it for 78% of names', () => {
+    const r = scoreStock(data, null, { return_on_equity: 0.25 },
+      { piotroski_f_score: null, return_on_equity: null, debt_to_equity: null, revenue_growth: null }, null);
+    expect(r.fundScore).toBeCloseTo(w(12), 5);
   });
 });

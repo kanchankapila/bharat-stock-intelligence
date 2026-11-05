@@ -54,3 +54,24 @@ describe('extractSymbolsByName', () => {
     expect(extractSymbolsByName(txt, idx, 2)).toHaveLength(2);
   });
 });
+
+describe('sibling companies whose names differ only in brackets (AF-20261105-05)', () => {
+  const idx = buildAliasIndex([
+    { symbol: 'ASIANHOTNR', name: 'Asian Hotels (North) Limited' },
+    { symbol: 'AHLEAST', name: 'Asian Hotels (East) Limited' },
+    { symbol: 'AHLWEST', name: 'Asian Hotels (West) Limited' },
+    { symbol: 'ALPHAGEO', name: 'Alphageo (India) Limited' },
+  ]);
+
+  it('tags only the company named', () => {
+    expect(extractSymbolsByName('Asian Hotels (East) Ltd: Board Meeting', idx)).toEqual(['AHLEAST']);
+  });
+
+  it('does not guess when the text names only the shared part', () => {
+    expect(extractSymbolsByName('Asian Hotels shares rise', idx)).toEqual([]);
+  });
+
+  it('still drops a bracket that does not distinguish a sibling', () => {
+    expect(extractSymbolsByName('Alphageo wins contract', idx)).toEqual(['ALPHAGEO']);
+  });
+});

@@ -60,8 +60,16 @@ export function buildAliasIndex(
     const a = norm(raw);
     if (a.length >= 2) out.push({ symbol, alias: a, len: a.length });
   };
+  const owners = new Map<string, number>();
+  for (const { name } of stocks) {
+    for (const a of companyAliases(name)) owners.set(a, (owners.get(a) ?? 0) + 1);
+  }
   for (const { symbol, name } of stocks) {
-    for (const a of companyAliases(name)) push(symbol, a);
+    for (const a of companyAliases(name)) {
+      // AF-20261105-05: siblings that differ only in brackets (Asian Hotels East/West/North) need
+      // the bracket, or every filing from one is tagged to all three.
+      push(symbol, (owners.get(a) ?? 0) > 1 ? name.replace(LEGAL_SUFFIX, ' ') : a);
+    }
     for (const a of (extra[symbol] ?? [])) push(symbol, a);
   }
   return out.sort((a, b) => b.len - a.len);

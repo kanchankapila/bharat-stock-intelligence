@@ -544,3 +544,9 @@ PR #131 merged as b4bf2a50. The reviewed source was integrated with the dirty li
 - A fresh audit invalidated the old zero-vulnerability snapshot. AF-20261105-01 fixes one high and five moderate Node advisories locally; all gates and `npm audit` pass, but runtime restart/readback remains DEPLOY-PENDING.
 - Measurement rows stay open when power or reproducibility is missing: AF-20260829-12 is powered only at one session, and AF-20261001-49's original learning-loop trend method was not retained as a script. No scoring surface changed.
 - Full gates: 2,297 Vitest passed / 46 skipped; 4,067 Python passed / 269 skipped; build, schema, docs, findings/backlog and security checks pass. The previous entry's `findings:check` red state is resolved.
+
+## 2026-11-05 - Wrong-direction call autopsy
+
+- Read-only; no code or ledger change. Replay of the 11-04 batch: 646 of 651 Sell labels sat above 30 before penalties, which is evidence for AF-20261030-05 but uses current inputs, not the frozen cohorts that row requires.
+- Owner decides whether to add it to the row. The digest prints "worse than chance" for any excess over expected (62 vs about 57); `signalAccuracyDigest.ts:399`.
+- Later the same night: AF-20261105-02..06 fixed in code. 11-06: both migrations applied at the owner's request and read back; `penalties` back in the INSERT. Restart still waits for the other session's screener-semantics work to be committed; then read back `penalties` per row after the next ranker run.

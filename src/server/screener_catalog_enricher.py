@@ -109,6 +109,9 @@ def classify_screener(name: str) -> str | None:
     # Special Value / Reversal / Turnaround Overrides
     if 'turnaround' in nl and 'loss to profit' in nl:
         return 'bullish'
+    # AF-20261105-03: ETnow appends a description, so these otherwise read as 'high debt' / 'loss'.
+    if 'low debt stocks' in nl or 'decreasing quarterly losses' in nl:
+        return 'bullish'
     if 'good fundamental' in nl and 'near 52 week low' in nl:
         return 'bullish'
     if any(k in nl for k in [

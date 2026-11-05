@@ -355,6 +355,32 @@ describe('honest-headline fixes (AF-20261007-01/02/03)', () => {
     expect(out.split('\n').find(l => l.includes('Wrong-direction'))!).toMatch(/worse than chance/i);
   });
 
+  it('does not call an excess inside normal daily noise worse than chance (AF-20261105-06)', () => {
+    const out = formatAccuracyDigest({
+      ...base, flyers: 209, divers: 55, universeN: 2351,
+      sellRatedN: 651, buyRatedN: 82, wrongBearish: 58, wrongBullish: 4,
+    });
+    const line = out.split('\n').find(l => l.includes('Wrong-direction'))!;
+    expect(line).not.toMatch(/worse than chance/i);
+    expect(line).toMatch(/expected by chance/i);
+  });
+
+  it('separates a market-wide rally from a stock-specific miss (AF-20261105-06)', () => {
+    const out = formatAccuracyDigest({
+      ...base, flyers: 209, divers: 55, universeN: 2351, sellRatedN: 651, buyRatedN: 82,
+      wrongBearish: 58, wrongBullish: 4, marketPct: 2.4, wrongBeyondMarket: 21,
+    });
+    expect(out).toMatch(/Nifty \+2\.4%/);
+    expect(out).toMatch(/21 of 62/);
+  });
+
+  it('omits the market line when the index move is unknown', () => {
+    const out = formatAccuracyDigest({
+      ...base, wrongBearish: 5, wrongBullish: 0, marketPct: null, wrongBeyondMarket: null,
+    });
+    expect(out).not.toMatch(/Nifty/);
+  });
+
   it('never divides by a zero universe', () => {
     const out = formatAccuracyDigest({
       ...base, flyers: 0, divers: 0, universeN: 0,

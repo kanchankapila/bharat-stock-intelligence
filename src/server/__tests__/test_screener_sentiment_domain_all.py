@@ -107,5 +107,24 @@ class TestScreenerDomainClassification(unittest.TestCase):
             "The two layers now agree -- if that was deliberate, delete this test and record "
             "which one won in docs/audit-findings.md AF-20260829-11.")
 
+class PositiveScreenersAreNotRedFlags(unittest.TestCase):
+    """AF-20261105-03: ETnow appends a description to the name, so "...associated with high debt"
+    and the substring "loss" read these two as bearish, and the x0.5 red-flag veto followed."""
+
+    def test_low_debt_and_shrinking_losses_are_bullish(self):
+        from screener_catalog_enricher import classify_screener
+        low_debt = ('18. Low Debt Stocks: Query: Identifies stocks from financially stable companies '
+                    'with minimal debt levels, suitable for investors concerned about the risks '
+                    'associated with high debt.')
+        self.assertEqual(classify_screener(low_debt), 'bullish')
+        self.assertEqual(classify_screener('Decreasing Quarterly LossesIdentify firms with improving '
+                                           'financial performance'), 'bullish')
+
+    def test_real_losses_stay_bearish(self):
+        from screener_catalog_enricher import classify_screener
+        self.assertEqual(classify_screener('Profit to Loss'), 'bearish')
+        self.assertEqual(classify_screener('Increasing Quarterly Losses'), 'bearish')
+
+
 if __name__ == '__main__':
     unittest.main()

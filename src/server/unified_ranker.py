@@ -1581,6 +1581,19 @@ def veto_classification(classification):
     return 'Hold' if classification in ('Strong Buy', 'Buy') else classification
 
 
+def penalty_record(pre_penalty_score, quality, red_flag, high_vol, crowding, bull, bear, fresh_result):
+    """What each penalty did to one row, for grading a risk-only abstention (AF-20261030-05)."""
+    return {
+        'pre_penalty_score': pre_penalty_score,
+        'pre_penalty_class': _classify(pre_penalty_score, bull, bear),
+        'quality': quality,
+        'red_flag': red_flag,
+        'high_vol': high_vol,
+        'crowding': crowding,
+        'fresh_result': fresh_result,
+    }
+
+
 # ── High-realized-volatility veto (2026-08-10) ───────────────────────────────────
 # The single most statistically robust cross-sectional result available in this platform's
 # own price history, and the only one that survives a 4.5-year test:
@@ -2306,6 +2319,10 @@ class UnifiedRanker:
             latest = {}
             for r in rows:
                 latest[r['symbol']] = [_finite_or_none(r[c]) for c in cols]
+            # AF-20261105-02: ~2,200 unrated rows with no data all impute to one raw value, about
+            # 48% of the percentile scale, so a name crossing it moved ~16 score points.
+            keep = self._restrict_to_tradeable_universe(set(latest))
+            latest = {s: v for s, v in latest.items() if s in keep}
             medians = []
             for i in range(len(cols)):
                 present = sorted(v[i] for v in latest.values() if v[i] is not None)
@@ -2706,6 +2723,21 @@ class UnifiedRanker:
             self.conn.rollback()
             return {}
 
+    def _get_fresh_result_symbols(self):
+        """Names whose results reached the exchange in the last two sessions. Recorded only:
+        results raise the size of the next move, not its direction (AF-20261030-05)."""
+        cutoff = as_of.trading_days_back(2, self.conn)[-1].isoformat()
+        try:
+            rows = self.conn.execute(
+                "SELECT DISTINCT symbol FROM nse_results_filings WHERE broadcast_ts >= ?",
+                (cutoff,),
+            ).fetchall()
+            return {r['symbol'] for r in rows}
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_fresh_result_symbols failed: {e}")
+            self.conn.rollback()
+            return set()
+
     def _get_multi_factor_map(self):
         """Finding #28: multi_factor_scorer.py's 5-factor breakdown, keyed by symbol, for the
         factor-crowding check. Empty dict (safe no-op via factor_crowding_multiplier's own
@@ -3036,6 +3068,7 @@ class UnifiedRanker:
         bo_p90, bo_p80 = _bo_pctl(0.90), _bo_pctl(0.80)
         # High-realized-vol veto cutoff for today's tape (see HIGH_VOL_VETO_PCTILE).
         realized_vol = self._get_realized_vol()
+        fresh_results = self._get_fresh_result_symbols()
         hv_cut = high_vol_cutoff(realized_vol.values())
         if hv_cut is None:
             print(f"[UnifiedRanker] high-vol veto INACTIVE (only {len(realized_vol)} symbols "
@@ -3075,6 +3108,7 @@ class UnifiedRanker:
             # and for breakout's sizing thresholds below.
             blend_scores = {e: m.get(sym, 0.0) for e, m in engine_maps_blend.items()}
             unified = _blend(blend_scores, present, base_weights)
+            pre_penalty_score = unified
 
             # ORDERING INVARIANT (2026-08-10): every ordinary score MULTIPLIER runs here,
             # BEFORE the single _classify call, and nothing may touch `unified` after it.
@@ -3266,6 +3300,16 @@ class UnifiedRanker:
                 # engine_scores[e] itself is untouched, and `unified` above was already computed
                 # from `present`/`_blend()` before this dict is built -- this only changes what
                 # gets WRITTEN to the reporting columns, not any score, weight, or classification.
+                'penalties': json.dumps(penalty_record(
+                    round(pre_penalty_score, 2),
+                    _qg if qm else 1.0,
+                    bool(red_flagged),
+                    bool(high_vol_vetoed),
+                    crowd_mult,
+                    bull_counts.get(sym, 0),
+                    bear_counts.get(sym, 0),
+                    sym in fresh_results,
+                )),
                 'screener_stock_score':    round(engine_scores['screener'], 2) if 'screener' in has_data else None,
                 'ml_score':                round(engine_scores['ml'], 2) if 'ml' in has_data else None,
                 'confluence_score':        round(engine_scores['confluence'], 2) if 'confluence' in has_data else None,
@@ -3458,13 +3502,13 @@ class UnifiedRanker:
                  classification, screener_stock_score, ml_score, confluence_score,
                  technical_score, cs_score, dl_score, breakout_score, smart_money_score,
                  fundamental_score, engine_coverage_count, entry_zone_low, stop_loss,
-                 target_1, position_size_pct, sector, win_probability)
+                 target_1, position_size_pct, sector, win_probability, penalties)
                 VALUES (:symbol, :computed_at, :generated_at, :regime, :unified_score,
                         :conviction_level, :classification, :screener_stock_score, :ml_score,
                         :confluence_score, :technical_score, :cs_score, :dl_score,
                         :breakout_score, :smart_money_score, :fundamental_score,
                         :engine_coverage_count, :entry_zone_low, :stop_loss, :target_1,
-                        :position_size_pct, :sector, :win_probability)
+                        :position_size_pct, :sector, :win_probability, :penalties)
                 ON CONFLICT(symbol, generated_at) DO NOTHING
             ''', r)
         self.conn.commit()
