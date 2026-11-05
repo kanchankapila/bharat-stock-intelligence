@@ -521,3 +521,26 @@ PR #131 merged as b4bf2a50. The reviewed source was integrated with the dirty li
 - Read tonight's 22:40 digest and tomorrow's 08:20 brief: the heading should say WATCH-LIST.
 - Before the 11-07 retrain: AF-20261103-12 has the comparison. After it, run the `nifty_regime` replay (-16). About 11-07 delete the 4 old dumps in `backups/` once C: holds 7.
 - `docker volume rm bharat_pgdata_pre_ts2_30_0_20260911` is checked and waiting on the user; the classifier refuses it for agents.
+
+## 2026-11-04 - Clean-slate rebuild plan
+
+- Design and plan written, uncommitted, awaiting owner review (AF-20261104-03). Nothing built.
+
+## 2026-11-04 - Edge design correction and endpoint policy (Codex)
+
+- AF-20261104-03 now points to the revision-2 design/plan in `D:/Github/bharat-edge`; later work there includes an existing Phase 1 foundation, so the earlier awaiting-review/nothing-built note is historical.
+- The owner's accepted corrections preserve frozen evidence while requiring sleeve-scoped expansion, exact temporal/decision provenance, clock-aware execution, causal expectations and independent-unit gates. The plan names prospective regression obligations; documentation is not proof the runtime satisfies them.
+- Owner explicitly removed endpoint allowlisting and per-endpoint approval for research discovery. Public and existing authorised data access can be used without a URL approval gate; data admission governs subsequent canonical use.
+- Next if approved: plan Phase 0, read-only; Task 2 audits Bharat Alpha's next-session lead, whose gate leak check is null.
+
+## 2026-11-05 - Clean-slate Phase 0 finished
+
+- Verdict in bharat-edge branch phase0-sdd (9404c7b). Owner decides: H3 counted or not, which bharat-edge tree continues, repair of `alpha.adjustment` (AF-20261104-04; next action dated 2026-11-06).
+- findings:check is red on Codex's AF-20261029-93, not this work.
+
+## 2026-11-05 - Actionable backlog reconciliation
+
+- Closed 11 stale rows only after exact-source gates and current production readbacks; the analyst job now retains 1,046 usable rows while honestly failing on Yahoo rate limits, and calibration shadow has 32,349 valid unique rows through 11-04.
+- A fresh audit invalidated the old zero-vulnerability snapshot. AF-20261105-01 fixes one high and five moderate Node advisories locally; all gates and `npm audit` pass, but runtime restart/readback remains DEPLOY-PENDING.
+- Measurement rows stay open when power or reproducibility is missing: AF-20260829-12 is powered only at one session, and AF-20261001-49's original learning-loop trend method was not retained as a script. No scoring surface changed.
+- Full gates: 2,297 Vitest passed / 46 skipped; 4,067 Python passed / 269 skipped; build, schema, docs, findings/backlog and security checks pass. The previous entry's `findings:check` red state is resolved.

@@ -95,6 +95,15 @@ This section is a dated status board, not a verdict list. A claim carrying an ol
 in this file is not wrong, it is *unrefreshed* — check the date before quoting it, and re-run
 rather than assume. Full narrative for anything here: `docs/measurement-history.md`.
 
+### 2026-11-05 — Phase 0 of the clean-slate rebuild (separate repo `bharat-edge`, branch `phase0-sdd`): H1 void, H2v2 ungradeable, H3 passes the letter only
+
+Full text: `D:/Github/bharat-edge-sdd/docs/phase0-verdict.md`; defect row AF-20261104-04. Recommendation (owner may overrule): Phase 1 only, as a research and risk tool with no calls.
+
+- **H1, provisional (momentum_12_1, 56 disjoint periods 2022-01-10..2026-10-13, ~37 names, 16 bps/side): frozen letter KILL, t -0.24 vs NIFTY 500, but the panel is DEFECTIVE and the result is VOID.** `alpha.adjustment` misses most splits and bonuses (790 closes below 0.65 of the last close, 15 with an adjustment row; BAJFINANCE 2025-06-17 reads -90%, legacy -1.6%). Do NOT quote it as evidence that momentum fails or works. The seam-repaired diagnostic (+1.33%/period, raw t 1.72) was written after the result was read and is also under 2.0; do not quote it either. Ran momentum-only: book-to-price dropped, quality formable on 6 of 57 decisions.
+- **H2v2: UNGRADEABLE.** 80.6% of events take inputs from rejected Dalalos net income. Its +0.63%/period (4 independent periods) rests on one week and has no usable t; do not quote it.
+- **H3 (s1 picks, 2026-10-01..11-03, 22 sessions, 220 picks).** Every return is a mean per day, equal-weighted across the day's picks, open to close, as excess over the same-day universe mean, net of a 40 bps round-trip cost. Frozen letter PASS (99.5th null percentile at 40 bps, cost-free ADT-bucket null, +0.564% per day, t 2.41). Decision reading FAIL (173 fillable picks vs a gap + ADT-decile null: 60th percentile, +0.232% per day, t 1.10; it reaches the 96.5th percentile only at an assumed 18 bps, which a 2,000-draw rerun does not confirm (94.95 raw, 97.4 winsorised), and fills and costs are unmeasured). The leak check (0.1488 vs 0.15) covers only the published top 10, 11 of 22 dates are over the bar, and a full-width rescore on 14 days reads 0.110. 48.1% of gross excess is from 17.7% of picks in series BE, which have no same-day exit. The pass comes from 14 days of one model version (s1-20261009). Not counting it is a post-result judgement, not a plan rule. Quote only as 'passes the letter, not tradable as published'; one falling tape; a pass would only ever mean paper with real fills.
+- **Vendor history:** Trendlyne P/B table rows hold Moneycontrol values from 2026-07-10 (100.00% identical, n=185,033); for P/E the identity is shown only from 2026-08-15 (n=127,166). The Trendlyne-authored span cannot be audited. 'Dalalos' rows are Mojo. 4 sessions are missing from `alpha.trading_day`; the false factors they cause sit on three ex-dates (2022-08-10, 2024-03-04, 2026-09-16), counted per ex-date.
+
 ### 2026-10-26 — ranker re-graded on 41 post-change dates; `breakout` zeroed; stale claims corrected
 
 Panel: every `unified_recommendations` run 2026-08-10..10-15 (41 dates, ~2,030 names/date), **dated by

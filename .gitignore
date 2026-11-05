@@ -35,6 +35,8 @@ pnpm-debug.log*
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+*.db-shm
+*.db-wal
 
 # Database files (generated at runtime)
 mc_tl_explore.db
