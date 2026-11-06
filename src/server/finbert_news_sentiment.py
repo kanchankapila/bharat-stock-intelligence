@@ -65,6 +65,11 @@ def score_batch(items: list[dict]) -> list[dict]:
 
 
 if __name__ == "__main__":
+    # 2026-11-06 23:03: one run hung until newsSentimentService's 420s kill with no stderr (first
+    # timeout in ~1,000 runs); finbert_scorer stalled twice the same evening before its model loaded.
+    # Dump every thread's stack to stderr just before the kill so the next stall names its location.
+    import faulthandler
+    faulthandler.dump_traceback_later(400, exit=False)
     arg = sys.argv[1]
     if arg.startswith("@"):  # file path: a 150-item batch overflows the Windows command line
         with open(arg[1:], encoding="utf-8") as fh:

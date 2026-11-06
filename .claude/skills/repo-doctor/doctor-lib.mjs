@@ -162,3 +162,17 @@ export function logRotationVerdict({ moduleInstalled, logBytes }) {
   if ((logBytes ?? 0) > 200e6) return { status: 'FAIL', detail: `pm2-out.log ${mb} MB: rotation is not running` };
   return { status: 'PASS', detail: `pm2-logrotate installed; pm2-out.log ${mb} MB` };
 }
+
+// 2026-11-07: app logs are named and rotated at IST midnight (yesterday becomes app-<day>.log.gz).
+// The scan used UTC dates and plain .log only, so just after midnight IST it read no file at all
+// and reported "0 error lines" as PASS. Name the days in IST and fall back to the rotated .gz.
+export function appLogFilesForScan(now, logDir, exists) {
+  const istDay = (ms) => new Date(ms + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  const files = [];
+  for (const day of [istDay(now.getTime()), istDay(now.getTime() - 86_400_000)]) {
+    const plain = `${logDir}/app-${day}.log`;
+    if (exists(plain)) files.push({ day, path: plain, gz: false });
+    else if (exists(`${plain}.gz`)) files.push({ day, path: `${plain}.gz`, gz: true });
+  }
+  return files;
+}

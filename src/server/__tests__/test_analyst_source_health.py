@@ -92,6 +92,54 @@ def test_yahoo_rate_limit_opens_breaker_but_moneycontrol_fallback_remains(monkey
     assert health.degraded() and health.yahoo_limited
 
 
+def _fake_yahoo(monkeypatch, info):
+    calls = []
+    class Ticker:
+        def __init__(self, symbol):
+            calls.append(symbol)
+            self.info = info
+    monkeypatch.setitem(sys.modules, 'yfinance', SimpleNamespace(Ticker=Ticker))
+    monkeypatch.setattr(snapshot, '_YAHOO_MIN_INTERVAL_S', 0.0)
+    return calls
+
+
+def test_yahoo_only_fills_fields_moneycontrol_left_empty(monkeypatch):
+    # 2026-11-07: Yahoo was asked for all ~2,300 symbols from 12 threads before MoneyControl and
+    # rate-limited the run every night after ~7 calls, failing the job and losing ~200 EPS values
+    # Yahoo does have. Yahoo is now a gap filler: it never overrides a MoneyControl value.
+    calls = _fake_yahoo(monkeypatch, {'targetMeanPrice': 999.0, 'forwardEps': 12.5,
+                                      'numberOfAnalystOpinions': 30})
+    monkeypatch.setattr(snapshot, '_fetch_symbol', lambda code, session, health:
+                        {'target_mean': 123.0, 'n_analysts': 9, 'buy_count': 5})
+    result = snapshot._fetch_symbol_hybrid('AAA', 'AA', object(), snapshot.SourceHealth())
+    assert calls == ['AAA.NS']
+    assert result['target_mean'] == 123.0 and result['n_analysts'] == 9
+    assert result['eps_est_next'] == 12.5
+
+
+def test_yahoo_not_called_when_moneycontrol_is_complete_or_has_no_coverage(monkeypatch):
+    calls = _fake_yahoo(monkeypatch, {'targetMeanPrice': 999.0})
+    full = {'target_mean': 1.0, 'target_high': 2.0, 'target_low': 0.5, 'n_analysts': 3,
+            'final_rating': 'BUY', 'eps_est_next': 4.0, 'buy_count': 2}
+    monkeypatch.setattr(snapshot, '_fetch_symbol', lambda code, session, health: dict(full))
+    snapshot._fetch_symbol_hybrid('FULL', 'FU', object(), snapshot.SourceHealth())
+    monkeypatch.setattr(snapshot, '_fetch_symbol', lambda code, session, health: {})
+    assert all(v is None for v in
+               snapshot._fetch_symbol_hybrid('NONE', 'NO', object(), snapshot.SourceHealth()).values())
+    assert calls == []
+
+
+def test_yahoo_calls_are_spaced_across_threads(monkeypatch):
+    clock = {'t': 100.0}
+    sleeps = []
+    monkeypatch.setattr(snapshot.time, 'monotonic', lambda: clock['t'])
+    monkeypatch.setattr(snapshot.time, 'sleep', lambda s: (sleeps.append(s), clock.__setitem__('t', clock['t'] + s)))
+    monkeypatch.setattr(snapshot, '_yahoo_last_call', [0.0])
+    snapshot._yahoo_pace()
+    snapshot._yahoo_pace()
+    assert sleeps and abs(sleeps[0] - snapshot._YAHOO_MIN_INTERVAL_S) < 1e-9
+
+
 def test_degraded_run_raises_after_retaining_successful_rows(monkeypatch):
     monkeypatch.setattr(snapshot, '_today_ist', lambda: '2026-10-30')
     monkeypatch.setattr(snapshot, 'query_all', lambda *args: [{'symbol': 'AAA', 'mcsymbol': 'AA'}])

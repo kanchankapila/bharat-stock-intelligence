@@ -17,7 +17,9 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import 'dotenv/config';
+import zlib from 'zlib';
 import {
+  appLogFilesForScan,
   classifyLatestDq,
   isKnownTransientFailure,
   latestExpectedNseDailyRun,
@@ -453,7 +455,9 @@ console.log('\n━━━ D. Logs ━━━');
 const BENIGN_LOG = [
   [/(?:^|[\s\\/])__tests__[\\/]fixtures[\\/]mem_hog\.py\b/i, 'intentional Python memory-ceiling test fixture'],
   [/waf|captcha/i, 'Trendlyne WAF captcha (vendor block, self-clears)'],
-  [/niftytrader.*(unauthorized|403|timeout)|execution budget/i, 'NiftyTrader vendor block/budget (self-clears)'],
+  // `|execution budget` used to stand alone, so ANY job's budget overrun read as a NiftyTrader block:
+  // 2026-11-06 it hid "ml-daily-ops exceeded its 210min execution budget" (the only match in 14 days).
+  [/niftytrader.*(unauthorized|403|timeout|budget)/i, 'NiftyTrader vendor block/budget (self-clears)'],
   [/marketsmojo/i, 'MarketsMojo crawl (progressive 7-day skip cache)'],
   [/EBUSY.*audit-files/i, 'vite watcher EBUSY (ignored since AF-10)'],
   [/error_code:? ?429|retry after/i, 'Telegram 429 (retried since AF-07)'],
@@ -466,12 +470,11 @@ const BENIGN_LOG = [
     'Trendlyne symbol retry (aggregate batch verdict remains actionable)'],
 ];
 try {
-  const days = [new Date(), new Date(Date.now() - 86_400_000)].map(d => d.toISOString().slice(0, 10));
+  const logFiles = appLogFilesForScan(new Date(), path.join(ROOT, 'logs'), fs.existsSync);
   const seen = new Map();
-  for (const day of days) {
-    const f = path.join(ROOT, 'logs', `app-${day}.log`);
-    if (!fs.existsSync(f)) continue;
-    for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+  for (const { path: f, gz } of logFiles) {
+    const raw = fs.readFileSync(f);
+    for (const line of (gz ? zlib.gunzipSync(raw) : raw).toString('utf8').split('\n')) {
       if (!line.includes('"level":"error"')) continue;
       let msg = line; try { msg = JSON.parse(line).message || line; } catch { /* raw */ }
       const key = String(msg).replace(/[0-9a-f-]{16,}|\d{3,}/g, '#').slice(0, 90);
@@ -483,10 +486,12 @@ try {
   }
   const unknown = [...seen.entries()].filter(([, v]) => !v.benign);
   const totalErr = [...seen.values()].reduce((a, v) => a + v.n, 0);
-  check('log-errors', 'logs', unknown.length ? 'WARN' : 'PASS',
+  const scanned = logFiles.map(f => path.basename(f.path)).join(', ');
+  if (!logFiles.length) check('log-errors', 'logs', 'WARN', 'no app log found for today or yesterday (IST) — nothing was scanned');
+  else check('log-errors', 'logs', unknown.length ? 'WARN' : 'PASS',
     unknown.length
-      ? `${unknown.length} unclassified error signature(s): ${unknown.slice(0, 4).map(([, v]) => `${v.n}x ${v.sample}`).join(' | ')}`
-      : `${totalErr} error lines, all match known-benign classes`);
+      ? `${unknown.length} unclassified error signature(s) in ${scanned}: ${unknown.slice(0, 4).map(([, v]) => `${v.n}x ${v.sample}`).join(' | ')}`
+      : `${totalErr} error lines in ${scanned}, all match known-benign classes`);
   for (const [, v] of [...seen.entries()].filter(([, v]) => v.benign).slice(0, 6)) {
     console.log(`      · benign ${v.n}x — ${v.benign}`);
   }

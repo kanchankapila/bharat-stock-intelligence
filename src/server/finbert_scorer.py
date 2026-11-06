@@ -283,6 +283,11 @@ def upsert_sentiment(conn: ConnWrapper, records: list[dict]):
 
 def run(limit: int = 500, days: int = 7, dry_run: bool = False):
     print(f"[FinBERT] Starting at {datetime.datetime.now()}")
+    # 2026-11-06: two runs stalled before "Model loaded" and were killed at ml-daily-ops' 180s
+    # budget with no stderr; six standalone loads took 16-17s. Dump every thread's stack just
+    # before that kill so the next stall names where it is stuck. No-op when the run finishes.
+    import faulthandler
+    faulthandler.dump_traceback_later(160, exit=False)
 
     tokenizer, model, device = load_model()
     tone = load_tone_model()

@@ -57,8 +57,10 @@ async function processDlMacroFetch(_job: Job): Promise<{ success: boolean; skipp
   // sector_global_corr_* could stop being written entirely with this job still green.
   await runPython('mc_global_macro_fetcher.py', [], 60_000)
     .catch(e => T.fail('mc_global_macro_fetcher', e));
-  // Sector-global correlation depends on macro_asset_prices populated above.
-  await runPython('sector_global_corr.py', [], 3 * 60_000)
+  // Sector-global correlation depends on macro_asset_prices populated above. 3 -> 10 min
+  // (2026-11-07): same technical_signals row-lock waits as the evening call raised on 11-03; this
+  // 08:00 call kept 3 min and died at exactly 180s on 11-02 and 11-04 (standalone run: 10s).
+  await runPython('sector_global_corr.py', [], 10 * 60_000)
     .catch(e => T.fail('sector_global_corr', e));
   // Bond yields (India G-Sec + US/UK/DE 10yr) are now fetched inside global_macro_fetcher.py.
   const verdict = T.finish();

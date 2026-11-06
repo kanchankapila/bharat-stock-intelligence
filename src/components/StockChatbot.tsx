@@ -87,6 +87,12 @@ interface HealthStatus {
   graph_ready: boolean;
 }
 
+/** Why chat is unavailable. A running service with no LLM key answers /health 503 + llm "unavailable". */
+export function offlineMessage(health: HealthStatus | null): string {
+  if (health?.llm === 'unavailable') return 'No LLM configured — set GEMINI_API_KEY in .env and restart chatbot';
+  return 'Chatbot service not running — start it with pm2 start chatbot';
+}
+
 export default function StockChatbot() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -102,8 +108,7 @@ export default function StockChatbot() {
     setHealthChecking(true);
     try {
       const res = await fetch(`${CHATBOT_BASE}/health`, { signal: AbortSignal.timeout(5000) });
-      if (res.ok) setHealth(await res.json());
-      else setHealth(null);
+      setHealth(await res.json().catch(() => null));
     } catch {
       setHealth(null);
     } finally {
@@ -261,7 +266,7 @@ export default function StockChatbot() {
           </div>
           <div>
             <h2 className="text-sm font-bold text-slate-100 leading-none">Bharat Stock AI</h2>
-            <p className="text-[10px] text-slate-500 mt-0.5">Powered by {health?.llm ?? 'LangGraph'}</p>
+            <p className="text-[10px] text-slate-500 mt-0.5">Powered by {health?.status === 'ok' ? health.llm : 'LangGraph'}</p>
           </div>
         </div>
 
@@ -278,9 +283,9 @@ export default function StockChatbot() {
             <button
               onClick={checkHealth}
               className="flex items-center gap-1.5 text-[10px] font-semibold text-rose-400 bg-rose-400/10 px-2 py-1 rounded-full hover:bg-rose-400/20 transition-colors"
-              title="Click to retry"
+              title={`${offlineMessage(health)}. Click to retry.`}
             >
-              <WifiOff className="w-3 h-3" /> Offline — retry
+              <WifiOff className="w-3 h-3" /> {health?.llm === 'unavailable' ? 'No LLM' : 'Offline'} — retry
             </button>
           )}
         </div>
@@ -390,7 +395,7 @@ export default function StockChatbot() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isOnline ? 'Ask about any Indian stock…' : 'Chatbot offline — start with npm run chatbot'}
+            placeholder={isOnline ? 'Ask about any Indian stock…' : offlineMessage(health)}
             disabled={!isOnline}
             className="flex-1 bg-transparent text-sm text-slate-200 placeholder:text-slate-600 outline-none disabled:opacity-50"
           />

@@ -15,6 +15,7 @@ Run:  python analyst_estimates_snapshot.py
 import argparse
 import datetime
 import threading
+import time
 from typing import Callable, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -225,59 +226,81 @@ def _fetch_symbol(mcsymbol: str, session: requests.Session, health: Optional[Sou
     return result
 
 
+# Yahoo throttles bursts: asked for every symbol from 12 threads it rate-limited each run after
+# ~7 calls (2026-11-02..06), while 60 sequential calls 0.5s apart all succeeded.
+_YAHOO_MIN_INTERVAL_S = 0.5
+_YAHOO_LOCK = threading.Lock()
+_yahoo_last_call = [0.0]
+_YAHOO_FIELDS = ("target_mean", "target_high", "target_low", "n_analysts", "final_rating",
+                 "eps_est_next")
+
+
+def _yahoo_pace() -> None:
+    """Space Yahoo request starts at least _YAHOO_MIN_INTERVAL_S apart across all threads."""
+    with _YAHOO_LOCK:
+        wait = _yahoo_last_call[0] + _YAHOO_MIN_INTERVAL_S - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _yahoo_last_call[0] = time.monotonic()
+
+
+def _fetch_yahoo(symbol: str) -> dict:
+    import yfinance as yf
+    _yahoo_pace()
+    info = yf.Ticker(f"{symbol}.NS").info or {}
+    t_high, t_low = info.get("targetHighPrice"), info.get("targetLowPrice")
+    n_cov, rec_key, fwd_eps = (info.get("numberOfAnalystOpinions"), info.get("recommendationKey"),
+                               info.get("forwardEps"))
+    t_mean = info.get("targetMeanPrice")
+    # NOTE: deliberately NOT estimating buy/hold/sell splits from recommendationMean -- these
+    # columns feed ml_ensemble as features, and synthetic distributions would poison training.
+    return {
+        "target_mean": float(t_mean) if t_mean is not None else None,
+        "target_high": float(t_high) if t_high else None,
+        "target_low": float(t_low) if t_low else None,
+        "n_analysts": int(n_cov) if n_cov else None,
+        "final_rating": rec_key.upper() if rec_key else None,
+        "eps_est_next": float(fwd_eps) if fwd_eps else None,
+    }
+
+
 def _fetch_symbol_hybrid(symbol: str, mcsymbol: str, session: requests.Session,
                          health: Optional[SourceHealth] = None) -> dict:
-    """Fast hybrid fetcher: structured direct engine with MoneyControl fallback."""
+    """MoneyControl first; Yahoo only fills fields MoneyControl left empty, never overrides them.
+
+    Yahoo is skipped when MoneyControl has no coverage at all: on 2026-11-07 Yahoo had a target
+    for 0 of 30 sampled symbols MoneyControl lacks, but EPS for 20 of 30 rows MC covered with gaps.
+    The skip rests on that 30-name sample (~10% upper bound on what it misses; AF-20261107-03).
+    """
     result: dict = {
         "n_analysts": None, "final_rating": None, "buy_count": None,
         "hold_count": None, "sell_count": None, "target_high": None,
         "target_mean": None, "target_low": None, "eps_est_next": None,
         "revenue_est_next": None
     }
+    if mcsymbol:
+        for k, v in _fetch_symbol(mcsymbol, session, health).items():
+            if v is not None:
+                result[k] = v
+
+    has_mc_coverage = any(v is not None for v in result.values())
+    if not has_mc_coverage or all(result[k] is not None for k in _YAHOO_FIELDS):
+        return result
     try:
         if health and health.blocked('yahoo'):
             raise _SourcePaused()
-        import yfinance as yf
-        t = yf.Ticker(f"{symbol}.NS")
-        info = t.info or {}
-        t_mean = info.get("targetMeanPrice")
-        t_high = info.get("targetHighPrice")
-        t_low = info.get("targetLowPrice")
-        n_cov = info.get("numberOfAnalystOpinions")
-        rec_key = info.get("recommendationKey")
-        fwd_eps = info.get("forwardEps")
-        
-        if t_mean is not None:
-            result["target_mean"] = float(t_mean)
-            result["target_high"] = float(t_high) if t_high else None
-            result["target_low"] = float(t_low) if t_low else None
-            result["n_analysts"] = int(n_cov) if n_cov else None
-            result["final_rating"] = rec_key.upper() if rec_key else None
-            result["eps_est_next"] = float(fwd_eps) if fwd_eps else None
-            # NOTE: deliberately NOT estimating buy/hold/sell splits from
-            # recommendationMean — these columns feed ml_ensemble as features, and
-            # synthetic distributions (80/15/5 etc. of n_analysts) would poison
-            # training. Real counts arrive from the MoneyControl merge below
-            # whenever MC has the symbol; if neither source has them they stay
-            # NULL (honest unknown), never fabricated.
+        for k, v in _fetch_yahoo(symbol).items():
+            if result.get(k) is None and v is not None:
+                result[k] = v
     except _SourcePaused:
         pass
     except Exception as exc:
-        # Yahoo path failed; MC fills the gaps below. Logged rather than swallowed because the
-        # result is a HALF-POPULATED estimate row, and "which of the two sources failed" is
-        # exactly what an audit needs to tell a vendor outage from a parser regression.
+        # Logged rather than swallowed: the row is then HALF-POPULATED, and "which source failed"
+        # is what an audit needs to tell a vendor outage from a parser regression.
         if health:
             health.record('yahoo', 'limited' if _is_rate_limit(exc) else 'error', str(exc)[:200])
         else:
             print(f"[AnalystEstimates] Yahoo parse failed: {exc}", file=sys.stderr)
-
-    if (result["target_mean"] is None or result["n_analysts"] is None
-            or result["eps_est_next"] is None or result["buy_count"] is None) and mcsymbol:
-        mc_res = _fetch_symbol(mcsymbol, session, health)
-        for k, v in mc_res.items():
-            if result.get(k) is None and v is not None:
-                result[k] = v
-
     return result
 
 

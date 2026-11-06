@@ -21,6 +21,7 @@ import { pythonApi } from '../pythonApi';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
 import { retryOnConnectionError } from '../localServiceRetry';
+import log from '../logger';
 import { shouldSkipOnTradingHoliday } from '../marketStatusService';
 import { StepTracker } from '../jobSteps';
 
@@ -136,7 +137,31 @@ export const QUEUE_CHATBOT_REINGEST = 'chatbot-reingest';
 const CHATBOT_BASE =
   process.env.CHATBOT_URL ?? `http://127.0.0.1:${process.env.CHATBOT_PORT ?? 8001}`;
 
-async function processChatbotReingest(_job: Job) {
+/** pm2's status for the chatbot app, or null when pm2 cannot be read. */
+async function chatbotPm2Status(): Promise<string | null> {
+  try {
+    const pm2 = (await import('pm2')).default;
+    return await new Promise<string | null>((resolve) => {
+      pm2.connect((err) => {
+        if (err) return resolve(null);
+        pm2.describe('chatbot', (e, list) => {
+          pm2.disconnect();
+          resolve(e ? null : (list?.[0]?.pm2_env?.status ?? null));
+        });
+      });
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function processChatbotReingest(_job: Job) {
+  // `pm2 stop chatbot` (to free memory) is a decision, not an outage: skip rather than fail every
+  // night. Only the explicit 'stopped' status skips; crashed/errored/unreadable still throws below.
+  if (await chatbotPm2Status() === 'stopped') {
+    log.info('[QUEUE] chatbot-reingest skipped — chatbot is stopped in pm2');
+    return { skipped: true, reason: 'chatbot stopped in pm2' };
+  }
   const res = await retryOnConnectionError(
     () => fetch(`${CHATBOT_BASE}/ingest`, { method: 'POST' }), { label: 'chatbot /ingest' });
   if (!res.ok) {

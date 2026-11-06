@@ -136,3 +136,21 @@ describe('repo-doctor pm2 log rotation', () => {
     expect(logRotationVerdict({ moduleInstalled: true, logBytes: 1.4e6 }).status).toBe('PASS');
   });
 });
+
+describe('repo-doctor log files to scan', () => {
+  // 2026-11-07 00:43 IST: the scan named days by UTC (11-06, 11-05) and only looked for plain .log,
+  // but app logs rotate at IST midnight to .log.gz -- it read no file and printed "0 error lines" PASS.
+  it('names today and yesterday by IST date and falls back to the rotated .gz', async () => {
+    const { appLogFilesForScan } = await import('./doctor-lib.mjs');
+    const present = new Set(['logs/app-2026-11-07.log', 'logs/app-2026-11-06.log.gz']);
+    const fwd = p => p.split(String.fromCharCode(92)).join('/');
+    const files = appLogFilesForScan(atIst('2026-11-07T00:43:00'), 'logs', p => present.has(fwd(p)));
+    expect(files.map(f => fwd(f.path))).toEqual(['logs/app-2026-11-07.log', 'logs/app-2026-11-06.log.gz']);
+    expect(files.map(f => f.gz)).toEqual([false, true]);
+  });
+
+  it('returns nothing when no log exists, so the caller can refuse to report a PASS', async () => {
+    const { appLogFilesForScan } = await import('./doctor-lib.mjs');
+    expect(appLogFilesForScan(atIst('2026-11-07T00:43:00'), 'logs', () => false)).toEqual([]);
+  });
+});
