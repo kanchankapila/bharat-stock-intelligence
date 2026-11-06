@@ -51,4 +51,18 @@ describe('ecosystem.config.cjs Python services', () => {
     expect(Number(app.env.BHARAT_PY_MEM_LIMIT_MB)).toBeGreaterThan(0);
     expect(app.env.PYTHONUNBUFFERED).toBe('1');
   });
+
+  // numpy's OpenBLAS reserves ~32MB per thread at import and defaults to all 16 logical CPUs:
+  // ~500MB of private commit per Python process on this host (2026-11-06).
+  it.each(PY_APPS.map(a => a.name))('%s caps the OpenBLAS thread pool', (name) => {
+    const app = apps.find(a => a.name === name);
+    const n = Number(app.env.OPENBLAS_NUM_THREADS);
+    expect(Number.isInteger(n) && n >= 1 && n <= 8, `${name}: OPENBLAS_NUM_THREADS=${app.env.OPENBLAS_NUM_THREADS}`).toBe(true);
+  });
+
+  it('keeps the idle long-running services at 2 OpenBLAS threads', () => {
+    for (const name of ['alphaquant-api', 'ml-api', 'chatbot', 'engine-worker', 'bqa-scheduler']) {
+      expect(apps.find(a => a.name === name).env.OPENBLAS_NUM_THREADS, name).toBe('2');
+    }
+  });
 });

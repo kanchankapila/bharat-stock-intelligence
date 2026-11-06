@@ -1,9 +1,3 @@
-# Early torch initialization to avoid Windows C10/CUDA DLL collision (WinError 1114)
-try:
-    import torch
-except Exception:
-    pass
-
 import asyncio
 import os
 import sys
@@ -17,7 +11,11 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import ml_ensemble
 import outcome_resolver
-import dl_engine
+# dl_engine (and torch, ~830MB of commit) is imported inside the two DL handlers, not here: no
+# TypeScript caller uses /api/train-dl or /api/infer-dl (DL runs as runPython subprocesses), so a
+# module-level import held torch for the service's whole life. The eager `import torch` that used
+# to sit at the top "to avoid WinError 1114" was re-tested 2026-11-06 on torch 2.9.1: a late
+# `import torch` and `import dl_engine` after this module's full import set both load cleanly.
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger("PythonAPI")
@@ -58,6 +56,7 @@ async def score_pending():
 async def train_dl():
     """Triggers DL Trainer"""
     try:
+        import dl_engine
         logger.info("Starting dl_engine.train_lstm()")
         await run_in_thread(dl_engine.train_lstm, version=1)
         logger.info("Finished dl_engine.train_lstm()")
@@ -82,6 +81,7 @@ async def resolve_outcomes(horizon: int = 15):
 async def infer_dl():
     """Triggers DL Inference"""
     try:
+        import dl_engine
         logger.info("Starting dl_engine.run_inference()")
         await run_in_thread(dl_engine.run_inference)
         logger.info("Finished dl_engine.run_inference()")

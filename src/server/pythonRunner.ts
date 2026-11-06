@@ -542,6 +542,11 @@ export async function runPython(
             PYTHONPATH: [PYBOOT_DIR, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
             BHARAT_PY_MEM_LIMIT_MB: String(memLimitMb),
             BHARAT_PY_PEAK_FILE: peakFile,
+            // numpy's OpenBLAS reserves ~32MB per thread at import, one thread per LOGICAL CPU by
+            // default: ~500MB of commit in every job on this 8-core/16-thread host. Measured
+            // 2026-11-06: numpy import 499MB at 16 threads vs 242MB at 8, and a 2000x2000 matmul
+            // 0.47s vs 0.49s -- hyperthreads add nothing to BLAS. An explicit env value wins.
+            OPENBLAS_NUM_THREADS: process.env.OPENBLAS_NUM_THREADS || '8',
           },
         },
       );

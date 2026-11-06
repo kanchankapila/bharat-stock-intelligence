@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from db_compat import connect
 
 import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
 
 # Dead SQLite-era parameter, NOT a live file path. Every chatbot tool's `_connect(db_path)`
 # ignores its argument and returns db_compat.connect() (Postgres) -- see tests/chatbot/conftest.py,
@@ -34,7 +34,50 @@ def get_chroma_client() -> chromadb.ClientAPI:
 
 
 def get_embedding_fn():
-    return SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+    # all-MiniLM-L6-v2 as ONNX, not via sentence-transformers: the same model without torch, which
+    # the nightly in-process re-ingest otherwise loaded into the chatbot service for good (~2.9GB
+    # private, 2026-11-06). Vectors matched sentence-transformers at cosine 1.000000.
+    return ONNXMiniLM_L6_V2()
+
+
+ONNX_EF_NAME = "onnx_mini_lm_l6_v2"
+CHATBOT_COLLECTIONS = ("stock_profiles", "screener_descriptions", "news_articles")
+
+
+def migrate_collection_embedding_fn(client: chromadb.ClientAPI, name: str, batch: int = 500) -> int:
+    """Re-record a collection under the ONNX embedding function, keeping its stored vectors.
+
+    Chroma records each collection's embedding function and refuses to open it with another one,
+    and cannot change the recorded type in place ("incompatible types"). So copy ids, vectors,
+    documents and metadata into a new collection, verify the count, then swap names: a failure
+    before the swap leaves the original untouched. Nothing is re-embedded. Returns the number of
+    records moved; 0 when the collection is absent or already ONNX.
+    """
+    cols = {c.name: c for c in client.list_collections()}
+    old = cols.get(name)
+    if old is None:
+        return 0
+    cfg = old.configuration_json or {}
+    if (cfg.get("embedding_function") or {}).get("name") == ONNX_EF_NAME:
+        return 0
+    data = old.get(include=["embeddings", "documents", "metadatas"])
+    hnsw = {k: v for k, v in (cfg.get("hnsw") or {}).items()
+            if k in ("space", "ef_construction", "ef_search", "max_neighbors") and v is not None}
+    tmp_name = f"{name}__onnx_migration"
+    if tmp_name in cols:
+        client.delete_collection(tmp_name)
+    tmp = client.create_collection(tmp_name, embedding_function=get_embedding_fn(),
+                                   metadata=old.metadata, configuration={"hnsw": hnsw})
+    ids = data["ids"]
+    for i in range(0, len(ids), batch):
+        tmp.add(ids=ids[i:i + batch], embeddings=data["embeddings"][i:i + batch],
+                documents=data["documents"][i:i + batch], metadatas=data["metadatas"][i:i + batch])
+    if tmp.count() != len(ids):
+        raise RuntimeError(f"{name}: copied {tmp.count()} of {len(ids)} records; original kept")
+    client.delete_collection(name)
+    tmp.modify(name=name)
+    logger.info(f"[ingest] {name}: {len(ids)} records re-recorded under {ONNX_EF_NAME}")
+    return len(ids)
 
 
 def ingest_stock_profiles(client: chromadb.ClientAPI, db_path: str = DB_PATH) -> int:
@@ -259,5 +302,10 @@ def run_full_ingest(db_path: str = DB_PATH) -> dict:
 
 
 if __name__ == "__main__":
-    result = run_full_ingest()
-    logger.info(f"Ingest complete: {result}")
+    if "--migrate-embedding-fn" in sys.argv:
+        # One-off, with the chatbot service stopped (it holds the same PersistentClient store).
+        client = get_chroma_client()
+        logger.info(f"Migrated: { {n: migrate_collection_embedding_fn(client, n) for n in CHATBOT_COLLECTIONS} }")
+    else:
+        result = run_full_ingest()
+        logger.info(f"Ingest complete: {result}")

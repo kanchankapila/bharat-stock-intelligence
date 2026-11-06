@@ -8,12 +8,11 @@ All heavy engines live in src/server/ (the canonical location). This file:
 Port: PYTHON_PORT env var (default 8002).
 """
 
-# Early torch initialization to avoid Windows C10/CUDA DLL collision (WinError 1114)
-# when numerical/database libraries load first.
-try:
-    import torch
-except Exception:
-    pass
+# No eager `import torch` here (removed 2026-11-06). It was added "to avoid WinError 1114" when
+# torch loads after numerical/database libraries, and it kept ~830MB of torch commit in this
+# service for its whole life. Re-tested on torch 2.9.1: with this file's full import set loaded
+# first, a late `import torch` and `import dl_engine` both load cleanly. torch now loads only if
+# FinBERT actually runs (nlp_engine.FinBERTInference, first predict()).
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware

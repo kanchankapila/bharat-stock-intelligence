@@ -79,6 +79,10 @@ const pyService = {
     // have zero call sites; DL train/infer run as runPython subprocesses of bharat-server,
     // whose env this does not touch.
     CUDA_VISIBLE_DEVICES: '-1',
+    // numpy's OpenBLAS reserves ~32MB per thread at import and defaults to all 16 logical CPUs
+    // (~500MB per process here). These services idle between requests, so 2 threads: numpy
+    // import 49MB instead of 499MB, measured 2026-11-06. runPython jobs get 8 (pythonRunner.ts).
+    OPENBLAS_NUM_THREADS: '2',
   },
 };
 
@@ -170,6 +174,7 @@ module.exports = {
         PYTHONPATH: [path.resolve(__dirname, 'src', 'server', 'pyboot'), dotenvVars.PYTHONPATH]
           .filter(Boolean).join(path.delimiter),
         BHARAT_PY_MEM_LIMIT_MB: '8192',
+        OPENBLAS_NUM_THREADS: '2',          // idle loop; see pyService
       },
       out_file: path.resolve(__dirname, 'logs', 'bqa-scheduler-out.log'),
       error_file: path.resolve(__dirname, 'logs', 'bqa-scheduler-err.log'),
@@ -207,6 +212,7 @@ module.exports = {
         PYTHONPATH: [path.resolve(__dirname, 'src', 'server', 'pyboot'), dotenvVars.PYTHONPATH]
           .filter(Boolean).join(path.delimiter),
         BHARAT_PY_MEM_LIMIT_MB: '4096',
+        OPENBLAS_NUM_THREADS: '1',          // pg_dump-bound; see pyService
       },
     },
 
@@ -254,6 +260,7 @@ module.exports = {
         PYTHONPATH: [path.resolve(__dirname, 'src', 'server', 'pyboot'), dotenvVars.PYTHONPATH]
           .filter(Boolean).join(path.delimiter),
         BHARAT_PY_MEM_LIMIT_MB: '8192',   // observe-first; re-cut once a scheduled run's peak is known
+        OPENBLAS_NUM_THREADS: '8',          // = physical cores; same BLAS speed as 16 (see pyService)
       },
       out_file: path.resolve(__dirname, 'logs', 'bqa-daily-out.log'),
       error_file: path.resolve(__dirname, 'logs', 'bqa-daily-err.log'),

@@ -21,8 +21,10 @@ def get_chroma_client():
 
 
 def get_embedding_fn():
-    from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-    return SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+    # Must match the function ingest.get_embedding_fn() records on the collection (ONNX MiniLM,
+    # torch-free; see there) or chroma refuses to open it.
+    from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
+    return ONNXMiniLM_L6_V2()
 
 
 def get_screener_stocks(scan_id: str, db_path: str = DB_PATH) -> list[dict]:

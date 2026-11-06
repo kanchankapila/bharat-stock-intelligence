@@ -12,11 +12,6 @@ from typing import Dict, Any, List
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
-try:
-    from transformers import pipeline
-except (ImportError, OSError):
-    pipeline = None
-
 # Bump this version whenever keyword rules or model change.
 # scoring_engine checks this and rebuilds screener_master when it changes.
 NLP_VERSION = "3.7"
@@ -25,29 +20,43 @@ NLP_VERSION = "3.7"
 class FinBERTInference:
     """
     High-fidelity financial sentiment analysis using ProsusAI/finbert BERT model.
+
+    The model (and transformers/torch with it) loads on the first predict(), not at import or
+    construction. alphaquant-api builds one of these on every /api/v1/score call, but FinBERT only
+    runs when screener_master meets a new screener -- loading it eagerly kept ~830MB of torch
+    commit plus the ~440MB model in that long-running service for nothing (2026-11-06).
     """
     def __init__(self):
         self.enabled = os.environ.get("USE_FINBERT", "true").lower() == "true"
         self.classifier = None
-        if self.enabled and pipeline:
+        self._load_attempted = False
+
+    def _ensure_loaded(self) -> None:
+        if self._load_attempted:
+            return
+        self._load_attempted = True
+        if not self.enabled:
+            print("FinBERT is disabled via USE_FINBERT env var.")
+            return
+        try:
+            from transformers import pipeline
+        except (ImportError, OSError):
+            print("Warning: transformers not installed. Falling back to regex.")
+            return
+        try:
+            # model="ProsusAI/finbert" is ~440MB. It will be cached locally.
             try:
-                # model="ProsusAI/finbert" is ~440MB. It will be cached locally.
-                try:
-                    import torch
-                    device = 0 if torch.cuda.is_available() else -1
-                except (ImportError, RuntimeError):
-                    device = -1
-                self.classifier = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=device)
-                print("FinBERT model loaded successfully.")
-            except Exception as e:
-                print(f"Warning: Failed to load FinBERT model: {e}. Falling back to regex.")
-        else:
-            if not pipeline:
-                print("Warning: transformers not installed. Falling back to regex.")
-            else:
-                print("FinBERT is disabled via USE_FINBERT env var.")
+                import torch
+                device = 0 if torch.cuda.is_available() else -1
+            except (ImportError, RuntimeError):
+                device = -1
+            self.classifier = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=device)
+            print("FinBERT model loaded successfully.")
+        except Exception as e:
+            print(f"Warning: Failed to load FinBERT model: {e}. Falling back to regex.")
 
     def predict(self, text: str) -> Dict[str, Any]:
+        self._ensure_loaded()
         # "available" distinguishes a genuine FinBERT-neutral verdict from the model simply
         # not having run (never loaded, or this call threw). Both used to collapse into the
         # same {"sentiment": "neutral", "score": 0.0} output, so a caller (or anyone
