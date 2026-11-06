@@ -42,8 +42,8 @@ def apply_reclassification(apply: bool = False):
     cat_updated = 0
     for r in cat_rows:
         sid, src, name, old_bias = r['screener_id'], r['source'], r['screener_name'], r['signal_bias']
-        new_bias = classify_screener(name)
-        if new_bias:
+        new_bias = classify_screener(name, src, sid)
+        if new_bias is not None and new_bias != old_bias:
             if apply:
                 conn.execute(
                     "UPDATE screener_catalog SET signal_bias = ? WHERE screener_id = ? AND LOWER(source) = LOWER(?)",
@@ -61,8 +61,8 @@ def apply_reclassification(apply: bool = False):
     master_updated = 0
     for r in master_rows:
         sid, src, name, old_sent = r['scan_id'], r['source'], r['name'], r['inferred_sentiment']
-        new_sent = classify_screener(name)
-        if new_sent:
+        new_sent = classify_screener(name, src, sid)
+        if new_sent is not None and new_sent != old_sent:
             if apply:
                 conn.execute(
                     "UPDATE screener_master SET inferred_sentiment = ? WHERE scan_id = ? AND LOWER(source) = LOWER(?)",

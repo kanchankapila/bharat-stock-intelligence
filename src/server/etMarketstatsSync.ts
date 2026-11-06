@@ -31,7 +31,7 @@ export async function getEtMarketstatsStockCount(): Promise<number> {
  * leaderboard/detail/appearance-history + confluenceEngine.ts) picks it up automatically,
  * and track entries/exits via screener_appearances. Mirrors etnowScreenerSync.ts.
  */
-export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 'long_term'): Promise<void> {
+export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 'long_term', screenerKeys?: string[]): Promise<void> {
   console.log(`[ET_MARKETSTATS] Starting sync (filter: ${timeframeFilter || 'all'})...`);
 
   let defs = await getEtMarketstatsScreenerDefs();
@@ -48,6 +48,7 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
       return timeframeFilter === 'intraday' ? isIntraday : !isIntraday;
     });
   }
+  if (screenerKeys) defs = defs.filter(d => screenerKeys.includes(d.screenerKey));
 
   if (defs.length === 0) {
     console.warn('[ET_MARKETSTATS] No screener definitions to sync.');

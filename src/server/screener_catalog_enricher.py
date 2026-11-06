@@ -103,23 +103,17 @@ CATEGORY_DEFAULTS = {
 BEARISH_KEYWORDS = r"breakdown|sell|short|fall|decline|bearish|overbought|death.cross"
 
 
-def classify_screener(name: str) -> str | None:
+def classify_screener(name: str, source: str = '', screener_id: str = '') -> str | None:
     nl = (name or '').lower()
-
-    # Special Value / Reversal / Turnaround Overrides
     if 'turnaround' in nl and 'loss to profit' in nl:
         return 'bullish'
     # AF-20261105-03: 'Low Debt Stocks' / 'Decreasing Quarterly Losses' read bearish via their ETnow
     # descriptions. Kept on purpose: the veto that follows was measured protective (t -2.91).
     if 'good fundamental' in nl and 'near 52 week low' in nl:
         return 'bullish'
-    if any(k in nl for k in [
-        'pe less than industry', 'pe less than sector', 'peg lower than industry',
-        'peg lower than sector', 'price to book value (p/bv) less than'
-    ]):
+    if any(k in nl for k in ['pe less than industry', 'pe less than sector', 'peg lower than industry',
+                             'peg lower than sector', 'price to book value (p/bv) less than']):
         return 'bullish'
-
-    # Technical Bearish / Sell indicators
     if any(k in nl for k in [
         'trending down', 'crossed below', 'crossed -80 from above', 'overbought',
         'bearish', 'breakdown', 'death cross', 'lower low', 'volume loser',
@@ -127,11 +121,8 @@ def classify_screener(name: str) -> str | None:
         'promoter pledge', 'high debt', 'less than industry', 'lower than sector',
         'less than sector', 'lower than industry', 'falling rsi', 'macd negative',
         'signal changed to sell', 'negative surprise', 'negative revenue growth',
-        'negative quarterly', 'negative eps', 'analysts estimate negative', 'profit to loss'
-    ]):
+        'negative quarterly', 'negative eps', 'analysts estimate negative', 'profit to loss']):
         return 'bearish'
-
-    # Technical Bullish / Buy indicators
     if any(k in nl for k in [
         'trending up', 'crossed above', 'oversold', 'bullish', 'breakout',
         'golden cross', 'higher high', 'volume gainer', 'signal changed to buy',
@@ -139,10 +130,8 @@ def classify_screener(name: str) -> str | None:
         'profit growth', 'revenue growth', 'earnings beat', 'upgrade', 'outperform',
         'strong buy', 'high momentum', 'multibagger', 'piotroski score', 'high roe',
         'positive surprise', 'positive revenue growth', 'positive quarterly', 'positive eps',
-        'analysts estimate positive'
-    ]):
+        'analysts estimate positive']):
         return 'bullish'
-
     return None
 
 
@@ -169,7 +158,7 @@ def reclassify_directional_neutrals(con) -> tuple[int, int]:
         WHERE inferred_sentiment IS NULL OR LOWER(inferred_sentiment) = 'neutral'
     """).fetchall():
         bias, _, _, _ = resolve_screener_defaults(
-            row['inferred_category'] or 'other', None, row['name'] or ''
+            row['inferred_category'] or 'other', None, row['name'] or '', row['source'], row['scan_id']
         )
         if bias not in ('bullish', 'bearish'):
             continue
@@ -186,7 +175,7 @@ def reclassify_directional_neutrals(con) -> tuple[int, int]:
         WHERE LOWER(signal_bias) = 'neutral'
     """).fetchall():
         bias, _, _, _ = resolve_screener_defaults(
-            row['category'] or 'other', None, row['screener_name'] or ''
+            row['category'] or 'other', None, row['screener_name'] or '', row['source'], row['screener_id']
         )
         if bias not in ('bullish', 'bearish'):
             continue
@@ -199,19 +188,16 @@ def reclassify_directional_neutrals(con) -> tuple[int, int]:
     return master_changed, catalog_changed
 
 
-def resolve_screener_defaults(category: str, sentiment: str | None, name: str) -> tuple[str, str, str, float]:
+def resolve_screener_defaults(category: str, sentiment: str | None, name: str, source: str = '', screener_id: str = '') -> tuple[str, str, str, float]:
     """Pure: (signal_bias, cat_norm, investment_horizon, confidence) for a screener_master
     row being inserted into screener_catalog (Step 5)."""
-    # 1. Check domain classifier first
-    domain_bias = classify_screener(name)
+    domain_bias = classify_screener(name, source, screener_id)
     if domain_bias:
         bias = domain_bias
     elif sentiment and sentiment in ('bullish', 'bearish', 'neutral'):
         bias = sentiment
     elif re.search(_safe_pattern(BEARISH_KEYWORDS), name.lower()):
         bias = 'bearish'
-    elif category == 'sector_theme':
-        bias = 'neutral'
     else:
         bias = 'neutral'
 
@@ -234,6 +220,7 @@ def load_catalog_rows_for_name_enrichment(con):
         FROM screener_catalog sc
         LEFT JOIN trendlyne_screeners ts ON ts.screener_id = sc.screener_id AND LOWER(sc.source) = 'trendlyne'
         LEFT JOIN screener_master sm ON sm.scan_id = sc.screener_id
+          AND LOWER(sm.source) = LOWER(sc.source)
         WHERE sc.signal_keywords IS NULL OR sc.signal_keywords = ''
     """).fetchall()
 
@@ -384,7 +371,7 @@ def run():
         ts_url    = row[6]
 
         kw = extract_signal_keywords(name)
-        bias, cat_norm, horizon, confidence = resolve_screener_defaults(category, sentiment, name)
+        bias, cat_norm, horizon, confidence = resolve_screener_defaults(category, sentiment, name, source, scan_id)
 
         url = ts_url or (tl_screener_url(screenpk) if source == 'trendlyne' and screenpk else None)
 
@@ -438,16 +425,16 @@ def run():
     DIRECTIONAL_KW = r"rising|growing|improving|breakout|momentum|strong|profit|roe|bullish|outperform|beat"
     sector_fixed = 0
     sector_rows = con.execute("""
-        SELECT screener_id, screener_name FROM screener_catalog
+        SELECT screener_id, screener_name, source FROM screener_catalog
         WHERE category = 'sector_theme' AND signal_bias = 'bullish'
     """).fetchall()
 
-    for sid, sname in sector_rows:
+    for sid, sname, src in sector_rows:
         has_direction = re.search(_safe_pattern(DIRECTIONAL_KW), (sname or "").lower())
         if not has_direction:
             con.execute("""
-                UPDATE screener_catalog SET signal_bias = 'neutral' WHERE screener_id = ?
-            """, (sid,))
+                UPDATE screener_catalog SET signal_bias = 'neutral' WHERE screener_id = ? AND source = ?
+            """, (sid, src))
             sector_fixed += 1
 
     con.commit()

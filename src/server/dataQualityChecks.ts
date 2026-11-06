@@ -20,6 +20,7 @@
 import { dbGet, dbAll, dbRun, dbExec } from './dbAsync';
 import { mapWithConcurrency } from './lib/async';
 import { withTransientRetry } from './pgClient';
+import { analyzeScreener } from './screenerSemantics';
 
 export type DataQualityStatus = 'pass' | 'warn' | 'fail' | 'error';
 
@@ -913,6 +914,7 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
  * agreement with the tagged checks so neither half can drift or grow silently.
  */
 export const DQ_STATIC_PROPERTY_CHECK_IDS: ReadonlySet<string> = new Set([
+  'screener-semantic-bias-integrity',
   'fundamental-observation-writer-contract',
   'market-endpoint-tick-label-honesty',
   'signal-source-case-collision',
@@ -3008,7 +3010,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
                  OR (sc.signal_bias IN ('bullish', 'bearish') AND sm.inferred_sentiment = 'neutral')
             ) AS mismatched
           FROM screener_catalog sc
-          JOIN screener_master sm ON sm.scan_id = sc.screener_id AND sm.source = sc.source`,
+          JOIN screener_master sm ON sm.scan_id = sc.screener_id AND LOWER(sm.source) = LOWER(sc.source)`,
     evaluate: (row) => {
       const total = Number(row?.total ?? 0);
       const mismatched = Number(row?.mismatched ?? 0);
@@ -3028,6 +3030,30 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         return { status: 'warn', detail: `${mismatched}/${total} (${pct.toFixed(1)}%) screener sentiment pairs disagree in direction — below the 5% fail floor but worth reconciling.` };
       }
       return { status: 'pass', detail: `All ${total} matching screener_catalog/screener_master pairs agree on sentiment direction.` };
+    },
+  },
+
+  {
+    id: 'screener-semantic-bias-integrity',
+    label: 'Every stored screener bias matches the shared semantic policy',
+    category: 'signals',
+    critical: false,
+    assertsStaticProperty: true,
+    sql: `SELECT jsonb_agg(t) AS entries, FALSE AS policy_active FROM (
+      SELECT name, source, scan_id AS id, inferred_sentiment AS bias FROM screener_master
+      UNION ALL SELECT screener_name AS name, source, screener_id AS id, signal_bias AS bias FROM screener_catalog
+      UNION ALL SELECT screener_name AS name, 'trendlyne' AS source, screener_id AS id, sentiment AS bias FROM trendlyne_screeners
+    ) t`,
+    evaluate: (row) => {
+      const entries = row?.entries as { name: string; source?: string; id?: string; bias: string }[] | undefined;
+      if (!entries?.length) return { status: 'fail', detail: 'No screener labels were available to verify.' };
+      const wrong = entries.filter(r => analyzeScreener(r.name, r.source, r.id).semantic_bias !== r.bias);
+      const invalid = entries.filter(r => analyzeScreener(r.name, r.source, r.id).role === 'invalid_filter');
+      return wrong.length
+        ? { status: row?.policy_active ? 'fail' : 'warn', detail: `${wrong.length}/${entries.length} stored labels differ from the review-only candidate; no automatic relabeling is authorized. ${wrong.slice(0, 3).map(r => r.name).join(', ')}` }
+        : invalid.length
+        ? { status: 'warn', detail: `${invalid.length} stored screener definitions have a title/filter conflict and are neutralized pending source repair.` }
+        : { status: 'pass', detail: `All ${entries.length} stored labels match the semantic policy; predictive direction remains unproven.` };
     },
   },
 

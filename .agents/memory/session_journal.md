@@ -533,6 +533,14 @@ PR #131 merged as b4bf2a50. The reviewed source was integrated with the dirty li
 - Owner explicitly removed endpoint allowlisting and per-endpoint approval for research discovery. Public and existing authorised data access can be used without a URL approval gate; data admission governs subsequent canonical use.
 - Next if approved: plan Phase 0, read-only; Task 2 audits Bharat Alpha's next-session lead, whose gate leak check is null.
 
+## 2026-11-06 - Screener re-review (Codex)
+
+- User correction: semantic cleanup must preserve measured-policy disagreements and risk vetoes until independently measured. Restore the original regression rather than rewriting it to agree with the candidate. Shared tracker: AF-20261106-01.
+- Freeze review manifests and replay outputs; bind results to policy/manifest hashes. Candidate rule correctness is separate from predictive evidence. The archived four-date replay was invalidated by incomplete membership capture (AF-20261106-04); no policy inference is supported.
+- ET support-source repair has independent live evidence; local integration/deployment state is recorded in AF-20261106-02. Broad semantics was not applied.
+
+- Pre-commit validation used an isolated snapshot over `034feb61`: tsc, 2,339 Vitest and 4,141 Python tests passed. AF-20261106-03 preserves the frozen byte hashes across checkouts; the archived replay stays invalid under AF-20261106-04.
+
 ## 2026-11-05 - Clean-slate Phase 0 finished
 
 - Verdict in bharat-edge branch phase0-sdd (9404c7b). Owner decides: H3 counted or not, which bharat-edge tree continues, repair of `alpha.adjustment` (AF-20261104-04; next action dated 2026-11-06).

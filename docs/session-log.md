@@ -1,5 +1,20 @@
 # Session Log — Bharat Stock Intelligence
 
+## 2026-11-06 - Screener re-review and measurement gate restored
+
+Codex reviewed the user's six objections; all exposed real policy, workflow or development-state issues.
+Corrected the review-only candidate for cheap price multiples, explicit risk warnings, negative-return
+trading-activity families and negation. Restored existing ingestion/scoring classifiers and the original
+oscillator conflict regression. No broad relabeling or risk-veto removal was applied.
+
+AF-20261106-01 records the immutable v3 review and archived four-date replay, subsequently invalidated
+by incomplete membership capture (AF-20261106-04); no policy inference or promotion. AF-20261106-02 records the independent ET support-predicate
+repair and live 100/100 below-support checks for each corrected identity. Persistent service code has
+not been restarted from the concurrently edited checkout. Verification and exact artifacts are linked
+from those shared ledger rows; they remain the only work tracker.
+
+Pre-commit checks on an isolated snapshot over `034feb61` passed: tsc, 2,339 Vitest and 4,141 Python tests, plus findings/backlog, document inventory, recurring-bug and whitespace checks. AF-20261106-03 pins frozen artifact hashes across checkouts. The archived replay remains invalid; no broad policy activation or persistent-service deployment was performed.
+
 Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file and was being loaded into every context window).
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.

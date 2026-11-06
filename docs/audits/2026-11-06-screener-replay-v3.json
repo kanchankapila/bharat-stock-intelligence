@@ -1,0 +1,75 @@
+{
+  "verdict": "LOW-DATA; semantic correctness only; no engine promotion",
+  "manifest_sha256": "5f1e008c39988da6c0e7bce669fd76101ca413e5490087df4fa4d31c1d68f0e9",
+  "captured_dates": 5,
+  "graded_dates": 4,
+  "caveat": "Five-date timestamped substrate; current template metadata; no multi-day directional inference.",
+  "daily": [
+    {
+      "decision_date": "2026-10-30",
+      "entry_date": "2026-11-02",
+      "symbols": 1444,
+      "zero_control": -1.6238165013908107e-16,
+      "before_distinct": 755,
+      "after_distinct": 554,
+      "memberships_before": 41852,
+      "memberships_after": 41157,
+      "before_ic": -0.18104580265056144,
+      "before_top50_net_excess_pct": -1.143865760455035,
+      "after_ic": -0.18564115804273743,
+      "after_top50_net_excess_pct": -1.3258442924535132
+    },
+    {
+      "decision_date": "2026-11-02",
+      "entry_date": "2026-11-03",
+      "symbols": 1400,
+      "zero_control": -1.0150610510858574e-17,
+      "before_distinct": 547,
+      "after_distinct": 425,
+      "memberships_before": 38289,
+      "memberships_after": 37637,
+      "before_ic": 0.01843319999310495,
+      "before_top50_net_excess_pct": -0.4937226686659951,
+      "after_ic": 0.01099942318143825,
+      "after_top50_net_excess_pct": -0.5151624569842097
+    },
+    {
+      "decision_date": "2026-11-03",
+      "entry_date": "2026-11-04",
+      "symbols": 1387,
+      "zero_control": -2.5614374036052637e-16,
+      "before_distinct": 523,
+      "after_distinct": 386,
+      "memberships_before": 38208,
+      "memberships_after": 37542,
+      "before_ic": -0.10396895248112842,
+      "before_top50_net_excess_pct": -0.8702750260227576,
+      "after_ic": -0.08347099701485333,
+      "after_top50_net_excess_pct": -0.8915682238063052
+    },
+    {
+      "decision_date": "2026-11-04",
+      "entry_date": "2026-11-05",
+      "symbols": 1414,
+      "zero_control": -1.0050109416691658e-17,
+      "before_distinct": 606,
+      "after_distinct": 432,
+      "memberships_before": 43183,
+      "memberships_after": 42422,
+      "before_ic": -0.05830453360884572,
+      "before_top50_net_excess_pct": -0.9520479048646948,
+      "after_ic": -0.049426391780013346,
+      "after_top50_net_excess_pct": -1.063144932909999
+    }
+  ],
+  "paired_ic_delta": {
+    "dates": 4,
+    "mean": 0.004336741272816195,
+    "t": 0.6717533070870925
+  },
+  "paired_net_delta_pct": {
+    "dates": 4,
+    "mean": -0.08395213653638608,
+    "t": -2.156879917303951
+  }
+}

@@ -74,7 +74,7 @@ const BEARISH_PATTERNS = [
 
 // ── Core classifier ──────────────────────────────────────────────────────────
 
-export function classifyByKeyword(name: string): ClassifyResult {
+export function classifyByKeyword(name: string, source = '', id = ''): ClassifyResult {
   const text = name.toLowerCase().replace(/[–—]/g, '-');
 
   let best: CategoryRule | undefined;
@@ -151,7 +151,7 @@ export async function classifyAllScreeners(): Promise<{
   // into one transaction (was one implicit commit per row) cuts round-trips substantially.
   await dbTransaction(async (tx) => {
     for (const row of rows) {
-      const r = classifyByKeyword(row.name);
+      const r = classifyByKeyword(row.name, row.source, row.scan_id);
       const timeframe = r.investment_horizon === 'intraday' ? 'intraday' : 'long_term';
       await tx.run(updateSql, [r.subcategory, r.category, r.signal_bias, timeframe, r.confidence, 'keyword', row.scan_id, row.source]);
       if (r.category === 'other') remaining_other++;

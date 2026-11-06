@@ -16,6 +16,7 @@ import {
 } from "../trendlyneScreener";
 import { router, publicProcedure, adminProcedure, expensiveProcedure } from "../trpc";
 import { SCANNER_CATALOG } from "../config/scannerCatalog";
+import { analyzeScreener } from '../screenerSemantics';
 
 // Real quant_scores columns runScreener is allowed to filter on (see db.ts's CREATE TABLE).
 // A zod enum, not a free-form string -- prevents a client-supplied "id" from being
@@ -427,7 +428,8 @@ export const screenersRouter = router({
         LIMIT 15
       `, [input.screener_id]);
 
-      return { perf, recentAppearances, topStocks };
+      return { perf, recentAppearances, topStocks,
+        biasAnalysis: perf ? analyzeScreener(String((perf as any).name ?? ''), String((perf as any).source ?? ''), input.screener_id) : null };
     }),
 
   getScreenerCategoryStats: publicProcedure

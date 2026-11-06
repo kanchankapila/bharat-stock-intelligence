@@ -2,6 +2,7 @@ import { dbGet, dbAll, dbTransaction } from './dbAsync';
 import { rowGroups, bulkUpsert } from './dbBulk';
 import { runPython } from './pythonRunner';
 import { wilderATR } from './atrBarriers';
+import { analyzeScreener } from './screenerSemantics';
 
 // ─── Screener Classification ────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ setInterval(() => {
 // Dhamaka" AND ETnow's "Warren Buffet Screener"), see the 2026-08-04 screener_master memory.
 // Every cache/lookup here is keyed by (source, scanId), matching screener_master's composite PK.
 function metaKey(source: string, scanId: string): string {
-  return `${source}::${scanId}`;
+  return `${source.toLowerCase()}::${scanId}`;
 }
 
 export async function ensureScreenerMeta(): Promise<void> {
@@ -422,6 +423,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
   // of the same number. entry.ids/.names still store the plain scanId/name (unchanged shape for
   // screener_ids_json/screener_names_json, which downstream consumers already parse).
   function addToMap(symbol: string, scanId: string, name: string, source: string) {
+    if (analyzeScreener(name, source, scanId).role === 'invalid_filter') return;
     const s = symbol?.trim().toUpperCase();
     if (!s) return;
     if (!screenerMap.has(s)) screenerMap.set(s, { ids: [], names: [], classes: [], seen: new Set() });

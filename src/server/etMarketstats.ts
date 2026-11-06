@@ -44,6 +44,14 @@ export interface EtMarketstatsScreenerDef {
   screenerPageUrl: string | null;
 }
 
+export function normalizeEtSupportFilter<T extends Omit<EtMarketstatsScreenerDef, 'screenerKey'>>(def: T): T {
+  if (/^Negative Breakout.*Support$/i.test(def.label) && def.firstOperand === 'lastTradedPrice'
+      && /^supportLevel[123]$/.test(def.secondOperand ?? '') && def.operationType === 'Above') {
+    return { ...def, operationType: 'Below' };
+  }
+  return def;
+}
+
 export function computeScreenerKey(def: Omit<EtMarketstatsScreenerDef, 'screenerKey'>): string {
   const slug = def.label
     .toLowerCase()
@@ -131,7 +139,8 @@ export async function initEtMarketstatsScreeners(): Promise<number> {
 
   let count = 0;
   await dbTransaction(async (tx) => {
-    for (const def of defs) {
+    for (const captured of defs) {
+      const def = normalizeEtSupportFilter(captured);
       const screenerKey = computeScreenerKey(def);
       await tx.run(upsertSql, [
         screenerKey, def.label, def.endpoint, def.viewId,
@@ -154,7 +163,7 @@ export async function getEtMarketstatsScreenerDefs(): Promise<Array<EtMarketstat
     FROM et_marketstats_screeners
     ORDER BY id
   `);
-  return rows;
+  return rows.filter(row => normalizeEtSupportFilter(row).operationType === row.operationType);
 }
 
 export interface EtMarketstatsRecord {

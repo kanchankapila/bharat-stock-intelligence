@@ -1529,7 +1529,7 @@ def size_confidence_multiplier(strength, coverage):
     return SIZE_CONFIDENCE_FLOOR + (1.0 - SIZE_CONFIDENCE_FLOOR) * q * c
 
 
-def compute_screener_stock_scores(membership, fundamental_scores, cat_weights=None):
+def compute_screener_stock_scores(membership, fundamental_scores, cat_weights=None, bias_sign=None):
     """
     Pure function — no DB access.
     membership: {symbol: [{signal_bias, confidence, category, subcategory, investment_horizon}]}
@@ -1538,6 +1538,7 @@ def compute_screener_stock_scores(membership, fundamental_scores, cat_weights=No
     Returns: (normalized_scores_0_100, bullish_counts, bearish_counts)
     """
     weights = cat_weights if cat_weights is not None else CAT_BASE_WT
+    signs = bias_sign if bias_sign is not None else BIAS_SIGN
     raw = {}
     bullish_counts = {}
     bearish_counts = {}
@@ -1545,7 +1546,7 @@ def compute_screener_stock_scores(membership, fundamental_scores, cat_weights=No
     for sym, screeners in membership.items():
         fm = _fund_mult(fundamental_scores.get(sym))
         contrib = sum(
-            BIAS_SIGN.get(s['signal_bias'], 0.0)
+            signs.get(s['signal_bias'], 0.0)
             * weights.get(s['category'], 0.0)
             * SUBCAT_MOD.get(s.get('subcategory', ''), 1.0)
             * HORIZON_MULT.get(s.get('investment_horizon', 'swing'), 0.95)
@@ -1979,6 +1980,8 @@ class UnifiedRanker:
                 'subcategory': subcat or '',
                 'investment_horizon': horizon or 'swing',
                 'screener_name': name or '',
+                'source': src or '',
+                'screener_id': str(sid or ''),
             })
 
         # LEFT JOIN, not JOIN, and falling back to screener_master (2026-08-10). The INNER

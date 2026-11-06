@@ -13,3 +13,6 @@
 # CLIs too; JSON/Markdown remain deliberately left to core.autocrlf.
 *.sh text eol=lf
 *.mjs text eol=lf
+# These bytes bind the screener review to its recorded replay across checkouts.
+src/server/config/screenerSemantics.json text eol=lf
+research/out/screener-bias-review-20261106-v3.json -text whitespace=cr-at-eol
