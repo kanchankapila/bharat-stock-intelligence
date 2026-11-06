@@ -911,6 +911,14 @@ describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCh
     expect(r.detail).toBe('mf_stock_holdings is empty');
   });
 
+  it('mf_stock_holdings stays green across its monthly cadence and warns on a skipped month', () => {
+    // 2026-11-06: August month-end, first fetched 10-02, next due 11-07 -- the cadence's own peak.
+    const check = byId('mf-stock-holdings-recency');
+    const asOf = new Date('2026-11-06T03:00:00Z');
+    expect(check.evaluate({ last_date: '2026-08-31' }, asOf).status).toBe('pass');
+    expect(check.evaluate({ last_date: '2026-07-31' }, asOf).status).toBe('warn');
+  });
+
   it('trading-day-aware checks absorb a weekend gap (Friday data on a Monday check)', () => {
     // Same regression shape as the ohlcv/fii-dii/market-regimes fix above, exercised through
     // the generic factory this time instead of a bespoke evaluate().

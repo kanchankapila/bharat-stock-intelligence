@@ -339,7 +339,11 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     emptyDetail: 'stock_delivery_volume is empty — NSE MTO fetch has never written a row',
     warnDays: 3, failDays: 5 },
   { id: 'mf-stock-holdings-recency', label: 'mf_stock_holdings (per-stock MF ownership, monthly disclosure)',
-    category: 'flows', critical: false, table: 'mf_stock_holdings', dateColumn: 'as_of_date', warnDays: 45 },
+    // warnDays 55 TRADING days (2026-11-06): a month-end is disclosed ~14d later and fetched by the
+    // FIRST trendlyne-ratios-monthly run of the month after, so it stays the newest until the next
+    // first run: legit age peaks ~49 trading days (2026-08-31 first fetched 10-02, next due 11-07;
+    // 48.9 on 11-06). At 45 it warned every month before the run; a missed run reads ~70 and warns.
+    category: 'flows', critical: false, table: 'mf_stock_holdings', dateColumn: 'as_of_date', warnDays: 55 },
   // Written by mf_sector_allocation_fetcher.py (ET/mcxlivefeeds), which replaced the dead AMFI
   // DownloadSchemeData_Po.aspx feed (now returns the scheme MASTER list, no holdings). Monthly
   // cadence -- `month` is the latest disclosed holding month, so warnDays 45 covers the lag.
@@ -971,7 +975,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'Latest XBRL observation has a consistent identity',
     category: 'signals',
     critical: false,
-    sql: `SELECT symbol, source_url,
+    // The detail names the observation it read (2026-11-06): a constant pass line read as a frozen
+    // input to dq-uninformative-checks while 589 observations landed in three days.
+    sql: `SELECT id, symbol, source_url,
                  COALESCE(jsonb_typeof(payload) = 'object'
                    AND payload->>'symbol' = symbol
                    AND payload->>'source_url' = source_url
@@ -981,7 +987,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     evaluate: (row) => {
       if (!row) return { status: 'warn', detail: 'No prospective XBRL observation captured yet; waiting for a new parse.' };
       return row.identity_consistent === true
-        ? { status: 'pass', detail: 'Latest XBRL observation identity matches its payload; coverage is not established.' }
+        ? { status: 'pass', detail: `Latest XBRL observation #${row.id} (${row.symbol}) identity matches its payload; coverage is not established.` }
         : { status: 'fail', detail: 'Latest XBRL observation identity does not match its payload.' };
     },
   },
