@@ -119,3 +119,34 @@ unchanged during the final run; only the verification record was updated afterwa
 Code validation does not validate the archived replay or activate the candidate. AF-20261106-01
 and AF-20261106-04 retain the measurement work. The ET source-code deployment and persistent
 service readback remain DEPLOY-PENDING under AF-20261106-02.
+
+## Deployment verification, 2026-11-06
+
+Code commit `0f8f6e1d` was pushed to main and deployed using the repository deploy-and-verify
+skill. Production frontend build passed. The production migration runner found no pending
+migrations; live schema drift passed. The measured risk-veto restoration is applied: the three
+previously bearish rows read risk_red_flags/bearish.
+
+bharat-server restarted from D:/Github/bharat-stock-intelligence after the code commit and
+remained online with HTTP 200 health. A live getScreenerDetail request for ETnow screener 713
+returned biasAnalysis with policy_version semantic-v2-review-20261106 and empirical_direction
+unproven. The modified canonical ranker ran as a fresh Python subprocess through its worker.
+The persistent Python API services were unchanged by this deployment.
+
+The scoped ET sync completed 3/3 screeners without failures. Each corrected Below identity
+contains 100 freshly seen rows on November 6, all below its stated support; legacy Above
+identities remain neutral. The restarted worker computed 4,430 fresh confluence rows, with zero
+legacy support IDs. It then completed the canonical ranker with 2,367 published recommendations
+and 2,367 complete penalty records, including 334 red-flag records.
+
+Independent readback over the 2,374 eligible confluence reference names matched 2,354 stored
+confluence percentiles exactly (MAE and maximum error 0.0). Reference membership precedes the
+final publication skips; the 2,367 published names are not the percentile denominator. This
+checks implementation and provenance, not predictive edge.
+
+Exact code-commit CI passed: https://github.com/kanchankapila/bharat-stock-intelligence/actions/runs/42150428531
+The local Node dependency audit reports zero vulnerabilities. The GitHub LangGraph alert
+references versions below 1.2.14; both the manifest and installed environment contain 1.2.14.
+
+AF-20261106-02 and AF-20261105-02 are closed on this evidence. AF-20261106-01 remains review-only;
+the incomplete-capture issue and invalid archived replay remain tracked in AF-20261106-04.

@@ -558,3 +558,8 @@ PR #131 merged as b4bf2a50. The reviewed source was integrated with the dirty li
 - Read-only; no code or ledger change. Replay of the 11-04 batch: 646 of 651 Sell labels sat above 30 before penalties, which is evidence for AF-20261030-05 but uses current inputs, not the frozen cohorts that row requires.
 - Owner decides whether to add it to the row. The digest prints "worse than chance" for any excess over expected (62 vs about 57); `signalAccuracyDigest.ts:399`.
 - Later the same night: AF-20261105-02..06 fixed in code. 11-06: both migrations applied at the owner's request and read back; `penalties` back in the INSERT. Restart still waits for the other session's screener-semantics work to be committed; then read back `penalties` per row after the next ranker run.
+
+## 2026-11-06 - Screener deployment verified (Codex)
+
+- Code 0f8f6e1d pushed and deployed; ET support repair and fresh confluence/ranker rows queried back. AF-20261106-02 and AF-20261105-02 closed; AF-20261106-01/04 remain evidence work.
+- Percentile verification must use the eligible reference universe before publication skips, not just published recommendations. Live readback: 2,374 reference names, 2,354 comparable stored values, exact match. Code CI passed; broad policy remains review-only.

@@ -12394,3 +12394,14 @@ The user said to do what is best for accurate, honest recommendations. Commits `
 - **Migrations (2026-11-06, at the owner's request):** `npm run migrate:up` applied both; read back `penalties` jsonb, the two screeners bullish / `fundamental_quality` in both tables, Asian Hotels article counts East 18 / North 19 / West 19. `penalties` restored to the ranker INSERT (`test_run_persists_penalties_to_history`, failed without it). `bharat-server` NOT restarted: another session's screener-semantics edits are staged but uncommitted in the same tree (AF-20261103-15), the owner's condition for the restart.
 - **Owner command for the leftover wrong news links (114 rows, derived and rebuildable from `news_articles.symbols`), after the migrations:** `DELETE FROM news_symbol_link l USING news_articles a WHERE a.id = l.news_id AND ((a.title LIKE 'Asian Hotels (East)%' AND l.symbol <> 'AHLEAST') OR (a.title LIKE 'Asian Hotels (West)%' AND l.symbol <> 'AHLWEST') OR (a.title LIKE 'Asian Hotels (North)%' AND l.symbol <> 'ASIANHOTNR'));`
 - **Closed from live evidence:** AF-20261029-02, AF-20261028-18, AF-20261029-04.
+
+## 2026-11-06 - Screener deployment verified (Codex)
+
+Pushed code commit 0f8f6e1d and deployed using .claude/skills/deploy-and-verify/SKILL.md. Build,
+migrations and schema drift passed; bharat-server restarted after the code commit, remained
+healthy, and served the new review-only biasAnalysis field. ET sync succeeded for all three
+corrected support screens, each with 100 fresh rows below support and legacy identities neutral.
+The restarted worker wrote 4,430 confluence rows and 2,367 canonical recommendations with complete
+penalty records. Independent eligible-universe percentile readback matched exactly. Exact-head
+GitHub CI passed. Closed AF-20261106-02 and AF-20261105-02; the broad candidate and invalid replay
+remain gated by AF-20261106-01/04. Detailed evidence is in docs/audits/2026-11-06-screener-review.md.
