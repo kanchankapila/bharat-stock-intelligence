@@ -95,6 +95,15 @@ This section is a dated status board, not a verdict list. A claim carrying an ol
 in this file is not wrong, it is *unrefreshed* — check the date before quoting it, and re-run
 rather than assume. Full narrative for anything here: `docs/measurement-history.md`.
 
+### 2026-11-06 — removing the red-flag veto from Low Debt Stocks / Decreasing Quarterly Losses fails the ship rule (AF-20261105-03, AF-20261106-04)
+
+Replay of 45 batches of `unified_recommendations_history` (latest per IST date, 2026-09-01..11-04). Membership is rebuilt from `screener_appearances` episodes open on the batch date; the timestamped capture is not usable (AF-20261106-04). Affected names are those whose only red flag is ETnow 8486 or 8651: ~15 per rated batch, 745 graded name-days, a nearly fixed basket of ~35 names. Counterfactual label is `_classify(min(100, stored x 2))`, with coverage-demoted Holds kept Hold. Returns run from the next session's open, |r| <= 40%. Script: `scripts/measure_veto_removal_replay.py`; per-date output: `research/out/veto-removal-replay-20261106.csv`.
+
+- **The vetoed names trailed the Hold cohort they would join:** 1 session -0.33% (t -2.91; halves t -2.96 / -1.20; 31 of 45 dates negative). On ADT >= Rs 1 cr: -0.47% (t -2.67). 5 sessions: -0.57% (t -3.15, overlapping windows); 9 independent windows -0.77% vs the batch (t -1.70). Per screener, 1 session vs the batch: Low Debt -0.38% (t -2.79), Decreasing Losses -0.25% (t -1.55).
+- **Fails the AF-20261026-71 ship rule** (t <= -2 in the first half). The veto stays; migration `20261106120000` restores the labels and the classifiers keep the risk reading. Removing it would have moved Sell -> Hold 265, Strong Sell -> Hold 177, Strong Sell -> Sell 126 and Hold -> Buy/Strong Buy up to 16 times over the 45 batches (Buy counts are an upper bound because the high-vol veto is not modelled).
+- **No mechanism:** debt-to-equity is missing for 19 of 20 Low Debt members, so this is "the basket ETnow returns underperforms", not "low debt underperforms". One falling tape, one basket, other red flags from today's catalog.
+- **The screener re-review's v3 replay (AF-20261106-01) used the under-captured membership and does not stand as evidence either way.**
+
 ### 2026-11-05 — what the Sell label is, and the confluence reference-population fix (AF-20261105-02/-03/-04, AF-20261030-05)
 
 Replay of `unified_recommendations_history`, 8 HIGH_VOL batches 2026-10-27..11-05. Stored score = `(confluence/3 + 2*technical_pct/3) x quality x high_vol x crowding`, x0.5 on a red flag; reproduces 2,140 of 2,143 two-engine rows within 1% on the 11-04 batch. Use stored confluence as is, since it is already a percentile.

@@ -37,8 +37,8 @@ const RULES: CategoryRule[] = [
   { category: 'event_corporate_action', subcategory: 'corporate_action', patterns: [/\bbonus\b/, /\bsplit\b/, /\bbuyback\b/, /\bright issue\b/, /\bdividend announcement\b/, /\bboard meeting\b/] },
   { category: 'event_corporate_action', subcategory: 'earnings_event', patterns: [/\bresult/, /\bsurprise\b/, /\bupcoming dividends?\b/] },
   { category: 'income_dividend', subcategory: 'dividend_income', patterns: [/\bdividend\b/, /\byield stocks?\b/] },
-  // AF-20261105-03: ETnow appends a description, so these also match the risk rule's debt/loss patterns.
-  { category: 'fundamental_quality', subcategory: 'balance_sheet_quality', weight: 3, patterns: [/\blow debt stocks\b/, /\bdecreasing quarterly losses/] },
+  // AF-20261105-03: 'Low Debt Stocks' / 'Decreasing Quarterly Losses' match this rule via their ETnow
+  // descriptions. Kept on purpose: the red-flag veto on their members was measured protective (t -2.91).
   { category: 'risk_red_flags', subcategory: 'financial_or_governance_risk', patterns: [/\bred flag/, /\bwealth destroy/, /\bvalue trap/, /\bmomentum trap/, /\bavoid\b/, /\bcaution\b/, /\bpledge/, /\bdeclining profit/, /\bdecreasing (?:eps|revenue|sales|profit|roe|roce)/, /\bincreasing debt/, /\bweak fundamental/, /\bpoor cash/, /\bloss(?:es| making)/, /\bprofit to loss\b/, /\bhigh debt/, /\bhigh leverage\b/, /\bdebt load\b/, /\bnpa\b/, /\bprovisions?\b/] },
   { category: 'fundamental_quality', subcategory: 'balance_sheet_quality', patterns: [/\bzero debt\b/, /\bno debt\b/, /\bdebt.?free\b/, /\blow debt\b/, /\bdecreasing debt\b/, /\bdebt reduction\b/, /\blow leverage\b/, /\bcash rich\b/, /\bcash cow/, /\bcash king/, /\bpositive cash flow\b/, /\bfree cash flow\b/, /\bpiotroski\b/, /\bfinancial health\b/, /\bgood financials\b/, /\bbalance sheet\b/] },
   { category: 'fundamental_quality', subcategory: 'capital_efficiency', patterns: [/\broe\b/, /\broce\b/, /\broa\b/, /\breturn on (?:equity|capital|assets)/, /\bprofit margins?\b/, /\bmargin expansion\b/, /\bmargin king/] },
