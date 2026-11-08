@@ -39,7 +39,7 @@ const ABNORMAL_EXIT_CODES: Record<number, string> = {
   3221225477: 'STATUS_ACCESS_VIOLATION (0xC0000005) — native crash inside a compiled extension',
   3221225725: 'STATUS_STACK_OVERFLOW (0xC00000FD) — native stack overflow',
   3221226356: 'STATUS_HEAP_CORRUPTION (0xC0000374) — heap corruption detected',
-  3221266689: 'STATUS_STACK_BUFFER_OVERRUN (0xC0000409) — fail-fast / stack buffer overrun',
+  3221226505: 'STATUS_STACK_BUFFER_OVERRUN (0xC0000409) — fail-fast / stack buffer overrun',
   137: 'SIGKILL (128+9) — killed by the OS, typically the out-of-memory killer',
   143: 'SIGTERM (128+15) — terminated by a signal',
 };

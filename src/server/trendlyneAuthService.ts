@@ -115,8 +115,12 @@ async function loginTrendlyne(): Promise<boolean> {
   const loginCookiePairs = extractCookiePairs(loginResponse.headers);
   const cookieHeader = mergeCookiePairs(initCookiePairs, loginCookiePairs);
 
-  if (!cookieHeader) {
-    console.warn('[TRENDLYNE AUTH] Login attempt did not return any session cookies');
+  // A rejected or degraded login answers 200 and rotates only csrftoken; a real one redirects
+  // and sets a session cookie. Caching the former served anonymous payloads for ~6h (2026-11-06).
+  const isRedirect = loginResponse.status >= 300 && loginResponse.status < 400;
+  const setsSession = [...loginCookiePairs.keys()].some((name) => name !== 'csrftoken');
+  if (!isRedirect || !setsSession) {
+    console.warn(`[TRENDLYNE AUTH] Login not accepted (HTTP ${loginResponse.status}, no session cookie)`);
     return false;
   }
 

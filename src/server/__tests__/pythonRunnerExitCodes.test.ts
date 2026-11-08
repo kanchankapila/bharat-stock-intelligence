@@ -33,6 +33,16 @@ describe('describeExitCode', () => {
     expect(isHostTeardownExit(137)).toBe(false);
   });
 
+  it('keys every NTSTATUS entry by the code its own description names', async () => {
+    // 0xC0000409 was keyed 3221266689 (the real value is 3221226505), so both 2026-11-06
+    // ml_ensemble crashes were reported as "not a code this runner has seen before".
+    const src = (await import('node:fs')).readFileSync(
+      new URL('../pythonRunner.ts', import.meta.url), 'utf8');
+    const hexes = [...src.matchAll(/\((0x[0-9A-F]{8})\)/g)].map(m => m[1]);
+    expect(hexes.length).toBeGreaterThanOrEqual(8);
+    for (const hex of hexes) expect(describeExitCode(Number(hex))).toContain(hex);
+  });
+
   it('returns empty for ordinary exit codes so the normal failure message is unchanged', () => {
     // Negative control: the overwhelmingly common path is a script sys.exit(1) that already
     // printed a real reason. Decoding must contribute nothing there, or every ordinary failure

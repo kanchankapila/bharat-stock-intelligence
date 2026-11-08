@@ -1,7 +1,7 @@
 import { getStockMapping } from './stockMapping';
 import { lastTuesdayExpiry } from './fnoService';
 import { cacheGet, cacheSet } from './cacheService';
-import { fetchTrendlyneWithAuth } from './trendlyneAuthService';
+import { fetchTrendlyneWithAuth, invalidateTrendlyneSession } from './trendlyneAuthService';
 import { dbGet } from './dbAsync';
 import { parseChecklistHtml, type TrendlyneChecklistResult } from './trendlyneChecklistParser';
 import {
@@ -280,6 +280,9 @@ export async function fetchTrendlyneStockMetrics(symbol: string) {
     }
 
     console.warn(`[TRENDLYNE] Metrics API returned gated/invalid payload for ${symbol}.`);
+    // A body-less payload is what an anonymous session gets, so force a re-login on the next
+    // call. Known ceiling: a permanently gated account would re-log in once per fetch.
+    await invalidateTrendlyneSession();
     return null;
   } catch (error) {
     // Re-throw circuit-breaker / transient throws so BullMQ retries fire;
