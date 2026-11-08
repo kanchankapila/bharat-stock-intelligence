@@ -253,15 +253,31 @@ export function rateLimitWaitMs(error: any): number | null {
   return 1_000; // 429 without a retry_after — short default backoff
 }
 
-async function postWithRateLimitRetry(url: string, payload: Record<string, unknown>): Promise<void> {
+// A reset or gateway error carries no retry_after. 2026-11-07 22:50 IST the job digest was lost to
+// one `read ECONNRESET` because only a 429 was retried. A reset that lands after Telegram accepted
+// the message can double-send; that is preferred over losing the report.
+const TRANSIENT_NETWORK_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EAI_AGAIN', 'EPIPE', 'ENETUNREACH', 'EHOSTUNREACH']);
+
+/** Milliseconds to wait before retrying a connection failure or 5xx, or null when it is neither. */
+export function transientRetryWaitMs(error: any, attempt: number): number | null {
+  const status = error?.response?.status;
+  const transient = status === undefined
+    ? TRANSIENT_NETWORK_CODES.has(error?.code)
+    : status === 500 || status === 502 || status === 503 || status === 504;
+  return transient ? 2_000 * (attempt + 1) : null;
+}
+
+export async function postWithRateLimitRetry(url: string, payload: Record<string, unknown>): Promise<void> {
   for (let attempt = 0; ; attempt++) {
     try {
       await axios.post(url, payload);
       return;
     } catch (error: any) {
-      const waitMs = rateLimitWaitMs(error);
+      const rateLimitMs = rateLimitWaitMs(error);
+      const waitMs = rateLimitMs ?? transientRetryWaitMs(error, attempt);
       if (waitMs === null || attempt >= MAX_RATE_LIMIT_RETRIES) throw error;
-      console.warn(`[TelegramService] HTTP 429 rate-limited — retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt + 1}/${MAX_RATE_LIMIT_RETRIES})`);
+      const why = rateLimitMs !== null ? 'HTTP 429 rate-limited' : `transient failure (${error?.code ?? error?.response?.status})`;
+      console.warn(`[TelegramService] ${why} — retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt + 1}/${MAX_RATE_LIMIT_RETRIES})`);
       await sleep(waitMs);
     }
   }
