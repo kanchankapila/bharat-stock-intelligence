@@ -143,12 +143,9 @@ export async function runTrendlyneMetricsFetch(
     const data = await fetchTrendlyneStockMetrics(symbol);
     if (!data?.body) return requirePersistence ? false : data !== null && data !== undefined;
 
-    // Persist alongside the existing cache-warm (2026-08-15) -- this job's own window (10 AM -
-    // 10 PM, randomDelayMs above) never crosses midnight, so a plain calendar date is a safe
-    // write-anchor here; no logical-trading-date rollover risk like the post-close jobs
-    // recurring-bugs.md warns about.
+    // Retries and manual runs can cross midnight; record the observation's IST calendar date.
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = new Date(Date.now() + 5.5 * 60 * 60_000).toISOString().slice(0, 10);
       await saveStockMetricsToDB(symbol, today, data.body);
     } catch (persistErr) {
       // Persistence failing must not fail the fetch/cache-warm itself -- this call's original
