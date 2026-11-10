@@ -13,9 +13,10 @@ It ranks the liquid NSE universe for 5- and 21-session horizons. It records ever
 grades it against what happened, reweights and recalibrates itself from those grades,
 retrains on schedule or when it degrades, and publishes an `edge_status` next to every ranking.
 
-It does **not** promise high accuracy. The legacy platform's own measurements put the
-achievable cross-sectional edge at roughly rank IC 0.05, and most factors turned negative after
-costs. This system's job is to find whatever edge exists, prove it, and refuse to present an
+It does **not** promise high accuracy or an achievable level of edge. The legacy platform's
+measurements include inconclusive and negative cost-aware results; see
+[`measurement.md`](../.claude/rules/measurement.md) for their scope and corrections. This
+system's job is to find whatever edge exists, prove it, and refuse to present an
 unproven ranking as trustworthy. On the synthetic market in `sim.py`:
 
 - with a planted edge, it passes the gate (out-of-fold IC 0.078, Newey–West t = 8.1, net

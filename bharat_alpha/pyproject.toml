@@ -13,7 +13,7 @@ dependencies = [
   "scipy>=1.11",
   "scikit-learn>=1.4,<1.9",  # 1.9.x pyds blocked by Windows Smart App Control (2026-10-07); 1.8.0 is what production runs
   "lightgbm>=4.3",
-  "psycopg[binary]>=3.2,!=3.3.6",  # 3.3.6 bundles a libpq DLL that Windows Smart App Control blocks (2026-10-07)
+  "psycopg[binary]>=3.2,<3.3.5",  # Windows Smart App Control blocks 3.3.6 (2026-10-07), 3.3.5 and 3.3.7 (2026-11-09); 3.3.4 loads
   "pyarrow>=15",
   "pydantic>=2.6",
   "pydantic-settings>=2.2",
