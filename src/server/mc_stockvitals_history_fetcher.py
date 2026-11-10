@@ -174,11 +174,54 @@ def parse_bars(bars: list[dict], score_type: str, month_day: str, today: str) ->
     return rows
 
 
-def upsert_history(symbol: str, rows: list[dict], con) -> None:
-    if not rows:
-        return
+def load_known_max_dates(con) -> dict:
+    """(symbol, score_type) -> max stored effective date, as ISO text.
+
+    Write-amplification guard (marketsmojo precedent): the MC stockvitals endpoint
+    returns the whole ~10-year annual series on every call, so re-upserting all
+    of it each run is pure waste. Pass the result in as `known`; upsert_history
+    skips bars whose effective date is already stored. Pass known=None (--full)
+    to force a complete re-upsert.
+    """
     cur = con.cursor()
+    try:
+        cur.execute(
+            "SELECT symbol, score_type, MAX(date) FROM proprietary_scores_history "
+            "WHERE source = 'moneycontrol' GROUP BY symbol, score_type"
+        )
+    except Exception:
+        try:
+            con.rollback()
+        except Exception:
+            pass
+        return {}
+    out = {}
+    for r in cur.fetchall():
+        try:
+            sym = r[0]
+            st = r[1]
+            mx = r[2]
+        except Exception:
+            try:
+                sym = r["symbol"]
+                st = r["score_type"]
+                mx = list(r)[-1]
+            except Exception:
+                continue
+        out[(sym, st)] = mx
+    return out
+
+
+def upsert_history(symbol: str, rows: list[dict], con, known=None) -> int:
+    if not rows:
+        return 0
+    cur = con.cursor()
+    written = 0
     for r in rows:
+        key = (symbol, r["score_type"])
+        if (known is not None and key in known and known[key] is not None
+                and r["date"] <= known[key]):
+            continue
         cur.execute("""
             INSERT INTO proprietary_scores_history (symbol, date, source, score_type, score_value, score_label)
             VALUES (?, ?, 'moneycontrol', ?, ?, ?)
@@ -186,7 +229,9 @@ def upsert_history(symbol: str, rows: list[dict], con) -> None:
                 score_value = excluded.score_value,
                 score_label = excluded.score_label
         """, (symbol, r["date"], r["score_type"], r["score_value"], r["score_label"]))
+        written += 1
     con.commit()
+    return written
 
 
 def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
@@ -205,6 +250,8 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", default=None)
+    parser.add_argument("--full", action="store_true", default=False,
+                        help="Re-upsert every bar instead of only dates newer than what is stored")
     args = parser.parse_args()
 
     con = connect()
@@ -215,6 +262,9 @@ def main() -> None:
 
     fy_ends = _load_fiscal_year_ends(con)
     today = logical_trading_date()
+    known = None if args.full else load_known_max_dates(con)
+    if known is not None:
+        print(f"[MCStockVitalsHistory] {len(known)} existing series known -- fetching new dates only")
     print(f"[MCStockVitalsHistory] Backfilling {len(stocks)} stocks x {len(SCORE_TYPE_MAP)} "
           f"metrics in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)…")
 
@@ -246,7 +296,7 @@ def main() -> None:
                 if not any_data:
                     print(f"  [{done}/{len(stocks)}] {symbol}: no data")
                     continue
-                upsert_history(symbol, rows, con)
+                upsert_history(symbol, rows, con, known=known)
                 print(f"  [{done}/{len(stocks)}] {symbol}: {len(rows)} historical score-years")
                 ok += 1
         time.sleep(BATCH_GAP_SEC)
