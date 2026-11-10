@@ -59,6 +59,32 @@ FII_RESPONSE = '{"summary": {"fii": {"percentage": 18.5, "changeQoQ": 1.2}, "dii
 
 
 class TestSnapshotDateGuard:
+    def test_other_fresh_endpoint_does_not_make_old_tapetide_score_fresh(self, monkeypatch):
+        con = _make_db()
+        con.execute("INSERT INTO technical_signals (symbol, date) VALUES ('BEL', '2026-11-06')")
+        con.execute("INSERT INTO extra_endpoint_responses VALUES ('BEL', 'tapetide_score', ?, '2026-09-18 10:00:00')", ('{"data":{"score":53}}',))
+        con.execute("INSERT INTO extra_endpoint_responses VALUES ('BEL', 'marketservices_shareholding', ?, '2026-11-06 10:00:00')", (FII_RESPONSE,))
+        con.commit()
+        monkeypatch.setattr(efp, 'connect', lambda: con)
+
+        assert efp.run('2026-11-06') == 1
+        row = con.execute("SELECT ext_tt_score, ext_fii_holding_pct FROM technical_signals WHERE symbol='BEL'").fetchone()
+        assert row['ext_tt_score'] is None
+        assert row['ext_fii_holding_pct'] == 18.5
+
+    def test_later_endpoint_does_not_block_matching_historical_snapshot(self, monkeypatch):
+        con = _make_db()
+        con.execute("INSERT INTO technical_signals (symbol, date) VALUES ('BEL', '2026-11-06')")
+        con.execute("INSERT INTO extra_endpoint_responses VALUES ('BEL', 'tapetide_score', ?, '2026-11-07 10:00:00')", ('{"data":{"score":53}}',))
+        con.execute("INSERT INTO extra_endpoint_responses VALUES ('BEL', 'marketservices_shareholding', ?, '2026-11-06 10:00:00')", (FII_RESPONSE,))
+        con.commit()
+        monkeypatch.setattr(efp, 'connect', lambda: con)
+
+        assert efp.run('2026-11-06') == 1
+        row = con.execute("SELECT ext_tt_score, ext_fii_holding_pct FROM technical_signals WHERE symbol='BEL'").fetchone()
+        assert row['ext_tt_score'] is None
+        assert row['ext_fii_holding_pct'] == 18.5
+
     def test_snapshot_fetched_today_writes_onto_todays_row(self, monkeypatch):
         con = _make_db()
         con.execute("INSERT INTO technical_signals (symbol, date) VALUES ('TCS', '2026-07-30')")

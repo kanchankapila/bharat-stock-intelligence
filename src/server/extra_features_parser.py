@@ -198,16 +198,14 @@ def run(target_date: str) -> int:
     """.format(",".join("?" for _ in symbols)), tuple(symbols))
 
     responses_by_symbol = {}
-    fetched_date_by_symbol = {}
+    stale_symbols = set()
     for r in cur.fetchall():
         sym, endpoint, resp, updated_at = r[0], r[1], r[2], r[3]
-        responses_by_symbol.setdefault(sym, []).append((endpoint, resp))
         fetched_date = str(updated_at)[:10] if updated_at else None
-        # Latest fetched_date across this symbol's endpoints -- if endpoints were fetched
-        # on different days, the snapshot as a whole is only as fresh as its oldest part,
-        # but MAX is the closest available proxy without per-endpoint row granularity.
-        if fetched_date and fetched_date > fetched_date_by_symbol.get(sym, ""):
-            fetched_date_by_symbol[sym] = fetched_date
+        if str(fetched_date) == str(target_date):
+            responses_by_symbol.setdefault(sym, []).append((endpoint, resp))
+        else:
+            stale_symbols.add(sym)
 
     # Parse and update
     updated_count = 0
@@ -215,15 +213,8 @@ def run(target_date: str) -> int:
     for sym in symbols:
         resps = responses_by_symbol.get(sym, [])
         if not resps:
-            continue
-
-        fetched_date = fetched_date_by_symbol.get(sym)
-        if fetched_date != target_date:
-            # The cached snapshot was NOT captured on target_date -- writing it there would
-            # leak a different day's data into this row (backward if fetched_date is newer
-            # than target_date, i.e. a historical backfill; stale if older). Skip rather
-            # than fabricate a point-in-time value this table cannot actually supply.
-            skipped_stale += 1
+            if sym in stale_symbols:
+                skipped_stale += 1
             continue
 
         feat = extract_features(sym, resps)
