@@ -73,10 +73,11 @@ A failing external call is **my code broke** / **their code broke** / **their se
 Say which. The 2026-08-17 live-suite run had 3 failures and only 1 was an upstream blip.
 
 **If the failure is upstream (route moved, 401/403/404, or schema change):**
-Do NOT conclude the vendor is permanently dead or immediately ask the user. Follow the mandatory 3,000+ data source lookup sequence:
-1. Query `market_endpoint_registry` in PostgreSQL (`bharat_intel` on `:5433`, 3,408 live working endpoints; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`).
-2. Run `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` against `url_endpoints` (830 templates).
-3. Check `unique_urls.txt` (3,103 raw URLs) and `DATA_FETCHING_GUIDE.md` for proven headers/payloads.
+Do NOT conclude the vendor is permanently dead or immediately ask the user. Follow
+`.claude/rules/data-sources.md`: check populated tables and existing scripts first, then:
+1. Query `market_endpoint_registry` in PostgreSQL; recorded HTTP successes are historical evidence.
+2. Run `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` against `url_endpoints`.
+3. Check the optional local `urls_v2.db` corpus and `DATA_FETCHING_GUIDE.md`; the removed flat list is available with full Git history via `git show c2ceae0e^:unique_urls.txt`. Verify headers and payloads against the provider.
 4. Grep the repo for sibling endpoints and isolate minimum required headers.
 5. Only if all alternates are exhausted, ask the user with per-route evidence.
 

@@ -34,8 +34,16 @@ pm2 jlist | node -e "const j=JSON.parse(require('fs').readFileSync(0));console.l
 ```
 
 Compare that timestamp against the fix commit's timestamp (`git log -1 --format=%cI <path>`).
-If `pm_uptime` predates the commit, the restart didn't happen, hung, or crash-looped back to an
-old build — check `pm2 logs <name> --lines 50 --nostream` before trusting anything downstream.
+Uptime is a timing clue, not proof of the source revision loaded by the running process: check the
+process's working directory, the checkout and uncommitted changes, and the actual output readback.
+If `pm_uptime` predates the commit, the process cannot be assumed to have loaded that commit; check
+`pm2 logs <name> --lines 50 --nostream` before trusting anything downstream. Never restart a shared
+working tree without checking concurrent edits and in-flight jobs first.
+
+`scripts/check_deploy_drift.mjs` is not a read-only verification command: it writes a heartbeat and
+may restart `bharat-server` when its drift threshold is met. Inspect its configuration and live
+conditions before running it; a successful timestamp comparison does not replace identity or output
+verification.
 
 ## 3. Migrations: applied, not just written
 

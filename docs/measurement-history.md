@@ -1,5 +1,7 @@
 # Measurement Investigation History
 
+> **Historical evidence, not current verdicts:** Entries preserve their original dates and may be superseded or retracted. Before quoting a result, read `.claude/rules/measurement.md` for later corrections, including the overlapping-window correction and its scope, then re-derive the result from the relevant current data and method. Do not treat a historical significance label as current evidence.
+
 Full narrative and derivation detail behind the rules and verdicts in
 `.claude/rules/measurement.md`. That file is what to read before doing a measurement task;
 this one is what to read when you need to know *how* a verdict was reached — the same

@@ -1,5 +1,7 @@
 # Market semantic layer: operator runbook
 
+> This is an implementation snapshot. Check the current migrations, writers, readers, and production schema before treating the described objects or workflows as live.
+
 ## What is implemented
 
 The repository now has a PostgreSQL-first semantic control plane:

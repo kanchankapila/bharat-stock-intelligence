@@ -1,6 +1,9 @@
 # Audit remediation 2026-10-25 — implementation plan
 
-Design/recipe only. The work queue is `docs/audit-findings.md`; each task names its ledger row.
+Historical design and session-specific recipe only. The work queue is `docs/audit-findings.md`;
+each task names its ledger row. The worktree, concurrent-session exclusions and commands below
+describe the original session, not instructions for the current checkout. Check the ledger and
+current operating rules before acting.
 
 **Spec:** the 2026-10-25 audit findings AF-20261025-02..09 in `docs/audit-findings.md`, plus the
 binding domain rules in `CLAUDE.md` and `.claude/rules/` (`measurement.md`,

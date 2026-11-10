@@ -1,5 +1,7 @@
 # Ingestion & Backfill Pipeline Guide
 
+> Operational details and coverage below are snapshots. Verify the current fetcher and job configuration, registry validation, and production freshness before relying on an endpoint, schedule, or coverage claim.
+
 > **Scope (clarified 2026-10-03): THIS file is the run/operations doc for individual
 > ingestion & backfill processes** — what each fetcher writes, how it runs, measured
 > performance, and verification queries. The other three data docs, one per purpose:
@@ -145,7 +147,7 @@ Tests: `src/server/tests/test_analyst_estimates_snapshot.py` (24 cases).
 | Quarterly revenue/EPS/growth history (deep, 2005+) | **DalalOS table** (§3) | Largest, deepest; extend via MCP bridge |
 | Analyst targets/consensus/forward EPS | **Hybrid engine** (§5) | Fastest (2.6 min), widest coverage, daily |
 | Revenue estimates next-period | MC fallback inside hybrid | Only source carrying them |
-| New source onboarding / failing feed alternate | **Discovery Registry (3,000+ endpoints)** | `market_endpoint_registry` (3,408 live endpoints in Postgres), `url_endpoints` (834 templates via `--find-alternates`; re-derive with `node scripts/docNumbers.mjs`), `unique_urls.txt` (3,103 raw URLs) |
+| New source onboarding / failing feed alternate | **Discovery registries** | Follow `.claude/rules/data-sources.md`; `market_endpoint_registry` and `url_endpoints` record historical evidence, not guaranteed live endpoints |
 
 ## 7. Operational notes
 
@@ -168,8 +170,10 @@ Tests: `src/server/tests/test_analyst_estimates_snapshot.py` (24 cases).
 ## 8. Master Discovery Registry for Onboarding & Alternates
 
 Whenever a pipeline's upstream provider fails or when onboarding new features:
-1. **Query `market_endpoint_registry` in PostgreSQL (:5433)**: 3,408 live verified endpoints across Trendlyne, MoneyControl, ETnow, NiftyTrader, SapphireBroking, and NSE. Check views `v_working_market_endpoints`, `v_stock_screeners` (2,709 screeners), and `v_fno_endpoints` (82 F&O endpoints).
+First follow `.claude/rules/data-sources.md` to inspect populated tables and existing scripts.
+Then use the registries below as historical discovery evidence and verify candidates live:
+1. **Query `market_endpoint_registry` in PostgreSQL (:5433)** and its `v_working_market_endpoints`, `v_stock_screeners`, and `v_fno_endpoints` views.
 2. **Search `url_endpoints`**: `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server`.
-3. **Inspect `unique_urls.txt` (3,103 URLs) and `DATA_FETCHING_GUIDE.md`** for tested request shapes, session cookies, and response matrix structures.
+3. **Inspect the optional local `urls_v2.db` corpus and `DATA_FETCHING_GUIDE.md`** for request shapes, session cookies, and response matrix structures. The removed flat list is available with full Git history via `git show c2ceae0e^:unique_urls.txt`.
 4. **Probe sibling routes in repository fetchers** before concluding an external source is dead or requesting user intervention.
 

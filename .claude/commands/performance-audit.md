@@ -14,14 +14,18 @@ first if the symptom is a job. This command is the broader sweep.
 
 ## Known-real bottleneck classes — check these before profiling anything new
 
+The examples below are historical incidents, not a current bottleneck ranking. Check the
+latest ledger status and measure the current path before repeating a fix or quoting a number.
+
 1. **Write amplification on per-symbol full-history fetchers.**
    `marketsmojo_technical_fetcher` re-upserted each stock's ~9,900-row history nightly to gain
    ~13 new rows — measured **2,010,101 writes for 2,787 genuinely new ones (721:1)** against a
    3.4GB table, ~11s of DB time per symbol, step killed at 12% of the universe. **It looked
-   healthy from outside** (rows written was in the millions). The fix is on the WRITE side, not
-   the fetch side — read `MAX(date)` per key once and skip what you already hold. Audit every
-   fetcher that pulls a full series per symbol: *what fraction of each response is actually new?*
-   If <1%, the upsert is the bottleneck.
+   healthy from outside** (rows written was in the millions). Audit current full-series fetchers
+   for writes and elapsed time. A low fraction of new rows is a lead, not proof that writes are
+   the bottleneck. Do not blindly skip everything through `MAX(date)`: that loses corrections,
+   gaps and late arrivals. Check the provider's revision behavior and compare values or use an
+   explicitly justified overlap/backfill policy before changing a writer.
    ⚠ When adding such a guard, use `key in known and known[key] == value`, **not**
    `known.get(key) == value` — the bare `.get()` form can't distinguish "never written" from
    "stored as NULL" and silently skips the first write forever.
@@ -44,11 +48,12 @@ first if the symptom is a job. This command is the broader sweep.
    `dl_engine.py` LSTM run held a slot for **10h12m**. Measure real slot occupancy before blaming
    a slow fetcher for its own timeout.
 
-5. **Duplicate scheduled runs.** `addJobWithCatchup`'s guard matched on `data.isCatchup` alone, so
+5. **Duplicate scheduled runs.** Historically, `addJobWithCatchup`'s guard matched on `data.isCatchup` alone, so
    a restart during a legitimate long run queued a duplicate behind it — `ml-daily-ops` ran its
    entire ~120-step chain twice in a day (**49% job-level fail rate, 44/89**; 129 catch-up events
    logged since 2026-07-25). For `trendlyne-midweek` it burned a finite per-session WAF request
-   allowance three times over on one Wednesday.
+   allowance three times over on one Wednesday. The current guard also checks active regular runs;
+   inspect `src/server/jobs/registerJob.ts` before proposing this fix again.
 
 6. **Local-LLM reload tax.** `keep_alive: 0` forced a full unload+reload between calls. A cold
    `mistral` load is **~20.5s** (`load_duration` ≈99% of `total_duration`; `eval_duration` ≈40ms),

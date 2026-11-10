@@ -7,6 +7,8 @@ paths:
 
 Read before quoting, comparing, or acting on any accuracy, win-rate, IC, or backtest number.
 
+> **Reading order:** The correction immediately below and later dated entries can supersede older claims, including claims retained in historical sections. A dated result is evidence for its stated sample and method, not a current performance claim. Re-run the relevant measurement before using it for a current decision; consult the latest ledger status for the associated finding. The `dates / horizon` adjustment is an approximate effective-period heuristic for overlapping forward windows, not proof that the resulting observations are statistically independent. Do not apply it indiscriminately to non-overlapping backtest periods.
+
 > ## ⚠ CORRECTION 2026-09-12 — read this before quoting ANY `factor_edge.py` reading below
 >
 > **`factor_edge.py` counted overlapping forward windows as independent observations, so the
@@ -37,7 +39,8 @@ Read before quoting, comparing, or acting on any accuracy, win-rate, IC, or back
 > **Two things this correction does NOT touch, and conflating them would discard real evidence:**
 >
 > 1. **`factor_backtest.py` rows are unaffected.** It holds a portfolio to the next rebalance, so
->    its periods are DISJOINT — its `n periods` is already an independent count. Every
+>    its periods are DISJOINT — its `n periods` does not need the overlap adjustment, though
+>    disjoint periods are not necessarily statistically independent. Every
 >    cost/turnover row in "Already tested" stands as written, including the capitulation triple
 >    (t=+3.48, p=0.0005) and `momentum_12_1` (t=1.45).
 > 2. **The `feature_store` mean-reversion finding stands, and is now the best-powered result

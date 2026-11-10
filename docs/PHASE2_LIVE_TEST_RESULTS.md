@@ -1,5 +1,9 @@
 # Phase 2 Live Test Results: Indian Earnings Data APIs
 
+> Historical test evidence only. Endpoint responses and provider availability can change; follow
+> `.claude/rules/data-sources.md` and check the current fetcher, registry and live response before
+> relying on these results. Current follow-ups belong in `docs/audit-findings.md`.
+
 **Date:** 2026-10-23 (Live Testing)  
 **Status:** ⚠️ Partial Success — Working APIs identified, earnings endpoints blocked  
 **Test Environment:** Windows 11, Python 3.11, requests library

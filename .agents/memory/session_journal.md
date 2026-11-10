@@ -559,7 +559,51 @@ PR #131 merged as b4bf2a50. The reviewed source was integrated with the dirty li
 - Owner decides whether to add it to the row. The digest prints "worse than chance" for any excess over expected (62 vs about 57); `signalAccuracyDigest.ts:399`.
 - Later the same night: AF-20261105-02..06 fixed in code. 11-06: both migrations applied at the owner's request and read back; `penalties` back in the INSERT. Restart still waits for the other session's screener-semantics work to be committed; then read back `penalties` per row after the next ranker run.
 
+## 2026-11-06 - Documentation snapshot clarification
+
+- Clarified historical status of the wrong-direction review and measurements, and corrected source pointers and outdated discovery counts. Current measurements still require a fresh, method-specific run; no production changes.
+
+## 2026-11-06 - Test target preflight
+
+- Added a read-only inventory preflight for the explicitly configured test database. It rejected the production target and accepted the inspected dedicated target; the result does not guarantee that test code connects there. Clarified historical performance examples and deployment verification limits. Decision-input provenance remains tracked by AF-20261104-01.
+
 ## 2026-11-06 - Screener deployment verified (Codex)
 
 - Code 0f8f6e1d pushed and deployed; ET support repair and fresh confluence/ranker rows queried back. AF-20261106-02 and AF-20261105-02 closed; AF-20261106-01/04 remain evidence work.
 - Percentile verification must use the eligible reference universe before publication skips, not just published recommendations. Live readback: 2,374 reference names, 2,354 comparable stored values, exact match. Code CI passed; broad policy remains review-only.
+
+## 2026-11-07 - Telegram and job review
+
+- Recovered the Trendlyne market-insights stage separately and found the metrics writer's UTC-date error after midnight; the erroneous retry row was removed. AF-20261107-01 tracks the local fix and remaining deployment, AF-20261107-02 the other job failures. Full validation and heavy reruns wait for the active DL retrain and safe headroom.
+
+## 2026-11-08 - Trendlyne anonymous session, ensemble crash evidence, Telegram retry (Claude)
+
+- **AF-20261107-10 (Trendlyne 244/500 on 11-06):** a bharat-server restart at 16:24 IST logged in during Trendlyne 502s; `loginTrendlyne()` counted the login page's own `csrftoken` as a session, so an anonymous session was cached for 10h and 648 metric fetches returned body-less payloads. Login now needs a 3xx plus a non-csrftoken cookie, and a gated payload drops the cached session. Committed b1f3bb83 with `trendlyneAuthAnonymousSession.test.ts` (2 of 3 cases fail on the old code). Live module probe: logged in, AJANTPHARM PE_TTM 32.7. Deployed 2026-11-08 13:19 IST; the Mon 2026-11-09 10:00 batch is the real check, and no 11-06 observation is to be backfilled.
+- **AF-20261107-06 (ml_ensemble 0xC0000409):** not reproduced. A full-scale dry run (8-thread cap, runPython env, peak 10,590 MB) exited 0, and the real `ml-weekly-retrain`, promoted by hand at 10:47 IST, finished clean (ensemble 40.4 min, model 409 active). Both 11-06 crashes overlapped `ml-daily-ops`; the clean run did not. Two crashes against one clean run is not evidence, so the row stays open as EVIDENCE. Caveat found afterwards: neither run reached the scoring write path (no pending signals on a Sunday, inferred from `technical_signals`), and Friday's crashes came after scoring, so the clean runs do not cover the crash case; a normal Sunday run will not either. Real finding: `pythonRunner` keyed 0xC0000409 as 3221266689 (real 3221226505), so both crashes read as an unknown code; fixed in b1f3bb83 with a source-derived test.
+- **Schedule:** this week's ml-weekly-retrain was moved from 10:30 to 16:45 IST (BullMQ `changeDelay`) to clear a manual full DL retrain, then promoted to run at 10:47 at the user's request. The DL run trained 2,216 of 2,216 symbols in about 16h (model 407, not active).
+- **AF-20261108-01:** `job-digest` lost its 11-07 22:50 IST send to one `read ECONNRESET`; the sender retried only HTTP 429. It now retries resets and 5xx twice (cb5724e9, `telegramTransientRetry.test.ts`, 3 of 5 fail on the old code). Deployed 13:31 IST. Evidence still due: the 22:50 digest tonight.
+- **Gates:** `tsc` clean; full vitest 2,371 passed, 1 failed (`docClaims`), caused by another session's uncommitted re-wrap of `.claude/rules/data-sources.md` splitting "optional local raw URL corpus"; re-joined the line in the working copy (still uncommitted, theirs).
+- **Process notes:** `TaskStop` reported a background probe stopped while its bash tree kept running 10h and did the real work; verify with a process listing (memory: taskstop-does-not-kill-windows-bash-tree). The second restart killed a `news-sentiment` refresh that had started a minute earlier; the server's reclaim requeued it. Server now runs other sessions' uncommitted `.ts` (`queues.ts`, `jobRegistry.ts`, `dl.jobs.ts`, `logger.ts`, `trendlyneDailyFetchService.ts`); they are tested but not committed. `GEMINI_API_KEY` in `.env` is empty (AF-20261017-08), which needs the user's key.
+
+## 2026-11-08 - Multi-horizon strategy research (Codex)
+
+- Live read-only coverage and exploratory five-session momentum run documented in docs/audits/2026-11-08-strategy-research-audit.md. The baseline did not establish net edge; paired combination tests and point-in-time verification remain EVIDENCE in AF-20261108-02. Existing paper-book protocol unchanged.
+
+## 2026-11-09 - Documentation freshness review (Codex)
+
+- Corrected README claims about automatic improvement, a stale service inventory and an unsupported achievable edge; labelled selected older plans and endpoint tests as historical.
+- Updated data-source guidance to follow the current lookup order and to identify the removed flat URL list as Git history rather than a present checkout file. Retained the screener snapshot because `src/server/url_explorer/screeners.py` consumes it.
+- Verification: documentation-only Vitest configuration: 28 passed, 1 skipped; `npm run doc:numbers:check` and `npm run backlog:check` passed; `npm run findings:check` passed with existing warnings. Inventory and local-link scan are not a complete semantic review of every Markdown document.
+
+## 2026-11-09 - Job audit after intentional host shutdown; Postgres stats self-repair (Claude)
+
+- **Shutdown fallout (expected, not defects):** no jobs ran 01:57-10:20 IST; `morning-brief-delivery` and `confluence-signals-freshness` (skips market hours by design) failed for that reason only.
+- **AF-20261109-01 (closed):** `bqa-scheduler` crash-looped because Smart App Control began blocking psycopg-binary 3.3.5 after the 11-07 Windows updates. Pinned `psycopg[binary]>=3.2,<3.3.5` (3.3.4), force-reinstalled, guard test `bharat_alpha/tests/test_native_extensions_load.py`. Isolation tests must replace `sys.path`, not prepend to it: the first round silently loaded the venv's own DLLs.
+- **AF-20261028-22 (4th recurrence, now automated):** manual `ANALYZE` (496 s, 104/107 -> 0/107 unanalyzed), then `src/server/pgStatsRecovery.ts` on the watchdog's 15-min poll, sharing the check's SQL and threshold. Deployed 13:02 IST; live call returned `healthy`.
+- **Watch tonight:** `so_option_chain` 43/221 on 11-06 (same shape as two self-recovered September dips, AF-20260920-02); 4 newly admitted symbols await the 18:50 `reconcile-stock-ohlcv`; `bqa-daily` missed its 06:00 run (user decision pending: rerun or wait for tomorrow).
+- **Gates:** `tsc` clean; full vitest 2,382 passed, 1 failed (`docNumbersOffline`, caused by my added `console.error`; switched to `log.error`, rerun green); `findings:check`, `backlog:check` and `doc:numbers:check` pass.
+
+## 2026-11-09 - Recovered URL corpus (Codex)
+
+- Restored `unique_urls.txt` byte-for-byte from `c2ceae0e^`; SHA-256 matched. In a read-only comparison, 85 distinct concrete host/path pairs were absent as exact pairs from `urls_v2.db`'s `url_catalog`, `market_endpoint_registry` URL fields, and `url_fetches.concrete_url`. They are candidates, not proven distinct endpoint families or live data sources; no HTTP probes or production writes were made. All 267 coarse structural keys were represented in the GET template catalog, whose host/segment-count/query-key grouping can collapse distinct paths.
+- Updated source-discovery rules and onboarding guidance to include the recovered file when present. Documentation tests: 18 passed, 1 skipped; backlog and findings checks passed with existing findings warnings.

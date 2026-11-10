@@ -4,6 +4,10 @@ A phased plan to turn this platform from a many-engine Buy/Sell ranking into a m
 cost-aware portfolio process. It is a design, not a work queue: every action lives as a row in
 `docs/audit-findings.md`, linked below by id. The umbrella row is AF-20261008-27.
 
+This is a dated proposal, not a current measurement or an approved implementation sequence.
+Later corrections in `.claude/rules/measurement.md` and current ledger rows take precedence over
+the historical findings and suggested dates below.
+
 Facts are cited to `.claude/rules/measurement.md` (dated there). Statements marked
 **[judgement]** are design choices, not measurements.
 

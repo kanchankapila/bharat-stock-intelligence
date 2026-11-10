@@ -1,10 +1,10 @@
 # urls.txt Data Categorization & Usage Analysis (2026-08-03)
 
 > **2026-09-13 addendum:** this analysis covers the original 250-template `urls.txt` corpus. The
-> live catalog has since been consolidated to **830 endpoint templates** across all eight URL
+> catalog was consolidated to **830 endpoint templates** across all eight URL
 > inventories (`url_explorer.ingest` → Postgres `url_endpoints`), with per-template provider,
-> feature-target, and external HTTP-evidence columns. Current numbers, the never-fetched count,
-> and the 67 zero-HTTP-200 templates: `consolidation_report_2026-09-13.md` in this directory.
+> feature-target, and external HTTP-evidence columns. That run's numbers and coverage appear in
+> `consolidation_report_2026-09-13.md`; query `url_endpoints` and verify endpoints for current status.
 > The per-template findings below remain the deepest field-level reference for the original corpus.
 
 ## Methodology

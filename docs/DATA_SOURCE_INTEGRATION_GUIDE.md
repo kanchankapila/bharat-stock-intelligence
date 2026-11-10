@@ -1,5 +1,7 @@
 # Data Source Integration Guide
 
+> Catalog entries are snapshots, not proof that an endpoint or provider mapping works today. Check `.claude/rules/data-sources.md`, the registry, the current fetcher, and an appropriately scoped live readback.
+
 > **Scope (clarified 2026-10-03): THIS file is the in-repo integration catalog** — canonical
 > identifier rules, provider endpoint families as *this repo* consumes them, and which
 > fetcher/table owns what. One file per purpose for data documentation; the other three:
@@ -779,7 +781,7 @@ large captured URL corpus. A faithful migration must carry both layers:
 | `updated_urls.json` / `updated_urls_verified.json` | Updated/verified subset | 919 rows each | Supplemental subset, not proof that the other 1,064 raw rows are absent |
 | `et_screeners.json` | ETNow POST request captures | 438 request bodies; one failed source-index capture | Exact `screenerId` + `queryCondition` definitions |
 | `et-marketstats-post-requests.json` | ET Marketstats POST request captures | 91 request bodies | Exact technical/intraday operand payloads; combine with four extras in `etMarketstats.ts` |
-| `unique_urls.txt` / `unique_urls_stats.json` | Deduplicated merged corpus (all captures) | 3,103 unique URLs of 9,837 lines | Input to the consolidated catalog (Section 9.2); loader repairs 15 malformed `https:////` URLs and splits whitespace-concatenated lines |
+| Former `unique_urls.txt` / `unique_urls_stats.json` | Historical deduplicated merged corpus | 3,103 unique URLs of 9,837 lines | Historical input to the consolidated catalog; the removed flat list is available with full Git history via `git show c2ceae0e^:unique_urls.txt` |
 
 `url_explorer.normalizer` groups by host, path structure, and query-key set. The original malformed
 corpus produces 250 structural templates, matching the historical field report. Running the same
@@ -925,12 +927,9 @@ WHERE url ILIKE '%<host>%';
 #### Calling & Parsing Specifications
 For exact header dictionaries, session cookie initialization (e.g. SapphireBroking, NSE), POST request bodies, and Trendlyne matrix parsing, consult [`DATA_FETCHING_GUIDE.md`](../DATA_FETCHING_GUIDE.md) at the repository root.
 
-**Mandatory Lookup Order**:
-1. `market_endpoint_registry` (3,408 verified endpoints)
-2. `url_endpoints` via `python -m url_explorer.ingest --find-alternates "<targets>"` (834 templates; re-derive with `node scripts/docNumbers.mjs`)
-3. `unique_urls.txt` (3,103 raw URLs) / `DATA_FETCHING_GUIDE.md`
-4. Sibling routes in repository fetchers
-5. Only then ask the user with the per-route breakdown.
+**Mandatory lookup order:** follow `.claude/rules/data-sources.md`: inspect populated database
+columns and existing scripts, then the registries, optional local corpus and wired providers.
+Registry records are historical evidence; verify candidate endpoints and request shapes live.
 
 ## 10. Scheduling and Ownership
 

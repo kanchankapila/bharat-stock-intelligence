@@ -45,7 +45,11 @@ the full rules, the dead-vendor lookup order and the shared-backlog contract are
 Not done until the relevant check has actually run and passed — claiming "done" without one is this repo's most repeated failure.
 Set `PGTEST_DB` explicitly to a dedicated test database before running database-backed Vitest or
 pytest gates. An explicit name alone does not verify that the database is safe; check the target
-first. CI sets its own isolated service database. Live datasource canaries have a separate contract.
+first. `node scripts/test_database_preflight.mjs` performs a read-only inventory of the `PGTEST_*`
+target and refuses user tables in the inspected schemas; it is a point-in-time check, not a guarantee
+that every test uses that target or that it will remain empty. Inspect any refusal; never clear a
+database to make the check pass. CI sets its own isolated service database. Live datasource canaries
+have a separate contract.
 
 ```bash
 npx tsc --noEmit                                    # any .ts change

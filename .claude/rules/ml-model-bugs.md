@@ -46,7 +46,7 @@ cover classes that stayed in `recurring-bugs.md`.
   **Scope, and this matters — the correction does NOT apply to every harness here.**
   `factor_edge.py` samples DAILY and overlaps, so it is affected. `factor_backtest.py` forms a
   portfolio and holds it to the next rebalance, so its periods are DISJOINT and its `n periods`
-  is already an independent count — its cost/turnover rows need no adjustment. Before applying
+  needs no overlap adjustment. Disjoint periods may still be statistically dependent. Before applying
   this correction to any number, ask whether the observations overlap; applying it to
   non-overlapping periods would discard real evidence.
   **A second, independent precondition the same guard was missing: cross-sectional WIDTH.**

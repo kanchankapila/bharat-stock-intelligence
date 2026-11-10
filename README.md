@@ -1,6 +1,6 @@
 # AlphaQuant Pro — Institutional-Grade Indian Stock Intelligence
 
-A local-first quantitative intelligence platform for NSE/BSE equities. Synthesizes technical analysis, fundamental data, derivatives, macro indicators, and news sentiment into actionable multi-horizon trading signals. Self-improving via a full ML feedback loop.
+A local-first research and decision-support platform for NSE/BSE equities. It combines technical, fundamental, derivatives, macro and news data with models and outcome tracking. These tools do not establish profitable recommendations or automatic improvement; see [measurement guidance](.claude/rules/measurement.md) and [project context](CONTEXT.md).
 
 ---
 
@@ -28,8 +28,7 @@ A local-first quantitative intelligence platform for NSE/BSE equities. Synthesiz
 │  Signal Pipeline (Node)                                             │
 │  technicalSignalsService → confluenceEngine → scoring_engine.py    │
 │                                                                     │
-│  ML Pipeline (Python, 295 non-test modules incl. 82 *_fetcher.py;        │
-│  re-derive any count via `npm run doc:numbers` — never trust it cold)     │
+│  ML Pipeline (Python; inventory: `npm run doc:numbers`)                 │
 │  feature_engineering → regime_detector → ml_ensemble → dl_engine  │
 │  outcome_resolver → performance_tracker → reward_engine → rl_agent │
 │  online_learner → strategy_optimizer → backtester                  │
@@ -47,9 +46,9 @@ A local-first quantitative intelligence platform for NSE/BSE equities. Synthesiz
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-All processes run under pm2 in production (`ecosystem.config.cjs`) — **7 apps**: the 5
-long-running services above plus two `cron_restart` jobs, `pg-backup-nightly` and `bqa-daily`
-(the `bharat_alpha` daily run). The earlier `greenfield/` and `bharatquant/` rebuilds were
+The PM2 configuration (`ecosystem.config.cjs`) includes the services above, the Bharat Alpha
+pre-open scheduler, and the `pg-backup-nightly` and `bqa-daily` scheduled jobs. Configuration
+does not establish which processes are currently running. The earlier `greenfield/` and `bharatquant/` rebuilds were
 removed 2026-10-03 (never wired in; recoverable from git history). `npm start` runs the 4 core
 dev services directly without pm2.
 
@@ -66,6 +65,7 @@ testing requirements, and known broken sources.
 | `chatbot` | `src/server/chatbot/app.py` | 8001 (`CHATBOT_PORT`) | LangGraph RAG agent, ChromaDB |
 | `alphaquant-api` | `backend-python/main.py` | 8002 (`PYTHON_PORT`) | Backtesting, scoring, TV bridge, optimisation |
 | `engine-worker` | `src/server/worker_service.py` | 8005 (`ENGINE_WORKER_PORT`) | Ingestion Governor, MCP server, Engine Worker |
+| `bqa-scheduler` | `bharat_alpha/src/bharat_alpha/cli.py` | — | Bharat Alpha pre-open capture scheduler |
 
 A change to one service is not live in the others, and none of the `.py`/`.ts` files are
 hot-reloaded — a code change needs `pm2 restart <name>` (or `npm start`'s dev-mode watchers).
@@ -83,6 +83,10 @@ consolidation and do not reflect the live app.
 ---
 
 ## Features
+
+This section is an orientation to components, not a current production inventory or evidence
+of predictive performance. Check the owning code, schedules and current ledger before relying
+on a feature, probability, refresh interval or provider description.
 
 ### Signal Intelligence & Confluence Engine
 - **Multi-screener confluence**: aggregates Trendlyne + MoneyControl + ETnow screeners, deduplicates correlated signals, scores by source/category caps with exponential decay

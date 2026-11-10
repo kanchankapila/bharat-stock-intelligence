@@ -58,4 +58,4 @@ freshness-check factory (`makeFreshnessCheck()`) and the live-test helpers both 
 calls (cadence, `failDays` vs. warn-only) this agent shouldn't make unsupervised.
 If a live test fails due to upstream route retirement/HTTP failure, note that active alternate
 endpoints should be resolved from the 3,000+ discovery registry (`market_endpoint_registry` on `:5433`,
-`url_endpoints`, `unique_urls.txt`) per `data-sources.md`.
+`url_endpoints`, and the optional local URL corpus) per `data-sources.md`.

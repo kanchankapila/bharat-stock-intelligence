@@ -24,6 +24,9 @@ that a trade was executed. Separate what the code currently does from what the p
 to achieve.
 
 ## Live System Shape
+
+The code descriptions below are orientation, not a production readback. Inspect the current writer and gates, and query the relevant production batch before asserting what actually contributed to a live run.
+
 The main flow is:
 
 ```text
@@ -86,10 +89,9 @@ running product. (Two earlier rebuilds, `greenfield/` and `bharatquant/`, were n
 2026-10-03; any reference to them is stale.)
 
 ## Measured State Of The Edge
-The ranker has a small positive rank IC, but every reading on `unified_recommendations` is LOW-DATA:
-every reading in the latest `factor_edge_history` run (97 rows, 2026-10-17) sits below the eff-20 reliability floor, at
-0.2-8.2 effective dates, so that panel gives no usable reading in either direction, and the ranker has never
-passed a cost-aware backtest. The longer-history deep-panel gradings (2021-2026, 2,431 symbols) are
+In the dated measurements cited below, the ranker showed a small positive rank IC, but the cited `unified_recommendations` panel was LOW-DATA:
+every reading in the cited `factor_edge_history` run (97 rows, 2026-10-17) sits below the eff-20 reliability floor, at
+0.2-8.2 effective dates, so that panel gives no usable reading in either direction, and no cost-aware backtest pass was documented in that review. The longer-history deep-panel gradings (2021-2026, 2,431 symbols) are
 separate: no tier reaches AUC 0.55, and the F&O-eligible tier is indistinguishable from zero (see
 `.claude/rules/measurement.md`, 2026-10-21). Most published factors tested here are null or inverted on this data. The realistic goal is a
 modest, honestly-measured cross-sectional edge (rank IC of roughly 0.05-0.10), not high accuracy, and the
@@ -152,9 +154,9 @@ edge is unproven. An "honest refusal engine" (watch-list, no calls) appears only
 | Current API surface | `src/server/router.ts`, `src/server/routers/` |
 | Job schedules and runtime behavior | `src/server/queues.ts`, `src/server/jobs/`, `src/server/jobRegistry.ts` |
 | Database schema and drift | `db/schema.postgres.sql`, `npm run schema:drift` |
-| Stock identity and provider mapping | `src/data/stocklist.ts`, `src/server/stockMapping.ts` |
+| Stock identity and provider mapping | `nse_stocks` and `stock_master` production readbacks alongside `src/data/stocklist.ts` and `src/server/stockMapping.ts`; verify the specific mapping |
 | Canonical scoring and signal contracts | `.claude/rules/scoring-authority.md`, `src/server/unified_ranker.py` |
-| Current measurement interpretation | `.claude/rules/measurement.md`, `docs/measurement-history.md` |
+| Measurement interpretation | `.claude/rules/measurement.md` and `docs/measurement-history.md` for dated evidence and corrections; rerun the relevant measurement for a current claim |
 | Data freshness and quality checks | `src/server/dataQualityChecks.ts` |
 | Data-source onboarding and endpoint discovery | `.claude/rules/data-sources.md`, `DATA_FETCHING_GUIDE.md` (how-to call endpoints), `docs/DATA_SOURCE_INTEGRATION_GUIDE.md` (in-repo catalog), `docs/INGESTION_PIPELINE.md` (per-fetcher run/ops) |
 | Open findings | `docs/audit-findings.md` |

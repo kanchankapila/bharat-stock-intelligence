@@ -12395,6 +12395,17 @@ The user said to do what is best for accurate, honest recommendations. Commits `
 - **Owner command for the leftover wrong news links (114 rows, derived and rebuildable from `news_articles.symbols`), after the migrations:** `DELETE FROM news_symbol_link l USING news_articles a WHERE a.id = l.news_id AND ((a.title LIKE 'Asian Hotels (East)%' AND l.symbol <> 'AHLEAST') OR (a.title LIKE 'Asian Hotels (West)%' AND l.symbol <> 'AHLWEST') OR (a.title LIKE 'Asian Hotels (North)%' AND l.symbol <> 'ASIANHOTNR'));`
 - **Closed from live evidence:** AF-20261029-02, AF-20261028-18, AF-20261029-04.
 
+## 2026-11-06 - Documentation snapshot clarification (Codex)
+
+- Marked the wrong-direction case review as historical and linked later ledger closures; distinguished dated measurements and overlap correction from current evidence. Clarified production/code verification for ranker behavior, identity mappings and data-source catalogs, and removed outdated registry inventory figures from the discovery rule.
+- Checked the ranker source, relevant ledger rows, and document-number, backlog and findings checks. No score, production data, or runtime configuration changed; no fresh performance measurement was performed.
+
+## 2026-11-06 - Test target preflight and analysis corrections (Codex)
+
+- Added a read-only `PGTEST_*` database inventory preflight; it refuses a target with user tables and does not certify isolation or replace verifying the target used by each test. The dedicated `bharat_pgtest` target passed, and the production `bharat_intel` target was rejected without a write. Node regressions cover missing configuration, rejection, a clear inventory and query failure.
+- Corrected performance-audit instructions that encouraged skipping history through `MAX(date)` and repeated an already-fixed catch-up defect; clarified that non-overlapping periods are not necessarily independent. Deployment guidance now distinguishes uptime from revision identity and warns that the existing drift script can write a heartbeat and restart the server.
+- A bounded read-only `pg_stat_statements` check identified monitoring count queries as a profiling lead since the statistics reset on 2026-11-02; cumulative history is not a current before/after benchmark. The calibration shadow inventory spans six signal dates; AF-20261008-17 remains evidence/calendar-blocked and AF-20261104-01 still owns exact decision-input capture. No score, runtime configuration or production data was changed.
+
 ## 2026-11-06 - Screener deployment verified (Codex)
 
 Pushed code commit 0f8f6e1d and deployed using .claude/skills/deploy-and-verify/SKILL.md. Build,
@@ -12405,3 +12416,32 @@ The restarted worker wrote 4,430 confluence rows and 2,367 canonical recommendat
 penalty records. Independent eligible-universe percentile readback matched exactly. Exact-head
 GitHub CI passed. Closed AF-20261106-02 and AF-20261105-02; the broad candidate and invalid replay
 remain gated by AF-20261106-01/04. Detailed evidence is in docs/audits/2026-11-06-screener-review.md.
+
+## 2026-11-07 - Telegram report and job recovery review (Codex)
+
+- Reviewed the latest report log and job history; screener-performance had already recovered. A standalone Trendlyne market-insights retry succeeded and its output was queried back; the parent ML daily job remains failed. See AF-20261107-02 for other failed stages and safe retry dependencies.
+- A single-symbol Trendlyne metrics retry exposed a UTC/IST date error after midnight. Removed only the newly created, incorrectly dated row and confirmed its absence. The local IST date fix has a focused regression that failed before and passed after; full TypeScript/Vitest checks and deployment remain outstanding under AF-20261107-01. The active scheduled DL retrain and host memory below the test guard's stop threshold prevented a safe broad rerun.
+
+## 2026-11-08 - Trendlyne anonymous session, ensemble crash evidence, Telegram retry (Claude)
+
+- **AF-20261107-10 (Trendlyne 244/500 on 11-06):** a bharat-server restart at 16:24 IST logged in during Trendlyne 502s; `loginTrendlyne()` counted the login page's own `csrftoken` as a session, so an anonymous session was cached for 10h and 648 metric fetches returned body-less payloads. Login now needs a 3xx plus a non-csrftoken cookie, and a gated payload drops the cached session. Committed b1f3bb83 with `trendlyneAuthAnonymousSession.test.ts` (2 of 3 cases fail on the old code). Live module probe: logged in, AJANTPHARM PE_TTM 32.7. Deployed 2026-11-08 13:19 IST; the Mon 2026-11-09 10:00 batch is the real check, and no 11-06 observation is to be backfilled.
+- **AF-20261107-06 (ml_ensemble 0xC0000409):** not reproduced. A full-scale dry run (8-thread cap, runPython env, peak 10,590 MB) exited 0, and the real `ml-weekly-retrain`, promoted by hand at 10:47 IST, finished clean (ensemble 40.4 min, model 409 active). Both 11-06 crashes overlapped `ml-daily-ops`; the clean run did not. Two crashes against one clean run is not evidence, so the row stays open as EVIDENCE. Caveat found afterwards: neither run reached the scoring write path (no pending signals on a Sunday, inferred from `technical_signals`), and Friday's crashes came after scoring, so the clean runs do not cover the crash case; a normal Sunday run will not either. Real finding: `pythonRunner` keyed 0xC0000409 as 3221266689 (real 3221226505), so both crashes read as an unknown code; fixed in b1f3bb83 with a source-derived test.
+- **Schedule:** this week's ml-weekly-retrain was moved from 10:30 to 16:45 IST (BullMQ `changeDelay`) to clear a manual full DL retrain, then promoted to run at 10:47 at the user's request. The DL run trained 2,216 of 2,216 symbols in about 16h (model 407, not active).
+- **AF-20261108-01:** `job-digest` lost its 11-07 22:50 IST send to one `read ECONNRESET`; the sender retried only HTTP 429. It now retries resets and 5xx twice (cb5724e9, `telegramTransientRetry.test.ts`, 3 of 5 fail on the old code). Deployed 13:31 IST. Evidence still due: the 22:50 digest tonight.
+- **Gates:** `tsc` clean; full vitest 2,371 passed, 1 failed (`docClaims`), caused by another session's uncommitted re-wrap of `.claude/rules/data-sources.md` splitting "optional local raw URL corpus"; re-joined the line in the working copy (still uncommitted, theirs).
+- **Process notes:** `TaskStop` reported a background probe stopped while its bash tree kept running 10h and did the real work; verify with a process listing (memory: taskstop-does-not-kill-windows-bash-tree). The second restart killed a `news-sentiment` refresh that had started a minute earlier; the server's reclaim requeued it. Server now runs other sessions' uncommitted `.ts` (`queues.ts`, `jobRegistry.ts`, `dl.jobs.ts`, `logger.ts`, `trendlyneDailyFetchService.ts`); they are tested but not committed. `GEMINI_API_KEY` in `.env` is empty (AF-20261017-08), which needs the user's key.
+
+## 2026-11-08 - Multi-horizon strategy research (Codex)
+
+- Audited selected production data coverage and ran an exploratory cost-aware five-session momentum baseline. Results and limitations: docs/audits/2026-11-08-strategy-research-audit.md; remaining research: AF-20261108-02. No live scoring changes.
+
+## 2026-11-09 - Documentation freshness review (Codex)
+
+- Corrected README claims about automatic improvement, a stale service inventory and an unsupported achievable edge; labelled selected older plans and endpoint tests as historical.
+- Updated data-source guidance to follow the current lookup order and to identify the removed flat URL list as Git history rather than a present checkout file. Retained the screener snapshot because `src/server/url_explorer/screeners.py` consumes it.
+- Verification: documentation-only Vitest configuration: 28 passed, 1 skipped; `npm run doc:numbers:check` and `npm run backlog:check` passed; `npm run findings:check` passed with existing warnings. Inventory and local-link scan are not a complete semantic review of every Markdown document.
+
+## 2026-11-09 - Recovered URL corpus (Codex)
+
+- Restored `unique_urls.txt` byte-for-byte from `c2ceae0e^`; SHA-256 matched. In a read-only comparison, 85 distinct concrete host/path pairs were absent as exact pairs from `urls_v2.db`'s `url_catalog`, `market_endpoint_registry` URL fields, and `url_fetches.concrete_url`. They are candidates, not proven distinct endpoint families or live data sources; no HTTP probes or production writes were made. All 267 coarse structural keys were represented in the GET template catalog, whose host/segment-count/query-key grouping can collapse distinct paths.
+- Updated source-discovery rules and onboarding guidance to include the recovered file when present. Documentation tests: 18 passed, 1 skipped; backlog and findings checks passed with existing findings warnings.
