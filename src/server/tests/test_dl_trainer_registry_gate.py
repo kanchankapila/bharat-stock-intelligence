@@ -113,6 +113,16 @@ class TestRecordModelRegistry:
         assert params[-1] == 0
 
 
+def test_train_budget_flag_reaches_the_trainer(monkeypatch):
+    """The weekend full retrain passes its budget per run; the default stays 90 min for drift retrains."""
+    seen = {}
+    monkeypatch.delenv("DL_TRAIN_BUDGET_SEC", raising=False)
+    monkeypatch.setattr(dlt, "retrain_models", lambda trigger: seen.update(
+        trigger=trigger, budget=os.environ.get("DL_TRAIN_BUDGET_SEC")) or {})
+    assert dlt.main(["--trigger", "scheduled", "--train-budget-sec", "72000"]) == 0
+    assert seen == {"trigger": "scheduled", "budget": "72000.0"}
+
+
 class TestStaleLockThreshold:
     def test_exceeds_the_bullmq_job_timeout(self):
         """queues.ts sets dl-retrain-weekly/emergency's BullMQ timeout to 24h (measured: a

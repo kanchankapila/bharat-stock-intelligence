@@ -204,8 +204,8 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // graceMinutes still 390 after the 2026-09-12 split. It is now TRAIN-ONLY and should finish
   // well inside that, but the value was not tightened: the train-only runtime has not been
   // measured yet, and guessing a tighter bound risks a phantom 'late' alert. Re-measure from
-  // job_run_history after a few Saturdays, then tighten.
-  { jobName: 'ml-weekly-retrain', label: 'ML Weekly Retrain', cronPattern: '0 5 * * 6', graceMinutes: 390, critical: false },
+  // job_run_history after a few weekends, then tighten. Sunday since 2026-11-06: Saturday is the full DL retrain's.
+  { jobName: 'ml-weekly-retrain', label: 'ML Weekly Retrain', cronPattern: '0 5 * * 0', graceMinutes: 390, critical: false },
   // Queue id kept as '-monthly' deliberately: renaming a BullMQ queue would orphan its
   // repeatable-job key and monitor state. As of 2026-07-31 the ratios step is WEEKLY (every
   // Saturday); only working_capital + mf_stock_holdings remain first-Saturday-only.
@@ -259,19 +259,19 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'breakout-classifier-train', label: 'ML Daily Ops: Breakout Classifier Train', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'movement-predictor-train', label: 'ML Daily Ops: Movement Predictor Train', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
 
-  // Same story for ml-weekly-retrain's (cron '0 5 * * 6') StepTracker sub-steps.
-  { jobName: 'ml-ensemble-train', label: 'ML Weekly Retrain: Ensemble Train', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
-  { jobName: 'strategy-optimizer', label: 'ML Weekly Retrain: Strategy Optimizer', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
+  // Same story for ml-weekly-retrain's (cron '0 5 * * 0') StepTracker sub-steps.
+  { jobName: 'ml-ensemble-train', label: 'ML Weekly Retrain: Ensemble Train', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
+  { jobName: 'strategy-optimizer', label: 'ML Weekly Retrain: Strategy Optimizer', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
   // These three T.run() siblings (queues.ts) were missing from this list entirely, so they fell
   // through to getStaleJobs()'s flat 26h legacy threshold instead of this file's cron-aware
   // getLateJobs() -- false-positiving "STALE" every week between Saturday runs (found live
   // 2026-08-21: backtest-optimizer logged STALE at ~77-83h while job_heartbeat showed
   // last_status='success' from the prior Saturday, no real failure).
-  { jobName: 'exit-policy-train', label: 'ML Weekly Retrain: Exit Policy Train', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
+  { jobName: 'exit-policy-train', label: 'ML Weekly Retrain: Exit Policy Train', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
   // cs-ranker-train removed 2026-08-31: model deactivated (live CV AUC 0.176, worse than
   // random) and its blend weight zeroed — see unified_ranker.py's REGIME_WEIGHTS note.
-  { jobName: 'backtest-optimizer', label: 'ML Weekly Retrain: Backtest Optimizer', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
-  { jobName: 'mover-study-weekly', label: 'Mover Reverse Engineering Study', cronPattern: '30 8 * * 6', graceMinutes: 180, critical: false },
+  { jobName: 'backtest-optimizer', label: 'ML Weekly Retrain: Backtest Optimizer', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
+  { jobName: 'mover-study-weekly', label: 'Mover Reverse Engineering Study', cronPattern: '30 8 * * 0', graceMinutes: 180, critical: false },
   // Registered 2026-09-04 alongside the job itself. Without an entry here the name still gets a
   // job_heartbeat row (its worker calls recordHeartbeat directly), and getStaleJobs() applies a
   // generic 26h staleness warning to any heartbeat whose name is in NEITHER JOB_REGISTRY,

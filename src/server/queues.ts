@@ -24,7 +24,7 @@ import { addJobWithCatchup } from './jobs/registerJob';
 import { registerAgentJobs } from './jobs/agents.jobs';
 import { registerOperationsJobs, resolveOutcomesResilient } from './jobs/operations.jobs';
 import { registerSyncJobs } from './jobs/sync.jobs';
-import { registerDlJobs, processDLPython } from './jobs/dl.jobs';
+import { registerDlJobs, processDLPython, dispatchFullRetrainAfterWeeklyData } from './jobs/dl.jobs';
 import { registerTrendlyneWeeklyJobs } from './jobs/trendlyneWeekly.jobs';
 import { registerConfluenceJobs } from './jobs/confluence.jobs';
 import { registerDigestJobs } from './jobs/digests.jobs';
@@ -2545,13 +2545,16 @@ export async function initQueues(): Promise<boolean> {
       stalledInterval: 15 * 60 * 1000,
       maxStalledCount: 3,
     });
+    // ml-weekly-data is the last Friday-night job, so either outcome starts the full DL retrain.
     mlWeeklyDataWorker.on('completed', () => {
       // Per-step + overall monitor states are written by StepTracker.finish() in the processor.
       console.log('[QUEUE] ml-weekly-data done');
+      void dispatchFullRetrainAfterWeeklyData(dlRetrainWeeklyQueue);
     });
     mlWeeklyDataWorker.on('failed', (_, err) => {
       console.error('[QUEUE] ml-weekly-data failed:', err.message);
       updateMonitorState('ml-weekly-data', 'failed', err?.message);
+      void dispatchFullRetrainAfterWeeklyData(dlRetrainWeeklyQueue);
     });
     // -- ML weekly retrain + optimize (Sunday 10:30 IST = 05:00 UTC, see the repeat pattern below) --
     mlWeeklyRetrainQueue = new Queue(QUEUE_ML_WEEKLY_RETRAIN, { connection });
@@ -2559,7 +2562,7 @@ export async function initQueues(): Promise<boolean> {
     // repeatable's `next` to detect a slot missed by a restart) — removing it here first would
     // erase that signal before the helper ever sees it.
     await addJobWithCatchup(mlWeeklyRetrainQueue, 'ml-weekly-retrain', {}, {
-      repeat: { pattern: '0 5 * * 6' }, // Saturday 10:30 IST (05:00 UTC) — early on the closed day, after fundamentals
+      repeat: { pattern: '0 5 * * 0' }, // Sunday 10:30 IST: Saturday belongs to the ~18h full DL retrain
       jobId: 'ml-weekly-retrain',
       removeOnComplete: 2, removeOnFail: 3,
     });
@@ -2734,21 +2737,19 @@ export async function initQueues(): Promise<boolean> {
       recordHeartbeat('nt-live-filter-capture', 'failed', err?.message, bullJobDurationMs(job));
     });
 
-    // ── Mover STUDY (weekly, Saturday 14:00 IST = 08:30 UTC): rebuilds computed classes
+    // ── Mover STUDY (weekly, Sunday 14:00 IST = 08:30 UTC): rebuilds computed classes
     // over 250 sessions then runs reverse_engineering_study.py (rank-IC, cohort lift,
     // engine hit-rate -- now including the ntlive_<HHMM>_* slot cohorts vs EOD outcomes).
-    // addJobWithCatchup: if the box is down Saturday, the study still runs once on
+    // addJobWithCatchup: if the box is down Sunday, the study still runs once on
     // next startup instead of silently skipping a week.
     //
-    // Moved off Sunday 12:00 IST 2026-08-30: every other weekly job on this platform lands on
-    // Saturday, and this one alone kept a Sunday dependency, so a "did the weekend finish?"
-    // check could never be answered on Saturday night. 14:00 IST sits after ml-weekly-retrain
-    // (10:30) and dl-retrain-weekly (11:30) have finished, and well before tickertape-scorecard
-    // (18:30), so the Saturday lane stays serial with no new overlap.
+    // Back on Sunday since 2026-11-06: Saturday now belongs to the ~18h full DL retrain, and
+    // reverse_engineering_study.py peaks at 3.8GB on top of its 9.4GB. 14:00 IST sits after
+    // ml-weekly-retrain (Sunday 10:30, ~2h), so the Sunday lane stays serial.
     const QUEUE_MOVER_STUDY = 'mover-reverse-engineering-study';
     const moverStudyQueue = new Queue(QUEUE_MOVER_STUDY, { connection });
     await addJobWithCatchup(moverStudyQueue, 'mover-study-weekly', {}, {
-      repeat: { pattern: '30 8 * * 6', tz: 'Etc/UTC' },   // Saturday 14:00 IST, market closed
+      repeat: { pattern: '30 8 * * 0', tz: 'Etc/UTC' },   // Sunday 14:00 IST, market closed
       jobId: 'mover-study-weekly',
       removeOnComplete: 2,
       removeOnFail: 3,

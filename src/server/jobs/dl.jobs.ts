@@ -24,7 +24,8 @@
  * dlRetrainWeeklyQueue) — monitor.router.ts's queue-health dashboard imports those exact
  * bindings directly, so this module only owns the registration logic.
  */
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
+import { dbGet } from '../dbAsync';
 import { runPython } from '../pythonRunner';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
@@ -128,8 +129,47 @@ async function processDlRegimeUpdate(_job: Job): Promise<{ success: boolean; ski
   return processDLPython('regime_detector.py', ['--mode', 'update'], 4 * 60_000);
 }
 
-async function processDlRetrainWeekly(job: Job): Promise<{ success: boolean; skipped?: boolean }> {
+// The weekly retrain covers the full universe (user, 2026-11-06), estimated at ~18h: 22 chunks at
+// ~45 min, inferred from the 207-symbol step pattern, not timed. train_lstm stops at a chunk
+// boundary once this passes, leaving 4h inside the 24h kill below to validate and save.
+export const FULL_RETRAIN_BUDGET_SEC = 20 * 60 * 60;
+
+/** Friday 23:00 to Saturday 12:00 IST. A full retrain started here ends by Sunday 10:00, before
+ *  ml-weekly-retrain (Sunday 10:30). Outside it, a restart's make-up would land on a weekday. */
+export function fullRetrainWindowOpen(now: Date): boolean {
+  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  const day = ist.getUTCDay();
+  const hour = ist.getUTCHours();
+  return (day === 5 && hour >= 23) || (day === 6 && hour < 12);
+}
+
+/** Called when ml-weekly-data, the last Friday-night job, finishes either way. Same job name as
+ *  the cron so HEAVY_MAKEUP_JOBS and the dl-trainer monitor apply to it unchanged. */
+export async function dispatchFullRetrainAfterWeeklyData(queue: Queue | null, now = new Date()): Promise<void> {
+  if (!queue) return;
+  const istDate = new Date(now.getTime() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  await queue.add('dl-retrain-weekly', { trigger: 'scheduled', chained: true },
+    { jobId: `dl-retrain-full-${istDate}`, removeOnComplete: 2, removeOnFail: 3 })
+    .then(() => console.log('[QUEUE] dl-retrain-weekly dispatched after ml-weekly-data (chain trigger)'))
+    // swallow-ok: the Saturday 02:00 IST cron is the fallback for a lost dispatch.
+    .catch((e: Error) => console.error('[QUEUE] dl-retrain-weekly chain dispatch failed:', e.message));
+}
+
+export async function processDlRetrainWeekly(job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   const trigger = job.data?.trigger || 'scheduled';
+  if (!fullRetrainWindowOpen(new Date())) {
+    console.log('[QUEUE] dl-retrain-weekly skipped: outside the Friday-night/Saturday window');
+    return { success: true, skipped: true };
+  }
+  if (!job.data?.chained) {
+    // The cron run only covers a chain dispatch that never happened. dl_trainer.py writes this
+    // stamp as naive local time when it takes its lock, and this server runs on IST.
+    const row = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'dl_retrain_acquired_at'");
+    if (row?.value && Date.now() - new Date(row.value).getTime() < 36 * 60 * 60 * 1000) {
+      console.log('[QUEUE] dl-retrain-weekly cron skipped: this weekend\'s chained retrain already started');
+      return { success: true, skipped: true };
+    }
+  }
   // Explicit 24h timeout, not processDLPython's 6h default: a real full-universe BiLSTM
   // retrain (~2100 symbols, chunked training + walk-forward validation retraining
   // several more model copies) measured at ~15min for just 25 symbols on this machine's
@@ -137,7 +177,8 @@ async function processDlRetrainWeekly(job: Job): Promise<{ success: boolean; ski
   // run can run well past 6h. The 6h default is still correct for every OTHER
   // processDLPython caller (feature_engineering.py, dl_engine.py --mode infer,
   // backfill_ohlcv.py), so it's overridden per-call here rather than raised globally.
-  return processDLPython('dl_trainer.py', ['--trigger', trigger], 24 * 60 * 60 * 1000);
+  return processDLPython('dl_trainer.py',
+    ['--trigger', trigger, '--train-budget-sec', String(FULL_RETRAIN_BUDGET_SEC)], 24 * 60 * 60 * 1000);
 }
 
 export async function registerDlJobs(connection: any) {
@@ -241,18 +282,14 @@ export async function registerDlJobs(connection: any) {
     connection,
     queueName: QUEUE_DL_RETRAIN_WEEKLY,
     jobName: 'dl-retrain-weekly',
-    // SUNDAY 10:30 IST (05:00 UTC). Moved off Saturday 06:00 UTC 2026-09-12 (AF-20260912-13).
-    // The old slot's comment claimed it ran 'after ml retrain'; it did not. A +60min cron
-    // offset is not a dependency, and ml-weekly-retrain's last three runs measured 87.4 /
-    // 110.7 / 192.7 min, so this job started mid-chain every week. Measured consequence on
-    // 2026-09-12: dl_trainer.py (13.50GB peak commit) ran concurrently with the ml chain's
-    // strategy_optimizer.py (16.87GB) on a 23.5GB host -- 94.3% of the 82GB commit limit,
-    // 339MB available, 102,856 pages/sec. Both were individually under the 20GB per-tree
-    // PY_CHILD_MEM_LIMIT_MB ceiling, which is exactly why neither ceiling fired.
-    // Sunday was entirely unscheduled, so this buys a full day of separation with no
-    // cross-job guard to get wrong -- the two heaviest trainers on the platform simply
-    // cannot coexist any more. Keep it that way: do NOT add a Saturday job here.
-    repeat: { pattern: '0 5 * * 0' },
+    // Normally dispatched the moment ml-weekly-data, the last Friday-night job, finishes (~00:30
+    // IST Saturday; queues.ts calls dispatchFullRetrainAfterWeeklyData). This cron, SATURDAY 02:00
+    // IST, only covers a lost dispatch and skips when the weekend's run already started.
+    // Full universe since 2026-11-06 (~18h), so it owns Saturday and ml-weekly-retrain moved to
+    // Sunday 10:30. Keep them on different days: on 2026-09-12 dl_trainer.py (13.50GB) and the ml
+    // chain's strategy_optimizer.py (16.87GB) together hit 94.3% of commit on this 23.5GB host
+    // (AF-20260912-13), and a cron offset is not a dependency.
+    repeat: { pattern: '30 20 * * 5' },
     jobId: 'dl-retrain-weekly',
     removeOnComplete: 2,
     removeOnFail: 3,

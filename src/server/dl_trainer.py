@@ -436,10 +436,15 @@ def retrain_models(trigger: str = "scheduled") -> dict:
     return result
 
 
-if __name__ == "__main__":
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--trigger", choices=["scheduled", "drift", "monthly"], default="scheduled")
-    args = parser.parse_args()
+    # Per run, not in .env: only the weekend full retrain gets the long budget (dl.jobs.ts), so a
+    # drift retrain on a weekday keeps train_lstm's 90-minute default.
+    parser.add_argument("--train-budget-sec", type=float)
+    args = parser.parse_args(argv)
+    if args.train_budget_sec is not None:
+        os.environ["DL_TRAIN_BUDGET_SEC"] = str(args.train_budget_sec)
     result = retrain_models(args.trigger)
     print(f"[TRAINER] Done: {result}")
     # Exit non-zero on a real training error so the BullMQ worker records a failure instead of a
@@ -447,5 +452,8 @@ if __name__ == "__main__":
     # dict, never throws), the process exits 0, the job heartbeat logs success — yet model_registry
     # gets no new BiLSTM row (observed: job "succeeded" but the model went 29 days without a retrain).
     # SKIPPED (concurrent-lock) is not a failure, so gate only on 'error'.
-    if result.get("error"):
-        sys.exit(1)
+    return 1 if result.get("error") else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
