@@ -20,6 +20,7 @@
 import { dbGet, dbAll, dbRun, dbExec } from './dbAsync';
 import { mapWithConcurrency } from './lib/async';
 import { withTransientRetry } from './pgClient';
+import { PG_TABLES_ANALYZED_SQL, isStatsReset } from './pgStatsRecovery';
 import { analyzeScreener } from './screenerSemantics';
 
 export type DataQualityStatus = 'pass' | 'warn' | 'fail' | 'error';
@@ -3693,18 +3694,14 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // AF-20261028-22: the unclean 2026-10-26 stop reset the cumulative statistics (177 of 267
     // tables with no analyze time) and autoanalyze ran late until a manual VACUUM (ANALYZE).
     // Sized by pg_class.reltuples, which survives a crash; n_live_tup is zeroed by one.
-    sql: `SELECT COUNT(*) AS big,
-                 COUNT(*) FILTER (WHERE COALESCE(s.last_autoanalyze, s.last_analyze) IS NULL) AS unanalyzed,
-                 STRING_AGG(s.relname, ' ' ORDER BY c.reltuples DESC)
-                   FILTER (WHERE COALESCE(s.last_autoanalyze, s.last_analyze) IS NULL) AS sample
-          FROM pg_stat_user_tables s JOIN pg_class c ON c.oid = s.relid
-          WHERE s.schemaname = 'public' AND c.reltuples > 10000`,
+    // Shared with pgStatsRecovery.ts, which the watchdog uses to repair a reset automatically.
+    sql: PG_TABLES_ANALYZED_SQL,
     evaluate: (row) => {
       const big = Number(row?.big) || 0;
       const n = Number(row?.unanalyzed) || 0;
       if (n === 0) return { status: 'pass', detail: `all ${big} large tables have been analyzed` };
       const detail = `${n} of ${big} large tables were never analyzed (${String(row?.sample ?? '').slice(0, 200)}) -- after an unclean restart run VACUUM (ANALYZE)`;
-      return { status: n >= big * 0.5 ? 'fail' : 'warn', detail };
+      return { status: isStatsReset(big, n) ? 'fail' : 'warn', detail };
     },
   },
   {

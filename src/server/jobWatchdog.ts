@@ -27,6 +27,8 @@ import { getSystemStatus } from './routers/monitor.router';
 import { telegramService, sanitizeMarkdown } from './telegramService';
 import { dbGet, dbRun, dbAll } from './dbAsync';
 import { runDataQualityChecks, getLatestDataQualityResults } from './dataQualityChecks';
+import { recoverPgStatsIfReset } from './pgStatsRecovery';
+import log from './logger';
 
 // Needs a minimum sample so a job with 1 failure out of 2 runs doesn't false-positive.
 const FAIL_RATE_WARN = 0.25;
@@ -556,6 +558,9 @@ export function startJobWatchdog(): void {
     } catch (err) {
       console.error('[WATCHDOG] checkAndAlertDataQuality failed:', (err as Error).message);
     }
+    // Not awaited: a repair ANALYZE takes ~8 min and must not delay the next poll's checks.
+    recoverPgStatsIfReset().catch(err =>
+      log.error(`[WATCHDOG] recoverPgStatsIfReset failed: ${(err as Error).message}`));
   };
   setInterval(() => { void check(); }, 15 * 60 * 1000).unref();
   console.log('[WATCHDOG] Job lateness watchdog started (every 15 min).');
