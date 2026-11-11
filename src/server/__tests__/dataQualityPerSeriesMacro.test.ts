@@ -83,4 +83,41 @@ describe('market-breadth-trading-day', () => {
     await dbRun(`INSERT INTO "${SCHEMA}".market_breadth (date, adv_decline_ratio) VALUES (${SUNDAY} - 2, 0.2219)`);
     expect((await run('market-breadth-trading-day')).status).toBe('warn');
   });
+
+  // 2026-11-11: the pass detail was a fixed sentence, byte-identical on 200+ runs, so
+  // dq-uninformative-checks correctly reported this check as reading a frozen input. The pass
+  // detail must carry the population it judged, so a writer that stops writing changes it.
+  it('pass detail names the judged row count and latest date, so it moves as rows land', async () => {
+    const before = (await run('market-breadth-trading-day')).detail;
+    await dbRun(`INSERT INTO "${SCHEMA}".market_breadth (date, adv_decline_ratio) VALUES (${SUNDAY} - 5, 0.6)`);
+    const after = await run('market-breadth-trading-day');
+    expect(after.status).toBe('pass');
+    expect(after.detail).toContain('0 of 3');
+    expect(after.detail).not.toBe(before);
+  });
+});
+
+describe('dq-uninformative-checks (real SQL)', () => {
+  beforeEach(async () => {
+    await dbRun(`DELETE FROM "${SCHEMA}".data_quality_history`);
+    await dbRun(`DELETE FROM "${SCHEMA}".data_quality_results`);
+  });
+
+  // 2026-11-11: its verdict is derived from every OTHER check, so one genuinely stuck check
+  // kept it warn on every run and it then listed itself as a second stuck check.
+  it('does not count its own history as a stuck check', async () => {
+    const now = Date.now();
+    for (const id of ['dq-uninformative-checks', 'really-stuck']) {
+      await dbRun(`INSERT INTO "${SCHEMA}".data_quality_results (check_id, status) VALUES (?, 'warn')`, [id]);
+      for (let i = 0; i < 12; i++) {
+        await dbRun(`INSERT INTO "${SCHEMA}".data_quality_history (check_id, status, detail, checked_at) VALUES (?, 'warn', 'x', ?)`,
+          [id, now - i * 60_000]);
+      }
+    }
+    const r = await run('dq-uninformative-checks');
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('1 check(s) have returned the SAME non-pass verdict');
+    expect(r.detail).toContain('really-stuck');
+    expect(r.detail).not.toMatch(/verdict on every one of their last 10\+ runs: [^.]*dq-uninformative-checks/);
+  });
 });

@@ -38,3 +38,22 @@ def test_a_fixtures_directory_outside_a_test_dir_is_not_muted():
     # the real logged shape, or an unrelated data directory named "fixtures" would be silently
     # exempted from ever being reported as a failure.
     assert not dft.is_muted(r"scripts\fixtures\some_real_script.py")
+
+
+def test_human_report_survives_a_cp1252_console(tmp_path, monkeypatch):
+    # 2026-11-11: an app log line carrying the emoji the TS services print crashed the report
+    # with UnicodeEncodeError on the default Windows console, so the full list was unreadable.
+    import datetime
+    import io
+    import json
+    day = datetime.date.today().isoformat()
+    (tmp_path / f"error-{day}.log").write_text(
+        json.dumps({"message": "❌ Error fetching Trendlyne screener data: fetch failed"}) + "\n",
+        encoding="utf-8")
+    monkeypatch.setattr(dft, "LOG_DIR", str(tmp_path))
+    monkeypatch.setattr(sys, "argv", ["daily_failure_triage.py", "--days", "1"])
+    buf = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(buf, encoding="cp1252"))
+    assert dft.main() == 1
+    sys.stdout.flush()
+    assert b"Error fetching Trendlyne screener data" in buf.getvalue()

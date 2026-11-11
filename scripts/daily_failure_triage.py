@@ -120,6 +120,8 @@ def main():
                          "no human-readable printing, always exits 0 (the caller decides severity "
                          "from the payload, not from this process's exit code)")
     args = ap.parse_args()
+    # Log messages carry emoji; a cp1252 Windows console raised UnicodeEncodeError mid-report.
+    sys.stdout.reconfigure(errors="replace")
 
     events = collect(args.days)
     if not events:

@@ -31,6 +31,15 @@ describe('postWithRateLimitRetry on transient network failures', () => {
     expect(post).toHaveBeenCalledTimes(2);
   });
 
+  // 2026-11-11 10:14 / 13:19 IST: on a wake from Windows Modern Standby the adapter is not up
+  // yet and getaddrinfo answers ENOTFOUND (not EAI_AGAIN) for api.telegram.org; 5 alerts were lost.
+  it('retries a DNS lookup failure (ENOTFOUND) on a fixed, well-known host', async () => {
+    post.mockRejectedValueOnce(Object.assign(new Error('getaddrinfo ENOTFOUND api.telegram.org'), { code: 'ENOTFOUND' }))
+      .mockResolvedValueOnce({ data: {} } as any);
+    expect(await run(postWithRateLimitRetry('u', { text: 'digest' }))).toBe('ok');
+    expect(post).toHaveBeenCalledTimes(2);
+  });
+
   it('retries a 502 from the gateway', async () => {
     post.mockRejectedValueOnce({ response: { status: 502 } }).mockResolvedValueOnce({ data: {} } as any);
     expect(await run(postWithRateLimitRetry('u', { text: 'digest' }))).toBe('ok');

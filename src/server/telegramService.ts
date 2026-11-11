@@ -256,7 +256,9 @@ export function rateLimitWaitMs(error: any): number | null {
 // A reset or gateway error carries no retry_after. 2026-11-07 22:50 IST the job digest was lost to
 // one `read ECONNRESET` because only a 429 was retried. A reset that lands after Telegram accepted
 // the message can double-send; that is preferred over losing the report.
-const TRANSIENT_NETWORK_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EAI_AGAIN', 'EPIPE', 'ENETUNREACH', 'EHOSTUNREACH']);
+// ENOTFOUND: the host is the fixed api.telegram.org, so a lookup miss is the network not being up
+// yet (Windows answers ENOTFOUND, not EAI_AGAIN, right after a Modern Standby wake; 5 alerts lost 2026-11-11).
+const TRANSIENT_NETWORK_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE', 'ENETUNREACH', 'EHOSTUNREACH']);
 
 /** Milliseconds to wait before retrying a connection failure or 5xx, or null when it is neither. */
 export function transientRetryWaitMs(error: any, attempt: number): number | null {

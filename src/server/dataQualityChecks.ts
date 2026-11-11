@@ -2727,15 +2727,19 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // adv_decline_ratio 0.2219 carried forward, which the HMM ffills. mc_advance_decline_fetcher
     // now skips closed days; this catches a regression or another writer. 30-day window so a
     // repaired history ages out instead of warning forever.
-    sql: `SELECT COUNT(*) AS bad, string_agg(b.date::text, ', ' ORDER BY b.date) AS dates
+    // The pass detail carries the judged row count and latest date: a fixed sentence was
+    // byte-identical for 200+ runs and dq-uninformative-checks rightly called it frozen.
+    sql: `SELECT COUNT(*) FILTER (WHERE EXTRACT(ISODOW FROM b.date) IN (6, 7)
+                 OR EXISTS (SELECT 1 FROM market_holidays h WHERE h.exchange = 'NSE' AND h.date = b.date)) AS bad,
+                 string_agg(b.date::text, ', ' ORDER BY b.date) FILTER (WHERE EXTRACT(ISODOW FROM b.date) IN (6, 7)
+                 OR EXISTS (SELECT 1 FROM market_holidays h WHERE h.exchange = 'NSE' AND h.date = b.date)) AS dates,
+                 COUNT(*) AS total, MAX(b.date)::text AS latest
           FROM market_breadth b
-          WHERE b.date >= CURRENT_DATE - 30
-            AND (EXTRACT(ISODOW FROM b.date) IN (6, 7)
-                 OR EXISTS (SELECT 1 FROM market_holidays h WHERE h.exchange = 'NSE' AND h.date = b.date))`,
+          WHERE b.date >= CURRENT_DATE - 30`,
     evaluate: (row) => {
       const bad = Number(row?.bad) || 0;
       if (bad > 0) return { status: 'warn', detail: `${bad} row(s) on non-trading days: ${row?.dates}` };
-      return { status: 'pass', detail: 'No market_breadth rows on weekends/holidays in 30d' };
+      return { status: 'pass', detail: `0 of ${Number(row?.total) || 0} market_breadth rows in 30d fall on weekends/holidays (latest ${row?.latest ?? 'none'})` };
     },
   },
   {
@@ -3255,6 +3259,8 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
                -- checks that no longer exist, and dq-new-failures below already joins to it for
                -- exactly this reason.
                AND check_id IN (SELECT check_id FROM data_quality_results)
+               -- Its own verdict is derived from the others, so one stuck check made it list itself too.
+               AND check_id <> 'dq-uninformative-checks'
              GROUP BY check_id
           )
           SELECT COUNT(*) FILTER (WHERE runs >= 10) AS judged,
