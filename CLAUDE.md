@@ -28,7 +28,7 @@ subagents and hooks: `AGENTS.md`. Services, layout, hook enforcement and full ar
 | `docs/audit-findings.md` — opening, updating or closing any finding | `.claude/rules/findings-ledger.md` |
 | **anything** — skim before writing Python or SQL | `.claude/rules/recurring-bugs.md` |
 
-`docs/session-log.md` is the historical changelog (~7,600 lines — never load it whole; grep a dated entry).
+`docs/session-log.md` is the historical changelog (over 12,000 lines and growing — never load it whole; grep a dated entry).
 
 ## Resolve findings, don't just log them
 

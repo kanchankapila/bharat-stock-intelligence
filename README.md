@@ -387,7 +387,7 @@ python src/server/backfill_ohlcv.py --mode gap-fill --lookback 30
 # Retrain online SGD learner (180-day rolling window)
 python src/server/online_learner.py --window 180
 
-# DL model retrain (uses feature_store)
+# DL model retrain (uses feature_store) — unscheduled since 2026-11-11 (AF-20261111-01), manual only
 python src/server/dl_trainer.py --trigger scheduled
 
 # Drift detection + optional retraining trigger

@@ -44,8 +44,9 @@ External data providers
 `technical` are non-zero in every regime; the runtime edge gate can reduce an engine's actual
 contribution further. `breakout`, `screener`, `cs`, `dl` and `smart_money` have weight 0.0 in every
 regime (`REGIME_WEIGHTS`; `breakout` was zeroed after a realised-return replay on 2026-10-26,
-and `dl` was paused by user decision 2026-09-13). Their keys and reporting columns remain for
-telemetry. Read the current weights and gates from the code before relying on this dated summary.
+and `dl` was paused by user decision 2026-09-13, then had its inference and retraining retired
+2026-11-11, AF-20261111-01). Their keys and reporting columns remain for telemetry; `dl_score` is no
+longer refreshed. Read the current weights and gates from the code before relying on this dated summary.
 
 Dated readback, 2026-11-02 ranker run (HIGH_VOL): `ml` does not reach the blend. Its `ml_score` had a
 standard deviation of 0.02 against the 3.0 floor in `ZERO_DISPERSION_MIN_SD_BY_ENGINE`, so
@@ -67,8 +68,8 @@ Outcome resolution, backtests, model evaluation, and monitoring provide feedback
 operations. Do not assume every source follows this exact path or that a feedback loop is
 autonomous; inspect the relevant writer, consumer, and job before changing one.
 
-This checkout currently has 89 Python `*_fetcher.py` modules and 75 `JOB_REGISTRY` entries
-(re-derived 2026-10-14). These are inventory snapshots, not targets or enduring truths; rerun
+This checkout currently has 89 Python `*_fetcher.py` modules and 74 `JOB_REGISTRY` entries
+(re-derived 2026-11-11). These are inventory snapshots, not targets or enduring truths; rerun
 `npm run doc:numbers` and `npm run doc:numbers:check` before quoting or updating them.
 
 ### Main Ownership Boundaries

@@ -24,7 +24,7 @@ service is not live in another until that service restarts.
 | pm2 name | Entry point | Port (env var) | Purpose |
 |---|---|---|---|
 | `bharat-server` | `server.ts` | 3000 (`PORT`) | tRPC API, React frontend, WebSocket at `/signals` |
-| `ml-api` | `src/server/python_api.py` | 8000 (`PYTHON_API_PORT`) | DL training/inference, outcome resolution |
+| `ml-api` | `src/server/python_api.py` | 8000 (`PYTHON_API_PORT`) | Outcome resolution, pending-signal scoring; its `/api/train-dl` and `/api/infer-dl` routes remain but nothing schedules them since the DL retirement (AF-20261111-01) |
 | `chatbot` | `src/server/chatbot/app.py` | 8001 (`CHATBOT_PORT`) | LangGraph RAG agent, ChromaDB |
 | `alphaquant-api` | `backend-python/main.py` | 8002 (`PYTHON_PORT`) | Backtesting, scoring, TV bridge, optimisation |
 | `engine-worker` | `src/server/worker_service.py` | 8005 | MCP tool dispatch + ingestion health/risk endpoints |
@@ -63,8 +63,8 @@ name (`V2AppShell`, `V6Shell`) is stale; a fix lands in v1 or it does not ship. 
 (`src/tala/`, mounted at `/tala/*` in `src/main.tsx`), also exists. The v7 Pro pages were retired at the user's
 direction (AF-20261027-08, superseding the 2026-10-25 retention); `/v7-*` URLs only redirect to their v1 pages.
 Do not add another surface. **Before editing a component, confirm a
-route renders it** (grep its import): `BuyRecommendationsPage.tsx` is imported by nothing, and honesty fixes landed there on
-2026-10-08 that no user could see.
+route renders it** (grep its import): on 2026-10-08 honesty fixes landed in `BuyRecommendationsPage`, a page nothing imported, so no
+user could see them (the page was deleted in `7f46be58`).
 
 ## Architecture facts that constrain changes
 

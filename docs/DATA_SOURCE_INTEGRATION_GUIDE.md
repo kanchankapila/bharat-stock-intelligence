@@ -722,9 +722,8 @@ These are external integrations but are not authoritative market-data sources.
 | Service | Purpose | Configuration | Implementation |
 |---|---|---|---|
 | Anthropic Messages API | High-impact news/signal narrative | `ANTHROPIC_API_KEY`, optional `ANTHROPIC_MODEL` | `newsSentimentService.ts`, `technicalSignalsService.ts` |
-| Google Gemini | Chatbot/AI fallback | `GEMINI_API_KEY` | `geminiService.ts`, chatbot modules |
-| AWS Bedrock | Configurable AI provider | AWS credentials/region | `bedrockService.ts` |
-| Ollama | Local LLM inference | `OLLAMA_URL`, `OLLAMA_MODEL` | `ollamaManager.ts`, `agents/ollama_client.py`, chatbot |
+| Google Gemini | Chatbot/AI fallback | `GEMINI_API_KEY` | `src/services/geminiService.ts`, chatbot modules |
+| AWS Bedrock | Configurable AI provider | AWS credentials/region | `src/services/bedrockService.ts` |
 | FinBERT | Local sentiment model | `USE_FINBERT` and Python model dependencies | `finbert_scorer.py`, `nlp_engine.py` |
 | AlphaQuant | Local optimization service | `ALPHAQUANT_URL` | `alphaQuantClient.ts`, optimizer agent |
 

@@ -61,6 +61,7 @@ Calls `unified_ranker.py`'s **own** getters rather than reimplementing their SQL
 reimplements the logic under test passes against the unfixed source):
 
 - **8 blended engines** — ml, cs, confluence, technical, dl, breakout, smart_money, screener
+  (`cs` and `dl` report as disabled SKIP stages; DL inference was retired 2026-11-11, AF-20261111-01)
 - **ML** — `win_probability` (ml_ensemble), `feature_store`, `engine_composite_scores`
 - **RL** — `rl_q_table`, `rl_episodes`, and `_passes_rl_gate` per symbol (who got excluded)
 - **Reward engine** — `signal_type_weights`, `signal_source_weights`

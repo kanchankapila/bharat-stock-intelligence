@@ -81,8 +81,8 @@ stopped at N instances when a static check immediately found N+4 more.
   backlog is actually read, not just the findings this run was handed. Pull open rows from
   `docs/audit-findings.md` itself (step 5's own ledger, reconciled first per that step), every
   `ponytail:` debt comment (`ponytail:ponytail-debt` skill), a repo-wide `TODO`/`FIXME` grep, and any
-  named-file backlog called out in a plan doc (e.g. `docs/SQLITE_DECOMMISSION_PLAN.md`'s remaining
-  files). Fold whatever's still open into this run's triage — a pending item nobody re-reads is
+  named-file backlog called out in a plan doc under `docs/superpowers/plans/` (each should already
+  link ledger IDs). Fold whatever's still open into this run's triage — a pending item nobody re-reads is
   indistinguishable from a closed one.
 
 - **The instruments themselves — before reading any verdict.** Audit the graders, scanners and scorers

@@ -11,17 +11,19 @@ drift from `CLAUDE.md`. Every name below is a real file — `claude-config.test.
 skill, command or subagent exists but is not listed here, or if a cited path does not exist.
 
 **Shared work tracker for every agent/model:** `docs/audit-findings.md`.
-Read the "Shared backlog — every agent and model" policy in `CLAUDE.md` before work; plans,
+Read the "Shared backlog — every agent and model" policy in `.claude/rules/findings-ledger.md` before work; plans,
 memory and model-specific instruction files point there rather than owning independent queues.
 
 ## Rules (auto-scoped by `paths:` frontmatter — loaded when you touch a matching file)
 | File | Covers |
 |---|---|
-| `.claude/rules/recurring-bugs.md` | every bug class that has recurred — skim before any Python/SQL/TS |
+| `.claude/rules/recurring-bugs.md` | index of every bug class that has recurred — skim before any Python/SQL/TS |
+| `.claude/rules/bugs-data-layer.md`, `bugs-jobs-runtime.md`, `bugs-monitoring.md`, `bugs-testing-env.md` | the classes themselves, split by area (the index names which file holds which) |
 | `.claude/rules/data-sources.md` | fetchers, provider ids, endpoint registry, "vendor is dead" protocol |
 | `.claude/rules/scoring-authority.md` | the canonical ranking, the four signal tables |
 | `.claude/rules/measurement.md` | how to measure edge, and every current verdict |
 | `.claude/rules/ml-model-bugs.md` | models, promotion gates, measurement harnesses |
+| `.claude/rules/findings-ledger.md` | opening, updating or closing a `docs/audit-findings.md` row; the shared-backlog contract |
 
 Rules apply even when you only *quote* a number without touching a file — read `measurement.md` then.
 

@@ -205,7 +205,7 @@ Every fetcher gets exactly one test marked so it can be found and run on demand,
 in CI (no guaranteed third-party network access, and a transient upstream outage must never
 fail the build):
 
-**Python** — `@pytest.mark.live_datasource` (see `src/server/tests/conftest.py`), using the
+**Python** — `@pytest.mark.live_datasource` (registered in `src/server/conftest.py`), using the
 shared assertions in `src/server/tests/live_datasource_helpers.py`
 (`assert_non_empty_response`, `assert_looks_like_ticker`, `assert_numeric_and_finite`,
 `assert_stored_row_ml_usable`) — two fully worked examples:

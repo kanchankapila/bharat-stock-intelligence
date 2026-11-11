@@ -64,7 +64,6 @@ Complete migration from PM2 + BullMQ to Hermes Agent for scheduling, monitoring,
 | `bharat-model-promotion-skill.md` | ML promotion gates skill |
 | `setup-hermes-integration.sh` | One-command setup |
 | `verify-hermes-integration.sh` | Verification script |
-| `ecosystem.hermes.cjs` | PM2 config for Hermes gateway |
 
 ## Cron Job Mapping
 

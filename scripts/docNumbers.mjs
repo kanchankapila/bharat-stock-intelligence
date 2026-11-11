@@ -132,8 +132,9 @@ if (CHECK) {
   // drifted 791 -> 797 while this check reported "All checked doc numbers match".
   expect(claude, String(py.length), 'CLAUDE.md total .py file count (incl. tests)');
   expect(claude, String(fetchers.length), 'CLAUDE.md fetcher count');
-  expect(context, String(fetchers.length), 'CONTEXT.md fetcher count');
-  expect(context, String(jobRegistry), 'CONTEXT.md JOB_REGISTRY entries');
+  // Anchored to the label: a bare "74" passed on "52-74" while CONTEXT.md still said 75 entries.
+  expect(context, `${fetchers.length} Python \`*_fetcher.py\``, 'CONTEXT.md fetcher count');
+  expect(context, `${jobRegistry} \`JOB_REGISTRY\``, 'CONTEXT.md JOB_REGISTRY entries');
   // The console.* count is quoted in logger.ts (and mirrored in server.ts), not CLAUDE.md.
   const loggerSrc = readFileSync(join(ROOT, 'src', 'server', 'logger.ts'), 'utf8');
   expect(loggerSrc, String(consoleSites), 'logger.ts console.* call-site count');

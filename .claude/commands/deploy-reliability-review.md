@@ -20,7 +20,7 @@ disable-model-invocation: true
   `smoke-test`), both test jobs with a `timescaledb` service, using `PGTEST_*` and never
   `POSTGRES_*` — deliberately, so a stray production URL can't redirect a schema-creating run.
 - Monitoring: `src/server/dataQualityChecks.ts` (~150 checks, daily cron + Telegram),
-  `job_heartbeat`, `jobs/jobHeartbeat.ts` lateness, 4 Grafana dashboards.
+  `job_heartbeat`, `src/server/jobHeartbeat.ts` lateness, 4 Grafana dashboards.
 
 **Do not propose Kubernetes, a service mesh, or multi-region** unless you first establish this
 workload needs it. It is a single-box analytics platform serving one market's trading day.
