@@ -71,11 +71,11 @@ const caller = createCaller({ req: { headers: { authorization: 'Bearer test' } }
 
 describe('BullMQ Monitor Router Procedures', () => {
   
-  it('getBullMQJobsStatus returns all 34 queues with categories and states', async () => {
+  it('getBullMQJobsStatus returns all 32 queues with categories and states', async () => {
     const status = await caller.getBullMQJobsStatus();
 
     expect(Array.isArray(status)).toBe(true);
-    expect(status.length).toBe(34);
+    expect(status.length).toBe(32); // dl-inference + dl-retrain-weekly retired 2026-11-11
 
     // Verify all return properties
     const stockRefresh = status.find(q => q.id === 'stock-refresh');

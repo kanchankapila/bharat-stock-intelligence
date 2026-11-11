@@ -24,7 +24,7 @@ import { addJobWithCatchup } from './jobs/registerJob';
 import { registerAgentJobs } from './jobs/agents.jobs';
 import { registerOperationsJobs, resolveOutcomesResilient } from './jobs/operations.jobs';
 import { registerSyncJobs } from './jobs/sync.jobs';
-import { registerDlJobs, processDLPython, dispatchFullRetrainAfterWeeklyData } from './jobs/dl.jobs';
+import { registerDlJobs, processDLPython } from './jobs/dl.jobs';
 import { registerTrendlyneWeeklyJobs } from './jobs/trendlyneWeekly.jobs';
 import { registerConfluenceJobs } from './jobs/confluence.jobs';
 import { registerDigestJobs } from './jobs/digests.jobs';
@@ -130,7 +130,6 @@ export { QUEUE_DL_MACRO_FETCH, QUEUE_DL_FEATURE_REFRESH, QUEUE_DL_INFERENCE, QUE
 export { QUEUE_TRENDLYNE_MIDWEEK, QUEUE_TRENDLYNE_RATIOS_MONTHLY } from './jobs/trendlyneWeekly.jobs';
 export { QUEUE_CONFLUENCE_COMPUTE, QUEUE_CONFLUENCE_OUTCOMES } from './jobs/confluence.jobs';
 export { QUEUE_JOB_DIGEST, QUEUE_RECOMMENDATIONS_DIGEST } from './jobs/digests.jobs';
-export const QUEUE_DL_RETRAIN_EMERGENCY = 'dl-retrain-emergency';
 export const QUEUE_OHLCV_BACKFILL       = 'ohlcv-backfill';
 export const QUEUE_UNIFIED_RANKER       = 'unified-ranker';
 export { QUEUE_AGENT_DATA_SCIENTIST, QUEUE_AGENT_STRATEGIST, QUEUE_AGENT_AUDITOR, QUEUE_AGENT_OPTIMIZER } from './jobs/agents.jobs';
@@ -205,17 +204,11 @@ let researchPremarketWorker: Worker | null = null;
 let researchPostcloseWorker: Worker | null = null;
 export let dlMacroFetchQueue:       Queue | null = null;
 export let dlFeatureRefreshQueue:   Queue | null = null;
-export let dlInferenceQueue:        Queue | null = null;
 export let dlRegimeUpdateQueue:     Queue | null = null;
-export let dlRetrainWeeklyQueue:    Queue | null = null;
-export let dlRetrainEmergencyQueue: Queue | null = null;
 
 let dlMacroFetchWorker:       Worker | null = null;
 let dlFeatureRefreshWorker:   Worker | null = null;
-let dlInferenceWorker:        Worker | null = null;
 let dlRegimeUpdateWorker:     Worker | null = null;
-let dlRetrainWeeklyWorker:    Worker | null = null;
-let dlRetrainEmergencyWorker: Worker | null = null;
 
 export let ohlcvBackfillQueue: Queue | null = null;
 let ohlcvBackfillWorker:       Worker | null = null;
@@ -1259,8 +1252,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
 
   // PSI-based feature drift check — writes drift_score to dl_model_performance so
   // scoring_engine applies a win_probability haircut when distributions shift.
-  // exit(1) from drift_detector means EMERGENCY_RETRAIN is needed — that is a deliberate
-  // signal, not a crash. Tolerate it here: queue the DL retrain and mark the step OK.
+  // exit(1) from drift_detector means EMERGENCY_RETRAIN — a deliberate signal, not a crash, so the
+  // step stays OK. Nothing is queued: the DL retrain it used to trigger was retired 2026-11-11
+  // (AF-20261111-01); drift_score still feeds scoring_engine's win_probability haircut.
   // Budget: measured 57.2s uncontended on 2026-07-31 against a 60_000 budget — a 2.8-second
   // margin. This is a T.run() step (not a tolerated .catch()), so every timeout-kill failed the
   // WHOLE ml-daily-ops parent job: 32 of 66 runs (48%) had last_error='1 steps failed:
@@ -1271,8 +1265,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
     runPython('drift_detector.py', [], 5 * 60_000).catch(async (e: any) => {
       if (e?.code === 1 || (e?.message || '').includes('exit code 1') ||
           (e?.message || '').includes('Command failed')) {
-        console.log('[QUEUE] drift-detector: EMERGENCY_RETRAIN signalled — queuing DL retrain');
-        try { await dlRetrainEmergencyQueue?.add('dl-retrain-emergency', { trigger: 'drift' }, { jobId: `drift-retrain-${Date.now()}`, removeOnComplete: 2, removeOnFail: 3 }); } catch (_) {}
+        console.log('[QUEUE] drift-detector: EMERGENCY_RETRAIN signalled (DL retrain retired; nothing queued)');
         return { stdout: '[DRIFT] EMERGENCY_RETRAIN', stderr: '' }; // step succeeds
       }
       throw e; // real crash — propagate
@@ -1762,14 +1755,6 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; sk
      '--scores', 'win_probability,cs_score,breakout_probability,signal_score',
      '--horizons', '1,5,21', '--persist'], 15 * 60_000)
     .catch(e => T.fail('factor_edge (technical_signals)', e));
-  // dl_engine.py's three heads, each at its OWN native horizon (target_ret_1d/5d/15d) rather
-  // than a generic grid -- grading a model against a horizon it was not trained for is the
-  // mismatch that produced three wrong verdicts on 2026-08-20 (see measurement.md's correction).
-  await runPython('factor_edge.py',
-    ['--table', 'deep_learning_predictions', '--date-col', 'prediction_date',
-     '--scores', 'prob_up_1d,prob_up_5d,prob_up_15d',
-     '--horizons', '1,5,15', '--persist'], 15 * 60_000)
-    .catch(e => T.fail('factor_edge (dl heads)', e));
   // mc_stock_futures_oi_fetcher.py's own docstring/queues.ts comment says this table "must be
   // graded through factor_edge.py like everything else before anything consumes it" -- that
   // grading call never existed until now, so the table was accumulating rows with no scheduled
@@ -2545,16 +2530,13 @@ export async function initQueues(): Promise<boolean> {
       stalledInterval: 15 * 60 * 1000,
       maxStalledCount: 3,
     });
-    // ml-weekly-data is the last Friday-night job, so either outcome starts the full DL retrain.
     mlWeeklyDataWorker.on('completed', () => {
       // Per-step + overall monitor states are written by StepTracker.finish() in the processor.
       console.log('[QUEUE] ml-weekly-data done');
-      void dispatchFullRetrainAfterWeeklyData(dlRetrainWeeklyQueue);
     });
     mlWeeklyDataWorker.on('failed', (_, err) => {
       console.error('[QUEUE] ml-weekly-data failed:', err.message);
       updateMonitorState('ml-weekly-data', 'failed', err?.message);
-      void dispatchFullRetrainAfterWeeklyData(dlRetrainWeeklyQueue);
     });
     // -- ML weekly retrain + optimize (Sunday 10:30 IST = 05:00 UTC, see the repeat pattern below) --
     mlWeeklyRetrainQueue = new Queue(QUEUE_ML_WEEKLY_RETRAIN, { connection });
@@ -2830,9 +2812,7 @@ export async function initQueues(): Promise<boolean> {
     const dlJobs = await registerDlJobs(connection);
     ({ queue: dlMacroFetchQueue, worker: dlMacroFetchWorker } = dlJobs.macroFetch);
     ({ queue: dlFeatureRefreshQueue, worker: dlFeatureRefreshWorker } = dlJobs.featureRefresh);
-    ({ queue: dlInferenceQueue, worker: dlInferenceWorker } = dlJobs.inference);
     ({ queue: dlRegimeUpdateQueue, worker: dlRegimeUpdateWorker } = dlJobs.regimeUpdate);
-    ({ queue: dlRetrainWeeklyQueue, worker: dlRetrainWeeklyWorker } = dlJobs.retrainWeekly);
 
     // ── Pre-open snapshot (3:40 AM UTC = 9:10 AM IST, weekdays) ──────────────────────────
     // GIFT Nifty level + Asia sentiment + global risk score captured before Indian market opens.
@@ -3074,45 +3054,6 @@ export async function initQueues(): Promise<boolean> {
       },
       { connection, concurrency: 1, lockDuration: 5 * 60_000 });
     console.log('[QUEUE] Closed-day early batch scheduled (pre-open weekdays; runs the daily pipeline early on trading holidays)');
-
-    // ── DL Emergency Retrain (on-demand, triggered by drift detector) ────────
-    dlRetrainEmergencyQueue = new Queue(QUEUE_DL_RETRAIN_EMERGENCY, { connection });
-    dlRetrainEmergencyWorker = new Worker(QUEUE_DL_RETRAIN_EMERGENCY,
-      // Same 24h override as dl-retrain-weekly above, and for the same reason -- this queue
-      // runs the identical dl_trainer.py orchestrator, just drift-triggered instead of cron'd.
-      async () => processDLPython('dl_trainer.py', ['--trigger', 'drift'], 24 * 60 * 60 * 1000),
-      {
-        connection,
-        concurrency: 1,
-        lockDuration: 24 * 60 * 60 * 1000,
-        lockRenewTime: 30 * 60 * 1000,
-        stalledInterval: 15 * 60 * 1000,
-        maxStalledCount: 3,
-      });
-    dlRetrainEmergencyWorker.on('completed', (job) => {
-      console.log('[QUEUE] dl-retrain-emergency done');
-      recordHeartbeat('dl-retrain-emergency', 'success', undefined, bullJobDurationMs(job));
-      // 2026-09-15 bookkeeping fix: the flag column stayed 0 on every dl_model_performance row
-      // since drift_detector's 2026-08-15 recalibration because nothing flipped it when the
-      // retrain this queue runs actually completed -- any monitor reading retrain_triggered
-      // concludes "no drift signal was ever answered by a retrain". Stamp each model's most
-      // recent drift-scored row (the one whose EMERGENCY_RETRAIN exit(1) enqueued this job).
-      // Swallow-and-warn: a bookkeeping stamp must never turn a finished retrain into a
-      // reported failure (same convention as write_training_metrics' non-fatal persistence).
-      void dbRun(
-        `UPDATE dl_model_performance SET retrain_triggered = 1
-         WHERE id IN (
-           SELECT MAX(id) FROM dl_model_performance
-           WHERE drift_score IS NOT NULL AND retrain_triggered = 0
-           GROUP BY model_name
-         )`,
-      ).catch((e: Error) =>
-        console.warn('[QUEUE] retrain_triggered stamp failed (non-fatal):', e.message));
-    });
-    dlRetrainEmergencyWorker.on('failed', (job, err) => {
-      console.error('[QUEUE] dl-retrain-emergency failed:', err.message);
-      recordHeartbeat('dl-retrain-emergency', 'failed', err.message, bullJobDurationMs(job));
-    });
 
     // ── OHLCV Backfill ───────────────────────────────────────────────────────
     // Worker handles both one-time full backfill and recurring weekly gap-fill
@@ -3717,14 +3658,8 @@ export async function shutdownQueues(): Promise<void> {
     dlMacroFetchQueue?.close(),
     dlFeatureRefreshWorker?.close(),
     dlFeatureRefreshQueue?.close(),
-    dlInferenceWorker?.close(),
-    dlInferenceQueue?.close(),
     dlRegimeUpdateWorker?.close(),
     dlRegimeUpdateQueue?.close(),
-    dlRetrainWeeklyWorker?.close(),
-    dlRetrainWeeklyQueue?.close(),
-    dlRetrainEmergencyWorker?.close(),
-    dlRetrainEmergencyQueue?.close(),
     ohlcvBackfillWorker?.close(),
     ohlcvBackfillQueue?.close(),
     confluenceComputeWorker?.close(),

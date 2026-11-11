@@ -117,7 +117,7 @@ on a feature, probability, refresh interval or provider description.
 ### ML Continuous Learning Framework
 - **Stacking Ensemble** (`ml_ensemble.py`): GradientBoosting + RandomForest + ExtraTrees + LogisticRegression with OOF stacking and calibrated probabilities
 - **Online SGD** (`online_learner.py`): incremental `partial_fit` with 40% SGD / 60% ensemble blend, rolling 180-day window
-- **Deep Learning** (`dl_engine.py`, `dl_trainer.py`): LSTM-based sequence model, predicts prob_up_1d/5d/15d
+- **Deep Learning** (`dl_engine.py`, `dl_trainer.py`): LSTM-based sequence model, predicts prob_up_1d/5d/15d. Unscheduled since 2026-11-11 (no measured edge; manual runs only)
 - **Outcome Resolver** (`outcome_resolver.py`): labels each signal WIN/LOSS/NEUTRAL/STOP_LOSS against OHLCV at 5-day and 15-day horizons
 - **Performance Tracker** (`performance_tracker.py`): computes win rates, Sharpe, alpha vs Nifty; segments by signal_type / regime / sector / score_bucket
 - **Reward Engine** (`reward_engine.py`): EMA-smoothed reward propagation updates `signal_type_weights`

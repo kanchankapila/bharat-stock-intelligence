@@ -210,9 +210,9 @@ describe('holiday-skip guard is wired into every targeted evening/night job', ()
     assertGuarded(confluenceJobsSrc, 'processConfluenceOutcomes');
   });
 
-  it('dl.jobs.ts: dl-feature-refresh, dl-inference', () => {
+  // dl-inference retired 2026-11-11 (AF-20261111-01).
+  it('dl.jobs.ts: dl-feature-refresh', () => {
     assertGuarded(dlJobsSrc, 'processDlFeatureRefresh');
-    assertGuarded(dlJobsSrc, 'processDlInference');
   });
 
   it('sync.jobs.ts: screener-performance (2026-08-07 — the one job this session\'s first pass missed)', () => {

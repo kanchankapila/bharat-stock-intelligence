@@ -24,7 +24,8 @@ describe('monitorFn wrappers forward durationMs', () => {
   }
 
   it('finds the inline wrappers (non-vacuity)', () => {
-    expect(wrappers.length).toBeGreaterThanOrEqual(3);
+    // dl-engine-infer and dl-trainer wrappers retired 2026-11-11 (AF-20261111-01); regime-detector remains.
+    expect(wrappers.length).toBeGreaterThanOrEqual(1);
   });
 
   it('every inline wrapper accepts and passes the 4th (duration) argument', () => {

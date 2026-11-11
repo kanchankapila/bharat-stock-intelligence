@@ -20,12 +20,12 @@ describe('JOB_REGISTRY', () => {
     }
   });
 
-  it('marks event-driven jobs (ai-signals, dl-retrain-emergency) with no schedule', () => {
+  it('marks the event-driven job (ai-signals) with no schedule', () => {
     const aiSignals = JOB_REGISTRY.find(j => j.jobName === 'ai-signals');
-    const dlEmergency = JOB_REGISTRY.find(j => j.jobName === 'dl-retrain-emergency');
+    expect(aiSignals).toBeDefined();
     expect(aiSignals?.cronPattern).toBeUndefined();
     expect(aiSignals?.everyMs).toBeUndefined();
-    expect(dlEmergency?.cronPattern).toBeUndefined();
-    expect(dlEmergency?.everyMs).toBeUndefined();
+    // dl-retrain-emergency retired 2026-11-11 (AF-20261111-01).
+    expect(JOB_REGISTRY.find(j => j.jobName === 'dl-retrain-emergency')).toBeUndefined();
   });
 });

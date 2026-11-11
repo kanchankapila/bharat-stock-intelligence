@@ -717,7 +717,8 @@ describe('individual evaluate() functions', () => {
   // checks no longer exist in DATA_QUALITY_CHECKS by design, see dataQualityChecks.ts.)
   describe('model-registry-active-* covers every model_registry consumer (ml-promotion-gate-review, 2026-08-19)', () => {
     const now = new Date('2026-08-19T00:00:00Z');
-    for (const modelName of ['exit_policy', 'confluence_ml', 'BiLSTM']) {
+    // BiLSTM dropped 2026-11-11: the DL retrain is retired (AF-20261111-01).
+    for (const modelName of ['exit_policy', 'confluence_ml']) {
       it(`model-registry-active-${modelName} exists and passes on a fresh model + fresh run`, () => {
         const r = byId(`model-registry-active-${modelName}`).evaluate(
           { active_trained_at: '2026-08-15T00:00:00Z', active_auc: 0.6,

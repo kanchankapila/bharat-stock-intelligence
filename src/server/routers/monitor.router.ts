@@ -197,12 +197,6 @@ async function probeLastRunAt(scriptId: ScriptId): Promise<string | null> {
     case 'reward-engine':
       row = await dbGet("SELECT MAX(last_updated) as t FROM signal_type_weights");
       break;
-    case 'dl-engine-infer':
-      row = await dbGet("SELECT MAX(created_at) as t FROM deep_learning_predictions");
-      break;
-    case 'dl-trainer':
-      row = await dbGet("SELECT MAX(trained_at) as t FROM model_registry WHERE model_name='BiLSTM'");
-      break;
     case 'signal-type-stats':
       row = await dbGet("SELECT MAX(last_computed) as t FROM signal_type_stats");
       break;
@@ -321,18 +315,6 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
       }
       case 'reward-engine':
         return { types: ((await dbGet("SELECT COUNT(*) as n FROM signal_type_weights")) as any)?.n ?? 0 };
-      case 'dl-engine-infer':
-        return {
-          symbols: ((await dbGet("SELECT COUNT(DISTINCT symbol) as n FROM deep_learning_predictions")) as any)?.n ?? 0,
-          // created_at is TIMESTAMPTZ; date('now') translates to a ::text literal (sqlTranslate.ts),
-          // so the column side must also be cast to ::text to compare equal (::text is stripped
-          // on the SQLite fallback path, leaving the original date(created_at)=date('now') form).
-          today: ((await dbGet("SELECT COUNT(*) as n FROM deep_learning_predictions WHERE date(created_at)::text=date('now')")) as any)?.n ?? 0,
-        };
-      case 'dl-trainer': {
-        const m = await dbGet("SELECT cv_roc_auc, is_active FROM model_registry WHERE model_name='BiLSTM' ORDER BY trained_at DESC LIMIT 1") as any;
-        return m ? { auc: m.cv_roc_auc?.toFixed(4) ?? 'N/A', active: m.is_active ? 'yes' : 'no' } : {};
-      }
       case 'signal-type-stats':
         return {
           types: ((await dbGet("SELECT COUNT(DISTINCT signal_type) as n FROM signal_type_stats")) as any)?.n ?? 0,
@@ -647,7 +629,7 @@ export const monitorRouter = router({
     }),
 
   triggerAllDaily: adminProcedure.mutation(async () => {
-    const dailyScripts = ['fii-dii-fetcher', 'regime-detector', 'feature-engineering', 'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker', 'reward-engine', 'ml-ensemble-score', 'dl-engine-infer', 'signal-type-stats'];
+    const dailyScripts = ['fii-dii-fetcher', 'regime-detector', 'feature-engineering', 'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker', 'reward-engine', 'ml-ensemble-score', 'signal-type-stats'];
     const upsert = async (key: string, val: string, errorMsg?: string) => {
       try {
         await dbRun("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [key, val]);
@@ -707,9 +689,7 @@ export const monitorRouter = router({
       { id: 'research-postclose', q: queueModule.researchPostcloseQueue, label: 'Postclose Aggregator', desc: 'Compiles close-of-day analytics', category: 'system-research' },
       { id: 'dl-macro-fetch', q: queueModule.dlMacroFetchQueue, label: 'DL Macro Fetcher', desc: 'Synchronizes macro indicators (US yields, Crude, Gold)', category: 'data-sync' },
       { id: 'dl-feature-refresh', q: queueModule.dlFeatureRefreshQueue, label: 'DL Feature Refresh', desc: 'Calculates deep learning feature store rows', category: 'machine-learning' },
-      { id: 'dl-inference', q: queueModule.dlInferenceQueue, label: 'DL Model Inference', desc: 'Generates deep learning predictions (LSTM model)', category: 'machine-learning' },
       { id: 'dl-regime-update', q: queueModule.dlRegimeUpdateQueue, label: 'HMM Regime Update', desc: 'Updates market regime HMM classifier states', category: 'machine-learning' },
-      { id: 'dl-retrain-weekly', q: queueModule.dlRetrainWeeklyQueue, label: 'DL Weekly Retrainer', desc: 'Retrains deep learning LSTM models', category: 'machine-learning' },
       { id: 'ohlcv-backfill', q: queueModule.ohlcvBackfillQueue, label: 'OHLCV Gap Filler', desc: 'Fills historical data gaps from Yahoo Finance', category: 'data-sync' },
       { id: 'confluence-compute', q: queueModule.confluenceComputeQueue, label: 'Confluence Engine', desc: 'Computes multi-indicator confluence scores', category: 'signals-analysis' },
       { id: 'confluence-outcomes', q: queueModule.confluenceOutcomesQueue, label: 'Confluence Outcomes', desc: 'Tracks confluence signal outcomes', category: 'signals-analysis' },
@@ -901,9 +881,7 @@ export const monitorRouter = router({
         { id: 'research-postclose', q: queueModule.researchPostcloseQueue },
         { id: 'dl-macro-fetch', q: queueModule.dlMacroFetchQueue },
         { id: 'dl-feature-refresh', q: queueModule.dlFeatureRefreshQueue },
-        { id: 'dl-inference', q: queueModule.dlInferenceQueue },
         { id: 'dl-regime-update', q: queueModule.dlRegimeUpdateQueue },
-        { id: 'dl-retrain-weekly', q: queueModule.dlRetrainWeeklyQueue },
         { id: 'ohlcv-backfill', q: queueModule.ohlcvBackfillQueue },
         { id: 'confluence-compute', q: queueModule.confluenceComputeQueue },
         { id: 'confluence-outcomes', q: queueModule.confluenceOutcomesQueue },

@@ -118,7 +118,6 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'intraday-ranker', label: 'Intraday Ranker (regime + ranking)', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false,
     lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
   { jobName: 'closed-day-early-batch', label: 'Closed-Day Early Batch (holiday pipeline)', cronPattern: '40 1 * * 1-5', graceMinutes: 60, critical: false },
-  { jobName: 'dl-retrain-emergency', label: 'DL Emergency Retrain (drift-triggered)', graceMinutes: 0, critical: false },
   // everyMs is its real cadence (30 min, 24/7) and stays the mirror of the registration, but the
   // job only does WORK inside isConfluenceComputeWindow() -- IST hours 6-7 and 17-23 -- and now
   // returns { skipped: true } outside it rather than faking a success. Without these deadlines the

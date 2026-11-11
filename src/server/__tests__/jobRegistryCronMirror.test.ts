@@ -74,7 +74,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
 
   it('sanity: most JOB_REGISTRY entries carry a schedule (a few are legitimately event-driven)', () => {
     expect(scheduled.length).toBeGreaterThan(40);
-    // ai-signals and dl-retrain-emergency are the only two by design (see jobRegistry.ts).
+    // ai-signals is event-driven by design (dl-retrain-emergency retired 2026-11-11).
     expect(eventDriven.length).toBeLessThanOrEqual(4);
   });
 

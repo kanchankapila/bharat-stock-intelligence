@@ -237,7 +237,8 @@ def main():
                            'producer retired; no longer blended by unified_ranker'))
     engine_stage('engine:confluence',                     rk._get_confluence_scores)
     engine_stage('engine:technical (signal_score)',       rk._get_technical_scores)
-    engine_stage('engine:dl (deep_learning_predictions)', rk._get_dl_scores)
+    _record(disabled_stage('engine:dl (deep_learning_predictions)',
+                           'inference and retraining retired 2026-11-11 (AF-20261111-01)'))
     engine_stage('engine:breakout',                       rk._get_breakout_scores)
     engine_stage('engine:smart_money',                    rk._get_smart_money_scores)
     engine_stage('engine:screener membership',            rk._get_screener_membership)

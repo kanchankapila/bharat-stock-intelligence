@@ -1805,14 +1805,6 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // jobs unscheduled (cs_ranker CV AUC 0.176 — worse than random; online_sgd 0.5017 — coin
     // flip; see unified_ranker.py's REGIME_WEIGHTS note). A freshness check on a model that
     // is deliberately never trained again can only ever fail.
-    // Added separately (2026-08-19, same sweep continued): dl_trainer.py's _record_model_registry
-    // writes a model_registry row on every BiLSTM run too (promoted or not, dl_trainer.py's own
-    // comment: "previously ... never deactivated the previous row either way -- every version
-    // from v4 through v18 was left with is_active=1 forever"). It already has monitorScripts.ts's
-    // 'dl-trainer' job-heartbeat, but that only proves the SCRIPT exited 0 -- not that the
-    // model_registry WRITE inside it actually landed, the same distinction the other 5 entries
-    // exist to make.
-    { modelName: 'BiLSTM', label: 'BiLSTM' },
   ] as const).map(({ modelName, label }): DataQualityCheck => ({
     id: `model-registry-active-${modelName}`,
     label: `Active ${label} model exists and was retrained recently`,

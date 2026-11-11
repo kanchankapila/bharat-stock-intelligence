@@ -139,6 +139,9 @@ const EXCLUDED_TABLES: Record<string, string> = {
   // contribution, note) -- no timestamp for the generic freshness factory to read. Its parent
   // tables (market_claim, market_evidence) carry the monitored timestamps.
   market_claim_evidence: 'semantic claim->evidence link table; no timestamp column',
+  // AF-20261111-01: DL inference retired 2026-11-11, so no cadence remains to assert.
+  deep_learning_predictions: 'dl_engine.py output; inference retired 2026-11-11, frozen history',
+  dl_model_performance: 'drift_detector.py drift_score log, a step of ml-daily-ops whose StepTracker monitors it; derived',
 };
 
 describe('table-coverage gate: exclusion map', () => {

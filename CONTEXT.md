@@ -122,9 +122,10 @@ edge is unproven. An "honest refusal engine" (watch-list, no calls) appears only
   midnight), respect exchange calendars and source availability, and prevent future information from
   leaking into historical features or evaluations. A missing or stale value is not automatically zero.
   Cron expressions in `queues.ts` / `jobRegistry.ts` are **UTC** (IST = UTC+5:30).
-- **Do not re-merge deliberately separated jobs:** ML and DL retrains run on different days
-  (`ml-weekly-retrain` and `dl-retrain-weekly`; see the comment block above their registration in
-  `queues.ts`) because together they exhausted host memory.
+- **Do not re-merge deliberately separated jobs, or revive retired ones without evidence:** the DL
+  retrain (`dl-retrain-weekly`) ran on a different day from `ml-weekly-retrain` because together they
+  exhausted host memory. DL inference and retraining were retired on 2026-11-11 (AF-20261111-01):
+  `dl_score` has no forward edge in any role, so do not reschedule them without a new measurement.
 - **Do not promote complexity as evidence:** a model score, rank correlation, hit rate, or passing
   unit test alone does not establish a tradable edge. Check the dated measurement guidance and use
   appropriate out-of-sample, liquidity, turnover, and transaction-cost evidence before changing
