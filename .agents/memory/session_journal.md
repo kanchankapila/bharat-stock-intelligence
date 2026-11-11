@@ -607,3 +607,9 @@ PR #131 merged as b4bf2a50. The reviewed source was integrated with the dirty li
 
 - Restored `unique_urls.txt` byte-for-byte from `c2ceae0e^`; SHA-256 matched. In a read-only comparison, 85 distinct concrete host/path pairs were absent as exact pairs from `urls_v2.db`'s `url_catalog`, `market_endpoint_registry` URL fields, and `url_fetches.concrete_url`. They are candidates, not proven distinct endpoint families or live data sources; no HTTP probes or production writes were made. All 267 coarse structural keys were represented in the GET template catalog, whose host/segment-count/query-key grouping can collapse distinct paths.
 - Updated source-discovery rules and onboarding guidance to include the recovered file when present. Documentation tests: 18 passed, 1 skipped; backlog and findings checks passed with existing findings warnings.
+
+## 2026-11-10 - Resource audit + edge re-check (Claude)
+
+- Resource audit: pm2 Python services are lean (4-31 MB); the real costs are Docker (46 GB images, 79 GB volumes, 6.5 GB build cache pruned) and five ranker engines at weight 0.0 in every regime, `dl` the expensive one (5d IC +0.003, t 0.74, 90 dates; 43% saturated). Nothing unscheduled yet: DL removal needs a ledger row and the z_dl/sd_dl/e2e checks updated together.
+- Edge re-check written to `.claude/rules/measurement.md` (2026-11-10 subsection): momentum/value reproduce at Rs1cr and halve at Rs10cr; momentum+PAT-growth blend and trend-filtered momentum both fail pre-stated bars; s1 forward flat in its last 4 days; capitulation_rule negative forward.
+- Trap: `factor_backtest.py --min-adt` is in rupees; `--min-adt 1` silently removes the liquidity floor.
