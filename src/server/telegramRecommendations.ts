@@ -404,7 +404,7 @@ export function renderDigest(d: DigestData): string {
       // in the evening (gated off during market hours since 2026-08-05) and is never
       // refreshed once trading starts — so "Entry" here can be a stale pre-market price by
       // the time this is read mid-session. Say so rather than let it look like a live quote.
-      out.push(`_Dedicated intraday engine is paused (${d.intradayGateReason}). Below are the unified ranker's intraday-horizon picks — their entry levels are a pre-market (~07:30 IST) snapshot that does not update once trading begins; check a live quote before acting._`);
+      out.push(`_Dedicated intraday engine is paused (${d.intradayGateReason}). Below are the unified ranker's intraday-horizon picks — their entry levels are anchored on the previous session's close and do not update once trading begins; check a live quote before acting._`);
     }
     d.intraday.forEach((p, i) => out.push(renderPick(p, i + 1)));
   } else if (d.intradayGated) {

@@ -93,7 +93,7 @@ const log = {
 // with zero code changes required at any of them. New code should still prefer calling `log`
 // directly when the event is worth structured fields beyond a formatted string (see the
 // server.ts internalAuth gate-rejection calls for the pattern) -- this shim's job is to stop
-// the other 722 sites from being invisible to log-level filtering, not to be the final form of
+// the other 724 sites from being invisible to log-level filtering, not to be the final form of
 // logging in this codebase.
 type ConsoleTarget = Pick<typeof logger, 'info' | 'warn' | 'error' | 'debug'>;
 

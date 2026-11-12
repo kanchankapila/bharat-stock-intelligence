@@ -130,14 +130,15 @@ export async function buildMorningBrief(
   stateReason: string | null = null,
 ): Promise<{ text: string; picks: number; state: BriefState }> {
   const digest = await buildRecommendationsDigest();
-  // Intraday recommendations expire at that session's close. This pre-open message reads the
-  // latest completed EOD ranking, so any intraday row available here belongs to the PRIOR
-  // session and is unactionable. Today's intraday calls are generated only after market open.
+  // The dedicated intraday engine's rows are from the PRIOR session and expired at its close; its
+  // calls for today come only after the open. The unified ranker's INTRADAY rows from last night's
+  // 22:30 run are FOR today (valid_until = today's 15:30; the query requires valid_until > now),
+  // so they stay: this is the one send that lands before that session opens (2026-11-12 audit).
   const preOpenDigest = {
     ...digest,
-    intraday: [],
+    intraday: digest.intraday.filter(p => p.source === 'unified'),
     intradayGated: true,
-    intradayGateReason: 'today\'s intraday calls are generated after the market opens; prior-session calls have expired',
+    intradayGateReason: 'the dedicated intraday engine\'s calls are generated after the market opens; its prior-session calls have expired',
   };
   const picks = preOpenDigest.longTerm.length;
 

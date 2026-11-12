@@ -273,10 +273,11 @@ describe('renderDigest', () => {
     expect(text).toContain('Dedicated intraday engine is paused');
     expect(text).toContain("unified ranker's intraday-horizon picks");
     expect(text).toContain('PRICOLLTD');
-    // 2026-08-10: these entries inherit their price from confluence_signals, which only
-    // computes pre-open/evening and is frozen for the whole session -- disclose that so a
-    // reader checking mid-session doesn't mistake a ~07:30 IST snapshot for a live quote.
-    expect(text).toContain('pre-market (~07:30 IST) snapshot');
+    // 2026-08-10: these entries inherit their price from confluence_signals, which is frozen for
+    // the whole session -- disclose that so a reader checking mid-session doesn't mistake it for a
+    // live quote. Since 2026-11-12 (AF-20261112-01) the levels anchor on the previous session's
+    // close, so that is what the disclosure must say.
+    expect(text).toContain("anchored on the previous session's close");
     expect(text).toContain('check a live quote before acting');
   });
 

@@ -51,6 +51,7 @@ import { recordHeartbeat, startHeartbeatMonitor, bullJobDurationMs } from './job
 import { startJobWatchdog, buildDailyDigest } from './jobWatchdog';
 import { telegramService, sanitizeMarkdown, sanitizeMarkdownWithCode } from './telegramService';
 import { sendAccuracyDigest } from './signalAccuracyDigest';
+import { waitForRankerInputsLogged } from './rankerReadiness';
 
 // Keep the literal failed-heartbeat write for this aggregate in one place. The worker has
 // several mutually exclusive accounting failures, but duplicating the write at every branch
@@ -3318,7 +3319,11 @@ export async function initQueues(): Promise<boolean> {
     // trendlyne-catchup owns its own Queue/Worker; nothing outside this module reads them, so
     // unlike its siblings there is no module-level binding to assign here.
 
-    // ── Unified Ranker — daily at 15:45 IST (10:15 UTC) ─────────────────
+    // ── Unified Ranker — daily at 22:30 IST (17:00 UTC) ─────────────────
+    // Before ranking, the processor waits (bounded, 40 min) for ml-daily-ops and quant-eod-sync to
+    // finish today's run: the cron offset alone let 2026-10-28 rank before ml-daily-ops finished
+    // (AF-20261112-07). The lock renews while waiting; 40 min + a ~15 min run stays inside the
+    // registry's 95-min grace.
     unifiedRankerQueue = new Queue(QUEUE_UNIFIED_RANKER, { connection });
     const unifiedRankerWorkerInstance = new Worker(
       QUEUE_UNIFIED_RANKER,
@@ -3331,6 +3336,7 @@ export async function initQueues(): Promise<boolean> {
           return { skipped: true };
         }
         console.log('[QUEUE] unified-ranker starting...');
+        await waitForRankerInputsLogged();
         // 45 min (AF-20260917-20): the previous 30-min budget — itself a raise from 5 min,
         // which had timeout-killed 19 of its last 24 runs — timeout-killed AGAIN on
         // 2026-09-16 AND 2026-09-17 at exactly 17:30:08 UTC, leaving unified_recommendations
