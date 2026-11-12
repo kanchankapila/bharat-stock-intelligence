@@ -520,6 +520,7 @@ export async function runPython(
     if (heavy) releaseHeavySlot();
   };
 
+  const runStartedAt = Date.now();
   let stdout = '';
   let stderr = '';
   let peakMemMb: number | undefined;
@@ -674,6 +675,7 @@ export async function runPython(
       log.info(`[PY] ${script} execution completed`, {
         script,
         args,
+        durationMs: Date.now() - runStartedAt,
         peakMemMb,
         outputSnippet: stdout.slice(0, 300),
       });

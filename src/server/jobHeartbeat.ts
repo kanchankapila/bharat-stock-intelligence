@@ -180,6 +180,7 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
       'nse-financial-results-freshness', 'signal-outcomes',
       // DL inference and retraining retired 2026-11-11 (AF-20261111-01).
       'dl-trainer', 'dl-retrain-emergency', 'dl-retrain-weekly', 'dl-engine-infer',
+      'model-registry-active-BiLSTM',
     ]);
     // These are StepTracker children. Their parent owns the cron, holiday gate and failure
     // verdict; applying this function's anonymous 26h fallback to a weekly/holiday-skipped

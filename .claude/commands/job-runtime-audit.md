@@ -23,7 +23,7 @@ grep -n "runPython\|cronPattern\|addJob\|scheduleJob" src/server/queues.ts src/s
 ```
 
 Cross-reference against `jobRegistry.ts`/`monitorScripts.ts` per the existing
-"mirror-consistency" concern in `recurring-bugs.md` — a `cronPattern` that drifted between the two
+"mirror-consistency" concern in `.claude/rules/bugs-data-layer.md` — a `cronPattern` that drifted between the two
 has caused phantom stale alerts before; confirm this audit isn't chasing a monitor bug instead of
 a job bug.
 

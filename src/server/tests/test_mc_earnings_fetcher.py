@@ -229,3 +229,15 @@ class TestEndpointFamilyHealthIsHonest:
         import pytest
         with pytest.raises(RuntimeError, match="rapid-results.*actual-estimate"):
             mef.main()
+
+
+def test_vendor_timeout_still_runs_the_days_to_results_backfill(monkeypatch):
+    """AF-20261004-07: fetch_earnings_dates returned early when MoneyControl timed out, so the
+    backfill that derives days_to_next_results from the dates ALREADY STORED never ran and whole
+    days of technical_signals were left NULL for days_to_next_results / earnings_in_5d."""
+    calls = []
+    monkeypatch.setattr(mef, "_get", lambda url, *a, **k: None)
+    monkeypatch.setattr(mef, "_backfill_days_to_results", lambda con, *a, **k: calls.append(con))
+    con = object()
+    mef.fetch_earnings_dates(con)
+    assert calls == [con]

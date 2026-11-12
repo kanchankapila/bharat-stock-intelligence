@@ -376,7 +376,7 @@ session cookie is required"`, cookie without Origin → `403 "Cross-origin reque
 accepted"`. §3.1 Trendlyne `kayal.trendlyne.com/broker-webview/...` base answers 200 with the
 `head`/`body.tableHeaders`/`tableData` matrix it describes. §3.2 ET `screenerByScreenerIdForWeb`
 POST with the documented payload returned 200 / 167 records — **ET is reachable again**, contrary
-to the 2026-09-12 "host-wide 503" note in `recurring-bugs.md`; re-probe before treating ET as down.
+to the 2026-09-12 "host-wide 503" note in `bugs-data-layer.md`; re-probe before treating ET as down.
 
 **Overridden by this repo — do NOT copy these from the guide:**
 
@@ -384,7 +384,7 @@ to the 2026-09-12 "host-wide 503" note in `recurring-bugs.md`; re-probe before t
 |---|---|---|
 | Header "Status: Verified Live, HTTP 200 … with active response payloads" | 200 ≠ data; see caveat 1 (Unauthorized envelope stored as working) | classify the BODY (ok / empty / error-envelope) on every call |
 | §3.6 NiftyTrader host `webapi.niftytrader.in/webapi/*` | **retired** — probed live: `200 {"result":0,"resultMessage":"Unauthorized…"}` (110 B); new host `www.niftytrader.in/api/niftytrader/*` returned `result:1`, 138 KB | rewrite the host per the NiftyTrader section above |
-| §2.1 "every request must carry" the full browser header set | headers are per-route and a token/header can LOWER access (`recurring-bugs.md`) | start from the guide's set, then isolate the minimum route by route |
+| §2.1 "every request must carry" the full browser header set | headers are per-route and a token/header can LOWER access (`bugs-data-layer.md`) | start from the guide's set, then isolate the minimum route by route |
 | §2.2 / §7 pool 25–50 per host, 20–25 workers, retry only 5xx | Trendlyne rations a cumulative request allowance; 429 is never retried; throttled and empty collapse to the same `[]` | bounded slice + resume-from-DB for Trendlyne; honor `retry_after`; count throttles separately and abort on sustained ones |
 | §3.2 `parse_et_screener`: `float(r.get(...) or 0.0)` | writes a sentinel `0.0` for missing — the sentinel-instead-of-NULL class | `math.isfinite` check, write NULL |
 | §5 client `_unpack_trendlyne_matrix` keys on `cell["parameter"]` only | the 2026-07-23 corruption was exactly a wrong-key header match; §3.1's own unpacker checks `unique_name` first | reuse the repo's existing Trendlyne parser / `tl_fetch.py`, and assert `assert_looks_like_ticker` on the symbol column |
@@ -419,7 +419,7 @@ number with a comment explaining why it is provisional.
 
 ## Isolating headers: `sec-fetch-site` has a WRONG value as well as a right one (2026-09-18)
 
-`recurring-bugs.md` records that adding a token can LOWER access. The same is true of a header
+`bugs-data-layer.md` records that adding a token can LOWER access. The same is true of a header
 with the wrong VALUE, and it is easier to walk into. Probing NiftyTrader with
 `sec-fetch-site: same-site` returned **403 on all four routes** — which reads exactly like a
 vendor-wide regression, and was very nearly reported as one. With **no headers at all**,

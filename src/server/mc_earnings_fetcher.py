@@ -192,7 +192,10 @@ def upcoming_earnings_url() -> str:
 def fetch_earnings_dates(con) -> None:
     data = _get(upcoming_earnings_url())
     if not data:
-        print("[EarningsFetcher] Upcoming: no data returned")
+        print("[EarningsFetcher] Upcoming: no data returned", file=sys.stderr)
+        # The backfill derives days_to_next_results from dates already stored, so a vendor
+        # timeout must not leave the day's technical_signals rows without it (AF-20261004-07).
+        _backfill_days_to_results(con)
         return
 
     items = data.get("list") or []

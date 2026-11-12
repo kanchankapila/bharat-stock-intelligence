@@ -182,6 +182,19 @@ describe('getStaleJobs', () => {
     expect(stale.map(s => s.job).filter(j => j.startsWith('dl-'))).toEqual([]);
   });
 
+  // 2026-11-12 (AF-20261112-10): retiring DL also dropped the BiLSTM model-registry check, so its
+  // last heartbeat (11-11 18:04) went stale and was announced hourly ("~28h") from 20:50 IST.
+  it('does not re-announce the retired BiLSTM model-registry check as stale', async () => {
+    vi.setSystemTime(new Date('2026-11-12T17:30:00Z'));
+    mockRows.push({
+      job_name: 'model-registry-active-BiLSTM', last_status: 'success',
+      last_success_at: new Date('2026-11-11T12:34:00Z').getTime(),
+    });
+    const stale = await getStaleJobs();
+    vi.useRealTimers();
+    expect(stale.map(s => s.job)).not.toContain('model-registry-active-BiLSTM');
+  });
+
   it('does NOT flag an event-driven registry job that is merely idle (last run succeeded)', async () => {
     vi.setSystemTime(new Date('2026-10-25T07:00:00Z'));
     mockRows.push({

@@ -925,7 +925,7 @@ engines carry nonzero weight in ANY regime (screener/cs/dl/smart_money are all p
 
 i.e. **89.7% of the book capped at 0.900 instead of 1.000, and mean size sat 9.6% below where it
 belonged** — a platform-wide position-size cut nobody asked for, arriving as a side effect of a
-coverage-COUNTING fix. This is `recurring-bugs.md`'s "restricting a universe upstream re-tunes
+coverage-COUNTING fix. This is `bugs-data-layer.md`'s "restricting a universe upstream re-tunes
 every absolute threshold downstream", in sizing form.
 
 `FULL_ENGINE_COVERAGE` is now **derived** from `REGIME_WEIGHTS`

@@ -108,7 +108,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
   });
 
   it('parser sanity: finds both known withJobTimeout budgets', () => {
-    expect(withJobTimeoutBudgets.get('ml-daily-ops')).toBe(3.5 * 60 * 60 * 1000);
+    expect(withJobTimeoutBudgets.get('ml-daily-ops')).toBe(3.9 * 60 * 60 * 1000);
     expect(withJobTimeoutBudgets.get('quant-eod-sync')).toBe(5.5 * 60 * 60_000);
   });
 

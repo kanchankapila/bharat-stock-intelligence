@@ -2491,9 +2491,12 @@ export async function initQueues(): Promise<boolean> {
 
     mlDailyOpsWorker = new Worker(
       QUEUE_ML_DAILY_OPS,
-      // 3.5h budget vs the 4h lock: a normal run is ~2-3h, so this only fires on a genuine
-      // hang, and it fires before BullMQ's stall path can requeue the wedged job.
-      (job) => withJobTimeout('ml-daily-ops', 3.5 * 60 * 60 * 1000, () => processMlDailyOps(job)),
+      // 3.9h budget vs the 4h lock and the 270 min graceMinutes. Wall time was 174 min on 11-11,
+      // then 213 min on 11-12 (first run with the final-bar scan, ~19 min, plus ~20 min of drift
+      // across the chain): the old 3.5h guard failed the job at 210 min and the chain finished
+      // 3 min later (also on 11-06). A guard fired on a healthy run is a false failure, and its
+      // heartbeat released the 22:30 ranker's gate early. AF-20261112-10.
+      (job) => withJobTimeout('ml-daily-ops', 3.9 * 60 * 60 * 1000, () => processMlDailyOps(job)),
       {
         connection,
         concurrency: 1,

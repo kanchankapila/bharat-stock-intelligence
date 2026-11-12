@@ -103,7 +103,7 @@ One table: file:line, which of the six signatures, whether it is a real finding 
 read-only/logging false positive, and the named replacement helper. Then state explicitly which
 signatures you checked **repo-wide** versus which you only spot-checked — this audit's value is
 completeness, and a partial pass reported as complete is the exact failure mode
-`recurring-bugs.md` warns about ("a code-review pass that finds N instances of a class should not
+`docs/recurring-bugs-history.md` warns about ("a code-review pass that finds N instances of a class should not
 be trusted as complete").
 
 If you find a *new* temporal signature not in the six above, the durable move is a check in
