@@ -31,6 +31,14 @@ export async function mlRankPctFor(symbol: string): Promise<number | null> {
   return row?.mlRankPct ?? null;
 }
 
+/** The latest session present in stock_ohlcv: the TS twin of as_of.logical_write_floor(). A
+ *  technical row must carry the date of the bar it was computed from; dating it by the wall clock
+ *  filed the previous session's bar under today for every in-session scan (2026-11-12). */
+export async function latestBarDate(): Promise<string | null> {
+  const row = await dbGet<{ d: string | null }>(`SELECT MAX(date)::text AS d FROM stock_ohlcv`);
+  return row?.d ?? null;
+}
+
 export async function latestCompleteSignalDate(): Promise<string | null> {
   const row = await dbGet<{ d: string | null }>(`SELECT ${LATEST_COMPLETE_TS_DATE_SQL}::text AS d`);
   return row?.d ?? null;

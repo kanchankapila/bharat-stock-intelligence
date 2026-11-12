@@ -21,6 +21,7 @@ import { wsSignalService } from './websocketService';
 import { fetchDeliveryMap } from './deliveryFetcher';
 import { getAtrBarriers } from './atrBarriers';
 import { telegramService } from './telegramService';
+import { latestBarDate } from './technicalSignalsDate';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -112,8 +113,13 @@ export function getTechnicalSignalsProgress(): TechnicalSignalsProgress {
   return { ...progress };
 }
 
+/** Scans are dated by the bar they read, not the wall clock (see latestBarDate). */
+export async function resolveScanDate(explicit?: string): Promise<string> {
+  return explicit ?? (await latestBarDate()) ?? new Date().toISOString().slice(0, 10);
+}
+
 export async function getTechnicalSignalCount(): Promise<number> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await resolveScanDate();
   return ((await dbGet(
     'SELECT COUNT(*) as n FROM technical_signals WHERE date = ?', [today]
   )) as { n: number }).n;
@@ -1226,7 +1232,7 @@ export async function runTechnicalSignalScan(options: {
   // aiInsightsLimit defaulted to 10 while every signalScore>0 row is published to unified_signals:
   // 3,523/3,699 Sept rows had no stop (AF-20261001-10). Every published setup now gets geometry.
   const { minScore = 2, aiInsightsLimit = Number.POSITIVE_INFINITY } = options;
-  const scanDate = options.date ?? new Date().toISOString().slice(0, 10);
+  const scanDate = await resolveScanDate(options.date);
 
   progress = {
     isRunning: true,

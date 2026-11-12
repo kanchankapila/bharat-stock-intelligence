@@ -190,18 +190,22 @@ def fetch_historical_ohlcv(con, symbol: str, cutoff_date: str, limit: int = 200)
     return [float(r[0]) for r in rows]
 
 
+def default_target_date(now: datetime.datetime | None = None) -> str:
+    """Today's IST calendar date: the only session a pre-open prediction can be for."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    return (now.astimezone(datetime.timezone.utc) + datetime.timedelta(hours=5, minutes=30)).date().isoformat()
+
+
 def run_predictor(target_date: str = None) -> list[dict]:
     con = connect()
     ensure_schema(con)
-    
-    cur = con.cursor()
+
     if not target_date:
-        # Default to latest date in preopen snapshot
-        cur.execute(translate("SELECT MAX(snapshot_date) FROM preopen_stock_snapshot"))
-        target_date = cur.fetchone()[0]
-        if not target_date:
-            target_date = datetime.date.today().strftime("%Y-%m-%d")
-            
+        # Today only. Defaulting to MAX(snapshot_date) re-scored 2026-11-06 on 2026-11-11 after a
+        # missed pre-open window, rewriting a five-session-old prediction set. With no book for
+        # today the snapshot read below finds nothing and returns [].
+        target_date = default_target_date()
+
     log.info("Running Early Hours Predictor for date: %s", target_date)
     
     # 1. Fetch preopen snapshots

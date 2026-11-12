@@ -365,7 +365,10 @@ function renderPick(p: Pick, idx: number): string {
     lines.push(`💰 Entry ${fmtPrice(p.entry)} · SL ${fmtPrice(p.stopLoss)} · Target ${fmtPrice(p.target)}${rr}`);
   }
 
-  const reason = safePickReason(p.reason);
+  // The narrative's count is confluence's own scoring set; the screener line uses the ranker's
+  // catalog count. Quote one number per message: the list's (AUROPHARMA read 43 beside 57).
+  const reason = safePickReason(p.reason)
+    ?.replace(/\b\d+(\s+bullish scanners?)\b/i, (m, rest) => (p.screenerCount > 0 ? `${p.screenerCount}${rest}` : m));
   if (reason) lines.push(`💡 Why: _${truncateWords(sanitizeMarkdown(reason), 320)}_`);
 
   if (p.screeners.length) {

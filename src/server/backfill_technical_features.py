@@ -33,7 +33,7 @@ Usage:
 """
 import sys, argparse
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
@@ -224,7 +224,7 @@ def run(limit: int | None = None):
 
     written = 0
     skipped = 0
-    now_str = datetime.now().isoformat()
+    now_str = datetime.now(timezone.utc).isoformat()
 
     for symbol, dates in by_symbol.items():
         # Load OHLCV for this symbol (all history, sorted asc)
@@ -394,7 +394,8 @@ def run_full_universe_today(min_price: float = 15.0) -> int:
     symbol_sector = {r['symbol']: r['sector'] for r in con.execute(
         "SELECT symbol, sector FROM nse_stocks WHERE sector IS NOT NULL").fetchall()}
 
-    now_str = datetime.now().isoformat()
+    # Aware UTC: a naive local now() lands 5.5h late in a timestamptz column on a UTC server.
+    now_str = datetime.now(timezone.utc).isoformat()
     written = 0
     filled_sector = 0
     f3_day, f10_day, d3_day = _flow_nets(fii_by_date, latest)
@@ -420,7 +421,18 @@ def run_full_universe_today(min_price: float = 15.0) -> int:
             VALUES (?,?,0,'GRID',?,?,?,?,?,?,?,?,?,?,?,?,?,
                     ?,?,?,
                     ?,?)
-            ON CONFLICT (symbol, date) DO NOTHING
+            ON CONFLICT (symbol, date) DO UPDATE SET
+                signal_score = 0, signal_type = 'GRID', signals_json = NULL,
+                rsi = excluded.rsi, sma50 = excluded.sma50, sma200 = excluded.sma200,
+                macd = excluded.macd, macd_signal = excluded.macd_signal,
+                bb_width = excluded.bb_width, volume_ratio = excluded.volume_ratio,
+                above_sma200 = excluded.above_sma200, adx = excluded.adx, cmp = excluded.cmp,
+                change_pct = excluded.change_pct, nifty_regime = excluded.nifty_regime,
+                computed_at = excluded.computed_at
+            -- Keep a row only if it was computed from THIS session's bar. An in-session scan row
+            -- carried the previous bar under today's date (AF-20261112-01): its indicators and
+            -- patterns are not this date's, so it is recomputed and its patterns dropped.
+            WHERE technical_signals.cmp IS DISTINCT FROM excluded.cmp
         """, (
             symbol, latest, ind['rsi'], ind['sma50'], ind['sma200'],
             ind['macd'], ind['macd_signal'], ind['bb_width'], ind['volume_ratio'],
@@ -480,6 +492,7 @@ def run_full_universe_today(min_price: float = 15.0) -> int:
     print(f"[Grid] {latest}: ensured {written} rows; technical_signals now has {total} rows for the day.")
     print(f"[Grid] flow nets: fii_3d={f3_day} fii_10d={f10_day} dii_3d={d3_day}; "
           f"sector returns filled on {filled_sector}/{written}")
+    con.close()
     return written
 
 

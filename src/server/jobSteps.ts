@@ -11,6 +11,7 @@ interface StepRec { name: string; ok: boolean; error?: string; ms: number; quiet
  */
 export class StepTracker {
   private recs: StepRec[] = [];
+  private readonly startedAt = performance.now();
   constructor(private jobName: string) {}
 
   /** Run one step under a monitor name, recording its outcome. Returns the step's value, or
@@ -109,11 +110,10 @@ export class StepTracker {
     if (process.env.VITEST !== 'true' && process.env.NODE_ENV !== 'test') {
       console.log(`[QUEUE] ${this.jobName}: ${line}`);
     }
-    // Steps run sequentially (each T.run()/runQuiet() call is awaited before the next), so
-    // summing their own ms is the job-level wall time for the tracked portion -- an
-    // approximation (any untracked gap between steps isn't counted) but far better than the
-    // NULL this row got before 2026-09-04.
-    const totalMs = this.recs.reduce((sum, r) => sum + r.ms, 0);
+    // Wall time since the tracker was created. Summing only the tracked steps' ms recorded
+    // ml-daily-ops' ~174-minute run as 18.6 min (its runPython(...).catch(T.fail) steps are
+    // untracked), and start times derived as ran_at - duration then looked hours late (2026-11-12).
+    const totalMs = Math.round(performance.now() - this.startedAt);
     updateMonitorState(
       this.jobName,
       failed.length ? 'failed' : 'success',

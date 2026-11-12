@@ -1,4 +1,5 @@
 import { dbGet, dbAll, dbRun } from './dbAsync';
+import { latestBarDate } from './technicalSignalsDate';
 
 async function persistStrategySignal(
   symbol: string,
@@ -7,7 +8,9 @@ async function persistStrategySignal(
   detail: string,
 ): Promise<void> {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    // The latest bar's session, like the scan: a wall-clock date planted an indicator-less stub
+    // that the evening grid-ensurer's ON CONFLICT DO NOTHING would then keep.
+    const today = (await latestBarDate()) ?? new Date().toISOString().slice(0, 10);
     const existing = await dbGet(
       `SELECT 1 FROM technical_signals WHERE symbol = ? AND date = ?`, [symbol, today]
     );

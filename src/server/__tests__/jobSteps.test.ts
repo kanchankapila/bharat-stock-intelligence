@@ -119,4 +119,18 @@ describe('StepTracker', () => {
     expect(typeof jobCall![3]).toBe('number');
     expect(jobCall![3]).toBeGreaterThanOrEqual(15);
   });
+
+  // 2026-11-12: ml-daily-ops ran 18:50-21:44 IST (~174 min) but job_run_history recorded 18.6 min,
+  // the sum of its few T.run/runQuiet steps; its many runPython(...).catch(T.fail) steps are
+  // untracked. A start time derived as ran_at - duration then read as a 2.5h-late start.
+  it('the job-level duration is wall time since the tracker started, untracked work included', async () => {
+    const mocked = vi.mocked(updateMonitorState);
+    mocked.mockClear();
+    const T = new StepTracker('job');
+    await new Promise(resolve => setTimeout(resolve, 60)); // an untracked runPython step
+    await T.run('tracked', async () => 1);
+    T.finish();
+    const jobCall = mocked.mock.calls.find(c => c[0] === 'job');
+    expect(jobCall![3]).toBeGreaterThanOrEqual(50);
+  });
 });

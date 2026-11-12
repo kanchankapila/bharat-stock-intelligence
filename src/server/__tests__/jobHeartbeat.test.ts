@@ -169,6 +169,19 @@ describe('getStaleJobs', () => {
     expect(stale.map(s => s.job)).toContain('event-job');
   });
 
+  // 2026-11-12: DL inference and retraining were retired 2026-11-11 (AF-20261111-01); their
+  // heartbeat rows stay behind and were re-announced as stale (dl-trainer 264h,
+  // dl-retrain-emergency 2145h) on every digest.
+  it('does not re-announce the retired DL jobs as stale', async () => {
+    vi.setSystemTime(new Date('2026-11-12T07:00:00Z'));
+    for (const job_name of ['dl-trainer', 'dl-retrain-emergency', 'dl-retrain-weekly', 'dl-engine-infer']) {
+      mockRows.push({ job_name, last_status: 'success', last_success_at: new Date('2026-08-14T07:00:00Z').getTime() });
+    }
+    const stale = await getStaleJobs();
+    vi.useRealTimers();
+    expect(stale.map(s => s.job).filter(j => j.startsWith('dl-'))).toEqual([]);
+  });
+
   it('does NOT flag an event-driven registry job that is merely idle (last run succeeded)', async () => {
     vi.setSystemTime(new Date('2026-10-25T07:00:00Z'));
     mockRows.push({

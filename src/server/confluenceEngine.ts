@@ -214,6 +214,13 @@ function toConvictionLevel(score: number): 'ELITE' | 'STRONG' | 'MODERATE' | 'WE
 // recommendation expiry and outcome grading use 1 / 5 / 15. Geometry must use that same
 // contract: a 20-session stop/target on a plan that expires after 15 sessions is not coherent.
 export const HOLDING_SESSIONS: Record<string, number> = { INTRADAY: 1, SWING: 5, POSITIONAL: 15 };
+
+/** Trade levels anchor on the latest stored session close: the same bars the ATR is computed
+ *  from. technical_signals.cmp was a prior session's close for ~20% of names (AF-20261112-01). */
+export function anchorPrice(bars: Array<{ close: number }>, fallback: number | null): number | null {
+  const last = bars.length ? bars[bars.length - 1].close : NaN;
+  return Number.isFinite(last) && last > 0 ? last : fallback;
+}
 export function buildTradeSetup(price: number, atr: number, score: number, timeframe: string) {
   const risk = atr * 1.5 * Math.sqrt((HOLDING_SESSIONS[timeframe] ?? 5) / 5);
   const rewardMult = score >= 80 ? 4 : score >= 60 ? 3 : 2;
@@ -562,8 +569,9 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
 
     const scored = scoreStock({ symbol, screenerIds: ids, screenerNames: names, screenerClasses: classes }, tech, quant, fund, nse);
 
-    const price = tech?.cmp ?? null;
-    const atr = wilderATR(barsBySymbol.get(symbol) ?? []) || null;
+    const bars = barsBySymbol.get(symbol) ?? [];
+    const price = anchorPrice(bars, tech?.cmp ?? null);
+    const atr = wilderATR(bars) || null;
     // buildTradeSetup only ever constructs a LONG setup (entry near CMP, stop below, targets
     // above) -- this platform has no short-side trade construct (cash equity, no retail
     // shorting; see unified_ranker.py's position-sizing comment "longs only"). Attaching it to

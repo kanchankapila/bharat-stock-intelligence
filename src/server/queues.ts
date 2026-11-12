@@ -570,6 +570,12 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // minting a per-step job_heartbeat row, which getStaleJobs() would otherwise flag stale
   // forever. Nothing in this chain swallows a failure any more.
   const T = new StepTracker('ml-daily-ops');
+  // Pattern scan on the session's FINAL bar (EOD row lands 16:00 IST). The scheduled scan stops at
+  // 15:30 and reads stored bars only, so without this the 22:30 ranker's pattern-fired rows all
+  // came from the previous session's bar (2026-11-12, AF-20261112-01). Runs before the
+  // grid-ensurer, whose ON CONFLICT DO NOTHING keeps whatever row a scan already wrote.
+  await (await import('./technicalSignalsService')).runTechnicalSignalScan()
+    .catch(e => T.fail('technical-scan-eod', e));
   // FULL-UNIVERSE feature grid FIRST: the signal scan only writes technical_signals rows
   // for stocks that produced a tradable pattern (14-800/day), so most of the universe had
   // no feature row on most days — starving the ensemble/ranker of a complete cross-section.

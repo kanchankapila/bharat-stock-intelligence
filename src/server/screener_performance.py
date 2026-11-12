@@ -734,14 +734,28 @@ def backfill_pit(conn: ConnWrapper, start: str, end: str, step_days: int = 7) ->
 
 # -- Entry point --------------------------------------------------------------
 
+def _timed(label, fn, *args):
+    """Stage timing on stderr, in the runner's benign INFO format. The step is killed at its
+    budget with stdout discarded, so two consecutive 45-min timeouts (2026-11-11/12,
+    AF-20261112-03) left no record of which phase overran."""
+    import sys
+    import time
+    t0 = time.perf_counter()
+    out = fn(*args)
+    stamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"{stamp} INFO screener_performance: {label} took {time.perf_counter() - t0:.1f}s",
+          file=sys.stderr, flush=True)
+    return out
+
+
 def run():
     conn = connect()
     try:
-        proxy = phase_a_bootstrap(conn)
-        phase_b_fill_returns(conn)
-        phase_c_bayesian(conn, proxy)
-        phase_d_sync_back(conn)
-        phase_e_update_confidence(conn)
+        proxy = _timed('phase_a_bootstrap', phase_a_bootstrap, conn)
+        _timed('phase_b_fill_returns', phase_b_fill_returns, conn)
+        _timed('phase_c_bayesian', phase_c_bayesian, conn, proxy)
+        _timed('phase_d_sync_back', phase_d_sync_back, conn)
+        _timed('phase_e_update_confidence', phase_e_update_confidence, conn)
         # logical_trading_date(), not date.today() (2026-08-06) -- this job is scheduled at
         # 21:00 UTC = 02:30 IST, i.e. always AFTER midnight relative to the trading day it
         # summarizes. A raw date.today() call here would permanently stamp every PIT snapshot

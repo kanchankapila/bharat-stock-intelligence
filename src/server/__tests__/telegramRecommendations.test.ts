@@ -153,7 +153,19 @@ describe('renderDigest', () => {
     })] }));
     expect(text).not.toContain('Forecaster');
     expect(text).not.toContain('YoY');
-    expect(text).toContain('44 bullish scanners, above 200-day SMA');
+    expect(text).toContain('62 bullish scanners, above 200-day SMA');
+  });
+  // 2026-11-12: AUROPHARMA read "43 bullish scanners" (confluence's own count) beside a screener
+  // list totalling 57 (the ranker's count). One message, one number: the list's.
+  it('the reason quotes the same bullish-screener count as the screener list', () => {
+    const text = renderDigest(digest({ longTerm: [pick({
+      reason: 'AUROPHARMA: 43 bullish scanners, above 200-day SMA.',
+      screeners: ['2 year Breakout', '3 Year Breakout', '5 Year Breakout', '52 Week High'],
+      screenerCount: 57,
+    })] }));
+    expect(text).toContain('57 bullish scanners');
+    expect(text).not.toContain('43 bullish scanners');
+    expect(text).toContain('(+53 more)');
   });
   it('withholds an unclosed scanner example rather than leaking its contents', () => {
     const text = renderDigest(digest({ longTerm: [pick({
