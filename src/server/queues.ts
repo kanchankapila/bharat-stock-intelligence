@@ -1370,6 +1370,11 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // forward test (one app_settings snapshot, exits 2 on protocol drift); watched by `paper-book-freshness`.
   await runPython('paper_book.py', ['--persist'], 10 * 60_000)
     .catch(e => T.fail('paper_book', e));
+  // Pre-registered sizing shadow (2026-11-11, AF-20261111-02): re-weights the paper book's own holdings by a
+  // breakout-adjusted volatility forecast vs a vol-only one; forward from 2026-11-12, verdict after 60 sessions.
+  // Must run after paper_book.py (same holdings). Exits 2 on protocol drift; watched by `sizing-shadow-freshness`.
+  await runPython('sizing_shadow_arm.py', ['--persist'], 10 * 60_000)
+    .catch(e => T.fail('sizing_shadow_arm', e));
 
   // Results-season preview (2026-10-27): rebuilds every quarterly result since 2023-03 point-in-time, grades the
   // frozen ep-v2 forecast walk-forward, scores the next 21 days of reporters and appends them to

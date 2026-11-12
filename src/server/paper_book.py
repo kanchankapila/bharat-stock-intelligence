@@ -64,13 +64,14 @@ MIN_SESSIONS = PROTOCOL["min_sessions"]
 def simulate(calls: dict, O: pd.DataFrame, ADT: pd.DataFrame, p: dict) -> pd.DataFrame:
     """calls: {session -> Series(symbol -> score)}; O/ADT indexed by session. One row per marked interval,
     labelled by the open it starts from: excess and net are book fractions (slots of 1/book_size).
-    D.attrs["holdings"] is the book for the next open, including the latest (not yet markable) decision."""
+    D.attrs["holdings"] is the book for the next open, including the latest (not yet markable) decision;
+    D.attrs["positions"] lists the names held over each row."""
     K, side = p["book_size"], p["cost_per_side"]
     enter_cut, keep_cut = 1 - p["enter_top_pct"], 1 - p["keep_top_pct"]
     sessions = O.index
     first = min((sessions.get_loc(s) for s in calls if s in sessions), default=len(sessions))
     pos: dict[str, int] = {}
-    rows = []
+    rows, held_by_row = [], []
     for i in range(first, len(sessions)):
         trades = 0
         s = sessions[i]
@@ -101,8 +102,10 @@ def simulate(calls: dict, O: pd.DataFrame, ADT: pd.DataFrame, p: dict) -> pd.Dat
         r = np.clip(np.array(r, dtype=float), -0.4, 0.4)
         cost = trades * side
         rows.append((sessions[i + 1], (r.sum() - len(r) * bench - cost) / K, (r.sum() - cost) / K, len(pos), trades))
+        held_by_row.append(sorted(pos))
     D = pd.DataFrame(rows, columns=["date", "excess", "net", "names", "trades"]).set_index("date")
     D.attrs["holdings"] = sorted(pos)
+    D.attrs["positions"] = held_by_row  # names held over each marked row (sizing_shadow_arm.py)
     return D
 
 
