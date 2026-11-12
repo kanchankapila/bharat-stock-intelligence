@@ -51,6 +51,8 @@ This file used to hold every class (~127 KB) and loaded on the first `.py`/`.ts`
 | Raw-age market-session checks plus provider-name/generic failure suppression create simultaneous false reds and false greens (2026-10-10) | `bugs-monitoring.md` |
 | Fan-out parent/child heartbeats, retry-idempotent batch finalisation and honest aggregate status (2026-10-15) | `bugs-monitoring.md` |
 | Recovery history reported as current failure; catch-ups clustered across distinct outages; raw vs gated model populations (2026-10-15) | `bugs-monitoring.md` |
+| A job duration summed from tracked steps read as runtime; naive `now()` into timestamptz (2026-11-12) | `bugs-monitoring.md` |
+| A row dated by the wall clock but computed from stored data that lags it (2026-11-12) | `bugs-data-layer.md` (Dates & scheduling) |
 | Fresh-but-meaningless features: forward-filled countdowns, partial-day `MAX(date)` joins, `mcsymbol` SQL joins, dict-row DataFrame NaN, fixes in unrouted components (2026-10-08); warm-up-zero-filled indicator columns invisible to non-null coverage (2026-10-20) | `bugs-data-layer.md` |
 | Declared corporate action with no clean ratio left as a fake -90% return; priced-but-unlisted alias symbols ranked as separate stocks; float32 price storage (2026-10-15) | `bugs-data-layer.md` |
 | Off-schedule guard discarding the post-outage catch-up; timeout bumped instead of a per-iteration plan fix (2026-10-15) | `bugs-jobs-runtime.md` |

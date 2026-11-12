@@ -40,6 +40,30 @@ External data providers
   -> Express/tRPC APIs and WebSocket -> the React application, Telegram, and chatbot surfaces
 ```
 
+Daily signal lifecycle, IST weekdays (verified 2026-11-12; crons in `jobRegistry.ts` are UTC and win
+over this summary):
+
+- **08:30-16:00 `technical-scan`, every 30 min.** It reads stored daily bars only, so an in-session scan
+  re-scans the last completed session. Rows are dated by the bar they were computed from
+  (`resolveScanDate`), never the wall clock (AF-20261112-01).
+- **16:00** `stock-refresh` (`refresh-all-daily`) writes the day's EOD bar (Yahoo); **16:30**
+  `stuck-signal-resolver` (`signal_lifecycle.py`) closes published `unified_signals` (target/stop/time).
+- **18:50 `ml-daily-ops` (~3 h):** pattern scan on the day's final bar, then the full technical grid
+  (recomputes any same-date row built on an older bar), enrichers, 19:48 bhavcopy reconcile, ~21:30 ML
+  scoring, high-flyer retrospective + Signal Accuracy digest, paper book and the pre-registered shadows.
+- **22:00 `quant-eod-sync`** (~23 min).
+- **22:30 `unified-ranker`** waits up to 40 min for today's `ml-daily-ops` and `quant-eod-sync` to finish
+  (`rankerReadiness.ts`), then ranks. `computed_at` is the session the ranking is FOR, `generated_at` when
+  it was produced. `valid_until`: INTRADAY = that session's 15:30 close, SWING = 5 sessions, POSITIONAL =
+  15, counting the entry session as the first.
+- **22:40** `recommendations-digest` waits up to 75 min for a ranking generated today. **08:20** morning
+  brief re-sends the same ranking (nothing re-ranks overnight) with last session's graded scorecard; it
+  keeps the unified INTRADAY picks, which are for that session.
+- `confluence-compute` runs every 30 min 06:00-07:30 and 17:00-23:30; its trade levels anchor on the
+  latest stored close. **09:30** `outcome-resolver` grades with next-open entry and horizons in sessions.
+- Known gap, recorded not fixed: the 17:00 `dl-feature-refresh` builds the latest `feature_store` row
+  before its flow inputs land (AF-20261112-09); no effect on the blend while ML is gated out.
+
 `unified_ranker.py` stores eight engine slots. The base weights for `ml`, `confluence` and
 `technical` are non-zero in every regime; the runtime edge gate can reduce an engine's actual
 contribution further. `breakout`, `screener`, `cs`, `dl` and `smart_money` have weight 0.0 in every

@@ -173,6 +173,13 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   day-separation over a cross-job guard** when a whole day is free — there is no guard to get
   wrong, and the two heaviest jobs here simply cannot coexist any more. If they must share a day,
   the ordering has to be a real completion trigger, never an offset.
+  **RECURRED 2026-11-12 (AF-20261112-07), on the platform's most important job:** the 22:30 IST
+  `unified-ranker` read what `ml-daily-ops` (18:50, ~3 h) and `quant-eod-sync` (22:00) write, with no
+  dependency. `ml-daily-ops` finished after it started on 2026-10-28 (23:02) and one minute before on
+  11-06; `quant-eod-sync` finished 3-8 min ahead on all 16 evenings checked. Fixed with a bounded
+  completion wait (`rankerReadiness.ts`: upstream heartbeat `last_run_at` >= today's slot read from
+  `JOB_REGISTRY`). **Measure the start against each upstream's finish over a few weeks**
+  (`job_run_history.ran_at` is the FINISH time) before trusting any evening offset.
 
 - **A train job that fetches cannot be scheduled around its own resource profile.** `ml-weekly-retrain`'s first 15 steps were fetchers and labellers (~513 min of budget) ahead of
   ~340 min of training, so the job was I/O-bound for hours and then abruptly 17GB-RAM-bound, and

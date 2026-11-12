@@ -460,6 +460,18 @@ the fix it reads `no evidence`.
 Fixed and immunized in AF-20260929-09; `bharat_alpha/tests/test_legacy_bridge.py` and
 `tests/test_ablation.py` carry the guards.
 
+## A job duration summed from its tracked steps is not its runtime (2026-11-12)
+
+- `StepTracker.finish()` recorded a chained job's `duration_ms` as the SUM of its `T.run`/`runQuiet`
+  steps. Most chain steps are untracked `runPython(...).catch(T.fail)`, so `ml-daily-ops` (18:50-21:44,
+  ~174 min) was recorded as 18.6 min, and `ran_at - duration_ms` "showed" a 21:26 start: a session filed
+  a late-start finding that was false (AF-20261112-04, corrected). Now wall time since the tracker started.
+  **Tell:** a long chain whose recorded duration is far below the gap between its first and last step log
+  lines; cross-check one step's own timestamp (`computed_at`, a `[PY] ... completed` line) before deriving
+  a start time. **Second trap from the same incident:** a timezone-naive `datetime.now().isoformat()`
+  written to a `timestamptz` column on a UTC server lands 5.5 h late on an IST host (18:50 read as 00:20);
+  write aware UTC.
+
 ## Recovery telemetry is not current failure state (2026-10-15)
 
 - A rolling failure ratio must also report the latest verdict. `2/5` with a latest success means

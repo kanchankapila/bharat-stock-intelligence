@@ -617,3 +617,9 @@ PR #131 merged as b4bf2a50. The reviewed source was integrated with the dirty li
 ## 2026-11-11 - Docs + ledger staleness audit (Claude)
 
 Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusable staleness detector), fixed live docs, and closed 8 ledger rows with production readback. `doc:numbers --check` was passing a stale CONTEXT.md count on an unrelated "52-74"; it is now label-anchored. A concurrent session was committing DL retirement and adding `sizing_shadow_arm.py` the whole time, so its untracked files move the CLAUDE.md .py counts (324/821) until it commits.
+
+## 2026-11-12 - Signal lifecycle audit (Claude)
+
+- Technical rows are dated by the bar they were computed from; a final-bar scan runs inside ml-daily-ops before the grid; the ranker waits (40 min cap) for ml-daily-ops and quant-eod-sync; the morning brief keeps today's unified INTRADAY picks. Ledger AF-20261112-01..09; daily timeline now in CONTEXT.md "Daily signal lifecycle".
+- Verify after tonight's runs: 11-12 pattern rows carry the 11-12 close, no "ranking WITHOUT" line, ml-daily-ops duration ~ wall time, screener_performance stage timings. Then close the "pending the next live run" rows.
+- Lessons: an idle gap between turns looks like a clock fault (it is not); derive a job's start from a step's own timestamp, not ran_at - duration_ms.
