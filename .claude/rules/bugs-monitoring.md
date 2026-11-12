@@ -521,3 +521,5 @@ Fixed and immunized in AF-20260929-09; `bharat_alpha/tests/test_legacy_bridge.py
   `market_endpoint_registry` held 3,408 of 3,408 `is_working = true`, last validated 2026-09-13. Report
   `validated_at` age next to any status read from it, and re-probe a sample on a schedule so a negative
   result can exist (`market-endpoint-validation-age`).
+
+- **Retiring a check leaves its last heartbeat behind, and `getStaleJobs()` re-announces it hourly (2026-11-12, AF-20261112-11).** Dropping the BiLSTM check with the DL engine left `model-registry-active-BiLSTM`'s final row (11-11 18:04) to read "stale ~26h, 27h, 28h" from 20:50 IST; the dl-trainer / dl-retrain-emergency rows had the same fate that morning. Third recurrence of the entry above, again fixed per name in `decommissionedJobs`. **Tell:** a `[HEARTBEAT] STALE` line for a job whose producer no longer exists; whenever you remove a producer, grep its heartbeat name in `jobHeartbeat.ts` and tombstone it in the same commit.

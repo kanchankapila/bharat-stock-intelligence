@@ -623,3 +623,9 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 - Technical rows are dated by the bar they were computed from; a final-bar scan runs inside ml-daily-ops before the grid; the ranker waits (40 min cap) for ml-daily-ops and quant-eod-sync; the morning brief keeps today's unified INTRADAY picks. Ledger AF-20261112-01..09; daily timeline now in CONTEXT.md "Daily signal lifecycle".
 - Verify after tonight's runs: 11-12 pattern rows carry the 11-12 close, no "ranking WITHOUT" line, ml-daily-ops duration ~ wall time, screener_performance stage timings. Then close the "pending the next live run" rows.
 - Lessons: an idle gap between turns looks like a clock fault (it is not); derive a job's start from a step's own timestamp, not ran_at - duration_ms.
+
+## 2026-11-12 (night) - Ledger sweep (Claude)
+
+- 86 rows closed with live evidence; new rows AF-20261112-10 (ml-daily-ops 3.5h budget < 213 min wall, now 3.9h + durationMs in `[PY]` lines) and -11 (BiLSTM heartbeat tombstone). Commit 0a157da8 local; restart pending.
+- After the restart verify: next `[PY]` completion lines carry durationMs; the first hourly `[HEARTBEAT]` check lists no model-registry-active-BiLSTM; tomorrow's ml-daily-ops row is success with no failed row before it (if wall time passes ~225 min, shed a step using durationMs; do not raise the budget again).
+- Open decisions are in the ledger (rows marked "needs a user decision"); AF-20261112-07 closes the first night an upstream finishes after 22:30.
