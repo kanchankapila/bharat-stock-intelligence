@@ -9,9 +9,10 @@
  * env var (an env var a library snapshots at import is only proven by the library's own value).
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { existsSync } from 'fs';
 import os from 'os';
 import path from 'path';
-import { runPython } from '../pythonRunner';
+import { PYTHON, runPython } from '../pythonRunner';
 
 const FIXTURE = path.join('__tests__', 'fixtures', 'blas_threads.py');
 const saved = process.env.OPENBLAS_NUM_THREADS;
@@ -27,7 +28,9 @@ function resolvedThreads(stdout: string): number {
   return Number(m![1]);
 }
 
-describe('runPython OpenBLAS thread cap', () => {
+// Needs the interpreter runPython spawns. CI's Node job has no backend-python venv, so every case
+// failed there with `spawn ... ENOENT` (main, 2026-11-10) -- a missing runtime, not the cap.
+describe.runIf(existsSync(PYTHON))('runPython OpenBLAS thread cap', () => {
   it('caps OpenBLAS at 8 threads by default', async () => {
     delete process.env.OPENBLAS_NUM_THREADS;
     const r = await runPython(FIXTURE, [], 120_000);
