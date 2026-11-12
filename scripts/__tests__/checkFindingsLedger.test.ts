@@ -9,6 +9,15 @@ const table = (...rows: string[]) => [HDR, ...rows].join('\n');
 
 // The first lookup walks every test directory; on a loaded host that exceeded the 5s default.
 describe('checkFindingsLedger.validate', { timeout: 60_000 }, () => {
+  it('rejects a row a scripted edit split into one cell per character instead of skipping it', () => {
+    // 2026-11-12: a regex mangled in a shell heredoc turned four rows into "||| |A|F|-|2|0|..." lines;
+    // the validator ignored any line not starting "| AF-" and stayed green.
+    const good = '| AF-20260930-90 | 2026-09-30 | x | bug | FIX | fixed | `test_nt_change_oi_fetcher.py` | 2026-09-30 |';
+    const mangled = '|||' + ' ' + [...good.replace(/\|/g, '')].join('|');
+    expect(validate(table(good))).toEqual([]);
+    expect(validate(table(good, mangled)).join()).toMatch(/not an AF- row/);
+  });
+
   it('accepts a closed FIX row that cites an existing test file', () => {
     const t = table('| AF-20260930-90 | 2026-09-30 | x | bug | FIX | fixed | `test_nt_change_oi_fetcher.py` | 2026-09-30 |');
     expect(validate(t)).toEqual([]);

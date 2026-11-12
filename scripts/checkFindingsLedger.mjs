@@ -97,6 +97,9 @@ export function validateDetailed(text) {
     if (isSep(line)) { width = cells(line).length; return; }
     if (!line.startsWith('| AF-')) {
       if (!line.startsWith('|')) width = null;
+      // A data row that lost its "| AF-" prefix (a scripted edit once split a row into one cell per
+      // character) was skipped here and the check stayed green: reject any other line in a ledger table.
+      else if (width === 8 && !/^\|\s*ID\s*\|/.test(line)) problems.push(`L${n}: table line is not an AF- row (corrupted by a scripted edit?): ${line.slice(0, 40)}`);
       return;
     }
     const c = cells(line);
