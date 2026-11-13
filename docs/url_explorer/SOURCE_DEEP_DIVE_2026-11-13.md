@@ -49,6 +49,13 @@ technicals, documents. They are in the same response, so storing them costs no e
 - Agreement with the per-stock page for 3 symbols (CHENNPETRO, VADILALIND, UJJIVANSFB): score, confidence and all six pillars are identical. The leaderboard row lacks `coverage_pct`, `governance`, `percentile` and `pillar_weights`, which the per-stock `score` section has.
 - Meaning for us: `extra_features_parser.py` reads only `data.score` into `ext_tt_score`, so a leaderboard crawl could supply that one column. It cannot replace the stock page, because analyst ratings and forecasts exist only there, and 31 to 84 names would be missing. Not wired. It is a cheap fallback and a cross-check if the stock-page route breaks. Sample: 3 symbols, one snapshot date.
 
+### 1c. Tapetide's MCP server (tested 2026-11-13): needs a token, not usable anonymously
+
+- `https://tapetide.com/mcp` is an HTML info page. The server is `https://mcp.tapetide.com/mcp` (Streamable HTTP). An anonymous `initialize` returns HTTP 401 `authentication_required` ("Bearer token required"), so I stopped there and made no tool calls.
+- Access is a Google sign-in or a personal token from tapetide.com/settings/tokens; the free plan allows 50 successful tool calls a day. Using it needs an account in the owner's name, so it is an owner decision (same as the TEJ key).
+- The public tool reference (`/mcp/llms-full.txt`) lists 48 tools. Datasets with no table of an obvious name here (name search only, not a content check): promoter pledge by quarter, SLBM and MTF positions, FPI by sector, option IV history for about 556 underlyings (rank, percentile, max pain), index membership as of a date, as-of symbol/ISIN resolution, parsed filings with an earnings-call digest. Overlaps with what we hold: FII/DII flows, bulk/block deals, credit ratings, corporate-action adjustment factors, insider deals, price history with delivery %.
+- At 50 calls a day it cannot feed a nightly universe fetch; it suits targeted lookups (for example `get_adjustment_factors` for the AF-20261112-12 symbols, `get_promoter_pledge`).
+
 ## 2. NSE's official MCP servers (new, free, no key)
 
 Page: `https://www.nseindia.com/nse-mcp`. It states "Do I need an account or API key? No." and, as
