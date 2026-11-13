@@ -1179,9 +1179,18 @@ const BEARISH_SIGNAL_TYPES = new Set<SignalType>([
 // single message; a log review (0 sends across the last 5 days of logs, 0 rows with a
 // win_probability on the latest technical_signals date) is what surfaced it.
 let lastScanDigestSentDate: string | null = null;
+const SCAN_DIGEST_SENT_KEY = 'technical_scan_digest_sent_date';
 
 export async function sendTelegramSignals(results: SignalResult[], date: string): Promise<void> {
   if (lastScanDigestSentDate === date) return;
+  // The marker above is per process, so a restart used to repeat the day's digest (AF-20261113-05).
+  // The sent date is also persisted; a read failure falls through to sending, never to silence.
+  try {
+    const row = await dbGet<{ value: string }>('SELECT value FROM app_settings WHERE key = ?', [SCAN_DIGEST_SENT_KEY]);
+    if (row?.value === date) { lastScanDigestSentDate = date; return; }
+  } catch (err) {
+    console.warn('[SIGNALS] could not read the persisted scan digest date; sending as usual:', (err as Error).message);
+  }
 
   // Same actionable threshold the scan itself uses to mirror rows into recommendation_log
   // (signalScore >= 5, tightened to 7 in BEAR): the digest reports what the platform actually
@@ -1211,6 +1220,10 @@ export async function sendTelegramSignals(results: SignalResult[], date: string)
   const sent = await telegramService.sendMarkdownMessage(message);
   if (sent) {
     lastScanDigestSentDate = date;
+    await dbRun(
+      'INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
+      [SCAN_DIGEST_SENT_KEY, date],
+    ).catch(err => console.warn('[SIGNALS] could not persist the scan digest date:', (err as Error).message));
     console.log('[SIGNALS] Telegram daily scan digest sent');
   } else {
     console.error('[SIGNALS] Telegram daily scan digest failed to send; the next scan slot will retry');

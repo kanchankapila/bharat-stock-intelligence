@@ -57,7 +57,7 @@ const DOUBLE_RECORDED_STEP_JOBS_SQL =
  *  per actual run (job_name/status/ran_at), so removed jobs drop out of the window naturally
  *  and the percentage means "is this job failing NOW". */
 async function getJobFailRateFlags(): Promise<string[]> {
-  const rows = await dbAll<{ job_name: string; total: number; fails: number; latest_status: string }>(
+  const rows = await dbAll<{ job_name: string; total: number; fails: number; latest_status: string; last_two_failed?: boolean }>(
     `WITH ordered AS (
        SELECT job_name, status, ran_at,
               LAG(ran_at) OVER (PARTITION BY job_name ORDER BY ran_at) AS prev_ran_at,
@@ -75,17 +75,35 @@ async function getJobFailRateFlags(): Promise<string[]> {
      SELECT job_name,
             COUNT(*) AS total,
             COUNT(*) FILTER (WHERE status <> 'success') AS fails,
-            (ARRAY_AGG(status ORDER BY ran_at DESC))[1] AS latest_status
+            (ARRAY_AGG(status ORDER BY ran_at DESC))[1] AS latest_status,
+            ((ARRAY_AGG(status ORDER BY ran_at DESC))[1] <> 'success'
+              AND (ARRAY_AGG(status ORDER BY ran_at DESC))[2] <> 'success') AS last_two_failed
      FROM deduped
      GROUP BY job_name
-     HAVING COUNT(*) >= ?`,
-    [MIN_RUNS_FOR_FAIL_RATE],
+     HAVING COUNT(*) >= 2`,
   );
+  // A once-per-weekday job has at most 5 rows in 7 days and misses the 5-run floor after any holiday,
+  // so below the floor only two consecutive failures count (screener-performance failed 11-11 and
+  // 11-12 with 4 runs in the window and no digest said so, AF-20261113-02).
   return rows
-    .filter(r => r.fails / r.total > FAIL_RATE_WARN)
-    .map(r => r.latest_status === 'success'
+    .filter(r => r.total < MIN_RUNS_FOR_FAIL_RATE ? r.last_two_failed === true : r.fails / r.total > FAIL_RATE_WARN)
+    .map(r => r.total < MIN_RUNS_FOR_FAIL_RATE
+      ? `📉 \`${sanitizeMarkdown(r.job_name)}\` failed its last 2 runs (${r.fails}/${r.total} runs failed in the trailing 7d)`
+      : r.latest_status === 'success'
       ? `📈 \`${sanitizeMarkdown(r.job_name)}\` latest run recovered; ${r.fails}/${r.total} earlier runs failed in the trailing 7d (${Math.round(100 * r.fails / r.total)}%)`
       : `📉 \`${sanitizeMarkdown(r.job_name)}\` failing ${Math.round(100 * r.fails / r.total)}% of runs (${r.fails}/${r.total}, last 7d)`);
+}
+
+const PENDING_LINE_MARK = '— pending (scheduled later today)';
+const PENDING_COLLAPSE_MIN = 8;
+
+/** The morning digest runs before most jobs have, so nearly every line read "pending" and buried the
+ *  few that mattered (57 of 64 on 2026-11-13). Past a handful, fold the pending lines into one count;
+ *  every line with a real status (succeeded, late, awaiting grace) is kept as is. */
+export function collapsePendingRunSheet(lines: string[]): string[] {
+  const pending = lines.filter(l => l.includes(PENDING_LINE_MARK));
+  if (pending.length < PENDING_COLLAPSE_MIN) return lines;
+  return [...lines.filter(l => !l.includes(PENDING_LINE_MARK)), `🕒 ${pending.length} more jobs scheduled later today, not yet due`];
 }
 
 /** Counts suspiciously clustered REAL catch-up queuings (not the already-deduped "skipping
@@ -208,6 +226,12 @@ export async function checkAndAlertStaleScripts(now: Date = new Date()): Promise
   for (const s of statuses) {
     if (!s.critical) continue;
     if (s.runState !== 'stale' && s.runState !== 'failed') continue;
+    // A probe that errored leaves only an old stored stamp, so "stale" there means "could not look",
+    // not "did not run": do not page on it (AF-20261113-03).
+    if ((s as { probeFailed?: boolean }).probeFailed) {
+      console.warn(`[MONITOR] not alerting on '${s.id}': its freshness probe failed`);
+      continue;
+    }
     if (await wasAlreadyAlerted(s.id, startOfToday)) continue;
 
     const errorLine = s.error ? `\nLast error: \`${sanitizeMarkdown(String(s.error).slice(0, 300))}\`` : '';
@@ -499,7 +523,7 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
     );
   }
 
-  lines.push(`*Today’s scheduled jobs (${runSheet.length}):*`, ...runSheet, '');
+  lines.push(`*Today’s scheduled jobs (${runSheet.length}):*`, ...collapsePendingRunSheet(runSheet), '');
 
   if (attention.length) {
     lines.push(`*Needs attention (${attention.length}):*`, ...attention, '');

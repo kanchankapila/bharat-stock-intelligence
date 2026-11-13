@@ -122,7 +122,7 @@ function nextCronTimeIso(cronPatterns: readonly string[] | undefined, now: Date)
 /** Backoff budget for the monitor's evidential probes (AF-20260929-02; see getLastRunAt). */
 const MONITOR_PROBE_RETRY_DELAYS_MS = [2_000, 8_000];
 
-async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
+async function getLastRunAt(scriptId: ScriptId): Promise<{ at: string | null; probeFailed: boolean }> {
   try {
     // AF-20260929-02: retry each probe on TRANSIENT connect errors with a wider budget than
     // pgQuery's built-in ~4.3s. Under the 2026-09-28 post-close cluster the shared pool was
@@ -131,10 +131,10 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
     // Working Capital Cycle "failed, last: never" -- while both tables were actually fresh (the
     // probes pass again the moment the cluster ends). [2s, 8s] rides out those short bursts; a
     // genuinely unreachable DB still degrades to the same stale/never verdict after ~10s.
-    return await withTransientRetry(() => probeLastRunAt(scriptId), MONITOR_PROBE_RETRY_DELAYS_MS);
+    return { at: await withTransientRetry(() => probeLastRunAt(scriptId), MONITOR_PROBE_RETRY_DELAYS_MS), probeFailed: false };
   } catch (err: unknown) {
     console.warn('[MONITOR] getLastRunAt failed:', (err as Error).message);
-    return null;
+    return { at: null, probeFailed: true };
   }
 }
 
@@ -410,7 +410,7 @@ export async function getSystemStatus(now: Date = new Date()) {
     // ~30 scripts in MONITOR_SCRIPTS this whole map is already running concurrently (Promise.all
     // over the map, not a true N+1 loop), so this halves the critical-path depth per script
     // rather than the total round-trip count.
-    const [dbLastRunAt, stats, sessions] = await Promise.all([
+    const [lastRunProbe, stats, sessions] = await Promise.all([
       getLastRunAt(s.id as ScriptId),
       getScriptStats(s.id as ScriptId),
       // Holiday-aware lateness (2026-09-14): a sessionless weekday inside the window is a
@@ -418,6 +418,7 @@ export async function getSystemStatus(now: Date = new Date()) {
       // jobHeartbeat.ts, so this adds no extra DB load beyond the first caller per 15 min.
       getRecentTradingSessions(now),
     ]);
+    const dbLastRunAt = lastRunProbe.at;
     // Take the LATEST of three independent pieces of evidence that the script ran, rather than
     // `dbLastRunAt ?? storedRanAt`. Preferring the output-table probe is only correct when a
     // healthy run always writes a row -- and for a GATED script it is not. strategy-optimizer's
@@ -501,6 +502,7 @@ export async function getSystemStatus(now: Date = new Date()) {
       runCount: hb?.runCount ?? 0,
       failCount: hb?.failCount ?? 0,
       runState,
+      probeFailed: lastRunProbe.probeFailed,
       stats,
       error: runStates[`monitor_${s.id}_error`] ?? hb?.lastError ?? null,
     };

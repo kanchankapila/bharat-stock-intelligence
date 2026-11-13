@@ -71,7 +71,7 @@ vi.mock('../dataQualityChecks', () => ({
   getLatestDataQualityResults: mockGetLatestDataQualityResults,
 }));
 
-import { checkAndAlertLateJobs, buildDailyDigest, checkAndAlertStaleScripts, checkAndAlertDataQuality } from '../jobWatchdog';
+import { checkAndAlertLateJobs, buildDailyDigest, checkAndAlertStaleScripts, checkAndAlertDataQuality, collapsePendingRunSheet } from '../jobWatchdog';
 
 describe('checkAndAlertLateJobs', () => {
   beforeEach(() => {
@@ -132,6 +132,19 @@ describe('checkAndAlertStaleScripts', () => {
     await checkAndAlertStaleScripts(new Date('2026-07-02T12:00:00Z'));
     expect(mockSend).toHaveBeenCalledTimes(1);
     expect(mockSend.mock.calls[0][0]).toContain('FII/DII Fetcher');
+  });
+
+  // 2026-11-13 (AF-20261113-03): at 23:56 IST on 11-12 the freshness probe for Feature Engineering
+  // failed under database starvation (nightly backup plus test traffic), fell back to the stored
+  // 2026-07-05 manual-trigger stamp, and paged "Critical engine stale" for a table that was fresh.
+  // The AF-20260929-02 retry only covers about 10 s of starvation.
+  it('does not page a critical script whose freshness probe itself failed', async () => {
+    mockGetSystemStatus.mockResolvedValue([
+      { id: 'feature-engineering', label: 'Feature Engineering', runState: 'stale', lastRunAt: '2026-07-05T11:12:28Z', critical: true, error: null, probeFailed: true },
+    ]);
+    await checkAndAlertStaleScripts(new Date('2026-11-12T18:26:00Z'));
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockMarkAlerted).not.toHaveBeenCalled();
   });
 
   it('does not alert for a critical script in success/running/never state', async () => {
@@ -304,6 +317,18 @@ describe('buildDailyDigest', () => {
     expect(digest).toContain('2026-07-02 IST');
   });
 
+  // 2026-11-13 (AF-20261113-04): the 08:15 digest listed 57 of 64 jobs as "pending (scheduled later
+  // today)", burying the 3 lines that mattered. Many pending lines collapse to one count.
+  it('collapses a long run of not-yet-due jobs into one line and leaves real statuses alone', () => {
+    const pending = (n: number) => `🕒 Job ${n} — pending (scheduled later today)`;
+    const lines = ['✅ A — succeeded (1 run)', ...Array.from({ length: 9 }, (_, i) => pending(i)), '❌ B — late/missed (2h late)'];
+    const out = collapsePendingRunSheet(lines);
+    expect(out).toEqual(['✅ A — succeeded (1 run)', '❌ B — late/missed (2h late)', '🕒 9 more jobs scheduled later today, not yet due']);
+    // a handful of pending jobs (the evening digest) stays itemised
+    const few = ['✅ A — succeeded (1 run)', pending(1), pending(2)];
+    expect(collapsePendingRunSheet(few)).toEqual(few);
+  });
+
   it('does not call a due-but-unrecorded job healthy merely because its grace window is open', async () => {
     const digest = await buildDailyDigest(new Date('2026-07-02T10:30:00Z'));
     expect(digest).toContain('Critical Job — awaiting completion (within grace)');
@@ -405,6 +430,36 @@ describe('buildDailyDigest', () => {
     expect(digest).toContain('morning-brief');
     expect(digest).toContain('latest run recovered');
     expect(digest).not.toContain('morning-brief` failing');
+  });
+
+  // 2026-11-13 (AF-20261113-02): screener-performance runs once per weekday, so it reaches the
+  // 5-run floor only if no weekday is missed; it failed on 11-11 and 11-12 (4 runs in 7 days) and
+  // no digest said so.
+  it('flags a low-frequency job whose last two runs both failed, even below the run floor', async () => {
+    mockDbAll.mockImplementation(async (sql?: string) => sql?.includes('daily-job-run-sheet') ? [] : [
+      { job_name: 'screener-performance', total: 4, fails: 2, latest_status: 'failed', last_two_failed: true },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-11-13T02:45:00Z'));
+    expect(digest).toContain('Job-runtime health');
+    expect(digest).toContain('screener-performance');
+    expect(digest).toContain('failed its last 2 runs');
+  });
+
+  it('the fail-rate query reads low-frequency jobs and reports whether the last two runs failed', async () => {
+    const queries: string[] = [];
+    mockDbAll.mockImplementation(async (sql?: string) => { if (sql) queries.push(sql); return []; });
+    await buildDailyDigest(new Date('2026-11-13T02:45:00Z'));
+    const q = queries.find(s => s.includes('last_two_failed'));
+    expect(q, 'fail-rate query must select last_two_failed').toBeDefined();
+    expect(q).toMatch(/HAVING COUNT\(\*\) >= 2/);
+  });
+
+  it('does not flag a low-frequency job that failed once and then recovered', async () => {
+    mockDbAll.mockImplementation(async (sql?: string) => sql?.includes('daily-job-run-sheet') ? [] : [
+      { job_name: 'screener-performance', total: 4, fails: 1, latest_status: 'success', last_two_failed: false },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-11-13T02:45:00Z'));
+    expect(digest).not.toContain('Job-runtime health');
   });
 
   it('does not flag a job below the fail-rate threshold or with too few runs to judge', async () => {
