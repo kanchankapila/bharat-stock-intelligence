@@ -671,23 +671,27 @@ export async function runPython(
     // The kill paths settle without 'close', so the record may still be on disk.
     if (peakMemMb === undefined) peakMemMb = takePeakMemMb(peakFile);
     if (peakMemMb !== undefined) recordObservedPeak(script, peakMemMb, args);
+    // Taken once so every line below (completed, empty-stdout, stderr, failure) carries the same run
+    // time: the steps that matter for attributing a slow chain are the ones with no stdout (AF-20261112-10).
+    const durationMs = Date.now() - runStartedAt;
     if (stdout) {
       log.info(`[PY] ${script} execution completed`, {
         script,
         args,
-        durationMs: Date.now() - runStartedAt,
+        durationMs,
         peakMemMb,
         outputSnippet: stdout.slice(0, 300),
       });
     }
     if (!stdout && !stderr && peakMemMb !== undefined) {
-      log.info(`[PY] ${script} completed`, { script, args, peakMemMb });
+      log.info(`[PY] ${script} completed`, { script, args, durationMs, peakMemMb });
     }
     if (stderr) {
       if (didThrow) {
         log.error(`[PY] ${script} encountered an error`, {
           script,
           args,
+          durationMs,
           peakMemMb,
           stderrSnippet: stderr.slice(0, 300),
           fullStderr: stderr,
@@ -704,7 +708,7 @@ export async function runPython(
         // underneath benign chatter still classifies as a real error).
         const cls = classifyStderr(stderr);
         const line = `[PY] ${script} finished successfully (stderr: ${cls})`;
-        const meta = { script, args, peakMemMb, stderrClass: cls, stderrSnippet: stderr.slice(0, 300), fullStderr: stderr };
+        const meta = { script, args, durationMs, peakMemMb, stderrClass: cls, stderrSnippet: stderr.slice(0, 300), fullStderr: stderr };
         if (cls === 'real_error') log.warn(line, meta);
         else log.info(line, meta);
       }

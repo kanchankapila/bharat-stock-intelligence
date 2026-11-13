@@ -1179,17 +1179,22 @@ const BEARISH_SIGNAL_TYPES = new Set<SignalType>([
 // single message; a log review (0 sends across the last 5 days of logs, 0 rows with a
 // win_probability on the latest technical_signals date) is what surfaced it.
 let lastScanDigestSentDate: string | null = null;
-const SCAN_DIGEST_SENT_KEY = 'technical_scan_digest_sent_date';
+const scanDigestHeader = (date: string) => `🇮🇳 *NSE DAILY SCAN — ${date}*`;
 
 export async function sendTelegramSignals(results: SignalResult[], date: string): Promise<void> {
   if (lastScanDigestSentDate === date) return;
-  // The marker above is per process, so a restart used to repeat the day's digest (AF-20261113-05).
-  // The sent date is also persisted; a read failure falls through to sending, never to silence.
+  // The marker above is per process, so a restart used to repeat the day's digest (AF-20261113-24).
+  // telegramService records every delivered message in telegram_report_log, so a previous process's
+  // send is visible there; a read failure falls through to sending, never to silence.
   try {
-    const row = await dbGet<{ value: string }>('SELECT value FROM app_settings WHERE key = ?', [SCAN_DIGEST_SENT_KEY]);
-    if (row?.value === date) { lastScanDigestSentDate = date; return; }
+    const row = await dbGet<{ hit: number }>(
+      `SELECT 1 AS hit FROM telegram_report_log
+        WHERE ok AND sent_at > now() - interval '3 days' AND text LIKE ? LIMIT 1`,
+      [`${scanDigestHeader(date)}%`],
+    );
+    if (row) { lastScanDigestSentDate = date; return; }
   } catch (err) {
-    console.warn('[SIGNALS] could not read the persisted scan digest date; sending as usual:', (err as Error).message);
+    console.warn('[SIGNALS] could not check telegram_report_log for an earlier scan digest; sending as usual:', (err as Error).message);
   }
 
   // Same actionable threshold the scan itself uses to mirror rows into recommendation_log
@@ -1215,15 +1220,11 @@ export async function sendTelegramSignals(results: SignalResult[], date: string)
     body += '\n';
   }
 
-  const message = `🇮🇳 *NSE DAILY SCAN — ${date}*\n${'─'.repeat(28)}\n\n${body}⚠️ _Educational only. Not SEBI advice. DYOR._`;
+  const message = `${scanDigestHeader(date)}\n${'─'.repeat(28)}\n\n${body}⚠️ _Educational only. Not SEBI advice. DYOR._`;
 
   const sent = await telegramService.sendMarkdownMessage(message);
   if (sent) {
     lastScanDigestSentDate = date;
-    await dbRun(
-      'INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
-      [SCAN_DIGEST_SENT_KEY, date],
-    ).catch(err => console.warn('[SIGNALS] could not persist the scan digest date:', (err as Error).message));
     console.log('[SIGNALS] Telegram daily scan digest sent');
   } else {
     console.error('[SIGNALS] Telegram daily scan digest failed to send; the next scan slot will retry');

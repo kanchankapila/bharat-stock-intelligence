@@ -75,25 +75,35 @@ describe('sendTelegramSignals (NSE DAILY SCAN digest)', () => {
     expect(mockSend).toHaveBeenCalledTimes(1);
   });
 
-  // 2026-11-13 (AF-20261113-05): the sent-date marker was in memory only, so every bharat-server
+  // 2026-11-13 (AF-20261113-24): the sent-date marker was in memory only, so every bharat-server
   // restart repeated the day's digest (11-12 17:50 restart: a second "NSE DAILY SCAN 2026-11-12"
   // at 19:08), which is why restarts were avoided between 08:30 and 16:00.
-  it('does not resend after a restart: the date a previous process already sent is read from the database', async () => {
+  it('does not resend after a restart: an earlier process\'s delivered digest is found in telegram_report_log', async () => {
     const svc = await fresh();
     const db = await import('../dbAsync');
-    (db.dbGet as any).mockResolvedValue({ value: '2026-09-09' });
+    (db.dbGet as any).mockResolvedValue({ hit: 1 });
     await svc.sendTelegramSignals([scanResult()], '2026-09-09');
     expect(mockSend).not.toHaveBeenCalled();
+    const [sql, params] = (db.dbGet as any).mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/telegram_report_log/);
+    expect(sql).toMatch(/\bok\b/);
+    expect(params).toEqual(['🇮🇳 *NSE DAILY SCAN — 2026-09-09*%']);
   });
 
-  it('still sends when the persisted date is an earlier day, and records the new date durably', async () => {
-    const svc = await fresh();
-    const db = await import('../dbAsync');
-    (db.dbGet as any).mockResolvedValue({ value: '2026-09-08' });
+  it('sends when no delivered digest for the date is on record, and when the lookup itself fails', async () => {
+    let svc = await fresh();
+    let db = await import('../dbAsync');
+    (db.dbGet as any).mockResolvedValue(undefined);
     await svc.sendTelegramSignals([scanResult()], '2026-09-09');
     expect(mockSend).toHaveBeenCalledTimes(1);
-    const writes = (db.dbRun as any).mock.calls as Array<[string, unknown[]]>;
-    expect(writes.some(([sql, params]) => /app_settings/.test(sql) && params.includes('technical_scan_digest_sent_date') && params.includes('2026-09-09'))).toBe(true);
+    expect(mockSend.mock.calls[0][0]).toMatch(/^🇮🇳 \*NSE DAILY SCAN — 2026-09-09\*/);
+
+    mockSend.mockClear();
+    svc = await fresh();
+    db = await import('../dbAsync');
+    (db.dbGet as any).mockRejectedValue(new Error('db down'));
+    await svc.sendTelegramSignals([scanResult()], '2026-09-10');
+    expect(mockSend).toHaveBeenCalledTimes(1);
   });
 
   it('sends nothing when no result clears the actionable threshold', async () => {

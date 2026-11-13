@@ -192,7 +192,9 @@ def upcoming_earnings_url() -> str:
 def fetch_earnings_dates(con) -> None:
     data = _get(upcoming_earnings_url())
     if not data:
-        print("[EarningsFetcher] Upcoming: no data returned", file=sys.stderr)
+        # None = vendor failure (a degraded read, so stderr); {} = HTTP 204, the normal answer between
+        # reporting seasons (stdout, or the runner would log a real_error every quiet night).
+        print("[EarningsFetcher] Upcoming: no data returned", file=sys.stderr if data is None else sys.stdout)
         # The backfill derives days_to_next_results from dates already stored, so a vendor
         # timeout must not leave the day's technical_signals rows without it (AF-20261004-07).
         _backfill_days_to_results(con)

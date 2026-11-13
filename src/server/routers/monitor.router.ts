@@ -2,7 +2,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
-import { withTransientRetry } from '../pgClient';
+import { isTransientConnError, withTransientRetry } from '../pgClient';
 import { router, publicProcedure, adminProcedure } from "../trpc";
 import { runPython } from '../pythonRunner';
 import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetchEODMarketScreener } from '../marketIntelService';
@@ -134,7 +134,9 @@ async function getLastRunAt(scriptId: ScriptId): Promise<{ at: string | null; pr
     return { at: await withTransientRetry(() => probeLastRunAt(scriptId), MONITOR_PROBE_RETRY_DELAYS_MS), probeFailed: false };
   } catch (err: unknown) {
     console.warn('[MONITOR] getLastRunAt failed:', (err as Error).message);
-    return { at: null, probeFailed: true };
+    // Only a pool/connect failure means "could not look". A broken probe (dropped table, renamed
+    // column, cancelled statement) must still read stale and page (AF-20261113-22 review).
+    return { at: null, probeFailed: isTransientConnError(err) };
   }
 }
 

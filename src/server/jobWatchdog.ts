@@ -56,7 +56,7 @@ const DOUBLE_RECORDED_STEP_JOBS_SQL =
  *  data-quality-daily all at ~30% off failures mostly weeks old). job_run_history rows exist
  *  per actual run (job_name/status/ran_at), so removed jobs drop out of the window naturally
  *  and the percentage means "is this job failing NOW". */
-async function getJobFailRateFlags(): Promise<string[]> {
+export async function getJobFailRateFlags(): Promise<string[]> {
   const rows = await dbAll<{ job_name: string; total: number; fails: number; latest_status: string; last_two_failed?: boolean }>(
     `WITH ordered AS (
        SELECT job_name, status, ran_at,
@@ -77,14 +77,17 @@ async function getJobFailRateFlags(): Promise<string[]> {
             COUNT(*) FILTER (WHERE status <> 'success') AS fails,
             (ARRAY_AGG(status ORDER BY ran_at DESC))[1] AS latest_status,
             ((ARRAY_AGG(status ORDER BY ran_at DESC))[1] <> 'success'
-              AND (ARRAY_AGG(status ORDER BY ran_at DESC))[2] <> 'success') AS last_two_failed
+              AND (ARRAY_AGG(status ORDER BY ran_at DESC))[2] <> 'success'
+              AND (ARRAY_AGG(ran_at ORDER BY ran_at DESC))[1] - (ARRAY_AGG(ran_at ORDER BY ran_at DESC))[2]
+                  > interval '1 hour') AS last_two_failed
      FROM deduped
      GROUP BY job_name
      HAVING COUNT(*) >= 2`,
   );
   // A once-per-weekday job has at most 5 rows in 7 days and misses the 5-run floor after any holiday,
   // so below the floor only two consecutive failures count (screener-performance failed 11-11 and
-  // 11-12 with 4 runs in the window and no digest said so, AF-20261113-02).
+  // 11-12 with 4 runs in the window and no digest said so, AF-20261113-21). The two must be over an
+  // hour apart: a retry burst inside one incident is not two failed runs.
   return rows
     .filter(r => r.total < MIN_RUNS_FOR_FAIL_RATE ? r.last_two_failed === true : r.fails / r.total > FAIL_RATE_WARN)
     .map(r => r.total < MIN_RUNS_FOR_FAIL_RATE

@@ -154,3 +154,32 @@ describe('getSystemStatus (extracted)', () => {
     expect(regime!.runState).toBe('stale');
   });
 });
+
+// AF-20261113-22 follow-up (Opus review 2026-11-13): only a TRANSIENT connection failure may mark a
+// probe as failed-to-look and suppress the page. A broken probe (dropped table, renamed column) must
+// still read as stale and page, or a critical engine could go dark for good.
+describe('getSystemStatus probeFailed', () => {
+  async function withFeatureProbeError(message: string) {
+    const orig = (dbGet as any).getMockImplementation();
+    (dbGet as any).mockImplementation(async (sql: string, ...rest: unknown[]) => {
+      if (sql.includes('FROM feature_store WHERE date')) throw new Error(message);
+      return orig(sql, ...rest);
+    });
+    try {
+      const status = await getSystemStatus(new Date('2026-11-12T18:26:00Z'));
+      return status.find(s => s.id === 'feature-engineering') as any;
+    } finally {
+      (dbGet as any).mockImplementation(orig);
+    }
+  }
+
+  it('does not set probeFailed for a non-transient probe error, so the alert still fires', async () => {
+    const fe = await withFeatureProbeError('relation "feature_store" does not exist');
+    expect(fe.probeFailed).toBe(false);
+  });
+
+  it('sets probeFailed when the probe could not get a connection', async () => {
+    const fe = await withFeatureProbeError('timeout exceeded when trying to connect');
+    expect(fe.probeFailed).toBe(true);
+  }, 30_000);
+});

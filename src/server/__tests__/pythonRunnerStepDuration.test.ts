@@ -14,6 +14,17 @@ describe('runPython step duration logging', () => {
     expect(block).toMatch(/durationMs/);
   });
 
+  it('every runner log line for a finished child carries the same run time, not only the one with stdout', () => {
+    const at = src.indexOf('const durationMs = Date.now() - runStartedAt');
+    expect(at, 'duration must be computed once before the log lines').toBeGreaterThan(0);
+    const tail = src.slice(at, at + 3500);
+    for (const marker of ['execution completed', '] ${script} completed`', 'encountered an error', 'const meta = {']) {
+      const i = tail.indexOf(marker);
+      expect(i, `log line "${marker}" not found`).toBeGreaterThan(0);
+      expect(tail.slice(i, i + 260), `${marker} must carry durationMs`).toMatch(/durationMs/);
+    }
+  });
+
   it('the duration is measured from after the slots are acquired, not from the call', () => {
     const slots = src.indexOf('await acquirePythonSlot(script)');
     const start = src.indexOf('const runStartedAt = Date.now()');

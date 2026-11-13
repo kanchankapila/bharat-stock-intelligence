@@ -241,3 +241,23 @@ def test_vendor_timeout_still_runs_the_days_to_results_backfill(monkeypatch):
     con = object()
     mef.fetch_earnings_dates(con)
     assert calls == [con]
+
+
+def test_empty_season_204_backfills_but_does_not_write_the_degraded_read_line_to_stderr(monkeypatch, capsys):
+    """Opus review 2026-11-13: _get returns {} on HTTP 204 (the normal answer between reporting
+    seasons). Only None (a vendor failure) belongs on stderr, where the runner classifies it."""
+    calls = []
+    monkeypatch.setattr(mef, "_get", lambda url, *a, **k: {})
+    monkeypatch.setattr(mef, "_backfill_days_to_results", lambda con, *a, **k: calls.append(con))
+    mef.fetch_earnings_dates(object())
+    out = capsys.readouterr()
+    assert calls, "backfill must still run on an empty season"
+    assert "no data returned" not in out.err
+    assert "no data returned" in out.out
+
+
+def test_vendor_failure_none_writes_the_degraded_read_line_to_stderr(monkeypatch, capsys):
+    monkeypatch.setattr(mef, "_get", lambda url, *a, **k: None)
+    monkeypatch.setattr(mef, "_backfill_days_to_results", lambda con, *a, **k: None)
+    mef.fetch_earnings_dates(object())
+    assert "no data returned" in capsys.readouterr().err
