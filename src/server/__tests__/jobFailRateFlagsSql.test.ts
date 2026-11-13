@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // AF-20261113-21: the digest's runtime-health SQL itself, run against the test schema (the
 // jobWatchdog.test.ts cases mock dbAll, so they never execute it). Rows are seeded with explicit
 // ran_at so each case is a real history.
 const { getJobFailRateFlags } = await import('../jobWatchdog');
-const { dbRun } = await import('../dbAsync');
+const { dbRun, dbGet } = await import('../dbAsync');
 
 const P = 'zzfrtest-';
 async function seed(job: string, runs: Array<[string, number]>) {
@@ -18,7 +18,19 @@ async function seed(job: string, runs: Array<[string, number]>) {
 const flagsFor = async (job: string) => (await getJobFailRateFlags()).filter(f => f.includes(P + job));
 
 describe('getJobFailRateFlags (real SQL)', () => {
+  // This file writes job_run_history, which the 22:50 digest reads in production. The throwaway
+  // schema keeps `public` on its search_path (bugs-testing-env.md), so a table the schema lacked
+  // would resolve to production: prove the writes land in the private schema, and always clean up.
   beforeEach(async () => {
+    const row = await dbGet<{ s: string; owner: string | null }>(
+      `SELECT current_schema() AS s,
+              (SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.oid = to_regclass('job_run_history')) AS owner`);
+    expect(row?.s, 'tests must run in a throwaway schema, never public').not.toBe('public');
+    expect(row?.owner, 'job_run_history must live in the private schema, not resolve to public').toBe(row?.s);
+    await dbRun(`DELETE FROM job_run_history WHERE job_name LIKE '${P}%'`);
+  });
+  afterEach(async () => {
     await dbRun(`DELETE FROM job_run_history WHERE job_name LIKE '${P}%'`);
   });
 

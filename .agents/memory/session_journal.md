@@ -634,3 +634,8 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 
 - Fixes in e5e1fd46 (digests/monitor) and earlier 0a157da8 (ml-daily-ops budget, durationMs, BiLSTM tombstone): all need ONE `pm2 restart bharat-server` at 16:05 to 16:55 IST (check the python process list first; the scan-digest persistence removes the digest-repeat reason for that window once deployed).
 - After the restart verify: `[PY]` lines carry durationMs; no model-registry-active-BiLSTM line at the next hourly `[HEARTBEAT]`; tomorrow's 08:15 digest is short; tonight's screener-performance chain finishes without a timeout (AF-20261113-25).
+
+### Correction (2026-11-13, evening)
+- Deployed 18:00 IST (HEAD f7de2d68); durationMs confirmed live at 18:15:41. The "restart at 16:05" line above is superseded: the feature refresh ran to 17:57, so the restart landed at 18:00.
+- Tonight to read, with no DB-backed tests running: 18:50 ml-daily-ops success with no failed row (AF-20261112-10); BiLSTM line gone at the 19:00 heartbeat (AF-20261112-11); scan digest for 2026-11-13 sent once (AF-20261113-24); 22:10-23:30 screener-performance chain inside budgets (AF-20261113-25); tomorrow 08:15 digest short (AF-20261113-23).
+- Decisions still needing the owner are listed in docs/audits/2026-11-12-ledger-triage.md (host settings, credentials, deletes, retiring jobs); nothing there was applied except AF-20261004-05 (guard test, flagged as Claude's call).
