@@ -20,7 +20,7 @@ rows a day -- scored 0/214 while still exiting 0, so its ml-daily-ops step repor
 `stock_options_oi` had gone stale after 2026-09-02 and the
 `stock-options-oi-freshness-iv-coverage` data-quality check was failing critical.
 
-This is deliberately NOT a new vendor (see data-sources.md's vendor-onboarding freeze).
+This is deliberately NOT a new vendor.
 `so_option_chain` is already onboarded, already scheduled and already fresh: it is written
 daily by `so_option_chain_fetcher.py` from Trendlyne SmartOptions and carries every field
 these consumers need (ce_oi/pe_oi/ce_price/pe_price/ce_iv/pe_iv/ce_volume/pe_volume/strike/
