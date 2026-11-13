@@ -21,9 +21,12 @@ import os
 import sys
 import urllib.request
 import ssl
+import threading
+import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime
 from db_compat import connect
+from sveltekit_data import TAPETIDE_SECTIONS, decode_data_json, tapetide_payloads
 from endpoint_registry import (
     ensure_endpoint_registry_schema,
     get_fetchable_endpoints,
@@ -42,6 +45,87 @@ MAX_IN_FLIGHT = MAX_WORKERS * 4
 
 STOCKLIST_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "stocklist.json")
 
+# Tapetide: the three api.tapetide.com routes (score / analyst-ratings / forecasts) now 404/401, but
+# the stock page's own data (https://tapetide.com/stocks/{symbol}/__data.json) answers anonymously
+# and carries all three sections. The three registry entries share that one URL, so the fetch plan
+# makes ONE request per stock (a ~100 KB page) under this task name and splits it on save.
+TAPETIDE_PAGE_TASK = "__tapetide_page__"
+# robots.txt allows /stocks/ and sets no crawl delay; spacing is ours: about 4 requests a second.
+HOST_MIN_INTERVAL_S = {"tapetide.com": 0.25}
+
+
+class HostPacer:
+    """Spaces requests to a named host; other hosts are never delayed. Thread-safe."""
+
+    def __init__(self, min_interval_s, now=time.monotonic, sleep=time.sleep):
+        self._min = dict(min_interval_s)
+        self._now, self._sleep = now, sleep
+        self._lock = threading.Lock()
+        self._next_ok = {}
+
+    def wait(self, url: str) -> None:
+        host = next((h for h in self._min if f"//{h}/" in url or f"//www.{h}/" in url), None)
+        if host is None:
+            return
+        with self._lock:
+            now = self._now()
+            ready = self._next_ok.get(host, now)
+            delay = max(0.0, ready - now)
+            # reserve this caller's slot before sleeping so concurrent workers queue behind it
+            self._next_ok[host] = max(now, ready) + self._min[host]
+        if delay > 0:
+            self._sleep(delay)
+
+
+_PACER = HostPacer(HOST_MIN_INTERVAL_S)
+
+
+def apply_scope(stock_endpoints, scope, parsed_endpoints):
+    """Pick the per-stock endpoints for a run scope.
+
+    daily: only endpoints extra_features_parser reads (the nightly path). weekly: everything else.
+    The daily Tapetide page fetch stores all three Tapetide payloads, so weekly must not fetch the
+    same page again just for the two the parser does not read.
+    """
+    if scope == "all":
+        return list(stock_endpoints)
+    if scope == "daily":
+        return [e for e in stock_endpoints if e.name in parsed_endpoints]
+    return [e for e in stock_endpoints if e.name not in parsed_endpoints and e.name not in TAPETIDE_SECTIONS]
+
+
+def build_tasks(stocks, stock_endpoints, render=None):
+    """The fetch plan: (symbol, endpoint_name, url) tuples, one Tapetide page request per stock."""
+    render = render or render_endpoint_url
+    tasks = []
+    for stock in stocks:
+        symbol = stock.get("symbol")
+        if not symbol:
+            continue
+        page_queued = False
+        for endpoint in stock_endpoints:
+            url = render(endpoint, stock)
+            if not url:
+                continue
+            if endpoint.name in TAPETIDE_SECTIONS:
+                if not page_queued:
+                    tasks.append((symbol, TAPETIDE_PAGE_TASK, url))
+                    page_queued = True
+                continue
+            tasks.append((symbol, endpoint.name, url))
+    return tasks
+
+
+def save_tapetide_page(cur, symbol: str, page_text: str) -> list:
+    """Decode one Tapetide stock page and store its sections as the three endpoint payloads.
+
+    Raises (and stores nothing) for a redirect, a malformed page, or a page for another stock.
+    """
+    payloads = tapetide_payloads(decode_data_json(page_text), symbol)
+    for name, payload in payloads.items():
+        save_response(cur, symbol, name, json.dumps(payload, ensure_ascii=False))
+    return list(payloads)
+
 def ensure_schema(con) -> None:
     cur = con.cursor()
     cur.execute("""
@@ -57,6 +141,7 @@ def ensure_schema(con) -> None:
     con.commit()
 
 def fetch_url(url: str) -> str:
+    _PACER.wait(url)
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -172,9 +257,7 @@ def main():
     if args.scope != "all":
         from extra_features_parser import PARSED_ENDPOINTS
         before = len(stock_endpoints)
-        wanted = (lambda n: n in PARSED_ENDPOINTS) if args.scope == "daily" \
-            else (lambda n: n not in PARSED_ENDPOINTS)
-        stock_endpoints = [e for e in stock_endpoints if wanted(e.name)]
+        stock_endpoints = apply_scope(stock_endpoints, args.scope, PARSED_ENDPOINTS)
         # Market-wide endpoints are 2 sequential calls, not part of the fan-out -- leave them
         # on the daily path and skip them on the weekly one so they aren't fetched twice.
         if args.scope == "weekly":
@@ -198,16 +281,7 @@ def main():
     con.commit()
 
     # Build the full request list up front, skipping rows missing the id a template needs.
-    tasks = []  # (symbol, endpoint_name, url)
-    for stock in stocks:
-        symbol = stock.get("symbol")
-        if not symbol:
-            continue
-        for endpoint in stock_endpoints:
-            url = render_endpoint_url(endpoint, stock)
-            if not url:
-                continue
-            tasks.append((symbol, endpoint.name, url))
+    tasks = build_tasks(stocks, stock_endpoints)  # (symbol, endpoint_name, url); Tapetide = 1 page/stock
 
     print(f"Fetching {len(tasks)} stock-endpoint requests across {len(stocks)} stocks "
           f"with {MAX_WORKERS} workers...")
@@ -216,7 +290,12 @@ def main():
     # bounded iterator prevents completed Futures from retaining every response until EOF.
     done = 0
     for symbol, name, data, error in iter_fetched_tasks(tasks):
-        if error is None:
+        if error is None and name == TAPETIDE_PAGE_TASK:
+            try:
+                save_tapetide_page(cur, symbol, data)
+            except Exception as exc:  # redirect, unknown stock, malformed page: this stock only
+                print(f"  Error decoding Tapetide page for {symbol}: {exc}", file=sys.stderr)
+        elif error is None:
             save_response(cur, symbol, name, data)
         else:
             print(f"  Error fetching {name} for {symbol}: {error}", file=sys.stderr)

@@ -374,13 +374,17 @@ CURATED_EXTRA_ENDPOINTS: tuple[EndpointDefinition, ...] = (
         enabled=True,
         parser_ready=True,
     ),
+    # MOVED 2026-11-13 (AF-20261107-09): the three api.tapetide.com/api/v1/companies/{symbol}/{score,
+    # analyst-ratings,forecasts} routes now 404/401. The site's own stock page data answers anonymously
+    # and carries all three sections (sections.score / analystRatings / forecasts), so the three entries
+    # share ONE url (one request per stock) and extra_endpoints_fetcher splits it with sveltekit_data.
     # Live-verified 2026-07-30 against updated_urls.json's captured Tapetide URLs. Also resolves
     # directly by plain NSE symbol, no ID mapping needed. Tapetide's ai-chat.tapetide.com
     # sub-endpoints (insights, documents) require auth (401 "Authentication required" live) and
     # are deliberately NOT promoted here.
     EndpointDefinition(
         name="tapetide_score",
-        url_template="https://api.tapetide.com/api/v1/companies/{symbol}/score",
+        url_template="https://tapetide.com/stocks/{symbol}/__data.json",
         scope="stock",
         required_ids=("symbol",),
         source="curated_extra",
@@ -392,7 +396,7 @@ CURATED_EXTRA_ENDPOINTS: tuple[EndpointDefinition, ...] = (
     ),
     EndpointDefinition(
         name="tapetide_analyst_ratings",
-        url_template="https://api.tapetide.com/api/v1/companies/{symbol}/analyst-ratings",
+        url_template="https://tapetide.com/stocks/{symbol}/__data.json",
         scope="stock",
         required_ids=("symbol",),
         source="curated_extra",
@@ -403,7 +407,7 @@ CURATED_EXTRA_ENDPOINTS: tuple[EndpointDefinition, ...] = (
     ),
     EndpointDefinition(
         name="tapetide_forecasts",
-        url_template="https://api.tapetide.com/api/v1/companies/{symbol}/forecasts",
+        url_template="https://tapetide.com/stocks/{symbol}/__data.json",
         scope="stock",
         required_ids=("symbol",),
         source="curated_extra",
