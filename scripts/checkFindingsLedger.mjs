@@ -9,6 +9,7 @@
 // Enforced for rows FOUND on/after RULE_START only -- older rows predate the rule and were
 // closed under the previous standard; re-judging them retroactively would flag hundreds of
 // legitimate historical closes. Structure is checked for every row.
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -96,6 +97,12 @@ export function validateDetailed(text) {
     const n = i + 1;
     if (isSep(line)) { width = cells(line).length; return; }
     if (!line.startsWith('| AF-')) {
+      // A row can also break OUT of its table (its leading "|" lost): a non-table line right after a
+      // table line that still carries 4 or more pipes is a damaged row, and was previously read as
+      // the end of the table (the last row of a table could be wrecked unnoticed). Opus review 2026-11-13.
+      if (!line.startsWith('|') && width !== null && (lines[i - 1] ?? '').startsWith('|') && (line.match(/\|/g) ?? []).length >= 4) {
+        problems.push(`L${n}: line with ${(line.match(/\|/g) ?? []).length} pipes broke out of its table (damaged row?): ${line.slice(0, 40)}`);
+      }
       if (!line.startsWith('|')) width = null;
       // A data row that lost its "| AF-" prefix (a scripted edit once split a row into one cell per
       // character) was skipped here and the check stayed green: reject any other line in a ledger table.
@@ -127,9 +134,26 @@ export function validateDetailed(text) {
   return { problems, warnings };
 }
 
+const idsOf = text => new Set([...text.matchAll(/^\| (AF-\d{8}-\d+) \|/gm)].map(m => m[1]));
+
+/** IDs present in an earlier version of the ledger but not in `text`: "never delete a row" had no
+ *  check, so a deleted row passed (Opus review 2026-11-13). */
+export function missingIds(earlierText, text) {
+  const now = idsOf(text);
+  return [...idsOf(earlierText)].filter(id => !now.has(id));
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const file = resolve(ROOT, process.argv[2] ?? 'docs/audit-findings.md');
-  const { problems, warnings } = validateDetailed(readFileSync(file, 'utf8'));
+  const current = readFileSync(file, 'utf8');
+  const { problems, warnings } = validateDetailed(current);
+  if (!process.argv[2]) {
+    try {
+      const head = execFileSync('git', ['show', 'HEAD:docs/audit-findings.md'], { cwd: ROOT, maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+      const gone = missingIds(head, current);
+      if (gone.length) problems.push(`row(s) present in HEAD are gone from the ledger (never delete a row, close it): ${gone.slice(0, 8).join(', ')}${gone.length > 8 ? ` and ${gone.length - 8} more` : ''}`);
+    } catch { /* not a git checkout, or HEAD has no ledger yet: nothing to compare against */ }
+  }
   for (const w of warnings) console.warn(`[findings:check] warn: ${w}`);
   if (problems.length) {
     console.error(`[findings:check] ${problems.length} problem(s) in ${file}:`);

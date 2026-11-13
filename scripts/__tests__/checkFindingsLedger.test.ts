@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 // @ts-expect-error -- plain .mjs module, no type declarations
-import { validate, validateDetailed } from '../checkFindingsLedger.mjs';
+import { validate, validateDetailed, missingIds } from '../checkFindingsLedger.mjs';
 
 const HDR = '| ID | Found | Class | Finding | Lane | Status | Immunized | Closed |\n|---|---|---|---|---|---|---|---|';
 const table = (...rows: string[]) => [HDR, ...rows].join('\n');
@@ -16,6 +16,21 @@ describe('checkFindingsLedger.validate', { timeout: 60_000 }, () => {
     const mangled = '|||' + ' ' + [...good.replace(/\|/g, '')].join('|');
     expect(validate(table(good))).toEqual([]);
     expect(validate(table(good, mangled)).join()).toMatch(/not an AF- row/);
+  });
+
+  it('rejects a damaged row that lost its leading pipe and so broke out of the end of its table', () => {
+    // Opus review 2026-11-13: such a line was read as "the table ended" and never flagged.
+    const good = '| AF-20260930-90 | 2026-09-30 | x | bug | FIX | fixed | `test_nt_change_oi_fetcher.py` | 2026-09-30 |';
+    const broken = [...good.replace(/\|/g, '')].join('|');
+    expect(validate(table(good, broken)).join()).toMatch(/broke out of its table/);
+    expect(validate(table(good) + '\n\nA sentence after the table with one | pipe.')).toEqual([]);
+  });
+
+  it('missingIds reports a row that was deleted since an earlier version of the ledger', () => {
+    const a = '| AF-20260930-90 | 2026-09-30 | x | bug | FIX | fixed | y | 2026-09-30 |';
+    const b = '| AF-20260930-91 | 2026-09-30 | x | bug | FIX | fixed | y | 2026-09-30 |';
+    expect(missingIds(table(a, b), table(a))).toEqual(['AF-20260930-91']);
+    expect(missingIds(table(a), table(a, b))).toEqual([]);
   });
 
   it('accepts a closed FIX row that cites an existing test file', () => {
