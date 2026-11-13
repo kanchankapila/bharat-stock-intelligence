@@ -629,3 +629,8 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 - 86 rows closed with live evidence; new rows AF-20261112-10 (ml-daily-ops 3.5h budget < 213 min wall, now 3.9h + durationMs in `[PY]` lines) and -11 (BiLSTM heartbeat tombstone). Commit 0a157da8 local; restart pending.
 - After the restart verify: next `[PY]` completion lines carry durationMs; the first hourly `[HEARTBEAT]` check lists no model-registry-active-BiLSTM; tomorrow's ml-daily-ops row is success with no failed row before it (if wall time passes ~225 min, shed a step using durationMs; do not raise the budget again).
 - Open decisions are in the ledger (rows marked "needs a user decision"); AF-20261112-07 closes the first night an upstream finishes after 22:30.
+
+## 2026-11-13 (afternoon) - Failing jobs + digest review (Claude)
+
+- Fixes in e5e1fd46 (digests/monitor) and earlier 0a157da8 (ml-daily-ops budget, durationMs, BiLSTM tombstone): all need ONE `pm2 restart bharat-server` at 16:05 to 16:55 IST (check the python process list first; the scan-digest persistence removes the digest-repeat reason for that window once deployed).
+- After the restart verify: `[PY]` lines carry durationMs; no model-registry-active-BiLSTM line at the next hourly `[HEARTBEAT]`; tomorrow's 08:15 digest is short; tonight's screener-performance chain finishes without a timeout (AF-20261113-25).
