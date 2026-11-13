@@ -1,7 +1,7 @@
 import asyncio
 import sys
 
-from db_compat import connect
+from db_compat import connect, ensure_column
 from as_of import filter_stock_ohlcv_records
 from datetime import date as _date_type
 
@@ -185,10 +185,11 @@ def init_db(conn):
     # mc_ohlcv_backfill.py's ensure_adjustment_basis_column() docstring. CREATE TABLE IF NOT
     # EXISTS above is a no-op on the live table, so an existing DB needs this ALTER too.
     try:
-        conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS adjustment_basis TEXT")
+        ensure_column(conn, "stock_ohlcv", "adjustment_basis", "TEXT")
         conn.commit()
-    except Exception:
+    except Exception as exc:
         conn.rollback()
+        print(f"[WARN] adjustment_basis column not ensured: {exc}")
     print("[OK] stock_ohlcv table ready  [DB: Postgres via db_compat.connect()]")
 
 def get_all_nse_symbols(conn):

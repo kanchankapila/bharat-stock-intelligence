@@ -37,3 +37,15 @@ def test_live_old_format_day_writes_ml_usable_rows():
     for i, col in enumerate(("atm_iv", "pcr_oi", "straddle_pct", "forward", "total_oi"), start=1):
         assert_numeric_and_finite(row[i], context=col)
     assert 0.05 < row[1] < 1.5, f"atm_iv {row[1]} is not a fraction-scale IV"
+
+    futs = m.futures_rows(recs, DAY)
+    assert len(futs) > 100, f"only {len(futs)} futures rows; the 2022-01-03 file carries ~190 stock futures x 2 kept expiries"
+    m.store_day(conn, futs, "nse_fo_bhav_old", m.FUT_TABLE, m.FUT_COLS)
+    f = conn.execute(
+        "SELECT symbol, close, settle, contracts_traded, open_interest, oi_change FROM stock_futures_eod_history "
+        "WHERE symbol = 'RELIANCE' AND trade_date = ? AND expiry_rank = 1", (DAY.isoformat(),)).fetchone()
+    assert f is not None
+    assert_looks_like_ticker(f[0], context="symbol")
+    for i, col in enumerate(("close", "settle", "contracts_traded", "open_interest", "oi_change"), start=1):
+        assert_numeric_and_finite(f[i], context=col)
+    assert f[4] % 250 == 0, "old-format OPEN_INT is in shares: a multiple of RELIANCE's 250 lot"

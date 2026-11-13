@@ -667,6 +667,28 @@ def safe_alter(conn_or_none, ddl: str) -> bool:
         return False
 
 
+def ensure_column(conn, table: str, column: str, col_type: str, lock_timeout: str = "5s") -> bool:
+    """Add `column` to `table` only when it is missing; True if it had to add it.
+
+    `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` takes ACCESS EXCLUSIVE even when the column is
+    already there, and a lock request that has to wait makes every later reader queue behind it
+    (a 26-minute pile-up on stock_ohlcv, 2026-11-12). Looking first costs no lock; the lock
+    timeout makes the rare real ALTER fail fast instead of queueing. `table`, `column` and
+    `col_type` are code constants, never user input. The caller commits (or rolls back on the
+    lock-timeout error).
+    """
+    exists = conn.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?",
+        (table, column),
+    ).fetchone()
+    if exists:
+        return False
+    conn.execute(f"SET LOCAL lock_timeout = '{lock_timeout}'")
+    conn.execute(f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "{column}" {col_type}')
+    return True
+
+
 def execute_returning(sql, params=()):
     """Run an INSERT/UPDATE ... RETURNING and commit; returns the first Row (or None)."""
     with get_engine().begin() as conn:

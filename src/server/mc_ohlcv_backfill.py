@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-from db_compat import connect, read_df, translate, use_postgres, get_engine
+from db_compat import connect, ensure_column, read_df, translate, use_postgres, get_engine
 from as_of import filter_stock_ohlcv_records
 
 URL = "https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history"
@@ -90,12 +90,12 @@ def ensure_adjustment_basis_column(conn) -> None:
     (relative_strength.py/ml_ensemble.py/breakout_classifier.py) detect and correct for a
     straddling return window instead of silently absorbing the step artifact.
     """
-    cur = conn.cursor()
     try:
-        cur.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS adjustment_basis TEXT")
+        ensure_column(conn, "stock_ohlcv", "adjustment_basis", "TEXT")
         conn.commit()
-    except Exception:
+    except Exception as exc:
         conn.rollback()
+        print(f"[WARN] adjustment_basis column not ensured: {exc}")
 
 
 def upsert(conn, rows: list[tuple], overwrite: bool) -> int:

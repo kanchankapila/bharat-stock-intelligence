@@ -1,0 +1,2 @@
+source,symbol,date,expiry,open_interest,oi_change,oi_pct_change,oi_buildup,rollover_pct,oi_pcr,futures_price,spot_price,basis,contracts,futures_volume,lot_size,fetched_at
+moneycontrol,AGROPHOS,2026-08-25,2026-08-25,1828250.0,-159000.0,-8.0,Long Unwinding,82.55,0.66,2618.8,2621.5,-2.699999999999818,3790.0,947500.0,250.0,2026-08-25T09:43:22.802346+00:00

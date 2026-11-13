@@ -1,0 +1,1264 @@
+{
+  "concepts": [
+    {
+      "definition": "Open, high, low, close and traded volume for an instrument and interval.",
+      "id": "ohlcv"
+    },
+    {
+      "definition": "Quantity traded in an interval, in instrument-specific units (shares for equity).",
+      "id": "volume"
+    },
+    {
+      "definition": "Share of cash-market traded quantity that settled by delivery; not investor buying.",
+      "id": "delivery"
+    },
+    {
+      "definition": "Outstanding derivative contracts at an observation; not traded volume.",
+      "id": "open_interest"
+    },
+    {
+      "definition": "Volatility parameter implied by an option price under a stated model.",
+      "id": "implied_volatility"
+    },
+    {
+      "definition": "Issuer events that change price comparability or entitlements.",
+      "id": "corporate_actions"
+    },
+    {
+      "definition": "Reported financial performance for an accounting period.",
+      "id": "earnings"
+    },
+    {
+      "definition": "Disclosed trades by persons covered by insider-disclosure rules.",
+      "id": "insider_trades"
+    },
+    {
+      "definition": "Cross-sectional participation across a defined universe; market-wide, one value per day.",
+      "id": "breadth"
+    },
+    {
+      "definition": "Persistence of a past return over a stated horizon.",
+      "id": "momentum"
+    },
+    {
+      "definition": "Deviation of price from a reference, expected to close.",
+      "id": "mean_reversion"
+    },
+    {
+      "definition": "Magnitude of price fluctuation over a stated window.",
+      "id": "volatility"
+    },
+    {
+      "definition": "Net institutional purchases, market-wide.",
+      "id": "flows"
+    },
+    {
+      "definition": "Distribution of securities among reported holder categories.",
+      "id": "ownership"
+    },
+    {
+      "definition": "Market state used to re-weight engines; a gate, not alpha.",
+      "id": "regime"
+    },
+    {
+      "definition": "The platform's canonical stock ordering.",
+      "id": "ranking"
+    }
+  ],
+  "instruments": [
+    {
+      "definition": "Listed share, identified by NSE symbol (the only canonical identifier).",
+      "id": "equity"
+    },
+    {
+      "definition": "Calculated benchmark; not tradable. Keyed by index name, not NSE symbol.",
+      "id": "index"
+    },
+    {
+      "definition": "Standardized contract on an underlying with an expiry (stock and index futures).",
+      "id": "future"
+    },
+    {
+      "definition": "Contract with underlying, expiry, strike and call/put side (stock and index options).",
+      "id": "option"
+    },
+    {
+      "definition": "Exchange-traded fund. DECLARED ONLY: no ETF table exists and nse_stocks name-matches at most one.",
+      "id": "etf"
+    }
+  ],
+  "ontology_compat": "1.1.0",
+  "relations": [
+    {
+      "object": "daily_ohlcv",
+      "predicate": "derived_from",
+      "subject": "traded_volume"
+    },
+    {
+      "object": "daily_ohlcv",
+      "predicate": "requires",
+      "subject": "trailing_return"
+    },
+    {
+      "object": "corporate_action_event",
+      "predicate": "requires",
+      "subject": "trailing_return"
+    },
+    {
+      "object": "trailing_return",
+      "predicate": "derived_from",
+      "subject": "momentum_12_1"
+    },
+    {
+      "object": "daily_ohlcv",
+      "predicate": "derived_from",
+      "subject": "dist_sma20_pct"
+    },
+    {
+      "object": "dist_sma20_pct",
+      "predicate": "derived_from",
+      "subject": "mean_reversion_14"
+    },
+    {
+      "object": "trailing_return",
+      "predicate": "derived_from",
+      "subject": "mean_reversion_14"
+    },
+    {
+      "object": "daily_ohlcv",
+      "predicate": "derived_from",
+      "subject": "hist_vol_21d"
+    },
+    {
+      "object": "daily_ohlcv",
+      "predicate": "derived_from",
+      "subject": "atr_pct"
+    },
+    {
+      "object": "traded_volume",
+      "predicate": "derived_from",
+      "subject": "volume_ratio_20d"
+    },
+    {
+      "object": "traded_volume",
+      "predicate": "requires",
+      "subject": "delivery_pct"
+    },
+    {
+      "object": "delivery_pct",
+      "predicate": "derived_from",
+      "subject": "delivery_z_20d"
+    },
+    {
+      "object": "future",
+      "predicate": "derived_from",
+      "subject": "futures_eod"
+    },
+    {
+      "object": "futures_open_interest",
+      "predicate": "requires",
+      "subject": "futures_oi_change"
+    },
+    {
+      "object": "futures_oi_change",
+      "predicate": "requires",
+      "subject": "oi_buildup"
+    },
+    {
+      "object": "daily_ohlcv",
+      "predicate": "requires",
+      "subject": "oi_buildup"
+    },
+    {
+      "object": "futures_open_interest",
+      "predicate": "requires",
+      "subject": "rollover_pct"
+    },
+    {
+      "object": "daily_ohlcv",
+      "predicate": "requires",
+      "subject": "cost_of_carry_ann"
+    },
+    {
+      "object": "future",
+      "predicate": "derived_from",
+      "subject": "cost_of_carry_ann"
+    },
+    {
+      "object": "option_open_interest",
+      "predicate": "requires",
+      "subject": "pcr_oi"
+    },
+    {
+      "object": "option",
+      "predicate": "derived_from",
+      "subject": "pcr_oi"
+    },
+    {
+      "object": "option_open_interest",
+      "predicate": "derived_from",
+      "subject": "pcr_oi"
+    },
+    {
+      "object": "option_open_interest",
+      "predicate": "requires",
+      "subject": "atm_iv"
+    },
+    {
+      "object": "option",
+      "predicate": "derived_from",
+      "subject": "atm_iv"
+    },
+    {
+      "object": "futures_open_interest",
+      "predicate": "derived_from",
+      "subject": "atm_iv"
+    },
+    {
+      "object": "atm_iv",
+      "predicate": "derived_from",
+      "subject": "skew_95_105"
+    },
+    {
+      "object": "atm_iv",
+      "predicate": "derived_from",
+      "subject": "straddle_pct"
+    },
+    {
+      "object": "option_open_interest",
+      "predicate": "requires",
+      "subject": "index_max_pain"
+    },
+    {
+      "object": "option",
+      "predicate": "derived_from",
+      "subject": "index_max_pain"
+    },
+    {
+      "object": "daily_ohlcv",
+      "predicate": "derived_from",
+      "subject": "pct_above_200dma"
+    },
+    {
+      "object": "daily_ohlcv",
+      "predicate": "derived_from",
+      "subject": "adv_decline_ratio"
+    },
+    {
+      "object": "daily_ohlcv",
+      "predicate": "derived_from",
+      "subject": "pct_at_20d_high"
+    },
+    {
+      "object": "daily_ohlcv",
+      "predicate": "derived_from",
+      "subject": "net_highs_lows"
+    }
+  ],
+  "signal_catalog_version": "1.1.0",
+  "signals": [
+    {
+      "availability": "End of session `date`; the card's expected lag is 5h. Not knowable intraday.",
+      "caveats": [
+        "Mixing adjustment_basis inside one series corrupts a backtest silently.",
+        "Filter is_suspect = 0 before building a panel; suspect bars are flagged, not deleted.",
+        "History starts 2021-01; names delisted before today may be absent (price paths iterate the current nse_stocks master)."
+      ],
+      "concepts": [
+        "ohlcv",
+        "volume"
+      ],
+      "date_column": "date",
+      "definition": "Open, high, low, close in INR/share and volume in shares for one NSE session; one row per (symbol, date). Price basis is per row in adjustment_basis (nse_bhavcopy_raw, split_only, split_dividend).",
+      "derived_from": [],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Daily OHLCV bar",
+      "lookback": "1 session",
+      "measured": "Data, not a signal: no edge claim.",
+      "name": "daily_ohlcv",
+      "requires": [],
+      "sources": [
+        "stock_ohlcv.open",
+        "stock_ohlcv.high",
+        "stock_ohlcv.low",
+        "stock_ohlcv.close",
+        "stock_ohlcv.volume"
+      ],
+      "symbol_column": "symbol",
+      "unit": "INR/share; shares"
+    },
+    {
+      "availability": "End of session `date`.",
+      "caveats": [
+        "Not adjusted by a split unless adjustment_basis says so: a split halves price and doubles shares."
+      ],
+      "concepts": [
+        "volume"
+      ],
+      "date_column": "date",
+      "definition": "stock_ohlcv.volume: shares traded in the session.",
+      "derived_from": [
+        "daily_ohlcv"
+      ],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Traded volume",
+      "lookback": "1 session",
+      "measured": "Data, not a signal.",
+      "name": "traded_volume",
+      "requires": [],
+      "sources": [
+        "stock_ohlcv.volume"
+      ],
+      "symbol_column": "symbol",
+      "unit": "shares"
+    },
+    {
+      "availability": "End of session t, once stock_ohlcv for t exists; feature_store card lag 5h.",
+      "caveats": [
+        "Counts rows, not calendar days: a missing bar silently lengthens the window.",
+        "Crossing an unadjusted split or bonus fabricates a +/-50% return; check adjustment_basis."
+      ],
+      "concepts": [
+        "momentum"
+      ],
+      "date_column": "date",
+      "definition": "ret_{d}d = close_t / close_(t-d) - 1 for d in 1, 5, 15, 21, 63, 126, 252 trading rows (feature_engineering.py, pandas pct_change on the symbol's own rows).",
+      "derived_from": [],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Trailing close-to-close return",
+      "lookback": "d trading rows, d in {1,5,15,21,63,126,252}",
+      "measured": "ret_21d / ret_63d / reversal_21d: negative, t down to -3.96, dead (measurement.md 'Already tested').",
+      "name": "trailing_return",
+      "requires": [
+        "daily_ohlcv",
+        "corporate_action_event"
+      ],
+      "sources": [
+        "feature_store.ret_1d",
+        "feature_store.ret_5d",
+        "feature_store.ret_21d",
+        "feature_store.ret_63d",
+        "feature_store.ret_252d"
+      ],
+      "symbol_column": "symbol",
+      "unit": "fraction (0.05 = 5%)"
+    },
+    {
+      "availability": "End of session t.",
+      "caveats": [
+        "Difference form overstates names whose 21d return is large and negative."
+      ],
+      "concepts": [
+        "momentum"
+      ],
+      "date_column": "date",
+      "definition": "feature_store.ret_12m_ex1m = close.pct_change(252) - close.pct_change(21): a DIFFERENCE of two simple returns, not the compounded skip-month return (1+r252)/(1+r21)-1.",
+      "derived_from": [
+        "trailing_return"
+      ],
+      "instruments": [
+        "equity"
+      ],
+      "label": "12-month return excluding the last month",
+      "lookback": "252 trading rows",
+      "measured": "Not demonstrated. 2026-10-27 re-run: +0.80%/period vs universe, t 1.67 (25 bps/side, 56 periods); a later H1 run is VOID on a defective split/bonus adjustment panel (measurement.md).",
+      "name": "momentum_12_1",
+      "requires": [],
+      "sources": [
+        "feature_store.ret_12m_ex1m"
+      ],
+      "symbol_column": "symbol",
+      "unit": "fraction"
+    },
+    {
+      "availability": "End of session t.",
+      "caveats": [
+        "Column name says percent, value is a fraction."
+      ],
+      "concepts": [
+        "mean_reversion"
+      ],
+      "date_column": "date",
+      "definition": "(close - sma20) / sma20, sma20 = close.rolling(20).mean() including today.",
+      "derived_from": [
+        "daily_ohlcv"
+      ],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Distance from 20-day mean",
+      "lookback": "20 trading rows",
+      "measured": "No standalone verdict recorded; see mean_reversion_14.",
+      "name": "dist_sma20_pct",
+      "requires": [],
+      "sources": [
+        "feature_store.dist_sma20_pct"
+      ],
+      "symbol_column": "symbol",
+      "unit": "fraction despite the _pct suffix (0.05 = 5%)"
+    },
+    {
+      "availability": "End of session t; only as available as its slowest input.",
+      "caveats": [
+        "The constituent list lives in factor_backtest.py; cite its commit with any result."
+      ],
+      "concepts": [
+        "mean_reversion"
+      ],
+      "date_column": "date",
+      "definition": "Research composite in factor_backtest.py: sign-flipped combination of 14 feature_store factors that measured negative. NOT a stored column; recompute from feature_store.",
+      "derived_from": [
+        "dist_sma20_pct",
+        "trailing_return"
+      ],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Mean-reversion composite",
+      "lookback": "per constituent factor (up to 252 rows)",
+      "measured": "Standalone long factor significantly NEGATIVE: 67 periods, net excess -0.94%/period, t -3.26, 0/6 years positive (2026-09-26). The veto-on-momentum arm is undecided (measured through a defective panel).",
+      "name": "mean_reversion_14",
+      "requires": [],
+      "sources": [
+        "feature_store.dist_sma20_pct"
+      ],
+      "symbol_column": "symbol",
+      "unit": "unitless rank score"
+    },
+    {
+      "availability": "End of session t.",
+      "caveats": [],
+      "concepts": [
+        "volatility"
+      ],
+      "date_column": "date",
+      "definition": "std of 21 daily log returns * sqrt(252) (feature_engineering.py).",
+      "derived_from": [
+        "daily_ohlcv"
+      ],
+      "instruments": [
+        "equity"
+      ],
+      "label": "21-day realised volatility",
+      "lookback": "21 trading rows",
+      "measured": "Risk descriptor; no directional verdict. Strong-looking factors here have been volatility detectors (reverse audit).",
+      "name": "hist_vol_21d",
+      "requires": [],
+      "sources": [
+        "feature_store.hist_vol_21d"
+      ],
+      "symbol_column": "symbol",
+      "unit": "annualised fraction (0.30 = 30%)"
+    },
+    {
+      "availability": "End of session t.",
+      "caveats": [],
+      "concepts": [
+        "volatility"
+      ],
+      "date_column": "date",
+      "definition": "atr_14 / close (feature_engineering.py).",
+      "derived_from": [
+        "daily_ohlcv"
+      ],
+      "instruments": [
+        "equity"
+      ],
+      "label": "ATR as a share of price",
+      "lookback": "14 trading rows",
+      "measured": "Risk descriptor; no directional verdict.",
+      "name": "atr_pct",
+      "requires": [],
+      "sources": [
+        "feature_store.atr_pct"
+      ],
+      "symbol_column": "symbol",
+      "unit": "fraction"
+    },
+    {
+      "availability": "End of session t.",
+      "caveats": [
+        "Including today in the denominator compresses spikes; not comparable with a prior-20-day baseline."
+      ],
+      "concepts": [
+        "volume"
+      ],
+      "date_column": "date",
+      "definition": "vol / vol.rolling(20).mean(); the 20-row mean INCLUDES today's volume.",
+      "derived_from": [
+        "traded_volume"
+      ],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Relative volume",
+      "lookback": "20 trading rows",
+      "measured": "No verdict recorded.",
+      "name": "volume_ratio_20d",
+      "requires": [],
+      "sources": [
+        "feature_store.volume_ratio_20d"
+      ],
+      "symbol_column": "symbol",
+      "unit": "ratio"
+    },
+    {
+      "availability": "T+1: the value for session D is published after D and is knowable only during D+1 (card lag 24h).",
+      "caveats": [
+        "A same-session join is a look-ahead.",
+        "stock_delivery_volume is a sibling table with different column names and coverage."
+      ],
+      "concepts": [
+        "delivery"
+      ],
+      "date_column": "date",
+      "definition": "stock_delivery_data.delivery_pct: delivery_qty / traded_qty * 100 for the session, as published by NSE.",
+      "derived_from": [],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Delivery percentage",
+      "lookback": "1 session",
+      "measured": "Raw level: quintile spread +0.19pp/day, t +7.82, but long-only top-50 net -1.04%/period (21d, 25 bps) and -0.15%/period (5d, 15 bps): dead as a long-only factor.",
+      "name": "delivery_pct",
+      "requires": [
+        "traded_volume"
+      ],
+      "sources": [
+        "stock_delivery_data.delivery_pct"
+      ],
+      "symbol_column": "symbol",
+      "unit": "percent (0-100)"
+    },
+    {
+      "availability": "T+1, same as delivery_pct.",
+      "caveats": [
+        "Two different 'delivery z' definitions coexist; name which one a result used."
+      ],
+      "concepts": [
+        "delivery"
+      ],
+      "date_column": "date",
+      "definition": "(delivery_pct_t - mean20) / std20 over rolling(20, min_periods=10) INCLUDING day t (feature_engineering.py). Differs from the ontology metric delivery_surprise_z, whose baseline is the 20 sessions BEFORE t.",
+      "derived_from": [
+        "delivery_pct"
+      ],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Delivery z-score",
+      "lookback": "20 sessions (>= 10 observed)",
+      "measured": "Closest tested analogues delivery_spike / delivery_trend: t -1.08 / -1.43, dead.",
+      "name": "delivery_z_20d",
+      "requires": [],
+      "sources": [
+        "feature_store.delivery_z_20d"
+      ],
+      "symbol_column": "symbol",
+      "unit": "z"
+    },
+    {
+      "availability": "After the vendor publishes the session; use fetched_at, not date. No row exists before the first fetch day, so this cannot be backfilled.",
+      "caveats": [
+        "Source column is moneycontrol only; the panel is short, so any reading is a calendar artefact until a year exists.",
+        "OI has a buyer and a seller for every contract: it does not show direction.",
+        "Until AF-20261113-02 is applied, rows exist under non-F&O symbols that share an mcsymbol with an F&O name: verbatim copies of the owner's contract. The fetcher no longer writes them; the historical rows stay until purged.",
+        "futures_eod holds the exchange's own series from 2021; prefer it for history."
+      ],
+      "concepts": [
+        "open_interest"
+      ],
+      "date_column": "date",
+      "definition": "stock_futures_oi_history.open_interest: outstanding futures for (symbol, expiry) on the session, as served by Moneycontrol, in SHARES (identical to the exchange file's OPEN_INT for 216 of 216 overlapping symbols on 2026-11-11); divide by lot_size for contracts.",
+      "derived_from": [],
+      "instruments": [
+        "future"
+      ],
+      "label": "Futures open interest",
+      "lookback": "1 session",
+      "measured": "LOW-DATA: oi_change 5d IC +0.078 / AUC 0.532 on 13 dates; 1d no edge (measurement.md).",
+      "name": "futures_open_interest",
+      "requires": [],
+      "sources": [
+        "stock_futures_oi_history.open_interest",
+        "stock_futures_oi_history.oi_change",
+        "stock_futures_oi_history.lot_size"
+      ],
+      "symbol_column": "symbol",
+      "unit": "shares (lot_size = shares per contract)"
+    },
+    {
+      "availability": "End of trade_date for the exchange file. Loaded retrospectively by a one-shot backfill, so fetched_at is load time, not publication time: a backtest must use trade_date + 1.",
+      "caveats": [
+        "Symbols are the file's own: a renamed name has two histories (no rename mapping).",
+        "No rows for index futures other than NIFTY and BANKNIFTY.",
+        "Not refreshed nightly: a one-shot research backfill, like stock_option_features_history."
+      ],
+      "concepts": [
+        "open_interest",
+        "ohlcv"
+      ],
+      "date_column": "trade_date",
+      "definition": "stock_futures_eod_history: for each symbol and trade_date, the two nearest expiries on or after the trade date (expiry_rank 1, 2; rank 1 is the EXPIRING contract on an expiry day, flagged is_expiry_day) with the exchange's close, settle, contracts_traded, open_interest and oi_change exactly as the daily F&O bhavcopy states them (nse_fo_bhav_history_fetcher.py). Stock futures plus NIFTY and BANKNIFTY index futures.",
+      "derived_from": [
+        "future"
+      ],
+      "instruments": [
+        "future"
+      ],
+      "label": "Exchange futures end-of-day (history)",
+      "lookback": "1 session",
+      "measured": "Data, not a signal: no verdict. Makes oi_buildup gradable on a 2021+ panel instead of waiting for the Moneycontrol series to age.",
+      "name": "futures_eod",
+      "requires": [],
+      "sources": [
+        "stock_futures_eod_history.open_interest",
+        "stock_futures_eod_history.oi_change",
+        "stock_futures_eod_history.settle",
+        "stock_futures_eod_history.contracts_traded"
+      ],
+      "symbol_column": "symbol",
+      "unit": "INR/share; contracts; open_interest and oi_change in shares"
+    },
+    {
+      "availability": "After the vendor publishes the session; use fetched_at, not date. No row exists before the first fetch day.",
+      "caveats": [
+        "Expiry roll days mix two series: check expiry before differencing."
+      ],
+      "concepts": [
+        "open_interest"
+      ],
+      "date_column": "date",
+      "definition": "stock_futures_oi_history.oi_change (absolute) and oi_pct_change (percent) versus the previous session for the same expiry, vendor-computed.",
+      "derived_from": [],
+      "instruments": [
+        "future"
+      ],
+      "label": "Futures OI change",
+      "lookback": "1 session",
+      "measured": "No edge at 1d; 5d LOW-DATA (see futures_open_interest).",
+      "name": "futures_oi_change",
+      "requires": [
+        "futures_open_interest"
+      ],
+      "sources": [
+        "stock_futures_oi_history.oi_change",
+        "stock_futures_oi_history.oi_pct_change"
+      ],
+      "symbol_column": "symbol",
+      "unit": "contracts; percent"
+    },
+    {
+      "availability": "After the vendor publishes the session; use fetched_at, not date. No row exists before the first fetch day.",
+      "caveats": [
+        "Futures uses 'Buildup'; the option chain uses 'Build Up': never compare the strings across tables.",
+        "A label from OI alone is impossible: it needs both futures OI and a price change.",
+        "Vendor label, not recomputed here."
+      ],
+      "concepts": [
+        "open_interest"
+      ],
+      "date_column": "date",
+      "definition": "stock_futures_oi_history.oi_buildup in {Long Buildup, Short Buildup, Long Unwinding, Short Covering}: the vendor's classification of the sign of price change against the sign of OI change (price up + OI up = Long Buildup; price down + OI up = Short Buildup; price down + OI down = Long Unwinding; price up + OI down = Short Covering). The price reference the vendor uses is not documented. Option rows carry the same idea per strike in so_option_chain.ce_buildup / pe_buildup.",
+      "derived_from": [],
+      "instruments": [
+        "future",
+        "option"
+      ],
+      "label": "Futures OI buildup label",
+      "lookback": "1 session",
+      "measured": "No verdict recorded for the label; its inputs (oi_change) show no edge and the panel is short.",
+      "name": "oi_buildup",
+      "requires": [
+        "futures_oi_change",
+        "daily_ohlcv"
+      ],
+      "sources": [
+        "stock_futures_oi_history.oi_buildup",
+        "so_option_chain.ce_buildup",
+        "so_option_chain.pe_buildup"
+      ],
+      "symbol_column": "symbol",
+      "unit": "label"
+    },
+    {
+      "availability": "After the exchange file for the session is parsed; use fetched_at.",
+      "caveats": [
+        "Two columns of the same name from two writers: state which one."
+      ],
+      "concepts": [
+        "open_interest"
+      ],
+      "date_column": "date",
+      "definition": "next_oi / (near_oi + next_oi) * 100 at the session (fno_rollover_fetcher.py); a second vendor-served rollover_pct exists in stock_futures_oi_history.",
+      "derived_from": [],
+      "instruments": [
+        "future"
+      ],
+      "label": "Futures rollover share",
+      "lookback": "1 session",
+      "measured": "Negative, LOW-DATA (measurement.md).",
+      "name": "rollover_pct",
+      "requires": [
+        "futures_open_interest"
+      ],
+      "sources": [
+        "fno_rollover.rollover_pct"
+      ],
+      "symbol_column": "symbol",
+      "unit": "percent (0-100)"
+    },
+    {
+      "availability": "After the exchange file for the session is parsed; use fetched_at, not date.",
+      "caveats": [
+        "Undefined when days_to_expiry <= 0."
+      ],
+      "concepts": [
+        "open_interest"
+      ],
+      "date_column": "date",
+      "definition": "(near_close - spot) / spot * 100 / days_to_expiry * 365 (fno_rollover_fetcher.py); spot is the file's underlying price.",
+      "derived_from": [
+        "future"
+      ],
+      "instruments": [
+        "future"
+      ],
+      "label": "Annualised cost of carry",
+      "lookback": "1 session to near expiry",
+      "measured": "Tested as futures carry on the 2021-01..2024-07 panel; read that measurement.md entry before quoting a number.",
+      "name": "cost_of_carry_ann",
+      "requires": [
+        "daily_ohlcv"
+      ],
+      "sources": [
+        "fno_rollover.cost_of_carry_ann"
+      ],
+      "symbol_column": "symbol",
+      "unit": "percent per annum"
+    },
+    {
+      "availability": "After the vendor snapshot; use fetched_at.",
+      "caveats": [
+        "A grid: one session yields many rows per symbol; a naive join multiplies parent rows.",
+        "Stock option-chain history is far shallower than the index panels."
+      ],
+      "concepts": [
+        "open_interest"
+      ],
+      "date_column": "date",
+      "definition": "so_option_chain.ce_oi / pe_oi: outstanding call / put contracts for (symbol, date, expiry, strike).",
+      "derived_from": [],
+      "instruments": [
+        "option"
+      ],
+      "label": "Option open interest by strike",
+      "lookback": "1 session",
+      "measured": "Data, not a signal.",
+      "name": "option_open_interest",
+      "requires": [],
+      "sources": [
+        "so_option_chain.ce_oi",
+        "so_option_chain.pe_oi"
+      ],
+      "symbol_column": "symbol",
+      "unit": "contracts as served"
+    },
+    {
+      "availability": "End of trade_date for the exchange file; the table was loaded retrospectively, so fetched_at is load time, not publication time.",
+      "caveats": [
+        "Options-derived: it cannot exist without option OI.",
+        "nt_index_pcr_ts carries three PCRs (OI, volume, change-in-OI); they are not interchangeable.",
+        "stock_option_features_history ends 2024-07-05 at time of writing."
+      ],
+      "concepts": [
+        "open_interest"
+      ],
+      "date_column": "trade_date",
+      "definition": "put_oi / call_oi, each summed over EVERY strike of the nearest option expiry strictly after the trade date (nse_fo_bhav_history_fetcher.py); in shares. Index form: index_max_pain.pcr_oi and nt_index_pcr_ts.pcr.",
+      "derived_from": [
+        "option",
+        "option_open_interest"
+      ],
+      "instruments": [
+        "option",
+        "equity",
+        "index"
+      ],
+      "label": "Put-call ratio by open interest",
+      "lookback": "1 session, near expiry",
+      "measured": "Descriptive only: IC +0.010, its book loses 0.36% net (2026-10-09 pre-registered run).",
+      "name": "pcr_oi",
+      "requires": [
+        "option_open_interest"
+      ],
+      "sources": [
+        "stock_option_features_history.pcr_oi",
+        "index_max_pain.pcr_oi",
+        "nt_index_pcr_ts.pcr"
+      ],
+      "symbol_column": "symbol",
+      "unit": "ratio (unitless)"
+    },
+    {
+      "availability": "End of trade_date for the exchange file; the table was loaded retrospectively, so fetched_at is load time, not publication time.",
+      "caveats": [
+        "so_option_chain.ce_iv / pe_iv are vendor values in PERCENT points (35.25), this column is a fraction: never mix them.",
+        "spot_proxy in the same table is derived from the future, so forward/spot_proxy is a constant (a trap for carry studies)."
+      ],
+      "concepts": [
+        "implied_volatility"
+      ],
+      "date_column": "trade_date",
+      "definition": "Black-76 on the forward F, r = 6.5%, T = calendar days to expiry / 365; OTM-side IVs (puts <= F, calls >= F) interpolated linearly in strike to F; only contracts that traded are priced (nse_fo_bhav_history_fetcher.py). F = same-expiry future settle, else put-call parity on the traded pair with the smallest |C-P|.",
+      "derived_from": [
+        "option",
+        "futures_open_interest"
+      ],
+      "instruments": [
+        "option"
+      ],
+      "label": "At-the-money implied volatility",
+      "lookback": "1 session, near expiry",
+      "measured": "No verdict recorded.",
+      "name": "atm_iv",
+      "requires": [
+        "option_open_interest"
+      ],
+      "sources": [
+        "stock_option_features_history.atm_iv"
+      ],
+      "symbol_column": "symbol",
+      "unit": "annualised fraction (0.23 = 23%)"
+    },
+    {
+      "availability": "End of trade_date for the exchange file; the table was loaded retrospectively, so fetched_at is load time, not publication time.",
+      "caveats": [],
+      "concepts": [
+        "implied_volatility"
+      ],
+      "date_column": "trade_date",
+      "definition": "IV(traded OTM put nearest 0.95F) - IV(traded OTM call nearest 1.05F), each within 2.5% moneyness of target (nse_fo_bhav_history_fetcher.py); positive = downside put bid.",
+      "derived_from": [
+        "atm_iv"
+      ],
+      "instruments": [
+        "option"
+      ],
+      "label": "Put-call implied-volatility skew",
+      "lookback": "1 session, near expiry",
+      "measured": "H5 FAIL, wrong sign: IC +0.024 at 5 sessions against a negative prediction, -0.49% net (measurement.md, 2026-10-09).",
+      "name": "skew_95_105",
+      "requires": [],
+      "sources": [
+        "stock_option_features_history.skew_95_105"
+      ],
+      "symbol_column": "symbol",
+      "unit": "volatility points as a fraction"
+    },
+    {
+      "availability": "End of trade_date for the exchange file; the table was loaded retrospectively, so fetched_at is load time, not publication time.",
+      "caveats": [],
+      "concepts": [
+        "implied_volatility"
+      ],
+      "date_column": "trade_date",
+      "definition": "(ATM call close + ATM put close) / spot_proxy * 100; NULL unless both legs traded.",
+      "derived_from": [
+        "atm_iv"
+      ],
+      "instruments": [
+        "option"
+      ],
+      "label": "ATM straddle size",
+      "lookback": "1 session, near expiry",
+      "measured": "Descriptive only: IC -0.019.",
+      "name": "straddle_pct",
+      "requires": [],
+      "sources": [
+        "stock_option_features_history.straddle_pct"
+      ],
+      "symbol_column": "symbol",
+      "unit": "percent of spot"
+    },
+    {
+      "availability": "After the vendor snapshot; use fetched_at.",
+      "caveats": [],
+      "concepts": [
+        "open_interest"
+      ],
+      "date_column": "date",
+      "definition": "Strike minimising total option-writer payout for the expiry (a mechanical calculation, index_max_pain.max_pain).",
+      "derived_from": [
+        "option"
+      ],
+      "instruments": [
+        "index",
+        "option"
+      ],
+      "label": "Index max pain",
+      "lookback": "1 session, per expiry",
+      "measured": "Unvalidated research candidate; a mechanical value, not a prediction.",
+      "name": "index_max_pain",
+      "requires": [
+        "option_open_interest"
+      ],
+      "sources": [
+        "index_max_pain.max_pain"
+      ],
+      "symbol_column": null,
+      "unit": "index points"
+    },
+    {
+      "availability": "Effective on ex_date. The ANNOUNCEMENT date is not stored (ingested_at is load time), so the table is not point-in-time for when an action became known.",
+      "caveats": [
+        "Carries 'Quarterly Results' rows that are not capital actions: filter action_type.",
+        "The NSE-sourced rows never populate ratio; history before the NSE writer comes from yfinance.",
+        "Demergers and rights are not share-ratio actions: a mechanical 2:1 reading is wrong."
+      ],
+      "concepts": [
+        "corporate_actions"
+      ],
+      "date_column": "ex_date",
+      "definition": "One row per (symbol, ex_date, action_type): DIVIDEND, DIVIDEND_SPECIAL, BONUS, SPLIT, OTHER, with ratio and amount where parsed. Used to adjust prices.",
+      "derived_from": [],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Corporate action event",
+      "lookback": "event",
+      "measured": "Infrastructure: no edge claim.",
+      "name": "corporate_action_event",
+      "requires": [],
+      "sources": [
+        "corporate_actions.ex_date",
+        "corporate_actions.action_type",
+        "corporate_actions.ratio",
+        "corporate_actions.amount"
+      ],
+      "symbol_column": "symbol",
+      "unit": "event; amount in INR/share; ratio unitless"
+    },
+    {
+      "availability": "After the vendor publishes the quarter; use fetched_at. `quarter` is a fiscal label (Q2FY26), not a date.",
+      "caveats": [
+        "Sequencing the quarter label as a string sorts wrongly across a year boundary.",
+        "Estimate vintage is not stored: the consensus may be post-revision."
+      ],
+      "concepts": [
+        "earnings"
+      ],
+      "date_column": "fetched_at",
+      "definition": "eps_surprise_history.eps_surprise: reported EPS versus the vendor consensus estimate for the fiscal quarter, as served by Moneycontrol.",
+      "derived_from": [],
+      "instruments": [
+        "equity"
+      ],
+      "label": "EPS surprise",
+      "lookback": "1 fiscal quarter",
+      "measured": "earnings_beat_yoy / qoq underpowered (3-27 periods), calendar-blocked until ~12+ months exist.",
+      "name": "eps_surprise_pct",
+      "requires": [],
+      "sources": [
+        "eps_surprise_history.eps_surprise",
+        "eps_surprise_history.eps_actual",
+        "eps_surprise_history.eps_estimate"
+      ],
+      "symbol_column": "symbol",
+      "unit": "percent as served"
+    },
+    {
+      "availability": "broadcast_ts (UTC), the earliest knowable time; fetched/first-observed timestamps can be later.",
+      "caveats": [
+        "Original versus revision labelling must be preserved; bank and insurer formats differ."
+      ],
+      "concepts": [
+        "earnings"
+      ],
+      "date_column": "broadcast_ts",
+      "definition": "One row per NSE integrated filing (nse_results_filings) with broadcast_ts, and parsed financial facts in nse_filing_financials. broadcast_ts is the first moment the result was public on the exchange.",
+      "derived_from": [],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Results filing event",
+      "lookback": "event",
+      "measured": "Results strength is forecastable before filing (learned IC 0.41); the price reaction is not (IC ~0) (memory: earnings preview, 2026-10-27).",
+      "name": "earnings_filing_event",
+      "requires": [],
+      "sources": [
+        "nse_results_filings.broadcast_ts"
+      ],
+      "symbol_column": "symbol",
+      "unit": "event"
+    },
+    {
+      "availability": "Trade date + 7 calendar days (disclosure lag).",
+      "caveats": [
+        "insider_trades stores the trade date, not the disclosure date.",
+        "ESOP, gift, pledge, inter-se and allotment rows are excluded as carrying no price view."
+      ],
+      "concepts": [
+        "insider_trades"
+      ],
+      "date_column": "date_iso",
+      "definition": "buy_qty / (buy_qty + sell_qty) over a 90-calendar-day window of OPEN-MARKET insider trades; a trade counts from date_iso + 7 calendar days; windows with no trade read 0.5 (neutral), never 0 (insider_features.py).",
+      "derived_from": [],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Insider buy share, 90 days",
+      "lookback": "90 calendar days",
+      "measured": "insider_net +0.29%/period, t 1.73: not significant. PIT net buying IC -0.014 (descriptive).",
+      "name": "insider_buy_pct_90d",
+      "requires": [],
+      "sources": [
+        "insider_trades.quantity",
+        "insider_trades.typeOfTransaction",
+        "insider_trades.date_iso"
+      ],
+      "symbol_column": "symbol",
+      "unit": "fraction (0-1)"
+    },
+    {
+      "availability": "End of session `date`.",
+      "caveats": [
+        "Normalise trade_type with UPPER() before netting buys and sells.",
+        "Four overlapping deal tables exist (block_deals, bulk_deals, bulk_block_deals, nse_bulk_block_deals): dedupe before summing."
+      ],
+      "concepts": [
+        "flows"
+      ],
+      "date_column": "date",
+      "definition": "block_deals.value_cr: deal value in CRORES; qty in shares; trade_type mixed case.",
+      "derived_from": [],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Block / bulk deal value",
+      "lookback": "1 session",
+      "measured": "smart_money composite (insider + block + institutional deals): rank IC -0.000 / AUC 0.502 (h1), -0.020 / 0.484 (h5) at 2026-08-29: weak.",
+      "name": "block_deal_value",
+      "requires": [],
+      "sources": [
+        "block_deals.value_cr",
+        "block_deals.qty"
+      ],
+      "symbol_column": "symbol",
+      "unit": "INR crore"
+    },
+    {
+      "availability": "End of session; computed_at is the write time.",
+      "caveats": [
+        "Universe is this platform's own: not comparable with a vendor breadth series."
+      ],
+      "concepts": [
+        "breadth"
+      ],
+      "date_column": "date",
+      "definition": "above.sum / sma-valid.sum across the platform's own universe, close > rolling(200) mean (market_breadth.py).",
+      "derived_from": [
+        "daily_ohlcv"
+      ],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Share of universe above 200-day mean",
+      "lookback": "200 trading rows",
+      "measured": "Market-wide: zero cross-sectional variance, so not a stock-selection factor; context only.",
+      "name": "pct_above_200dma",
+      "requires": [],
+      "sources": [
+        "market_breadth.pct_above_200dma"
+      ],
+      "symbol_column": null,
+      "unit": "fraction (0-1)"
+    },
+    {
+      "availability": "End of session, after stock_ohlcv for that date exists; computed_at is the write time.",
+      "caveats": [
+        "feature_store.advance_decline_ratio comes from a different writer: check before joining."
+      ],
+      "concepts": [
+        "breadth"
+      ],
+      "date_column": "date",
+      "definition": "advancers / (advancers + decliners) versus the prior close (market_breadth.py). Note: this is a SHARE in [0,1], not the conventional advancers/decliners ratio.",
+      "derived_from": [
+        "daily_ohlcv"
+      ],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Advancer share of movers",
+      "lookback": "1 session",
+      "measured": "Market-wide context only.",
+      "name": "adv_decline_ratio",
+      "requires": [],
+      "sources": [
+        "market_breadth.adv_decline_ratio"
+      ],
+      "symbol_column": null,
+      "unit": "fraction (0-1)"
+    },
+    {
+      "availability": "End of session, after stock_ohlcv for that date exists; computed_at is the write time.",
+      "caveats": [],
+      "concepts": [
+        "breadth",
+        "momentum"
+      ],
+      "date_column": "date",
+      "definition": "fraction of universe making a fresh 20-day high (market_breadth.py).",
+      "derived_from": [
+        "daily_ohlcv"
+      ],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Share of universe at a 20-day high",
+      "lookback": "20 trading rows",
+      "measured": "Market-wide context only.",
+      "name": "pct_at_20d_high",
+      "requires": [],
+      "sources": [
+        "market_breadth.pct_at_20d_high"
+      ],
+      "symbol_column": null,
+      "unit": "fraction (0-1)"
+    },
+    {
+      "availability": "End of session, after stock_ohlcv for that date exists; computed_at is the write time.",
+      "caveats": [],
+      "concepts": [
+        "breadth"
+      ],
+      "date_column": "date",
+      "definition": "(new 52-week highs - new 52-week lows) / universe (market_breadth.py).",
+      "derived_from": [
+        "daily_ohlcv"
+      ],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Net 52-week highs minus lows",
+      "lookback": "252 trading rows",
+      "measured": "Market-wide context only.",
+      "name": "net_highs_lows",
+      "requires": [],
+      "sources": [
+        "market_breadth.net_highs_lows"
+      ],
+      "symbol_column": null,
+      "unit": "fraction"
+    },
+    {
+      "availability": "After the evening publication; the first value is provisional.",
+      "caveats": [
+        "Provisional exchange figures are revised."
+      ],
+      "concepts": [
+        "flows"
+      ],
+      "date_column": "date",
+      "definition": "fii_dii_flow.fii_net: FII buy minus sell in the cash segment as published, INR crore (source's convention; the schema does not declare the unit). feature_store.fii_3d_net / fii_10d_net are rolling(3) / rolling(10) sums of it.",
+      "derived_from": [],
+      "instruments": [
+        "equity"
+      ],
+      "label": "FII net cash flow",
+      "lookback": "1 session; 3 and 10 session sums",
+      "measured": "Market-wide: not a stock-selection factor; context only.",
+      "name": "fii_net_cash",
+      "requires": [],
+      "sources": [
+        "fii_dii_flow.fii_net",
+        "fii_dii_flow.dii_net"
+      ],
+      "symbol_column": null,
+      "unit": "INR crore (undeclared in schema)"
+    },
+    {
+      "availability": "After the nightly regime job; use computed_at.",
+      "caveats": [
+        "History is short relative to price history: report per-regime n."
+      ],
+      "concepts": [
+        "regime"
+      ],
+      "date_column": "date",
+      "definition": "market_regimes.regime with regime_prob from the HMM state; used to re-blend engine weights.",
+      "derived_from": [],
+      "instruments": [
+        "index"
+      ],
+      "label": "Market regime label",
+      "lookback": "model-dependent",
+      "measured": "A weight gate, not alpha; treating it as a signal inverts its role.",
+      "name": "market_regime",
+      "requires": [],
+      "sources": [
+        "market_regimes.regime",
+        "market_regimes.regime_prob"
+      ],
+      "symbol_column": null,
+      "unit": "label; probability"
+    },
+    {
+      "availability": "After disclosure; fetched_at.",
+      "caveats": [
+        "Disclosure-grain, not daily: state the carry-forward rule in any panel."
+      ],
+      "concepts": [
+        "ownership"
+      ],
+      "date_column": "date",
+      "definition": "stock_mf_holdings.mf_holding_pct: share of equity held by mutual funds for a disclosure period, with num_funds and chg_vs_prev.",
+      "derived_from": [],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Mutual-fund holding",
+      "lookback": "1 disclosure period (monthly)",
+      "measured": "No verdict recorded.",
+      "name": "mf_holding_pct",
+      "requires": [],
+      "sources": [
+        "stock_mf_holdings.mf_holding_pct"
+      ],
+      "symbol_column": "symbol",
+      "unit": "percent of equity"
+    },
+    {
+      "availability": "After the evening unified-ranker run; use the history table's generated_at.",
+      "caveats": [
+        "Not a calibrated probability."
+      ],
+      "concepts": [
+        "ranking"
+      ],
+      "date_column": "generated_at",
+      "definition": "unified_recommendations.unified_score from unified_ranker.py: the platform's one ranking. Never write a parallel 'final' score.",
+      "derived_from": [],
+      "instruments": [
+        "equity"
+      ],
+      "label": "Canonical ranking score",
+      "lookback": "none (cross-sectional per run)",
+      "measured": "No demonstrated forward-return edge; top quintile worst at 5d (memory 2026-10-25).",
+      "name": "unified_score",
+      "requires": [],
+      "sources": [
+        "unified_recommendations.unified_score"
+      ],
+      "symbol_column": "symbol",
+      "unit": "score as defined by the ranker"
+    }
+  ]
+}

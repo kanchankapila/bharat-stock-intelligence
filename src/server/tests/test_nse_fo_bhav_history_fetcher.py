@@ -274,3 +274,50 @@ def test_failed_store_rolls_back_the_whole_day():
     with pytest.raises(Exception):
         m.store_day(conn, rows, "test")
     assert conn.execute("SELECT count(*) FROM stock_option_features_history").fetchone()[0] == 0
+
+
+# ── futures rows (stock_futures_eod_history) ────────────────────────────────
+
+def _futrec(sym, xp, oi, chg=0.0, vol=10.0, cls="STK", td=D0):
+    return m._record(("FUT", cls), sym, td, xp, None, None, 100.0, 101.0, vol, oi, chg)
+
+
+def test_futures_rows_keep_the_two_nearest_expiries_in_exchange_units():
+    rows = m.futures_rows(m.parse_old(_fixture_text()), D0)
+    assert len(rows) == 8 and {r["expiry_rank"] for r in rows} == {1, 2}
+    rel = next(r for r in rows if r["symbol"] == "RELIANCE" and r["expiry_rank"] == 1)
+    assert (rel["expiry"], rel["open_interest"], rel["oi_change"], rel["contracts_traded"]) == (
+        dt.date(2022, 1, 27), 32218250.0, -383250.0, 24619.0)
+    assert not any(r["is_expiry_day"] for r in rows)
+
+
+def test_expiry_day_contract_is_rank_one_and_flagged_and_past_expiries_are_dropped():
+    recs = [_futrec("XYZ", dt.date(2022, 1, 3), 500.0), _futrec("XYZ", dt.date(2022, 1, 27), 700.0),
+            _futrec("XYZ", dt.date(2022, 2, 24), 900.0), _futrec("XYZ", dt.date(2021, 12, 30), 111.0)]
+    rows = sorted(m.futures_rows(recs, D0), key=lambda r: r["expiry_rank"])
+    assert [(r["expiry"], r["is_expiry_day"]) for r in rows] == [
+        (dt.date(2022, 1, 3), True), (dt.date(2022, 1, 27), False)]
+
+
+def test_only_nifty_and_banknifty_index_futures_are_kept():
+    xp = dt.date(2022, 1, 27)
+    recs = [_futrec("NIFTY", xp, 1.0, cls="IDX"), _futrec("FINNIFTY", xp, 1.0, cls="IDX"), _futrec("ABC", xp, 1.0)]
+    assert sorted(r["symbol"] for r in m.futures_rows(recs, D0)) == ["ABC", "NIFTY"]
+
+
+def test_run_range_fills_futures_and_refetches_a_day_that_has_only_options():
+    conn = _db_with_sessions(D0)
+    s1 = _Session({m.day_url(D0): (200, _fixture_bytes())})
+    first = m.run_range(conn, D0, D0, _fetcher(s1))
+    assert (first["fetched"], first["rows"], first["futures_rows"]) == (1, 4, 8)
+    # a day stored before the futures table existed: options present, futures absent
+    conn.execute("DELETE FROM stock_futures_eod_history")
+    conn.commit()
+    s2 = _Session({m.day_url(D0): (200, _fixture_bytes())})
+    second = m.run_range(conn, D0, D0, _fetcher(s2))
+    assert second["fetched"] == 1 and second["skipped"] == 0 and second["futures_rows"] == 8
+    assert conn.execute("SELECT count(*) FROM stock_futures_eod_history").fetchone()[0] == 8
+    assert conn.execute("SELECT count(*) FROM stock_option_features_history").fetchone()[0] == 4
+    # and a day with both is skipped
+    s3 = _Session({m.day_url(D0): (200, _fixture_bytes())})
+    assert m.run_range(conn, D0, D0, _fetcher(s3))["skipped"] == 1

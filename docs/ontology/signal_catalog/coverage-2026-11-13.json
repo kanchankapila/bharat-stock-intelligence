@@ -1,0 +1,227 @@
+{
+  "as_of_utc": "2026-11-13T09:08:28+00:00",
+  "tables": {
+    "block_deals": {
+      "distinct_symbols": 1721,
+      "earliest": "2024-08-26",
+      "latest": "2026-11-12",
+      "missing_columns": [],
+      "pct_of_universe": 35.1,
+      "rows": 20971,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 855
+    },
+    "corporate_actions": {
+      "distinct_symbols": 2001,
+      "earliest": "1994-06-03",
+      "latest": "2026-11-20",
+      "missing_columns": [],
+      "pct_of_universe": 79.5,
+      "rows": 26439,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 1936
+    },
+    "eps_surprise_history": {
+      "distinct_symbols": 571,
+      "earliest": "2026-06-30 12:02:45.633022+00",
+      "latest": "2026-11-12 15:28:25.065039+00",
+      "missing_columns": [],
+      "pct_of_universe": 23.5,
+      "rows": 1480,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 571
+    },
+    "feature_store": {
+      "distinct_symbols": 2433,
+      "earliest": "2021-01-01",
+      "latest": "2026-11-12",
+      "missing_columns": [],
+      "pct_of_universe": 98.2,
+      "rows": 2772570,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 2390
+    },
+    "fii_dii_flow": {
+      "distinct_symbols": null,
+      "earliest": "2016-01-01",
+      "latest": "2026-11-12",
+      "missing_columns": [],
+      "pct_of_universe": null,
+      "rows": 2666,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": null
+    },
+    "fno_rollover": {
+      "distinct_symbols": 223,
+      "earliest": "2026-06-29",
+      "latest": "2026-11-11",
+      "missing_columns": [],
+      "pct_of_universe": 9.1,
+      "rows": 18490,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 222
+    },
+    "index_max_pain": {
+      "distinct_symbols": null,
+      "earliest": "2026-06-30",
+      "latest": "2026-11-12",
+      "missing_columns": [],
+      "pct_of_universe": null,
+      "rows": 1136,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": null
+    },
+    "insider_trades": {
+      "distinct_symbols": 1805,
+      "earliest": "2015-05-22",
+      "latest": "2026-11-11",
+      "missing_columns": [],
+      "pct_of_universe": 66.6,
+      "rows": 108489,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 1621
+    },
+    "market_breadth": {
+      "distinct_symbols": null,
+      "earliest": "2021-01-04",
+      "latest": "2026-11-12",
+      "missing_columns": [],
+      "pct_of_universe": null,
+      "rows": 1448,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": null
+    },
+    "market_regimes": {
+      "distinct_symbols": null,
+      "earliest": "2023-11-08",
+      "latest": "2026-11-12",
+      "missing_columns": [],
+      "pct_of_universe": null,
+      "rows": 757,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": null
+    },
+    "nse_results_filings": {
+      "distinct_symbols": 2275,
+      "earliest": "2021-01-08 04:56:51+00",
+      "latest": "2026-11-12 16:04:10+00",
+      "missing_columns": [],
+      "pct_of_universe": 93.5,
+      "rows": 92601,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 2275
+    },
+    "nt_index_pcr_ts": {
+      "distinct_symbols": null,
+      "earliest": "2026-06-30T06:30:00",
+      "latest": "2026-11-12T20:24:00",
+      "missing_columns": [],
+      "pct_of_universe": null,
+      "rows": 349418,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": null
+    },
+    "so_option_chain": {
+      "distinct_symbols": 218,
+      "earliest": "2026-06-30",
+      "latest": "2026-11-12",
+      "missing_columns": [],
+      "pct_of_universe": 9.0,
+      "rows": 972440,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 218
+    },
+    "stock_delivery_data": {
+      "distinct_symbols": 3052,
+      "earliest": "2025-06-20",
+      "latest": "2026-11-12",
+      "missing_columns": [],
+      "pct_of_universe": 97.8,
+      "rows": 834283,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 2381
+    },
+    "stock_futures_eod_history": {
+      "distinct_symbols": 307,
+      "earliest": "2021-01-01",
+      "latest": "2026-11-12",
+      "missing_columns": [],
+      "pct_of_universe": 11.9,
+      "rows": 561646,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 290
+    },
+    "stock_futures_oi_history": {
+      "distinct_symbols": 229,
+      "earliest": "2026-08-21",
+      "latest": "2026-11-12",
+      "missing_columns": [],
+      "pct_of_universe": 9.4,
+      "rows": 11471,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 229
+    },
+    "stock_mf_holdings": {
+      "distinct_symbols": 1404,
+      "earliest": "2026-08-13",
+      "latest": "2026-09-18",
+      "missing_columns": [],
+      "pct_of_universe": 55.1,
+      "rows": 8405,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 1341
+    },
+    "stock_ohlcv": {
+      "distinct_symbols": 2472,
+      "earliest": "2021-01-01",
+      "latest": "2026-11-12",
+      "missing_columns": [],
+      "pct_of_universe": 99.8,
+      "rows": 2780219,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 2429
+    },
+    "stock_option_features_history": {
+      "distinct_symbols": 307,
+      "earliest": "2021-01-01",
+      "latest": "2026-11-12",
+      "missing_columns": [],
+      "pct_of_universe": 11.9,
+      "rows": 281578,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 290
+    },
+    "unified_recommendations": {
+      "distinct_symbols": 2429,
+      "earliest": "2026-08-10 18:23:51.363893+00",
+      "latest": "2026-11-12 17:00:04.373809+00",
+      "missing_columns": [],
+      "pct_of_universe": 99.8,
+      "rows": 137124,
+      "status": "observed",
+      "symbols_basis": "all_rows",
+      "symbols_in_nse_stocks": 2429
+    }
+  },
+  "universe": "nse_stocks",
+  "universe_symbols": 2434
+}

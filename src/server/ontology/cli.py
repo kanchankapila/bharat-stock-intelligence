@@ -279,13 +279,71 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("table")
     d.add_argument("--max-chars", type=int, default=2500)
 
+    sg = sub.add_parser("signals", help="the versioned signal catalog: validate | export | coverage | show")
+    sg.add_argument("action", choices=("validate", "export", "coverage", "show"))
+    sg.add_argument("name", nargs="?", help="signal name for `show`")
+    sg.add_argument("--out", help="export: catalog dir; coverage: file to write")
+
     s = sub.add_parser("show", help="describe concepts by name")
     s.add_argument("names", nargs="+")
     s.add_argument("--max-chars", type=int, default=2500)
     return p
 
 
+def cmd_signals(onto: Ontology, args: argparse.Namespace) -> int:
+    from . import signals
+    if args.action == "validate":
+        issues = signals.validate()
+        for i in issues:
+            _print(f"  ISSUE {i}")
+        _print(f"signal catalog {signals.SIGNAL_CATALOG_VERSION}: {len(signals.SIGNALS)} signals, "
+               f"{'OK' if not issues else str(len(issues)) + ' issue(s)'}")
+        return 1 if issues else 0
+    if args.action == "export":
+        issues = signals.validate()
+        if issues:
+            _print("refusing to export an invalid catalog: " + "; ".join(issues[:5]))
+            return 1
+        out = args.out or signals.CATALOG_DIR
+        path = os.path.join(out, f"v{signals.SIGNAL_CATALOG_VERSION}.json")
+        if os.path.exists(path):
+            _print(f"{path} already exists: published versions are immutable; bump SIGNAL_CATALOG_VERSION")
+            return 1
+        os.makedirs(out, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(signals.catalog(), fh, indent=2, ensure_ascii=False, sort_keys=True)
+            fh.write("\n")
+        _print(f"wrote {path}")
+        return 0
+    if args.action == "show":
+        row = next((s for s in signals.catalog()["signals"] if s["name"] == args.name), None)
+        if row is None:
+            _print(f"unknown signal {args.name!r}")
+            return 1
+        rel = [r for r in signals.catalog()["relations"] if args.name in (r["subject"], r["object"])]
+        _print(json.dumps({"signal": row, "relations": rel}, indent=2, ensure_ascii=False))
+        return 0
+    import psycopg2
+    from db_compat import database_url
+    conn = psycopg2.connect(database_url().replace("postgresql+psycopg2://", "postgresql://", 1),
+                            options="-c default_transaction_read_only=on")
+    try:
+        report = signals.coverage(conn)
+    finally:
+        conn.close()
+    text = json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            fh.write(text + "\n")
+        _print(f"wrote {args.out}")
+    else:
+        _print(text)
+    bad = [t for t, r in report["tables"].items() if r["status"] != "observed" or r["missing_columns"]]
+    return 1 if bad else 0
+
+
 _COMMANDS = {
+    "signals": cmd_signals,
     "verify": cmd_verify,
     "stats": cmd_stats,
     "standards": cmd_standards,

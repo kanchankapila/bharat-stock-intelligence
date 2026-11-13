@@ -35,6 +35,12 @@ same features from UDiFF for the separate bharat_alpha DB; it is not importable 
     expiring series has T=0, so it rolls to the next one; `is_expiry_day` flags the day).
     Expiry dates come from the file, never from a weekday rule (Thursday before 2025-09,
     Tuesday after).
+Futures: the same file's FUTSTK/FUTIDX rows are reduced to `stock_futures_eod_history` (one row per
+(symbol, trade_date, expiry) for the two nearest expiries on or after the trade date): exchange close,
+settle, contracts traded, open interest and its change, all as the file states them. OPEN_INT is in
+SHARES (RELIANCE 2026-11-11 near contract: 130,185,500, identical to Moneycontrol's open_interest
+there). Kept in its OWN table: `stock_futures_oi_history` feeds a nightly factor_edge run with no
+source filter, so exchange history added there would silently change what that run grades.
 Symbols are the file's own: no rename/lot mapping by convention. Stock options (OPTSTK) for all
 names plus index options (OPTIDX) for NIFTY and BANKNIFTY only. NULL whenever a value is not
 computable, never 0. Realised volatility is NOT stored here; the research harness joins it.
@@ -69,6 +75,8 @@ UDIFF_URL = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{
 OLD_FORMAT_LAST = dt.date(2024, 7, 5)
 
 TABLE = "stock_option_features_history"
+FUT_TABLE = "stock_futures_eod_history"
+FUT_EXPIRIES_KEPT = 2
 INDEX_SYMBOLS = {"NIFTY", "BANKNIFTY"}
 RISK_FREE = 0.065
 SKEW_PUT, SKEW_CALL, MONEYNESS_TOL = 0.95, 1.05, 0.025
@@ -293,6 +301,27 @@ def compute_features(records: list[dict], trade_date: dt.date) -> list[dict]:
 
 # ── HTTP ────────────────────────────────────────────────────────────────────
 
+def futures_rows(records: list[dict], trade_date: dt.date) -> list[dict]:
+    """FUTSTK/FUTIDX rows for `trade_date`: the two nearest expiries on or after the trade date per
+    symbol (rank 1 is the EXPIRING contract on an expiry day, flagged by is_expiry_day). Index
+    futures are limited to INDEX_SYMBOLS, like the option side."""
+    by: dict[tuple, list[dict]] = {}
+    for r in records:
+        if r["type"] != "FUT" or r["trade_date"] != trade_date or r["expiry"] < trade_date:
+            continue
+        if r["cls"] == "IDX" and r["symbol"] not in INDEX_SYMBOLS:
+            continue
+        by.setdefault((r["symbol"], r["cls"]), []).append(r)
+    out = []
+    for (sym, cls), rs in by.items():
+        for rank, r in enumerate(sorted(rs, key=lambda x: x["expiry"])[:FUT_EXPIRIES_KEPT], 1):
+            out.append({"symbol": sym, "trade_date": trade_date, "expiry": r["expiry"], "instrument": cls,
+                        "expiry_rank": rank, "is_expiry_day": r["expiry"] == trade_date,
+                        "close": r["close"], "settle": r["settle"], "contracts_traded": r["vol"],
+                        "open_interest": r["oi"], "oi_change": r["chg_oi"]})
+    return out
+
+
 def day_url(d: dt.date) -> str:
     if d <= OLD_FORMAT_LAST:
         mon = d.strftime("%b").upper()
@@ -387,6 +416,27 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
     PRIMARY KEY (symbol, trade_date, expiry)
 )"""
 
+FUT_DDL = f"""
+CREATE TABLE IF NOT EXISTS {FUT_TABLE} (
+    symbol            TEXT NOT NULL,
+    trade_date        DATE NOT NULL,
+    expiry            DATE NOT NULL,
+    instrument        TEXT NOT NULL,
+    expiry_rank       INTEGER NOT NULL,
+    is_expiry_day     BOOLEAN NOT NULL,
+    close             DOUBLE PRECISION,
+    settle            DOUBLE PRECISION,
+    contracts_traded  DOUBLE PRECISION,
+    open_interest     DOUBLE PRECISION,
+    oi_change         DOUBLE PRECISION,
+    source            TEXT NOT NULL,
+    fetched_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (symbol, trade_date, expiry)
+)"""
+
+FUT_COLS = ["symbol", "trade_date", "expiry", "instrument", "expiry_rank", "is_expiry_day", "close", "settle",
+            "contracts_traded", "open_interest", "oi_change", "source"]
+
 COLS = ["symbol", "trade_date", "expiry", "instrument", "days_to_expiry", "forward", "forward_source",
         "spot_proxy", "atm_strike", "atm_iv", "atm_straddle", "straddle_pct", "iv_put_95", "iv_call_105",
         "skew_95_105", "call_oi", "put_oi", "total_oi", "oi_change", "pcr_oi", "pcr_vol", "n_traded_otm",
@@ -396,6 +446,8 @@ COLS = ["symbol", "trade_date", "expiry", "instrument", "days_to_expiry", "forwa
 def ensure_schema(conn) -> None:
     conn.execute(DDL)
     conn.execute(f"CREATE INDEX IF NOT EXISTS idx_sofh_trade_date ON {TABLE} (trade_date)")
+    conn.execute(FUT_DDL)
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_sfeh_trade_date ON {FUT_TABLE} (trade_date)")
     conn.commit()
 
 
@@ -405,18 +457,18 @@ def _db_value(v):
     return v
 
 
-def store_day(conn, rows: list[dict], source: str) -> int:
-    """Upsert one day's rows in ONE transaction (all or nothing)."""
+def store_day(conn, rows: list[dict], source: str, table: str = TABLE, cols: list[str] = COLS) -> int:
+    """Upsert one day's rows in ONE transaction (all or nothing). cols[:3] are the primary key."""
     if not rows:
         return 0
-    ph = ",".join(["?"] * len(COLS))
-    upd = ", ".join(f"{c}=excluded.{c}" for c in COLS[3:]) + ", fetched_at=now()"
-    sql = (f"INSERT INTO {TABLE} ({', '.join(COLS)}) VALUES ({ph}) "
+    ph = ",".join(["?"] * len(cols))
+    upd = ", ".join(f"{c}=excluded.{c}" for c in cols[3:]) + ", fetched_at=now()"
+    sql = (f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({ph}) "
            f"ON CONFLICT (symbol, trade_date, expiry) DO UPDATE SET {upd}")
     try:
         for r in rows:
             r = {**r, "source": source, "trade_date": r["trade_date"].isoformat(), "expiry": r["expiry"].isoformat()}
-            conn.execute(sql, tuple(_db_value(r[c]) for c in COLS))
+            conn.execute(sql, tuple(_db_value(r[c]) for c in cols))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -424,8 +476,8 @@ def store_day(conn, rows: list[dict], source: str) -> int:
     return len(rows)
 
 
-def present_dates(conn, since: dt.date, until: dt.date) -> set[dt.date]:
-    rows = conn.execute(f"SELECT DISTINCT trade_date FROM {TABLE} WHERE trade_date BETWEEN ? AND ?",
+def present_dates(conn, since: dt.date, until: dt.date, table: str = TABLE) -> set[dt.date]:
+    rows = conn.execute(f"SELECT DISTINCT trade_date FROM {table} WHERE trade_date BETWEEN ? AND ?",
                         (since.isoformat(), until.isoformat())).fetchall()
     return {dt.date.fromisoformat(str(r[0])[:10]) for r in rows}
 
@@ -450,9 +502,12 @@ def sessions(conn, since: dt.date, until: dt.date) -> list[dt.date]:
 
 def run_range(conn, since: dt.date, until: dt.date, fetcher: Fetcher) -> dict:
     ensure_schema(conn)
-    have = present_dates(conn, since, until)
+    # a session is done only when BOTH tables hold it: the futures table was added after the option
+    # history, so 2021-01..2024-07 is re-read once to fill it (option rows are an idempotent upsert)
+    have = present_dates(conn, since, until) & present_dates(conn, since, until, FUT_TABLE)
     todo = sessions(conn, since, until)
-    s = {"sessions": len(todo), "fetched": 0, "skipped": 0, "holidays": 0, "failed": 0, "rows": 0, "aborted": None}
+    s = {"sessions": len(todo), "fetched": 0, "skipped": 0, "holidays": 0, "failed": 0, "rows": 0,
+         "futures_rows": 0, "aborted": None}
     for d in todo:
         if d in have:
             s["skipped"] += 1
@@ -472,13 +527,16 @@ def run_range(conn, since: dt.date, until: dt.date, fetcher: Fetcher) -> dict:
             _log(f"{d}: 404 (no session / not published)")
             continue
         feats = compute_features(recs, d)
-        if not feats:
+        futs = futures_rows(recs, d)
+        if not feats and not futs:
             file_dates = sorted({r["trade_date"] for r in recs})
             s["failed"] += 1
             _log(f"{d}: file holds no rows for this date (file dates {file_dates[:2]}) -- nothing stored")
             continue
         try:
-            n = store_day(conn, feats, "nse_fo_bhav_old" if d <= OLD_FORMAT_LAST else "nse_fo_udiff")
+            src = "nse_fo_bhav_old" if d <= OLD_FORMAT_LAST else "nse_fo_udiff"
+            n = store_day(conn, feats, src)
+            s["futures_rows"] += store_day(conn, futs, src, FUT_TABLE, FUT_COLS)
         except Exception as e:
             s["failed"] += 1
             _log(f"{d}: STORE FAILED {type(e).__name__}: {e}")

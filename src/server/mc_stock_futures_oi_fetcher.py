@@ -202,10 +202,28 @@ def load_mc_symbol_map(symbols: list[str] | None = None) -> dict:
     """{NSE symbol: mcsymbol}. Resolution comes from nse_stocks, never constructed by
     convention -- MC's scId is opaque (data-sources.md)."""
     rows = query_all(
-        "SELECT symbol, mcsymbol FROM nse_stocks "
+        "SELECT symbol, mcsymbol, fno_eligible FROM nse_stocks "
         "WHERE mcsymbol IS NOT NULL AND mcsymbol != '' AND status = 'ACTIVE'"
     )
-    m = {r["symbol"]: r["mcsymbol"] for r in rows}
+    # mcsymbol is not unique (AF-20260918-02). MC answers a shared code with ONE company's futures,
+    # so fetching it once per sharing symbol stored e.g. ASIANPAINT's contract under AGROPHOS (a
+    # non-F&O name): 12 of 228 rows on 2026-11-11, each a verbatim copy of the real owner's row.
+    # Only an F&O name has a futures contract, so a shared code goes to its single F&O-flagged
+    # owner; with zero or several, nobody gets it rather than a guess.
+    by_code: dict = {}
+    for r in rows:
+        by_code.setdefault(r["mcsymbol"], []).append(r)
+    m, dropped = {}, []
+    for code, rs in by_code.items():
+        if len(rs) > 1:
+            rs = [r for r in rs if r["fno_eligible"] == 1]
+            if len(rs) != 1:
+                dropped.append(code)
+                continue
+        m[rs[0]["symbol"]] = code
+    if dropped:
+        log.warning("%d shared mcsymbol codes have no single F&O owner and are skipped: %s",
+                    len(dropped), ", ".join(sorted(dropped)[:10]))
     if symbols:
         want = {s.strip().upper() for s in symbols}
         m = {k: v for k, v in m.items() if k.upper() in want}
