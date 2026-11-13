@@ -85,14 +85,18 @@ services:
     # follow the 8GB cap: 25% and ~75% respectively (the old effective_cache_size=4GB also
     # overstated reality -- there was never 4GB of page cache inside a 6GB container after
     # shared_buffers, which biases the planner toward index/nested-loop plans).
-    # max_worker_processes: the data-volume postgresql.conf says 23, and every database with the
-    # timescaledb extension (bharat_intel plus each scratch test/audit DB) holds one scheduler slot
-    # forever. At 15 databases the policy jobs of bharat_intel could not launch ("out of background
-    # workers", last success 2026-11-02). Headroom = schedulers + 16 job workers + 4 parallel + 4 logrep.
+    # Worker pools: every database with the timescaledb extension (bharat_intel plus each scratch
+    # test/audit DB) holds one scheduler slot forever, in BOTH timescaledb.max_background_workers
+    # (its own pool, 16 in the volume's postgresql.conf) and max_worker_processes (23 there). At 15
+    # databases the 16 TimescaleDB slots were all schedulers plus the launcher, so no policy job of
+    # bharat_intel could launch ("out of background workers", last success 2026-11-02). Raising only
+    # max_worker_processes did not fix it (2026-11-14). TimescaleDB pool = databases + concurrent
+    # jobs; max_worker_processes = that pool + launcher + 4 parallel + 4 logical replication.
     command: >
       postgres
       -c max_connections=60
       -c max_worker_processes=48
+      -c timescaledb.max_background_workers=32
       -c shared_buffers=2GB
       -c work_mem=16MB
       -c maintenance_work_mem=256MB
