@@ -230,7 +230,7 @@ export async function checkAndAlertStaleScripts(now: Date = new Date()): Promise
     if (!s.critical) continue;
     if (s.runState !== 'stale' && s.runState !== 'failed') continue;
     // A probe that errored leaves only an old stored stamp, so "stale" there means "could not look",
-    // not "did not run": do not page on it (AF-20261113-03).
+    // not "did not run": do not page on it (AF-20261113-22).
     if ((s as { probeFailed?: boolean }).probeFailed) {
       console.warn(`[MONITOR] not alerting on '${s.id}': its freshness probe failed`);
       continue;

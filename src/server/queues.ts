@@ -1059,7 +1059,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // MAX_PAGES=15, so a throttled night is legitimately several minutes longer than an
   // off-peak one. 900s = ~3.9x the slower standalone measurement and ~9 throttled pages of
   // room, the same "size at ~2x measured, then leave headroom" rule as mf_sector_allocation
-  // below; still a rounding error inside this job's 3.5h withJobTimeout.
+  // below; still a rounding error inside this job's 3.9h withJobTimeout.
   await runPython('mc_broker_reco_fetcher.py', ['--days', '7'], 15 * 60_000)
     .catch(e => T.fail('mc_broker_reco_fetcher', e));
 
@@ -1134,7 +1134,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // step could never once have completed inside its old budget, and it was one of the three
   // ml-daily-ops steps reporting failed every night. Sized at ~2x measured rather than just
   // over it: recurring-bugs.md's repeated defect here is picking a budget with no headroom and
-  // never revisiting it as the work grows. Fits inside the job's own 3.5h withJobTimeout.
+  // never revisiting it as the work grows. Fits inside the job's own 3.9h withJobTimeout.
   await runPython('mf_sector_allocation_fetcher.py', [], 45 * 60_000)
     .catch(e => T.fail('mf_sector_allocation_fetcher', e));
 
@@ -1331,7 +1331,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   await runPython('intraday_strategy_learner.py', [], 120_000)
     .catch(e => T.fail('intraday_strategy_learner', e));
 
-  await T.run('reward-engine', () => runPython('reward_engine.py'));
+  // Explicit budget (AF-20260927-12): 5 min is what the omitted argument used to mean. Measured 16-62 s
+  // over 30 days (62 s on the 11-12 contended night), so 5 min is ~5x headroom, now stated, not implied.
+  await T.run('reward-engine', () => runPython('reward_engine.py', [], 5 * 60_000));
   // rl_agent (Q-learning over signal episodes) REMOVED 2026-08-31: zero demonstrated edge
   // anywhere in the platform's measurement history (docs/measurement-history.md), and its
   // --update path only recomputed Q-values for rows nothing else creates. rl_q_table /
@@ -2525,7 +2527,7 @@ export async function initQueues(): Promise<boolean> {
     // -- ML weekly DATA prep: fetch + labelling, FRIDAY 23:30 IST (18:00 UTC) --
     // Deliberately a WEEKDAY slot, and deliberately not adjacent to the Saturday training
     // window (AF-20260912-13). 18:00 UTC clears ml-daily-ops' worst case: that job is
-    // '20 13 * * 1-5' with a 3.5h withJobTimeout, so it cannot run past 16:50 UTC.
+    // '20 13 * * 1-5' with a 3.9h withJobTimeout, so it cannot run past 17:14 UTC.
     // Everything this job fetches is quarterly/monthly disclosure data or a symbol master;
     // none of it can change between Friday night and Saturday morning, which is precisely
     // why it no longer belongs in the Saturday chain.
@@ -3121,7 +3123,7 @@ export async function initQueues(): Promise<boolean> {
     // that Friday's ohlcv-gap-fill-daily had not already seen. The only thing this 30-day
     // full-universe sweep can legitimately catch is a vendor RESTATING an older bar, which
     // is not weekend-sensitive and does not need to sit in the Saturday training window.
-    // A weekday slot also keeps it clear of ml-daily-ops (13:20 UTC + 3.5h worst case) and
+    // A weekday slot also keeps it clear of ml-daily-ops (13:20 UTC + 3.9h worst case) and
     // of ml-weekly-data (Friday 18:00 UTC). The 30-day lookback makes the exact weekday
     // irrelevant to coverage -- only the latency of repairing a restated bar changes.
     await addJobWithCatchup(ohlcvBackfillQueue, 'ohlcv-gap-fill-weekly', { mode: 'gap-fill', lookback: 30 }, {
