@@ -40,6 +40,15 @@ own as-of date (2026-11-12 on all three), which the old API never carried.
 Not stored yet and worth a decision: shareholding history, pledge, quarterly financials, peers,
 technicals, documents. They are in the same response, so storing them costs no extra request.
 
+### 1b. The leaderboard route and the `x-sveltekit-validated` URLs (tested 2026-11-13)
+
+- `x-sveltekit-validated=01` is not a SvelteKit parameter and the server ignores it: the CHENNPETRO URL with it decodes identically to the plain one (HTTP 200, 92,262 B). The real switch is `x-sveltekit-invalidated` (see section 1).
+- `https://tapetide.com/score/leaderboard/__data.json?scope=all` answers anonymously (HTTP 200, about 40 KB, 0.3 s). It returns 50 rows a page, each with `nse_symbol`, `score`, `band`, `confidence`, the six `pillars`, `archetype`, `sector`, `pe`, `market_cap_cr` and `red_flags`. `meta.snapshot.score_date` carries the as-of date (2026-11-12).
+- Paging works only through `cursor=<next_cursor>` (the cursor is `v2:<score_date>:<score>:<confidence>:<n>:`). `limit`, `from`, `min_confidence` and `sort`/`order` as I sent them did not change the page size, start or filter (`sort` is echoed in `applied_filters` but I did not verify the order it produces).
+- Reach: 4,516 scored, 4,463 eligible, 4,432 returned by the default filters; 31 are hidden by a confidence threshold of 75 that I could not lower. That is about 89 pages for the reachable rows against roughly 2,000 per-stock pages.
+- Agreement with the per-stock page for 3 symbols (CHENNPETRO, VADILALIND, UJJIVANSFB): score, confidence and all six pillars are identical. The leaderboard row lacks `coverage_pct`, `governance`, `percentile` and `pillar_weights`, which the per-stock `score` section has.
+- Meaning for us: `extra_features_parser.py` reads only `data.score` into `ext_tt_score`, so a leaderboard crawl could supply that one column. It cannot replace the stock page, because analyst ratings and forecasts exist only there, and 31 to 84 names would be missing. Not wired. It is a cheap fallback and a cross-check if the stock-page route breaks. Sample: 3 symbols, one snapshot date.
+
 ## 2. NSE's official MCP servers (new, free, no key)
 
 Page: `https://www.nseindia.com/nse-mcp`. It states "Do I need an account or API key? No." and, as
