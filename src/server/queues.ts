@@ -13,6 +13,7 @@ import { Queue, Worker, QueueEvents, Job, ConnectionOptions } from 'bullmq';
 import { fetchAllLiveStocks } from './liveStockData';
 import { cacheDelPrefix } from './cacheService';
 import { FILED_CORP_ACTIONS_CACHE_PREFIX } from './cacheKeys';
+import { redisReconnectDelay } from './redisRetry';
 import { generateStockAnalysis } from '../services/aiService';
 import { dbGet, dbAll, dbRun } from './dbAsync';
 import Redis from 'ioredis';
@@ -86,11 +87,7 @@ export function makeConnection(isProbe = false): any {
     maxRetriesPerRequest: null,
     enableOfflineQueue: true,
     autoResubscribe: true,
-    // Stagger reconnect attempts so all 88 connections don't pile on Redis at once
-    retryStrategy: (times) => {
-      if (times > 20) return null;
-      return Math.min(times * 200, 5000) + Math.floor(Math.random() * 200);
-    },
+    retryStrategy: redisReconnectDelay,
   };
 }
 
