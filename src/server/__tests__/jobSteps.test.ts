@@ -133,4 +133,30 @@ describe('StepTracker', () => {
     const jobCall = mocked.mock.calls.find(c => c[0] === 'job');
     expect(jobCall![3]).toBeGreaterThanOrEqual(50);
   });
+
+  // AF-20261113-26: sync_tl_index_map's Trendlyne 403 marked ml-weekly-data DEGRADED while every
+  // other step worked and the stored id map stayed usable. A soft failure stays visible (log line,
+  // job heartbeat message, returned list) but does not change the verdict; a hard one still does.
+  it('soft() keeps the job green but names the soft-failed step', async () => {
+    const T = new StepTracker('job');
+    await T.run('ok-step', async () => 1);
+    T.soft('id-map', new Error('403 Forbidden'));
+    const v = T.finish();
+    expect(v.ok).toBe(true);
+    expect(v.failedSteps).toEqual([]);
+    expect(v.softFailedSteps).toEqual(['id-map']);
+    const job = calls.find(c => c.name === 'job')!;
+    expect(job.state).toBe('success');
+    expect(job.message).toContain('id-map');
+  });
+
+  it('a hard failure beside a soft one still degrades the job', async () => {
+    const T = new StepTracker('job');
+    T.soft('id-map', new Error('403'));
+    T.fail('real-step', new Error('boom'));
+    const v = T.finish();
+    expect(v.ok).toBe(false);
+    expect(v.failedSteps).toEqual(['real-step']);
+    expect(calls.find(c => c.name === 'job')!.state).toBe('failed');
+  });
 });

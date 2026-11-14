@@ -1,6 +1,6 @@
 import { updateMonitorState } from './monitoringService';
 
-interface StepRec { name: string; ok: boolean; error?: string; ms: number; quiet?: boolean; }
+interface StepRec { name: string; ok: boolean; error?: string; ms: number; quiet?: boolean; soft?: boolean; }
 
 /**
  * Tracks the outcome of individual steps inside a multi-step job so a step failure is
@@ -60,6 +60,21 @@ export class StepTracker {
     }
   }
 
+  /**
+   * A caught failure that is reported but does not degrade the job: the step's last good output
+   * is still usable (AF-20261113-26: a Trendlyne 403 on the slowly-changing index id map marked
+   * ml-weekly-data DEGRADED while every other step worked). Not swallowed: it is logged, named in
+   * the job heartbeat's message and returned as softFailedSteps. The CALLER decides when a
+   * failure may be soft, and must fall back to fail() when the stored output is not usable.
+   */
+  soft(stepName: string, e: unknown): void {
+    const error = (e as Error)?.message ?? String(e);
+    this.recs.push({ name: stepName, ok: false, error, ms: 0, quiet: true, soft: true });
+    if (process.env.VITEST !== 'true' && process.env.NODE_ENV !== 'test') {
+      console.warn(`[QUEUE] ${this.jobName}:${stepName} failed (soft, job not degraded):`, error);
+    }
+  }
+
   private async _exec<T>(name: string, fn: () => Promise<T>, quiet: boolean): Promise<T | undefined> {
     // performance.now(), NOT Date.now(). Two reasons, both measured on this box:
     //  1. Windows' wall clock ticks at ~15.6ms, so Date.now() quantizes to that. EVERY step
@@ -96,8 +111,9 @@ export class StepTracker {
    *  same run (ACTION_ITEMS #16). Deliberately returned rather than thrown: these are
    *  multi-hour jobs, and throwing would hand them to BullMQ's retry machinery and re-run the
    *  whole chain over one failed step. */
-  finish(): { ok: boolean; failedSteps: string[]; monitorAlreadyRecorded: true } {
-    const failed = this.recs.filter(r => !r.ok);
+  finish(): { ok: boolean; failedSteps: string[]; softFailedSteps: string[]; monitorAlreadyRecorded: true } {
+    const failed = this.recs.filter(r => !r.ok && !r.soft);
+    const softNames = this.recs.filter(r => r.soft).map(r => r.name);
     // Quiet steps deliberately get no per-step heartbeat (see runQuiet's docstring) but DO
     // count toward the failed list and the job-level verdict below.
     for (const r of this.recs) {
@@ -105,8 +121,9 @@ export class StepTracker {
     }
 
     const names = failed.map(r => r.name);
-    const line = `${this.recs.length - failed.length} ok, ${failed.length} failed`
-      + (failed.length ? `: ${names.join(', ')}` : '');
+    const softNote = softNames.length ? `; soft-failed (not degrading): ${softNames.join(', ')}` : '';
+    const line = `${this.recs.length - failed.length - softNames.length} ok, ${failed.length} failed`
+      + (failed.length ? `: ${names.join(', ')}` : '') + softNote;
     if (process.env.VITEST !== 'true' && process.env.NODE_ENV !== 'test') {
       console.log(`[QUEUE] ${this.jobName}: ${line}`);
     }
@@ -117,9 +134,10 @@ export class StepTracker {
     updateMonitorState(
       this.jobName,
       failed.length ? 'failed' : 'success',
-      failed.length ? `${failed.length} steps failed: ${names.join(',')}` : undefined,
+      failed.length ? `${failed.length} steps failed: ${names.join(',')}${softNote}`
+        : (softNames.length ? `soft-failed (not degrading): ${softNames.join(',')}` : undefined),
       totalMs,
     );
-    return { ok: failed.length === 0, failedSteps: names, monitorAlreadyRecorded: true };
+    return { ok: failed.length === 0, failedSteps: names, softFailedSteps: softNames, monitorAlreadyRecorded: true };
   }
 }

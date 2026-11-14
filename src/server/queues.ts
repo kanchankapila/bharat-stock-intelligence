@@ -1492,8 +1492,16 @@ async function processMlWeeklyData(_job: Job): Promise<{ success: boolean; skipp
   // Keep index_provider_map in sync with live provider index lists.
   await runPython('sync_mc_index_map.py', [], 60_000)
     .catch(e => T.fail('sync_mc_index_map', e));
+  // The Trendlyne index id map changes rarely, so a failed refresh (a 403, AF-20261113-26) keeps
+  // the stored ids usable and must not mark the whole job DEGRADED; with no stored ids it is a
+  // real failure. ponytail: the map has no synced-at stamp, so ids Trendlyne renumbers go
+  // unnoticed until a refresh succeeds; add a stamp + age check if that starts to matter.
   await runPython('sync_tl_index_map.py', [], 60_000)
-    .catch(e => T.fail('sync_tl_index_map', e));
+    .catch(async e => {
+      const stored = await dbGet<{ n: number }>(
+        "SELECT count(*)::int AS n FROM index_provider_map WHERE provider = 'trendlyne'").catch(() => undefined);
+      return (stored?.n ?? 0) > 0 ? T.soft('sync_tl_index_map', e) : T.fail('sync_tl_index_map', e);
+    });
   await runPython('sync_nt_fno_symbols.py', [], 60_000)
     .catch(e => T.fail('sync_nt_fno_symbols', e));
   // Refresh earnings beat/miss history (quarterly data, no need to run daily).
