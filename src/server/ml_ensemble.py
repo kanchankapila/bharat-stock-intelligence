@@ -4398,3 +4398,6 @@ if __name__ == "__main__":
     run(do_train=do_train, do_score=do_score,
         retrain_full=args.retrain_full, min_samples=args.min_samples, label=args.label,
         do_tune=args.tune, dry_run=args.dry_run)
+    # All work is committed. A native teardown crash after this line (0xC0000409, five times since
+    # 2026-09-10, AF-20261107-06) is reported by the runner as COMPLETED BEFORE EXIT, not a failed run.
+    print("[BSI] COMPLETE", flush=True)

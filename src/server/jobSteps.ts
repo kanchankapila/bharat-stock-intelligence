@@ -141,3 +141,22 @@ export class StepTracker {
     return { ok: failed.length === 0, failedSteps: names, softFailedSteps: softNames, monitorAlreadyRecorded: true };
   }
 }
+
+/**
+ * Wraps a runPython step whose script prints the completion sentinel: if it finished its work and then
+ * crashed in native teardown (error.completedBeforeExit), report it as a SOFT failure so the job is not
+ * degraded over a run that did everything; any other failure is rethrown unchanged (AF-20261107-06).
+ */
+export function tolerateCompletedCrash<R>(T: StepTracker, name: string, fn: () => Promise<R>): () => Promise<R | undefined> {
+  return async () => {
+    try {
+      return await fn();
+    } catch (e) {
+      if ((e as { completedBeforeExit?: boolean })?.completedBeforeExit) {
+        T.soft(name, e);
+        return undefined;
+      }
+      throw e;
+    }
+  };
+}

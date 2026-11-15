@@ -35,7 +35,7 @@ import { syncNiftyTraderScores, syncTrendlyneScores } from './syncProprietarySco
 import { syncTrendlyneTechnicals } from './technicalIntelligenceService';
 import { fetchDeliveryMap } from './deliveryFetcher';
 import { updateMonitorState } from './monitoringService';
-import { StepTracker } from './jobSteps';
+import { StepTracker, tolerateCompletedCrash } from './jobSteps';
 import { updateTrailingStops } from './trailingStopUpdater';
 import { getTrendlyneMetricSymbols, enqueueTrendlyneMetricsFetchJobs, runTrendlyneMetricsFetch } from './trendlyneDailyFetchService';
 import { initialiseTrendlyneBatch, requireSuccessfulTrendlyneFetch, settleTrendlyneBatch, trendlyneBatchId } from './trendlyneDailyBatch';
@@ -1680,7 +1680,8 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; sk
   // Soft failure: if ml-ensemble-train crashes (e.g. ValueError in score_pending), log the
   // warning but let the weekly job continue to breakout_classifier, strategy-optimizer, etc.
   // and always reach T.finish() so the heartbeat is written.
-  await T.run('ml-ensemble-train', () => runPython('ml_ensemble.py', ['--train', '--tune', '--score', '--label', 'triple_barrier'], 90 * 60_000))
+  await T.run('ml-ensemble-train', tolerateCompletedCrash(T, 'ml-ensemble-train',
+    () => runPython('ml_ensemble.py', ['--train', '--tune', '--score', '--label', 'triple_barrier'], 90 * 60_000)))
     .catch(e => T.fail('ml-ensemble-train', e));
   // cs-ranker-train REMOVED 2026-08-31 alongside the daily score and the blend weight:
   // training a model whose live CV AUC (0.176) is worse than a coin flip only spends
