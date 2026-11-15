@@ -109,7 +109,15 @@ export function buildFailureReason(opts: {
   // there would send the reader off to raise the limit.
   const atCeiling = memLimitMb > 0 && peakMemMb !== undefined && peakMemMb >= 0.9 * memLimitMb;
   const oom = OOM_STDERR.test(err);
+  // A ceilinged run writes its peak at interpreter exit (atexit in pyboot/sitecustomize.py), so an
+  // ordinary non-zero exit WITHOUT that report never reached exit: it was terminated from outside.
+  // 2026-11-15: another project's `taskkill /f /im python.exe` killed three ml-weekly-retrain steps.
+  const killedOutside = memLimitMb > 0 && peakMemMb === undefined && code !== 0
+    && !isAbnormalExitCode(code) && !oom;
   return [
+    killedOutside && `KILLED FROM OUTSIDE: exit code ${code} with no peak-memory report -- the ` +
+      `interpreter never reached its exit hooks, so something terminated it (taskkill /F, ` +
+      `TerminateProcess). Not a script failure; check what else ran at this minute.`,
     atCeiling && `MEMORY CEILING: the job's process tree peaked at ${peakMemMb}MB against its ` +
       `${memLimitMb}MB per-job ceiling (PY_CHILD_MEM_LIMIT_MB) and was refused further ` +
       `memory -- a runaway this job contained instead of the host.`,

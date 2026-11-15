@@ -111,6 +111,23 @@ describe('buildFailureReason', () => {
     expect(buildFailureReason({ code: 1 })).toBe('Command failed with exit code 1');
   });
 
+  // 2026-11-15: exit-policy-train, ml-ensemble-train and strategy-optimizer all failed with a bare
+  // "Command failed with exit code 1" or a stdout tail. Another project's `taskkill /f /im python.exe`
+  // had killed every python.exe (the pm2 Python services restarted 3 s later). A process that exits
+  // non-zero WITHOUT its peak-memory report never reached its atexit hooks, so it was terminated.
+  it('names an outside kill when a ceilinged run exits with an ordinary code and no peak report', () => {
+    const r = buildFailureReason({ code: 1, stdout: '[Optimizer] Baseline', memLimitMb: 20480 });
+    expect(r).toMatch(/^KILLED FROM OUTSIDE/);
+    expect(r).toContain('stdout: [Optimizer] Baseline');
+    expect(buildFailureReason({ code: 1, memLimitMb: 20480 })).toMatch(/^KILLED FROM OUTSIDE/);
+  });
+
+  it('does not claim an outside kill for a deliberate exit, a run without a ceiling, or a native crash', () => {
+    expect(buildFailureReason({ code: 1, stdout: 'guard', peakMemMb: 900, memLimitMb: 20480 })).toBe('stdout: guard');
+    expect(buildFailureReason({ code: 1, stdout: 'guard' })).toBe('stdout: guard');
+    expect(buildFailureReason({ code: 3221225477, memLimitMb: 20480 })).not.toMatch(/KILLED FROM OUTSIDE/);
+  });
+
   it('keeps the memory-ceiling diagnosis ahead of the stream tails', () => {
     const r = buildFailureReason({
       code: 1, stdout: 'boom', peakMemMb: 19500, memLimitMb: 20480,

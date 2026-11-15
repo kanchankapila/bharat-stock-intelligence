@@ -78,7 +78,15 @@ def tej_factors(actions) -> list:
     return sorted((date.fromisoformat(d), f) for d, f in byd.items())
 
 
-def _candidates(known, ours) -> list:
+def merge_actions(tej, extras) -> list:
+    """TEJ's [(ex_date, factor)] plus operator-supplied actions verified elsewhere (NSE's SME index
+    lists SIKKO's 2021-03-18 1:1 bonus, TEJ does not); a supplied factor replaces TEJ's for that date."""
+    byd = dict(tej)
+    byd.update(dict(extras))
+    return sorted(byd.items())
+
+
+def _candidates(known, ours, min_step=MIN_STEP) -> list:
     ratios = []
     for ex, f in known:
         ratios.append(f)
@@ -91,17 +99,17 @@ def _candidates(known, ours) -> list:
         for combo in itertools.combinations(ratios, n):
             p = math.prod(combo)
             for v in (p, 1 / p):
-                if abs(math.log(v)) >= MIN_STEP:
+                if abs(math.log(v)) >= min_step:
                     out.setdefault(round(v, 6), v)
     return list(out.values())
 
 
-def plan_symbol(series, raw, tej, ours, last):
+def plan_symbol(series, raw, tej, ours, last, min_step=MIN_STEP):
     """series [(date, o, h, l, close, volume)]; raw {date: raw close}; tej and ours [(ex_date, factor)];
     last = the newest bar date, so an announced but not yet effective action is never applied.
     Returns ({date: multiplier}, {'segments': [...], 'unmatched': n})."""
     known = [(ex, f) for ex, f in tej if ex <= last]
-    cands = _candidates(known, ours)
+    cands = _candidates(known, ours, min_step)
     labels = []
     for b in series:
         rc = raw.get(b[0])
@@ -171,13 +179,13 @@ def plan_symbol(series, raw, tej, ours, last):
     return mult, rep
 
 
-def plan(conn, symbols, aliases=None):
-    aliases = aliases or {}
+def plan(conn, symbols, aliases=None, extras=None, min_step=MIN_STEP):
+    aliases, extras = aliases or {}, extras or {}
     conn.execute("SET LOCAL timescaledb.max_tuples_decompressed_per_dml_transaction = 0")
     ops, notes = [], []
     for sym in symbols:
         try:
-            tej = tej_factors(fetch_actions(sym).get("data", []))
+            tej = merge_actions(tej_factors(fetch_actions(sym).get("data", [])), extras.get(sym, []))
         except Exception as e:      # a symbol TEJ cannot answer is skipped, never guessed
             notes.append(f"{sym:12s} SKIPPED: {e}")
             continue
@@ -189,7 +197,7 @@ def plan(conn, symbols, aliases=None):
             "SELECT ex_date, factor FROM ohlcv_adjustment_factors WHERE symbol = ? ORDER BY ex_date",
             (sym,)).fetchall()]
         raw = raw_closes(conn, sym, aliases.get(sym, ()))
-        mult, rep = plan_symbol(series, raw, tej, ours, series[-1][0])
+        mult, rep = plan_symbol(series, raw, tej, ours, series[-1][0], min_step)
         no_raw = sum(1 for b in series if b[0] not in raw)
         notes.append(f"{sym:12s} TEJ factors {[(str(e), round(f, 4)) for e, f in tej][-3:]}; "
                      f"{len(mult)} bars to correct (incl. {rep['bridged']} bridged), {rep['unmatched']} unmatched and "
@@ -215,13 +223,21 @@ def main(argv=None, conn=None) -> int:
     ap.add_argument("--symbols", required=True, help="comma-separated NSE symbols, each checked against TEJ")
     ap.add_argument("--alias", action="append", default=[], metavar="NEW:OLD",
                     help="an earlier ticker of NEW whose raw closes should be used too, e.g. CCAVENUE:INFIBEAM")
+    ap.add_argument("--extra-action", action="append", default=[], metavar="SYMBOL:YYYY-MM-DD:FACTOR",
+                    help="an action verified at NSE that TEJ lacks, e.g. SIKKO:2021-03-18:0.5 (SME 1:1 bonus)")
+    ap.add_argument("--min-step", type=float, default=MIN_STEP,
+                    help="smallest correction applied; lower it only for named symbols whose factor two sources confirm")
     args = ap.parse_args(argv)
     syms = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     aliases: dict = {}
     for a in args.alias:
         new, _, old = a.upper().partition(":")
         aliases.setdefault(new, []).append(old)
-    return run(args, conn, lambda c: plan(c, syms, aliases))
+    extras: dict = {}
+    for a in args.extra_action:
+        sym, d, f = a.split(":")
+        extras.setdefault(sym.upper(), []).append((date.fromisoformat(d), float(f)))
+    return run(args, conn, lambda c: plan(c, syms, aliases, extras, args.min_step))
 
 
 if __name__ == "__main__":

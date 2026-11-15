@@ -209,6 +209,26 @@ def test_a_plan_that_would_create_a_new_price_step_is_refused_for_review():
     assert mult == {} and rep['review'] == [L[30]]          # correcting 30..109 alone would step 10 -> 5 at L[30]
 
 
+def test_an_operator_supplied_action_completes_tej_and_unblocks_the_symbol():
+    m = _load()                                            # SIKKO: NSE's SME index lists the 2021-03-18 1:1 bonus TEJ lacks
+    raw = {d: (20.0 if i < 30 else 10.0 if i < 110 else 5.0) for i, d in enumerate(L)}
+    prod = [10.0] * 110 + [5.0] * 30
+    tej = m.merge_actions([(EXL, 0.5)], [(L[30], 0.5)])
+    assert tej == [(L[30], 0.5), (EXL, 0.5)]
+    mult, rep = m.plan_symbol(_lseries(prod), raw, tej, [], LASTL)
+    assert sorted(mult) == L[:110] and set(mult.values()) == {0.5} and rep['review'] == []
+    assert m.merge_actions([(EXL, 0.7778)], [(EXL, 0.75)]) == [(EXL, 0.75)]   # the confirmed value replaces TEJ's
+
+
+def test_min_step_can_be_lowered_for_a_confirmed_small_correction():
+    m = _load()                                            # BRIGADE: stored 0.7778, NSE and TEJ both 0.75 (a 3.6% step)
+    raw = {d: (100.0 / 0.75 if i < 40 else 100.0) for i, d in enumerate(D)}
+    prod = [raw[d] * 0.7778 if i < 40 else raw[d] for i, d in enumerate(D)]
+    assert m.plan_symbol(_series(prod), raw, [(EX, 0.75)], [(EX, 0.7778)], LAST)[0] == {}
+    mult, _ = m.plan_symbol(_series(prod), raw, [(EX, 0.75)], [(EX, 0.7778)], LAST, min_step=0.03)
+    assert sorted(mult) == D[:40] and all(math.isclose(v, 0.75 / 0.7778) for v in mult.values())
+
+
 def test_raw_lookup_uses_any_series_prefers_eq_and_follows_an_explicit_alias(pg_conn):
     m = _load()                                            # SHRADHA trades BE for months; CCAVENUE was INFIBEAM
     pg_conn.execute("CREATE TABLE nse_universe_history (symbol TEXT, date DATE, series TEXT, close FLOAT8)")
