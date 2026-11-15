@@ -328,6 +328,30 @@ def adjust_symbol(rows) -> dict:
 DATE_WINDOW_DAYS = 5  # ex-date vs record-date / weekend slack between the two sources
 
 
+PRICE_SUPPORT_TOL = 0.30   # ex-date close/prev_close may differ from the factor by this much (a 20% circuit day on top of it)
+
+
+def _price_contradicts(conn: ConnWrapper, sym: str, ex_date, factor: float) -> bool:
+    """True only on POSITIVE evidence that the action never happened in price: raw bars exist within the date
+    window and none moves by the factor. MoneyControl declared LAGNAM 0.1 ex 2026-11-05 while its raw close
+    stayed continuous (AF-20261112-12, 19 such rows). Band factors are not judged (price cannot tell them from
+    a circuit move, and a declared one is declared); no table, no bars or a missing jump bar means no verdict."""
+    if BAND[0] <= factor <= BAND[1]:
+        return False
+    if conn.execute("SELECT to_regclass('nse_universe_history')").fetchone()[0] is None:
+        return False
+    from datetime import date as _date, timedelta
+    ex = _date.fromisoformat(_iso(ex_date))
+    rows = conn.execute(
+        "SELECT close, prev_close FROM nse_universe_history WHERE symbol = ? AND date BETWEEN ? AND ? "
+        "AND prev_close > 0 AND close > 0",
+        (sym, (ex - timedelta(days=DATE_WINDOW_DAYS)).isoformat(), (ex + timedelta(days=DATE_WINDOW_DAYS)).isoformat()),
+    ).fetchall()
+    if not rows:
+        return False
+    return not any(abs((r[0] / r[1]) / factor - 1) <= PRICE_SUPPORT_TOL for r in rows)
+
+
 def cross_validate_with_mc_actions(conn: ConnWrapper, persist: bool = False) -> dict:
     """Compare `stock_corporate_action_history`'s authoritative bonus/split ratios against
     `ohlcv_adjustment_factors`, the heuristic detector's output.
@@ -390,6 +414,8 @@ def cross_validate_with_mc_actions(conn: ConnWrapper, persist: bool = False) -> 
     if persist and filled:
         ensure_schema(conn)
         for sym, d, atype, factor, ratio_text in filled:
+            if _price_contradicts(conn, sym, d, factor):
+                continue                      # reported as filled, but never stored: raw prices say it did not happen
             conn.execute(
                 "INSERT INTO ohlcv_adjustment_factors (symbol, ex_date, factor, source) "
                 "VALUES (?,?,?,'mc_corporate_action') "
@@ -418,6 +444,22 @@ def ensure_schema(conn: ConnWrapper) -> None:
     conn.commit()
 
 
+# A factor inside this band read off prices alone cannot be told from a circuit run: a gap-up day that opens
+# above +15% and runs to the +20% limit has a real range and passes every test below as a 7:6 action.
+# TEJ plus raw prices found 59 such artifacts in the stored table (AF-20261112-12). repair_unadjusted_splits.py
+# already refuses to APPLY an undeclared factor in this band; scan() now refuses to STORE one.
+BAND = (0.75, 1.25)
+DECLARED_WINDOW_DAYS = 5     # a corporate_actions date within this many days of the detected seam declares it
+
+
+def _declared_near(dates, ex_date) -> bool:
+    if not dates:
+        return False
+    from datetime import date as _date
+    ex = _date.fromisoformat(_iso(ex_date))
+    return any(abs((_date.fromisoformat(_iso(d)) - ex).days) <= DECLARED_WINDOW_DAYS for d in dates)
+
+
 def scan(conn: ConnWrapper, persist: bool = False) -> dict:
     rows = conn.execute(
         "SELECT symbol, date, prev_close, open, high, low, close FROM nse_universe_history "
@@ -435,9 +477,13 @@ def scan(conn: ConnWrapper, persist: bool = False) -> dict:
     ).fetchall():
         declared.setdefault(r[0], []).append(r[1])
 
+    table_start = min((s[0][0] for s in by_symbol.values()), default=None)
     all_accepted, all_rejected, all_declared = [], [], []
     for sym, srows in by_symbol.items():
         acc, rej = detect_adjustment_events(srows)
+        # A listing day: prev_close is the issue price, and no earlier bar exists for a factor to adjust.
+        if srows[0][0] != table_start:
+            acc = [(d, f) for d, f in acc if d != srows[0][0]]
         all_accepted += [(sym, d, f) for d, f in acc]
         promoted = promote_declared_seams(rej, srows, declared.get(sym))
         all_declared += [(sym, d, f) for d, f in promoted]
@@ -445,12 +491,19 @@ def scan(conn: ConnWrapper, persist: bool = False) -> dict:
         all_rejected += [(sym, d, f, why) for d, f, why in rej if _iso(d) not in gone]
 
 
-    if persist and all_accepted:
+    band_undeclared = [(s, d, f) for s, d, f in all_accepted
+                       if BAND[0] <= f <= BAND[1] and not _declared_near(declared.get(s), d)]
+    persistable = [t for t in all_accepted if t not in band_undeclared]
+
+    if persist and persistable:
         ensure_schema(conn)
-        for sym, d, f in all_accepted:
+        for sym, d, f in persistable:
+            # Refresh only a row this scan wrote itself: a price-derived value must never overwrite one
+            # from an authoritative source (mc_corporate_action, tej_action, ...).
             conn.execute(
                 "INSERT INTO ohlcv_adjustment_factors (symbol, ex_date, factor) VALUES (?,?,?) "
-                "ON CONFLICT (symbol, ex_date) DO UPDATE SET factor=excluded.factor",
+                "ON CONFLICT (symbol, ex_date) DO UPDATE SET factor=excluded.factor "
+                "WHERE ohlcv_adjustment_factors.source = 'bhavcopy_prev_close'",
                 (sym, d, f),
             )
         conn.commit()
@@ -469,6 +522,7 @@ def scan(conn: ConnWrapper, persist: bool = False) -> dict:
     return {
         'symbols_scanned': len(by_symbol),
         'accepted': all_accepted,
+        'band_undeclared': band_undeclared,
         'rejected': all_rejected,
         'declared_seams': all_declared,
     }
