@@ -780,6 +780,29 @@ def resolve_unified_outcomes(conn: ConnWrapper, horizon_days: int = 1, dry_run: 
                   dry_run=dry_run, relabel_before=relabel_before)
 
 
+def _targeted_pending_ts(conn, keys) -> list:
+    """The technical_signals rows named by `keys` [(symbol, 'YYYY-MM-DD')], in the pending query's column order."""
+    return conn.execute("""
+        SELECT ts.symbol, ts.date AS signal_date, ts.cmp AS entry_price, ts.signal_score, ts.signals_json,
+               CAST(ts.stop_loss AS REAL) AS stop_loss, ts.time_horizon
+        FROM technical_signals ts
+        JOIN (SELECT unnest(CAST(? AS text[])) AS s, unnest(CAST(? AS text[])) AS d) k
+          ON k.s = ts.symbol AND CAST(ts.date AS text) = k.d
+        ORDER BY ts.date DESC, ts.symbol DESC
+    """, ([k[0] for k in keys], [k[1] for k in keys])).fetchall()
+
+
+def _targeted_pending_us(conn, ids) -> list:
+    """The unified_signals rows with these ids, in the pending query's column order."""
+    return conn.execute("""
+        SELECT us.id, us.symbol, us.signal_date, us.entry_price, us.stop_loss, us.signal_source,
+               us.confidence_score, us.target_price
+        FROM unified_signals us
+        JOIN (SELECT unnest(CAST(? AS bigint[])) AS i) k ON k.i = us.id
+        ORDER BY us.signal_date DESC, us.id DESC
+    """, (list(ids),)).fetchall()
+
+
 def _resolve_outcomes_batch(
     conn: ConnWrapper,
     horizon_days: int = 1,
@@ -787,12 +810,18 @@ def _resolve_outcomes_batch(
     relabel_before: str | None = None,
     limit: int = 2000,
     after: tuple | None = None,
+    keys: list | None = None,
+    sink: list | None = None,
 ) -> dict:
     """
     PHASE 1 FIX: Resolve signal outcomes with proper time-of-day validation
     - Signals entered at next trading day's open
     - SL checked on intraday (low) before target (high)
     - Horizon exit checked at close on exit_date
+
+    `keys` = [(symbol, 'YYYY-MM-DD')] grades exactly those technical_signals rows whatever their current
+    outcome (a targeted re-grade after a price repair); `sink` collects each row's upsert parameters
+    instead of writing, so a caller can compare before applying (AF-20261112-12).
     """
     cutoff = _gradeable_cutoff(conn, horizon_days)
 
@@ -803,7 +832,7 @@ def _resolve_outcomes_batch(
     # ANY row for (symbol, signal_date, horizon_days) regardless of who wrote it, so this
     # resolver would silently skip a horizon confluence_outcome_tracker.py had already claimed
     # (and vice versa) — see the signal_outcomes.signal_source migration for the full mechanism.
-    pending = conn.execute("""
+    pending = _targeted_pending_ts(conn, keys) if keys is not None else conn.execute("""
         SELECT ts.symbol, ts.date AS signal_date, ts.cmp AS entry_price,
                ts.signal_score, ts.signals_json,
                CAST(ts.stop_loss AS REAL) AS stop_loss,
@@ -859,6 +888,12 @@ def _resolve_outcomes_batch(
             computed_at=excluded.computed_at, label_definition=excluded.label_definition
     """
 
+    def _write(params):
+        if sink is not None:
+            sink.append(params)
+        else:
+            conn.execute(upsert, params)
+
     # ── AF-69 batched lookups ────────────────────────────────────────────────
     # The four per-row queries below (resolved-guard, next-day open, SL scan,
     # horizon-exit close) are answered from run-wide prefetched maps. Every
@@ -872,7 +907,7 @@ def _resolve_outcomes_batch(
         # so writing under another horizon left the row unresolved at every pass (AF-20260930-28).
         _r['_h'] = horizon_days
         _r['_exit'] = _nth_session_after(_cal, _r['signal_date'], horizon_days)
-    _resolved_keys = set() if relabel_before else _prefetch_resolved_keys(
+    _resolved_keys = set() if (relabel_before or keys is not None) else _prefetch_resolved_keys(
         conn, [(r['symbol'], str(r['signal_date'])[:10], r['_h']) for r in rows])
     _np_map = _prefetch_next_price(
         conn,
@@ -1018,7 +1053,7 @@ def _resolve_outcomes_batch(
             print(msg)
             continue
 
-        conn.execute(upsert, (
+        _write((
             sym, signal_date, sig_horizon, entry,
             check_date, exit_price,
             round(return_pct, 4) if return_pct is not None else None,
@@ -1029,7 +1064,7 @@ def _resolve_outcomes_batch(
         if outcome != 'PENDING':
             resolved += 1
 
-    if not dry_run:
+    if not dry_run and sink is None:
         conn.commit()
 
     print(f"[OutcomeResolver] Resolved {resolved}/{len(rows)} signals.")
@@ -1044,9 +1079,15 @@ def _resolve_unified_batch(
     relabel_before: str | None = None,
     limit: int = 2000,
     after: tuple | None = None,
+    keys: list | None = None,
+    sink: list | None = None,
 ) -> dict:
     """
     Resolve outcomes for all signal sources (AI, Quant, Technical) from unified_signals.
+
+    `keys` = [unified_signals.id] grades exactly those signals whatever their current outcome (a targeted
+    re-grade after a price repair); `sink` collects each row's upsert parameters instead of writing
+    (AF-20261112-12).
     """
     cutoff = _gradeable_cutoff(conn, horizon_days)
 
@@ -1057,7 +1098,7 @@ def _resolve_unified_batch(
     # PENDING signals (root cause of ~86% of AI signals never resolving).
     # Do NOT filter on status='COMPLETED': the per-horizon NOT EXISTS below is the correct
     # guard. Filtering on status caused h1 to mark signals COMPLETED, starving h5/h15 passes.
-    pending = conn.execute("""
+    pending = _targeted_pending_us(conn, keys) if keys is not None else conn.execute("""
         SELECT us.id, us.symbol, us.signal_date, us.entry_price, us.stop_loss, us.signal_source,
                us.confidence_score, us.target_price
         FROM unified_signals us
@@ -1146,6 +1187,12 @@ def _resolve_unified_batch(
             exit_time=excluded.exit_time,
             computed_at=excluded.computed_at
     """
+
+    def _write(params):
+        if sink is not None:
+            sink.append(params)
+        else:
+            conn.execute(upsert, params)
 
     for row in rows:
         uid = row['id']
@@ -1291,7 +1338,7 @@ def _resolve_unified_batch(
         conf = row.get('confidence_score')
         signal_score = round(conf) if conf is not None else None
 
-        conn.execute(upsert, (
+        _write((
             uid, source, sym, signal_date, horizon_days, entry,
             check_date, exit_price, outcome,
             round(return_pct, 4) if return_pct is not None else None,
@@ -1301,11 +1348,11 @@ def _resolve_unified_batch(
             round(mae_pct, 4) if mae_pct is not None else None,
             exit_time,
         ))
-        
+
         if outcome != 'PENDING':
             resolved += 1
 
-    if not dry_run:
+    if not dry_run and sink is None:
         conn.commit()
 
     print(f"[OutcomeResolver] Resolved {resolved}/{len(rows)} unified signals.")
