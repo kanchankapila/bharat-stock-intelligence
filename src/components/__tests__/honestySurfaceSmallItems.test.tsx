@@ -49,6 +49,11 @@ describe('daily-cadence polling', () => {
     const query = s.slice(s.indexOf('getSectorsOverview.useQuery'), s.indexOf('getSectorDeepDive.useQuery'));
     expect(query).toMatch(/refetchInterval:\s*5 \* 60_000/);
   });
+  it('sector page shows an unavailable state instead of hard-coded sectors when the overview is empty', () => {
+    const s = src('src/components/sectors/SectorIntelligencePage.tsx');
+    expect(s).not.toMatch(/FALLBACK_SECTORS|Systemic credit growth/);
+    expect(s).toContain('Sector data is unavailable right now.');
+  });
 });
 
 describe('Dashboard layout and Stock Intelligence labels', () => {
