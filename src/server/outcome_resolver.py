@@ -1647,7 +1647,9 @@ def resolve_recommendation_log(
                 gross += dividend_pct
                 
             return_pct = net_return_pct(gross)
-            if exit_reason == 'STOP_LOSS':
+            # A stop after a scale-out at target (or with a dividend) can net positive; only a
+            # losing stop-out is forced to LOSS (AF-20261117: 9.7k positive-return LOSS rows).
+            if exit_reason == 'STOP_LOSS' and return_pct <= 0:
                 outcome = 'LOSS'
             else:
                 threshold = get_volatility_threshold(conn, sym, signal_date, h)

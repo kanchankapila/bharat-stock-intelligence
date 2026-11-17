@@ -3107,7 +3107,8 @@ CREATE TABLE IF NOT EXISTS "recommendation_log" (
   "resolved_at" TIMESTAMPTZ,
   "horizon_days" BIGINT DEFAULT 15,
   "round_trip_cost_pct" DOUBLE PRECISION,
-  "cost_adjusted_target_1" DOUBLE PRECISION
+  "cost_adjusted_target_1" DOUBLE PRECISION,
+  "trailing_stop" DOUBLE PRECISION
 );
 CREATE UNIQUE INDEX idx_rec_log_uniq ON public.recommendation_log USING btree (symbol, signal_date, timeframe, source);
 CREATE INDEX idx_rec_outcome ON public.recommendation_log USING btree (outcome, signal_date DESC);

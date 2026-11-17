@@ -6,7 +6,6 @@ import { fetchWithCache } from '../cacheService';
 import { getLatestNiftyRegime } from '../strategySignalsService';
 import {
   fetchAllIndianIndices,
-  fetchSectorPerformance,
   fetchSectorAdvanceDecline,
   fetchSectorStocks,
   fetchIndexStocksList,
@@ -212,6 +211,48 @@ export const SECTOR_DEFINITIONS: SectorDefinition[] = [
   },
 ];
 
+// marketsmojo_index_history.name for each sector's NSE index, and the benchmark.
+export const SECTOR_INDEX_HISTORY_NAME: Record<string, string> = {
+  'nifty-bank': 'BANKNIFTY', 'nifty-it': 'NIFTYIT', 'nifty-auto': 'NIFTYAUTO',
+  'nifty-pharma': 'NIFTYPHARMA', 'nifty-fmcg': 'NIFTYFMCG', 'nifty-metal': 'NIFTYMETAL',
+  'nifty-energy': 'NIFTYENERGY', 'nifty-realty': 'NIFTYREALTY', 'nifty-infra': 'NIFTYINFRAST',
+  'nifty-psu-bank': 'NIFTYPSUBANK', 'nifty-fin-service': 'NIFTYFINANCE', 'nifty-media': 'NIFTYMEDIA',
+};
+const BENCHMARK_INDEX_HISTORY_NAME = 'NIFTY';
+export const RETURN_WINDOWS = { '5d': 5, '1m': 21, '3m': 63, '6m': 126, '1y': 252 } as const;
+export type IndexReturns = Partial<Record<keyof typeof RETURN_WINDOWS, number>>;
+
+/** Trailing returns (%) over trading-session windows from stored index closes. A window with
+ *  too little history is omitted, never estimated (AF-20261117: these were 1-day x constants). */
+export function trailingReturns(closesNewestFirst: number[]): IndexReturns {
+  const out: IndexReturns = {};
+  const last = closesNewestFirst[0];
+  for (const [k, n] of Object.entries(RETURN_WINDOWS) as Array<[keyof typeof RETURN_WINDOWS, number]>) {
+    const base = closesNewestFirst[n];
+    if (last > 0 && base > 0) out[k] = parseFloat(((last / base - 1) * 100).toFixed(2));
+  }
+  return out;
+}
+
+export type Buildup = 'LONG_BUILDUP' | 'SHORT_COVERING' | 'SHORT_BUILDUP' | 'LONG_UNWINDING';
+const VENDOR_BUILDUP: Record<string, Buildup> = {
+  'long buildup': 'LONG_BUILDUP', 'short covering': 'SHORT_COVERING',
+  'short buildup': 'SHORT_BUILDUP', 'long unwinding': 'LONG_UNWINDING',
+};
+
+/** Sector buildup = the per-stock futures buildup class (price x OI, from the vendor) carrying
+ *  the most |OI change| in the sector. Null when the sector has no F&O rows. */
+export function sectorBuildup(rows: Array<{ oi_buildup: string | null; oi_change: number | null }>): Buildup | null {
+  const w = new Map<Buildup, number>();
+  for (const r of rows) {
+    const b = VENDOR_BUILDUP[String(r.oi_buildup ?? '').trim().toLowerCase()];
+    if (b) w.set(b, (w.get(b) ?? 0) + Math.abs(Number(r.oi_change) || 0));
+  }
+  let best: Buildup | null = null;
+  for (const [b, v] of w) if (best === null || v > (w.get(best) ?? 0)) best = b;
+  return best;
+}
+
 // Helper to determine Analyst Stance & Trading Call from Quantitative data
 function computeAnalystStance(
   rsRatio: number,
@@ -310,19 +351,6 @@ export const sectorsRouter = router({
         console.warn('[SectorsRouter] Failed to fetch Indian indices:', err);
       }
 
-      // 2. Fetch Multi-timeframe performance from MoneyControl
-      let perfMap = new Map<string, number>();
-      try {
-        const perfData1m = await fetchSectorPerformance({ dur: '1m', limit: 30 });
-        if (perfData1m?.data) {
-          for (const item of perfData1m.data) {
-            perfMap.set((item.sectorName || item.sector || '').toLowerCase(), item.percentChange ?? item.mcapPerChange ?? 0);
-          }
-        }
-      } catch (err) {
-        console.warn('[SectorsRouter] Sector perf error:', err);
-      }
-
       // 3. Fetch Advance / Decline Breadth from MoneyControl
       let adMap = new Map<string, { advances: number; declines: number; changePer: string }>();
       try {
@@ -370,6 +398,42 @@ export const sectorsRouter = router({
       } catch (err) {
         console.warn('[SectorsRouter] Sector F&O sentiment error:', err);
       }
+
+      // 5b. Stored index closes -> trailing returns; futures OI buildup per sector
+      const returnsByIndex = new Map<string, IndexReturns>();
+      try {
+        const names = [...Object.values(SECTOR_INDEX_HISTORY_NAME), BENCHMARK_INDEX_HISTORY_NAME];
+        const rows = await dbAll<{ name: string; price: number }>(`
+          SELECT name, price FROM marketsmojo_index_history
+          WHERE name IN (${names.map(() => '?').join(', ')}) AND date >= CURRENT_DATE - 400 AND price > 0
+          ORDER BY name, date DESC
+        `, names);
+        const closes = new Map<string, number[]>();
+        for (const r of rows) {
+          if (!closes.has(r.name)) closes.set(r.name, []);
+          closes.get(r.name)!.push(Number(r.price));
+        }
+        for (const [name, c] of closes) returnsByIndex.set(name, trailingReturns(c));
+      } catch (err) {
+        console.warn('[SectorsRouter] Index history returns error:', err);
+      }
+      const buildupRows = new Map<string, Array<{ oi_buildup: string | null; oi_change: number | null }>>();
+      try {
+        const rows = await dbAll<{ sector: string; oi_buildup: string | null; oi_change: number | null }>(`
+          SELECT ns.sector, f.oi_buildup, f.oi_change
+          FROM stock_futures_oi_history f
+          JOIN nse_stocks ns ON ns.symbol = f.symbol
+          WHERE f.date = (SELECT MAX(date) FROM stock_futures_oi_history)
+        `);
+        for (const r of rows) {
+          const k = String(r.sector || '').toLowerCase();
+          if (!buildupRows.has(k)) buildupRows.set(k, []);
+          buildupRows.get(k)!.push(r);
+        }
+      } catch (err) {
+        console.warn('[SectorsRouter] Futures OI buildup error:', err);
+      }
+      const niftyReturns = returnsByIndex.get(BENCHMARK_INDEX_HISTORY_NAME) ?? {};
 
       // 6. Query technical stats (% above 50 DMA, 200 DMA, avg RSI)
       let techStatsMap = new Map<string, { pctAbove50: number; pctAbove200: number; avgRsi: number }>();
@@ -455,12 +519,7 @@ export const sectorsRouter = router({
           else if (pcr < 0.65) foSentiment = 'BEARISH';
         }
 
-        let buildup: 'LONG_BUILDUP' | 'SHORT_COVERING' | 'SHORT_BUILDUP' | 'LONG_UNWINDING' = 'LONG_BUILDUP';
-        if (liveChangePct >= 0) {
-          buildup = pcr && pcr >= 0.8 ? 'LONG_BUILDUP' : 'SHORT_COVERING';
-        } else {
-          buildup = pcr && pcr <= 0.7 ? 'SHORT_BUILDUP' : 'LONG_UNWINDING';
-        }
+        const buildup = sectorBuildup(buildupRows.get(def.dbSector.toLowerCase()) ?? []);
 
         // Match Technicals
         const tech = techStatsMap.get(def.dbSector.toLowerCase()) || {
@@ -472,21 +531,25 @@ export const sectorsRouter = router({
         // Relative Strength (RS) & Relative Rotation Graph (RRG) coordinates
         // RS-Ratio: normalized relative return vs Nifty 50 (>100 is outperforming)
         // RS-Momentum: rate of change of relative return (>100 is accelerating)
+        const returns = returnsByIndex.get(SECTOR_INDEX_HISTORY_NAME[def.id]) ?? {};
         const relPerf1d = liveChangePct - niftyChangePct;
-        const relPerf1m = (perfMap.get(def.dbSector.toLowerCase()) ?? (liveChangePct * 5)) - (niftyChangePct * 4);
+        const relPerf1m = returns['1m'] != null && niftyReturns['1m'] != null
+          ? returns['1m'] - niftyReturns['1m'] : null;
 
-        const rsRatio = parseFloat((100 + relPerf1m * 1.5).toFixed(2));
+        // Null when either 1-month return is missing: no estimate from the 1-day move.
+        const rsRatio = relPerf1m == null ? null : parseFloat((100 + relPerf1m * 1.5).toFixed(2));
         const rsMomentum = parseFloat((100 + relPerf1d * 4).toFixed(2));
 
-        let quadrant: 'LEADING' | 'WEAKENING' | 'LAGGING' | 'IMPROVING' = 'LEADING';
-        if (rsRatio >= 100 && rsMomentum >= 100) quadrant = 'LEADING';
+        let quadrant: 'LEADING' | 'WEAKENING' | 'LAGGING' | 'IMPROVING' | null = null;
+        if (rsRatio == null) quadrant = null;
+        else if (rsRatio >= 100 && rsMomentum >= 100) quadrant = 'LEADING';
         else if (rsRatio >= 100 && rsMomentum < 100) quadrant = 'WEAKENING';
         else if (rsRatio < 100 && rsMomentum < 100) quadrant = 'LAGGING';
         else quadrant = 'IMPROVING';
 
         // Analyst Stance
         const analyst = computeAnalystStance(
-          rsRatio,
+          rsRatio ?? 100,
           rsMomentum,
           liveChangePct,
           advPct,
@@ -534,6 +597,7 @@ export const sectorsRouter = router({
             buildup,
           },
           technicals: tech,
+          returns,
           rrg: {
             rsRatio,
             rsMomentum,

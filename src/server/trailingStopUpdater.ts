@@ -13,7 +13,8 @@
  * points at): for every ACTIVE BUY position, recompute the chandelier stop from the
  * highest high since entry and the current 14-day Wilder ATR (same wilderATR() used by
  * atrBarriers.ts for entry-time barriers, so the live and at-entry ATR conventions match),
- * and ratchet stop_loss UP if the new level clears the current one. Never lowers a stop.
+ * and ratchet trailing_stop UP if the new level clears the current one. Never lowers a stop.
+ * stop_loss itself is immutable after publication (AF-20261117).
  *
  * Long-only, matching outcome_resolver.py's own documented scope ("long-only — matches
  * the resolver's math") -- this platform has no short (SELL-direction) positions to trail.
@@ -33,13 +34,14 @@ interface ActivePosition {
   signal_date: string;
   entry_price: number;
   stop_loss: number | null;
+  trailing_stop: number | null;
 }
 
 interface Bar { date: string; high: number; low: number; close: number; }
 
 export async function updateTrailingStops(): Promise<{ updated: number; checked: number }> {
   const positions = await dbAll<ActivePosition>(
-    `SELECT id, symbol, signal_date, entry_price, stop_loss
+    `SELECT id, symbol, signal_date, entry_price, stop_loss, trailing_stop
      FROM recommendation_log
      WHERE status = 'ACTIVE' AND rec_type = 'BUY'
        AND entry_price IS NOT NULL AND entry_price > 0`
@@ -48,10 +50,11 @@ export async function updateTrailingStops(): Promise<{ updated: number; checked:
   let updated = 0;
   for (const pos of positions) {
     try {
-      // Highest high since entry (inclusive) -- the chandelier anchor.
+      // Highest high since entry -- the chandelier anchor. Entry is the session AFTER the
+      // signal date, so the signal-day high is pre-entry (matches outcome_resolver's window).
       const sinceEntryBars = await dbAll<{ high: number }>(
         `SELECT high FROM stock_ohlcv
-         WHERE symbol = ? AND date >= ? AND COALESCE(is_suspect, 0) = 0`,
+         WHERE symbol = ? AND date > ? AND COALESCE(is_suspect, 0) = 0`,
         [pos.symbol, pos.signal_date]
       );
       if (sinceEntryBars.length === 0) continue;
@@ -71,14 +74,16 @@ export async function updateTrailingStops(): Promise<{ updated: number; checked:
       const atr = wilderATR(ascending);
       if (!(atr > 0)) continue;
 
-      const currentStop = pos.stop_loss ?? -Infinity;
+      const currentStop = pos.trailing_stop ?? pos.stop_loss ?? -Infinity;
       const chandelierStop = highestHighSinceEntry - CHANDELIER_ATR_MULT * atr;
       const newStop = Math.max(currentStop, chandelierStop);
 
       // Never write a stop above the highest high (degenerate) or a non-improvement.
       if (newStop > currentStop && newStop < highestHighSinceEntry) {
+        // stop_loss is the published plan and the resolver's initial stop; never rewrite it
+        // (AF-20261117: overwriting it graded trailed winners as STOP_LOSS -> LOSS).
         await dbRun(
-          `UPDATE recommendation_log SET stop_loss = ? WHERE id = ?`,
+          `UPDATE recommendation_log SET trailing_stop = ? WHERE id = ?`,
           [Math.round(newStop * 100) / 100, pos.id]
         );
         updated++;

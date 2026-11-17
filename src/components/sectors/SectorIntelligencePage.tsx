@@ -463,7 +463,7 @@ export const SectorIntelligencePage: React.FC<SectorIntelligencePageProps> = ({
 
   // RRG Quadrant Chart Data
   const rrgData = useMemo(() => {
-    return sectors.map(s => ({
+    return sectors.filter(s => s.rrg.rsRatio != null).map(s => ({
       name: s.name,
       id: s.id,
       x: s.rrg.rsRatio,
@@ -476,19 +476,18 @@ export const SectorIntelligencePage: React.FC<SectorIntelligencePageProps> = ({
 
   // Multi-timeframe bar data
   const timeframeBarData = useMemo(() => {
-    return sectors.map(s => {
-      let val = s.changePct;
-      if (selectedTimeframe === '5d') val = s.changePct * 2.1;
-      else if (selectedTimeframe === '1m') val = (s.rrg.rsRatio - 100) / 1.5;
-      else if (selectedTimeframe === '3m') val = (s.rrg.rsRatio - 100) * 1.8;
-      else if (selectedTimeframe === '6m') val = (s.rrg.rsRatio - 100) * 2.4;
-      else if (selectedTimeframe === '1y') val = (s.rrg.rsRatio - 100) * 3.5;
-
-      return {
+    // Real index returns from the server; a sector without that window is left out, never
+    // estimated from the 1-day move (AF-20261117).
+    return sectors.flatMap(s => {
+      const val = selectedTimeframe === '1d'
+        ? s.changePct
+        : (s as { returns?: Partial<Record<Timeframe, number>> }).returns?.[selectedTimeframe];
+      if (val == null) return [];
+      return [{
         name: s.name.replace('NIFTY ', ''),
         id: s.id,
         returnPct: parseFloat(val.toFixed(2)),
-      };
+      }];
     }).sort((a, b) => b.returnPct - a.returnPct);
   }, [sectors, selectedTimeframe]);
 
@@ -1227,7 +1226,7 @@ export const SectorIntelligencePage: React.FC<SectorIntelligencePageProps> = ({
                             s.derivatives.buildup === 'SHORT_BUILDUP' && "bg-rose-500/10 text-rose-400 border-rose-500/30",
                             s.derivatives.buildup === 'LONG_UNWINDING' && "bg-amber-500/10 text-amber-400 border-amber-500/30"
                           )}>
-                            {s.derivatives.buildup.replace('_', ' ')}
+                            {s.derivatives.buildup?.replace('_', ' ') ?? '—'}
                           </span>
                         </td>
                         <td className="py-3">

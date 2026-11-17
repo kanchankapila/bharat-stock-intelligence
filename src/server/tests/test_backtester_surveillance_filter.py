@@ -32,7 +32,7 @@ def _signal_row(symbol, signal_date, asm_flag=None, gsm_stage=None):
         'signals_json': '[]',
         'nifty_regime': 'BULL',
         'adx': 25.0,
-        'horizon_days': 15,
+        'horizon_days': 2,  # 3rd bar = 2nd session after the signal; horizons count sessions (AF-20261117)
         'asm_flag': asm_flag,
         'gsm_stage': gsm_stage,
     }
@@ -101,7 +101,7 @@ class TestPointInTimeSurveillanceFilter:
         signals = pd.DataFrame([{
             'symbol': 'AAPL', 'signal_date': pd.Timestamp('2024-01-01'), 'signal_score': 5,
             'entry_price_ref': 100.0, 'stop_loss': 90.0, 'target_price': None,
-            'signals_json': '[]', 'nifty_regime': 'BULL', 'adx': 25.0, 'horizon_days': 15,
+            'signals_json': '[]', 'nifty_regime': 'BULL', 'adx': 25.0, 'horizon_days': 2,  # 3rd bar = 2nd session after the signal; horizons count sessions (AF-20261117)
         }])
         trade_log, _ = bt.simulate_trades(
             signals, _ohlcv('AAPL'), max_positions=10, initial_capital=1_000_000,

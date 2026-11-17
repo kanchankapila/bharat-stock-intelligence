@@ -967,3 +967,38 @@ def test_resolver_pages_the_whole_backlog_not_just_one_batch():
 
     assert result["processed"] == 3 and result["resolved"] == 3
     assert conn.execute("SELECT COUNT(*) FROM signal_outcomes").fetchone()[0] == 3
+
+
+def _reclog_case(symbol, stop, bars):
+    from outcome_resolver import resolve_recommendation_log
+    conn = make_reclog_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, 0, -1):  # flat history -> ATR ~0 (no trail), 0.5% threshold floor
+        d = (base - datetime.timedelta(days=i)).isoformat()
+        conn.execute("INSERT OR IGNORE INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES (?,?,100,100,100,100,100000)", (symbol, d))
+    conn.execute("INSERT INTO recommendation_log (symbol, signal_date, entry_price, stop_loss, target_1, horizon_days, outcome) "
+                 "VALUES (?, ?, 100, ?, 105, 5, 'PENDING')", (symbol, sig_date, stop))
+    for off, o, h, l, c in bars:
+        d = (base + datetime.timedelta(days=off)).isoformat()
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES (?,?,?,?,?,?,100000)", (symbol, d, o, h, l, c))
+    conn.commit()
+    resolve_recommendation_log(conn, horizon_days=5, dry_run=False)
+    return conn.execute("SELECT outcome, actual_return_pct FROM recommendation_log WHERE symbol=?", (symbol,)).fetchone()
+
+
+def test_reclog_stop_after_scale_out_with_positive_return_is_not_a_loss():
+    """AF-20261117: a STOP_LOSS exit was forced to LOSS whatever the return. Half booked at
+    target (+5%) then the rest stopped at 97 nets +0.7%: 7,132 live rows read LOSS at ~+0.2%."""
+    row = _reclog_case('RECSO', 97, [(1, 100, 106, 100, 104), (2, 100, 100, 96, 97),
+                                     (3, 97, 97, 97, 97), (4, 97, 97, 97, 97), (5, 97, 97, 97, 97)])
+    assert row[1] == pytest.approx(1.0 - 0.30, abs=0.05)
+    assert row[0] == 'WIN'
+
+
+def test_reclog_plain_stop_out_stays_loss_even_inside_threshold():
+    row = _reclog_case('RECSL', 99.8, [(1, 100, 100.5, 99, 99.5), (2, 99.5, 99.5, 99.5, 99.5),
+                                       (3, 99.5, 99.5, 99.5, 99.5), (4, 99.5, 99.5, 99.5, 99.5),
+                                       (5, 99.5, 99.5, 99.5, 99.5)])
+    assert row[1] < 0
+    assert row[0] == 'LOSS'
