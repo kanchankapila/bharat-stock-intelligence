@@ -1155,15 +1155,29 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // in step. This check exists because the upstream calendar guard (isTradingHolidayToday)
     // returns false on ANY fetch error, i.e. fails OPEN: one network blip on a holiday
     // reinstates the bug, and only the data's shape reveals it.
+    //
+    // Second shape (AF-20261117-18): a day whose bars repeat each symbol's previous bar exactly,
+    // volume included. Saturday 2026-07-11 held 2,114 of 2,121 such bars unflagged for four
+    // months because only the flat zero-volume shape was tested; every real special session
+    // (Muhurat, budget Saturdays) has 0 copies. The lag window starts 10 days before the
+    // checked window so its first day has a previous bar.
     sql: `SELECT current_date::text AS as_of,
             (SELECT COUNT(*) FROM (
-               SELECT date FROM stock_ohlcv
+               SELECT date FROM (
+                 SELECT date, open, high, low, close, volume, is_suspect,
+                        lag(open) OVER w AS po, lag(high) OVER w AS ph, lag(low) OVER w AS pl,
+                        lag(close) OVER w AS pc, lag(volume) OVER w AS pv
+                 FROM stock_ohlcv
+                 WHERE date >= current_date - 100
+                 WINDOW w AS (PARTITION BY symbol ORDER BY date)
+               ) t
                WHERE date >= current_date - 90
                GROUP BY date
                HAVING COUNT(*) > 50
-                  AND COUNT(*) FILTER (WHERE COALESCE(volume,0) = 0
-                        AND open = high AND high = low AND low = close)::float
-                      / COUNT(*) >= 0.95
+                  AND (COUNT(*) FILTER (WHERE COALESCE(volume,0) = 0
+                         AND open = high AND high = low AND low = close)::float / COUNT(*) >= 0.95
+                    OR COUNT(*) FILTER (WHERE open = po AND high = ph AND low = pl
+                         AND close = pc AND volume = pv)::float / COUNT(*) >= 0.95)
                   AND COUNT(*) FILTER (WHERE COALESCE(is_suspect,0) = 1) < COUNT(*)
              ) q) AS bad_days`,
     evaluate: (row) => {
@@ -1171,9 +1185,10 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (bad > 0) {
         return {
           status: 'fail',
-          detail: `${bad} session(s) in the last 90d are universe-wide flat/zero-volume and NOT ` +
+          detail: `${bad} session(s) in the last 90d are universe-wide flat/zero-volume or a copy ` +
+            `of the previous session's bars, and NOT ` +
             `flagged is_suspect — the exchange was shut and the bars are fabricated. ` +
-            `Run: python data_integrity_repair.py --closed-sessions --holidays (AF-20260911-15)`,
+            `Run: python data_integrity_repair.py --closed-sessions --holidays (AF-20260911-15, AF-20261117-18)`,
         };
       }
       return { status: 'pass', detail: `no unflagged closed-session bars in the 90d window ending ${row?.as_of ?? 'unknown'}` };
