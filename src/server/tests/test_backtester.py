@@ -228,3 +228,14 @@ def test_horizon_counts_trading_sessions_not_calendar_days():
     assert len(log) == 1
     assert log[0]['exit_date'].startswith('2024-01-15')  # 10th session after 2024-01-01
     assert log[0]['holding_days'] == 10
+
+
+@pytest.mark.parametrize('h', [5, 15, 30])
+def test_exit_pad_covers_a_session_horizon_opened_on_the_last_day(h):
+    """AF-20261117: horizons count sessions, so the history pad past a window must span h
+    sessions plus a holiday cluster; `h + 10` calendar days left 30-session holds unclosed."""
+    from src.server.backtester import _exit_pad_days
+    for start in pd.date_range('2024-01-01', '2024-12-31', freq='7D'):
+        holidays = 5  # e.g. a Diwali/Holi week inside the hold
+        last = pd.bdate_range(start, periods=h + holidays + 1)[-1]
+        assert (last - start).days <= _exit_pad_days(h)

@@ -335,7 +335,7 @@ function computeAnalystStance(
 export const sectorsRouter = router({
   // ─── 1. Main Overview: All Sectors + RRG + Breadth + Analyst Calls ─────────
   getSectorsOverview: publicProcedure.query(async () => {
-    return fetchWithCache('sectors:overview:v2', async () => {
+    return fetchWithCache('sectors:overview:v3', async () => {
       // 1. Fetch live indices
       let keyIndicesList: any[] = [];
       try {

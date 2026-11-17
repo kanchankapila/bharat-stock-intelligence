@@ -64,6 +64,13 @@ def warn_on_signal_quality_discontinuity(signals: pd.DataFrame, threshold: float
     return msg
 
 
+def _exit_pad_days(horizon_sessions: int) -> int:
+    """Calendar days of price history to load past a window so an `horizon_sessions` hold opened on
+    its last day can still close: ~7/5 calendar days per session plus holiday headroom. The old
+    `horizon + 10` assumed calendar-day horizons (AF-20261117)."""
+    return int(math.ceil(horizon_sessions * 1.5)) + 10
+
+
 def _circuit_locked(o: float, h: float, l: float, prev_close: float | None) -> str | None:
     """'upper' / 'lower' when the bar is a single price away from the prior close, else None.
 
@@ -873,7 +880,7 @@ class Backtester:
                 continue
 
             oos_syms = oos_signals['symbol'].unique().tolist()
-            extended_oos_end = (pd.to_datetime(oos_end) + pd.Timedelta(days=best_horizon + 10)).strftime('%Y-%m-%d')
+            extended_oos_end = (pd.to_datetime(oos_end) + pd.Timedelta(days=_exit_pad_days(best_horizon))).strftime('%Y-%m-%d')
             oos_ohlcv = self.load_ohlcv(oos_syms, oos_start.isoformat(), extended_oos_end)
             oos_ohlcv_dict = {sym: g.reset_index(drop=True) for sym, g in oos_ohlcv.groupby('symbol')}
 
@@ -1166,7 +1173,7 @@ class Backtester:
             survivorship = {**survivorship, **pit_stats}
 
         # Extend end date for exit prices
-        extended_end = (pd.to_datetime(end) + pd.Timedelta(days=horizon_days + 10)).strftime('%Y-%m-%d')
+        extended_end = (pd.to_datetime(end) + pd.Timedelta(days=_exit_pad_days(horizon_days))).strftime('%Y-%m-%d')
         print("[Backtester] Loading OHLCV data...")
         ohlcv_all = self.load_ohlcv(symbols, start, extended_end)
 
