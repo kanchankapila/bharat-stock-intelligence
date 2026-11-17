@@ -660,3 +660,4 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 - Verified live: digest fixes read back from telegram_report_log; Tapetide route; three starved ml-daily-ops steps re-run (4 to 10 s each); phase B equivalence on 312 live rows (0 differences).
 - Not verified: tonight's screener-performance phase B timing (was 1,526.7 s); ml-ensemble-train teardown crash (next retrain 2026-11-22).
 - Rule to carry: a manual production re-grade inside 18:50 to 00:30 IST starves ml-daily-ops steps; three fast steps timing out together is contention, re-run them.
+- Later the same morning: earnings-calendar snapshots started (AF-20261115-01); Trendlyne refusal latch, rotation slot and fno_activity exit code fixed, and the 11-16 fno_activity session recovered (AF-20261113-26). Not verified until tonight: catch-up no longer repeats a fetcher back to back; coverage check back above 50%; phase B timing.

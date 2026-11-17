@@ -40,7 +40,7 @@ from db_compat import connect
 from as_of import logical_write_floor
 from fetch_utils import (retry_get, FetchTracker, filter_numeric_tlids,
                          TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget, WAF_BLOCKED,
-                         _is_waf_challenge,
+                         _is_waf_challenge, VENDOR_BLOCK_STATUSES,
                          run_deadline, past_deadline)
 import os
 import sys
@@ -186,7 +186,8 @@ def _ddl_column_exists(cur, ddl: str) -> bool:
 def _fetch(tlid: str, session: requests.Session) -> dict | None:
     url = ANALYSIS_URL.format(tlid=tlid)
     try:
-        r = retry_get(session, url, params={"format": "json"}, timeout=15)
+        r = retry_get(session, url, params={"format": "json"}, timeout=15,
+                      stop_statuses=VENDOR_BLOCK_STATUSES)
         data = r.json()
         if (data.get("head") or {}).get("status") != "0":
             return None
@@ -196,8 +197,9 @@ def _fetch(tlid: str, session: requests.Session) -> dict | None:
         # the sentinel lets the caller stop the slice cleanly and resume next run, instead of
         # booking ~2,100 phantom "failures" that trip FetchTracker's threshold and fail the job
         # -- which is what made trendlyne-midweek fail 48 of 58 runs while writing real rows.
-        if _is_waf_challenge(e):
-            print(f"  [{tlid}] allowance exhausted (WAF): {e}", file=sys.stderr)
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if _is_waf_challenge(e) or status in VENDOR_BLOCK_STATUSES:
+            print(f"  [{tlid}] allowance exhausted (HTTP {status or 'WAF'}): {e}", file=sys.stderr)
             return WAF_BLOCKED
         print(f"  [{tlid}] price-analysis error: {e}", file=sys.stderr)
         return None

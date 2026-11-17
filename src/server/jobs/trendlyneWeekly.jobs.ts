@@ -40,15 +40,23 @@ const CATCHUP_FETCHERS = [
   'trendlyne_fundamentals_fetcher.py',
 ];
 
-/** Rotate off the clock rather than stored state — a restart must not always replay index 0. */
+/** The catch-up cron fires every 15 minutes; the rotation slot must be the same length. */
+export const CATCHUP_SLOT_MS = 15 * 60_000;
+
+/**
+ * Rotate off the clock rather than stored state — a restart must not always replay index 0.
+ * The slot was 20 min after the cron moved to 15 (AF-20260917-24), so every fourth firing reused
+ * the previous one's fetcher: two slices on one route 15 min apart, ~220 requests against a
+ * ~110-request slice budget (AF-20261113-26).
+ */
 export function catchupFetcherFor(now = new Date()): string {
-  const slot = Math.floor(now.getTime() / (20 * 60_000));
+  const slot = Math.floor(now.getTime() / CATCHUP_SLOT_MS);
   return CATCHUP_FETCHERS[slot % CATCHUP_FETCHERS.length];
 }
 
 export async function processTrendlyneCatchup(_job: Job): Promise<{ success: boolean; script: string }> {
   const script = catchupFetcherFor();
-  // 10 min: a 110-request slice is ~2-4 min serially. Deliberately far below the 20-min cadence
+  // 10 min: a 110-request slice is ~2-4 min serially. Deliberately below the 15-min cadence
   // so two catch-up runs can never overlap and double-spend the shared WAF allowance.
   //
   // Was `.catch(warn)` with no rethrow, same shape processTrendlyneMidweek below was already

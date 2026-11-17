@@ -2,18 +2,18 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { catchupFetcherFor } from '../jobs/trendlyneWeekly.jobs';
+import { catchupFetcherFor, CATCHUP_SLOT_MS } from '../jobs/trendlyneWeekly.jobs';
 
 /**
  * trendlyne.com's AWS WAF allowance is a per-session REQUEST COUNT (~131-150, measured
  * 2026-08-17), not a rate — so no pacing gets a 2,234-symbol universe through in one pass, and
  * the four per-symbol fetchers share ONE allowance because they share one source IP.
  *
- * The catch-up job therefore runs exactly one fetcher per 20-minute slot, rotating off the wall
+ * The catch-up job therefore runs exactly one fetcher per cron slot (15 min), rotating off the wall
  * clock so a restart doesn't always replay the same one. These pin that contract.
  */
 describe('trendlyne-catchup fetcher rotation', () => {
-  const SLOT = 20 * 60_000;
+  const SLOT = CATCHUP_SLOT_MS;
 
   it('runs exactly one fetcher per slot, cycling through all four', () => {
     const base = Date.UTC(2026, 7, 18, 0, 0);
@@ -37,6 +37,19 @@ describe('trendlyne-catchup fetcher rotation', () => {
       expect(catchupFetcherFor(new Date(base + i * SLOT)))
         .toBe(catchupFetcherFor(new Date(base + (i + 4) * SLOT)));
     }
+  });
+
+  // 2026-11-17: the slot was 20 min under a 15-min cron, so the same fetcher ran twice in a row
+  // once an hour and one route took two slices' worth of requests back to back.
+  it('never gives two consecutive cron firings to the same fetcher', () => {
+    const src = readFileSync(resolve(__dirname, '..', 'jobs', 'trendlyneWeekly.jobs.ts'), 'utf-8');
+    const cron = /repeat: \{ pattern: '\*\/(\d+) [^']*' \},\s*jobId: 'trendlyne-catchup-slice'/.exec(src);
+    expect(cron, 'catch-up cron pattern not found').not.toBeNull();
+    const everyMs = Number(cron![1]) * 60_000;
+    expect(everyMs).toBe(CATCHUP_SLOT_MS);
+    const base = Date.UTC(2026, 10, 17, 0, 0);
+    const picks = Array.from({ length: 96 }, (_, i) => catchupFetcherFor(new Date(base + i * everyMs + 2_000)));
+    for (let i = 1; i < picks.length; i++) expect(picks[i], `firing ${i}`).not.toBe(picks[i - 1]);
   });
 
   // The whole design rests on each fetcher taking a bounded slice AND skipping what it already

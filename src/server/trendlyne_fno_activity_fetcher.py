@@ -204,7 +204,10 @@ def fetch_activity(expiry: str, screen_type: str) -> dict | None:
     url = ACTIVITY_URL.format(expiry=expiry, screen_type=screen_type)
     try:
         r = requests.get(url, headers=FNO_ACTIVITY_HEADERS, timeout=20)
-        if not r.ok or not r.text.strip():
+        if not r.ok:
+            print(f"    [fno_activity] HTTP {r.status_code} for {screen_type}/{expiry}", file=sys.stderr)
+            return None
+        if not r.text.strip():
             return None
         d = r.json()
         if d.get("head", {}).get("status") != 0:
@@ -279,11 +282,20 @@ def run(expiry: str | None = None, screen_types=SCREEN_TYPES) -> int:
     return total
 
 
-if __name__ == "__main__":
+def main(argv=None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--expiry", default=None, help="Force expiry date YYYY-MM-DD (default: nearest NIFTY expiry)")
     parser.add_argument("--screen-type", default=None, help="Fetch a single screen type instead of all")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     screen_types = (args.screen_type,) if args.screen_type else SCREEN_TYPES
-    run(expiry=args.expiry, screen_types=screen_types)
+    total = run(expiry=args.expiry, screen_types=screen_types)
+    # 2026-11-16: every screen answered 403, the run printed "no data" three times and exited 0,
+    # and the day's rows were lost without a failed step. The feed answers on non-trading days too.
+    if total == 0:
+        print("[fno_activity] nothing written for any screen type", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
