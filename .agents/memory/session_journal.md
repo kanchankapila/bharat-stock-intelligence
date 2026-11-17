@@ -661,3 +661,9 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 - Not verified: tonight's screener-performance phase B timing (was 1,526.7 s); ml-ensemble-train teardown crash (next retrain 2026-11-22).
 - Rule to carry: a manual production re-grade inside 18:50 to 00:30 IST starves ml-daily-ops steps; three fast steps timing out together is contention, re-run them.
 - Later the same morning: earnings-calendar snapshots started (AF-20261115-01); Trendlyne refusal latch, rotation slot and fno_activity exit code fixed, and the 11-16 fno_activity session recovered (AF-20261113-26). Not verified until tonight: catch-up no longer repeats a fetcher back to back; coverage check back above 50%; phase B timing.
+
+## 2026-11-18 00:10 IST — lifecycle review, "fix all" (Claude)
+- Local main had a stuck `git pull` merge (MERGE_HEAD 22:40, CLAUDE.md + logger.ts conflicted). Aborted it and fast-forwarded main to 0172db5d, PR #139's head, which is the same merge already resolved (tree f82c1c5c identical). Not pushed.
+- PR #139 and every main push now fail `security:check`: picomatch GHSA-fc5q-39xc-vjpf widened to <=4.0.7 (latest) on 11-17, no patch. Exception script refused by the classifier; owner decision, AF-20261117-22.
+- 1a25d3db: sector page shows an unavailable state instead of 12 hard-coded sectors; AF-20261117-09 closed (cost batch read back).
+- Deploy of AF-20261117-02/03/06/07/13/18/21 still waits for the 16:05-16:55 window (work state lifecycle-review-2026-11-17).
