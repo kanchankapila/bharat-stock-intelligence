@@ -10,6 +10,7 @@ Phases:
   D - Sync tier back to screener_master + screener_reliability
 """
 
+import bisect
 import json
 import statistics
 import datetime
@@ -210,7 +211,7 @@ def phase_b_fill_returns(conn: ConnWrapper) -> int:
     # Python rather than one SQL join -- exactly the same defensive pattern this codebase
     # already uses elsewhere for this table (see CLAUDE.md's ohlcv_adjust.py notes: "update
     # by explicit (symbol, date) key in small batches" to avoid the identical decompression
-    # trap). Kept the variable name "pending" -- it now means "pending AND fillable".
+    # trap). A symbol with no bars costs one empty read and is skipped.
     candidates = conn.execute("""
         SELECT screener_id, symbol, appeared_date
         FROM screener_appearances
@@ -224,69 +225,94 @@ def phase_b_fill_returns(conn: ConnWrapper) -> int:
         return 0
 
     distinct_symbols = {row[1] for row in candidates}
-    covered = {
-        sym for sym in distinct_symbols
-        if conn.execute("SELECT 1 FROM stock_ohlcv WHERE symbol = ? LIMIT 1", (sym,)).fetchone()
-    }
-    pending = [row for row in candidates if row[1] in covered]
+    # One literal `WHERE symbol = ?` price read per symbol (2026-11-17, AF-20261112-03). The loop
+    # used to issue 8 reads per APPEARANCE (entry + 5 horizons + 2 index): 1,527 s of a 1,776 s run.
+    by_symbol = defaultdict(list)
+    for row in candidates:
+        by_symbol[row[1]].append(row)
+    earliest = min(str(row[2])[:10] for row in candidates)
+    nifty_dates, nifty_closes = _clean_closes(conn, NIFTY_SYMBOL, earliest)
 
-    if not pending:
-        print(f"[PhaseB] {len(candidates)} candidates, 0 have OHLCV coverage. Nothing to fill.")
-        return 0
-
-    print(f"[PhaseB] {len(candidates)} candidates ({len(distinct_symbols)} symbols, "
-          f"{len(covered)} with OHLCV coverage) -- filling {len(pending)} appearances...")
+    print(f"[PhaseB] {len(candidates)} candidates ({len(distinct_symbols)} symbols) -- filling...")
     filled = 0
+    covered = 0
 
-    for screener_id, symbol, appeared_date in pending:
-        # appeared_date is a timestamptz (datetime) on Postgres; use its date portion for
-        # the OHLCV lookups but keep the original value for the UPDATE WHERE row match.
-        lookup_date = str(appeared_date)[:10]
-        entry_price = get_price_on_or_after(conn, symbol, lookup_date)
-        if entry_price is None:
+    for symbol, rows in by_symbol.items():
+        dates, closes = _clean_closes(conn, symbol, min(str(r[2])[:10] for r in rows))
+        if not dates:
             continue
+        covered += 1
+        for screener_id, _, appeared_date in rows:
+            # appeared_date is a timestamptz (datetime) on Postgres; use its date portion for
+            # the OHLCV lookups but keep the original value for the UPDATE WHERE row match.
+            lookup_date = str(appeared_date)[:10]
+            entry_price = _close_on_or_after(dates, closes, lookup_date)
+            if entry_price is None:
+                continue
 
-        returns = {}
-        for n, col in [(5, 'return_5d'), (10, 'return_10d'), (20, 'return_20d'), (60, 'return_60d'), (120, 'return_120d')]:
-            exit_price, _ = get_trading_days_after(conn, symbol, lookup_date, n)
-            returns[col] = compute_return(entry_price, exit_price)
-
-        nifty_exit, _ = get_trading_days_after(conn, NIFTY_SYMBOL, lookup_date, 20)
-        nifty_entry = get_price_on_or_after(conn, NIFTY_SYMBOL, lookup_date)
-        nifty_ret_20d = compute_return(nifty_entry, nifty_exit)
-
-        r20 = returns.get('return_20d')
-        if r20 is None:
-            outcome_20d = 'PENDING'
-        elif nifty_ret_20d is not None:
-            diff = r20 - nifty_ret_20d
-            outcome_20d = 'WIN' if diff > 0.5 else ('LOSS' if diff < -0.5 else 'NEUTRAL')
-        else:
-            outcome_20d = 'WIN' if r20 > 1.0 else ('LOSS' if r20 < -1.0 else 'NEUTRAL')
-
-        conn.execute("""
-            UPDATE screener_appearances
-            SET return_5d=?, return_10d=?, return_20d=?, return_60d=?, return_120d=?,
-                nifty_ret_20d=?, outcome_20d=?
-            WHERE screener_id=? AND symbol=? AND appeared_date=?
-        """, (
-            returns['return_5d'], returns['return_10d'], returns['return_20d'],
-            returns['return_60d'], returns['return_120d'],
-            nifty_ret_20d, outcome_20d,
-            screener_id, symbol, appeared_date
-        ))
-        filled += 1
-
-        # Batched commit (2026-08-09, same bug session as the EXISTS fix above): the old
-        # single commit() at the very end meant a timeout-killed run lost 100% of its
-        # progress -- committing every 500 rows means a killed run keeps whatever it already
-        # filled, so the backlog actually shrinks run over run instead of resetting to zero.
-        if filled % 500 == 0:
-            conn.commit()
+            returns = {
+                col: compute_return(entry_price, _close_n_bars_after(dates, closes, lookup_date, n))
+                for n, col in [(5, 'return_5d'), (10, 'return_10d'), (20, 'return_20d'),
+                               (60, 'return_60d'), (120, 'return_120d')]
+            }
+            nifty_ret_20d = compute_return(
+                _close_on_or_after(nifty_dates, nifty_closes, lookup_date),
+                _close_n_bars_after(nifty_dates, nifty_closes, lookup_date, 20))
+            filled += _write_phase_b_row(conn, screener_id, symbol, appeared_date, returns, nifty_ret_20d)
+            # Batched commit (2026-08-09): a timeout-killed run keeps what it already filled.
+            if filled % 500 == 0:
+                conn.commit()
 
     conn.commit()
-    print(f"[PhaseB] Filled {filled} rows.")
+    print(f"[PhaseB] Filled {filled} rows ({covered} of {len(distinct_symbols)} symbols have OHLCV).")
     return filled
+
+
+def _clean_closes(conn: ConnWrapper, symbol: str, from_date: str):
+    """(dates, closes) of a symbol's non-suspect bars from from_date on, ascending. A literal
+    symbol equality, never a join: see the 2026-08-09 note in phase_b_fill_returns."""
+    rows = conn.execute("""
+        SELECT date, close FROM stock_ohlcv
+        WHERE symbol = ? AND date >= ? AND (is_suspect IS NULL OR is_suspect = 0)
+        ORDER BY date ASC
+    """, (symbol, from_date)).fetchall()
+    return [str(r[0])[:10] for r in rows], [r[1] for r in rows]
+
+
+def _close_on_or_after(dates, closes, date: str):
+    """In-memory get_price_on_or_after."""
+    i = bisect.bisect_left(dates, date)
+    return closes[i] if i < len(dates) else None
+
+
+def _close_n_bars_after(dates, closes, date: str, n: int):
+    """In-memory get_trading_days_after: the close n bars strictly after date."""
+    i = bisect.bisect_right(dates, date) + n - 1
+    return closes[i] if i < len(dates) else None
+
+
+def _write_phase_b_row(conn, screener_id, symbol, appeared_date, returns, nifty_ret_20d) -> int:
+    r20 = returns.get('return_20d')
+    if r20 is None:
+        outcome_20d = 'PENDING'
+    elif nifty_ret_20d is not None:
+        diff = r20 - nifty_ret_20d
+        outcome_20d = 'WIN' if diff > 0.5 else ('LOSS' if diff < -0.5 else 'NEUTRAL')
+    else:
+        outcome_20d = 'WIN' if r20 > 1.0 else ('LOSS' if r20 < -1.0 else 'NEUTRAL')
+
+    conn.execute("""
+        UPDATE screener_appearances
+        SET return_5d=?, return_10d=?, return_20d=?, return_60d=?, return_120d=?,
+            nifty_ret_20d=?, outcome_20d=?
+        WHERE screener_id=? AND symbol=? AND appeared_date=?
+    """, (
+        returns['return_5d'], returns['return_10d'], returns['return_20d'],
+        returns['return_60d'], returns['return_120d'],
+        nifty_ret_20d, outcome_20d,
+        screener_id, symbol, appeared_date
+    ))
+    return 1
 
 
 # -- Phase C: Bayesian composite + tier ---------------------------------------

@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import execute, executemany, query_one, read_df
-from model_promotion import clears_promotion_bar, file_staleness_override_applies
+from model_promotion import clears_promotion_bar, file_staleness_override_applies, metric_is_usable
 import sys
 
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_models", "live_screener_intraday_clf.pkl")
@@ -452,7 +452,7 @@ def train():
     # STALENESS OVERRIDE (ml-promotion-gate-review, 2026-08-15): see
     # model_promotion.file_staleness_override_applies()'s docstring for the full contract.
     staleness_override, age_days, rejection_count = (False, 0.0, 0)
-    if not promote and baseline is not None:
+    if not promote and baseline is not None and metric_is_usable(test_auc):
         staleness_override, age_days, rejection_count = file_staleness_override_applies(baseline)
 
     # Refit on ALL data (train + test windows) for the artifact that actually goes live --

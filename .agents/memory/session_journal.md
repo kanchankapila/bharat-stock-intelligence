@@ -653,3 +653,10 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 - Not verified: ml-ensemble-train after the completion marker (next ml-weekly-retrain is Sunday 2026-11-22 05:00); trendlyneWeekly's `ohlcv_adjust --persist` with the new guards (only a read-only scan was run, it would persist 0 of the deleted rows).
 - Rules to carry: our own factor table is not an authority to judge prices by (use TEJ/NSE); after a cleanup, run the producer read-only and diff; another project on this host can kill our Python by image name, the runner now names it.
 
+
+
+## 2026-11-17 (morning) - open-items pass (Claude)
+- Full account: docs/session-log.md, same date. Ledger: 17 rows closed, AF-20261117-01 new and closed, AF-20261112-03 fixed in code and waiting on tonight's run.
+- Verified live: digest fixes read back from telegram_report_log; Tapetide route; three starved ml-daily-ops steps re-run (4 to 10 s each); phase B equivalence on 312 live rows (0 differences).
+- Not verified: tonight's screener-performance phase B timing (was 1,526.7 s); ml-ensemble-train teardown crash (next retrain 2026-11-22).
+- Rule to carry: a manual production re-grade inside 18:50 to 00:30 IST starves ml-daily-ops steps; three fast steps timing out together is contention, re-run them.
