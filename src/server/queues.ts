@@ -992,6 +992,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
         }
       })
       .catch(e => T.fail('investsights_corporate_actions_fetcher', e)),
+    // Append-only daily view of the forward earnings calendar (AF-20261115-01); one call, ~4 s.
+    runPython('investsights_earnings_calendar_fetcher.py', [], 2 * 60_000)
+      .catch(e => T.fail('investsights_earnings_calendar_fetcher', e)),
     // NDTV Profit futures basis/roll-spread/PCR, independent cross-check for fno_rollover_fetcher.py
     // (2026-08-07 urls.txt follow-up) → ndtv_fno_basis. F&O-eligible universe only (209 symbols) --
     // futures don't exist for the rest of nse_stocks. Live-measured ~7s for the full universe.

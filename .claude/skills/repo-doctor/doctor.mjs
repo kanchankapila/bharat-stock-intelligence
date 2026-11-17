@@ -19,7 +19,7 @@ import { execSync } from 'child_process';
 import 'dotenv/config';
 import zlib from 'zlib';
 import {
-  appLogFilesForScan,
+  appLogFilesForScan, BOOT_MARKER, isRestartTeardown, logLineTimeMs,
   classifyLatestDq,
   isKnownTransientFailure,
   latestExpectedNseDailyRun,
@@ -472,17 +472,28 @@ const BENIGN_LOG = [
 try {
   const logFiles = appLogFilesForScan(new Date(), path.join(ROOT, 'logs'), fs.existsSync);
   const seen = new Map();
+  const errors = [];
+  const boots = [];
   for (const { path: f, gz } of logFiles) {
     const raw = fs.readFileSync(f);
     for (const line of (gz ? zlib.gunzipSync(raw) : raw).toString('utf8').split('\n')) {
-      if (!line.includes('"level":"error"')) continue;
-      let msg = line; try { msg = JSON.parse(line).message || line; } catch { /* raw */ }
-      const key = String(msg).replace(/[0-9a-f-]{16,}|\d{3,}/g, '#').slice(0, 90);
-      if (!seen.has(key)) {
-        seen.set(key, { n: 0, sample: String(msg).slice(0, 140), benign: (BENIGN_LOG.find(([re]) => re.test(String(msg))) || [])[1] });
-      }
-      seen.get(key).n++;
+      const isError = line.includes('"level":"error"');
+      if (!isError && !line.includes(BOOT_MARKER)) continue;
+      let msg = line, ts = null;
+      try { const o = JSON.parse(line); msg = o.message || line; ts = logLineTimeMs(o.timestamp); } catch { /* raw */ }
+      if (isError) errors.push({ msg: String(msg), ts });
+      else if (ts !== null) boots.push(ts);
     }
+  }
+  for (const { msg, ts } of errors) {
+    const teardown = isRestartTeardown(msg, ts, boots);
+    const key = (teardown ? 'restart:' : '') + msg.replace(/[0-9a-f-]{16,}|\d{3,}/g, '#').slice(0, 90);
+    if (!seen.has(key)) {
+      seen.set(key, { n: 0, sample: msg.slice(0, 140), benign: teardown
+        ? 'restart teardown (a server boot follows within 10 min)'
+        : (BENIGN_LOG.find(([re]) => re.test(msg)) || [])[1] });
+    }
+    seen.get(key).n++;
   }
   const unknown = [...seen.entries()].filter(([, v]) => !v.benign);
   const totalErr = [...seen.values()].reduce((a, v) => a + v.n, 0);

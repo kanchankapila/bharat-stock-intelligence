@@ -492,6 +492,8 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'fundamentals', critical: false, table: 'stock_corporate_action_history', dateColumn: 'fetched_at', warnDays: 10, failDays: 16 },
   { id: 'nse-filed-corporate-actions-freshness', label: 'nse_filed_corporate_actions (InvestSights, sourced from real NSE filings)',
     category: 'fundamentals', critical: false, table: 'nse_filed_corporate_actions', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  { id: 'earnings-calendar-snapshots-freshness', label: 'earnings_calendar_snapshots (InvestSights forward earnings calendar, one view per day)',
+    category: 'fundamentals', critical: false, table: 'earnings_calendar_snapshots', dateColumn: 'snapshot_date', warnDays: 3, failDays: 5 },
   // onboard-data-source batch, 2026-08-13 -- 4 new InvestSights per-stock/screener endpoints.
   // See investsights_fundamentals_fetcher.py / investsights_factor_scores_fetcher.py /
   // investsights_announcement_intel_fetcher.py docstrings for the endpoints + quirks.
