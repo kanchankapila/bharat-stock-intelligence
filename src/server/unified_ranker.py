@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from db_compat import connect
 import as_of
-from indian_market_costs import round_trip_cost_bps, equity_trade_type_for_timeframe
+from indian_market_costs import round_trip_cost_bps, equity_trade_type_for_timeframe, participation_from_adt
 
 CSV_PATH         = Path(__file__).parent.parent.parent / 'screener_scoring_v2.csv'
 CORRECTIONS_PATH = Path(__file__).parent.parent.parent / 'screener_corrections.csv'
@@ -2168,8 +2168,7 @@ class UnifiedRanker:
                 atr = float(row[3]) if row[3] else cmp_val * 0.02
                 # Estimate participation rate: ₹10L notional vs ADT
                 notional = 1_000_000.0
-                participation = (notional / adt) if adt > 0 else 0.01
-                participation = min(participation, 0.25)  # cap at 25% of ADT
+                participation = participation_from_adt(adt, notional)
                 # Daily volatility as percentage
                 daily_vol_pct = (atr / cmp_val * 100.0) if cmp_val > 0 else 2.0
                 trade_type = (trade_type_by_symbol or {}).get(sym, 'delivery')

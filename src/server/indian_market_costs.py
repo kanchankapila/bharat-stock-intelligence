@@ -64,6 +64,17 @@ def _market_cap_tier(market_cap_cr):
     return "microcap"
 
 
+MAX_PARTICIPATION = 0.25  # share of average daily turnover a position may take
+
+
+def participation_from_adt(adt, notional: float = 1_000_000.0) -> float:
+    """Share of average daily turnover a `notional` order takes, capped. No turnover means
+    illiquid, so it takes the cap (AF-20261117-09: both cost maps returned the liquid 1%)."""
+    if not adt or adt <= 0:
+        return MAX_PARTICIPATION
+    return min(notional / adt, MAX_PARTICIPATION)
+
+
 def estimate_slippage_bps(participation_rate=0.01, market_cap_cr=None, volatility_pct=None):
     tier = _market_cap_tier(market_cap_cr)
     base = SLIPPAGE_BASE_BPS[tier]

@@ -24,7 +24,7 @@ REC_LOG_HORIZON_SESSIONS = {'intraday': 1, 'long_term': 15}
 # +0.24 at h5, -0.20 at h15, both insignificant) -- see measurement.md. Re-enable only with a fresh
 # prior learned on cost-aware labels that clears the same test.
 SIGNAL_TYPE_PRIOR_WEIGHT = 0.0
-from indian_market_costs import round_trip_cost_bps, equity_trade_type_for_timeframe
+from indian_market_costs import round_trip_cost_bps, equity_trade_type_for_timeframe, participation_from_adt
 
 
 # ── Pure functions: regime-edge-adjusted ML win_probability consumption ────────
@@ -1237,8 +1237,7 @@ class AlphaQuantScoringEngine:
                     atr = float(row[3]) if row[3] else cmp_val * 0.02
                     # Estimate participation rate: ₹10L notional vs ADT
                     notional = 1_000_000.0
-                    participation = (notional / adt) if adt > 0 else 0.01
-                    participation = min(participation, 0.25)  # cap at 25% of ADT
+                    participation = participation_from_adt(adt, notional)
                     # Daily volatility as percentage
                     daily_vol_pct = (atr / cmp_val * 100.0) if cmp_val > 0 else 2.0
                     trade_type = (trade_type_by_symbol or {}).get(sym, 'delivery')
