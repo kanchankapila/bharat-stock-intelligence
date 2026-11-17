@@ -1002,3 +1002,30 @@ def test_reclog_plain_stop_out_stays_loss_even_inside_threshold():
                                        (5, 99.5, 99.5, 99.5, 99.5)])
     assert row[1] < 0
     assert row[0] == 'LOSS'
+
+
+def test_reclog_levels_are_rescaled_when_a_split_falls_inside_the_window():
+    """AF-20261117-13: stock_ohlcv is back-adjusted for splits/bonuses, recommendation_log levels
+    are not. A 1:2 split inside the hold left entry 200 / stop 190 against bars near 100, so any
+    (re)grade booked an instant fake STOP_LOSS; 134 of 205 split-spanning live rows are on the
+    old basis."""
+    from outcome_resolver import resolve_recommendation_log
+    conn = make_reclog_db()
+    conn.execute("CREATE TABLE corporate_actions (symbol TEXT, action_type TEXT, ex_date TEXT, amount REAL)")
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, -1, -1):  # adjusted history incl. the signal day: flat at 100
+        d = (base - datetime.timedelta(days=i)).isoformat()
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('SPL',?,100,100,100,100,100000)", (d,))
+    conn.execute("INSERT INTO corporate_actions VALUES ('SPL','SPLIT',?,NULL)", ((base + datetime.timedelta(days=2)).isoformat(),))
+    conn.execute("INSERT INTO recommendation_log (symbol, signal_date, entry_price, stop_loss, target_1, horizon_days, outcome) "
+                 "VALUES ('SPL', ?, 200, 190, 210, 5, 'PENDING')", (sig_date,))
+    for off, (o, h, l, c) in enumerate([(100, 101, 99.5, 100.5), (100.5, 102, 100, 101.5), (101.5, 103, 101, 102.5),
+                                        (102.5, 104, 102, 103.5), (103.5, 104, 103, 103.8)], start=1):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('SPL',?,?,?,?,?,100000)",
+                     ((base + datetime.timedelta(days=off)).isoformat(), o, h, l, c))
+    conn.commit()
+    resolve_recommendation_log(conn, horizon_days=5, dry_run=False)
+    outcome, ret = conn.execute("SELECT outcome, actual_return_pct FROM recommendation_log WHERE symbol='SPL'").fetchone()
+    assert ret == pytest.approx(3.8 - 0.30, abs=0.1)   # 100 -> 103.8 on the adjusted basis
+    assert outcome == 'WIN'
