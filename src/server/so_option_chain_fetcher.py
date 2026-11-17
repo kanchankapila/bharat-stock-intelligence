@@ -35,6 +35,7 @@ from datetime import date as _date, timedelta
 import requests
 
 from db_compat import execute, executemany, query_all
+from fetch_utils import VendorBlockLatch
 from as_of import is_trading_session
 import sys
 
@@ -238,11 +239,18 @@ def _sf(v) -> float | None:
         return None
 
 
+VENDOR_BLOCK = VendorBlockLatch("so_chain")
+
+
 def fetch_chain(symbol: str, expiry: str) -> dict | None:
+    if VENDOR_BLOCK.tripped():
+        return None
     url = CHAIN_URL.format(symbol=symbol, expiry=expiry)
     try:
         r = requests.get(url, headers=SO_HEADERS, timeout=20)
-        if not r.ok or not r.text.strip():
+        # A 403/405/429 is the shared Trendlyne allowance refusing, not "this symbol has no
+        # chain": 2026-11-13 and 11-16 sent 221 refused requests each and wrote nothing.
+        if VENDOR_BLOCK.refused(r.status_code) or not r.ok or not r.text.strip():
             return None
         d = r.json()
         if d.get("head", {}).get("status") != "0":
@@ -412,6 +420,10 @@ def run(
     ok = fail = 0
     written: set[str] = set()
     for i, sym in enumerate(symbols):
+        if VENDOR_BLOCK.tripped():
+            print(f"[so_chain] stopped after {i} of {len(symbols)}: vendor refused (HTTP "
+                  f"{VENDOR_BLOCK.status}); the rest resume next run, least-covered first")
+            break
         exp = expiry or _get_nearest_expiry(sym)
         print(f"  [{i+1}/{len(symbols)}] {sym} (expiry={exp}) ...", end=" ", flush=True)
         body = fetch_chain(sym, exp)
@@ -441,6 +453,12 @@ def run(
             time.sleep(delay)
 
     print(f"[so_chain] Done. ok={ok} fail={fail} total={ok+fail}")
+    if ok == 0 and symbols:
+        # Nothing landed: a refused or empty run must not report success (2026-11-16 did).
+        print(f"[so_chain] wrote no chain for any of {len(symbols)} symbols"
+              + (f" (vendor refused: HTTP {VENDOR_BLOCK.status})" if VENDOR_BLOCK.tripped() else ""),
+              file=sys.stderr)
+        sys.exit(1)
 
     # Coverage guard -- CUMULATIVE, not per-run, and on stderr.
     #

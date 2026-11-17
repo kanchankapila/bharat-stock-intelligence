@@ -91,3 +91,20 @@ def test_fno_activity_that_wrote_nothing_exits_non_zero(monkeypatch, capsys):
         fno.main([])
     assert exc.value.code == 1
     assert "HTTP 403" in capsys.readouterr().err
+
+
+def test_option_chain_stops_at_the_first_refusal_and_fails_when_nothing_landed(monkeypatch, capsys):
+    import so_option_chain_fetcher as so
+    monkeypatch.setattr(so, "VENDOR_BLOCK", fetch_utils.VendorBlockLatch("test"))
+    s = _Session(403)
+    monkeypatch.setattr(so.requests, "get", s.get)
+    monkeypatch.setattr(so, "is_trading_session", lambda d: True)
+    monkeypatch.setattr(so, "_get_fno_symbols", lambda: ["AAA", "BBB", "CCC"])
+    monkeypatch.setattr(so, "_coverage_map", lambda syms: {})
+    monkeypatch.setattr(so, "resume_order", lambda syms, cov: syms)
+    monkeypatch.setattr(so, "_get_nearest_expiry", lambda sym: "2026-11-24")
+    with pytest.raises(SystemExit) as exc:
+        so.run(delay=0)
+    assert exc.value.code == 1
+    assert s.calls == 1
+    assert "HTTP 403" in capsys.readouterr().err
