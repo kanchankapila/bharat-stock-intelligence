@@ -16,6 +16,7 @@ import { runPython } from '../pythonRunner';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
 import { isMarketOpen } from '../marketStatusService';
+import { trendlynePending, withTrendlyneSlot } from '../trendlyneGate';
 
 export const QUEUE_TRENDLYNE_MIDWEEK = 'trendlyne-midweek';
 export const QUEUE_TRENDLYNE_RATIOS_MONTHLY = 'trendlyne-ratios-monthly';
@@ -54,8 +55,14 @@ export function catchupFetcherFor(now = new Date()): string {
   return CATCHUP_FETCHERS[slot % CATCHUP_FETCHERS.length];
 }
 
-export async function processTrendlyneCatchup(_job: Job): Promise<{ success: boolean; script: string }> {
+export async function processTrendlyneCatchup(_job: Job): Promise<{ success: boolean; script: string; skipped?: boolean }> {
   const script = catchupFetcherFor();
+  // A scheduled Trendlyne step is running or queued: give up this slice rather than add a
+  // second burst on the shared allowance (AF-20261117-18). The next slot takes it.
+  if (trendlynePending() > 0) {
+    console.log(`[QUEUE] trendlyne-catchup skipped ${script}: another Trendlyne step holds the slot`);
+    return { success: true, script, skipped: true };
+  }
   // 10 min: a 110-request slice is ~2-4 min serially. Deliberately below the 15-min cadence
   // so two catch-up runs can never overlap and double-spend the shared WAF allowance.
   //
@@ -66,7 +73,7 @@ export async function processTrendlyneCatchup(_job: Job): Promise<{ success: boo
   // (found live 2026-08-30 reviewing logs/error-2026-08-30.log). Rethrow so a real failure
   // reaches worker.on('failed') and actually marks the heartbeat.
   try {
-    await runPython(script, [], 10 * 60_000);
+    await withTrendlyneSlot(() => runPython(script, [], 10 * 60_000));
   } catch (e) {
     console.warn(`[QUEUE] trendlyne-catchup ${script} failed:`, (e as Error).message);
     throw e;
@@ -101,12 +108,12 @@ async function processTrendlyneMidweek(_job: Job): Promise<{ success: boolean; s
   // Collect failures and throw once both have had a chance to run, so a genuine break is visible
   // in job_heartbeat/the daily digest instead of only in a DB-freshness staleness check.
   const errors: string[] = [];
-  await runPython('trendlyne_adv_tech_fetcher.py', [], 40 * 60_000)
+  await withTrendlyneSlot(() => runPython('trendlyne_adv_tech_fetcher.py', [], 40 * 60_000))
     .catch(e => {
       console.warn('[QUEUE] trendlyne_adv_tech_fetcher failed:', (e as Error).message);
       errors.push(`trendlyne_adv_tech_fetcher: ${(e as Error).message}`);
     });
-  await runPython('trendlyne_price_analysis_fetcher.py', [], 40 * 60_000)
+  await withTrendlyneSlot(() => runPython('trendlyne_price_analysis_fetcher.py', [], 40 * 60_000))
     .catch(e => {
       console.warn('[QUEUE] trendlyne_price_analysis_fetcher failed:', (e as Error).message);
       errors.push(`trendlyne_price_analysis_fetcher: ${(e as Error).message}`);

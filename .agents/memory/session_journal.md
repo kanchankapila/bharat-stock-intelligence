@@ -667,3 +667,4 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 - PR #139 and every main push now fail `security:check`: picomatch GHSA-fc5q-39xc-vjpf widened to <=4.0.7 (latest) on 11-17, no patch. Exception script refused by the classifier; owner decision, AF-20261117-22.
 - 1a25d3db: sector page shows an unavailable state instead of 12 hard-coded sectors; AF-20261117-09 closed (cost batch read back).
 - Deploy of AF-20261117-02/03/06/07/13/18/21 still waits for the 16:05-16:55 window (work state lifecycle-review-2026-11-17).
+- 2026-11-18 00:40: Trendlyne gate (AF-20261118-01) and option-chain fix committed, restart + pm2 upgrade owed at 16:05 today. Fintrend provisional edge (IC 0.05 at 21d, survives momentum control); PE-band history void (rewritten each run). Git Bash `TZ=Asia/Kolkata` prints GMT: use plain `date`.

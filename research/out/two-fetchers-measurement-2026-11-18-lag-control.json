@@ -1,0 +1,196 @@
+{
+ "fintrend_score_lag3d": {
+  "scored_panel_rows": 1470278,
+  "scored_sessions": 1447,
+  "ic": [
+   {
+    "horizon": 5,
+    "n_independent_dates": 269,
+    "mean_ic": 0.0291105311664745,
+    "t": 6.567277559299663,
+    "hit_rate": 0.7100371747211895
+   },
+   {
+    "horizon": 21,
+    "n_independent_dates": 64,
+    "mean_ic": 0.0487969503860114,
+    "t": 4.305321546901692,
+    "hit_rate": 0.828125
+   },
+   {
+    "horizon": 63,
+    "n_independent_dates": 20,
+    "mean_ic": 0.05293015050299819,
+    "t": 3.987152588224931,
+    "hit_rate": 0.75
+   }
+  ],
+  "rebal21_cost25": {
+   "factor": "external_score",
+   "long_short": false,
+   "excess_by_year_pct": {
+    "2021": 1.802,
+    "2022": 0.232,
+    "2023": 1.085,
+    "2024": 1.977,
+    "2025": -1.192,
+    "2026": 2.321
+   },
+   "years_positive": "5/6",
+   "rebalance_days": 21,
+   "top_k": 50,
+   "cost_bps_per_side": 25.0,
+   "missing_exit_pct": -100.0,
+   "missing_exits": 4,
+   "periods": 61,
+   "years": 5.08,
+   "gross_per_period_pct": 2.1953,
+   "cost_per_period_pct": 0.1467,
+   "net_per_period_pct": 2.0486,
+   "universe_per_period_pct": 1.1626,
+   "universe_annualised_pct": 14.88,
+   "benchmark_sane": true,
+   "net_excess_vs_universe_pct": 0.8859,
+   "excess_t_stat": 3.0,
+   "pct_periods_beating_universe": 63.9,
+   "avg_oneway_turnover": 0.293,
+   "annual_cost_drag_pct": 1.76,
+   "cagr_net_pct": 24.11,
+   "sharpe_net": 1.03,
+   "max_drawdown_pct": -32.61,
+   "clamped_returns": 35
+  },
+  "rebal21_cost40": {
+   "factor": "external_score",
+   "long_short": false,
+   "excess_by_year_pct": {
+    "2021": 1.697,
+    "2022": 0.141,
+    "2023": 0.998,
+    "2024": 1.896,
+    "2025": -1.277,
+    "2026": 2.231
+   },
+   "years_positive": "5/6",
+   "rebalance_days": 21,
+   "top_k": 50,
+   "cost_bps_per_side": 40.0,
+   "missing_exit_pct": -100.0,
+   "missing_exits": 4,
+   "periods": 61,
+   "years": 5.08,
+   "gross_per_period_pct": 2.1953,
+   "cost_per_period_pct": 0.2348,
+   "net_per_period_pct": 1.9605,
+   "universe_per_period_pct": 1.1626,
+   "universe_annualised_pct": 14.88,
+   "benchmark_sane": true,
+   "net_excess_vs_universe_pct": 0.7979,
+   "excess_t_stat": 2.7,
+   "pct_periods_beating_universe": 63.9,
+   "avg_oneway_turnover": 0.293,
+   "annual_cost_drag_pct": 2.82,
+   "cagr_net_pct": 22.82,
+   "sharpe_net": 0.98,
+   "max_drawdown_pct": -33.51,
+   "clamped_returns": 35
+  }
+ },
+ "fintrend_score_lag7d": {
+  "scored_panel_rows": 1472807,
+  "scored_sessions": 1447,
+  "ic": [
+   {
+    "horizon": 5,
+    "n_independent_dates": 270,
+    "mean_ic": 0.02917069964939869,
+    "t": 6.60669318134476,
+    "hit_rate": 0.6962962962962963
+   },
+   {
+    "horizon": 21,
+    "n_independent_dates": 64,
+    "mean_ic": 0.050593514059627163,
+    "t": 4.425426524870311,
+    "hit_rate": 0.84375
+   },
+   {
+    "horizon": 63,
+    "n_independent_dates": 20,
+    "mean_ic": 0.05523915693604494,
+    "t": 4.2810422529025,
+    "hit_rate": 0.8
+   }
+  ],
+  "rebal21_cost25": {
+   "factor": "external_score",
+   "long_short": false,
+   "excess_by_year_pct": {
+    "2021": 2.198,
+    "2022": 0.381,
+    "2023": 0.913,
+    "2024": 2.277,
+    "2025": -0.966,
+    "2026": 1.911
+   },
+   "years_positive": "5/6",
+   "rebalance_days": 21,
+   "top_k": 50,
+   "cost_bps_per_side": 25.0,
+   "missing_exit_pct": -100.0,
+   "missing_exits": 3,
+   "periods": 61,
+   "years": 5.08,
+   "gross_per_period_pct": 2.2492,
+   "cost_per_period_pct": 0.1434,
+   "net_per_period_pct": 2.1058,
+   "universe_per_period_pct": 1.1462,
+   "universe_annualised_pct": 14.66,
+   "benchmark_sane": true,
+   "net_excess_vs_universe_pct": 0.9596,
+   "excess_t_stat": 3.32,
+   "pct_periods_beating_universe": 65.6,
+   "avg_oneway_turnover": 0.287,
+   "annual_cost_drag_pct": 1.72,
+   "cagr_net_pct": 24.94,
+   "sharpe_net": 1.06,
+   "max_drawdown_pct": -31.8,
+   "clamped_returns": 38
+  },
+  "rebal21_cost40": {
+   "factor": "external_score",
+   "long_short": false,
+   "excess_by_year_pct": {
+    "2021": 2.095,
+    "2022": 0.293,
+    "2023": 0.827,
+    "2024": 2.198,
+    "2025": -1.047,
+    "2026": 1.821
+   },
+   "years_positive": "5/6",
+   "rebalance_days": 21,
+   "top_k": 50,
+   "cost_bps_per_side": 40.0,
+   "missing_exit_pct": -100.0,
+   "missing_exits": 3,
+   "periods": 61,
+   "years": 5.08,
+   "gross_per_period_pct": 2.2492,
+   "cost_per_period_pct": 0.2295,
+   "net_per_period_pct": 2.0197,
+   "universe_per_period_pct": 1.1462,
+   "universe_annualised_pct": 14.66,
+   "benchmark_sane": true,
+   "net_excess_vs_universe_pct": 0.8735,
+   "excess_t_stat": 3.02,
+   "pct_periods_beating_universe": 62.3,
+   "avg_oneway_turnover": 0.287,
+   "annual_cost_drag_pct": 2.75,
+   "cagr_net_pct": 23.67,
+   "sharpe_net": 1.01,
+   "max_drawdown_pct": -32.67,
+   "clamped_returns": 38
+  }
+ }
+}

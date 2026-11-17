@@ -19,6 +19,7 @@ import { dbGet, dbAll, dbRun } from './dbAsync';
 import Redis from 'ioredis';
 import { REDIS_BASE } from './redisConfig';
 import { runPython } from './pythonRunner';
+import { withTrendlyneSlot } from './trendlyneGate';
 import { UNIFIED_RANKER_TIMEOUT_MS } from './jobBudgets';
 import { registerScreenerJobs } from './jobs/screeners.jobs';
 import { addJobWithCatchup } from './jobs/registerJob';
@@ -594,7 +595,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // having covered 55% of the universe -- while the parser, the table's ONLY production
   // consumer, read 5 of them. The other 15 now run weekly (processMlWeeklyRetrain) so the raw
   // corpus stays warm without costing the nightly window. ~10,000 requests, comfortably inside.
-  await runPython('extra_endpoints_fetcher.py', ['--scope', 'daily'], 30 * 60_000)
+  await withTrendlyneSlot(() => runPython('extra_endpoints_fetcher.py', ['--scope', 'daily'], 30 * 60_000))
     .catch(e => T.fail('extra_endpoints_fetcher', e));
   // Separate step ON PURPOSE — do not fold this back into the fetcher. It used to be that
   // script's last statement, so the 30-min timeout kill (which happened every night, see the
@@ -923,7 +924,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
     runPython('nt_change_oi_fetcher.py', [], 2 * 60_000)
       .catch(e => T.fail('nt_change_oi_fetcher', e)),
     // SmartOptions Greek-enriched option chain for all F&O stocks (Delta/Gamma/Theta/Vega/IV).
-    runPython('so_option_chain_fetcher.py', ['--delay', '0.3'], 30 * 60_000)
+    withTrendlyneSlot(() => runPython('so_option_chain_fetcher.py', ['--delay', '0.3'], 30 * 60_000))
       .catch(e => T.fail('so_option_chain_fetcher', e)),
     // Per-stock FUTURES OI/positioning (MC FUTSTK) -> stock_futures_oi_history: open interest,
     // OI change, long/short buildup, rollover %, basis. This is the family measurement.md had
@@ -937,7 +938,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
     // at the current monthly expiry -- distinct from so_option_chain_fetcher's per-stock chain
     // above (that one needs stockCode; this one is a ranked cross-market screener with no
     // per-stock id). Promoted 2026-07-30 from a stale-expiry URL found in updated_urls.json.
-    runPython('trendlyne_fno_activity_fetcher.py', [], 3 * 60_000)
+    withTrendlyneSlot(() => runPython('trendlyne_fno_activity_fetcher.py', [], 3 * 60_000))
       .catch(e => T.fail('trendlyne_fno_activity_fetcher', e)),
     // Sector Relative Rotation Graph + sector x sector correlation matrix (2026-08-06 urls.txt
     // analysis) → sector_rrg_history/sector_correlation_{pairs,stats,summary}.
@@ -970,7 +971,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
     // beats/misses, block deals, ...) — 2026-08-15, promoted from endpoint_registry.py's
     // trendlyne_market_insight after re-inspection showed it arrives pre-labeled, not raw
     // headlines needing NLP (see the fetcher's own docstring) → trendlyne_market_insights.
-    runPython('trendlyne_market_insight_fetcher.py', [], 60_000)
+    withTrendlyneSlot(() => runPython('trendlyne_market_insight_fetcher.py', [], 60_000))
       .catch(e => T.fail('trendlyne_market_insight_fetcher', e)),
     // Market-wide corporate-actions calendar sourced from real NSE filings (2026-08-07
     // urls.txt open-source sourcing pass) → nse_filed_corporate_actions. Daily and cheap (one
@@ -1499,7 +1500,7 @@ async function processMlWeeklyData(_job: Job): Promise<{ success: boolean; skipp
   // the stored ids usable and must not mark the whole job DEGRADED; with no stored ids it is a
   // real failure. ponytail: the map has no synced-at stamp, so ids Trendlyne renumbers go
   // unnoticed until a refresh succeeds; add a stamp + age check if that starts to matter.
-  await runPython('sync_tl_index_map.py', [], 60_000)
+  await withTrendlyneSlot(() => runPython('sync_tl_index_map.py', [], 60_000))
     .catch(async e => {
       const stored = await dbGet<{ n: number }>(
         "SELECT count(*)::int AS n FROM index_provider_map WHERE provider = 'trendlyne'").catch(() => undefined);
@@ -1584,7 +1585,7 @@ async function processMlWeeklyData(_job: Job): Promise<{ success: boolean; skipp
   // fetch already covers them, fed into the same history tables — see mc_pricefeed_fetcher.py).
   // Scoped to scripts/stocklist.json (~2005 stocks), not the full tlid universe: 2005 stocks
   // × 2 API calls × 0.5s = ~34 min; 150 min timeout is generous headroom
-  await runPython('trendlyne_fundamentals_fetcher.py', [], 150 * 60_000)
+  await withTrendlyneSlot(() => runPython('trendlyne_fundamentals_fetcher.py', [], 150 * 60_000))
     .catch(e => T.fail('trendlyne_fundamentals_fetcher', e));
   // Analyst consensus + price targets: REMOVED from this weekly chain 2026-09-01 —
   // now a dedicated daily BullMQ job (analyst-estimates-sync-daily, sync.jobs.ts,
@@ -1595,7 +1596,7 @@ async function processMlWeeklyData(_job: Job): Promise<{ success: boolean; skipp
   // 5 it does, nightly). No feature consumes these today — they are kept warm for future
   // feature work, which is a weekly-cadence need, not a reason to spend the nightly window on
   // them. Drop this step rather than let it grow if nothing has parsed them by the next audit.
-  await runPython('extra_endpoints_fetcher.py', ['--scope', 'weekly'], 90 * 60_000)
+  await withTrendlyneSlot(() => runPython('extra_endpoints_fetcher.py', ['--scope', 'weekly'], 90 * 60_000))
     .catch(e => T.fail('extra_endpoints_fetcher (weekly scope)', e));
   // insider_transactions_fetcher.py: moved off the nightly chain 2026-08-13 (14m47/night for a
   // feed measured 73.7 days stale), then dropped from this weekly slot entirely 2026-08-14 --

@@ -16,6 +16,7 @@
  */
 import { Job } from 'bullmq';
 import { runPython } from '../pythonRunner';
+import { withTrendlyneSlot } from '../trendlyneGate';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
 import { shouldSkipOnTradingHoliday } from '../marketStatusService';
@@ -85,7 +86,7 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; skippe
   // missing from the DB, but with ~612 known PKs and a 0.4s rate limit that can still
   // run 20+ minutes in practice — the old 10-min timeout routinely SIGTERM'd it mid-run
   // (execFile kills before any stderr flushes, logged as an opaque "Command failed").
-  await runPython('trendlyne_screener_discovery.py', [], 30 * 60_000)
+  await withTrendlyneSlot(() => runPython('trendlyne_screener_discovery.py', [], 30 * 60_000))
     .catch(e => T.fail('trendlyne_screener_discovery', e));
 
   // 2. Bulk-enrich signal_keywords + screener_url; INSERT 858 missing catalog entries; fix sector_theme bias

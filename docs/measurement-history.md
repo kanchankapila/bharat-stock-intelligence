@@ -2684,3 +2684,9 @@ symbols have no bar with volume > 0 in the window, so `est_cost_bps`, the cost-v
 every classification are unchanged today; the change only stops a future untraded name from
 being costed as the cheapest trade. The no-`technical_signals`-row path (AF-20261013-04) keeps
 its documented neutral 1% assumption. No factor/weight is touched, so no factor_backtest replay.
+
+### Two unread fetchers measured (2026-11-18, AF-20261019-02)
+
+- **MarketsMojo financial trend (`marketsmojo_fintrend_history.score`), PROVISIONAL (vendor backfill).** factor_backtest panel, next-open entry, universe restricted to scored names, score carried at most ~100 days. Held back 3 and 7 days (31% of scores are dated 1-2 days before their NSE broadcast): rank IC 0.029 at 5 sessions (t 6.6, 269 independent dates), 0.049-0.051 at 21 (t 4.3-4.4, 64), 0.053-0.055 at 63 (t 4.0-4.3, 20). Top-50, 21-session rebalance: +0.89% / +0.96% per period over the scored universe net of 25 bps a side (t 3.0 / 3.3, 61 periods), +0.80% / +0.87% at 40 bps; drawdown ~32%. After regressing out 63-day and 12-1 momentum and 21-day volatility the IC keeps about two thirds (0.018 at 5, t 6.0; 0.029 at 21, t 4.3). Not wired; a forward capture is the arbiter because past scores may embed restatements. Files: research/out/two-fetchers-measurement-2026-11-18*.json.
+- **InvestSights PE band (`investsights_pe_band_history`): VOID, not point in time.** The first read (IC 0.42 at 63 sessions, +3.9% per period, t 7.6) is look-ahead: the fetcher re-upserts every historical row with today's bands (ACC: 5 distinct band_median values over 767 rows). Do not quote it.
+
