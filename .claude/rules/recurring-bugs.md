@@ -65,5 +65,6 @@ This file used to hold every class (~127 KB) and loaded on the first `.py`/`.ts`
 | A price-derived factor table re-creating its own errors after a cleanup; judging prices by our own factor table; a review label with a tolerance hiding a real row (2026-11-15) | `bugs-data-layer.md` |
 | Another project killing Python by image name; a step that completes then dies in native teardown (2026-11-15) | `bugs-testing-env.md` |
 | A vendor refusal stopped in one fetcher and not its siblings; a rotation slot longer than its cron; non-OK HTTP read as no data (2026-11-17) | `bugs-jobs-runtime.md` |
+| Grading published levels against back-adjusted or raw bars; a run-level cutoff grading rows before their own horizon; non-cash dividend amounts (2026-11-18) | `bugs-data-layer.md` |
 
 When you add a class, put it in the area file whose `paths:` cover the code it bites, and add its row here.
