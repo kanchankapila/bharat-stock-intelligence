@@ -407,3 +407,39 @@ class TestUnlistedJunkSymbols:
         dir_mod.repair_unlisted_symbols(conn, False)
         flagged = {r[0] for r in conn.execute("SELECT symbol FROM stock_ohlcv WHERE is_suspect=1").fetchall()}
         assert flagged == {'M', 'GVT', 'ZZTEST'}
+
+
+class TestPositiveStopOutcomes:
+    """AF-20261117-19: 4,099 unified_signal_outcomes rows were stored as STOP_LOSS with a positive
+    net return (scale-out then stop); every reader counts STOP_LOSS as a decisive loss."""
+
+    def test_regrades_only_profitable_stops_and_keeps_a_backup(self, monkeypatch, tmp_path):
+        import outcome_resolver
+        monkeypatch.setattr(outcome_resolver, 'get_volatility_threshold', lambda *a: 0.5)
+        conn = pg_memory_conn()
+        conn.execute("""CREATE TABLE unified_signal_outcomes (id SERIAL PRIMARY KEY, symbol TEXT,
+            signal_date DATE, horizon_days INTEGER, return_pct DOUBLE PRECISION, outcome TEXT, exit_reason TEXT)""")
+        for sym, ret, out, why in (('A', 0.7, 'STOP_LOSS', 'STOP_LOSS'), ('B', 0.2, 'STOP_LOSS', None),
+                                   ('C', -3.0, 'STOP_LOSS', 'STOP_LOSS'), ('D', 2.0, 'WIN', 'TARGET')):
+            conn.execute("INSERT INTO unified_signal_outcomes (symbol, signal_date, horizon_days, return_pct, outcome, exit_reason) "
+                         "VALUES (?, '2026-10-01', 5, ?, ?, ?)", (sym, ret, out, why))
+        conn.commit()
+        dir_mod.repair_positive_stop_outcomes(conn, False, backup_dir=str(tmp_path))
+        got = {r[0]: (r[1], r[2]) for r in conn.execute(
+            "SELECT symbol, outcome, exit_reason FROM unified_signal_outcomes").fetchall()}
+        assert got == {'A': ('WIN', 'STOP_LOSS'), 'B': ('NEUTRAL', 'STOP_LOSS'),
+                       'C': ('STOP_LOSS', 'STOP_LOSS'), 'D': ('WIN', 'TARGET')}
+        assert len((tmp_path / 'unified_signal_outcomes.csv').read_text().strip().splitlines()) == 3
+
+    def test_dry_run_writes_nothing(self, monkeypatch, tmp_path):
+        import outcome_resolver
+        monkeypatch.setattr(outcome_resolver, 'get_volatility_threshold', lambda *a: 0.5)
+        conn = pg_memory_conn()
+        conn.execute("""CREATE TABLE unified_signal_outcomes (id SERIAL PRIMARY KEY, symbol TEXT,
+            signal_date DATE, horizon_days INTEGER, return_pct DOUBLE PRECISION, outcome TEXT, exit_reason TEXT)""")
+        conn.execute("INSERT INTO unified_signal_outcomes (symbol, signal_date, horizon_days, return_pct, outcome) "
+                     "VALUES ('A', '2026-10-01', 5, 0.7, 'STOP_LOSS')")
+        conn.commit()
+        dir_mod.repair_positive_stop_outcomes(conn, True, backup_dir=str(tmp_path))
+        assert conn.execute("SELECT outcome FROM unified_signal_outcomes").fetchone()[0] == 'STOP_LOSS'
+        assert not list(tmp_path.iterdir())

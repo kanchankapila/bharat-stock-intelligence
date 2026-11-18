@@ -1098,6 +1098,39 @@ def repair_unlisted_symbols(conn: ConnWrapper, dry: bool) -> None:
     _log(f"  flagged {done} bars")
 
 
+def repair_positive_stop_outcomes(conn: ConnWrapper, dry: bool, backup_dir: str | None = None) -> None:
+    """Regrade unified_signal_outcomes stored as STOP_LOSS with a positive net return by the
+    resolver's volatility threshold (AF-20261117-19); exit_reason keeps the stop."""
+    import csv
+    from outcome_resolver import get_volatility_threshold
+    _log("positive-return STOP_LOSS outcomes: regrading ...")
+    rows = conn.execute(
+        "SELECT id, symbol, signal_date::text, horizon_days, return_pct, outcome, exit_reason "
+        "FROM unified_signal_outcomes WHERE outcome = 'STOP_LOSS' AND return_pct > 0").fetchall()
+    updates = []
+    for rid, sym, sd, h, ret, _, _ in rows:
+        thr = get_volatility_threshold(conn, sym, str(sd)[:10], int(h or 1))
+        updates.append(('WIN' if float(ret) > thr else 'NEUTRAL', rid))
+    _log(f"  rows: {len(rows)} -> WIN {sum(u[0] == 'WIN' for u in updates)}, "
+         f"NEUTRAL {sum(u[0] == 'NEUTRAL' for u in updates)}")
+    if dry or not rows:
+        return
+    backup_dir = backup_dir or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), '..', '..', 'backups',
+        'positive_stop_outcomes_' + datetime.datetime.now().strftime('%Y%m%dT%H%M%S'))
+    os.makedirs(backup_dir, exist_ok=True)
+    with open(os.path.join(backup_dir, 'unified_signal_outcomes.csv'), 'w', newline='', encoding='utf-8') as fh:
+        w = csv.writer(fh)
+        w.writerow(['id', 'symbol', 'signal_date', 'horizon_days', 'return_pct', 'outcome', 'exit_reason'])
+        w.writerows(rows)
+    conn.execute("UPDATE unified_signal_outcomes SET exit_reason = 'STOP_LOSS' "
+                 "WHERE outcome = 'STOP_LOSS' AND return_pct > 0 AND exit_reason IS NULL")
+    done = safe_keyed_update(
+        conn, "UPDATE unified_signal_outcomes SET outcome = ? WHERE id = ? AND outcome = 'STOP_LOSS'",
+        updates, batch_size=500)
+    _log(f"  regraded {done} rows (backup {backup_dir})")
+
+
 TASKS = {
     'bad_bars': repair_bad_bars,
     'adjustment': repair_adjustment_basis,
@@ -1119,6 +1152,7 @@ TASKS = {
     'conflict_signal_outcomes': repair_conflict_signal_outcomes,
     'signal_exit_evidence': repair_signal_exit_evidence,
     'signal_outcome_mfe': repair_signal_outcome_mfe,
+    'positive_stop_outcomes': repair_positive_stop_outcomes,
 }
 
 
