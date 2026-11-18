@@ -35,11 +35,13 @@ rare InvestSights endpoint that arrives with real history already, not a 1-row s
 `pe_bands` (singular, top-level) is just `chart[-1]`'s five band values restated -- NOT stored
 separately, `chart`'s last row already has it.
 
-Full re-upsert every run (not incremental): the provider has no since-param and the vendor can
-restate its own rolling-window band calc for historical dates as new data arrives (same
-`ON CONFLICT DO UPDATE` shape as its sibling fetchers) -- but write volume is bounded (~500
-rows/symbol, not marketsmojo's ~9,900), so this is not the write-amplification trap documented
-in recurring-bugs.md.
+APPEND ONLY since 2026-11-18 (AF-20261019-02). The vendor rebuilds every historical chart point
+from its CURRENT bands, so the old full re-upsert rewrote three years of rows with later
+information (ACC: 767 rows, 5 distinct band_median values; one value on every date from 2025-01
+to 2026-09) and a backtest on the table read IC 0.42 out of look-ahead. Each run now writes only
+dates after the symbol's newest stored date and never updates a stored row, so each row keeps the
+band as first seen. Rows dated on or before 2026-11-17 are NOT point in time; measure only rows
+dated after it.
 
 UNIVERSE / AS-OF: same as investsights_fundamentals_fetcher.py -- nse_stocks ACTIVE by
 market_cap, --limit bound, --symbol override.
@@ -57,6 +59,7 @@ import requests
 
 from db_compat import connect, ConnWrapper
 from fetch_utils import retry_get, FetchTracker
+from as_of import logical_write_floor
 
 BASE = "https://investsights.in/api/v2/market/pe-band"
 SOURCE = "investsights"
@@ -131,14 +134,24 @@ def ensure_schema(conn: ConnWrapper) -> None:
     conn.commit()
 
 
-def store_rows(conn: ConnWrapper, rows: list[dict]) -> int:
+def load_known_max_dates(conn: ConnWrapper) -> dict[str, str]:
+    rows = conn.execute(
+        "SELECT symbol, MAX(date)::text FROM investsights_pe_band_history GROUP BY symbol").fetchall()
+    return {r[0]: r[1] for r in rows if r[1]}
+
+
+def store_rows(conn: ConnWrapper, rows: list[dict], known: dict[str, str] | None = None,
+               through: str | None = None) -> int:
+    """Append only: dates after the symbol's newest stored date and on or before `through` (the
+    latest completed session, so an in-progress point from a market-hours run is never frozen),
+    and never a rewrite of a stored row."""
+    known = known or {}
+    rows = [r for r in rows if known.get(r["symbol"], "") < r["date"] <= (through or "9999")]
     if not rows:
         return 0
     ph = ",".join(["?"] * len(COLS))
-    update_cols = [c for c in COLS if c not in ("symbol", "date")]
-    updates = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
     sql = (f"INSERT INTO investsights_pe_band_history ({', '.join(COLS)}) VALUES ({ph}) "
-           f"ON CONFLICT (symbol, date) DO UPDATE SET {updates}")
+           f"ON CONFLICT (symbol, date) DO NOTHING")
     for row in rows:
         conn.execute(sql, tuple(row[c] for c in COLS))
     conn.commit()
@@ -159,7 +172,7 @@ def run(symbol_filter: str | None = None, limit: int = 300) -> dict:
     session = requests.Session()
     session.headers.update(HEADERS)
     conn = connect()
-    result = {"attempted": 0, "symbols_stored": 0, "rows_stored": 0}
+    result = {"attempted": 0, "symbols_fetched": 0, "symbols_stored": 0, "rows_stored": 0}
     # ponytail: fail-fast on a dead endpoint (this fetcher's own /pe-band route went 404
     # for every symbol shortly after onboarding, see module docstring) instead of grinding
     # through the full --limit with a 3-attempt retry_get backoff per symbol every night --
@@ -167,6 +180,8 @@ def run(symbol_filter: str | None = None, limit: int = 300) -> dict:
     tracker = FetchTracker("investsights_pe_band", abort_after_consecutive_fails=10)
     try:
         ensure_schema(conn)
+        known = load_known_max_dates(conn)
+        through = logical_write_floor(conn)
         universe = _load_universe(conn, symbol_filter, limit)
         _log(f"fetching PE bands for {len(universe)} symbols...")
         for symbol in universe:
@@ -174,11 +189,12 @@ def run(symbol_filter: str | None = None, limit: int = 300) -> dict:
             try:
                 data = fetch_pe_band(session, symbol)
                 rows = parse_chart_rows(symbol, data)
-                n = store_rows(conn, rows)
+                n = store_rows(conn, rows, known, through)
+                result["symbols_fetched"] += bool(rows)
                 if n:
                     result["symbols_stored"] += 1
                     result["rows_stored"] += n
-                tracker.record(symbol, ok=n > 0)
+                tracker.record(symbol, ok=bool(rows))
             except Exception as e:
                 _log(f"{symbol}: failed ({e})")
                 tracker.record(symbol, ok=False)
@@ -196,7 +212,7 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=300)
     args = ap.parse_args()
     result = run(symbol_filter=args.symbol, limit=args.limit)
-    return 0 if result["symbols_stored"] > 0 else 1
+    return 0 if result["symbols_fetched"] > 0 else 1
 
 
 if __name__ == "__main__":

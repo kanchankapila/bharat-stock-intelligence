@@ -2,8 +2,8 @@
 """
 MarketsMojo finTrendGraph historical fetcher.
 
-stocks/finTrendGraph returns the HISTORY of the "financial trend" score (0-1, direction,
-positive/negative label) -- confirmed live 2026-08-11 against sid=592009 (HDFCBANK): 20
+stocks/finTrendGraph returns the HISTORY of the "financial trend" score (integer points, -48 to
++49 in the table on 2026-11-18; plus a direction and a positive/negative label) -- confirmed live 2026-08-11 against sid=592009 (HDFCBANK): 20
 quarterly-cadence points, 2021-10-16 through 2026-07-18 (~5 years), unauthenticated.
 Everything else on the platform (marketsmojo_header_info's ext_mojo_financial_pts,
 endpoint_registry.py) only ever captures this score's LATEST value, overwritten each run --

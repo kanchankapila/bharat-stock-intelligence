@@ -187,13 +187,13 @@ def load_sessions(con) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(pd.to_datetime([r[0] for r in rows]))
 
 
-def ensure_protocol(con) -> tuple[str, bool]:
+def ensure_protocol(con, key: str = PROTOCOL_KEY, protocol: dict = PROTOCOL) -> tuple[str, bool]:
     """Freeze the protocol on first run; afterwards report whether this code still matches it."""
-    h = protocol_hash(PROTOCOL)
-    row = con.execute("SELECT value FROM app_settings WHERE key = ?", (PROTOCOL_KEY,)).fetchone()
+    h = protocol_hash(protocol)
+    row = con.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
     if row is None:
         con.execute("INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING",
-                    (PROTOCOL_KEY, json.dumps({"hash": h, "protocol": PROTOCOL}, sort_keys=True)))
+                    (key, json.dumps({"hash": h, "protocol": protocol}, sort_keys=True)))
         con.commit()
         return h, True
     return h, json.loads(row[0])["hash"] == h

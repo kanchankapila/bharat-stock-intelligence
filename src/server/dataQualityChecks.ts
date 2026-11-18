@@ -2037,6 +2037,21 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'fintrend-forward-test-freshness',
+    label: 'fintrend_forward_test_report snapshot (frozen forward test of the financial-trend score, written weekly by ml-weekly-data)',
+    category: 'scoring',
+    critical: false,
+    // AF-20261019-02: the wiring decision waits on this test, so a silently stopped weekly step must show.
+    sql: `SELECT "updatedAt" AS last_date FROM app_settings WHERE key = 'fintrend_forward_test_report'`,
+    evaluate: (row, now) => {
+      const stale = tradingDaysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'No fintrend_forward_test_report snapshot yet - run fintrend_forward_test.py --persist' };
+      if (stale > 12) return { status: 'fail', detail: `fintrend_forward_test_report is ${fmtDays(stale)} old - the forward test has stopped accumulating` };
+      if (stale > 6) return { status: 'warn', detail: `fintrend_forward_test_report is ${fmtDays(stale)} old` };
+      return { status: 'pass', detail: `fintrend_forward_test_report ${fmtDays(stale)} old` };
+    },
+  },
+  {
     id: 'paper-book-freshness',
     label: 'paper_book_report snapshot (frozen paper book vs random books, written by ml-daily-ops)',
     category: 'scoring',

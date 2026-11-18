@@ -635,8 +635,8 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
 
   // InvestSights rolling PE-band chart (same batch) → investsights_pe_band_history. Corrected
   // 2026-08-14 to the real /market/pe-band/{symbol} path (the initial /fundamentals/{symbol}/
-  // pe-band guess 404s -- see the fetcher's own docstring). 20 min budget: ~500 rows/symbol,
-  // full re-upsert every run (no since-param on this endpoint).
+  // pe-band guess 404s -- see the fetcher's own docstring). 20 min budget: one request per
+  // symbol; append-only since 2026-11-18 (the vendor restates history from current bands).
   await runPython('investsights_pe_band_fetcher.py', ['--limit', '300'], 20 * 60_000)
     .catch(e => T.fail('investsights_pe_band_fetcher', e));
 
@@ -1542,6 +1542,9 @@ async function processMlWeeklyData(_job: Job): Promise<{ success: boolean; skipp
     .catch(e => T.fail('marketsmojo_shareholding_fetcher', e));
   await runPython('marketsmojo_fintrend_fetcher.py', [], 40 * 60_000)
     .catch(e => T.fail('marketsmojo_fintrend_fetcher', e));
+  // Frozen forward test of the score just captured (AF-20261019-02); reads only, seconds.
+  await runPython('fintrend_forward_test.py', ['--persist'], 10 * 60_000)
+    .catch(e => T.fail('fintrend_forward_test', e));
   // FinStack MCP quarterly cash-flow (onboarded 2026-09-01): the platform's first real
   // QUARTERLY CFO/CFI/CFF/capex/FCF history, fetched by speaking MCP stdio to
   // `python -m finstack.server` (whose cash_flow tool wraps yfinance quarterly_cashflow).
