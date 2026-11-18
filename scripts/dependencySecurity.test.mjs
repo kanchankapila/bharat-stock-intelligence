@@ -39,7 +39,10 @@ describe('dependency security and test-runner migration', () => {
   });
 
   it('makes registry audit failures a CI failure rather than an advisory-only report', () => {
-    expect(manifest.scripts['security:check']).toBe('npm audit --include=dev --audit-level=low');
+    expect(manifest.scripts['security:check']).toBe('node scripts/securityCheck.mjs');
+    const gate = readFileSync(new URL('./securityCheck.mjs', import.meta.url), 'utf8');
+    expect(gate).toContain('npm audit --include=dev --json');
+    expect(gate).toContain('process.exit(1)');
     const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
     expect(ci).toMatch(/run: npm run security:check/);
   });
