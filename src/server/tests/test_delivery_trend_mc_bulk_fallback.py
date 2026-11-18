@@ -42,11 +42,18 @@ def test_uses_the_rows_own_date_not_today():
     assert got["deal_date"] == "2026-09-08"
 
 
-def test_ambiguous_sc_id_is_dropped_not_guessed():
-    """`mcsymbol` is not unique: API -> {ASIANPAINT, AGROPHOS}, TEL -> {TMPV, TOUCHWOOD}."""
+def test_ambiguous_sc_id_is_dropped_not_guessed(tmp_path, monkeypatch):
+    """A code two entries share is dropped, never resolved by file position. The ambiguity is built
+    here: the live stocklist's API/TEL collisions were the data defect fixed in AF-20261118-06."""
+    import json
+    p = tmp_path / "stocklist.json"
+    p.write_text(json.dumps([{"symbol": "ASIANPAINT", "mcsymbol": "API"}, {"symbol": "AGROPHOS", "mcsymbol": "API"},
+                             {"symbol": "RELIANCE", "mcsymbol": "RI"}]), encoding="utf-8")
+    monkeypatch.setattr(d, "STOCKLIST_PATH", str(p))
+    monkeypatch.setattr(d, "_mc_sc_id_to_symbol", None)
     mapping = d.load_mc_sc_id_map()
     assert "API" not in mapping, "an ambiguous MC code resolved to a single symbol"
-    assert "TEL" not in mapping
+    assert mapping.get("RI") == "RELIANCE"
     assert d._parse_mc_deal({**_ROW, "sc_id": "API"}) is None
 
 

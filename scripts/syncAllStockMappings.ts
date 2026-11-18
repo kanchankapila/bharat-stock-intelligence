@@ -81,6 +81,20 @@ export async function syncMappings() {
       }
     }
 
+    // A MoneyControl code names ONE company. Never write one another active stock already carries:
+    // 54 rows once carried an older company's code (MEDICO had CHENNPETRO's MR), and every MC fetcher
+    // then booked that company's data under both (AF-20261118-06).
+    if (mcsymbol && !row?.mcsymbol) {
+      const taken = await dbGet<{ symbol: string }>(
+        "SELECT symbol FROM nse_stocks WHERE upper(trim(mcsymbol)) = upper(trim(?)) AND symbol <> ? AND status = 'ACTIVE' LIMIT 1",
+        [mcsymbol, symbol],
+      );
+      if (taken) {
+        console.warn(`[MC] ${symbol}: code ${mcsymbol} already belongs to ${taken.symbol}; not written`);
+        mcsymbol = undefined;
+      }
+    }
+
     const gainedNewField =
       (mcsymbol && !row?.mcsymbol) || (tlid && !row?.tlid) ||
       (stockid && !row?.stockid) || (companyid && !row?.companyid) ||

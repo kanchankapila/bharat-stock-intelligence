@@ -35,3 +35,19 @@ describe("resolveMoneycontrolSymbol against MoneyControl's real concatenated-JSO
     expect(result).toBe('TESTID1');
   });
 });
+
+describe('resolveMoneycontrolSymbol never guesses (AF-20261118-06)', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('returns null when no suggestion carries the symbol, instead of the first suggestion', async () => {
+    // A query whose only suggestion is ANOTHER company: the old "best effort" fallback returned its
+    // code, which is how Bilcare (BI) came to carry Britannia's MoneyControl code.
+    global.fetch = (async () =>
+      new Response(JSON.stringify([{ pdt_dis_nm: 'Britannia Industries <span>INE216A01030, BRITANNIA, 500825</span>', sc_id: 'BI' }]),
+        { status: 200 })) as unknown as typeof fetch;
+    expect(await resolveMoneycontrolSymbol('ZZZNOMATCH')).toBeNull();
+  });
+});
