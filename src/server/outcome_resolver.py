@@ -1579,7 +1579,9 @@ def resolve_recommendation_log(
                COALESCE(horizon_days, ?) AS rl_horizon
         FROM recommendation_log
         WHERE (outcome IS NULL OR outcome = 'PENDING' {relabel})
-          AND entry_price IS NOT NULL
+          -- A row with no published entry (scoring_engine recs: no entry/stop/target) is a long from the
+          -- next open (AF-20261118-08); one already EXPIRED as ungradeable stays out.
+          AND (entry_price IS NOT NULL OR COALESCE(status, '') <> 'EXPIRED')
           AND signal_date::text <= {row_cutoff}
         ORDER BY signal_date DESC
         LIMIT ?
@@ -1601,12 +1603,10 @@ def resolve_recommendation_log(
         rec_id = row['id']
         sym = row['symbol']
         signal_date = str(row['signal_date'])
-        entry = float(row['entry_price'] or 0)
+        published = float(row['entry_price'] or 0)
+        entry = published
         stop_loss = float(row['stop_loss']) if row['stop_loss'] else None
         h = int(row['rl_horizon'] or horizon_days)
-
-        if not entry:
-            continue
 
         signal_date_str = signal_date[:10]
         signal_date_obj = datetime.date.fromisoformat(signal_date_str)
@@ -1626,7 +1626,7 @@ def resolve_recommendation_log(
         sb = conn.execute(
             "SELECT close FROM stock_ohlcv WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect,0)=0 ORDER BY date DESC LIMIT 1",
             (sym, signal_date_str)).fetchone()
-        if sb and sb[0] and abs(float(sb[0]) / entry - 1) > BASIS_SEAM_MIN:
+        if published and sb and sb[0] and abs(float(sb[0]) / entry - 1) > BASIS_SEAM_MIN:
             basis = float(sb[0]) / entry
             entry *= basis
             stop_loss = stop_loss * basis if stop_loss else None
@@ -1636,6 +1636,8 @@ def resolve_recommendation_log(
         # target stay the published levels.
         if next_row and next_row[1] and float(next_row[1]) > 0:
             entry = float(next_row[1])
+        if not entry:
+            continue
 
         # #2 exit policy: target-capture / scale-out / chandelier trailing over the bar window.
         target = float(row['target_1']) * basis if row.get('target_1') else None
@@ -1658,7 +1660,8 @@ def resolve_recommendation_log(
         use_intra = False
         # intraday_ohlcv is never back-adjusted: once the levels are on the daily bars' adjusted
         # basis (basis != 1), raw 15-minute bars would grade against the wrong price (AF-20261118-05).
-        if next_trading_day and exit_target_date and basis == 1.0:
+        # With no published entry the basis cannot be checked at all, so daily bars only (AF-20261118-08).
+        if next_trading_day and exit_target_date and basis == 1.0 and published:
             try:
                 start_d = datetime.date.fromisoformat(next_trading_day)
                 end_d = datetime.date.fromisoformat(exit_target_date)

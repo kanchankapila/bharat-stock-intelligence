@@ -1181,3 +1181,47 @@ def test_reclog_levels_are_rescaled_when_a_split_falls_inside_the_window():
     outcome, ret = conn.execute("SELECT outcome, actual_return_pct FROM recommendation_log WHERE symbol='SPL'").fetchone()
     assert ret == pytest.approx(3.8 - 0.30, abs=0.1)   # 100 -> 103.8 on the adjusted basis
     assert outcome == 'WIN'
+
+
+def _null_entry_case(raw_intraday=None, monkeypatch=None, status=None):
+    from outcome_resolver import resolve_recommendation_log
+    import outcome_resolver
+    if raw_intraday is not None:
+        monkeypatch.setattr(outcome_resolver, "query_all", lambda *a, **k: raw_intraday)
+    conn = make_reclog_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, -1, -1):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('NULLE',?,100,100,100,100,100000)",
+                     ((base - datetime.timedelta(days=i)).isoformat(),))
+    conn.execute("INSERT INTO recommendation_log (symbol, signal_date, entry_price, stop_loss, target_1, horizon_days, outcome, status) "
+                 "VALUES ('NULLE', ?, NULL, NULL, NULL, 5, 'PENDING', ?)", (sig_date, status or 'RESOLVED'))
+    for off, (o, h, l, c) in enumerate([(100, 101, 99.5, 100.5), (100.5, 102, 100, 101.5), (101.5, 103, 101, 102.5),
+                                        (102.5, 104, 102, 103.5), (103.5, 104, 103, 103.8)], start=1):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('NULLE',?,?,?,?,?,100000)",
+                     ((base + datetime.timedelta(days=off)).isoformat(), o, h, l, c))
+    conn.commit()
+    resolve_recommendation_log(conn, horizon_days=5, dry_run=False)
+    return conn.execute("SELECT outcome, actual_return_pct, status FROM recommendation_log WHERE symbol='NULLE'").fetchone()
+
+
+def test_reclog_row_without_a_published_entry_grades_at_the_next_open():
+    """AF-20261118-08: scoring_engine recommendations carry no entry/stop/target. Under the next-open fill
+    (AF-20261117-12) they are a long from the next open to the horizon close; the resolver skipped them, so
+    10,946 old grades (made before their own horizon) could not be reproduced."""
+    outcome, ret, status = _null_entry_case()
+    assert ret == pytest.approx(3.8 - 0.30, abs=0.1)
+    assert outcome == 'WIN' and status == 'RESOLVED'
+
+
+def test_reclog_null_entry_row_ignores_raw_intraday_bars(monkeypatch):
+    """No published entry means no basis check, so raw 15-minute bars cannot be trusted: daily bars only."""
+    raw = [(f"2026-01-0{d} 10:00", 204.0, 202.0, 203.0) for d in range(1, 8)]
+    outcome, ret, _ = _null_entry_case(raw, monkeypatch)
+    assert ret == pytest.approx(3.8 - 0.30, abs=0.1)
+
+
+def test_reclog_expired_null_entry_row_stays_untouched():
+    """Rows the resolver already expired as ungradeable are out of scope: widening must not grade them."""
+    outcome, ret, status = _null_entry_case(status='EXPIRED')
+    assert outcome == 'PENDING' and ret is None and status == 'EXPIRED'
