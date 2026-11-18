@@ -1630,7 +1630,9 @@ def resolve_recommendation_log(
         # symbol), and (b) a bare conn.rollback() to recover would discard every already-
         # processed row's uncommitted UPSERT from earlier in this same loop.
         use_intra = False
-        if next_trading_day and exit_target_date:
+        # intraday_ohlcv is never back-adjusted: once the levels are on the daily bars' adjusted
+        # basis (basis != 1), raw 15-minute bars would grade against the wrong price (AF-20261118-05).
+        if next_trading_day and exit_target_date and basis == 1.0:
             try:
                 start_d = datetime.date.fromisoformat(next_trading_day)
                 end_d = datetime.date.fromisoformat(exit_target_date)

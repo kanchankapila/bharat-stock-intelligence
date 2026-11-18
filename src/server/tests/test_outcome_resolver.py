@@ -1084,6 +1084,15 @@ def test_reclog_levels_are_rescaled_for_any_back_adjustment_not_only_an_in_windo
     assert abs(ret) < 5
 
 
+def test_reclog_back_adjusted_row_ignores_raw_intraday_bars(monkeypatch):
+    """AF-20261118-05 (2): intraday_ohlcv is never back-adjusted. After the rescale put entry on the
+    daily bars' basis (~40), the 15-minute bars at the raw ~404 booked BHAGYANGR +549%."""
+    import outcome_resolver
+    raw = [(f"2026-01-0{d} 10:00", 404.0, 402.0, 403.0) for d in range(1, 8)]
+    monkeypatch.setattr(outcome_resolver, "query_all", lambda *a, **k: raw)
+    test_reclog_levels_are_rescaled_for_any_back_adjustment_not_only_an_in_window_split()
+
+
 def test_reclog_levels_are_rescaled_when_a_split_falls_inside_the_window():
     """AF-20261117-13: stock_ohlcv is back-adjusted for splits/bonuses, recommendation_log levels
     are not. A 1:2 split inside the hold left entry 200 / stop 190 against bars near 100, so any
