@@ -350,3 +350,25 @@ def test_relabel_regrades_rows_written_under_the_old_rules():
     assert conn.execute("SELECT outcome FROM signal_outcomes WHERE symbol='OLDR' AND horizon_days=1").fetchone()[0] == 'LOSS'
     track_outcomes(conn, relabel=True)
     assert conn.execute("SELECT outcome FROM signal_outcomes WHERE symbol='OLDR' AND horizon_days=1").fetchone()[0] == 'WIN'
+
+
+def test_weekend_snapshot_is_not_graded_as_its_own_signal():
+    """AF-20261117-20: confluence_signals is snapshotted on weekends too, and every Saturday and
+    Sunday snapshot was graded with Friday's price and Friday's forward sessions -- 406,937 of
+    1,307,299 confluence outcomes (31%) duplicated the previous session's sample."""
+    conn = make_db(market_every_day=False)
+    fri = datetime.date.fromisoformat(SIGNAL_DATE)
+    fri -= datetime.timedelta(days=(fri.weekday() - 4) % 7)
+    d = fri - datetime.timedelta(days=7)
+    while d <= fri + datetime.timedelta(days=21):
+        if d.weekday() < 5:
+            conn.execute("INSERT INTO stock_ohlcv (symbol, date, close) VALUES ('WKE', ?, 100.0)", (d.isoformat(),))
+        d += datetime.timedelta(days=1)
+    for day in (fri, fri + datetime.timedelta(days=1), fri + datetime.timedelta(days=2)):
+        conn.execute("INSERT INTO confluence_signals (symbol, computed_at, current_price, screener_ids_json) "
+                     "VALUES ('WKE', ?, 100.0, '[]')", (day.isoformat(),))
+    conn.commit()
+    track_outcomes(conn)
+    dates = {str(r['signal_date'])[:10] for r in conn.execute(
+        "SELECT signal_date FROM signal_outcomes WHERE symbol='WKE'").fetchall()}
+    assert dates == {fri.isoformat()}

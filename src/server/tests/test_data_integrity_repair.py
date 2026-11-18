@@ -443,3 +443,35 @@ class TestPositiveStopOutcomes:
         dir_mod.repair_positive_stop_outcomes(conn, True, backup_dir=str(tmp_path))
         assert conn.execute("SELECT outcome FROM unified_signal_outcomes").fetchone()[0] == 'STOP_LOSS'
         assert not list(tmp_path.iterdir())
+
+
+class TestNonSessionOutcomes:
+    """AF-20261117-20: outcomes, excursions and feature rows dated on days with no clean bar."""
+
+    def test_deletes_rows_on_non_session_dates_only_and_backs_them_up(self, tmp_path):
+        conn = pg_memory_conn()
+        conn.execute("""CREATE TABLE stock_ohlcv (symbol TEXT, date DATE, close DOUBLE PRECISION,
+            is_suspect SMALLINT DEFAULT 0, PRIMARY KEY (symbol, date))""")
+        conn.execute("CREATE TABLE signal_outcomes (symbol TEXT, signal_date DATE, horizon_days INT, signal_source TEXT)")
+        conn.execute("CREATE TABLE signal_excursions (symbol TEXT, signal_date DATE, horizon_days INT)")
+        conn.execute("CREATE TABLE technical_signals (symbol TEXT, date DATE, cmp DOUBLE PRECISION)")
+        conn.execute("CREATE TABLE feature_store (symbol TEXT, date DATE, timeframe TEXT)")
+        # Fri 2026-07-10 and Mon 07-13 trade; Sat 07-11 has only a flagged (fabricated) bar; 07-14 is the latest session
+        for d, sus in (('2026-07-10', 0), ('2026-07-11', 1), ('2026-07-13', 0), ('2026-07-14', 0)):
+            conn.execute("INSERT INTO stock_ohlcv VALUES ('A', ?, 1, ?)", (d, sus))
+        for d in ('2026-07-10', '2026-07-11', '2026-07-12', '2026-07-14'):
+            conn.execute("INSERT INTO signal_outcomes VALUES ('A', ?, 1, 'confluence'), ('A', ?, 5, 'technical')", (d, d))
+            conn.execute("INSERT INTO signal_excursions VALUES ('A', ?, 5)", (d,))
+            conn.execute("INSERT INTO technical_signals VALUES ('A', ?, 1)", (d,))
+            conn.execute("INSERT INTO feature_store VALUES ('A', ?, 'D')", (d,))
+        conn.commit()
+
+        dir_mod.repair_non_session_outcomes(conn, True, backup_dir=str(tmp_path))
+        assert conn.execute("SELECT count(*) FROM signal_outcomes").fetchone()[0] == 8
+        assert not list(tmp_path.iterdir())
+
+        dir_mod.repair_non_session_outcomes(conn, False, backup_dir=str(tmp_path))
+        for table, col in dir_mod.NON_SESSION_TABLES:
+            left = {str(r[0]) for r in conn.execute(f"SELECT DISTINCT {col} FROM {table}").fetchall()}
+            assert left == {'2026-07-10', '2026-07-14'}, table
+        assert len((tmp_path / 'signal_outcomes.csv').read_text().strip().splitlines()) == 5

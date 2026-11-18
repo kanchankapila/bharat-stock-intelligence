@@ -996,16 +996,20 @@ def _find_copied_sessions(conn) -> list:
 PHANTOM_DERIVED_TABLES = ('feature_store', 'technical_signals')
 
 
-def _purge_phantom_derived(conn, dates: list, dry: bool, backup_dir: str) -> None:
+def _purge_phantom_derived(conn, dates: list, dry: bool, backup_dir: str,
+                           tables=tuple((t, 'date') for t in PHANTOM_DERIVED_TABLES)) -> None:
+    """Back up then delete every row of `tables` ((table, date column) pairs) dated on `dates`."""
     import csv
+    if not dates:
+        return
     placeholders = ','.join('?' for _ in dates)
-    for table in PHANTOM_DERIVED_TABLES:
+    for table, col in tables:
         if not conn.execute("SELECT to_regclass(?)", (table,)).fetchone()[0]:
             continue
-        cur = conn.execute(f"SELECT * FROM {table} WHERE date::text IN ({placeholders})", tuple(dates))
+        cur = conn.execute(f"SELECT * FROM {table} WHERE {col}::text IN ({placeholders})", tuple(dates))
         cols = [c[0] for c in cur.description]
         rows = cur.fetchall()
-        _log(f"  {table}: {len(rows)} rows on fabricated sessions")
+        _log(f"  {table}: {len(rows)} rows on non-session dates")
         if dry or not rows:
             continue
         os.makedirs(backup_dir, exist_ok=True)
@@ -1013,11 +1017,11 @@ def _purge_phantom_derived(conn, dates: list, dry: bool, backup_dir: str) -> Non
             w = csv.writer(fh)
             w.writerow(cols)
             w.writerows([tuple(r) for r in rows])
-        i_sym, i_date = cols.index('symbol'), cols.index('date')
-        done = safe_keyed_update(
-            conn, f"DELETE FROM {table} WHERE symbol=? AND date::text=?",
-            [(str(r[i_sym]), str(r[i_date])[:10]) for r in rows], batch_size=500)
-        _log(f"  {table}: deleted {done} rows (backup {backup_dir})")
+        i_sym, i_date = cols.index('symbol'), cols.index(col)
+        keys = sorted({(str(r[i_sym]), str(r[i_date])[:10]) for r in rows})
+        safe_keyed_update(
+            conn, f"DELETE FROM {table} WHERE symbol=? AND {col}=CAST(? AS date)", keys, batch_size=500)
+        _log(f"  {table}: deleted {len(rows)} rows (backup {backup_dir})")
 
 
 def repair_closed_sessions(conn: ConnWrapper, dry: bool, backup_dir: str | None = None) -> None:
@@ -1098,6 +1102,35 @@ def repair_unlisted_symbols(conn: ConnWrapper, dry: bool) -> None:
     _log(f"  flagged {done} bars")
 
 
+NON_SESSION_TABLES = (('signal_outcomes', 'signal_date'), ('signal_excursions', 'signal_date'),
+                      ('technical_signals', 'date'), ('feature_store', 'date'))
+
+
+def repair_non_session_outcomes(conn: ConnWrapper, dry: bool, backup_dir: str | None = None) -> None:
+    """Delete outcomes, excursions and feature rows dated on a day with no clean bar for any symbol
+    (weekend/holiday scans and confluence snapshots graded as sessions; AF-20261117-20). Each such
+    row duplicates the previous session's sample. Dates from the latest session on are left alone."""
+    _log("non-session outcomes: finding dates the exchange never traded ...")
+    first = conn.execute("SELECT min(signal_date)::text FROM signal_outcomes").fetchone()[0]
+    if not first:
+        return
+    sessions = {str(r[0])[:10] for r in conn.execute(
+        "SELECT DISTINCT date FROM stock_ohlcv WHERE date >= ? AND COALESCE(is_suspect,0)=0", (first,)).fetchall()}
+    if not sessions:
+        return
+    last = max(sessions)
+    seen = {str(r[0])[:10] for r in conn.execute(
+        "SELECT DISTINCT signal_date FROM signal_outcomes WHERE signal_date < ?", (last,)).fetchall()}
+    seen |= {str(r[0])[:10] for r in conn.execute(
+        "SELECT DISTINCT date FROM technical_signals WHERE date >= ? AND date < ?", (first, last)).fetchall()}
+    dates = sorted(seen - sessions)
+    _log(f"  {len(dates)} non-session dates: {dates[:3]}{' ...' if len(dates) > 3 else ''}")
+    backup_dir = backup_dir or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), '..', '..', 'backups',
+        'non_session_outcomes_' + datetime.datetime.now().strftime('%Y%m%dT%H%M%S'))
+    _purge_phantom_derived(conn, dates, dry, backup_dir, tables=NON_SESSION_TABLES)
+
+
 def repair_positive_stop_outcomes(conn: ConnWrapper, dry: bool, backup_dir: str | None = None) -> None:
     """Regrade unified_signal_outcomes stored as STOP_LOSS with a positive net return by the
     resolver's volatility threshold (AF-20261117-19); exit_reason keeps the stop."""
@@ -1153,6 +1186,7 @@ TASKS = {
     'signal_exit_evidence': repair_signal_exit_evidence,
     'signal_outcome_mfe': repair_signal_outcome_mfe,
     'positive_stop_outcomes': repair_positive_stop_outcomes,
+    'non_session_outcomes': repair_non_session_outcomes,
 }
 
 

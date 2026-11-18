@@ -85,6 +85,7 @@ def track_outcomes(conn, relabel: bool = False):
     # calendar-day h3 from a Thursday priced Monday, 2 sessions. The market calendar is every
     # date any symbol has a clean bar.
     sessions = sorted({d for bars in ohlcv_cache.values() for d in bars})
+    session_set = set(sessions)
 
     # Load existing outcomes to skip already-resolved ones. Scoped to signal_source='confluence'
     # (2026-08): this used to key on ANY row for (symbol, signal_date, horizon_days) regardless
@@ -120,6 +121,10 @@ def track_outcomes(conn, relabel: bool = False):
         symbol = row['symbol']
         # Postgres DATE(computed_at) yields a date object; SQLite yields a 'YYYY-MM-DD' string.
         signal_date = str(row['signal_date'])
+        # A weekend/holiday snapshot carries the previous session's price and the same forward
+        # sessions as that session's signal: grading it duplicates that sample (AF-20261117-20).
+        if signal_date not in session_set:
+            continue
         entry_price = float(row['current_price'])
 
         for horizon in HORIZONS:
