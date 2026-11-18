@@ -486,6 +486,33 @@ def test_unified_resolution_excludes_suspect_bars():
     assert row[1] > -10
 
 
+def test_unified_stop_after_scale_out_with_positive_return_is_not_a_loss_outcome():
+    """AF-20261117-19: a stop exit was stored as outcome STOP_LOSS whatever the return, and every
+    reader counts STOP_LOSS as a decisive loss (4,069 live rows with return_pct > 0). Half booked
+    at target (+5%), the rest stopped at 97 nets +0.7%: the outcome is graded by the threshold
+    and the stop stays visible in exit_reason."""
+    from outcome_resolver import resolve_unified_outcomes
+    conn = make_unified_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, -1, -1):  # flat history -> ATR ~0 (no trail), 0.5% threshold floor
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('USO1',?,100,100,100,100,100000)",
+                     ((base - datetime.timedelta(days=i)).isoformat(),))
+    conn.execute("INSERT INTO unified_signals (symbol, signal_date, entry_price, target_price, stop_loss, signal_source, confidence_score) "
+                 "VALUES ('USO1', ?, 100, 105, 97, 'AI', 70)", (sig_date,))
+    for off, (o, h, l, c) in enumerate([(100, 106, 100, 104), (100, 100, 96, 97), (97, 97, 97, 97),
+                                        (97, 97, 97, 97), (97, 97, 97, 97)], start=1):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('USO1',?,?,?,?,?,100000)",
+                     ((base + datetime.timedelta(days=off)).isoformat(), o, h, l, c))
+    conn.commit()
+    resolve_unified_outcomes(conn, horizon_days=5, dry_run=False)
+    outcome, ret, reason = conn.execute(
+        "SELECT outcome, return_pct, exit_reason FROM unified_signal_outcomes WHERE symbol='USO1'").fetchone()
+    assert ret > 0
+    assert reason == 'STOP_LOSS'
+    assert outcome == 'WIN'
+
+
 # ─── multi-horizon regression tests (the starvation bugs) ───────────────────────
 #
 # Bug 1 (resolve_outcomes): the pending NOT EXISTS matched any resolved horizon,

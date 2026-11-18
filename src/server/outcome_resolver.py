@@ -1321,7 +1321,9 @@ def _resolve_unified_batch(
                 # derived from the same suspect bars, so null them too for the same reason.
                 outcome, exit_reason, return_pct = 'NEUTRAL', 'SUSPECT_DATA', None
                 mfe_pct = mae_pct = None
-            elif exit_reason == 'STOP_LOSS':
+            elif exit_reason == 'STOP_LOSS' and return_pct <= 0:
+                # A stop after a scale-out at target can net positive; that is not a loss, and
+                # every reader counts STOP_LOSS as one. exit_reason keeps the stop (AF-20261117-19).
                 outcome = 'STOP_LOSS'
             else:
                 threshold = get_volatility_threshold(conn, sym, signal_date, horizon_days)
