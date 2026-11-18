@@ -674,3 +674,8 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 - Shared MoneyControl codes (52) were the cause of the "non-cash" dividends; MC's price feed (NSEID + ISIN per code) is the ownership authority. Root writer was `resolveMoneycontrolSymbol`'s best-effort fallback (fixed c6cb2b4e). A date match against another source is not ownership: +-7-day dividend matches kept 297 non-owner copies.
 - Never infer "not listed yet" from an NSE listing date or our first bar: renamed, BSE-first and relisted names postdate their real actions there.
 - 16:05 pm2 slot never ran; I restarted ml-api only (17:06). Owed tonight: AF-20261117-19 and AF-20261118-02 read-backs after the 18:50 chain; weekend confluence check; 11-22 backtester save.
+
+## 2026-11-18 evening — repo-doctor sweep (Claude)
+
+- Trendlyne account deactivated since 11-17 15:20 IST (login 302 -> /accounts/inactive/). A gated-payload storm means check the login Location before blaming the WAF. Anonymous routes also 405 tonight even serialized: Trendlyne is refusing this client. Owner decision pending (AF-20261118-09).
+- Owed: `pm2 restart bharat-server` before 10:00 IST 11-19 (e2db184e); 11-21 MF crawl read-back (AF-20261118-10); GNRL/PASHUPATI repair needs approval + pg_dump (AF-20261118-11).
