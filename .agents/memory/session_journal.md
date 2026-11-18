@@ -679,3 +679,9 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 
 - Trendlyne account deactivated since 11-17 15:20 IST (login 302 -> /accounts/inactive/). A gated-payload storm means check the login Location before blaming the WAF. Anonymous routes also 405 tonight even serialized: Trendlyne is refusing this client. Owner decision pending (AF-20261118-09).
 - Owed: `pm2 restart bharat-server` before 10:00 IST 11-19 (e2db184e); 11-21 MF crawl read-back (AF-20261118-10); GNRL/PASHUPATI repair needs approval + pg_dump (AF-20261118-11).
+
+## 2026-11-18 (all day) — forward test, PE band, deploy batch, rec-log regrade (Claude, session -0f)
+- Deploy batch ran early (07:38) at owner's request; pm2 7.1.1 at 17:47 after dl-feature-refresh (a bharat-server runPython child: check the python process list before any server restart, not only job_run_history, which records FINISH times).
+- A full regrade is a good audit: a WIN mean of +46% exposed three grading defects (AF-20261118-04/-05). Check the result distribution of any regrade before closing.
+- The 16:05 window slipped because a background timer's notification only reaches an idle session at its next prompt; a timed deploy needs the session active (or a scheduled agent), not a sleeping timer.
+- Closed AF-20261112-03; AF-20261115-01 snapshot is unattended now; AF-20261025-33 waits on picomatch (exception expires 2026-12-17).
