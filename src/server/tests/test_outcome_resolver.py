@@ -1060,6 +1060,30 @@ def test_reclog_row_is_not_graded_before_its_own_horizon_completes():
     assert (row[0], row[1]) == ('PENDING', None)
 
 
+def test_reclog_levels_are_rescaled_for_any_back_adjustment_not_only_an_in_window_split():
+    """AF-20261118-05: BHAGYANGR's history was back-adjusted for a demerger (no SPLIT/BONUS row), so
+    the next-open fill took entry ~35 from the bars while stop/target stayed on the published ~408
+    basis: 470 live WINs averaged +368%. Any signal-day bar > 20% from the published entry is a
+    different basis, wherever the adjustment's ex-date falls."""
+    from outcome_resolver import resolve_recommendation_log
+    conn = make_reclog_db()
+    conn.execute("CREATE TABLE corporate_actions (symbol TEXT, action_type TEXT, ex_date TEXT, amount REAL)")
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, -1, -1):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('DEM',?,40,40,40,40,100000)",
+                     ((base - datetime.timedelta(days=i)).isoformat(),))
+    conn.execute("INSERT INTO recommendation_log (symbol, signal_date, entry_price, stop_loss, target_1, horizon_days, outcome) "
+                 "VALUES ('DEM', ?, 400, 380, 420, 5, 'PENDING')", (sig_date,))
+    for off in range(1, 6):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('DEM',?,40,40.4,39.8,40.2,100000)",
+                     ((base + datetime.timedelta(days=off)).isoformat(),))
+    conn.commit()
+    resolve_recommendation_log(conn, horizon_days=5, dry_run=False)
+    ret = conn.execute("SELECT actual_return_pct FROM recommendation_log WHERE symbol='DEM'").fetchone()[0]
+    assert abs(ret) < 5
+
+
 def test_reclog_levels_are_rescaled_when_a_split_falls_inside_the_window():
     """AF-20261117-13: stock_ohlcv is back-adjusted for splits/bonuses, recommendation_log levels
     are not. A 1:2 split inside the hold left entry 200 / stop 190 against bars near 100, so any

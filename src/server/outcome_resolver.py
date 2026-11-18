@@ -1527,29 +1527,8 @@ def expire_stale_pending_all(conn: ConnWrapper, dry_run: bool = False) -> int:
 
 
 # A published level and today's back-adjusted bars differ by more than this only across a
-# split/bonus (the smallest common ratio, 4:5, moves price 20%).
+# back-adjustment (split, bonus, demerger, capital reduction; a 4:5 split moves price 20%).
 BASIS_SEAM_MIN = 0.2
-
-
-def _split_ex_dates(conn, symbols) -> dict:
-    """symbol -> SPLIT/BONUS ex-dates (ISO). Read once BEFORE any row is graded: a failed read on
-    the shared connection would otherwise roll back the rows already written in this pass."""
-    symbols = sorted({str(s) for s in symbols})
-    if not symbols:
-        return {}
-    try:
-        ph = ','.join('?' for _ in symbols)
-        rows = conn.execute(
-            f"SELECT symbol, CAST(ex_date AS TEXT) FROM corporate_actions "
-            f"WHERE action_type IN ('SPLIT', 'BONUS') AND symbol IN ({ph})", tuple(symbols)).fetchall()
-    except Exception as e:
-        print(f"[OutcomeResolver] corporate_actions unavailable ({e}); no price-basis rescale",
-              file=sys.stderr)
-        return {}
-    out: dict = {}
-    for sym, d in rows:
-        out.setdefault(str(sym), []).append(str(d)[:10])
-    return out
 
 
 def resolve_recommendation_log(
@@ -1591,7 +1570,6 @@ def resolve_recommendation_log(
     print(f"[OutcomeResolver] {len(rows)} recommendation_log entries pending resolution.")
     resolved = 0
     _cal = _session_calendar(conn, rows, 'signal_date')
-    _splits = _split_ex_dates(conn, [r['symbol'] for r in rows])
 
     for row in rows:
         rec_id = row['id']
@@ -1614,18 +1592,18 @@ def resolve_recommendation_log(
         next_trading_day = next_row[0] if next_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
         exit_target_date = _nth_session_after(_cal, signal_date_str, h)
 
-        # AF-20261117-13: stock_ohlcv is back-adjusted for splits/bonuses; the published levels are
-        # not. With an action inside the window, put the levels on the bars' basis via the
-        # signal-day bar (entry was that day's close when published).
+        # AF-20261117-13 / AF-20261118-05: stock_ohlcv is back-adjusted (splits, bonuses, demergers,
+        # capital reductions); the published levels are not. Entry was the signal-day close when
+        # published, so a signal-day bar > 20% away means the bars are on another basis, wherever
+        # the adjustment's ex-date falls: put the levels on the bars' basis.
         basis = 1.0
-        if any(signal_date_str < d <= str(exit_target_date) for d in _splits.get(sym, ())):
-            sb = conn.execute(
-                "SELECT close FROM stock_ohlcv WHERE symbol = ? AND date = ? AND COALESCE(is_suspect,0)=0",
-                (sym, signal_date_str)).fetchone()
-            if sb and sb[0] and abs(float(sb[0]) / entry - 1) > BASIS_SEAM_MIN:
-                basis = float(sb[0]) / entry
-                entry *= basis
-                stop_loss = stop_loss * basis if stop_loss else None
+        sb = conn.execute(
+            "SELECT close FROM stock_ohlcv WHERE symbol = ? AND date = ? AND COALESCE(is_suspect,0)=0",
+            (sym, signal_date_str)).fetchone()
+        if sb and sb[0] and abs(float(sb[0]) / entry - 1) > BASIS_SEAM_MIN:
+            basis = float(sb[0]) / entry
+            entry *= basis
+            stop_loss = stop_loss * basis if stop_loss else None
 
         # AF-20261117-12 (owner decision 2026-11-18): fill at the next session's open, the first
         # price a reader of the published rec could trade, like the signal resolvers. The stop and
