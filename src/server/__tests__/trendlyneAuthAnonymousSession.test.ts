@@ -48,6 +48,30 @@ describe('Trendlyne login must not cache an anonymous session', () => {
     const headers = await getTrendlyneAuthHeaders();
     expect(headers.Cookie).toContain('.trendlyne=sess123');
   });
+
+  // 2026-11-18 (AF-20261118-09): the account was deactivated; login answered 302 to
+  // /accounts/inactive/ with a `.trendlyne` cookie, was cached as a session, every metrics call
+  // came back gated, invalidated it and logged in again: 1,084 logins in one day.
+  it('rejects a 302 to /accounts/inactive/ and stops logging in', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method !== 'POST') return LOGIN_PAGE();
+      const r = res(302, ['csrftoken=rotated; Path=/', '.trendlyne=sess123; Path=/; HttpOnly']);
+      r.headers.set('location', '/accounts/inactive/');
+      return r;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const auth = await import('../trendlyneAuthService');
+
+    const p = auth.getTrendlyneAuthHeaders();
+    await vi.runAllTimersAsync();
+    expect(await p).toEqual({});
+    expect(auth.isTrendlyneAccountDeactivated()).toBe(true);
+
+    const callsAfterRefusal = fetchMock.mock.calls.length;
+    await auth.invalidateTrendlyneSession();
+    expect(await auth.getTrendlyneAuthHeaders()).toEqual({});
+    expect(fetchMock.mock.calls.length).toBe(callsAfterRefusal);
+  });
 });
 
 describe('a gated stock-metrics payload drops the cached session', () => {

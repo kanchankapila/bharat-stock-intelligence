@@ -82,3 +82,15 @@ class TestPointInTimeGating:
         ).fetchone()
         assert row["mf_holding_pct"] == 3.5, "fallback floor should equal the write date, so this row qualifies"
         con.close()
+
+
+def test_staleness_window_ends_at_the_latest_passed_disclosure():
+    """AF-20261118-10: an 80-day skip from the last fetch (2026-09-09) held the Sep-quarter
+    disclosures (public ~2026-10-30) back until ~2026-11-28."""
+    from datetime import date
+    # Sep quarter disclosed 2026-10-30; a fetch on 09-09 predates it, so it must not count.
+    assert mf.staleness_days(date(2026, 11, 18)) == (date(2026, 11, 18) - date(2026, 10, 30)).days
+    # Before that disclosure date passes, the previous quarter's (Jun 30 + 30) applies, capped at 80.
+    assert mf.staleness_days(date(2026, 10, 15)) == min(80, (date(2026, 10, 15) - date(2026, 7, 30)).days)
+    # Right after a disclosure date every earlier fetch is stale.
+    assert mf.staleness_days(date(2026, 10, 30)) == 0

@@ -39,6 +39,7 @@ import { updateMonitorState } from './monitoringService';
 import { StepTracker, tolerateCompletedCrash } from './jobSteps';
 import { updateTrailingStops } from './trailingStopUpdater';
 import { getTrendlyneMetricSymbols, enqueueTrendlyneMetricsFetchJobs, runTrendlyneMetricsFetch } from './trendlyneDailyFetchService';
+import { ensureTrendlyneSession, isTrendlyneAccountDeactivated } from './trendlyneAuthService';
 import { initialiseTrendlyneBatch, requireSuccessfulTrendlyneFetch, settleTrendlyneBatch, trendlyneBatchId } from './trendlyneDailyBatch';
 import { isMarketOpen, isTradingHolidayToday, shouldSkipOnTradingHoliday } from './marketStatusService';
 import {
@@ -3268,6 +3269,10 @@ export async function initQueues(): Promise<boolean> {
       QUEUE_TRENDLYNE_DAILY_FETCH,
       async (job: Job) => {
         if (!job.data || !job.data.symbol) {
+          // The metrics route needs a login; 500 children x 3 attempts cannot succeed without one.
+          if (!(await ensureTrendlyneSession()) && isTrendlyneAccountDeactivated()) {
+            throw new Error('Trendlyne account deactivated (login redirects to /accounts/inactive/); symbol fan-out skipped');
+          }
           const symbols = await getTrendlyneMetricSymbols();
           const batchId = trendlyneBatchId(job.data?.batchId, job.id);
           await initialiseTrendlyneBatch(trendlyneDailyFetchQueue!, batchId, symbols.length);

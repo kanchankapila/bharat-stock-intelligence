@@ -14,6 +14,12 @@ interface TrendlyneSession {
 
 let trendlyneSession: TrendlyneSession | null = null;
 let sessionRefreshInFlight: Promise<boolean> | null = null;
+const LOGIN_REFUSED_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+let loginRefusedUntil = 0;
+
+export function isTrendlyneAccountDeactivated(): boolean {
+  return Date.now() < loginRefusedUntil;
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -119,6 +125,14 @@ async function loginTrendlyne(): Promise<boolean> {
   // and sets a session cookie. Caching the former served anonymous payloads for ~6h (2026-11-06).
   const isRedirect = loginResponse.status >= 300 && loginResponse.status < 400;
   const setsSession = [...loginCookiePairs.keys()].some((name) => name !== 'csrftoken');
+  // A deactivated account also answers 302 + `.trendlyne`, but to /accounts/inactive/; its cookie
+  // is anonymous. Latch login off so gated payloads cannot drive a re-login per fetch (AF-20261118-09).
+  const location = loginResponse.headers.get('location') ?? '';
+  if (isRedirect && /\/accounts\//.test(location)) {
+    loginRefusedUntil = Date.now() + LOGIN_REFUSED_COOLDOWN_MS;
+    console.error(`[TRENDLYNE AUTH] Login redirected to ${location}: account unusable (deactivated?); no login retry for ${LOGIN_REFUSED_COOLDOWN_MS / 3_600_000}h`);
+    return false;
+  }
   if (!isRedirect || !setsSession) {
     console.warn(`[TRENDLYNE AUTH] Login not accepted (HTTP ${loginResponse.status}, no session cookie)`);
     return false;
@@ -136,6 +150,7 @@ export async function ensureTrendlyneSession(): Promise<boolean> {
   if (trendlyneSession && Date.now() < trendlyneSession.expiresAt) {
     return true;
   }
+  if (isTrendlyneAccountDeactivated()) return false;
   if (sessionRefreshInFlight) {
     return sessionRefreshInFlight;
   }
@@ -147,6 +162,7 @@ export async function ensureTrendlyneSession(): Promise<boolean> {
         sessionRefreshInFlight = null;
         return true;
       }
+      if (isTrendlyneAccountDeactivated()) break;
       await sleep(1000 * attempt);
     }
     sessionRefreshInFlight = null;

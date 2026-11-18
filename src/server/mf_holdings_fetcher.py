@@ -51,9 +51,9 @@ import sys
 
 RATE_LIMIT_SEC = 0.3
 
-# Quarterly SEBI filings restate ~4x/year; SHAREHOLDING_DISCLOSURE_LAG_DAYS=30 already models
-# the filing lag. 80 days is comfortably inside a quarter, so a genuinely-new disclosure is still
-# picked up on the next weekly run, while unchanged symbols are skipped instead of recrawled.
+# Quarterly SEBI filings restate ~4x/year. 80 days alone held a new quarter back for weeks (a
+# 09-09 fetch suppressed the Sep quarter until ~11-28), so staleness_days() also ends the window
+# at the latest passed disclosure date (quarter end + SHAREHOLDING_DISCLOSURE_LAG_DAYS).
 STALENESS_DAYS = 80
 # How long a genuinely-empty verdict suppresses a symbol. Measured 2026-09-10: of a
 # 2,366-name universe only 1,403 have EVER been written, so 1,037 (44%) were re-crawled on
@@ -242,6 +242,18 @@ def record_no_coverage(con, symbols: list[str]) -> None:
         print(f"[MF] could not record no-coverage symbols ({exc})", file=sys.stderr)
 
 
+def staleness_days(today: date) -> int:
+    """Skip window: STALENESS_DAYS, cut back to the latest quarter's disclosure date that has
+    passed, so a fetch made before that quarter became public never suppresses it (AF-20261118-10)."""
+    disclosure = None
+    for year in (today.year, today.year - 1):
+        for month, day in ((12, 31), (9, 30), (6, 30), (3, 31)):
+            public = date(year, month, day) + timedelta(days=SHAREHOLDING_DISCLOSURE_LAG_DAYS)
+            if public <= today and (disclosure is None or public > disclosure):
+                disclosure = public
+    return min(STALENESS_DAYS, (today - disclosure).days)
+
+
 def recently_fetched(con, days: int) -> set[str]:
     """Symbols already written to stock_mf_holdings within `days`.
 
@@ -292,7 +304,8 @@ def main():
     # match the fetch cadence to the data cadence, so steady-state runs are a near-no-op.
     ensure_no_coverage_schema(con)
     if not args.symbol and not args.no_skip:
-        fresh = recently_fetched(con, STALENESS_DAYS)
+        window = staleness_days(date.today())
+        fresh = recently_fetched(con, window)
         # Symbols the vendor has cleanly told us have no MF holdings. Without this the 1,037
         # never-written names are re-crawled every run forever -- they cannot enter `fresh`,
         # which is built from successful WRITES.
@@ -300,7 +313,7 @@ def main():
         before = len(stocks)
         stocks = [(s, c) for s, c in stocks if s not in fresh and s not in no_cov]
         print(f"[MF] Skipping {before - len(stocks)}/{before} symbols "
-              f"({len(fresh)} fetched within {STALENESS_DAYS}d, "
+              f"({len(fresh)} fetched within {window}d, "
               f"{len(no_cov)} confirmed no-coverage within {NO_COVERAGE_TTL_DAYS}d); "
               f"{len(stocks)} to fetch.")
         if not stocks:
