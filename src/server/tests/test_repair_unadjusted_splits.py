@@ -172,3 +172,20 @@ def test_update_lands_on_compressed_hypertable_chunks(pg_conn, dump):
     assert [s[('SPLT', x)] for x in d] == [(50.0, 2000)] * 6 + [(50.0, 1000)] * 6
     assert m.main(['--apply', '--dump-path', dump], conn=pg_conn) == 0
     assert _snap(pg_conn) == s
+
+
+def test_history_already_on_new_basis_far_from_ex_date_is_not_adjusted_twice():
+    """AF-20261112-12: TRENT's backfill was already adjusted for its 2026-06-04 bonus (raw 5113,
+    stored 3408.67 = raw x 2/3), raw bhavcopy bars were appended from 2025-05-12, and the 10-10
+    run multiplied every bar before the ex-date by 2/3 -- the pre-2025-05-12 segment twice. The
+    inverse seam is 13 months from the ex-date, outside WINDOW_DAYS, so only the raw close can tell
+    an adjusted bar from an unadjusted one."""
+    m = _load()
+    d = _days(40)
+    f = 2 / 3
+    raw = {x: (150.0 if i < 30 else 100.0) for i, x in enumerate(d)}
+    stored = [100.0] * 10 + [150.0] * 20 + [100.0] * 10      # 0-9 already x f, 10-29 raw, 30+ new basis
+    series = [(x, c, c, c, c, 1000) for x, c in zip(d, stored)]
+    acts = m.find_actions(series, [(d[30], [f], True)], raw=raw)
+    assert acts[0]['dates'] == d[10:30]
+    assert m.multipliers(acts) == {x: f for x in d[10:30]}

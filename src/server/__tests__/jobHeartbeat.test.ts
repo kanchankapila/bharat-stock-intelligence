@@ -182,7 +182,7 @@ describe('getStaleJobs', () => {
     expect(stale.map(s => s.job).filter(j => j.startsWith('dl-'))).toEqual([]);
   });
 
-  // 2026-11-12 (AF-20261112-10): retiring DL also dropped the BiLSTM model-registry check, so its
+  // 2026-11-12 (AF-20261112-11): retiring DL also dropped the BiLSTM model-registry check, so its
   // last heartbeat (11-11 18:04) went stale and was announced hourly ("~28h") from 20:50 IST.
   it('does not re-announce the retired BiLSTM model-registry check as stale', async () => {
     vi.setSystemTime(new Date('2026-11-12T17:30:00Z'));

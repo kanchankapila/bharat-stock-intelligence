@@ -168,7 +168,6 @@ Written now so later results cannot move the goalposts.
 - Do not reweight the current blend to chase a better-looking backtest on the same 41-date panel.
 - Do not build Phase 3 before Phase 1: a portfolio on an aliased universe repeats the
   duplicate-entity bugs with real money.
-- Do not onboard a new vendor without the named hypothesis the onboarding freeze requires.
 
 ## 6. Risks
 

@@ -14,6 +14,12 @@ Old-basis bars get open/high/low/close x factor and volume / factor. A factor is
 where its seam is still visible, so a second run finds nothing (idempotent), and a large move
 with no factor, or one whose ratio does not match the factor, is never touched.
 
+The inverse seam is searched only near the ex-date, but a backfill that was already adjusted can
+meet raw appended bars anywhere (TRENT: 2025-05-12, 13 months before its 2026-06-04 bonus), and
+the 2026-10-10 run applied the factor a second time to that older segment (AF-20261112-12). So a
+bar whose stored close over its raw bhavcopy close (nse_universe_history) already carries the
+factor is skipped; without a raw close the bar is treated as before.
+
 Compressed hypertable: TimescaleDB 2.30 updates compressed chunks in place, decompressing only
 the batches of the segmentby column (symbol) that the WHERE matches -- the same mechanism
 hypertable_safe_write.safe_keyed_update relies on, used here with SET LOCAL inside the ONE
@@ -26,6 +32,7 @@ compress_chunk calls recompress them.
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 from datetime import date, timedelta
@@ -40,6 +47,7 @@ REPORT_GAP = 0.35   # the AF-20261008-37 threshold, for the summary only
 # NSE's widest price band is 20%. A factor inside 0.75..1.25 read off prices alone (no declared
 # action) cannot be told from a circuit run: AKI's stored 1.2 on 2025-07-07 is one.
 CIRCUIT_BAND = (0.75, 1.25)
+RAW_TOL = 0.02      # stored/raw vs the expected basis: Yahoo-sourced bars sit within ~0.5% of raw
 
 _PREFILTER = f"""
 WITH s AS (
@@ -64,11 +72,13 @@ def _ratio_matches(prev_close, bar, target):
     return lo is not None and lo / prev_close > 1 + DEADBAND
 
 
-def find_actions(series, events):
+def find_actions(series, events, raw=None):
     """series: [(date, open, high, low, close, volume)] ascending; events: [(ex_date, [factors],
     usable)] with `usable` False for an undeclared circuit-band factor (reported, never applied).
-    Returns one dict per event: {ex, factor, start, end, cls, dates:[(date, multiplier)]}.
+    raw: {date: raw bhavcopy close}, optional.
+    Returns one dict per event: {ex, factor, start, end, cls, dates:[(date, multiplier)], skipped}.
     `start` inclusive / `end` exclusive bound the old-basis bars; None = unbounded."""
+    applied = [(e[0], e[1][0]) for e in events if not (e[2:] and not e[2])]
     traded = [b for b in series if b[5] != 0]   # zero-volume bars are synthetic: never a seam
     pairs = [(traded[i - 1], traded[i]) for i in range(1, len(traded)) if traded[i - 1][4]]
     out = []
@@ -98,7 +108,7 @@ def find_actions(series, events):
             out.append({'ex': ex, 'factor': f, 'cls': 'review_inverse_only', 'start': start,
                         'end': end, 'dates': [], 'seam': S})
             continue
-        dates, last_traded = [], None
+        dates, last_traded, skipped = [], None, 0
         for b in series:
             if b[5] != 0:
                 last_traded = b[4]
@@ -107,10 +117,16 @@ def find_actions(series, events):
             # a zero-volume bar already sitting on the NEW basis (a forward-filled phantom) stays
             if b[5] == 0 and last_traded and abs(b[4] - last_traded * f) < abs(b[4] - last_traded):
                 continue
+            rc = (raw or {}).get(b[0])
+            if rc and b[4]:
+                later = math.prod(fo for eo, fo in applied if eo > b[0] and eo != ex)
+                if abs(b[4] / rc / (later * f) - 1) <= RAW_TOL:
+                    skipped += 1
+                    continue
             dates.append(b[0])
         cls = 'seam_segment' if start is not None else 'full_history'
         out.append({'ex': ex, 'factor': f, 'cls': cls, 'start': start, 'end': end,
-                    'dates': dates, 'seam': G or S})
+                    'dates': dates, 'seam': G or S, 'skipped': skipped})
     return out
 
 
@@ -190,9 +206,16 @@ def _has(conn, table):
                              "current_schema() AND table_name = ?", (table,)).fetchall())
 
 
+def _raw_closes(conn, symbol):
+    return {_d(r[0]): float(r[1]) for r in conn.execute(
+        "SELECT date, close FROM nse_universe_history WHERE symbol = ? AND series = 'EQ' AND close > 0",
+        (symbol,)).fetchall()}
+
+
 def plan(conn):
     conn.execute("SET LOCAL timescaledb.max_tuples_decompressed_per_dml_transaction = 0")
     ops, notes, summary, touched = [], [], {}, []
+    has_raw = _has(conn, 'nse_universe_history')
     symbols = [r[0] for r in conn.execute(_PREFILTER).fetchall()]
     notes.append(f"{len(symbols)} symbols have a >{DEADBAND:.0%} move within {WINDOW_DAYS}d of a factor")
     notes.append("symbol       ex_date    seam       factor    class               bars  big_gap")
@@ -200,7 +223,7 @@ def plan(conn):
         series = _series(conn, sym)
         by_date = {b[0]: b for b in series}
         idx = {b[0]: i for i, b in enumerate(series)}
-        acts = find_actions(series, _events(conn, sym))
+        acts = find_actions(series, _events(conn, sym), _raw_closes(conn, sym) if has_raw else None)
         for a in acts:
             if a['cls'] in ('already_adjusted', 'circuit_band_undeclared'):
                 summary[a['cls']] = summary.get(a['cls'], 0) + 1
@@ -214,7 +237,8 @@ def plan(conn):
                     summary[k] = summary.get(k, 0) + 1
             summary[a['cls']] = summary.get(a['cls'], 0) + 1
             notes.append(f"{sym:12s} {a['ex']} {str(s or '-'):<10} {a['factor']:<9.4g} {a['cls']:19s} "
-                         f"{len(a['dates']):5d}  {big}")
+                         f"{len(a['dates']):5d}  {big}"
+                         + (f"  skipped {a['skipped']} bars already on the new basis" if a.get('skipped') else ''))
         m = multipliers(acts)
         if not m:
             continue

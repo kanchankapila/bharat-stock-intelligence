@@ -634,3 +634,30 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 
 - Fixes in e5e1fd46 (digests/monitor) and earlier 0a157da8 (ml-daily-ops budget, durationMs, BiLSTM tombstone): all need ONE `pm2 restart bharat-server` at 16:05 to 16:55 IST (check the python process list first; the scan-digest persistence removes the digest-repeat reason for that window once deployed).
 - After the restart verify: `[PY]` lines carry durationMs; no model-registry-active-BiLSTM line at the next hourly `[HEARTBEAT]`; tomorrow's 08:15 digest is short; tonight's screener-performance chain finishes without a timeout (AF-20261113-25).
+
+### Correction (2026-11-13, evening)
+- Deployed 18:00 IST (HEAD f7de2d68); durationMs confirmed live at 18:15:41. The "restart at 16:05" line above is superseded: the feature refresh ran to 17:57, so the restart landed at 18:00.
+- Tonight to read, with no DB-backed tests running: 18:50 ml-daily-ops success with no failed row (AF-20261112-10); BiLSTM line gone at the 19:00 heartbeat (AF-20261112-11); scan digest for 2026-11-13 sent once (AF-20261113-24); 22:10-23:30 screener-performance chain inside budgets (AF-20261113-25); tomorrow 08:15 digest short (AF-20261113-23).
+- Decisions still needing the owner are listed in docs/audits/2026-11-12-ledger-triage.md (host settings, credentials, deletes, retiring jobs); nothing there was applied except AF-20261004-05 (guard test, flagged as Claude's call).
+
+## 2026-11-11 (evening) - DL retired, breakout sizing shadow (Claude; follows the 11-10 entry above)
+
+- **DL inference and retraining retired** (AF-20261111-01, `cf0d6051`, live after `pm2 restart` 18:18 IST): `dl_score` is 0.0 in every regime, 5d rank IC +0.003, and none of its outputs forecast move size beyond vol20. Kept on purpose: dl-feature-refresh (feeds feature_store), dl-regime-update (market_regimes), dl-macro-fetch, drift_detector. Redis repeatables for dl-inference / dl-retrain-weekly / dl-retrain-emergency read 0 afterwards. screener and smart_money were left alone (zero cost, zero effect); breakout stays.
+- **Breakout sizing shadow** (AF-20261111-02, `3a96a3cf`): `sizing_shadow_arm.py`, frozen protocol hash b2474f049c1ab8cf, forward from 2026-11-12, verdict after 60 sessions (earliest ~2027-02-09), open and calendar-blocked. It ran in the 11-12 night ml-daily-ops (report written 22:21 IST); forward block reads 0 sessions until the 11-13 open exists.
+- **Not verified on the final tree:** the second full pytest gate was refused by the memory guard ("less than 2 GiB available"), so the last full run (4,160 passed, 0 failed) predates `sizing_shadow_arm.py`. Targeted pytest for it, paper_book and e2e (37 passed), full vitest (2,373 passed) and tsc were clean. Re-run the full gate when memory allows.
+- **Method traps hit:** (1) `grep -c $'\r'` in Git Bash counts every line, so it reports CRLF for LF files; count bytes with Python before writing an edit script (queues.ts is LF, monitor.router.ts is CRLF). (2) vitest fails with "failed to find the current suite" from Git Bash on this box; run it from PowerShell with `PGTEST_DB=bharat_pgtest`. (3) `paper_book.simulate` already used `held` as a local, so a new list named `held` broke 5 tests, caught by the existing suite.
+
+## 2026-11-14 to 2026-11-15 - starvation, Redis, price-basis repairs, factor table (Claude)
+- Full account: docs/session-log.md, same date. Ledger: AF-20261114-01/-02/-03, AF-20261112-12, AF-20261115-01/-02/-03.
+- Verified live: TimescaleDB worker pool (48/32) with 37 concurrent workers; ~12,300 `stock_ohlcv` bars repaired under dump gates with rollback CSVs in `backups/`; factor table 2,527 to 2,451 rows with a second dry-run of 0; pytest 4,243 passed on the final tree.
+- Not verified: ml-ensemble-train after the completion marker (next ml-weekly-retrain is Sunday 2026-11-22 05:00); trendlyneWeekly's `ohlcv_adjust --persist` with the new guards (only a read-only scan was run, it would persist 0 of the deleted rows).
+- Rules to carry: our own factor table is not an authority to judge prices by (use TEJ/NSE); after a cleanup, run the producer read-only and diff; another project on this host can kill our Python by image name, the runner now names it.
+
+
+
+## 2026-11-17 (morning) - open-items pass (Claude)
+- Full account: docs/session-log.md, same date. Ledger: 17 rows closed, AF-20261117-01 new and closed, AF-20261112-03 fixed in code and waiting on tonight's run.
+- Verified live: digest fixes read back from telegram_report_log; Tapetide route; three starved ml-daily-ops steps re-run (4 to 10 s each); phase B equivalence on 312 live rows (0 differences).
+- Not verified: tonight's screener-performance phase B timing (was 1,526.7 s); ml-ensemble-train teardown crash (next retrain 2026-11-22).
+- Rule to carry: a manual production re-grade inside 18:50 to 00:30 IST starves ml-daily-ops steps; three fast steps timing out together is contention, re-run them.
+- Later the same morning: earnings-calendar snapshots started (AF-20261115-01); Trendlyne refusal latch, rotation slot and fno_activity exit code fixed, and the 11-16 fno_activity session recovered (AF-20261113-26). Not verified until tonight: catch-up no longer repeats a fetcher back to back; coverage check back above 50%; phase B timing.

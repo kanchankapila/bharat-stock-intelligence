@@ -44,6 +44,18 @@ const ABNORMAL_EXIT_CODES: Record<number, string> = {
   143: 'SIGTERM (128+15) — terminated by a signal',
 };
 
+/**
+ * A script that has finished ALL its work and committed it prints this as its very last line. An
+ * abnormal native exit AFTER it is a teardown crash, not a failed run: ml_ensemble.py trained,
+ * registered, scored and printed Done, then exited 0xC0000409 five times (AF-20261107-06).
+ */
+export const COMPLETION_SENTINEL = '[BSI] COMPLETE';
+
+export function completedBeforeExit(code: number | null | undefined, stdout?: string): boolean {
+  const c = normalizeExitCode(code);
+  return isAbnormalExitCode(c) && !!stdout && stdout.trimEnd().endsWith(COMPLETION_SENTINEL);
+}
+
 /** Codes meaning "the host/OS killed this process" — the script itself did not fail. */
 const HOST_TEARDOWN_EXIT_CODES = new Set([1073807364, 3221225786, 3221225794]);
 
@@ -109,7 +121,17 @@ export function buildFailureReason(opts: {
   // there would send the reader off to raise the limit.
   const atCeiling = memLimitMb > 0 && peakMemMb !== undefined && peakMemMb >= 0.9 * memLimitMb;
   const oom = OOM_STDERR.test(err);
+  // A ceilinged run writes its peak at interpreter exit (atexit in pyboot/sitecustomize.py), so an
+  // ordinary non-zero exit WITHOUT that report never reached exit: it was terminated from outside.
+  // 2026-11-15: another project's `taskkill /f /im python.exe` killed three ml-weekly-retrain steps.
+  const killedOutside = memLimitMb > 0 && peakMemMb === undefined && code !== 0
+    && !isAbnormalExitCode(code) && !oom;
   return [
+    completedBeforeExit(code, out) && `COMPLETED BEFORE EXIT: the script printed its completion marker, so its work is ` +
+      `done and committed; the process then crashed in native teardown (exit code ${code}). Reported, not a failed run.`,
+    killedOutside && `KILLED FROM OUTSIDE: exit code ${code} with no peak-memory report -- the ` +
+      `interpreter never reached its exit hooks, so something terminated it (taskkill /F, ` +
+      `TerminateProcess). Not a script failure; check what else ran at this minute.`,
     atCeiling && `MEMORY CEILING: the job's process tree peaked at ${peakMemMb}MB against its ` +
       `${memLimitMb}MB per-job ceiling (PY_CHILD_MEM_LIMIT_MB) and was refused further ` +
       `memory -- a runaway this job contained instead of the host.`,
@@ -623,7 +645,7 @@ export async function runPython(
             // instead of choosing one: stderr is where a traceback lands, stdout is where a
             // deliberate sys.exit(1) guard prints its reason, and a failing run can use either.
             const reason = buildFailureReason({ code, stderr: err, stdout: out, peakMemMb, memLimitMb });
-            reject(Object.assign(new Error(reason), { stdout: out, stderr: err, code }));
+            reject(Object.assign(new Error(reason), { stdout: out, stderr: err, code, completedBeforeExit: completedBeforeExit(code, out) }));
           }
         });
       });

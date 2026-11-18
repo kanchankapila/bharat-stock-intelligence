@@ -13,7 +13,7 @@ The endpoint was never dead; the call was incomplete. Confirmed live for all 8 n
 `pcr_fetcher.py` reports as uncovered (RELIANCE, SBIN, SUNPHARMA, TCS, TECHM, TITAN,
 ULTRACEMCO, WIPRO) and for indices.
 
-This is NOT a new vendor under `data-sources.md`'s onboarding freeze -- NSE is already the
+This is NOT a new vendor -- NSE is already the
 canonical identifier authority for this entire platform, and this repairs an existing
 integration rather than adding a dependency.
 

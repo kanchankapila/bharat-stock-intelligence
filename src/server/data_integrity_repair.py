@@ -8,7 +8,9 @@ Each repair is idempotent and can be run independently:
   --bad-bars        flag physically-impossible stock_ohlcv bars (is_suspect)
   --adjustment      backfill the untagged adjustment_basis column
   --insider-dates   convert insider_trades.date from "22 May, 2026" to ISO
-  --closed-sessions flag stock_ohlcv bars from days the exchange never opened
+  --closed-sessions flag stock_ohlcv bars from days the exchange never opened (flat zero-volume
+                    or a copy of the previous session), purge their feature_store/technical_signals rows
+  --unlisted-symbols flag stock_ohlcv bars of the evidenced non-NSE symbols
   --holidays        populate market_holidays from observed trading gaps
   --news-link       build an indexed news_symbol_link table from symbols_json
   --labels          add label_definition/producer to signal_outcomes + flag implausible returns
@@ -25,6 +27,7 @@ Run:  python data_integrity_repair.py --all [--dry-run]
 """
 import argparse
 import datetime
+import os
 import json
 import re
 
@@ -963,7 +966,61 @@ def _find_closed_sessions(conn) -> list:
             if int(r[1]) and int(r[2]) / int(r[1]) >= CLOSED_MARKET_SHARE_FLOOR]
 
 
-def repair_closed_sessions(conn: ConnWrapper, dry: bool) -> None:
+COPIED_SESSION_REASON = 'closed session: universe-wide copy of the previous session bar'
+
+
+def _find_copied_sessions(conn) -> list:
+    """Dates where the day's bars repeat each symbol's previous bar exactly (OHLC and volume):
+    a refresh on a shut exchange persisted the last session's full quote under the new date.
+    The second fabricated shape beside the flat zero-volume one (AF-20261117-18: 2026-07-11,
+    2,114 of 2,121); every real special session, weekends included, has 0 such copies."""
+    rows = conn.execute("""
+        SELECT date::text AS d, count(*) AS n,
+               count(*) FILTER (WHERE open = po AND high = ph AND low = pl
+                                 AND close = pc AND volume = pv) AS copies
+        FROM (SELECT date, open, high, low, close, volume,
+                     lag(open) OVER w AS po, lag(high) OVER w AS ph, lag(low) OVER w AS pl,
+                     lag(close) OVER w AS pc, lag(volume) OVER w AS pv
+              FROM stock_ohlcv
+              WINDOW w AS (PARTITION BY symbol ORDER BY date)) t
+        GROUP BY date
+        HAVING count(*) > 50
+        ORDER BY date
+    """).fetchall()
+    return [(str(r[0])[:10], int(r[1])) for r in rows
+            if int(r[1]) and int(r[2]) / int(r[1]) >= CLOSED_MARKET_SHARE_FLOOR]
+
+
+# Rows computed FROM a fabricated session's bars. Flagging the bars does not remove them, and a
+# feature rebuild only rewrites dates it still sees, so they stay as duplicate training rows.
+PHANTOM_DERIVED_TABLES = ('feature_store', 'technical_signals')
+
+
+def _purge_phantom_derived(conn, dates: list, dry: bool, backup_dir: str) -> None:
+    import csv
+    placeholders = ','.join('?' for _ in dates)
+    for table in PHANTOM_DERIVED_TABLES:
+        if not conn.execute("SELECT to_regclass(?)", (table,)).fetchone()[0]:
+            continue
+        cur = conn.execute(f"SELECT * FROM {table} WHERE date::text IN ({placeholders})", tuple(dates))
+        cols = [c[0] for c in cur.description]
+        rows = cur.fetchall()
+        _log(f"  {table}: {len(rows)} rows on fabricated sessions")
+        if dry or not rows:
+            continue
+        os.makedirs(backup_dir, exist_ok=True)
+        with open(os.path.join(backup_dir, f"{table}.csv"), 'w', newline='', encoding='utf-8') as fh:
+            w = csv.writer(fh)
+            w.writerow(cols)
+            w.writerows([tuple(r) for r in rows])
+        i_sym, i_date = cols.index('symbol'), cols.index('date')
+        done = safe_keyed_update(
+            conn, f"DELETE FROM {table} WHERE symbol=? AND date::text=?",
+            [(str(r[i_sym]), str(r[i_date])[:10]) for r in rows], batch_size=500)
+        _log(f"  {table}: deleted {done} rows (backup {backup_dir})")
+
+
+def repair_closed_sessions(conn: ConnWrapper, dry: bool, backup_dir: str | None = None) -> None:
     """Flag bars belonging to a session the exchange never opened (AF-20260911-15).
 
     Found 2026-09-11: 4 such dates (2026-01-15, 2026-05-01, 2026-05-28, 2026-06-26) held 7,515
@@ -977,37 +1034,68 @@ def repair_closed_sessions(conn: ConnWrapper, dry: bool) -> None:
     Flags rather than deletes: is_suspect is the column that exists for exactly this, every
     measurement path already filters on it, and the flag is reversible where a DELETE is not.
     """
-    _log("closed sessions: scanning for universe-wide flat zero-volume days ...")
-    conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS is_suspect SMALLINT DEFAULT 0")
-    conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS suspect_reason TEXT")
-    conn.commit()
+    _log("closed sessions: scanning for flat zero-volume and copied-previous-session days ...")
+    if not dry:  # even a no-op IF NOT EXISTS takes an ACCESS EXCLUSIVE lock on stock_ohlcv
+        conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS is_suspect SMALLINT DEFAULT 0")
+        conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS suspect_reason TEXT")
+        conn.commit()
 
-    sessions = _find_closed_sessions(conn)
+    sessions = [(d, n, CLOSED_SESSION_REASON) for d, n in _find_closed_sessions(conn)]
+    seen = {d for d, _, _ in sessions}
+    sessions += [(d, n, COPIED_SESSION_REASON) for d, n in _find_copied_sessions(conn) if d not in seen]
     if not sessions:
         _log("  none found")
         return
-    for d, n in sessions:
-        _log(f"  {d}: {n} bars")
+    for d, n, reason in sessions:
+        _log(f"  {d}: {n} bars ({reason})")
 
-    dates = [d for d, _ in sessions]
-    placeholders = ','.join('?' for _ in dates)
-    # Idempotent: only rows not already carrying this reason are rewritten, so a second run
+    # Idempotent: only rows not already carrying their reason are rewritten, so a second run
     # decompresses nothing.
-    pairs = conn.execute(
-        f"SELECT symbol, date::text FROM stock_ohlcv "
-        f"WHERE date::text IN ({placeholders}) "
-        f"AND (COALESCE(is_suspect,0)=0 OR suspect_reason IS DISTINCT FROM ?)",
-        (*dates, CLOSED_SESSION_REASON)).fetchall()
-    _log(f"  bars needing the flag: {len(pairs)}")
-    if not pairs or dry:
-        return
+    updates = []
+    for d, _, reason in sessions:
+        pairs = conn.execute(
+            "SELECT symbol FROM stock_ohlcv WHERE date::text = ? "
+            "AND (COALESCE(is_suspect,0)=0 OR suspect_reason IS DISTINCT FROM ?)",
+            (d, reason)).fetchall()
+        updates += [(reason, str(r[0]), d) for r in pairs]
+    _log(f"  bars needing the flag: {len(updates)}")
+    if not dry and updates:
+        done = safe_keyed_update(
+            conn,
+            "UPDATE stock_ohlcv SET is_suspect=1, suspect_reason=? WHERE symbol=? AND date::text=?",
+            updates, batch_size=200)
+        _log(f"  flagged {done} bars across {len(sessions)} session(s)")
 
+    backup_dir = backup_dir or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), '..', '..', 'backups',
+        'phantom_sessions_' + datetime.datetime.now().strftime('%Y%m%dT%H%M%S'))
+    _purge_phantom_derived(conn, [d for d, _, _ in sessions], dry, backup_dir)
+
+
+# Symbols that are not NSE listings: Yahoo answered a ticker truncated at an unencoded `&`
+# (M&M -> M, J&KBANK -> J, S&SPOWER -> S, ARE&M -> ARE, GVT&D -> GVT) with a US stock, 59 bars
+# each 2026-05-26..09-11, before yahooQuoteUrl() fixed the source (AF-20260911-11); ZZTEST is a
+# leaked test fixture. Explicit on purpose: none has an nse_stocks or nse_universe_history row,
+# and a rule that inferred "unlisted" would also catch index rows and fresh listings.
+UNLISTED_JUNK_SYMBOLS = ('ARE', 'GVT', 'J', 'M', 'S', 'ZZTEST')
+UNLISTED_REASON = 'not an NSE listing (truncated & ticker answered by a US quote, or test fixture)'
+
+
+def repair_unlisted_symbols(conn: ConnWrapper, dry: bool) -> None:
+    """Flag stock_ohlcv bars of symbols that are not NSE listings (AF-20261117-18)."""
+    _log("unlisted symbols: flagging non-NSE bars ...")
+    placeholders = ','.join('?' for _ in UNLISTED_JUNK_SYMBOLS)
+    pairs = conn.execute(
+        f"SELECT symbol, date::text FROM stock_ohlcv WHERE symbol IN ({placeholders}) "
+        f"AND (COALESCE(is_suspect,0)=0 OR suspect_reason IS DISTINCT FROM ?)",
+        (*UNLISTED_JUNK_SYMBOLS, UNLISTED_REASON)).fetchall()
+    _log(f"  bars needing the flag: {len(pairs)}")
+    if dry or not pairs:
+        return
     done = safe_keyed_update(
-        conn,
-        "UPDATE stock_ohlcv SET is_suspect=1, suspect_reason=? WHERE symbol=? AND date::text=?",
-        [(CLOSED_SESSION_REASON, str(s), str(d)[:10]) for s, d in pairs],
-        batch_size=200)
-    _log(f"  flagged {done} bars across {len(dates)} session(s)")
+        conn, "UPDATE stock_ohlcv SET is_suspect=1, suspect_reason=? WHERE symbol=? AND date::text=?",
+        [(UNLISTED_REASON, str(s), str(d)[:10]) for s, d in pairs], batch_size=200)
+    _log(f"  flagged {done} bars")
 
 
 TASKS = {
@@ -1017,6 +1105,7 @@ TASKS = {
     # Must precede 'holidays': that repair derives the calendar from dates ABSENT from
     # stock_ohlcv, so the fabricated sessions have to be flagged first to be excluded.
     'closed_sessions': repair_closed_sessions,
+    'unlisted_symbols': repair_unlisted_symbols,
     'holidays': repair_holidays,
     'news_link': repair_news_link,
     'labels': repair_labels,

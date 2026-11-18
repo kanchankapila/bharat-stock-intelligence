@@ -780,6 +780,29 @@ def resolve_unified_outcomes(conn: ConnWrapper, horizon_days: int = 1, dry_run: 
                   dry_run=dry_run, relabel_before=relabel_before)
 
 
+def _targeted_pending_ts(conn, keys) -> list:
+    """The technical_signals rows named by `keys` [(symbol, 'YYYY-MM-DD')], in the pending query's column order."""
+    return conn.execute("""
+        SELECT ts.symbol, ts.date AS signal_date, ts.cmp AS entry_price, ts.signal_score, ts.signals_json,
+               CAST(ts.stop_loss AS REAL) AS stop_loss, ts.time_horizon
+        FROM technical_signals ts
+        JOIN (SELECT unnest(CAST(? AS text[])) AS s, unnest(CAST(? AS text[])) AS d) k
+          ON k.s = ts.symbol AND CAST(ts.date AS text) = k.d
+        ORDER BY ts.date DESC, ts.symbol DESC
+    """, ([k[0] for k in keys], [k[1] for k in keys])).fetchall()
+
+
+def _targeted_pending_us(conn, ids) -> list:
+    """The unified_signals rows with these ids, in the pending query's column order."""
+    return conn.execute("""
+        SELECT us.id, us.symbol, us.signal_date, us.entry_price, us.stop_loss, us.signal_source,
+               us.confidence_score, us.target_price
+        FROM unified_signals us
+        JOIN (SELECT unnest(CAST(? AS bigint[])) AS i) k ON k.i = us.id
+        ORDER BY us.signal_date DESC, us.id DESC
+    """, (list(ids),)).fetchall()
+
+
 def _resolve_outcomes_batch(
     conn: ConnWrapper,
     horizon_days: int = 1,
@@ -787,12 +810,18 @@ def _resolve_outcomes_batch(
     relabel_before: str | None = None,
     limit: int = 2000,
     after: tuple | None = None,
+    keys: list | None = None,
+    sink: list | None = None,
 ) -> dict:
     """
     PHASE 1 FIX: Resolve signal outcomes with proper time-of-day validation
     - Signals entered at next trading day's open
     - SL checked on intraday (low) before target (high)
     - Horizon exit checked at close on exit_date
+
+    `keys` = [(symbol, 'YYYY-MM-DD')] grades exactly those technical_signals rows whatever their current
+    outcome (a targeted re-grade after a price repair); `sink` collects each row's upsert parameters
+    instead of writing, so a caller can compare before applying (AF-20261112-12).
     """
     cutoff = _gradeable_cutoff(conn, horizon_days)
 
@@ -803,7 +832,7 @@ def _resolve_outcomes_batch(
     # ANY row for (symbol, signal_date, horizon_days) regardless of who wrote it, so this
     # resolver would silently skip a horizon confluence_outcome_tracker.py had already claimed
     # (and vice versa) — see the signal_outcomes.signal_source migration for the full mechanism.
-    pending = conn.execute("""
+    pending = _targeted_pending_ts(conn, keys) if keys is not None else conn.execute("""
         SELECT ts.symbol, ts.date AS signal_date, ts.cmp AS entry_price,
                ts.signal_score, ts.signals_json,
                CAST(ts.stop_loss AS REAL) AS stop_loss,
@@ -859,6 +888,12 @@ def _resolve_outcomes_batch(
             computed_at=excluded.computed_at, label_definition=excluded.label_definition
     """
 
+    def _write(params):
+        if sink is not None:
+            sink.append(params)
+        else:
+            conn.execute(upsert, params)
+
     # ── AF-69 batched lookups ────────────────────────────────────────────────
     # The four per-row queries below (resolved-guard, next-day open, SL scan,
     # horizon-exit close) are answered from run-wide prefetched maps. Every
@@ -872,7 +907,7 @@ def _resolve_outcomes_batch(
         # so writing under another horizon left the row unresolved at every pass (AF-20260930-28).
         _r['_h'] = horizon_days
         _r['_exit'] = _nth_session_after(_cal, _r['signal_date'], horizon_days)
-    _resolved_keys = set() if relabel_before else _prefetch_resolved_keys(
+    _resolved_keys = set() if (relabel_before or keys is not None) else _prefetch_resolved_keys(
         conn, [(r['symbol'], str(r['signal_date'])[:10], r['_h']) for r in rows])
     _np_map = _prefetch_next_price(
         conn,
@@ -1018,7 +1053,7 @@ def _resolve_outcomes_batch(
             print(msg)
             continue
 
-        conn.execute(upsert, (
+        _write((
             sym, signal_date, sig_horizon, entry,
             check_date, exit_price,
             round(return_pct, 4) if return_pct is not None else None,
@@ -1029,7 +1064,7 @@ def _resolve_outcomes_batch(
         if outcome != 'PENDING':
             resolved += 1
 
-    if not dry_run:
+    if not dry_run and sink is None:
         conn.commit()
 
     print(f"[OutcomeResolver] Resolved {resolved}/{len(rows)} signals.")
@@ -1044,9 +1079,15 @@ def _resolve_unified_batch(
     relabel_before: str | None = None,
     limit: int = 2000,
     after: tuple | None = None,
+    keys: list | None = None,
+    sink: list | None = None,
 ) -> dict:
     """
     Resolve outcomes for all signal sources (AI, Quant, Technical) from unified_signals.
+
+    `keys` = [unified_signals.id] grades exactly those signals whatever their current outcome (a targeted
+    re-grade after a price repair); `sink` collects each row's upsert parameters instead of writing
+    (AF-20261112-12).
     """
     cutoff = _gradeable_cutoff(conn, horizon_days)
 
@@ -1057,7 +1098,7 @@ def _resolve_unified_batch(
     # PENDING signals (root cause of ~86% of AI signals never resolving).
     # Do NOT filter on status='COMPLETED': the per-horizon NOT EXISTS below is the correct
     # guard. Filtering on status caused h1 to mark signals COMPLETED, starving h5/h15 passes.
-    pending = conn.execute("""
+    pending = _targeted_pending_us(conn, keys) if keys is not None else conn.execute("""
         SELECT us.id, us.symbol, us.signal_date, us.entry_price, us.stop_loss, us.signal_source,
                us.confidence_score, us.target_price
         FROM unified_signals us
@@ -1146,6 +1187,12 @@ def _resolve_unified_batch(
             exit_time=excluded.exit_time,
             computed_at=excluded.computed_at
     """
+
+    def _write(params):
+        if sink is not None:
+            sink.append(params)
+        else:
+            conn.execute(upsert, params)
 
     for row in rows:
         uid = row['id']
@@ -1291,7 +1338,7 @@ def _resolve_unified_batch(
         conf = row.get('confidence_score')
         signal_score = round(conf) if conf is not None else None
 
-        conn.execute(upsert, (
+        _write((
             uid, source, sym, signal_date, horizon_days, entry,
             check_date, exit_price, outcome,
             round(return_pct, 4) if return_pct is not None else None,
@@ -1301,11 +1348,11 @@ def _resolve_unified_batch(
             round(mae_pct, 4) if mae_pct is not None else None,
             exit_time,
         ))
-        
+
         if outcome != 'PENDING':
             resolved += 1
 
-    if not dry_run:
+    if not dry_run and sink is None:
         conn.commit()
 
     print(f"[OutcomeResolver] Resolved {resolved}/{len(rows)} unified signals.")
@@ -1477,6 +1524,32 @@ def expire_stale_pending_all(conn: ConnWrapper, dry_run: bool = False) -> int:
     return total
 
 
+# A published level and today's back-adjusted bars differ by more than this only across a
+# split/bonus (the smallest common ratio, 4:5, moves price 20%).
+BASIS_SEAM_MIN = 0.2
+
+
+def _split_ex_dates(conn, symbols) -> dict:
+    """symbol -> SPLIT/BONUS ex-dates (ISO). Read once BEFORE any row is graded: a failed read on
+    the shared connection would otherwise roll back the rows already written in this pass."""
+    symbols = sorted({str(s) for s in symbols})
+    if not symbols:
+        return {}
+    try:
+        ph = ','.join('?' for _ in symbols)
+        rows = conn.execute(
+            f"SELECT symbol, CAST(ex_date AS TEXT) FROM corporate_actions "
+            f"WHERE action_type IN ('SPLIT', 'BONUS') AND symbol IN ({ph})", tuple(symbols)).fetchall()
+    except Exception as e:
+        print(f"[OutcomeResolver] corporate_actions unavailable ({e}); no price-basis rescale",
+              file=sys.stderr)
+        return {}
+    out: dict = {}
+    for sym, d in rows:
+        out.setdefault(str(sym), []).append(str(d)[:10])
+    return out
+
+
 def resolve_recommendation_log(
     conn: ConnWrapper,
     horizon_days: int = 15,
@@ -1509,6 +1582,7 @@ def resolve_recommendation_log(
     print(f"[OutcomeResolver] {len(rows)} recommendation_log entries pending resolution.")
     resolved = 0
     _cal = _session_calendar(conn, rows, 'signal_date')
+    _splits = _split_ex_dates(conn, [r['symbol'] for r in rows])
 
     for row in rows:
         rec_id = row['id']
@@ -1531,9 +1605,22 @@ def resolve_recommendation_log(
         next_trading_day = next_row[0] if next_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
         exit_target_date = _nth_session_after(_cal, signal_date_str, h)
 
+        # AF-20261117-13: stock_ohlcv is back-adjusted for splits/bonuses; the published levels are
+        # not. With an action inside the window, put the levels on the bars' basis via the
+        # signal-day bar (entry was that day's close when published).
+        basis = 1.0
+        if any(signal_date_str < d <= str(exit_target_date) for d in _splits.get(sym, ())):
+            sb = conn.execute(
+                "SELECT close FROM stock_ohlcv WHERE symbol = ? AND date = ? AND COALESCE(is_suspect,0)=0",
+                (sym, signal_date_str)).fetchone()
+            if sb and sb[0] and abs(float(sb[0]) / entry - 1) > BASIS_SEAM_MIN:
+                basis = float(sb[0]) / entry
+                entry *= basis
+                stop_loss = stop_loss * basis if stop_loss else None
+
         # #2 exit policy: target-capture / scale-out / chandelier trailing over the bar window
         # (entry stays the recommended price, unlike the next-day-open signal resolvers).
-        target = float(row['target_1']) if row.get('target_1') else None
+        target = float(row['target_1']) * basis if row.get('target_1') else None
         atr = get_atr(conn, sym, signal_date_str)
         bar_rows = conn.execute("""
             SELECT date, high, low, close FROM stock_ohlcv
@@ -1600,7 +1687,9 @@ def resolve_recommendation_log(
                 gross += dividend_pct
                 
             return_pct = net_return_pct(gross)
-            if exit_reason == 'STOP_LOSS':
+            # A stop after a scale-out at target (or with a dividend) can net positive; only a
+            # losing stop-out is forced to LOSS (AF-20261117: 9.7k positive-return LOSS rows).
+            if exit_reason == 'STOP_LOSS' and return_pct <= 0:
                 outcome = 'LOSS'
             else:
                 threshold = get_volatility_threshold(conn, sym, signal_date, h)

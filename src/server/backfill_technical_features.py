@@ -352,6 +352,9 @@ def _load_flow_sector_inputs(con) -> dict:
     return {'fii_by_date': fii_by_date, 'sector_mom': sector_mom}
 
 
+# The 15.0 price floor is UNMEASURED: it was never derived from a backtest and is kept so grid rows stay
+# comparable with history. Lowering it widens the ranked universe, which is a scoring change that needs a
+# measurement first (measurement.md). Decided 2026-11-13, AF-20260823-71.
 def run_full_universe_today(min_price: float = 15.0) -> int:
     """Grid-ensurer: guarantee a technical_signals row exists for EVERY liquid stock on
     the latest OHLCV date, with the core OHLCV-derived indicators. The signal scan only

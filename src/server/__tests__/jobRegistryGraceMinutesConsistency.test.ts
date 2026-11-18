@@ -24,7 +24,7 @@ import { JOB_REGISTRY } from '../jobRegistry';
  *
  * Building this test found real, live drift: mc-screener-sync (grace 60min < lockDuration
  * 90min), and three much larger gaps on the platform's heaviest jobs -- ml-daily-ops (grace
- * 60min vs a Worker lockDuration of 4h / withJobTimeout of 3.5h -- and CLAUDE.md's own job-
+ * 60min vs a Worker lockDuration of 4h / withJobTimeout of 3.5h (3.9h since 2026-11-13) -- and CLAUDE.md's own job-
  * schedule-review note independently measured this job's real runtime at ~4.4h, so even the
  * 4h lockDuration may be tight), ml-weekly-retrain (grace 180min vs lockDuration 360min), and
  * quant-eod-sync (grace 45min vs lockDuration 120min / withJobTimeout 5.5h, with the source's

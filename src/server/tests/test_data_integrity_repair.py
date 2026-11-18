@@ -321,3 +321,89 @@ class TestFindClosedSessions:
         conn = self._conn()
         self._insert(conn, '2026-05-07', 20, flat=True, volume=0)
         assert dir_mod._find_closed_sessions(conn) == []
+
+
+# ── copied-session bars (AF-20261117-18) ─────────────────────────────────────
+# Saturday 2026-07-11 held 2,121 bars, 2,114 of them byte-identical to the symbol's Friday bar
+# (OHLC and volume): a refresh on a shut exchange persisted the last session's quote under the new
+# date. _find_closed_sessions only knew the flat zero-volume shape, so it never saw this one. Every
+# real special session (2023-11-12 Muhurat, 2024-01-20, 2024-03-02, 2024-05-18, 2025-02-01,
+# 2026-02-01 budget) has 0 copied bars.
+
+class TestCopiedSessions:
+    N = 60
+
+    def _conn(self):
+        conn = pg_memory_conn()
+        conn.execute("""
+            CREATE TABLE stock_ohlcv (
+                symbol TEXT NOT NULL, date DATE NOT NULL,
+                open DOUBLE PRECISION, high DOUBLE PRECISION,
+                low DOUBLE PRECISION, close DOUBLE PRECISION,
+                volume BIGINT, is_suspect SMALLINT DEFAULT 0, suspect_reason TEXT,
+                PRIMARY KEY (symbol, date))""")
+        conn.execute("CREATE TABLE feature_store (symbol TEXT, date DATE, rsi DOUBLE PRECISION, PRIMARY KEY (symbol, date))")
+        conn.execute("CREATE TABLE technical_signals (symbol TEXT, date DATE, cmp DOUBLE PRECISION, PRIMARY KEY (symbol, date))")
+        conn.commit()
+        return conn
+
+    def _seed(self, conn, copies):
+        for i in range(self.N):
+            px = 100.0 + i
+            bar = (px, px * 1.02, px * 0.98, px * 1.01, 5_000 + i)
+            conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES (?,?,?,?,?,?,?)",
+                         (f"S{i}", '2026-07-10', *bar))
+            nxt = bar if i < copies else (px * 1.01, px * 1.03, px * 0.99, px * 1.02, 7_000 + i)
+            conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES (?,?,?,?,?,?,?)",
+                         (f"S{i}", '2026-07-11', *nxt))
+            for d in ('2026-07-10', '2026-07-11'):
+                conn.execute("INSERT INTO feature_store (symbol,date,rsi) VALUES (?,?,50)", (f"S{i}", d))
+                conn.execute("INSERT INTO technical_signals (symbol,date,cmp) VALUES (?,?,100)", (f"S{i}", d))
+        conn.commit()
+
+    def test_detects_a_universe_wide_copy_of_the_previous_session(self):
+        conn = self._conn()
+        self._seed(conn, copies=self.N)
+        assert dir_mod._find_copied_sessions(conn) == [('2026-07-11', self.N)]
+
+    def test_real_session_with_some_unchanged_bars_is_not_a_copy(self):
+        conn = self._conn()
+        self._seed(conn, copies=10)
+        assert dir_mod._find_copied_sessions(conn) == []
+
+    def test_repair_flags_the_copy_and_purges_its_derived_rows(self, tmp_path):
+        conn = self._conn()
+        self._seed(conn, copies=self.N)
+        dir_mod.repair_closed_sessions(conn, False, backup_dir=str(tmp_path))
+        flagged = conn.execute(
+            "SELECT count(*) FROM stock_ohlcv WHERE date='2026-07-11' AND is_suspect=1 AND suspect_reason=?",
+            (dir_mod.COPIED_SESSION_REASON,)).fetchone()[0]
+        assert flagged == self.N
+        assert conn.execute("SELECT count(*) FROM stock_ohlcv WHERE date='2026-07-10' AND COALESCE(is_suspect,0)=1").fetchone()[0] == 0
+        for t in ('feature_store', 'technical_signals'):
+            assert conn.execute(f"SELECT count(*) FROM {t} WHERE date='2026-07-11'").fetchone()[0] == 0
+            assert conn.execute(f"SELECT count(*) FROM {t} WHERE date='2026-07-10'").fetchone()[0] == self.N
+            backup = tmp_path / f"{t}.csv"
+            assert backup.exists() and len(backup.read_text().strip().splitlines()) == self.N + 1
+
+    def test_dry_run_writes_nothing(self, tmp_path):
+        conn = self._conn()
+        self._seed(conn, copies=self.N)
+        dir_mod.repair_closed_sessions(conn, True, backup_dir=str(tmp_path))
+        assert conn.execute("SELECT count(*) FROM stock_ohlcv WHERE COALESCE(is_suspect,0)=1").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM feature_store").fetchone()[0] == 2 * self.N
+        assert not list(tmp_path.iterdir())
+
+
+class TestUnlistedJunkSymbols:
+    def test_flags_only_the_evidenced_symbols(self):
+        conn = pg_memory_conn()
+        conn.execute("""CREATE TABLE stock_ohlcv (symbol TEXT NOT NULL, date DATE NOT NULL,
+            open DOUBLE PRECISION, high DOUBLE PRECISION, low DOUBLE PRECISION, close DOUBLE PRECISION,
+            volume BIGINT, is_suspect SMALLINT DEFAULT 0, suspect_reason TEXT, PRIMARY KEY (symbol, date))""")
+        for s in ('M', 'GVT', 'ZZTEST', 'RELIANCE', 'NIFTYIT'):
+            conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES (?,'2026-09-01',1,1,1,1,1)", (s,))
+        conn.commit()
+        dir_mod.repair_unlisted_symbols(conn, False)
+        flagged = {r[0] for r in conn.execute("SELECT symbol FROM stock_ohlcv WHERE is_suspect=1").fetchall()}
+        assert flagged == {'M', 'GVT', 'ZZTEST'}

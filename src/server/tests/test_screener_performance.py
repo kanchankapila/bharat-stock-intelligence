@@ -414,3 +414,76 @@ def test_phase_b_leaves_a_too_recent_row_alone():
     _seed_ohlcv_run(conn, 'FFF', appeared, 10)
     filled = phase_b_fill_returns(CastStrippingConn(conn))
     assert filled == 0, "a 3-day-old appearance is too recent for even return_5d"
+
+
+# ─── phase_b_fill_returns: one price read per symbol (2026-11-17, AF-20261112-03) ───
+
+class _CountingConn(CastStrippingConn):
+    def __init__(self, conn):
+        super().__init__(conn)
+        self.ohlcv_reads = 0
+
+    def execute(self, sql, params=()):
+        if 'FROM stock_ohlcv' in sql:
+            self.ohlcv_reads += 1
+        return super().execute(sql, params)
+
+
+def _seed_phase_b_fixture(conn):
+    """Three symbols over 200 days with a suspect bar, a missing bar and a short history, plus
+    the index series, and several appearances per symbol at different ages."""
+    start = (TODAY - datetime.timedelta(days=200)).isoformat()
+    _seed_ohlcv_run(conn, 'AAA', start, 190, base_price=100.0)
+    _seed_ohlcv_run(conn, 'BBB', start, 190, base_price=50.0)
+    _seed_ohlcv_run(conn, 'CCC', start, 40, base_price=10.0)      # too short for 60d/120d
+    _seed_ohlcv_run(conn, sp.NIFTY_SYMBOL, start, 190, base_price=20000.0)
+    d0 = datetime.date.fromisoformat(start)
+    conn.execute("UPDATE stock_ohlcv SET is_suspect = 1 WHERE symbol = 'AAA' AND date = ?",
+                 ((d0 + datetime.timedelta(days=12)).isoformat(),))
+    conn.execute("DELETE FROM stock_ohlcv WHERE symbol = 'BBB' AND date = ?",
+                 ((d0 + datetime.timedelta(days=5)).isoformat(),))
+    appearances = []
+    for sym in ('AAA', 'BBB', 'CCC'):
+        for offset in (0, 5, 11, 12, 30, 100, 150):
+            appearances.append((sym, (d0 + datetime.timedelta(days=offset)).isoformat()))
+    for sym, appeared in appearances:
+        conn.execute(
+            "INSERT INTO screener_appearances (screener_id, source, symbol, appeared_date) "
+            "VALUES ('scr1', 'trendlyne', ?, ?)", (sym, appeared))
+    conn.commit()
+    return appearances
+
+
+def test_phase_b_reads_prices_once_per_symbol_not_per_appearance():
+    conn = make_db()
+    appearances = _seed_phase_b_fixture(conn)
+    counting = _CountingConn(conn)
+    filled = phase_b_fill_returns(counting)
+    assert filled == len(appearances) - 2   # CCC has no bar on or after its two late dates
+    # one series per symbol with pending rows, plus the index series
+    assert counting.ohlcv_reads <= 4, (
+        f"{counting.ohlcv_reads} stock_ohlcv reads for {len(appearances)} appearances of 3 symbols")
+
+
+def test_phase_b_in_memory_returns_equal_the_per_row_lookups():
+    """The stored values must equal what the per-row helpers (the pre-2026-11-17 path) give."""
+    conn = make_db()
+    appearances = _seed_phase_b_fixture(conn)
+    wrapped = CastStrippingConn(conn)
+    phase_b_fill_returns(wrapped)
+    checked_non_null = 0
+    for sym, appeared in appearances:
+        entry = get_price_on_or_after(wrapped, sym, appeared)
+        want = [sp.compute_return(entry, get_trading_days_after(wrapped, sym, appeared, n)[0])
+                for n in (5, 10, 20, 60, 120)]
+        n_entry = get_price_on_or_after(wrapped, sp.NIFTY_SYMBOL, appeared)
+        n_exit, _ = get_trading_days_after(wrapped, sp.NIFTY_SYMBOL, appeared, 20)
+        want.append(sp.compute_return(n_entry, n_exit))
+        if entry is None:
+            want = [None] * 6   # a row with no entry bar is left untouched
+        got = conn.execute(
+            "SELECT return_5d, return_10d, return_20d, return_60d, return_120d, nifty_ret_20d "
+            "FROM screener_appearances WHERE symbol = ? AND appeared_date = ?", (sym, appeared)).fetchone()
+        assert [got[i] for i in range(6)] == want, (sym, appeared)
+        checked_non_null += sum(v is not None for v in want)
+    assert checked_non_null > 40, "fixture produced too few real returns to prove anything"

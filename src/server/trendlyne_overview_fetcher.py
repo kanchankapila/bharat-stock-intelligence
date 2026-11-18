@@ -45,7 +45,8 @@ import requests
 import tl_fetch
 
 from db_compat import connect
-from fetch_utils import filter_numeric_tlids, TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget
+from fetch_utils import (filter_numeric_tlids, TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget,
+                         VendorBlockLatch)
 from as_of import logical_write_floor
 import sys
 
@@ -216,10 +217,15 @@ def _ddl_column_exists(cur, ddl: str) -> bool:
 
 # â”€â”€ Fetch helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+VENDOR_BLOCK = VendorBlockLatch("TLOverview")
+
+
 def _fetch(url: str, session: requests.Session) -> dict | None:
+    if VENDOR_BLOCK.tripped():
+        return None
     try:
         r = session.get(url, params={"format": "json"}, timeout=15)
-        if r.status_code != 200:
+        if VENDOR_BLOCK.refused(r.status_code) or r.status_code != 200:
             return None
         data = r.json()
         body = data.get("body") if isinstance(data, dict) else None
@@ -777,6 +783,8 @@ def main() -> None:
         return symbol, tlid, profile
 
     for batch_start in range(0, len(stocks), BATCH_SIZE):
+        if VENDOR_BLOCK.tripped():
+            break
         batch = stocks[batch_start:batch_start + BATCH_SIZE]
         with ThreadPoolExecutor(max_workers=len(batch)) as pool:
             futures = [pool.submit(_fetch_one, item) for item in batch]

@@ -2673,3 +2673,14 @@ val_AUC 0.5017 (chance, as expected). Two promotion gates rejected again (`cs_ra
 2026-09-04 — see the current file, they cleared to 39 dates). No BiLSTM had trained since
 2026-08-25 due to a scheduler defect (`dl-retrain-weekly`'s Saturday run left `active` in BullMQ
 with no surviving worker after a pm2 restart); re-run 2026-08-30 as a make-up.
+
+### Cost-map participation for zero turnover (2026-11-17, AF-20261117-09) — no output change today
+
+`unified_ranker._compute_cost_map` and `scoring_engine._compute_cost_map` priced a stock whose
+20-day average turnover was 0 at participation 0.01 (the most liquid case); both now call
+`indian_market_costs.participation_from_adt`, which returns the 0.25 cap for zero/missing
+turnover. Census against live production before landing: in the latest ranker batch 0 of 2,380
+symbols have no bar with volume > 0 in the window, so `est_cost_bps`, the cost-vs-edge zeroing and
+every classification are unchanged today; the change only stops a future untraded name from
+being costed as the cheapest trade. The no-`technical_signals`-row path (AF-20261013-04) keeps
+its documented neutral 1% assumption. No factor/weight is touched, so no factor_backtest replay.

@@ -62,5 +62,8 @@ This file used to hold every class (~127 KB) and loaded on the first `.py`/`.ts`
 | Deadline charged during the consumer's work, read as a slow source; a step-function count mistaken for a rate (2026-11-02) | `bugs-jobs-runtime.md` |
 | Memory-guard stop blamed on the interrupted test: VM file cache, scheduled host jobs, one-time library cost (2026-11-02) | `bugs-testing-env.md` |
 | Test failures persisted into production logs; primary-source errors emitted before fallback verdict (2026-10-21) | `bugs-testing-env.md` / `bugs-monitoring.md` |
+| A price-derived factor table re-creating its own errors after a cleanup; judging prices by our own factor table; a review label with a tolerance hiding a real row (2026-11-15) | `bugs-data-layer.md` |
+| Another project killing Python by image name; a step that completes then dies in native teardown (2026-11-15) | `bugs-testing-env.md` |
+| A vendor refusal stopped in one fetcher and not its siblings; a rotation slot longer than its cron; non-OK HTTP read as no data (2026-11-17) | `bugs-jobs-runtime.md` |
 
 When you add a class, put it in the area file whose `paths:` cover the code it bites, and add its row here.

@@ -472,6 +472,22 @@ CREATE TABLE IF NOT EXISTS "early_hours_predictions" (
 );
 CREATE INDEX idx_ehp_date ON public.early_hours_predictions USING btree (date DESC);
 
+-- ── earnings_calendar_snapshots ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "earnings_calendar_snapshots" (
+  "snapshot_date" DATE NOT NULL,
+  "provider_symbol" TEXT NOT NULL,
+  "result_date" DATE NOT NULL,
+  "symbol" TEXT,
+  "exchange" TEXT,
+  "eps_estimated" DOUBLE PRECISION,
+  "revenue_estimated" DOUBLE PRECISION,
+  "is_announced" INTEGER,
+  "source" TEXT NOT NULL DEFAULT 'investsights_fmp'::text,
+  "known_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("snapshot_date", "provider_symbol", "result_date")
+);
+CREATE INDEX idx_ecs_symbol_result ON public.earnings_calendar_snapshots USING btree (symbol, result_date);
+
 -- ── earnings_preview_snapshots ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "earnings_preview_snapshots" (
   "as_of_date" DATE NOT NULL,
@@ -3091,7 +3107,8 @@ CREATE TABLE IF NOT EXISTS "recommendation_log" (
   "resolved_at" TIMESTAMPTZ,
   "horizon_days" BIGINT DEFAULT 15,
   "round_trip_cost_pct" DOUBLE PRECISION,
-  "cost_adjusted_target_1" DOUBLE PRECISION
+  "cost_adjusted_target_1" DOUBLE PRECISION,
+  "trailing_stop" DOUBLE PRECISION
 );
 CREATE UNIQUE INDEX idx_rec_log_uniq ON public.recommendation_log USING btree (symbol, signal_date, timeframe, source);
 CREATE INDEX idx_rec_outcome ON public.recommendation_log USING btree (outcome, signal_date DESC);

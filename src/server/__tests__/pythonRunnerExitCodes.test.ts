@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { describeExitCode, isHostTeardownExit, buildFailureReason } from '../pythonRunner';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { describeExitCode, isHostTeardownExit, buildFailureReason, completedBeforeExit, COMPLETION_SENTINEL } from '../pythonRunner';
 
 /**
  * AF-20260910-05. A Windows Update restart (2026-09-10 02:06 IST) killed the in-flight
@@ -72,6 +74,32 @@ describe('describeExitCode', () => {
   });
 });
 
+// AF-20261107-06: ml_ensemble.py trained, registered a model, scored and printed Done, then exited
+// 0xC0000409 at teardown, five times (2026-09-10, 09-11, 11-06 x2, 11-15), and each time the job read
+// as failed. A script opts in by printing the sentinel as its LAST line once all work is committed.
+describe('completedBeforeExit', () => {
+  const done = `[Ensemble] Done.\n${COMPLETION_SENTINEL}\n`;
+  it('is true only for an abnormal native exit whose output ends with the completion sentinel', () => {
+    expect(completedBeforeExit(3221226505, done)).toBe(true);
+    expect(completedBeforeExit(-1073741819, done)).toBe(true);                       // signed twin of 0xC0000005
+    expect(completedBeforeExit(3221226505, 'work\n')).toBe(false);                   // no sentinel: a real crash
+    expect(completedBeforeExit(3221226505, `${COMPLETION_SENTINEL}\nmore work\n`)).toBe(false);   // work after it
+    expect(completedBeforeExit(1, done)).toBe(false);                                // an ordinary failure stays one
+    expect(completedBeforeExit(0, done)).toBe(false);
+    expect(completedBeforeExit(null, done)).toBe(false);
+    expect(completedBeforeExit(3221226505, undefined)).toBe(false);
+  });
+  it('ml_ensemble.py prints exactly the sentinel the runner looks for, as the last thing after run() returns', () => {
+    const src = readFileSync(join(__dirname, '..', 'ml_ensemble.py'), 'utf8');
+    const tail = src.slice(src.lastIndexOf('run(do_train=do_train'));
+    expect(tail).toContain(`print("${COMPLETION_SENTINEL}", flush=True)`);
+  });
+  it('is named at the head of the failure message so the log says what happened', () => {
+    expect(buildFailureReason({ code: 3221226505, stdout: done })).toMatch(/^COMPLETED BEFORE EXIT/);
+    expect(buildFailureReason({ code: 3221226505, stdout: 'work' })).not.toMatch(/COMPLETED BEFORE EXIT/);
+  });
+});
+
 describe('buildFailureReason', () => {
   /**
    * AF-20260911-14. ml-ensemble-train was recorded 'failed' on 2026-09-10 and 2026-09-11 with
@@ -109,6 +137,23 @@ describe('buildFailureReason', () => {
 
   it('still falls back to the bare sentence when both streams are empty', () => {
     expect(buildFailureReason({ code: 1 })).toBe('Command failed with exit code 1');
+  });
+
+  // 2026-11-15: exit-policy-train, ml-ensemble-train and strategy-optimizer all failed with a bare
+  // "Command failed with exit code 1" or a stdout tail. Another project's `taskkill /f /im python.exe`
+  // had killed every python.exe (the pm2 Python services restarted 3 s later). A process that exits
+  // non-zero WITHOUT its peak-memory report never reached its atexit hooks, so it was terminated.
+  it('names an outside kill when a ceilinged run exits with an ordinary code and no peak report', () => {
+    const r = buildFailureReason({ code: 1, stdout: '[Optimizer] Baseline', memLimitMb: 20480 });
+    expect(r).toMatch(/^KILLED FROM OUTSIDE/);
+    expect(r).toContain('stdout: [Optimizer] Baseline');
+    expect(buildFailureReason({ code: 1, memLimitMb: 20480 })).toMatch(/^KILLED FROM OUTSIDE/);
+  });
+
+  it('does not claim an outside kill for a deliberate exit, a run without a ceiling, or a native crash', () => {
+    expect(buildFailureReason({ code: 1, stdout: 'guard', peakMemMb: 900, memLimitMb: 20480 })).toBe('stdout: guard');
+    expect(buildFailureReason({ code: 1, stdout: 'guard' })).toBe('stdout: guard');
+    expect(buildFailureReason({ code: 3221225477, memLimitMb: 20480 })).not.toMatch(/KILLED FROM OUTSIDE/);
   });
 
   it('keeps the memory-ceiling diagnosis ahead of the stream tails', () => {

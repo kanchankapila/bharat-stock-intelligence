@@ -44,7 +44,7 @@ from requests.adapters import HTTPAdapter
 
 from db_compat import connect
 from as_of import logical_write_floor
-from fetch_utils import TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget
+from fetch_utils import TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget, VendorBlockLatch
 import sys
 
 BASE_URL = "https://trendlyne.com/mapp/v1/stock/chart-data/{tlid}/{param}/"
@@ -186,11 +186,16 @@ def _ddl_column_exists(cur, ddl: str) -> bool:
 
 # â”€â”€ Fetch helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+VENDOR_BLOCK = VendorBlockLatch("TLFund")
+
+
 def _fetch(tlid: str, param: str, session: requests.Session) -> dict | None:
+    if VENDOR_BLOCK.tripped():
+        return None
     url = BASE_URL.format(tlid=tlid, param=param)
     try:
         r = session.get(url, params={"format": "json"}, timeout=15)
-        if r.status_code != 200:
+        if VENDOR_BLOCK.refused(r.status_code) or r.status_code != 200:
             return None
         data = r.json()
         if data.get("head", {}).get("status") != "0":
@@ -514,6 +519,8 @@ def main() -> None:
     done = 0
 
     for batch_start in range(0, len(stocks), BATCH_SIZE):
+        if VENDOR_BLOCK.tripped():
+            break
         batch = stocks[batch_start:batch_start + BATCH_SIZE]
         with ThreadPoolExecutor(max_workers=len(batch)) as pool:
             futures = [pool.submit(_process_one, symbol, tlid, today, session) for symbol, tlid in batch]

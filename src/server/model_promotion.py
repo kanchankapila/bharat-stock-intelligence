@@ -13,9 +13,9 @@ Two call shapes exist across the seven sites, and BOTH are preserved here exactl
 than merged into one "safer-looking" behavior, because the two sites that already do a
 NaN/None check (movement_predictor.py, breakout_classifier.py) treat "no baseline yet" and
 "invalid candidate metric" as different states on purpose (a NaN held-out AUC must never
-auto-promote just because there happens to be no prior baseline to fail against), while the
-other five sites' existing behavior does NOT special-case a NaN candidate -- changing that
-would be a functional change, not a refactor, so it is deliberately not applied everywhere.
+auto-promote just because there happens to be no prior baseline to fail against). The other
+five sites did not special-case a NaN candidate until 2026-11-17 (AF-20261029-94); the shared
+helper now refuses a missing or non-finite candidate for all of them.
 """
 import datetime
 import math
@@ -32,12 +32,18 @@ def clears_promotion_bar(candidate_metric: Optional[float], baseline_metric: Opt
     `baseline_metric` must already be resolved to plain None for "no baseline" -- callers
     whose baseline is a dict/row object (e.g. `baseline.get("test_auc")`) resolve that
     themselves before calling, so this function stays agnostic to each site's storage shape.
-    Does NOT special-case a NaN candidate_metric -- matches every one of these five sites'
-    existing behavior (a NaN candidate compared against a real baseline naturally evaluates
-    to False via Python's NaN-comparison semantics; a NaN candidate with no baseline yet
-    naturally promotes, same as before this was extracted).
+    A candidate whose metric is missing or non-finite never clears the bar, baseline or not
+    (AF-20261029-94): until 2026-11-17 a NaN candidate with no baseline promoted, and +inf
+    beat any baseline.
     """
+    if not metric_is_usable(candidate_metric):
+        return False
     return baseline_metric is None or candidate_metric >= baseline_metric + margin
+
+
+def metric_is_usable(metric: Optional[float]) -> bool:
+    """True when a metric was actually computed: not None, NaN or infinite."""
+    return metric is not None and math.isfinite(metric)
 
 
 def decide_promotion_with_nan_guard(candidate_metric: Optional[float],

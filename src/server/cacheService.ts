@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { REDIS_BASE } from './redisConfig';
+import { redisReconnectDelay } from './redisRetry';
 
 // ─── Redis client (optional — gracefully falls back to in-process Map) ─────────
 
@@ -18,12 +19,7 @@ function createRedisClient(): Redis | null {
     enableOfflineQueue: false,
     autoResubscribe: true,
     maxRetriesPerRequest: 0,
-    // Reconnect with backoff: 200ms → 1s → 5s, give up after 10 attempts.
-    // This handles transient Docker networking blips without permanently losing Redis.
-    retryStrategy: (times) => {
-      if (times > 10) return null;
-      return Math.min(times * 200, 5000) + Math.floor(Math.random() * 100);
-    },
+    retryStrategy: redisReconnectDelay,
   });
 
   client.on('connect', () => {

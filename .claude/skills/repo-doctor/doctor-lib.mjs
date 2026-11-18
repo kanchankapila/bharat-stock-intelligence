@@ -176,3 +176,21 @@ export function appLogFilesForScan(now, logDir, exists) {
   }
   return files;
 }
+
+// AF-20260910-27: a server restart tears down its own sockets and children, and the log lines that
+// leaves (ECONNRESET, HOST/OS TERMINATION) were re-triaged by hand after every restart. They are
+// benign only when the process demonstrably came back: a boot marker within `beforeMs` after the
+// line (or `afterMs` before it, for resets logged while starting). The same text with no boot
+// nearby stays unclassified, so a real network fault still surfaces.
+export const RESTART_TEARDOWN_RE = /read ECONNRESET|HOST\/OS TERMINATION/;
+export const BOOT_MARKER = 'Server running on http';
+
+export function logLineTimeMs(timestamp) {
+  const ms = Date.parse(String(timestamp ?? '').replace(' ', 'T'));
+  return Number.isFinite(ms) ? ms : null;
+}
+
+export function isRestartTeardown(message, tsMs, bootTimesMs, { beforeMs = 10 * 60_000, afterMs = 2 * 60_000 } = {}) {
+  if (tsMs === null || !RESTART_TEARDOWN_RE.test(String(message))) return false;
+  return bootTimesMs.some(b => tsMs >= b - beforeMs && tsMs <= b + afterMs);
+}

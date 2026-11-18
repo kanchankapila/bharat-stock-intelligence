@@ -42,6 +42,31 @@ class _WafBlocked:
 
 WAF_BLOCKED = _WafBlocked()
 
+# A bare 403/405/429 from Trendlyne is the same refusal the WAF header announces (measured
+# 2026-11-13..16: plain 403s with no x-amzn-waf-action for three days). Asking again spends the
+# shared allowance on answers that will not change, and keeps the block warm.
+VENDOR_BLOCK_STATUSES = frozenset({403, 405, 429})
+
+
+class VendorBlockLatch:
+    """Tripped by the first refused response in a run; every later fetch then skips its request."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.status: int | None = None
+
+    def tripped(self) -> bool:
+        return self.status is not None
+
+    def refused(self, status_code) -> bool:
+        if status_code not in VENDOR_BLOCK_STATUSES:
+            return False
+        if self.status is None:
+            self.status = status_code
+            print(f"[{self.name}] vendor block (HTTP {status_code}): no further requests this "
+                  f"run; the next run resumes from the DB", file=sys.stderr)
+        return True
+
 
 def _is_waf_challenge(exc: Exception) -> bool:
     """True if `exc` is an HTTPError whose response carries AWS WAF's own

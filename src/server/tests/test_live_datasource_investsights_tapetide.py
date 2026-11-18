@@ -19,7 +19,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 from pg_test_support import pg_memory_conn  # noqa: E402
 
 from endpoint_registry import CURATED_EXTRA_ENDPOINTS, render_endpoint_url
-from extra_endpoints_fetcher import fetch_url, save_response, ensure_schema
+from extra_endpoints_fetcher import fetch_url, save_response, save_tapetide_page, ensure_schema
+from sveltekit_data import TAPETIDE_PAGE_URL, TAPETIDE_SECTIONS, decode_data_json, tapetide_payloads
 import extra_features_parser as efp
 from live_datasource_helpers import assert_non_empty_response, assert_numeric_and_finite
 
@@ -71,6 +72,16 @@ class TestInvestSightsTapetideLiveDataSource:
         assert url, f"{name}: could not render a URL for RELIANCE"
         data = fetch_url(url)
         assert_non_empty_response(data, name)
+        if name in TAPETIDE_SECTIONS:
+            # AF-20261107-09: Tapetide is one stock page split into three stored payloads, so go
+            # through the fetcher's own save function and read the stored row back.
+            assert name in save_tapetide_page(self.cur, self.stock["symbol"], data)
+            self.con.commit()
+            row = self.cur.execute(
+                "SELECT response_json FROM extra_endpoint_responses WHERE symbol = ? AND endpoint_name = ?",
+                (self.stock["symbol"], name)).fetchone()
+            assert row and row[0], f"{name}: nothing stored"
+            return row[0]
         save_response(self.cur, self.stock["symbol"], name, data)
         self.con.commit()
         return data
@@ -94,6 +105,20 @@ class TestInvestSightsTapetideLiveDataSource:
         feat = efp.extract_features(self.stock["symbol"], [("tapetide_score", data)])
         assert_numeric_and_finite(feat["ext_tt_score"], "ext_tt_score")
         assert 0 <= feat["ext_tt_score"] <= 100
+        # the page states the score's own as-of date; it is what tells a stale cached score apart
+        assert parsed["meta"].get("score_date"), "score payload lost its as-of date"
+
+    def test_tapetide_page_url_forms(self):
+        """Both usable URL forms return the same stock data; the page-skipped form is unusable."""
+        sym = self.stock["symbol"]
+        base = TAPETIDE_PAGE_URL.format(symbol=sym)
+        plain = tapetide_payloads(decode_data_json(fetch_url(base)), sym)
+        page_only = tapetide_payloads(decode_data_json(fetch_url(base + "?x-sveltekit-invalidated=01")), sym)
+        assert plain == page_only, "layout-skipped form must carry the same stock sections"
+        # invalidated=10 asks for the layout only: a small shell with no stock, which must be rejected
+        shell = decode_data_json(fetch_url(base + "?x-sveltekit-invalidated=10"))
+        with pytest.raises(ValueError):
+            tapetide_payloads(shell, sym)
 
     # ── Unparsed (archived raw) endpoints ──
 

@@ -3,6 +3,8 @@ import fs from 'fs';
 import {
   classifyLatestDq,
   isKnownTransientFailure,
+  isRestartTeardown,
+  logLineTimeMs,
   latestExpectedNseDailyRun,
   latestExpectedNseIntradaySlot,
   latestNseSessionDate,
@@ -152,5 +154,32 @@ describe('repo-doctor log files to scan', () => {
   it('returns nothing when no log exists, so the caller can refuse to report a PASS', async () => {
     const { appLogFilesForScan } = await import('./doctor-lib.mjs');
     expect(appLogFilesForScan(atIst('2026-11-07T00:43:00'), 'logs', () => false)).toEqual([]);
+  });
+});
+
+describe('restart teardown classification (AF-20260910-27)', () => {
+  const boot = logLineTimeMs('2026-11-16 08:23:41');
+  const at = (t) => logLineTimeMs(t);
+
+  it('reads the app log timestamp format', () => {
+    expect(boot).not.toBeNull();
+    expect(logLineTimeMs(undefined)).toBeNull();
+  });
+
+  it('treats a connection reset shortly before a server boot as restart teardown', () => {
+    expect(isRestartTeardown('Error: read ECONNRESET', at('2026-11-16 08:20:02'), [boot])).toBe(true);
+    expect(isRestartTeardown('[PY] x.py HOST/OS TERMINATION: DBG_TERMINATE_PROCESS', at('2026-11-16 08:14:00'), [boot])).toBe(true);
+    expect(isRestartTeardown('Error: read ECONNRESET', at('2026-11-16 08:24:30'), [boot])).toBe(true);
+  });
+
+  it('still surfaces the same error when no boot is near it', () => {
+    expect(isRestartTeardown('Error: read ECONNRESET', at('2026-11-16 13:05:00'), [boot])).toBe(false);
+    expect(isRestartTeardown('Error: read ECONNRESET', at('2026-11-16 08:27:00'), [boot])).toBe(false);
+    expect(isRestartTeardown('Error: read ECONNRESET', at('2026-11-16 08:20:02'), [])).toBe(false);
+    expect(isRestartTeardown('Error: read ECONNRESET', null, [boot])).toBe(false);
+  });
+
+  it('never excuses an unrelated error because a restart happened', () => {
+    expect(isRestartTeardown('[QUEUE] unified-ranker failed: relation does not exist', at('2026-11-16 08:20:02'), [boot])).toBe(false);
   });
 });

@@ -177,7 +177,9 @@ def test_fetchable_registry_keeps_current_parser_ready_pipeline(tmp_path):
     assert "sid=456" in rendered["trading80_header_info"]
     assert "sid=456" in rendered["marketsmojo_header_info"]
     assert rendered["investsights_score"] == "https://investsights.in/api/v2/stocks/BEL/score?"
-    assert rendered["tapetide_score"] == "https://api.tapetide.com/api/v1/companies/BEL/score"
+    # api.tapetide.com/api/v1/companies/* now 404/401; the stock page data answers anonymously (AF-20261107-09)
+    assert rendered["tapetide_score"] == "https://tapetide.com/stocks/BEL/__data.json"
+    assert rendered["tapetide_analyst_ratings"] == rendered["tapetide_score"] == rendered["tapetide_forecasts"]
     assert rendered["tickertape_financials_income"] == (
         "https://api.tickertape.in/stocks/financials/income/BAJE/annual/normal"
     )

@@ -15,7 +15,7 @@ def _bt() -> Backtester:
     return Backtester.__new__(Backtester)
 
 
-def _make_signals(symbol='AAPL', signal_date='2024-01-01', stop_loss=90.0, target_price=None):
+def _make_signals(symbol='AAPL', signal_date='2024-01-01', stop_loss=90.0, target_price=None, horizon_days=15):
     return pd.DataFrame([{
         'symbol': symbol,
         'signal_date': pd.Timestamp(signal_date),
@@ -26,7 +26,7 @@ def _make_signals(symbol='AAPL', signal_date='2024-01-01', stop_loss=90.0, targe
         'signals_json': '[]',
         'nifty_regime': 'BULL',
         'adx': 25.0,
-        'horizon_days': 15,
+        'horizon_days': horizon_days,
     }])
 
 
@@ -53,7 +53,7 @@ class TestPositionSizing:
 
     def test_fixed_fraction_of_initial_capital(self):
         bt = _bt()
-        signals = _make_signals()
+        signals = _make_signals(horizon_days=2)  # 3rd bar = 2nd session after the signal; horizons count sessions (AF-20261117)
         ohlcv = _make_ohlcv()
         max_pos = 10
         capital = 1_000_000.0
@@ -88,7 +88,7 @@ class TestPositionSizing:
                 'signals_json': '[]',
                 'nifty_regime': 'BULL',
                 'adx': 25.0,
-                'horizon_days': 30,
+                'horizon_days': 2,  # 3rd bar = 2nd session after the signal; horizons count sessions (AF-20261117)
             })
             ohlcv_dict[sym] = pd.DataFrame({
                 'symbol': sym,
@@ -160,7 +160,7 @@ class TestCommission:
     def test_commission_reduces_net_pnl(self):
         bt_no_comm  = _bt()
         bt_with_comm = _bt()
-        signals  = _make_signals()
+        signals  = _make_signals(horizon_days=2)  # 3rd bar = 2nd session after the signal; horizons count sessions (AF-20261117)
         ohlcv    = _make_ohlcv()
 
         log_no_comm, _  = bt_no_comm.simulate_trades(
@@ -175,3 +175,67 @@ class TestCommission:
         assert log_with_comm, "Expected at least one trade"
         # Net PnL with commission must be strictly less than without
         assert log_with_comm[0]['pnl'] < log_no_comm[0]['pnl']
+
+
+def _run(bt, signals, ohlcv):
+    return bt.simulate_trades(signals, ohlcv, max_positions=10, initial_capital=1_000_000,
+                              slippage_bps=0, stop_loss_pct=7.0, commission_bps=0)[0]
+
+
+class TestCircuitLocks:
+    """AF-20261117: a lock was detected only when O=H=L AND volume == 0, but a locked NSE stock
+    still trades volume at the limit, so the check almost never fired and the backtest filled
+    buys at limit-up opens and exited stops through limit-down bars."""
+
+    def test_upper_lock_with_volume_blocks_entry(self):
+        ohlcv = _make_ohlcv(dates=['2024-01-01', '2024-01-02', '2024-01-03'],
+                            opens=[100.0, 105.0, 106.0], highs=[101.0, 105.0, 107.0],
+                            lows=[99.0, 105.0, 105.0], closes=[100.0, 105.0, 106.0])
+        signals = _make_signals(stop_loss=90.0)
+        signals['horizon_days'] = 1  # an entered trade closes inside the fixture
+        assert _run(_bt(), signals, ohlcv) == []
+
+    def test_lower_lock_with_volume_defers_the_stop(self):
+        ohlcv = _make_ohlcv(dates=['2024-01-01', '2024-01-02', '2024-01-03', '2024-01-04'],
+                            opens=[100.0, 100.0, 90.0, 88.0], highs=[101.0, 101.0, 90.0, 89.0],
+                            lows=[99.0, 99.0, 90.0, 86.0], closes=[100.0, 100.0, 90.0, 88.0])
+        stops = [t for t in _run(_bt(), _make_signals(stop_loss=95.0), ohlcv) if t['outcome'] == 'STOP_LOSS']
+        assert len(stops) == 1
+        assert stops[0]['exit_date'].startswith('2024-01-04')
+        assert stops[0]['exit_price'] == pytest.approx(88.0, abs=0.01)
+
+    def test_flat_bar_below_prior_close_still_fills_a_buy(self):
+        ohlcv = _make_ohlcv(dates=['2024-01-01', '2024-01-02', '2024-01-03'],
+                            opens=[100.0, 96.0, 97.0], highs=[101.0, 96.0, 98.0],
+                            lows=[99.0, 96.0, 96.0], closes=[100.0, 96.0, 97.0])
+        signals = _make_signals(stop_loss=90.0)
+        signals['horizon_days'] = 1
+        log = _run(_bt(), signals, ohlcv)
+        assert len(log) == 1 and log[0]['entry_price'] == pytest.approx(96.0, abs=0.1)
+
+
+def test_horizon_counts_trading_sessions_not_calendar_days():
+    """AF-20261117: the live resolver exits on the h-th session after the signal
+    (_nth_session_after); the backtester counted calendar days, so a 10-day hold ended on
+    the 8th session and backtest and live win rates were not comparable."""
+    dates = [d.strftime('%Y-%m-%d') for d in pd.bdate_range('2024-01-01', '2024-01-26')]
+    n = len(dates)
+    ohlcv = _make_ohlcv(dates=dates, opens=[100.0] * n, highs=[101.0] * n,
+                        lows=[99.0] * n, closes=[100.0] * n)
+    signals = _make_signals(stop_loss=90.0)
+    signals['horizon_days'] = 10
+    log = _run(_bt(), signals, ohlcv)
+    assert len(log) == 1
+    assert log[0]['exit_date'].startswith('2024-01-15')  # 10th session after 2024-01-01
+    assert log[0]['holding_days'] == 10
+
+
+@pytest.mark.parametrize('h', [5, 15, 30])
+def test_exit_pad_covers_a_session_horizon_opened_on_the_last_day(h):
+    """AF-20261117: horizons count sessions, so the history pad past a window must span h
+    sessions plus a holiday cluster; `h + 10` calendar days left 30-session holds unclosed."""
+    from src.server.backtester import _exit_pad_days
+    for start in pd.date_range('2024-01-01', '2024-12-31', freq='7D'):
+        holidays = 5  # e.g. a Diwali/Holi week inside the hold
+        last = pd.bdate_range(start, periods=h + holidays + 1)[-1]
+        assert (last - start).days <= _exit_pad_days(h)

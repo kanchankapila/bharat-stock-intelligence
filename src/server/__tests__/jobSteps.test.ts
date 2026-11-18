@@ -7,7 +7,7 @@ vi.mock('../monitoringService', () => ({
   }),
 }));
 
-import { StepTracker } from '../jobSteps';
+import { StepTracker, tolerateCompletedCrash } from '../jobSteps';
 import { updateMonitorState } from '../monitoringService';
 
 describe('StepTracker', () => {
@@ -132,5 +132,48 @@ describe('StepTracker', () => {
     T.finish();
     const jobCall = mocked.mock.calls.find(c => c[0] === 'job');
     expect(jobCall![3]).toBeGreaterThanOrEqual(50);
+  });
+
+  // AF-20261113-26: sync_tl_index_map's Trendlyne 403 marked ml-weekly-data DEGRADED while every
+  // other step worked and the stored id map stayed usable. A soft failure stays visible (log line,
+  // job heartbeat message, returned list) but does not change the verdict; a hard one still does.
+  it('soft() keeps the job green but names the soft-failed step', async () => {
+    const T = new StepTracker('job');
+    await T.run('ok-step', async () => 1);
+    T.soft('id-map', new Error('403 Forbidden'));
+    const v = T.finish();
+    expect(v.ok).toBe(true);
+    expect(v.failedSteps).toEqual([]);
+    expect(v.softFailedSteps).toEqual(['id-map']);
+    const job = calls.find(c => c.name === 'job')!;
+    expect(job.state).toBe('success');
+    expect(job.message).toContain('id-map');
+  });
+
+  it('a hard failure beside a soft one still degrades the job', async () => {
+    const T = new StepTracker('job');
+    T.soft('id-map', new Error('403'));
+    T.fail('real-step', new Error('boom'));
+    const v = T.finish();
+    expect(v.ok).toBe(false);
+    expect(v.failedSteps).toEqual(['real-step']);
+    expect(calls.find(c => c.name === 'job')!.state).toBe('failed');
+  });
+
+  // AF-20261107-06: a step whose script finished all its work and then crashed in native teardown is
+  // reported (soft) but must not degrade the job; any other failure still must.
+  it('tolerateCompletedCrash makes a completed-then-crashed step soft and rethrows every other error', async () => {
+    const T = new StepTracker('job');
+    const crash = Object.assign(new Error('COMPLETED BEFORE EXIT: 0xC0000409'), { completedBeforeExit: true });
+    expect(await T.run('s1', tolerateCompletedCrash(T, 's1', async () => { throw crash; }))).toBeUndefined();
+    const v = T.finish();
+    expect(v.ok).toBe(true);
+    expect(v.softFailedSteps).toEqual(['s1']);
+    const T2 = new StepTracker('job');
+    await T2.run('s2', tolerateCompletedCrash(T2, 's2', async () => { throw new Error('real failure'); }));
+    expect(T2.finish().failedSteps).toEqual(['s2']);
+    const T3 = new StepTracker('job');
+    expect(await T3.run('s3', tolerateCompletedCrash(T3, 's3', async () => 7))).toBe(7);
+    expect(T3.finish().softFailedSteps).toEqual([]);
   });
 });

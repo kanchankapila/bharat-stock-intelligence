@@ -64,6 +64,28 @@ def warn_on_signal_quality_discontinuity(signals: pd.DataFrame, threshold: float
     return msg
 
 
+def _exit_pad_days(horizon_sessions: int) -> int:
+    """Calendar days of price history to load past a window so an `horizon_sessions` hold opened on
+    its last day can still close: ~7/5 calendar days per session plus holiday headroom. The old
+    `horizon + 10` assumed calendar-day horizons (AF-20261117)."""
+    return int(math.ceil(horizon_sessions * 1.5)) + 10
+
+
+def _circuit_locked(o: float, h: float, l: float, prev_close: float | None) -> str | None:
+    """'upper' / 'lower' when the bar is a single price away from the prior close, else None.
+
+    A locked NSE stock still prints volume at the limit (only one side of the book trades), so
+    volume is not part of the test (AF-20261117). Direction comes from the prior close.
+    """
+    if not (abs(o - h) < 0.01 and abs(o - l) < 0.01) or not prev_close:
+        return None
+    if o > prev_close:
+        return 'upper'
+    if o < prev_close:
+        return 'lower'
+    return None
+
+
 def _kelly_fraction(win_prob: float | None, target: float | None, entry: float, stop: float | None) -> float | None:
     """Fractional Kelly size as fraction of capital. Returns None → fall back to equal-weight."""
     if win_prob is None or not (0.01 < win_prob < 0.99):
@@ -467,12 +489,14 @@ class Backtester:
             # ── check and update open positions day-by-day ──────────────
             for sym in list(open_positions.keys()):
                 pos = open_positions[sym]
-                days_held = (date - pos['entry_date']).days
                 if sym not in ohlcv_dict:
                     continue
                 day_ohlcv = ohlcv_dict[sym][ohlcv_dict[sym]['date'] == date]
                 if day_ohlcv.empty:
                     continue
+                # Sessions, not calendar days: matches outcome_resolver._nth_session_after.
+                pos['sessions_held'] += 1
+                days_held = pos['sessions_held']
 
                 open_price  = float(day_ohlcv['open'].iloc[0])
                 high_price  = float(day_ohlcv['high'].iloc[0])
@@ -487,14 +511,11 @@ class Backtester:
                 elif pos['atr'] and pos['atr'] > 0:
                     eff_stop = pos['highest_high'] - 3.0 * pos['atr']
 
-                # ── Circuit-lock check: on lower-circuit days the stock is
-                #    frozen (open=high=low=close) — cannot exit at SL price.
-                #    Defer the SL to the next liquid trading day.
-                is_lower_circuit = (
-                    abs(open_price - day_ohlcv['high'].iloc[0]) < 0.01
-                    and abs(open_price - low_price) < 0.01
-                    and float(day_ohlcv['volume'].iloc[0]) == 0
-                )
+                # ── Circuit-lock check: on a lower-circuit day there are no buyers, so the SL
+                #    cannot fill. Defer it to the next tradable session.
+                is_lower_circuit = _circuit_locked(open_price, high_price, low_price,
+                                                   pos['prev_close']) == 'lower'
+                pos['prev_close'] = close_price
 
                 # 1. Trailing Stop / Stop-Loss check (adverse move first)
                 if eff_stop is not None and low_price <= eff_stop and not is_lower_circuit:
@@ -591,14 +612,11 @@ class Backtester:
                 next_row = next_days.iloc[0]
                 raw_entry = float(next_row['open'])
 
-                # ── Upper-circuit detection: stock is locked limit-up
-                #    (open=high=low=close, or zero volume) — no sellers, skip entry.
-                is_upper_circuit = (
-                    abs(raw_entry - float(next_row['high'])) < 0.01
-                    and abs(raw_entry - float(next_row['low'])) < 0.01
-                    and float(next_row.get('volume', 1)) == 0
-                )
-                if is_upper_circuit:
+                # ── Upper-circuit lock on the entry session: no sellers, skip entry.
+                sig_bar = ohlcv_dict[sym][ohlcv_dict[sym]['date'] == date]
+                sig_close = float(sig_bar['close'].iloc[0]) if not sig_bar.empty else None
+                if _circuit_locked(raw_entry, float(next_row['high']), float(next_row['low']),
+                                   sig_close) == 'upper':
                     continue
 
                 if pd.isna(raw_entry) or raw_entry <= 0:
@@ -667,6 +685,8 @@ class Backtester:
                     'total_cost':   total_cost,
                     'atr':          atr,
                     'highest_high': entry_price,
+                    'sessions_held': 0,
+                    'prev_close': sig_close,
                     'partial_taken': False,
                     'partial_proceeds': 0.0,
                     'regime':       row.get('nifty_regime') if hasattr(row, 'get') else getattr(row, 'nifty_regime', None),
@@ -860,7 +880,7 @@ class Backtester:
                 continue
 
             oos_syms = oos_signals['symbol'].unique().tolist()
-            extended_oos_end = (pd.to_datetime(oos_end) + pd.Timedelta(days=best_horizon + 10)).strftime('%Y-%m-%d')
+            extended_oos_end = (pd.to_datetime(oos_end) + pd.Timedelta(days=_exit_pad_days(best_horizon))).strftime('%Y-%m-%d')
             oos_ohlcv = self.load_ohlcv(oos_syms, oos_start.isoformat(), extended_oos_end)
             oos_ohlcv_dict = {sym: g.reset_index(drop=True) for sym, g in oos_ohlcv.groupby('symbol')}
 
@@ -1153,7 +1173,7 @@ class Backtester:
             survivorship = {**survivorship, **pit_stats}
 
         # Extend end date for exit prices
-        extended_end = (pd.to_datetime(end) + pd.Timedelta(days=horizon_days + 10)).strftime('%Y-%m-%d')
+        extended_end = (pd.to_datetime(end) + pd.Timedelta(days=_exit_pad_days(horizon_days))).strftime('%Y-%m-%d')
         print("[Backtester] Loading OHLCV data...")
         ohlcv_all = self.load_ohlcv(symbols, start, extended_end)
 

@@ -109,6 +109,22 @@ let progress: TechnicalSignalsProgress = {
   lastError: null,
 };
 
+/** recommendation_log insert for a technical-scan BUY. The last parameter repeats the symbol: only an
+ *  ACTIVE equity in nse_stocks is logged, the same tradeable-universe rule as scoring_engine's
+ *  writer (AF-20261117-21: index symbols NIFTYIT/NIFTYPHARMA were logged as BUY). */
+export const REC_LOG_UPSERT_SQL = `
+      INSERT INTO recommendation_log
+        (symbol, rec_type, signal_date, generated_at, entry_price, stop_loss,
+         target_1, target_2, target_3, confidence_score, signal_score, signals_json,
+         nifty_regime, win_probability, quant_score, sentiment_score,
+         source, status, horizon_days)
+      SELECT ?, 'BUY', ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'technical_scan', 'ACTIVE', 5
+      WHERE EXISTS (SELECT 1 FROM nse_stocks
+                    WHERE symbol = ? AND status = 'ACTIVE'
+                      AND COALESCE(instrument_type, 'equity') = 'equity')
+      ON CONFLICT DO NOTHING
+    `;
+
 export function getTechnicalSignalsProgress(): TechnicalSignalsProgress {
   return { ...progress };
 }
@@ -1567,15 +1583,7 @@ export async function runTechnicalSignalScan(options: {
     // r.newsSentimentScore, already computed above for the technical_signals upsert;
     // quant_score comes from the new quantMap pre-fetch above (same pattern as pcrMap/
     // marketCapMap/sectorRows already established in this function).
-    const recLogUpsertSql = `
-      INSERT INTO recommendation_log
-        (symbol, rec_type, signal_date, generated_at, entry_price, stop_loss,
-         target_1, target_2, target_3, confidence_score, signal_score, signals_json,
-         nifty_regime, win_probability, quant_score, sentiment_score,
-         source, status, horizon_days)
-      VALUES (?, 'BUY', ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'technical_scan', 'ACTIVE', 5)
-      ON CONFLICT DO NOTHING
-    `;
+    const recLogUpsertSql = REC_LOG_UPSERT_SQL;
 
     // signal_source='technical' (2026-08): must match what outcome_resolver.py /
     // signalOutcomesService.ts later UPSERT with (ON CONFLICT symbol, signal_date,
@@ -1724,6 +1732,7 @@ export async function runTechnicalSignalScan(options: {
             r.signalScore, r.signalScore, JSON.stringify(r.signals),
             r.niftyRegime ?? null, (r as any).winProbability ?? null,
             quantMap.get(r.symbol) ?? null, r.newsSentimentScore ?? null,
+            r.symbol,
           ]);
           if (r.cmp) {
             await tx.run(seedOutcomeSql, [r.symbol, scanDate, 5,  r.cmp]);

@@ -134,7 +134,7 @@ describe('checkAndAlertStaleScripts', () => {
     expect(mockSend.mock.calls[0][0]).toContain('FII/DII Fetcher');
   });
 
-  // 2026-11-13 (AF-20261113-03): at 23:56 IST on 11-12 the freshness probe for Feature Engineering
+  // 2026-11-13 (AF-20261113-22): at 23:56 IST on 11-12 the freshness probe for Feature Engineering
   // failed under database starvation (nightly backup plus test traffic), fell back to the stored
   // 2026-07-05 manual-trigger stamp, and paged "Critical engine stale" for a table that was fresh.
   // The AF-20260929-02 retry only covers about 10 s of starvation.
@@ -317,7 +317,7 @@ describe('buildDailyDigest', () => {
     expect(digest).toContain('2026-07-02 IST');
   });
 
-  // 2026-11-13 (AF-20261113-04): the 08:15 digest listed 57 of 64 jobs as "pending (scheduled later
+  // 2026-11-13 (AF-20261113-23): the 08:15 digest listed 57 of 64 jobs as "pending (scheduled later
   // today)", burying the 3 lines that mattered. Many pending lines collapse to one count.
   it('collapses a long run of not-yet-due jobs into one line and leaves real statuses alone', () => {
     const pending = (n: number) => `🕒 Job ${n} — pending (scheduled later today)`;
@@ -432,7 +432,7 @@ describe('buildDailyDigest', () => {
     expect(digest).not.toContain('morning-brief` failing');
   });
 
-  // 2026-11-13 (AF-20261113-02): screener-performance runs once per weekday, so it reaches the
+  // 2026-11-13 (AF-20261113-21): screener-performance runs once per weekday, so it reaches the
   // 5-run floor only if no weekday is missed; it failed on 11-11 and 11-12 (4 runs in 7 days) and
   // no digest said so.
   it('flags a low-frequency job whose last two runs both failed, even below the run floor', async () => {

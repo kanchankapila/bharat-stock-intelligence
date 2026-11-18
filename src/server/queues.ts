@@ -13,6 +13,7 @@ import { Queue, Worker, QueueEvents, Job, ConnectionOptions } from 'bullmq';
 import { fetchAllLiveStocks } from './liveStockData';
 import { cacheDelPrefix } from './cacheService';
 import { FILED_CORP_ACTIONS_CACHE_PREFIX } from './cacheKeys';
+import { redisReconnectDelay } from './redisRetry';
 import { generateStockAnalysis } from '../services/aiService';
 import { dbGet, dbAll, dbRun } from './dbAsync';
 import Redis from 'ioredis';
@@ -34,7 +35,7 @@ import { syncNiftyTraderScores, syncTrendlyneScores } from './syncProprietarySco
 import { syncTrendlyneTechnicals } from './technicalIntelligenceService';
 import { fetchDeliveryMap } from './deliveryFetcher';
 import { updateMonitorState } from './monitoringService';
-import { StepTracker } from './jobSteps';
+import { StepTracker, tolerateCompletedCrash } from './jobSteps';
 import { updateTrailingStops } from './trailingStopUpdater';
 import { getTrendlyneMetricSymbols, enqueueTrendlyneMetricsFetchJobs, runTrendlyneMetricsFetch } from './trendlyneDailyFetchService';
 import { initialiseTrendlyneBatch, requireSuccessfulTrendlyneFetch, settleTrendlyneBatch, trendlyneBatchId } from './trendlyneDailyBatch';
@@ -86,11 +87,7 @@ export function makeConnection(isProbe = false): any {
     maxRetriesPerRequest: null,
     enableOfflineQueue: true,
     autoResubscribe: true,
-    // Stagger reconnect attempts so all 88 connections don't pile on Redis at once
-    retryStrategy: (times) => {
-      if (times > 20) return null;
-      return Math.min(times * 200, 5000) + Math.floor(Math.random() * 200);
-    },
+    retryStrategy: redisReconnectDelay,
   };
 }
 
@@ -995,6 +992,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
         }
       })
       .catch(e => T.fail('investsights_corporate_actions_fetcher', e)),
+    // Append-only daily view of the forward earnings calendar (AF-20261115-01); one call, ~4 s.
+    runPython('investsights_earnings_calendar_fetcher.py', [], 2 * 60_000)
+      .catch(e => T.fail('investsights_earnings_calendar_fetcher', e)),
     // NDTV Profit futures basis/roll-spread/PCR, independent cross-check for fno_rollover_fetcher.py
     // (2026-08-07 urls.txt follow-up) → ndtv_fno_basis. F&O-eligible universe only (209 symbols) --
     // futures don't exist for the rest of nse_stocks. Live-measured ~7s for the full universe.
@@ -1059,7 +1059,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // MAX_PAGES=15, so a throttled night is legitimately several minutes longer than an
   // off-peak one. 900s = ~3.9x the slower standalone measurement and ~9 throttled pages of
   // room, the same "size at ~2x measured, then leave headroom" rule as mf_sector_allocation
-  // below; still a rounding error inside this job's 3.5h withJobTimeout.
+  // below; still a rounding error inside this job's 3.9h withJobTimeout.
   await runPython('mc_broker_reco_fetcher.py', ['--days', '7'], 15 * 60_000)
     .catch(e => T.fail('mc_broker_reco_fetcher', e));
 
@@ -1134,7 +1134,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // step could never once have completed inside its old budget, and it was one of the three
   // ml-daily-ops steps reporting failed every night. Sized at ~2x measured rather than just
   // over it: recurring-bugs.md's repeated defect here is picking a budget with no headroom and
-  // never revisiting it as the work grows. Fits inside the job's own 3.5h withJobTimeout.
+  // never revisiting it as the work grows. Fits inside the job's own 3.9h withJobTimeout.
   await runPython('mf_sector_allocation_fetcher.py', [], 45 * 60_000)
     .catch(e => T.fail('mf_sector_allocation_fetcher', e));
 
@@ -1331,7 +1331,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   await runPython('intraday_strategy_learner.py', [], 120_000)
     .catch(e => T.fail('intraday_strategy_learner', e));
 
-  await T.run('reward-engine', () => runPython('reward_engine.py'));
+  // Explicit budget (AF-20260927-12): 5 min is what the omitted argument used to mean. Measured 16-62 s
+  // over 30 days (62 s on the 11-12 contended night), so 5 min is ~5x headroom, now stated, not implied.
+  await T.run('reward-engine', () => runPython('reward_engine.py', [], 5 * 60_000));
   // rl_agent (Q-learning over signal episodes) REMOVED 2026-08-31: zero demonstrated edge
   // anywhere in the platform's measurement history (docs/measurement-history.md), and its
   // --update path only recomputed Q-values for rows nothing else creates. rl_q_table /
@@ -1493,8 +1495,16 @@ async function processMlWeeklyData(_job: Job): Promise<{ success: boolean; skipp
   // Keep index_provider_map in sync with live provider index lists.
   await runPython('sync_mc_index_map.py', [], 60_000)
     .catch(e => T.fail('sync_mc_index_map', e));
+  // The Trendlyne index id map changes rarely, so a failed refresh (a 403, AF-20261113-26) keeps
+  // the stored ids usable and must not mark the whole job DEGRADED; with no stored ids it is a
+  // real failure. ponytail: the map has no synced-at stamp, so ids Trendlyne renumbers go
+  // unnoticed until a refresh succeeds; add a stamp + age check if that starts to matter.
   await runPython('sync_tl_index_map.py', [], 60_000)
-    .catch(e => T.fail('sync_tl_index_map', e));
+    .catch(async e => {
+      const stored = await dbGet<{ n: number }>(
+        "SELECT count(*)::int AS n FROM index_provider_map WHERE provider = 'trendlyne'").catch(() => undefined);
+      return (stored?.n ?? 0) > 0 ? T.soft('sync_tl_index_map', e) : T.fail('sync_tl_index_map', e);
+    });
   await runPython('sync_nt_fno_symbols.py', [], 60_000)
     .catch(e => T.fail('sync_nt_fno_symbols', e));
   // Refresh earnings beat/miss history (quarterly data, no need to run daily).
@@ -1673,7 +1683,8 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; sk
   // Soft failure: if ml-ensemble-train crashes (e.g. ValueError in score_pending), log the
   // warning but let the weekly job continue to breakout_classifier, strategy-optimizer, etc.
   // and always reach T.finish() so the heartbeat is written.
-  await T.run('ml-ensemble-train', () => runPython('ml_ensemble.py', ['--train', '--tune', '--score', '--label', 'triple_barrier'], 90 * 60_000))
+  await T.run('ml-ensemble-train', tolerateCompletedCrash(T, 'ml-ensemble-train',
+    () => runPython('ml_ensemble.py', ['--train', '--tune', '--score', '--label', 'triple_barrier'], 90 * 60_000)))
     .catch(e => T.fail('ml-ensemble-train', e));
   // cs-ranker-train REMOVED 2026-08-31 alongside the daily score and the blend weight:
   // training a model whose live CV AUC (0.176) is worse than a coin flip only spends
@@ -2525,7 +2536,7 @@ export async function initQueues(): Promise<boolean> {
     // -- ML weekly DATA prep: fetch + labelling, FRIDAY 23:30 IST (18:00 UTC) --
     // Deliberately a WEEKDAY slot, and deliberately not adjacent to the Saturday training
     // window (AF-20260912-13). 18:00 UTC clears ml-daily-ops' worst case: that job is
-    // '20 13 * * 1-5' with a 3.5h withJobTimeout, so it cannot run past 16:50 UTC.
+    // '20 13 * * 1-5' with a 3.9h withJobTimeout, so it cannot run past 17:14 UTC.
     // Everything this job fetches is quarterly/monthly disclosure data or a symbol master;
     // none of it can change between Friday night and Saturday morning, which is precisely
     // why it no longer belongs in the Saturday chain.
@@ -3121,7 +3132,7 @@ export async function initQueues(): Promise<boolean> {
     // that Friday's ohlcv-gap-fill-daily had not already seen. The only thing this 30-day
     // full-universe sweep can legitimately catch is a vendor RESTATING an older bar, which
     // is not weekend-sensitive and does not need to sit in the Saturday training window.
-    // A weekday slot also keeps it clear of ml-daily-ops (13:20 UTC + 3.5h worst case) and
+    // A weekday slot also keeps it clear of ml-daily-ops (13:20 UTC + 3.9h worst case) and
     // of ml-weekly-data (Friday 18:00 UTC). The 30-day lookback makes the exact weekday
     // irrelevant to coverage -- only the latency of repairing a restated bar changes.
     await addJobWithCatchup(ohlcvBackfillQueue, 'ohlcv-gap-fill-weekly', { mode: 'gap-fill', lookback: 30 }, {

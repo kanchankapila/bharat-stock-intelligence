@@ -177,7 +177,7 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'stuck-signal-resolver', label: 'Stuck Signal Resolver (path-based)', cronPattern: '0 11 * * 1-5', graceMinutes: 90, critical: true },
   // graceMinutes 60 -> 270: the Worker's own lockDuration is 4h (240min, "covers the full
   // daily ops run" per queues.ts's own comment) and processMlDailyOps is wrapped in
-  // withJobTimeout(..., 3.5h) -- 60min grace flagged 'late' (critical: true, real Telegram
+  // withJobTimeout(..., 3.5h then, 3.9h since 2026-11-13) -- 60min grace flagged 'late' (critical: true, real Telegram
   // alert) on every run past an hour, which is the norm for an ~11-15-step chain the source
   // itself budgets up to 4h for. CLAUDE.md's own job-schedule-review note independently
   // measured this job's real runtime at ~4.4h (and a separate note recorded a run completing
