@@ -39,23 +39,9 @@ describe('dependency security and test-runner migration', () => {
   });
 
   it('makes registry audit failures a CI failure rather than an advisory-only report', () => {
-    expect(manifest.scripts['security:check']).toBe('node scripts/securityCheck.mjs');
+    expect(manifest.scripts['security:check']).toBe('npm audit --include=dev --audit-level=low');
     const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
     expect(ci).toMatch(/run: npm run security:check/);
-  });
-
-  it('accepts only listed, unexpired advisories (AF-20261117-22)', async () => {
-    const { unacceptedAdvisories, ACCEPTED } = await import('./securityCheck.mjs');
-    const audit = (...ids) => ({ vulnerabilities: { x: { via: ['dep', ...ids.map(id => ({
-      name: 'pkg', severity: 'low', title: 't', url: `https://github.com/advisories/${id}`,
-    }))] } } });
-    const accepted = { 'GHSA-aaaa': '2026-12-17' };
-    expect(unacceptedAdvisories(audit('GHSA-aaaa'), accepted, '2026-11-18')).toEqual([]);
-    expect(unacceptedAdvisories(audit('GHSA-aaaa'), accepted, '2026-12-18')).toHaveLength(1);
-    expect(unacceptedAdvisories(audit('GHSA-aaaa', 'GHSA-bbbb'), accepted, '2026-11-18')).toEqual(['GHSA-bbbb pkg low: t']);
-    for (const until of Object.values(ACCEPTED)) {
-      expect(Date.parse(until) - Date.parse('2026-11-18')).toBeLessThanOrEqual(45 * 86_400_000);
-    }
   });
 
   it('keeps imported CLI hashbangs at the start of the Vite SSR transform on Windows', () => {

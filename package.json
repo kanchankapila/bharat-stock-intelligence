@@ -47,7 +47,7 @@
     "doc:numbers:check": "node scripts/docNumbers.mjs --check",
     "findings:check": "node scripts/checkFindingsLedger.mjs && node scripts/checkSharedBacklog.mjs",
     "backlog:check": "node scripts/checkSharedBacklog.mjs",
-    "security:check": "node scripts/securityCheck.mjs",
+    "security:check": "npm audit --include=dev --audit-level=low",
     "migrate:up": "node-pg-migrate up -d POSTGRES_URL",
     "migrate:down": "node-pg-migrate down -d POSTGRES_URL",
     "migrate:create": "node-pg-migrate create -j sql -d POSTGRES_URL"
