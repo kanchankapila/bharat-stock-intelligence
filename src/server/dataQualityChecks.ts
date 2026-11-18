@@ -2437,6 +2437,29 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'nse-stocks-mcsymbol-unique',
+    label: 'nse_stocks: a MoneyControl code carried by more than one active stock',
+    category: 'reference',
+    critical: false,
+    // AF-20261118-06: 52 codes were shared (MEDICO carried CHENNPETRO's MR), so every MC fetcher booked
+    // one company's dividends, splits, shockers and chart patterns under both. A code names one company on
+    // MoneyControl's side; the owner is the row whose ISIN matches pricefeed/nse/equitycash/{code}.
+    sql: `SELECT COUNT(*) AS shared, COALESCE(string_agg(code, ', ' ORDER BY code), '') AS codes
+          FROM (SELECT upper(trim(mcsymbol)) AS code FROM nse_stocks
+                WHERE status = 'ACTIVE' AND trim(COALESCE(mcsymbol, '')) <> ''
+                GROUP BY 1 HAVING COUNT(DISTINCT symbol) > 1) s`,
+    evaluate: (row) => {
+      const n = Number(row?.shared) || 0;
+      if (n > 0) return {
+        status: 'fail',
+        detail: `${n} MoneyControl code(s) shared by several active stocks (${String(row?.codes).slice(0, 200)}); `
+          + `MC fetchers drop them, and a writer that resolves them books one company's data under another. `
+          + `Ask priceapi.moneycontrol.com/pricefeed/nse/equitycash/{code} for the owner's ISIN and clear the others`,
+      };
+      return { status: 'pass', detail: '0 MoneyControl codes shared by more than one active stock' };
+    },
+  },
+  {
     id: 'unified-recommendations-liquid-coverage',
     label: 'unified_recommendations coverage of the liquid (>=Rs 1cr ADT) universe',
     category: 'scoring',
