@@ -21,3 +21,20 @@ describe('quotesNumber (docNumbers --check digit boundary)', () => {
     expect(quotesNumber('13,408 endpoints', '3,408')).toBe(false);
   });
 });
+
+// @ts-expect-error plain .mjs helper
+import { driftedCounts } from '../quotesNumber.mjs';
+
+describe('driftedCounts (url_endpoints/registry figures quoted outside the ledger rule)', () => {
+  const re = /url_endpoints|find-alternates/;
+  it('flags a stale figure on an anchored line and reports its line number', () => {
+    const doc = 'intro\nCheck `url_endpoints` (830 templates) via --find-alternates\n';
+    expect(driftedCounts(doc, re, 'templates', 834)).toEqual([{ line: 2, found: '830' }]);
+  });
+  it('accepts the current figure, grouped or not, and ignores unanchored lines', () => {
+    expect(driftedCounts('`url_endpoints` (834 templates)', re, 'templates', 834)).toEqual([]);
+    expect(driftedCounts('a sample of 250 templates', re, 'templates', 834)).toEqual([]);
+    expect(driftedCounts('market_endpoint_registry: 3,408 live working endpoints', /market_endpoint_registry/,
+      '(?:live )?(?:working )?endpoints', 3408)).toEqual([]);
+  });
+});

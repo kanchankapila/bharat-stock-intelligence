@@ -301,7 +301,7 @@ SELECT status_code, error_msg, validated_at FROM url_candidates_validation_audit
 ```
 
 **Order of lookup:** this registry (broadest, 3,408 endpoints) → `url_endpoints` /
-`--find-alternates` above (830 templates, carries our own fetch health) → repo grep → ask the
+`--find-alternates` above (834 templates, carries our own fetch health) → repo grep → ask the
 user with the per-route breakdown. Both catalogs are candidate generators; neither is a verdict.
 
 **Caveats measured live 2026-09-13 — do not skip these, each one would mislead you:**

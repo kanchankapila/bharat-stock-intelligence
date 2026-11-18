@@ -43,8 +43,8 @@ path uses — confirming the entire `computeTimeframeScores`/`getTimeframeRankin
 procedures, `computeTimeframeScores()` itself, `backtestRunner.ts` and its test,
 `ScreenerRankingPanel.tsx`, and the dead sub-block inside `ScreenerIntelligencePage.tsx` (the page
 itself stays — it also drives screener detail/category-stats/leaderboard, all unrelated and live).
-The `timeframe_scores` DB table itself was left in place (empty, harmless schema debris — dropping
-a table is a separate, more invasive decision). Full detail: `docs/session-log.md`'s 2026-08-30
+The empty `timeframe_scores` table was later dropped by migration
+`20261004100000_drop-unused-order-book-and-timeframe-tables.sql` (AF-20261003-06); it is absent from live Postgres. Full detail: `docs/session-log.md`'s 2026-08-30
 "Phase 2" entry.
 
 `quant_scores` previously had three writers with a real ordering bug: `institutional_quant_engine.py`

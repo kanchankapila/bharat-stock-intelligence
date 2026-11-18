@@ -19,7 +19,7 @@ import { readdirSync, statSync, existsSync, readFileSync } from 'fs';
 import { join, extname, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
-import { quotesNumber } from './quotesNumber.mjs';
+import { quotesNumber, driftedCounts } from './quotesNumber.mjs';
 import { findStaleForecasts } from './staleForecasts.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -146,6 +146,20 @@ if (CHECK) {
     expect(ledgerRule, grouped(registryTotal), 'findings-ledger.md registry total');
   }
   expect(ledgerRule, urlEndpoints === null ? null : String(urlEndpoints), 'findings-ledger.md url_endpoints count');
+  // Every current-guidance doc that copies these figures (dated reports and logs are history).
+  const guidance = execFileSync('git', ['ls-files', '*.md'], { cwd: ROOT, encoding: 'utf8' }).split('\n')
+    .filter((f) => f && !/session-log|audit-findings|session_journal|history|docs\/audits\/|superpowers\/|\d{4}-\d{2}-\d{2}/.test(f));
+  for (const f of guidance) {
+    const txt = readFileSync(join(ROOT, f), 'utf8');
+    const checks = [
+      [urlEndpoints, /url_endpoints|find-alternates/, 'templates'],
+      [registryTotal, /market_endpoint_registry/, '(?:live )?(?:working )?endpoints'],
+    ];
+    for (const [want, anchor, unit] of checks) {
+      if (want === null) continue;
+      for (const d of driftedCounts(txt, anchor, unit, want)) stale.push(`${f}:${d.line}: quotes ${d.found}, expected ${want}`);
+    }
+  }
 
   // Elapsed `~DATE` forecasts in rule files with no outcome written back (AF-20261026-47).
   const rulesDir = join(ROOT, '.claude', 'rules');

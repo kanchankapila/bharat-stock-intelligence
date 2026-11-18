@@ -685,3 +685,9 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 - A full regrade is a good audit: a WIN mean of +46% exposed three grading defects (AF-20261118-04/-05). Check the result distribution of any regrade before closing.
 - The 16:05 window slipped because a background timer's notification only reaches an idle session at its next prompt; a timed deploy needs the session active (or a scheduled agent), not a sleeping timer.
 - Closed AF-20261112-03; AF-20261115-01 snapshot is unattended now; AF-20261025-33 waits on picomatch (exception expires 2026-12-17).
+
+## 2026-11-18 (late) — .md staleness sweep + repo-doctor --full (Claude)
+- A checked count can still drift in its unchecked copies: docNumbers asserted url_endpoints only in findings-ledger.md, so three other files sat at 830. The check now scans every guidance .md (AF-20261118-13).
+- A negative control that returns 0 hits after removing known items means the control is broken (CRLF in a psql dump made `grep -vx` a no-op), not that the scan is clean.
+- Before naming why the platform was down, read `~/.pm2/pm2.log` (local IST timestamps; `grep -a`, it reads as binary): "Stopping app:" is a manual stop, a "New PM2 Daemon started" banner is a resurrect. The event log alone mis-attributed the 11-15 gap to the reboot.
+- Git Bash heredocs here collapse a double backslash to a single one; write JS regex code with Edit/Write, not a heredoc.

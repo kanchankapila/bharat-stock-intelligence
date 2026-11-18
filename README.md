@@ -31,7 +31,7 @@ A local-first research and decision-support platform for NSE/BSE equities. It co
 │  ML Pipeline (Python; inventory: `npm run doc:numbers`)                 │
 │  feature_engineering → regime_detector → ml_ensemble → dl_engine  │
 │  outcome_resolver → performance_tracker → reward_engine → rl_agent │
-│  online_learner → strategy_optimizer → backtester                  │
+│  strategy_optimizer → backtester                                   │
 │  → unified_ranker.py (canonical cross-source ranking)              │
 ├─────────────────────────────────────────────────────────────────────┤
 │  bharat_alpha/  from-scratch self-grading rewrite (own README) — not    │
@@ -109,14 +109,14 @@ on a feature, probability, refresh interval or provider description.
 - Stored in `market_regimes` table; used by scoring engine and signal labeling
 
 ### Feature Engineering Pipeline
-- **84 ML-ready features** per symbol per day: price returns, momentum, volatility, volume, FII/DII flows, fundamentals, macro indicators, sentiment, options data
+- **ML-ready features** per symbol per day (the column list is `feature_store` in `db/schema.postgres.sql`): price returns, momentum, volatility, volume, FII/DII flows, fundamentals, macro indicators, sentiment, options data
 - Leakage-prevented with FUND_LAG_DAYS=45 and FII_LAG_DAYS=1
 - Persistent scaler (`ml_models/feature_scaler_v1.pkl`)
-- Writes to `feature_store`; consumed by `ml_ensemble.py`, `dl_engine.py`, `online_learner.py`
+- Writes to `feature_store`; consumed by `ml_ensemble.py` (and the unscheduled `dl_engine.py` / `online_learner.py`)
 
 ### ML Continuous Learning Framework
 - **Stacking Ensemble** (`ml_ensemble.py`): GradientBoosting + RandomForest + ExtraTrees + LogisticRegression with OOF stacking and calibrated probabilities
-- **Online SGD** (`online_learner.py`): incremental `partial_fit` with 40% SGD / 60% ensemble blend, rolling 180-day window
+- **Online SGD** (`online_learner.py`): incremental `partial_fit` with 40% SGD / 60% ensemble blend, rolling 180-day window. Unscheduled since 2026-08-31 (live CV AUC 0.5017; nothing reads its output)
 - **Deep Learning** (`dl_engine.py`, `dl_trainer.py`): LSTM-based sequence model, predicts prob_up_1d/5d/15d. Unscheduled since 2026-11-11 (no measured edge; manual runs only)
 - **Outcome Resolver** (`outcome_resolver.py`): labels each signal WIN/LOSS/NEUTRAL/STOP_LOSS against OHLCV at 5-day and 15-day horizons
 - **Performance Tracker** (`performance_tracker.py`): computes win rates, Sharpe, alpha vs Nifty; segments by signal_type / regime / sector / score_bucket
@@ -384,7 +384,7 @@ python src/server/strategy_optimizer.py
 # OHLCV gap fill — 30-day lookback
 python src/server/backfill_ohlcv.py --mode gap-fill --lookback 30
 
-# Retrain online SGD learner (180-day rolling window)
+# Retrain online SGD learner (180-day rolling window) — unscheduled since 2026-08-31, manual only
 python src/server/online_learner.py --window 180
 
 # DL model retrain (uses feature_store) — unscheduled since 2026-11-11 (AF-20261111-01), manual only

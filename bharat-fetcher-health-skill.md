@@ -12,12 +12,12 @@ metadata:
 
 # Bharat Fetcher Health Skill
 
-Diagnose fetcher failures, inspect DLQ, requeue jobs, and monitor ingestion pipeline health.
+Diagnose fetcher failures, re-run missed windows, and monitor ingestion pipeline health.
 
 ## When to Use
 
 - A fetcher shows as failed in the dashboard
-- DLQ has entries that need reprocessing
+- A job step failed and its window needs re-running
 - Data quality checks are failing
 - You need to understand why a fetcher isn't running
 
@@ -28,7 +28,7 @@ This skill uses the `bharat-intelligence` MCP server which exposes:
 - `get_fetcher_status` - Status of specific or all fetchers
 - `run_fetcher` - Manually trigger a fetcher
 - `list_fetchers` - List all available fetchers
-- `requeue_dlq` - **RETIRED 2026-09-13** — returns an error by design. The DLQ table keeps no reconstructable payload and nothing consumes its status values, so the old relabel-to-RETRYING was a "success that wrote nothing". Re-run the failed fetch with `run_fetcher` instead.
+- `requeue_dlq` - **RETIRED 2026-09-13** — returns an error by design. The `data_ingestion_dlq` table itself was dropped 2026-10-05 (migration `20261005100000`, AF-20261003-07). Re-run the failed fetch with `run_fetcher` instead.
 
 ## Procedures
 
@@ -36,7 +36,7 @@ This skill uses the `bharat-intelligence` MCP server which exposes:
 ```
 1. Call inspect_ingestion_health
 2. Review heartbeats for failed/never-run jobs
-3. Check DLQ counts per fetcher
+3. Check per-step failures in job_run_history (status/error) for the failing job
 4. Review data quality failures
 5. Take action on each issue
 ```
@@ -49,19 +49,17 @@ This skill uses the `bharat-intelligence` MCP server which exposes:
 4. Run fetcher manually with run_fetcher to test
 ```
 
-### 3. DLQ Remediation (replaces the retired requeue_dlq)
+### 3. Missed-Window Remediation
 ```
-1. Call inspect_ingestion_health to see DLQ counts
-2. For each fetcher with DLQ entries: identify the failed window/symbols
-   (read data_ingestion_dlq.reason + fetch_date), then re-run that fetcher
-   over the missed window with run_fetcher — the DLQ row itself cannot be
-   replayed (payload_sample is truncated to 2000 chars).
+1. Call inspect_ingestion_health for failed heartbeats and DQ failures
+2. For each failed step: read job_run_history.error for the run to find the
+   failed window/symbols, then re-run that fetcher over it with run_fetcher.
 3. Monitor job_heartbeat / the next daily digest for the re-run's outcome
 4. If same fetcher fails repeatedly: check upstream data source.
    **Lookup alternate working sources in the 3,000+ discovery registry:**
    - Query `market_endpoint_registry` in Postgres (:5433, 3,408 live working endpoints; `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`).
-   - Run `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server` to check `url_endpoints` (830 templates).
-   - Check `unique_urls.txt` (3,103 raw URLs) and `DATA_FETCHING_GUIDE.md` for proven headers, cookies, and payload shapes.
+   - Run `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server` to check `url_endpoints` (834 templates).
+   - Check the optional local `urls_v2.db` corpus if present (the flat `unique_urls.txt` was deleted 2026-10-23; `git show c2ceae0e^:unique_urls.txt`) and `DATA_FETCHING_GUIDE.md` for proven headers, cookies, and payload shapes.
 ```
 
 ### 4. Trading Holiday Awareness
@@ -76,7 +74,7 @@ Many jobs skip on trading holidays (NSE/BSE closed). Check:
 |---------|-------|-------------|
 | `last_status: null` | Never ran | Check schedule, dependencies, manual run |
 | `last_error: timeout` | Budget too low | Increase lockDuration/timeout in job config |
-| `DLQ count > 0` | Partial failures | Re-run the missed window with `run_fetcher` (DLQ rows are not replayable), then check root cause |
+| `N steps failed` in job_run_history | Partial failures | Re-run the missed window with `run_fetcher`, then check root cause |
 | `data_quality: FAIL` | Stale/freshness breach | Run fetcher manually; if upstream is dead/stale, query `market_endpoint_registry` (3,408 endpoints) / `url_endpoints` (`--find-alternates`) for active alternates |
 
 ## Integration with Hermes
@@ -92,7 +90,7 @@ Many jobs skip on trading holidays (NSE/BSE closed). Check:
 # Via Hermes chat
 "Check ingestion health"
 "Run the intraday fetcher"
-"Re-run yesterday's block-deal fetch over the DLQ window"
+"Re-run yesterday's block-deal fetch for the failed window"
 "Show status of mc_broker_reco_fetcher"
 "List all fetchers"
 ```
