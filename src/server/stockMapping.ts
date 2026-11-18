@@ -118,12 +118,8 @@ export async function resolveMoneycontrolSymbol(query: string): Promise<string |
           scIdCache.set(upperQuery, exactMatch.sc_id);
           return exactMatch.sc_id;
         }
-        
-        // If no exact symbol match, just return the first one as best effort
-        if (data[0].sc_id) {
-          scIdCache.set(upperQuery, data[0].sc_id);
-          return data[0].sc_id;
-        }
+        // No suggestion carries this symbol: return nothing. The old "first suggestion as best effort"
+        // handed Bilcare (BI) Britannia's code, and syncAllStockMappings persisted 54 such codes (AF-20261118-06).
       }
     }
   } catch (error) {

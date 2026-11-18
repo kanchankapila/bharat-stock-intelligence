@@ -15844,7 +15844,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Ace Integrated Solutions Limited",
-    "mcsymbol": "AIS",
+    "mcsymbol": "",
     "tlid": "87794",
     "tlname": "ace-integrated-solutions-ltd",
     "isin": "INE543V01017",
@@ -15922,7 +15922,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Agro Phos India Limited",
-    "mcsymbol": "API",
+    "mcsymbol": "",
     "tlid": "57464",
     "tlname": "agro-phos-india-ltd",
     "isin": "INE740V01019",
@@ -15935,7 +15935,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Ahlada Engineers Limited",
-    "mcsymbol": "AE21",
+    "mcsymbol": "",
     "tlid": "109298",
     "tlname": "ahlada-engineers-ltd",
     "isin": "INE00PV01013",
@@ -15961,7 +15961,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Airan Limited",
-    "mcsymbol": "A09",
+    "mcsymbol": "",
     "tlid": "87812",
     "tlname": "airan-ltd",
     "isin": "INE645W01026",
@@ -16320,7 +16320,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Archidply Industries Limited",
-    "mcsymbol": "AI",
+    "mcsymbol": "",
     "tlid": "96",
     "tlname": "archidply-industries-ltd",
     "isin": "INE877I01016",
@@ -16359,7 +16359,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Aries Agro Limited",
-    "mcsymbol": "AA02",
+    "mcsymbol": "",
     "tlid": "99",
     "tlname": "aries-agro-ltd",
     "isin": "INE298I01015",
@@ -17444,7 +17444,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Dangee Dums Limited",
-    "mcsymbol": "DD",
+    "mcsymbol": "",
     "tlid": "107252",
     "tlname": "dangee-dums-ltd",
     "isin": "INE688Y01022",
@@ -17625,7 +17625,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Dhunseri Investments Limited",
-    "mcsymbol": "DI27",
+    "mcsymbol": "",
     "tlid": "330",
     "tlname": "dhunseri-investments-ltd",
     "isin": "INE320L01011",
@@ -17651,7 +17651,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Digjam Limited",
-    "mcsymbol": "D05",
+    "mcsymbol": "",
     "tlid": "4736",
     "tlname": "digjam-ltd",
     "isin": "INE731U01028",
@@ -18078,7 +18078,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Flexituff Ventures International Limited",
-    "mcsymbol": "FI08",
+    "mcsymbol": "",
     "tlid": "420",
     "tlname": "flexituff-ventures-international-ltd",
     "isin": "INE060J01017",
@@ -18400,7 +18400,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Goyal Aluminiums Limited",
-    "mcsymbol": "ATI",
+    "mcsymbol": "",
     "tlid": "87727",
     "tlname": "goyal-aluminiums-ltd",
     "isin": "INE705X01018",
@@ -19110,7 +19110,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Nandani Creation Limited",
-    "mcsymbol": "NC09",
+    "mcsymbol": "",
     "tlid": "57466",
     "tlname": "nandani-creation-ltd",
     "isin": "INE696V01013",
@@ -19704,7 +19704,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Laxmi Cotspin Limited",
-    "mcsymbol": "LC03",
+    "mcsymbol": "",
     "tlid": "57467",
     "tlname": "laxmi-cotspin-ltd",
     "isin": "INE801V01019",
@@ -20066,7 +20066,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Manaksia Aluminium Company Limited",
-    "mcsymbol": "MAC03",
+    "mcsymbol": "",
     "tlid": "1572",
     "tlname": "manaksia-aluminium-company-ltd",
     "isin": "INE859Q01017",
@@ -20183,7 +20183,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Marksans Pharma Limited",
-    "mcsymbol": "MP21",
+    "mcsymbol": "",
     "tlid": "841",
     "tlname": "marksans-pharma-ltd",
     "isin": "INE750C01026",
@@ -20235,7 +20235,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Mazda Limited",
-    "mcsymbol": "M14",
+    "mcsymbol": "",
     "tlid": "2978",
     "tlname": "mazda-ltd",
     "isin": "INE885E01034",
@@ -20285,7 +20285,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Medico Remedies Limited",
-    "mcsymbol": "MR",
+    "mcsymbol": "",
     "tlid": "82387",
     "tlname": "medico-remedies-ltd",
     "isin": "INE630Y01024",
@@ -20634,7 +20634,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Narmada Agrobase Limited",
-    "mcsymbol": "NA",
+    "mcsymbol": "",
     "tlid": "97161",
     "tlname": "narmada-agrobase-ltd",
     "isin": "INE117Z01011",
@@ -20828,7 +20828,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Indo-National Limited",
-    "mcsymbol": "NBC",
+    "mcsymbol": "",
     "tlid": "944",
     "tlname": "indo-national-ltd",
     "isin": "INE567A01028",
@@ -21539,7 +21539,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Music Broadcast Limited",
-    "mcsymbol": "MB05",
+    "mcsymbol": "",
     "tlid": "53209",
     "tlname": "music-broadcast-ltd",
     "isin": "INE919I01024",
@@ -21900,7 +21900,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Sagardeep Alloys Limited",
-    "mcsymbol": "SA05",
+    "mcsymbol": "",
     "tlid": "87824",
     "tlname": "sagardeep-alloys-ltd",
     "isin": "INE976T01013",
@@ -22220,7 +22220,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "STL Global Limited",
-    "mcsymbol": "STL05",
+    "mcsymbol": "",
     "tlid": "1209",
     "tlname": "stl-global-ltd",
     "isin": "INE353H01010",
@@ -22258,7 +22258,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Shanti Overseas (India) Limited",
-    "mcsymbol": "SO01",
+    "mcsymbol": "",
     "tlid": "87734",
     "tlname": "shanti-overseas-india-ltd",
     "isin": "INE933X01016",
@@ -22296,7 +22296,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Shivam Autotech Limited",
-    "mcsymbol": "SA13",
+    "mcsymbol": "",
     "tlid": "1222",
     "tlname": "shivam-autotech-ltd",
     "isin": "INE637H01024",
@@ -22591,7 +22591,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Softtech Engineers Limited",
-    "mcsymbol": "SE24",
+    "mcsymbol": "",
     "tlid": "97142",
     "tlname": "softtech-engineers-ltd",
     "isin": "INE728Z01015",
@@ -22862,7 +22862,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Surana Solar Limited",
-    "mcsymbol": "SV05",
+    "mcsymbol": "",
     "tlid": "1556",
     "tlname": "surana-solar-ltd",
     "isin": "INE272L01022",
@@ -22901,7 +22901,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Suvidhaa Infoserve Limited",
-    "mcsymbol": "SI84",
+    "mcsymbol": "",
     "tlid": "457974",
     "tlname": "suvidhaa-infoserve-ltd",
     "isin": "INE018401013",
@@ -22953,7 +22953,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Tarapur Transformers Limited",
-    "mcsymbol": "TT04",
+    "mcsymbol": "",
     "tlid": "1353",
     "tlname": "tarapur-transformers-ltd",
     "isin": "INE747K01017",
@@ -23187,7 +23187,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Touchwood Entertainment Limited",
-    "mcsymbol": "TEL",
+    "mcsymbol": "",
     "tlid": "87855",
     "tlname": "touchwood-entertainment-ltd",
     "isin": "INE486Y01013",
@@ -23252,7 +23252,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Trigyn Technologies Limited",
-    "mcsymbol": "TT08",
+    "mcsymbol": "",
     "tlid": "1416",
     "tlname": "trigyn-technologies-ltd",
     "isin": "INE948A01012",

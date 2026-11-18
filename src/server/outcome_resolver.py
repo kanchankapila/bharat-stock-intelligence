@@ -1202,6 +1202,20 @@ def _resolve_unified_batch(
         stop_loss = float(row['stop_loss']) if row['stop_loss'] else None
         source = row['signal_source']
 
+        # AF-20261118-07: the same basis rule as resolve_recommendation_log (AF-20261118-05): a
+        # signal-day bar > 20% from the published entry means the bars were back-adjusted since,
+        # so the published levels move onto the bars' basis.
+        # ponytail: one indexed lookup per row; prefetch like _np_map_u if batches grow large.
+        basis = 1.0
+        if entry > 0:
+            sb = conn.execute(
+                "SELECT close FROM stock_ohlcv WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect,0)=0 ORDER BY date DESC LIMIT 1",
+                (sym, signal_date[:10])).fetchone()
+            if sb and sb[0] and abs(float(sb[0]) / entry - 1) > BASIS_SEAM_MIN:
+                basis = float(sb[0]) / entry
+                entry *= basis
+                stop_loss = stop_loss * basis if stop_loss else None
+
         signal_date_obj = datetime.date.fromisoformat(signal_date[:10])
         # AF-20260823-80 stage 2: batched next-open map, inline SQL fallback.
         nphit = _np_map_u.get((sym, signal_date[:10], 'AFTER_OPEN'))
@@ -1226,7 +1240,7 @@ def _resolve_unified_batch(
 
         # #2 exit policy: replay daily bars through target-capture / scale-out / chandelier
         # trailing / time exit instead of just booking the horizon close.
-        target = float(row['target_price']) if row.get('target_price') else None
+        target = float(row['target_price']) * basis if row.get('target_price') else None
         atr = get_atr(conn, sym, signal_date[:10])
         # AF-20260823-80 stage 3: batched holding-window bars; inline fallback.
         _bkey = (sym, _norm_iso(next_trading_day), _norm_iso(exit_target_date))
@@ -1250,7 +1264,8 @@ def _resolve_unified_batch(
         # symbol), and (b) a bare conn.rollback() to recover would discard every already-
         # processed row's uncommitted UPSERT from earlier in this same loop.
         use_intra = False
-        if next_trading_day and exit_target_date:
+        # intraday_ohlcv is never back-adjusted (AF-20261118-07), so not once basis != 1.
+        if next_trading_day and exit_target_date and basis == 1.0:
             try:
                 start_d = datetime.date.fromisoformat(next_trading_day)
                 end_d = datetime.date.fromisoformat(exit_target_date)
@@ -1309,9 +1324,7 @@ def _resolve_unified_batch(
                 exit_time = check_date
 
             # Incorporate dividend returns if any paid during the trade
-            if dividend_sum > 0:
-                dividend_pct = (dividend_sum / entry) * 100
-                gross += dividend_pct
+            gross += _dividend_pct(dividend_sum, entry, sym)
 
             return_pct = net_return_pct(gross)
             if not is_plausible_return(return_pct):
@@ -1527,29 +1540,21 @@ def expire_stale_pending_all(conn: ConnWrapper, dry_run: bool = False) -> int:
 
 
 # A published level and today's back-adjusted bars differ by more than this only across a
-# split/bonus (the smallest common ratio, 4:5, moves price 20%).
+# back-adjustment (split, bonus, demerger, capital reduction; a 4:5 split moves price 20%).
 BASIS_SEAM_MIN = 0.2
 
 
-def _split_ex_dates(conn, symbols) -> dict:
-    """symbol -> SPLIT/BONUS ex-dates (ISO). Read once BEFORE any row is graded: a failed read on
-    the shared connection would otherwise roll back the rows already written in this pass."""
-    symbols = sorted({str(s) for s in symbols})
-    if not symbols:
-        return {}
-    try:
-        ph = ','.join('?' for _ in symbols)
-        rows = conn.execute(
-            f"SELECT symbol, CAST(ex_date AS TEXT) FROM corporate_actions "
-            f"WHERE action_type IN ('SPLIT', 'BONUS') AND symbol IN ({ph})", tuple(symbols)).fetchall()
-    except Exception as e:
-        print(f"[OutcomeResolver] corporate_actions unavailable ({e}); no price-basis rescale",
-              file=sys.stderr)
-        return {}
-    out: dict = {}
-    for sym, d in rows:
-        out.setdefault(str(sym), []).append(str(d)[:10])
-    return out
+def _dividend_pct(dividend_sum: float, entry: float, sym: str) -> float:
+    """Cash dividends paid in the window, as % of entry. An amount above BASIS_SEAM_MIN of the entry
+    is implausible and ignored: MEDICO 54.0 on a Rs 48 stock was CHENNPETRO's dividend booked under
+    a shared MoneyControl code (AF-20261118-05, root cause AF-20261118-06).
+    ponytail: also drops a real special dividend above 20% (ASTERDM Rs 118 on Rs 513, 2024)."""
+    if not dividend_sum or dividend_sum <= 0 or not entry:
+        return 0.0
+    if dividend_sum / entry > BASIS_SEAM_MIN:
+        print(f"[OutcomeResolver] {sym}: dividend {dividend_sum} on entry {entry:.2f} is implausible; ignored", file=sys.stderr)
+        return 0.0
+    return dividend_sum / entry * 100
 
 
 def resolve_recommendation_log(
@@ -1560,19 +1565,28 @@ def resolve_recommendation_log(
     limit: int = 2000,
 ) -> dict[str, int]:
     """Resolve recommendation_log.outcome by checking OHLCV data after the signal horizon."""
-    cutoff = _gradeable_cutoff(conn, horizon_days)
+    # Each row is gradeable only once its OWN horizon has passed. A single run-level cutoff let the
+    # horizon-1 run grade 15-session rows on one bar (AF-20261118-04).
+    horizons = sorted({int(r[0]) for r in conn.execute(
+        "SELECT DISTINCT horizon_days FROM recommendation_log WHERE horizon_days IS NOT NULL").fetchall()}
+        | {horizon_days})
+    row_cutoff = "CASE COALESCE(horizon_days, ?) {} END".format(
+        " ".join("WHEN ? THEN ?" for _ in horizons))
+    cutoff_params = (horizon_days,) + tuple(x for h in horizons for x in (h, _gradeable_cutoff(conn, h)))
 
     pending = conn.execute("""
         SELECT id, symbol, signal_date, entry_price, stop_loss, target_1,
                COALESCE(horizon_days, ?) AS rl_horizon
         FROM recommendation_log
         WHERE (outcome IS NULL OR outcome = 'PENDING' {relabel})
-          AND entry_price IS NOT NULL
-          AND signal_date <= ?
+          -- A row with no published entry (scoring_engine recs: no entry/stop/target) is a long from the
+          -- next open (AF-20261118-08); one already EXPIRED as ungradeable stays out.
+          AND (entry_price IS NOT NULL OR COALESCE(status, '') <> 'EXPIRED')
+          AND signal_date::text <= {row_cutoff}
         ORDER BY signal_date DESC
         LIMIT ?
-    """.format(relabel="OR resolved_at < ?" if relabel_before else ''),
-        (horizon_days,) + ((relabel_before,) if relabel_before else ()) + (cutoff, limit)).fetchall()
+    """.format(relabel="OR resolved_at < ?" if relabel_before else '', row_cutoff=row_cutoff),
+        (horizon_days,) + ((relabel_before,) if relabel_before else ()) + cutoff_params + (limit,)).fetchall()
 
     cols = ['id', 'symbol', 'signal_date', 'entry_price', 'stop_loss', 'target_1', 'rl_horizon']
     rows = [dict(zip(cols, r)) for r in pending]
@@ -1584,18 +1598,15 @@ def resolve_recommendation_log(
     print(f"[OutcomeResolver] {len(rows)} recommendation_log entries pending resolution.")
     resolved = 0
     _cal = _session_calendar(conn, rows, 'signal_date')
-    _splits = _split_ex_dates(conn, [r['symbol'] for r in rows])
 
     for row in rows:
         rec_id = row['id']
         sym = row['symbol']
         signal_date = str(row['signal_date'])
-        entry = float(row['entry_price'] or 0)
+        published = float(row['entry_price'] or 0)
+        entry = published
         stop_loss = float(row['stop_loss']) if row['stop_loss'] else None
         h = int(row['rl_horizon'] or horizon_days)
-
-        if not entry:
-            continue
 
         signal_date_str = signal_date[:10]
         signal_date_obj = datetime.date.fromisoformat(signal_date_str)
@@ -1607,24 +1618,26 @@ def resolve_recommendation_log(
         next_trading_day = next_row[0] if next_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
         exit_target_date = _nth_session_after(_cal, signal_date_str, h)
 
-        # AF-20261117-13: stock_ohlcv is back-adjusted for splits/bonuses; the published levels are
-        # not. With an action inside the window, put the levels on the bars' basis via the
-        # signal-day bar (entry was that day's close when published).
+        # AF-20261117-13 / AF-20261118-05: stock_ohlcv is back-adjusted (splits, bonuses, demergers,
+        # capital reductions); the published levels are not. Entry was the signal-day close when
+        # published, so a signal-day bar > 20% away means the bars are on another basis, wherever
+        # the adjustment's ex-date falls: put the levels on the bars' basis.
         basis = 1.0
-        if any(signal_date_str < d <= str(exit_target_date) for d in _splits.get(sym, ())):
-            sb = conn.execute(
-                "SELECT close FROM stock_ohlcv WHERE symbol = ? AND date = ? AND COALESCE(is_suspect,0)=0",
-                (sym, signal_date_str)).fetchone()
-            if sb and sb[0] and abs(float(sb[0]) / entry - 1) > BASIS_SEAM_MIN:
-                basis = float(sb[0]) / entry
-                entry *= basis
-                stop_loss = stop_loss * basis if stop_loss else None
+        sb = conn.execute(
+            "SELECT close FROM stock_ohlcv WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect,0)=0 ORDER BY date DESC LIMIT 1",
+            (sym, signal_date_str)).fetchone()
+        if published and sb and sb[0] and abs(float(sb[0]) / entry - 1) > BASIS_SEAM_MIN:
+            basis = float(sb[0]) / entry
+            entry *= basis
+            stop_loss = stop_loss * basis if stop_loss else None
 
         # AF-20261117-12 (owner decision 2026-11-18): fill at the next session's open, the first
         # price a reader of the published rec could trade, like the signal resolvers. The stop and
         # target stay the published levels.
         if next_row and next_row[1] and float(next_row[1]) > 0:
             entry = float(next_row[1])
+        if not entry:
+            continue
 
         # #2 exit policy: target-capture / scale-out / chandelier trailing over the bar window.
         target = float(row['target_1']) * basis if row.get('target_1') else None
@@ -1645,7 +1658,10 @@ def resolve_recommendation_log(
         # symbol), and (b) a bare conn.rollback() to recover would discard every already-
         # processed row's uncommitted UPSERT from earlier in this same loop.
         use_intra = False
-        if next_trading_day and exit_target_date:
+        # intraday_ohlcv is never back-adjusted: once the levels are on the daily bars' adjusted
+        # basis (basis != 1), raw 15-minute bars would grade against the wrong price (AF-20261118-05).
+        # With no published entry the basis cannot be checked at all, so daily bars only (AF-20261118-08).
+        if next_trading_day and exit_target_date and basis == 1.0 and published:
             try:
                 start_d = datetime.date.fromisoformat(next_trading_day)
                 end_d = datetime.date.fromisoformat(exit_target_date)
@@ -1689,9 +1705,7 @@ def resolve_recommendation_log(
                 bars, entry=entry, initial_stop=initial_stop, target=target, atr=atr)
             
             # Incorporate dividend returns if any paid during the trade
-            if dividend_sum > 0:
-                dividend_pct = (dividend_sum / entry) * 100
-                gross += dividend_pct
+            gross += _dividend_pct(dividend_sum, entry, sym)
                 
             return_pct = net_return_pct(gross)
             # A stop after a scale-out at target (or with a dividend) can net positive; only a

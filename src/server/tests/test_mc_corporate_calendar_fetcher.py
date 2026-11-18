@@ -75,3 +75,15 @@ class TestRefreshHistoricalDivSkipsBadDates:
         updated = mcc._refresh_historical_div(con, {"GOOD", "BAD"}, date(2026, 7, 19))
         assert updated == 1
         assert len(con.updates) == 1
+
+
+class TestScidMapDropsAmbiguousCodes:
+    """AF-20261118-06: `MR` is CHENNPETRO's and MEDICO's code, so the last-wins dict booked
+    CHENNPETRO's Rs 54 dividend under MEDICO (a Rs 48 stock) and the resolver graded +108%."""
+
+    def test_ambiguous_code_resolves_to_nobody(self):
+        rows = [{"symbol": "CHENNPETRO", "mcsymbol": "MR"}, {"symbol": "MEDICO", "mcsymbol": "MR"},
+                {"symbol": "RELIANCE", "mcsymbol": "RI"}]
+        m = mcc._build_scid_map(_FakeConn(select_rows=rows))
+        assert "MR" not in m
+        assert m["RI"] == "RELIANCE"

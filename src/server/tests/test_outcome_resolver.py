@@ -513,6 +513,40 @@ def test_unified_stop_after_scale_out_with_positive_return_is_not_a_loss_outcome
     assert outcome == 'WIN'
 
 
+def test_unified_levels_are_rescaled_to_back_adjusted_bars():
+    """AF-20261118-07: the unified path filled at the adjusted next open (~100) but kept the
+    published stop/target (190/210, pre-adjustment basis), so a 1:2-adjusted symbol stopped out
+    on its first bar. Same rule as the recommendation_log path (AF-20261118-05)."""
+    from outcome_resolver import resolve_unified_outcomes
+    conn = make_unified_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, -1, -1):  # adjusted history incl. the signal day: flat at 100
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('USOADJ',?,100,100,100,100,100000)",
+                     ((base - datetime.timedelta(days=i)).isoformat(),))
+    conn.execute("INSERT INTO unified_signals (symbol, signal_date, entry_price, target_price, stop_loss, signal_source, confidence_score) "
+                 "VALUES ('USOADJ', ?, 200, 210, 190, 'AI', 70)", (sig_date,))
+    for off, (o, h, l, c) in enumerate([(100, 101, 99.5, 100.5), (100.5, 102, 100, 101.5), (101.5, 103, 101, 102.5),
+                                        (102.5, 104, 102, 103.5), (103.5, 104, 103, 103.8)], start=1):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('USOADJ',?,?,?,?,?,100000)",
+                     ((base + datetime.timedelta(days=off)).isoformat(), o, h, l, c))
+    conn.commit()
+    resolve_unified_outcomes(conn, horizon_days=5, dry_run=False)
+    outcome, ret = conn.execute(
+        "SELECT outcome, return_pct FROM unified_signal_outcomes WHERE symbol='USOADJ'").fetchone()
+    assert ret == pytest.approx(3.8 - 0.30, abs=0.1)   # 100 -> 103.8 on the adjusted basis
+    assert outcome == 'WIN'
+
+
+def test_unified_back_adjusted_row_ignores_raw_intraday_bars(monkeypatch):
+    """AF-20261118-07: intraday_ohlcv is never back-adjusted; raw 15-minute bars at ~200 must not
+    grade a row whose levels were put on the daily bars' adjusted basis (~100)."""
+    import outcome_resolver
+    raw = [(f"2026-01-0{d} 10:00", 204.0, 202.0, 203.0) for d in range(1, 8)]
+    monkeypatch.setattr(outcome_resolver, "query_all", lambda *a, **k: raw)
+    test_unified_levels_are_rescaled_to_back_adjusted_bars()
+
+
 # ─── multi-horizon regression tests (the starvation bugs) ───────────────────────
 #
 # Bug 1 (resolve_outcomes): the pending NOT EXISTS matched any resolved horizon,
@@ -1039,6 +1073,89 @@ def test_reclog_fills_at_the_next_open_not_the_published_price():
     assert row[0] == 'NEUTRAL'
 
 
+def test_reclog_row_is_not_graded_before_its_own_horizon_completes():
+    """AF-20261118-04: the horizon-1 run took every PENDING row dated before yesterday and graded
+    a 15-session row on the bars that existed (one, live): 8,404 h15 rows graded after one bar."""
+    from outcome_resolver import resolve_recommendation_log
+    conn = make_reclog_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=4)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, -1, -1):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('EARLY',?,100,100,100,100,100000)",
+                     ((base - datetime.timedelta(days=i)).isoformat(),))
+    for off in (1, 2, 3):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('EARLY',?,100,104,100,104,100000)",
+                     ((base + datetime.timedelta(days=off)).isoformat(),))
+    conn.execute("INSERT INTO recommendation_log (symbol, signal_date, entry_price, stop_loss, target_1, horizon_days, outcome) "
+                 "VALUES ('EARLY', ?, 100, 97, 110, 15, 'PENDING')", (sig_date,))
+    conn.commit()
+    resolve_recommendation_log(conn, horizon_days=1, dry_run=False)
+    row = conn.execute("SELECT outcome, actual_return_pct FROM recommendation_log WHERE symbol='EARLY'").fetchone()
+    assert (row[0], row[1]) == ('PENDING', None)
+
+
+def test_reclog_levels_are_rescaled_for_any_back_adjustment_not_only_an_in_window_split():
+    """AF-20261118-05: BHAGYANGR's history was back-adjusted for a demerger (no SPLIT/BONUS row), so
+    the next-open fill took entry ~35 from the bars while stop/target stayed on the published ~408
+    basis: 470 live WINs averaged +368%. Any signal-day bar > 20% from the published entry is a
+    different basis, wherever the adjustment's ex-date falls."""
+    from outcome_resolver import resolve_recommendation_log
+    conn = make_reclog_db()
+    conn.execute("CREATE TABLE corporate_actions (symbol TEXT, action_type TEXT, ex_date TEXT, amount REAL)")
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, -1, -1):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('DEM',?,40,40,40,40,100000)",
+                     ((base - datetime.timedelta(days=i)).isoformat(),))
+    conn.execute("INSERT INTO recommendation_log (symbol, signal_date, entry_price, stop_loss, target_1, horizon_days, outcome) "
+                 "VALUES ('DEM', ?, 400, 380, 420, 5, 'PENDING')", (sig_date,))
+    for off in range(1, 6):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('DEM',?,40,40.4,39.8,40.2,100000)",
+                     ((base + datetime.timedelta(days=off)).isoformat(),))
+    conn.commit()
+    resolve_recommendation_log(conn, horizon_days=5, dry_run=False)
+    ret = conn.execute("SELECT actual_return_pct FROM recommendation_log WHERE symbol='DEM'").fetchone()[0]
+    assert abs(ret) < 5
+
+
+def test_reclog_rescale_uses_the_last_bar_before_a_non_session_signal_date():
+    """AF-20261118-05 (3): rows published on a holiday or weekend (2026-10-02, 08-08) have no
+    signal-day bar, so the rescale never ran: BHAGYANGR +976%, JSWDULUX +890%."""
+    from outcome_resolver import resolve_recommendation_log
+    conn = make_reclog_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, 0, -1):     # adjusted history up to the day BEFORE the signal date; none on it
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('HOL',?,40,40,40,40,100000)",
+                     ((base - datetime.timedelta(days=i)).isoformat(),))
+    conn.execute("INSERT INTO recommendation_log (symbol, signal_date, entry_price, stop_loss, target_1, horizon_days, outcome) "
+                 "VALUES ('HOL', ?, 400, 380, 420, 5, 'PENDING')", (sig_date,))
+    for off in range(1, 6):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('HOL',?,40,40.4,39.8,40.2,100000)",
+                     ((base + datetime.timedelta(days=off)).isoformat(),))
+    conn.commit()
+    resolve_recommendation_log(conn, horizon_days=5, dry_run=False)
+    assert abs(conn.execute("SELECT actual_return_pct FROM recommendation_log WHERE symbol='HOL'").fetchone()[0]) < 5
+
+
+def test_reclog_ignores_an_implausible_dividend_amount(monkeypatch):
+    """AF-20261118-05 (4): corporate_actions holds MEDICO 'DIVIDEND 54.0' on a Rs 48 stock (a
+    percent-of-face figure, not cash); added to the return it graded a stop-out at +108%."""
+    import outcome_resolver
+    monkeypatch.setattr(outcome_resolver, "query_one", lambda *a, **k: (54.0,))
+    row = _reclog_case('DIVX', 97, [(off, 100, 100.5, 99.5, 100) for off in range(1, 6)])
+    assert abs(row[1]) < 5
+
+
+def test_reclog_back_adjusted_row_ignores_raw_intraday_bars(monkeypatch):
+    """AF-20261118-05 (2): intraday_ohlcv is never back-adjusted. After the rescale put entry on the
+    daily bars' basis (~40), the 15-minute bars at the raw ~404 booked BHAGYANGR +549%."""
+    import outcome_resolver
+    raw = [(f"2026-01-0{d} 10:00", 404.0, 402.0, 403.0) for d in range(1, 8)]
+    monkeypatch.setattr(outcome_resolver, "query_all", lambda *a, **k: raw)
+    test_reclog_levels_are_rescaled_for_any_back_adjustment_not_only_an_in_window_split()
+
+
 def test_reclog_levels_are_rescaled_when_a_split_falls_inside_the_window():
     """AF-20261117-13: stock_ohlcv is back-adjusted for splits/bonuses, recommendation_log levels
     are not. A 1:2 split inside the hold left entry 200 / stop 190 against bars near 100, so any
@@ -1064,3 +1181,47 @@ def test_reclog_levels_are_rescaled_when_a_split_falls_inside_the_window():
     outcome, ret = conn.execute("SELECT outcome, actual_return_pct FROM recommendation_log WHERE symbol='SPL'").fetchone()
     assert ret == pytest.approx(3.8 - 0.30, abs=0.1)   # 100 -> 103.8 on the adjusted basis
     assert outcome == 'WIN'
+
+
+def _null_entry_case(raw_intraday=None, monkeypatch=None, status=None):
+    from outcome_resolver import resolve_recommendation_log
+    import outcome_resolver
+    if raw_intraday is not None:
+        monkeypatch.setattr(outcome_resolver, "query_all", lambda *a, **k: raw_intraday)
+    conn = make_reclog_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, -1, -1):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('NULLE',?,100,100,100,100,100000)",
+                     ((base - datetime.timedelta(days=i)).isoformat(),))
+    conn.execute("INSERT INTO recommendation_log (symbol, signal_date, entry_price, stop_loss, target_1, horizon_days, outcome, status) "
+                 "VALUES ('NULLE', ?, NULL, NULL, NULL, 5, 'PENDING', ?)", (sig_date, status or 'RESOLVED'))
+    for off, (o, h, l, c) in enumerate([(100, 101, 99.5, 100.5), (100.5, 102, 100, 101.5), (101.5, 103, 101, 102.5),
+                                        (102.5, 104, 102, 103.5), (103.5, 104, 103, 103.8)], start=1):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('NULLE',?,?,?,?,?,100000)",
+                     ((base + datetime.timedelta(days=off)).isoformat(), o, h, l, c))
+    conn.commit()
+    resolve_recommendation_log(conn, horizon_days=5, dry_run=False)
+    return conn.execute("SELECT outcome, actual_return_pct, status FROM recommendation_log WHERE symbol='NULLE'").fetchone()
+
+
+def test_reclog_row_without_a_published_entry_grades_at_the_next_open():
+    """AF-20261118-08: scoring_engine recommendations carry no entry/stop/target. Under the next-open fill
+    (AF-20261117-12) they are a long from the next open to the horizon close; the resolver skipped them, so
+    10,946 old grades (made before their own horizon) could not be reproduced."""
+    outcome, ret, status = _null_entry_case()
+    assert ret == pytest.approx(3.8 - 0.30, abs=0.1)
+    assert outcome == 'WIN' and status == 'RESOLVED'
+
+
+def test_reclog_null_entry_row_ignores_raw_intraday_bars(monkeypatch):
+    """No published entry means no basis check, so raw 15-minute bars cannot be trusted: daily bars only."""
+    raw = [(f"2026-01-0{d} 10:00", 204.0, 202.0, 203.0) for d in range(1, 8)]
+    outcome, ret, _ = _null_entry_case(raw, monkeypatch)
+    assert ret == pytest.approx(3.8 - 0.30, abs=0.1)
+
+
+def test_reclog_expired_null_entry_row_stays_untouched():
+    """Rows the resolver already expired as ungradeable are out of scope: widening must not grade them."""
+    outcome, ret, status = _null_entry_case(status='EXPIRED')
+    assert outcome == 'PENDING' and ret is None and status == 'EXPIRED'

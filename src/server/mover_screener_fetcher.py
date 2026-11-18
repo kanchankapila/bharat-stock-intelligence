@@ -547,9 +547,10 @@ def _mc_symbol_map() -> dict | None:
     """
     try:
         from db_compat import query_all
-        rows = query_all("SELECT mcsymbol, symbol FROM nse_stocks "
-                         "WHERE mcsymbol IS NOT NULL AND mcsymbol <> ''")
-        return {r["mcsymbol"].strip().upper(): r["symbol"] for r in rows}
+        from mc_symbol_map import MC_MAP_ROWS_SQL, build_mc_to_symbol
+        return build_mc_to_symbol(
+            [(r["symbol"], r["mcsymbol"].strip().upper()) for r in query_all(MC_MAP_ROWS_SQL)],
+            log=lambda m: print(m, file=sys.stderr))
     except Exception as e:
         print(f"[mc_price_shockers] symbol-map lookup failed ({e})", file=sys.stderr)
         return None

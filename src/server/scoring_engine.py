@@ -32,6 +32,15 @@ from indian_market_costs import round_trip_cost_bps, equity_trade_type_for_timef
 # elsewhere (see ml_calibration.py). These are pure/DB-free so they're independently unit
 # testable; the class wires them in behind app_settings.edge_adjustment_enabled (default off).
 
+def load_signal_type_weights(conn) -> Dict[str, float]:
+    """Per signal type, the sample-weighted mean of its (regime, sector) weights. A plain AVG let a
+    5-row key pinned at a clamp count as much as a 2,000-row key (AF-20261118-02)."""
+    rows = conn.execute(
+        "SELECT signal_type, SUM(weight * sample_count) / SUM(sample_count) FROM signal_type_weights "
+        "WHERE sample_count > 0 GROUP BY signal_type").fetchall()
+    return {r[0]: float(r[1]) for r in rows if r[0] and r[1] is not None}
+
+
 def apply_edge_adjustment_to_win_probs(win_prob_map: Dict[str, float], regime_map: Dict[str, str],
                                         edge_status: Dict[str, Any]) -> Dict[str, float]:
     """Shrink each symbol's win_probability toward neutral (0.5) per its own regime's proven
@@ -779,14 +788,15 @@ class AlphaQuantScoringEngine:
         signal_quality_map: Dict[str, float] = {}
         sym_signal_types: Dict[str, list] = {}  # used later for prior blend
         try:
-            with self.engine.connect() as conn:
-                stw = conn.execute(text(
-                    "SELECT signal_type, AVG(weight) FROM signal_type_weights GROUP BY signal_type"
-                )).fetchall()
-                type_weight = {r[0]: float(r[1]) for r in stw if r[0]}
+            _wconn = db_connect()
+            try:
+                type_weight = load_signal_type_weights(_wconn)
                 # Trading days, not calendar days -- days=3 survives Fri->Mon exactly but
                 # returns empty after any holiday Monday, silently skipping the prior blend.
-                sig_cutoff = as_of.trading_days_back(3, db_connect())[-1].isoformat()
+                sig_cutoff = as_of.trading_days_back(3, _wconn)[-1].isoformat()
+            finally:
+                _wconn.close()
+            with self.engine.connect() as conn:
                 sig_rows = conn.execute(text("""
                     SELECT symbol, signals_json FROM technical_signals
                     WHERE date >= :cutoff AND signals_json IS NOT NULL

@@ -79,6 +79,7 @@ import requests
 from db_compat import connect, ConnWrapper
 from data_integrity_repair import parse_loose_date
 from fetch_utils import retry_get
+from mc_symbol_map import build_mc_to_symbol
 
 ACTION_URL = "https://api.moneycontrol.com/mcapi/v1/stock/corporate-action"
 HEADERS = {
@@ -255,7 +256,10 @@ def _load_stocks(conn: ConnWrapper, symbol_filter: str | None) -> list[tuple[str
         "SELECT symbol, mcsymbol FROM nse_stocks "
         "WHERE status = 'ACTIVE' AND mcsymbol IS NOT NULL AND mcsymbol != '' ORDER BY symbol"
     )
-    rows = [(r[0], r[1]) for r in cur.fetchall()]
+    # A code two symbols share is fetched for neither: the response would be written under both
+    # (AF-20261118-06). build_mc_to_symbol keeps only codes with exactly one symbol.
+    one = build_mc_to_symbol([(r[0], r[1]) for r in cur.fetchall()], log=_log)
+    rows = sorted((s, m) for m, s in one.items())
     if symbol_filter:
         rows = [(s, m) for s, m in rows if s.upper() == symbol_filter.upper()]
     return rows

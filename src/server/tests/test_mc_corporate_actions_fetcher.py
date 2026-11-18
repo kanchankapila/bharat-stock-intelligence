@@ -153,3 +153,18 @@ class TestSchemaAndStorage:
         mca.store(con, rows_b)
         count = con.execute("SELECT COUNT(*) FROM stock_corporate_action_history").fetchone()[0]
         assert count == 2
+
+
+class TestLoadStocksSkipsSharedCodes:
+    """AF-20261118-06: the fetch runs per (symbol, mcsymbol), so a code two symbols share (LC03 =
+    LUPIN and LAXMICOT) wrote Lupin's actions under both, and ohlcv_adjust turned the copies into
+    adjustment factors for the wrong stock (Aarti's splits under ARCHIDPLY)."""
+
+    def test_shared_code_is_not_fetched_for_either_symbol(self):
+        class _Conn:
+            def execute(self, sql, params=None):
+                class _C:
+                    def fetchall(self_inner):
+                        return [("LUPIN", "LC03"), ("LAXMICOT", "LC03"), ("RELIANCE", "RI")]
+                return _C()
+        assert mca._load_stocks(_Conn(), None) == [("RELIANCE", "RI")]

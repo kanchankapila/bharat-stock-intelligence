@@ -668,3 +668,9 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 - 1a25d3db: sector page shows an unavailable state instead of 12 hard-coded sectors; AF-20261117-09 closed (cost batch read back).
 - Deploy of AF-20261117-02/03/06/07/13/18/21 still waits for the 16:05-16:55 window (work state lifecycle-review-2026-11-17).
 - 2026-11-18 00:40: Trendlyne gate (AF-20261118-01) and option-chain fix committed, restart + pm2 upgrade owed at 16:05 today. Fintrend provisional edge (IC 0.05 at 21d, survives momentum control); PE-band history void (rewritten each run). Git Bash `TZ=Asia/Kolkata` prints GMT: use plain `date`.
+
+## 2026-11-18 afternoon — AF-20261118-06/-07 (Claude, session b0)
+
+- Shared MoneyControl codes (52) were the cause of the "non-cash" dividends; MC's price feed (NSEID + ISIN per code) is the ownership authority. Root writer was `resolveMoneycontrolSymbol`'s best-effort fallback (fixed c6cb2b4e). A date match against another source is not ownership: +-7-day dividend matches kept 297 non-owner copies.
+- Never infer "not listed yet" from an NSE listing date or our first bar: renamed, BSE-first and relisted names postdate their real actions there.
+- 16:05 pm2 slot never ran; I restarted ml-api only (17:06). Owed tonight: AF-20261117-19 and AF-20261118-02 read-backs after the 18:50 chain; weekend confluence check; 11-22 backtester save.

@@ -35,6 +35,7 @@ from datetime import date
 from curl_cffi import requests
 
 from db_compat import connect
+from mc_symbol_map import MC_MAP_ROWS_SQL, build_mc_to_symbol
 from as_of import logical_write_floor
 import sys
 
@@ -383,13 +384,11 @@ def main() -> None:
 
     # Load mcsymbol -> symbol mapping from nse_stocks
     cur = con.cursor()
-    cur.execute("SELECT mcsymbol, symbol FROM nse_stocks WHERE mcsymbol IS NOT NULL AND mcsymbol != ''")
-    mc_to_sym = {}
-    for r in cur.fetchall():
-        mc = r[0] if isinstance(r, (tuple, list)) else (r['mcsymbol'] if hasattr(r, '__getitem__') and 'mcsymbol' in r else list(dict(r).values())[0])
-        sym = r[1] if isinstance(r, (tuple, list)) else (r['symbol'] if hasattr(r, '__getitem__') and 'symbol' in r else list(dict(r).values())[1])
-        if mc and sym:
-            mc_to_sym[mc.strip().upper()] = sym.strip().upper()
+    # A code shared by two symbols maps to neither (AF-20261118-06; was last-wins).
+    cur.execute(MC_MAP_ROWS_SQL)
+    mc_to_sym = build_mc_to_symbol(
+        [(str(r[0]).strip().upper(), str(r[1]).strip().upper()) for r in cur.fetchall()],
+        log=lambda m: print(m, file=sys.stderr))
 
     # Group patterns by mcsymbol
     patterns_by_mcsym: dict[str, list[dict]] = {}

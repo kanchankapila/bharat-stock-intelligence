@@ -70,6 +70,11 @@ def test_accepts_mapping_rows_too():
     assert m == {"RI": "RELIANCE"}
 
 
+import re  # noqa: E402
+
+_MC_FIRST_SELECT = re.compile(r"SELECT\s+mcsymbol\s*,\s*symbol\s+FROM\s+nse_stocks", re.IGNORECASE)
+
+
 def test_no_call_site_rebuilds_the_map_by_dict_comprehension():
     """Derived from source, so a THIRD call site cannot reintroduce the class.
 
@@ -87,6 +92,10 @@ def test_no_call_site_rebuilds_the_map_by_dict_comprehension():
                 continue
             # The clobbering shape: a dict comprehension KEYED on an mcsymbol field.
             if '["mcsymbol"]:' in stripped or "['mcsymbol']:" in stripped:
+                offenders.append(f"{path.name}:{n}: {stripped}")
+            # AF-20261118-06: the same map built from a `SELECT mcsymbol, symbol` (code first,
+            # read positionally or with .strip()) escaped the key scan in three fetchers.
+            if _MC_FIRST_SELECT.search(stripped):
                 offenders.append(f"{path.name}:{n}: {stripped}")
     assert not offenders, (
         "an mcsymbol reverse map is built by dict comprehension, so 62 ambiguous codes resolve "

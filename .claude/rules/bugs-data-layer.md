@@ -259,6 +259,27 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   **Tell, cheapest first:** `SELECT count(*), count(DISTINCT <code>) FROM <table>` -- if those two
   numbers differ, every dict comprehension over that column is lossy. Guarded by
   `test_mc_symbol_map.py`'s source-derived scan for `["mcsymbol"]:`.
+  **RECURRED 2026-11-18 (AF-20261118-06) in four more writers the key scan could not see**:
+  `{row[0]: row[1]}` after `SELECT mcsymbol, symbol` (corporate calendar), `r["mcsymbol"].strip().upper():`
+  (price shockers), a loop assignment (chart patterns), and a fourth shape with no map at all:
+  `mc_corporate_actions_fetcher` fetched once PER `(symbol, mcsymbol)`, so a shared code wrote one company's
+  actions under both symbols. Damage: CHENNPETRO's dividend under MEDICO graded a stop-out +108%; Adani Power's
+  1:5 split became an EMPOWER adjustment factor for the backtester. The scan now also flags any
+  `SELECT mcsymbol, symbol FROM nse_stocks`. **Tell for the fan-out shape:** a per-symbol fetch keyed by a
+  provider code; group the output by code and look for identical rows under two symbols. Clean by an
+  independent authority (TEJ `api.tejhq.dev/v1/actions/{SYMBOL}`), deleting a copy only when the event is the
+  sibling's; past TEJ's depth, Yahoo's split list on `<symbol>.NS` and `.BO` decides (it reaches 1991 for TMPV). **Never
+  infer "not listed yet" from an NSE listing date or the first bar in our own tables**: renamed, BSE-first and relisted
+  companies (TMPV, AEPL, SICALLOG, ASAHIINDIA) all postdate their real actions there; only a Yahoo first trade after its
+  ~2002 coverage floor is evidence of a later first listing.
+  **Better than all of that, found last: ask MoneyControl who owns the code.** `priceapi.moneycontrol.com/pricefeed/nse/
+  equitycash/{code}` returns `NSEID` and `isinid`; MC codes are unique on MC's side, so a shared code in OUR master is
+  our error and the ISIN match names the owner (52 of 52 resolved). Everything a writer fetched by that code is the
+  owner's. A date match against another source is not ownership: +-7-day dividend matches had "confirmed" 297
+  non-owner copies (same-season AGM dividends). **Root writer:** `resolveMoneycontrolSymbol` returned the first
+  autosuggest hit when none carried the symbol ("best effort"), and `syncAllStockMappings` persisted it (fixed
+  2026-11-18, plus a collision guard). Tell: `SELECT upper(trim(mcsymbol)) FROM nse_stocks WHERE status='ACTIVE'
+  GROUP BY 1 HAVING count(DISTINCT symbol) > 1` must return 0.
 
 - **A reverse map built from a provider-id column is ambiguous unless you prove the column is
   unique, and a dict comprehension silently resolves the ambiguity by file position.**

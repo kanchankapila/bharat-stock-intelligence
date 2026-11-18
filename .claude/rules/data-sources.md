@@ -83,6 +83,12 @@ The **NSE symbol** (e.g., `HDFCBANK`, `INFY`, `BAJAJ-AUTO`) is the single source
 | MoneyControl stockid | `stockid` | Numeric string | `592009` |
 | MarketsMojo | `stockid` _(shared)_ | Numeric string | `592009` |
 
+**Verifying a MoneyControl code (2026-11-18, AF-20261118-06).** `mcsymbol` names ONE company on MoneyControl's side;
+`https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{code}` returns its `NSEID` and `isinid` (no auth). A code
+two `nse_stocks` rows share is our error, never MC's: the ISIN match names the owner. Never accept an autosuggest hit that
+does not carry the symbol (the old "first suggestion as best effort" seeded 54 wrong codes), and never write a code another
+active stock carries. DQ check `nse-stocks-mcsymbol-unique` fails on any shared active code.
+
 **MarketsMojo (onboarded 2026-08-11)** — 5 fetchers (`marketsmojo_{technical,financials,fintrend,index,shareholding}_fetcher.py`) writing 5 `marketsmojo_*_history` tables. It reuses the **MoneyControl `stockid`**, read from `scripts/stocklist.json` via each fetcher's `load_sid_map()`; there is no new opaque id, so nothing was added to `StockMapping`. Requires a `Referer: https://www.marketsmojo.com/` header. Note the shared id: a `stockid` alone does not identify the *provider*, so any future table keyed on it needs the provider in the PK per the composite-key rule below — the existing 5 are keyed on `symbol`, which sidesteps it.
 
 ### Resolution Files

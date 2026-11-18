@@ -58,6 +58,7 @@ if _ROOT not in sys.path:
 
 os.environ.setdefault("USE_POSTGRES", "true")
 from db_compat import connect   # noqa: E402
+from mc_symbol_map import MC_MAP_ROWS_SQL, build_mc_to_symbol   # noqa: E402
 from fetch_utils import retry_get   # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -93,11 +94,8 @@ def _fetch_duration(duration: str) -> dict:
 
 
 def _build_scid_map(con) -> dict:
-    """mcsymbol → symbol mapping from nse_stocks."""
-    rows = con.execute(
-        "SELECT mcsymbol, symbol FROM nse_stocks WHERE mcsymbol IS NOT NULL AND mcsymbol != ''"
-    ).fetchall()
-    return {row[0]: row[1] for row in rows}
+    """mcsymbol → symbol; a code shared by two symbols maps to neither (AF-20261118-06)."""
+    return build_mc_to_symbol(con.execute(MC_MAP_ROWS_SQL).fetchall(), log=log.warning)
 
 
 def _parse_events(listing: dict) -> list[dict]:
