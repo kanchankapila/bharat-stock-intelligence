@@ -1599,7 +1599,7 @@ def resolve_recommendation_log(
         signal_date_obj = datetime.date.fromisoformat(signal_date_str)
 
         next_row = conn.execute(
-            "SELECT date FROM stock_ohlcv WHERE symbol = ? AND date > ? AND COALESCE(is_suspect,0)=0 ORDER BY date ASC LIMIT 1",
+            "SELECT date, open FROM stock_ohlcv WHERE symbol = ? AND date > ? AND COALESCE(is_suspect,0)=0 ORDER BY date ASC LIMIT 1",
             (sym, signal_date_str)
         ).fetchone()
         next_trading_day = next_row[0] if next_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
@@ -1618,8 +1618,13 @@ def resolve_recommendation_log(
                 entry *= basis
                 stop_loss = stop_loss * basis if stop_loss else None
 
-        # #2 exit policy: target-capture / scale-out / chandelier trailing over the bar window
-        # (entry stays the recommended price, unlike the next-day-open signal resolvers).
+        # AF-20261117-12 (owner decision 2026-11-18): fill at the next session's open, the first
+        # price a reader of the published rec could trade, like the signal resolvers. The stop and
+        # target stay the published levels.
+        if next_row and next_row[1] and float(next_row[1]) > 0:
+            entry = float(next_row[1])
+
+        # #2 exit policy: target-capture / scale-out / chandelier trailing over the bar window.
         target = float(row['target_1']) * basis if row.get('target_1') else None
         atr = get_atr(conn, sym, signal_date_str)
         bar_rows = conn.execute("""

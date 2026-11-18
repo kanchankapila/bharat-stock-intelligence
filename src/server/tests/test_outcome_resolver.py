@@ -1004,6 +1004,14 @@ def test_reclog_plain_stop_out_stays_loss_even_inside_threshold():
     assert row[0] == 'LOSS'
 
 
+def test_reclog_fills_at_the_next_open_not_the_published_price():
+    """AF-20261117-12: entry stayed the signal-day close (100) when the next session opened at
+    102, so a flat hold at 102 graded as a +1.7% WIN that no reader could have earned."""
+    row = _reclog_case('RECGAP', 97, [(off, 102, 102, 102, 102) for off in range(1, 6)])
+    assert row[1] == pytest.approx(-0.30, abs=0.05)
+    assert row[0] == 'NEUTRAL'
+
+
 def test_reclog_levels_are_rescaled_when_a_split_falls_inside_the_window():
     """AF-20261117-13: stock_ohlcv is back-adjusted for splits/bonuses, recommendation_log levels
     are not. A 1:2 split inside the hold left entry 200 / stop 190 against bars near 100, so any

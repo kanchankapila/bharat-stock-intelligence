@@ -241,6 +241,30 @@ describe('getBuyRecommendations', () => {
     expect(pick.win_probability).toBeCloseTo(0.61);
   });
 
+  // AF-20261117-08: 22 of 9,495 Buys were published on a stock locked limit-up (entry unfillable).
+  it('flags a Buy whose latest bar is locked at the upper circuit, without dropping it', async () => {
+    const ts = '2026-08-03T00:00:00.000Z';
+    await dbExec(`DELETE FROM stock_ohlcv WHERE symbol IN ('LOCKUP', 'FLATDN', 'NORMAL')`);
+    for (const sym of ['LOCKUP', 'FLATDN', 'NORMAL']) {
+      await dbRun(`INSERT INTO unified_recommendations
+        (symbol, computed_at, regime, unified_score, conviction_level, classification)
+        VALUES (?, ?, 'BULL', 80.0, 'A_HIGH', 'Buy')`, [sym, ts]);
+    }
+    const day = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+    const bars: Array<[string, number, number, number, number, number]> = [
+      ['LOCKUP', 2, 100, 101, 99, 100], ['LOCKUP', 1, 120, 120, 120, 120], // one price, +20%
+      ['FLATDN', 2, 100, 101, 99, 100], ['FLATDN', 1, 90, 90, 90, 90],     // locked limit-down
+      ['NORMAL', 2, 100, 101, 99, 100], ['NORMAL', 1, 104, 110, 103, 110],
+    ];
+    for (const [sym, ago, o, h, l, c] of bars) {
+      await dbRun(`INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, 1000)`,
+        [sym, day(ago), o, h, l, c]);
+    }
+    const result = await caller.getBuyRecommendations({ conviction: 'ALL' });
+    const flag = Object.fromEntries(result.picks.map((p: any) => [p.symbol, p.upperCircuitLocked]));
+    expect(flag).toEqual({ LOCKUP: true, FLATDN: false, NORMAL: false });
+  });
+
   it("'TOP' conviction (the default) includes S_ELITE and A_HIGH, excludes B_MEDIUM", async () => {
     const ts = '2026-08-03T00:00:00.000Z';
     await dbRun(`INSERT INTO unified_recommendations

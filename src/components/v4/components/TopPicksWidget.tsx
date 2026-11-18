@@ -57,6 +57,11 @@ export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-xs font-bold text-slate-100 shrink-0">{p.symbol}</span>
                     <ConvictionPill level={p.conviction_level} />
+                    {p.upperCircuitLocked && (
+                      <span className="text-[9px] font-bold text-amber-300 shrink-0" title="Locked at its upper circuit; the published entry was not fillable.">
+                        Not fillable
+                      </span>
+                    )}
                     {p.sector && <span className="text-[10px] text-slate-500 truncate">{p.sector}</span>}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">

@@ -44,6 +44,7 @@ interface CanonicalPick {
   stop_loss?: number | null;
   valid_until?: string | null;
   planStatus?: string | null;
+  upperCircuitLocked?: boolean;
   trade_reasoning?: string | null;
   engine_coverage_count?: number | null;
   days_to_next_results?: number | null;
@@ -189,6 +190,12 @@ function CanonicalPickCard({ pick, onSelectStock }: { pick: CanonicalPick; onSel
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-base font-black tracking-wide text-white">{pick.symbol}</span>
+            {pick.upperCircuitLocked && (
+              <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-300"
+                title="The latest bar traded at one price at its upper circuit; the published entry was not fillable.">
+                Not fillable · locked limit-up
+              </span>
+            )}
             <span className={cn(
               'rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-wider',
               pick.classification === 'Strong Buy'

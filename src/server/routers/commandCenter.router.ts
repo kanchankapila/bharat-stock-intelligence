@@ -236,6 +236,26 @@ export const commandCenterRouter = router({
         LIMIT ?
       `, params);
 
+      // AF-20261117-08 (owner decision: badge, not veto): a latest bar that traded at one price
+      // above the prior close is locked at its upper circuit, so the published entry cannot be
+      // filled. Display-only; the ranking is unchanged.
+      const locked = new Set<string>();
+      if (rows.length) {
+        const syms = rows.map((r) => r.symbol);
+        const lockRows = await dbAll<{ symbol: string }>(`
+          SELECT symbol FROM (
+            SELECT symbol, open, high, low, close,
+                   lag(close) OVER (PARTITION BY symbol ORDER BY date) AS prev_close,
+                   row_number() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+            FROM stock_ohlcv
+            WHERE symbol IN (${syms.map(() => '?').join(',')})
+              AND date >= current_date - 15 AND COALESCE(is_suspect, 0) = 0
+          ) b
+          WHERE rn = 1 AND open = high AND high = low AND low = close AND close > prev_close
+        `, syms);
+        for (const l of lockRows) locked.add(l.symbol);
+      }
+
       let liveCache: Record<string, any> = {};
       try {
         const cached = await cacheGet('live-stocks-bulk');
@@ -249,6 +269,7 @@ export const commandCenterRouter = router({
           livePrice:    live?.price ?? live?.lastPrice ?? r.cmp ?? null,
           changePercent: live?.changePercent ?? r.change_pct ?? null,
           planStatus: planStatus(r.valid_until),
+          upperCircuitLocked: locked.has(r.symbol),
         };
       });
 
