@@ -1560,7 +1560,14 @@ def resolve_recommendation_log(
     limit: int = 2000,
 ) -> dict[str, int]:
     """Resolve recommendation_log.outcome by checking OHLCV data after the signal horizon."""
-    cutoff = _gradeable_cutoff(conn, horizon_days)
+    # Each row is gradeable only once its OWN horizon has passed. A single run-level cutoff let the
+    # horizon-1 run grade 15-session rows on one bar (AF-20261118-04).
+    horizons = sorted({int(r[0]) for r in conn.execute(
+        "SELECT DISTINCT horizon_days FROM recommendation_log WHERE horizon_days IS NOT NULL").fetchall()}
+        | {horizon_days})
+    row_cutoff = "CASE COALESCE(horizon_days, ?) {} END".format(
+        " ".join("WHEN ? THEN ?" for _ in horizons))
+    cutoff_params = (horizon_days,) + tuple(x for h in horizons for x in (h, _gradeable_cutoff(conn, h)))
 
     pending = conn.execute("""
         SELECT id, symbol, signal_date, entry_price, stop_loss, target_1,
@@ -1568,11 +1575,11 @@ def resolve_recommendation_log(
         FROM recommendation_log
         WHERE (outcome IS NULL OR outcome = 'PENDING' {relabel})
           AND entry_price IS NOT NULL
-          AND signal_date <= ?
+          AND signal_date::text <= {row_cutoff}
         ORDER BY signal_date DESC
         LIMIT ?
-    """.format(relabel="OR resolved_at < ?" if relabel_before else ''),
-        (horizon_days,) + ((relabel_before,) if relabel_before else ()) + (cutoff, limit)).fetchall()
+    """.format(relabel="OR resolved_at < ?" if relabel_before else '', row_cutoff=row_cutoff),
+        (horizon_days,) + ((relabel_before,) if relabel_before else ()) + cutoff_params + (limit,)).fetchall()
 
     cols = ['id', 'symbol', 'signal_date', 'entry_price', 'stop_loss', 'target_1', 'rl_horizon']
     rows = [dict(zip(cols, r)) for r in pending]

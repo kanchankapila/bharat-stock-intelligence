@@ -1039,6 +1039,27 @@ def test_reclog_fills_at_the_next_open_not_the_published_price():
     assert row[0] == 'NEUTRAL'
 
 
+def test_reclog_row_is_not_graded_before_its_own_horizon_completes():
+    """AF-20261118-04: the horizon-1 run took every PENDING row dated before yesterday and graded
+    a 15-session row on the bars that existed (one, live): 8,404 h15 rows graded after one bar."""
+    from outcome_resolver import resolve_recommendation_log
+    conn = make_reclog_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=4)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, -1, -1):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('EARLY',?,100,100,100,100,100000)",
+                     ((base - datetime.timedelta(days=i)).isoformat(),))
+    for off in (1, 2, 3):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('EARLY',?,100,104,100,104,100000)",
+                     ((base + datetime.timedelta(days=off)).isoformat(),))
+    conn.execute("INSERT INTO recommendation_log (symbol, signal_date, entry_price, stop_loss, target_1, horizon_days, outcome) "
+                 "VALUES ('EARLY', ?, 100, 97, 110, 15, 'PENDING')", (sig_date,))
+    conn.commit()
+    resolve_recommendation_log(conn, horizon_days=1, dry_run=False)
+    row = conn.execute("SELECT outcome, actual_return_pct FROM recommendation_log WHERE symbol='EARLY'").fetchone()
+    assert (row[0], row[1]) == ('PENDING', None)
+
+
 def test_reclog_levels_are_rescaled_when_a_split_falls_inside_the_window():
     """AF-20261117-13: stock_ohlcv is back-adjusted for splits/bonuses, recommendation_log levels
     are not. A 1:2 split inside the hold left entry 200 / stop 190 against bars near 100, so any
