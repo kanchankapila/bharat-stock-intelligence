@@ -450,7 +450,7 @@ async function processLiveScreenerCollect(_job: Job): Promise<{ skipped: boolean
   return { skipped: false, success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
-async function processIntradayFetcher(_job: Job): Promise<{ skipped: boolean }> {
+async function processIntradayFetcher(_job: Job): Promise<{ skipped: boolean; success?: boolean; failedSteps?: string[] }> {
   // Cron is weekday+time only, so it still fires on a trading holiday — guard on the
   // holiday-aware live status so intraday fetches no-op on holidays/off-hours.
   if (!(await isMarketOpen())) {
@@ -470,7 +470,12 @@ async function processIntradayFetcher(_job: Job): Promise<{ skipped: boolean }> 
   // the failures only surfaced as "untracked step failures" in the daily digest. A failed
   // fetcher must propagate so the .on('failed') handler records it like every sibling job.
   await runPython('intraday_fetcher.py', ['--lookback-days', '1'], 840_000);
-  return { skipped: false };
+  // AF-20261117-15: alert on open plans whose stop/target the fresh 15-min bars just touched.
+  const T = new StepTracker('intraday-fetcher');
+  const { checkRecPlanHits } = await import('./recPlanAlerts');
+  await checkRecPlanHits().catch(e => T.fail('rec_plan_alerts', e));
+  const verdict = T.finish();
+  return { skipped: false, success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 async function processMoverCapture(_job: Job): Promise<{ skipped: boolean }> {
@@ -2620,9 +2625,11 @@ export async function initQueues(): Promise<boolean> {
       processIntradayFetcher,
       { connection, concurrency: 1, lockDuration: 10 * 60 * 1000, lockRenewTime: 2 * 60 * 1000 },
     );
-    intradayFetcherWorker.on('completed', (job, result?: { skipped?: boolean }) => {
+    intradayFetcherWorker.on('completed', (job, result?: { skipped?: boolean; success?: boolean }) => {
       console.log('[QUEUE] intraday-fetcher completed');
       if (result?.skipped) return;
+      // processIntradayFetcher's StepTracker already wrote the verdict -- don't clobber it.
+      if (result?.success === false) return;
       recordHeartbeat('intraday-fetcher', 'success', undefined, bullJobDurationMs(job));
     });
     intradayFetcherWorker.on('failed', (job, err) => {

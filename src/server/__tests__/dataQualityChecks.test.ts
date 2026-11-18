@@ -1371,6 +1371,21 @@ describe('audit regression guards (2026-08-11)', () => {
       expect(c.evaluate({ last_date: null }, now).status).toBe('warn');   // never run yet
     });
 
+    it('forward-test live decay relays the harness verdict for the published Buys (AF-20261117-17)', () => {
+      const c = find('forward-test-live-decay');
+      const report = (verdict: string) => ({ value: JSON.stringify({ blocks: { forward: { tiers: { '5': [
+        { tier: 0.01, verdict: 'EDGE' },
+        { tier: 'published', verdict, mean_excess_pct: -0.4, t_eff: -2.3, eff_dates: 24 },
+      ] } } } }) });
+      expect(c.evaluate(report('NEGATIVE'), now).status).toBe('fail');
+      expect(c.evaluate(report('NEGATIVE'), now).detail).toContain('t_eff -2.30');
+      expect(c.evaluate(report('NO EDGE'), now).status).toBe('warn');
+      expect(c.evaluate(report('LOW-DATA'), now).status).toBe('pass');
+      expect(c.evaluate({ value: null }, now).status).toBe('warn');
+      // Python writes NaN, which plain JSON.parse rejects.
+      expect(c.evaluate({ value: '{"blocks":{"forward":{"tiers":{"5":[{"tier":"published","verdict":"NEGATIVE","t_eff":NaN}]}}}}' }, now).status).toBe('fail');
+    });
+
     it('ranker input snapshot warns then fails when the nightly archive stops', () => {
       const c = find('ranker-input-snapshot-freshness');
       expect(c.sql).toContain("key = 'ranker_input_snapshot_last'");

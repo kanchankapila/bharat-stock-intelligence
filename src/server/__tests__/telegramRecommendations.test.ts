@@ -218,6 +218,14 @@ describe('renderDigest', () => {
     expect(text).toContain('Prior session traded at one price; entry fill is unverified.');
   });
 
+  it('lists scheduled events that fall before the plan expires (AF-20261117-14)', () => {
+    const text = renderDigest(digest({
+      longTerm: [pick({ planEvents: ['Ex-dividend 24 Nov', 'F&O expiry 25 Nov'] })],
+    }));
+    expect(text).toContain('Before this plan expires: Ex-dividend 24 Nov · F&O expiry 25 Nov');
+    expect(renderDigest(digest())).not.toContain('Before this plan expires');
+  });
+
   it('does not present a Strong Buy label as a calibrated success probability', () => {
     const text = renderDigest(digest());
     expect(text).toContain('relative rank, not a calibrated win probability');

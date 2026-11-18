@@ -234,6 +234,16 @@ export function trailingReturns(closesNewestFirst: number[]): IndexReturns {
   return out;
 }
 
+export type PcrLevel = 'PCR_HIGH' | 'PCR_NEUTRAL' | 'PCR_LOW';
+/** A descriptive put/call-ratio level, not a direction: a high PCR is put writing (support) as
+ *  often as put buying (hedging), so it was wrong to label it BULLISH (AF-20261119-01). */
+export function pcrLevel(pcr: number | null | undefined): PcrLevel | null {
+  if (pcr == null || !Number.isFinite(pcr)) return null;
+  if (pcr > 0.95) return 'PCR_HIGH';
+  if (pcr < 0.65) return 'PCR_LOW';
+  return 'PCR_NEUTRAL';
+}
+
 export type Buildup = 'LONG_BUILDUP' | 'SHORT_COVERING' | 'SHORT_BUILDUP' | 'LONG_UNWINDING';
 const VENDOR_BUILDUP: Record<string, Buildup> = {
   'long buildup': 'LONG_BUILDUP', 'short covering': 'SHORT_COVERING',
@@ -513,11 +523,7 @@ export const sectorsRouter = router({
         const callOi = fo?.total_call_oi ? Number(fo.total_call_oi) : null;
         const putOi = fo?.total_put_oi ? Number(fo.total_put_oi) : null;
 
-        let foSentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
-        if (pcr !== null) {
-          if (pcr > 0.95) foSentiment = 'BULLISH';
-          else if (pcr < 0.65) foSentiment = 'BEARISH';
-        }
+        const foSentiment = pcrLevel(pcr);
 
         const buildup = sectorBuildup(buildupRows.get(def.dbSector.toLowerCase()) ?? []);
 
@@ -801,12 +807,9 @@ export const sectorsRouter = router({
       `);
 
       return rows.map((r: any) => {
-        const pcr = r.sector_pcr ? parseFloat(Number(r.sector_pcr).toFixed(2)) : 1.0;
-        let sentiment: 'STRONG_BULLISH' | 'BULLISH' | 'NEUTRAL' | 'BEARISH' | 'STRONG_BEARISH' = 'NEUTRAL';
-        if (pcr >= 1.2) sentiment = 'STRONG_BULLISH';
-        else if (pcr >= 0.9) sentiment = 'BULLISH';
-        else if (pcr <= 0.55) sentiment = 'STRONG_BEARISH';
-        else if (pcr <= 0.75) sentiment = 'BEARISH';
+        // A missing PCR is unknown, not 1.0 (which used to read as BULLISH).
+        const pcr = r.sector_pcr ? parseFloat(Number(r.sector_pcr).toFixed(2)) : null;
+        const sentiment = pcrLevel(pcr);
 
         return {
           sector: r.sector,
@@ -863,7 +866,7 @@ export const sectorsRouter = router({
         indexOverview: fullDetails?.indices || {},
         fundamentals,
         screenerNetScore: screenerRow?.net_score || 0,
-        optionsPcr: foRow?.sector_pcr || 1.0,
+        optionsPcr: foRow?.sector_pcr ?? null,
       };
 
       try {

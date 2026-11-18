@@ -841,7 +841,7 @@ export const SectorIntelligencePage: React.FC<SectorIntelligencePageProps> = ({
                     <th className="pb-3 font-bold uppercase tracking-wider">Sector</th>
                     <th className="pb-3 font-bold uppercase tracking-wider text-right">Put-Call Ratio (PCR)</th>
                     <th className="pb-3 font-bold uppercase tracking-wider">F&O Buildup Type</th>
-                    <th className="pb-3 font-bold uppercase tracking-wider">Derivatives Sentiment</th>
+                    <th className="pb-3 font-bold uppercase tracking-wider">PCR Level</th>
                     <th className="pb-3 font-bold uppercase tracking-wider text-right">Total Call OI</th>
                     <th className="pb-3 font-bold uppercase tracking-wider text-right">Total Put OI</th>
                   </tr>
@@ -876,12 +876,9 @@ export const SectorIntelligencePage: React.FC<SectorIntelligencePageProps> = ({
                           </span>
                         </td>
                         <td className="py-3">
-                          <span className={cn(
-                            "font-bold text-xs",
-                            s.derivatives.sentiment === 'BULLISH' ? "text-emerald-400" :
-                            s.derivatives.sentiment === 'BEARISH' ? "text-rose-400" : "text-slate-400"
-                          )}>
-                            {s.derivatives.sentiment}
+                          <span className="font-bold text-xs text-slate-400"
+                            title="Put/call ratio level. Not a direction: high PCR can be put writing or hedging.">
+                            {s.derivatives.sentiment ? s.derivatives.sentiment.replace('PCR_', 'PCR ').toLowerCase() : '—'}
                           </span>
                         </td>
                         <td className="py-3 text-right font-medium text-slate-400">

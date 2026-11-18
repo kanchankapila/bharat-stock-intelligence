@@ -17,6 +17,7 @@ import { dbAll } from './dbAsync';
 import { telegramService, sanitizeMarkdown } from './telegramService';
 import { normaliseHorizon, type CanonicalHorizon } from './horizon';
 import { parsePythonJson } from './parsePythonJson';
+import { fetchPlanEvents } from './planEvents';
 import { deriveCallState, type ForwardTestReport } from '../lib/callState';
 export { normaliseHorizon } from './horizon';
 
@@ -43,6 +44,8 @@ export interface Pick {
   screenerCount: number;
   engineCoverage: number | null;
   executionWarning?: string | null;
+  /** Ex-dates / F&O expiry scheduled before the plan expires (AF-20261117-14). */
+  planEvents?: string[];
   source: 'unified' | 'intraday';
 }
 
@@ -143,7 +146,7 @@ export async function fetchLongTermPicks(limit = MAX_PICKS_PER_HORIZON): Promise
     `WITH picks AS (
        SELECT symbol, computed_at, unified_score, conviction_level, classification, timeframe,
               entry_zone_low, entry_zone_high, stop_loss, target_1, risk_reward, sector,
-              trade_reasoning, screener_names_json, engine_coverage_count, bullish_screener_count
+              trade_reasoning, screener_names_json, engine_coverage_count, bullish_screener_count, valid_until
          FROM unified_recommendations
         WHERE substring(computed_at, 1, 10) = (
                 SELECT max(substring(computed_at, 1, 10)) FROM unified_recommendations)
@@ -168,6 +171,11 @@ export async function fetchLongTermPicks(limit = MAX_PICKS_PER_HORIZON): Promise
       ORDER BY picks.unified_score DESC`,
     [...BUY_CLASSIFICATIONS, limit],
   );
+  const events = await fetchPlanEvents(rows.map((r) => ({ symbol: r.symbol, validUntil: r.valid_until })))
+    .catch((e) => {
+      console.warn('[TelegramRecommendations] plan events unavailable:', (e as Error).message);
+      return new Map<string, string[]>();
+    });
   return rows.map((r) => {
     const scr = parseScreeners(r.screener_names_json);
     return {
@@ -188,6 +196,7 @@ export async function fetchLongTermPicks(limit = MAX_PICKS_PER_HORIZON): Promise
       executionWarning: r.prior_single_price === true
         ? 'Prior session traded at one price; entry fill is unverified.'
         : null,
+      planEvents: events.get(r.symbol) ?? [],
       source: 'unified' as const,
     };
   });
@@ -357,6 +366,7 @@ function renderPick(p: Pick, idx: number): string {
   if (scoreBits.length) lines.push(`📊 ${scoreBits.join(' · ')}`);
 
   if (p.executionWarning) lines.push(`⚠️ ${sanitizeMarkdown(p.executionWarning)}`);
+  if (p.planEvents?.length) lines.push(`📅 Before this plan expires: ${sanitizeMarkdown(p.planEvents.join(' · '))}`);
 
   if (p.entry != null || p.stopLoss != null || p.target != null) {
     const rr = p.riskReward != null && Number.isFinite(p.riskReward)
