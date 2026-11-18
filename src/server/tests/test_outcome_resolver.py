@@ -513,6 +513,40 @@ def test_unified_stop_after_scale_out_with_positive_return_is_not_a_loss_outcome
     assert outcome == 'WIN'
 
 
+def test_unified_levels_are_rescaled_to_back_adjusted_bars():
+    """AF-20261118-07: the unified path filled at the adjusted next open (~100) but kept the
+    published stop/target (190/210, pre-adjustment basis), so a 1:2-adjusted symbol stopped out
+    on its first bar. Same rule as the recommendation_log path (AF-20261118-05)."""
+    from outcome_resolver import resolve_unified_outcomes
+    conn = make_unified_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, -1, -1):  # adjusted history incl. the signal day: flat at 100
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('USOADJ',?,100,100,100,100,100000)",
+                     ((base - datetime.timedelta(days=i)).isoformat(),))
+    conn.execute("INSERT INTO unified_signals (symbol, signal_date, entry_price, target_price, stop_loss, signal_source, confidence_score) "
+                 "VALUES ('USOADJ', ?, 200, 210, 190, 'AI', 70)", (sig_date,))
+    for off, (o, h, l, c) in enumerate([(100, 101, 99.5, 100.5), (100.5, 102, 100, 101.5), (101.5, 103, 101, 102.5),
+                                        (102.5, 104, 102, 103.5), (103.5, 104, 103, 103.8)], start=1):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('USOADJ',?,?,?,?,?,100000)",
+                     ((base + datetime.timedelta(days=off)).isoformat(), o, h, l, c))
+    conn.commit()
+    resolve_unified_outcomes(conn, horizon_days=5, dry_run=False)
+    outcome, ret = conn.execute(
+        "SELECT outcome, return_pct FROM unified_signal_outcomes WHERE symbol='USOADJ'").fetchone()
+    assert ret == pytest.approx(3.8 - 0.30, abs=0.1)   # 100 -> 103.8 on the adjusted basis
+    assert outcome == 'WIN'
+
+
+def test_unified_back_adjusted_row_ignores_raw_intraday_bars(monkeypatch):
+    """AF-20261118-07: intraday_ohlcv is never back-adjusted; raw 15-minute bars at ~200 must not
+    grade a row whose levels were put on the daily bars' adjusted basis (~100)."""
+    import outcome_resolver
+    raw = [(f"2026-01-0{d} 10:00", 204.0, 202.0, 203.0) for d in range(1, 8)]
+    monkeypatch.setattr(outcome_resolver, "query_all", lambda *a, **k: raw)
+    test_unified_levels_are_rescaled_to_back_adjusted_bars()
+
+
 # ─── multi-horizon regression tests (the starvation bugs) ───────────────────────
 #
 # Bug 1 (resolve_outcomes): the pending NOT EXISTS matched any resolved horizon,

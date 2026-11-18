@@ -1202,6 +1202,20 @@ def _resolve_unified_batch(
         stop_loss = float(row['stop_loss']) if row['stop_loss'] else None
         source = row['signal_source']
 
+        # AF-20261118-07: the same basis rule as resolve_recommendation_log (AF-20261118-05): a
+        # signal-day bar > 20% from the published entry means the bars were back-adjusted since,
+        # so the published levels move onto the bars' basis.
+        # ponytail: one indexed lookup per row; prefetch like _np_map_u if batches grow large.
+        basis = 1.0
+        if entry > 0:
+            sb = conn.execute(
+                "SELECT close FROM stock_ohlcv WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect,0)=0 ORDER BY date DESC LIMIT 1",
+                (sym, signal_date[:10])).fetchone()
+            if sb and sb[0] and abs(float(sb[0]) / entry - 1) > BASIS_SEAM_MIN:
+                basis = float(sb[0]) / entry
+                entry *= basis
+                stop_loss = stop_loss * basis if stop_loss else None
+
         signal_date_obj = datetime.date.fromisoformat(signal_date[:10])
         # AF-20260823-80 stage 2: batched next-open map, inline SQL fallback.
         nphit = _np_map_u.get((sym, signal_date[:10], 'AFTER_OPEN'))
@@ -1226,7 +1240,7 @@ def _resolve_unified_batch(
 
         # #2 exit policy: replay daily bars through target-capture / scale-out / chandelier
         # trailing / time exit instead of just booking the horizon close.
-        target = float(row['target_price']) if row.get('target_price') else None
+        target = float(row['target_price']) * basis if row.get('target_price') else None
         atr = get_atr(conn, sym, signal_date[:10])
         # AF-20260823-80 stage 3: batched holding-window bars; inline fallback.
         _bkey = (sym, _norm_iso(next_trading_day), _norm_iso(exit_target_date))
@@ -1250,7 +1264,8 @@ def _resolve_unified_batch(
         # symbol), and (b) a bare conn.rollback() to recover would discard every already-
         # processed row's uncommitted UPSERT from earlier in this same loop.
         use_intra = False
-        if next_trading_day and exit_target_date:
+        # intraday_ohlcv is never back-adjusted (AF-20261118-07), so not once basis != 1.
+        if next_trading_day and exit_target_date and basis == 1.0:
             try:
                 start_d = datetime.date.fromisoformat(next_trading_day)
                 end_d = datetime.date.fromisoformat(exit_target_date)
@@ -1530,13 +1545,14 @@ BASIS_SEAM_MIN = 0.2
 
 
 def _dividend_pct(dividend_sum: float, entry: float, sym: str) -> float:
-    """Cash dividends paid in the window, as % of entry. corporate_actions also stores percent-of-face
-    figures as the amount (MEDICO 54.0 on a Rs 48 stock), so an amount above BASIS_SEAM_MIN of the
-    entry is not cash and is ignored (AF-20261118-05)."""
+    """Cash dividends paid in the window, as % of entry. An amount above BASIS_SEAM_MIN of the entry
+    is implausible and ignored: MEDICO 54.0 on a Rs 48 stock was CHENNPETRO's dividend booked under
+    a shared MoneyControl code (AF-20261118-05, root cause AF-20261118-06).
+    ponytail: also drops a real special dividend above 20% (ASTERDM Rs 118 on Rs 513, 2024)."""
     if not dividend_sum or dividend_sum <= 0 or not entry:
         return 0.0
     if dividend_sum / entry > BASIS_SEAM_MIN:
-        print(f"[OutcomeResolver] {sym}: dividend {dividend_sum} on entry {entry:.2f} is not a cash amount; ignored", file=sys.stderr)
+        print(f"[OutcomeResolver] {sym}: dividend {dividend_sum} on entry {entry:.2f} is implausible; ignored", file=sys.stderr)
         return 0.0
     return dividend_sum / entry * 100
 
