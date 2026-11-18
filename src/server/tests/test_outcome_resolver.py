@@ -1084,6 +1084,35 @@ def test_reclog_levels_are_rescaled_for_any_back_adjustment_not_only_an_in_windo
     assert abs(ret) < 5
 
 
+def test_reclog_rescale_uses_the_last_bar_before_a_non_session_signal_date():
+    """AF-20261118-05 (3): rows published on a holiday or weekend (2026-10-02, 08-08) have no
+    signal-day bar, so the rescale never ran: BHAGYANGR +976%, JSWDULUX +890%."""
+    from outcome_resolver import resolve_recommendation_log
+    conn = make_reclog_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, 0, -1):     # adjusted history up to the day BEFORE the signal date; none on it
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('HOL',?,40,40,40,40,100000)",
+                     ((base - datetime.timedelta(days=i)).isoformat(),))
+    conn.execute("INSERT INTO recommendation_log (symbol, signal_date, entry_price, stop_loss, target_1, horizon_days, outcome) "
+                 "VALUES ('HOL', ?, 400, 380, 420, 5, 'PENDING')", (sig_date,))
+    for off in range(1, 6):
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('HOL',?,40,40.4,39.8,40.2,100000)",
+                     ((base + datetime.timedelta(days=off)).isoformat(),))
+    conn.commit()
+    resolve_recommendation_log(conn, horizon_days=5, dry_run=False)
+    assert abs(conn.execute("SELECT actual_return_pct FROM recommendation_log WHERE symbol='HOL'").fetchone()[0]) < 5
+
+
+def test_reclog_ignores_an_implausible_dividend_amount(monkeypatch):
+    """AF-20261118-05 (4): corporate_actions holds MEDICO 'DIVIDEND 54.0' on a Rs 48 stock (a
+    percent-of-face figure, not cash); added to the return it graded a stop-out at +108%."""
+    import outcome_resolver
+    monkeypatch.setattr(outcome_resolver, "query_one", lambda *a, **k: (54.0,))
+    row = _reclog_case('DIVX', 97, [(off, 100, 100.5, 99.5, 100) for off in range(1, 6)])
+    assert abs(row[1]) < 5
+
+
 def test_reclog_back_adjusted_row_ignores_raw_intraday_bars(monkeypatch):
     """AF-20261118-05 (2): intraday_ohlcv is never back-adjusted. After the rescale put entry on the
     daily bars' basis (~40), the 15-minute bars at the raw ~404 booked BHAGYANGR +549%."""

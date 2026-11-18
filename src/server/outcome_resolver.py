@@ -1309,9 +1309,7 @@ def _resolve_unified_batch(
                 exit_time = check_date
 
             # Incorporate dividend returns if any paid during the trade
-            if dividend_sum > 0:
-                dividend_pct = (dividend_sum / entry) * 100
-                gross += dividend_pct
+            gross += _dividend_pct(dividend_sum, entry, sym)
 
             return_pct = net_return_pct(gross)
             if not is_plausible_return(return_pct):
@@ -1531,6 +1529,18 @@ def expire_stale_pending_all(conn: ConnWrapper, dry_run: bool = False) -> int:
 BASIS_SEAM_MIN = 0.2
 
 
+def _dividend_pct(dividend_sum: float, entry: float, sym: str) -> float:
+    """Cash dividends paid in the window, as % of entry. corporate_actions also stores percent-of-face
+    figures as the amount (MEDICO 54.0 on a Rs 48 stock), so an amount above BASIS_SEAM_MIN of the
+    entry is not cash and is ignored (AF-20261118-05)."""
+    if not dividend_sum or dividend_sum <= 0 or not entry:
+        return 0.0
+    if dividend_sum / entry > BASIS_SEAM_MIN:
+        print(f"[OutcomeResolver] {sym}: dividend {dividend_sum} on entry {entry:.2f} is not a cash amount; ignored", file=sys.stderr)
+        return 0.0
+    return dividend_sum / entry * 100
+
+
 def resolve_recommendation_log(
     conn: ConnWrapper,
     horizon_days: int = 15,
@@ -1598,7 +1608,7 @@ def resolve_recommendation_log(
         # the adjustment's ex-date falls: put the levels on the bars' basis.
         basis = 1.0
         sb = conn.execute(
-            "SELECT close FROM stock_ohlcv WHERE symbol = ? AND date = ? AND COALESCE(is_suspect,0)=0",
+            "SELECT close FROM stock_ohlcv WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect,0)=0 ORDER BY date DESC LIMIT 1",
             (sym, signal_date_str)).fetchone()
         if sb and sb[0] and abs(float(sb[0]) / entry - 1) > BASIS_SEAM_MIN:
             basis = float(sb[0]) / entry
@@ -1676,9 +1686,7 @@ def resolve_recommendation_log(
                 bars, entry=entry, initial_stop=initial_stop, target=target, atr=atr)
             
             # Incorporate dividend returns if any paid during the trade
-            if dividend_sum > 0:
-                dividend_pct = (dividend_sum / entry) * 100
-                gross += dividend_pct
+            gross += _dividend_pct(dividend_sum, entry, sym)
                 
             return_pct = net_return_pct(gross)
             # A stop after a scale-out at target (or with a dividend) can net positive; only a
