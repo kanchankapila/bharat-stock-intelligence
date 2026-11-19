@@ -22,6 +22,7 @@ import { mapWithConcurrency } from './lib/async';
 import { withTransientRetry } from './pgClient';
 import { PG_TABLES_ANALYZED_SQL, isStatsReset } from './pgStatsRecovery';
 import { analyzeScreener } from './screenerSemantics';
+import { parsePythonJson } from './parsePythonJson';
 
 export type DataQualityStatus = 'pass' | 'warn' | 'fail' | 'error';
 
@@ -108,6 +109,31 @@ export function safeRatio(numerator: unknown, denominator: unknown): number {
   const d = Number(denominator) || 0;
   if (d <= 0) return 0;
   return n / d;
+}
+
+/**
+ * AF-20261117-17: fail when the frozen forward test's as-published Buy row reads NEGATIVE
+ * (forward_test_report.py: t_eff <= -2 over independent windows), warn on NO EDGE once the
+ * harness says the sample is reliable. LOW-DATA passes with the sample size in the detail.
+ */
+export function evaluateForwardTestDecay(raw: unknown): { status: DataQualityStatus; detail: string } {
+  let row: Record<string, unknown> | undefined;
+  try {
+    const report = parsePythonJson<{ blocks?: { forward?: { tiers?: Record<string, unknown> } } }>(raw as string);
+    const tier = report?.blocks?.forward?.tiers?.['5'];
+    row = Array.isArray(tier) ? tier.find((r: any) => r?.tier === 'published') : undefined;
+  } catch {
+    row = undefined;
+  }
+  if (!row) return { status: 'warn', detail: 'No as-published 5-session row in forward_test_report yet' };
+  const n = (v: unknown, dp: number) => (Number.isFinite(Number(v)) && v != null ? Number(v).toFixed(dp) : 'n/a');
+  const detail = `verdict ${row.verdict ?? 'n/a'}: net excess ${n(row.mean_excess_pct, 2)}%/5d after costs, ` +
+    `t_eff ${n(row.t_eff, 2)}, ${n(row.eff_dates, 1)} independent windows`;
+  if (row.verdict === 'NEGATIVE') {
+    return { status: 'fail', detail: `Published Buys are underperforming the universe — ${detail}. Review before trusting the ranker.` };
+  }
+  if (row.verdict === 'NO EDGE') return { status: 'warn', detail };
+  return { status: 'pass', detail };
 }
 
 function fmtDays(d: number | null): string {
@@ -2035,6 +2061,17 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (stale > 3) return { status: 'warn', detail: `forward_test_report snapshot is ${fmtDays(stale)} old` };
       return { status: 'pass', detail: `forward_test_report snapshot ${fmtDays(stale)} old` };
     },
+  },
+  {
+    id: 'forward-test-live-decay',
+    label: 'Published Buy calls vs the universe in the frozen forward test (5-session, after costs)',
+    category: 'scoring',
+    critical: false,
+    // AF-20261117-17 (owner decision 2026-11-18: monitor + alert, no automatic weight change).
+    // Relays forward_test_report.py's own verdict for the as-published row; re-deriving a
+    // threshold here would let this monitor and the harness disagree about what is evidence.
+    sql: `SELECT value FROM app_settings WHERE key = 'forward_test_report'`,
+    evaluate: (row) => evaluateForwardTestDecay(row?.value),
   },
   {
     id: 'fintrend-forward-test-freshness',

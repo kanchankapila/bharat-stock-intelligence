@@ -64,6 +64,8 @@ describe('getSectorsOverview', () => {
     expect(it.rrg.rsRatio).toBeCloseTo(100 + m1 * 1.5, 1);
     // OI-weighted: |-900| short covering outweighs 300 of long buildup; PCR 1.2 is irrelevant
     expect(it.derivatives.buildup).toBe('SHORT_COVERING');
+    // PCR 1.2 is a level, not a call: it used to read BULLISH.
+    expect(it.derivatives.sentiment).toBe('PCR_HIGH');
     expect(it.returns['1m']).toBeCloseTo(m1, 1);
     expect(it.returns['1y']).toBeCloseTo((Math.pow(1.001, 252) - 1) * 100, 1);
 
@@ -71,5 +73,6 @@ describe('getSectorsOverview', () => {
     expect(bank.rrg.rsRatio).toBeNull();
     expect(bank.rrg.quadrant).toBeNull();
     expect(bank.derivatives.buildup).toBeNull();
+    expect(bank.derivatives.sentiment).toBeNull();
   });
 });

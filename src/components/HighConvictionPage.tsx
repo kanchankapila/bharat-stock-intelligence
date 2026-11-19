@@ -45,6 +45,7 @@ interface CanonicalPick {
   valid_until?: string | null;
   planStatus?: string | null;
   upperCircuitLocked?: boolean;
+  planEvents?: string[];
   trade_reasoning?: string | null;
   engine_coverage_count?: number | null;
   days_to_next_results?: number | null;
@@ -264,6 +265,12 @@ function CanonicalPickCard({ pick, onSelectStock }: { pick: CanonicalPick; onSel
             Results in {pick.days_to_next_results}d
           </span>
         )}
+        {pick.planEvents?.map((e) => (
+          <span key={e} className="rounded-full border border-amber-300/25 bg-amber-300/[0.07] px-2 py-1 text-amber-300"
+            title="Scheduled before this plan expires; can gap the price past the stop or target.">
+            {e}
+          </span>
+        ))}
       </div>
     </button>
   );

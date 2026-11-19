@@ -5,6 +5,7 @@ import { runPython } from '../pythonRunner';
 import { cacheGet } from '../cacheService';
 import { latestComputedAt, invalidateLatestComputedAt } from '../latestComputedAt';
 import { planStatus } from '../planLifecycle';
+import { fetchPlanEvents } from '../planEvents';
 import { LATEST_COMPLETE_TS_DATE_SQL, ML_RANK_PCT_SQL, mlRankPctFor } from '../technicalSignalsDate';
 import { canonicalHorizon } from '../horizon';
 import { UNIFIED_RANKER_TIMEOUT_MS } from '../jobBudgets';
@@ -256,6 +257,14 @@ export const commandCenterRouter = router({
         for (const l of lockRows) locked.add(l.symbol);
       }
 
+      // AF-20261117-14 (owner decision: tag only): ex-dates and F&O expiry before valid_until.
+      // Display enrichment; a failed read must not drop the recommendations themselves.
+      const planEvents = await fetchPlanEvents(rows.map((r) => ({ symbol: r.symbol, validUntil: r.valid_until })))
+        .catch((e) => {
+          console.warn('[commandCenter] plan events unavailable:', (e as Error).message);
+          return new Map<string, string[]>();
+        });
+
       let liveCache: Record<string, any> = {};
       try {
         const cached = await cacheGet('live-stocks-bulk');
@@ -270,6 +279,7 @@ export const commandCenterRouter = router({
           changePercent: live?.changePercent ?? r.change_pct ?? null,
           planStatus: planStatus(r.valid_until),
           upperCircuitLocked: locked.has(r.symbol),
+          planEvents: planEvents.get(r.symbol) ?? [],
         };
       });
 
