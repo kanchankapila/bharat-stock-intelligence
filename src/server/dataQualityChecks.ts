@@ -116,6 +116,21 @@ export function safeRatio(numerator: unknown, denominator: unknown): number {
  * (forward_test_report.py: t_eff <= -2 over independent windows), warn on NO EDGE once the
  * harness says the sample is reliable. LOW-DATA passes with the sample size in the detail.
  */
+export function evaluateChallengerGate(raw: unknown, stale: number | null): { status: DataQualityStatus; detail: string } {
+  if (stale == null) return { status: 'warn', detail: 'No ranker_challenger_gate snapshot yet - run ranker_challenger_gate.py --persist (ml-daily-ops does this nightly)' };
+  if (stale > 6) return { status: 'fail', detail: `ranker_challenger_gate snapshot is ${fmtDays(stale)} old - challengers are no longer being graded` };
+  const g = parsePythonJson<{ status?: string; candidates?: string[]; arms?: Record<string, { verdict?: string }> }>(raw as string);
+  if (!g) return { status: 'warn', detail: 'ranker_challenger_gate snapshot is unreadable' };
+  if (g.status === 'INVALID') {
+    return { status: 'fail', detail: 'Gate INVALID: the shuffled-score control read as better than the published ranking - fix the test before trusting any arm' };
+  }
+  const verdicts = Object.entries(g.arms ?? {}).map(([a, r]) => `${a} ${r?.verdict ?? 'n/a'}`).join(', ');
+  if (g.candidates?.length) {
+    return { status: 'warn', detail: `Promotion candidate(s) awaiting an owner decision: ${g.candidates.join(', ')} (${verdicts})` };
+  }
+  return { status: 'pass', detail: verdicts || 'no arms graded' };
+}
+
 export function evaluateForwardTestDecay(raw: unknown): { status: DataQualityStatus; detail: string } {
   let row: Record<string, unknown> | undefined;
   try {
@@ -237,6 +252,11 @@ function makeFreshnessCheck(cfg: TableFreshnessConfig): DataQualityCheck {
 // for. One check per logically-distinct table; where several sibling fetchers share one table
 // (e.g. macro_asset_prices, fed by ~8 different scripts) there is one check, not one per script.
 const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
+  // AF-20261119: call_attribution.py re-derives every closed Buy window nightly in ml-daily-ops, so computed_at
+  // moves every trading day while the step runs.
+  { id: 'call-attribution-freshness', label: 'call_attribution (why each published Buy hit or missed)',
+    category: 'scoring', critical: false, table: 'call_attribution', dateColumn: 'computed_at',
+    nativeDateColumn: true, warnDays: 3, failDays: 6 },
   { id: 'nse-equity-master-freshness', label: 'nse_stocks official NSE equity/ETF master reconciliation',
     category: 'reference', critical: true, table: 'nse_stocks', dateColumn: 'exchange_master_updated_at',
     tradingDayAware: false, warnDays: 10, failDays: 16 },
@@ -2060,6 +2080,16 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (stale > 3) return { status: 'warn', detail: `forward_test_report snapshot is ${fmtDays(stale)} old` };
       return { status: 'pass', detail: `forward_test_report snapshot ${fmtDays(stale)} old` };
     },
+  },
+  {
+    id: 'ranker-challenger-gate',
+    label: 'Ranker champion/challenger gate (shadow arms vs the published ranking, pre-registered)',
+    category: 'scoring',
+    critical: false,
+    // AF-20261119: the gate proposes, never applies. A CANDIDATE is surfaced for an owner decision; INVALID
+    // means the negative control (shuffled scores) read as better than the ranking, so the test is broken.
+    sql: `SELECT "updatedAt" AS last_date, value FROM app_settings WHERE key = 'ranker_challenger_gate'`,
+    evaluate: (row, now) => evaluateChallengerGate(row?.value, tradingDaysStale(row?.last_date, now)),
   },
   {
     id: 'forward-test-live-decay',

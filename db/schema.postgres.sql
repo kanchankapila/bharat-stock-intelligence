@@ -242,6 +242,37 @@ CREATE TABLE IF NOT EXISTS "calibration_shadow" (
 );
 CREATE INDEX idx_calibration_shadow_fitted_at ON public.calibration_shadow USING btree (fitted_at);
 
+-- ── call_attribution ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "call_attribution" (
+  "symbol" TEXT NOT NULL,
+  "call_session" DATE NOT NULL,
+  "horizon" INTEGER NOT NULL,
+  "classification" TEXT,
+  "unified_score" DOUBLE PRECISION,
+  "sector" TEXT,
+  "regime" TEXT,
+  "adt" DOUBLE PRECISION,
+  "entry_open" DOUBLE PRECISION,
+  "fwd" DOUBLE PRECISION,
+  "excess" DOUBLE PRECISION,
+  "gross_excess" DOUBLE PRECISION,
+  "excess_2h" DOUBLE PRECISION,
+  "sector_rel" DOUBLE PRECISION,
+  "idio" DOUBLE PRECISION,
+  "mae" DOUBLE PRECISION,
+  "mfe" DOUBLE PRECISION,
+  "stop_dist" DOUBLE PRECISION,
+  "stop_hit" BOOLEAN,
+  "target_hit" BOOLEAN,
+  "target_after_stop" BOOLEAN,
+  "unfillable" BOOLEAN,
+  "has_exdate" BOOLEAN,
+  "cause" TEXT NOT NULL,
+  "computed_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY ("symbol", "call_session", "horizon")
+);
+CREATE INDEX idx_call_attribution_session ON public.call_attribution USING btree (call_session DESC, cause);
+
 -- ── company_profiles ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "company_profiles" (
   "symbol" TEXT NOT NULL PRIMARY KEY,

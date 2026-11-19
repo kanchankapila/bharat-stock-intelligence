@@ -1,8 +1,8 @@
 # Bharat Stock Intelligence — Claude Instructions
 
 Real-time Indian stock market (NSE/BSE) research and decision-support platform. Express + tRPC
-backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, 329 non-test Python modules
-in `src/server/` (90 `*_fetcher.py` plus ML engines, jobs and helpers; 852 `.py` files including tests).
+backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, 331 non-test Python modules
+in `src/server/` (90 `*_fetcher.py` plus ML engines, jobs and helpers; 856 `.py` files including tests).
 
 What the product is for and the contracts a change must preserve: `CONTEXT.md`. Skills, commands,
 subagents and hooks: `AGENTS.md`. Services, layout, hook enforcement and full architecture notes:

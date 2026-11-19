@@ -97,7 +97,8 @@ def test_end_to_end_on_a_throwaway_schema_and_persist_writes_one_row():
     since = str(sess[-40].date())
     out = S.build_scorecard(con, since)
     arms = {r["arm"] for r in out["rows"]}
-    assert arms == {"published", "reblend", "reblend_vol_veto", "reblend_no_ml", "random_control", "reblend_no_sector_slot"}
+    assert arms == {"published", "reblend", "reblend_vol_veto", "reblend_no_ml", "random_control", "reblend_no_sector_slot",
+                    "reblend_learned"}
     assert out["no_sector_slot"] == {"sessions_covered": 40, "sessions_excluded": 0, "excluded": []}
     assert {r["floor"] for r in out["rows"]} == {1e8, 5e8} or {r["floor"] for r in out["rows"]} == {1e8}
     pub = [r for r in out["rows"] if r["tier"] == "published"]
