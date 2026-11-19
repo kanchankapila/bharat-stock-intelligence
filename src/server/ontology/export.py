@@ -1079,7 +1079,7 @@ def _md_header(onto: Ontology) -> List[str]:
         "```bash",
         "cd src/server",
         "python -m ontology verify                    # integrity of the layer itself",
-        "python -m ontology export --out ../docs/ontology",
+        "python -m ontology export                    # writes <repo>/docs/ontology",
         "python -m ontology coverage --fresh          # drift vs the live database",
         "python -m ontology ask \"delivery percentage\"  # lexical concept search",
         "python -m ontology context \"explain a swing signal for INFY\"",

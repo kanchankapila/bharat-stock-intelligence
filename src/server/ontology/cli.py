@@ -5,7 +5,7 @@ Run from `src/server` (or with `PYTHONPATH=src/server`):
 
     python -m ontology verify                    integrity of the layer itself
     python -m ontology build                     verify + export + store + contracts + identity
-    python -m ontology export --out ../docs/ontology
+    python -m ontology export                    write docs/ontology/* (repo root)
     python -m ontology coverage --fresh          drift and freshness vs the live database
     python -m ontology store                     materialize kg_* tables and views
     python -m ontology reset                     drop every kg_* object (our own, always)
@@ -29,7 +29,7 @@ from .model import Ontology
 from semantic_contracts import sync_ontology_contracts
 from semantic_identity import sync_identity
 
-DEFAULT_OUT = os.path.join("..", "docs", "ontology")
+DEFAULT_OUT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "docs", "ontology"))
 
 
 def _print(text: str) -> None:

@@ -62,7 +62,7 @@ flowchart LR
     direction TB
     OutcomeRecord["Outcome record"]
     EdgeReading["Edge reading<br/>factor_edge_history"]
-    SignalOutcome["Signal outcome<br/>signal_outcomes, unified_signal_outcomes"]
+    SignalOutcome["Signal outcome<br/>call_attribution, signal_outcomes, unifi..."]
     SignalExcursion["Signal excursion<br/>signal_excursions"]
     ScreenerOutcome["Screener outcome<br/>live_screener_outcomes"]
     DecisionOutcome["Decision outcome<br/>market_decision_outcome"]
@@ -70,6 +70,7 @@ flowchart LR
   subgraph governance["Provenance, quality & governance"]
     direction TB
     GovernanceRecord["Governance record"]
+    TechnicalSignalObservation["Technical signal observation<br/>technical_signal_observations"]
     Endpoint["Data endpoint<br/>market_endpoint_registry, url_endpoints"]
     JobRun["Job run<br/>job_heartbeat"]
     DataQualityCheck["Data-quality check<br/>data_quality_results"]
@@ -111,6 +112,7 @@ flowchart LR
   ScreenerAppearance -.->|subclass| CandidateRecord
   ScreenerOutcome -.->|subclass| OutcomeRecord
   EventTrigger -.->|subclass| CandidateRecord
+  TechnicalSignalObservation -.->|subclass| GovernanceRecord
   Endpoint -.->|subclass| GovernanceRecord
   JobRun -.->|subclass| GovernanceRecord
   DataQualityCheck -.->|subclass| GovernanceRecord
@@ -188,9 +190,12 @@ flowchart LR
   tbl_intraday_regime_history["intraday_regime_history"]:::tbl -.-> RegimeState
   tbl_sector_rrg_history["sector_rrg_history"]:::tbl -.-> SectorRotationPoint
   tbl_technical_signals["technical_signals"]:::tbl -.-> TechnicalSignal
+  tbl_technical_signal_observations["technical_signal_observations"]:::tbl -.-> TechnicalSignalObservation
   tbl_feature_store["feature_store"]:::tbl -.-> FeatureVector
   tbl_unified_recommendations["unified_recommendations"]:::tbl -.-> Recommendation
   tbl_unified_recommendations_history["unified_recommendations_history"]:::tbl -.-> Recommendation
+  tbl_recommendation_log["recommendation_log"]:::tbl -.-> Recommendation
+  tbl_call_attribution["call_attribution"]:::tbl -.-> SignalOutcome
   tbl_intraday_recommendations["intraday_recommendations"]:::tbl -.-> Recommendation
   tbl_confluence_signals["confluence_signals"]:::tbl -.-> EngineScore
   tbl_engine_composite_scores["engine_composite_scores"]:::tbl -.-> EngineScore

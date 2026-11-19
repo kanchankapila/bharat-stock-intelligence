@@ -2029,7 +2029,7 @@ _:FeatureVector_vwap_prop     sh:path bsip:vwap ;
 
 _:FeatureVector_rsi_prop     sh:path bsip:rsi ;
     sh:name "RSI (14)" ;
-    sh:description "Wilder RSI. Graded on this platform as a mean-reversion input with NEGATIVE rank-IC at 5 days — a finding, not a defect." ;
+    sh:description "14-period RSI. TWO definitions share this name (AF-20261119-15): rows written by the nightly `backfill_technical_features.py --full-today` grid use a simple mean of the last 14 gains/losses (Cutler RSI), while the live scanner and alerts read the vendor's Wilder-smoothed RSI; 70/30 thresholds do not mean the same thing on both. Graded on this platform as a mean-reversion input with NEGATIVE rank-IC at 5 days." ;
     sh:datatype xsd:decimal ;
     sh:order "11"^^xsd:integer ;
     bsi:unit "index_points" .
@@ -2079,7 +2079,7 @@ _:TechnicalSignal_signal_score_prop     sh:path bsip:signal_score ;
 
 _:TechnicalSignal_rsi_prop     sh:path bsip:rsi ;
     sh:name "RSI (14)" ;
-    sh:description "Wilder RSI. Graded on this platform as a mean-reversion input with NEGATIVE rank-IC at 5 days — a finding, not a defect." ;
+    sh:description "14-period RSI. TWO definitions share this name (AF-20261119-15): rows written by the nightly `backfill_technical_features.py --full-today` grid use a simple mean of the last 14 gains/losses (Cutler RSI), while the live scanner and alerts read the vendor's Wilder-smoothed RSI; 70/30 thresholds do not mean the same thing on both. Graded on this platform as a mean-reversion input with NEGATIVE rank-IC at 5 days." ;
     sh:datatype xsd:decimal ;
     sh:order "4"^^xsd:integer ;
     bsi:unit "index_points" .
@@ -2363,7 +2363,7 @@ bsi:EngineScoreShape     rdf:type sh:NodeShape ;
     sh:name "Engine score" ;
     sh:description "A single engine's, or the multi-engine composite's, score for a symbol and date with its engine-coverage count." ;
     bsi:grain "(symbol, date)" ;
-    sh:property _:EngineScore_symbol_prop, _:EngineScore_computed_at_prop, _:EngineScore_confluence_score_prop, _:EngineScore_conviction_level_prop, _:EngineScore_active_screener_count_prop, _:EngineScore_bullish_screener_count_prop, _:EngineScore_bearish_screener_count_prop, _:EngineScore_screener_ids_json_prop, _:EngineScore_screener_names_json_prop, _:EngineScore_screener_weights_json_prop, _:EngineScore_fundamental_score_prop, _:EngineScore_ml_breakout_probability_prop, _:EngineScore_ml_trend_probability_prop, _:EngineScore_entry_zone_low_prop, _:EngineScore_entry_zone_high_prop, _:EngineScore_stop_loss_prop, _:EngineScore_target_1_prop, _:EngineScore_target_2_prop, _:EngineScore_target_3_prop, _:EngineScore_risk_reward_prop, _:EngineScore_ai_insight_prop, _:EngineScore_trade_reasoning_prop, _:EngineScore_sector_prop, _:EngineScore_market_cap_prop, _:EngineScore_current_price_prop, _:EngineScore_current_volume_prop, _:EngineScore_rsi_prop, _:EngineScore_atr_prop, _:EngineScore_expiry_prop, _:EngineScore_date_prop, _:EngineScore_composite_prop, _:EngineScore_engine_coverage_count_prop, _:EngineScore_timeframe_prop, _:EngineScore_win_probability_prop, _:EngineScore_classification_prop, _:EngineScore_last_updated_prop .
+    sh:property _:EngineScore_symbol_prop, _:EngineScore_computed_at_prop, _:EngineScore_confluence_score_prop, _:EngineScore_conviction_level_prop, _:EngineScore_active_screener_count_prop, _:EngineScore_bullish_screener_count_prop, _:EngineScore_bearish_screener_count_prop, _:EngineScore_screener_ids_json_prop, _:EngineScore_screener_names_json_prop, _:EngineScore_screener_weights_json_prop, _:EngineScore_fundamental_score_prop, _:EngineScore_ml_breakout_probability_prop, _:EngineScore_entry_zone_low_prop, _:EngineScore_entry_zone_high_prop, _:EngineScore_stop_loss_prop, _:EngineScore_target_1_prop, _:EngineScore_target_2_prop, _:EngineScore_target_3_prop, _:EngineScore_risk_reward_prop, _:EngineScore_trade_reasoning_prop, _:EngineScore_sector_prop, _:EngineScore_market_cap_prop, _:EngineScore_current_price_prop, _:EngineScore_current_volume_prop, _:EngineScore_rsi_prop, _:EngineScore_atr_prop, _:EngineScore_expiry_prop, _:EngineScore_date_prop, _:EngineScore_composite_prop, _:EngineScore_engine_coverage_count_prop, _:EngineScore_timeframe_prop, _:EngineScore_win_probability_prop, _:EngineScore_classification_prop, _:EngineScore_last_updated_prop .
 
 _:EngineScore_symbol_prop     sh:path bsip:symbol ;
     sh:name "Symbol" ;
@@ -2455,126 +2455,113 @@ _:EngineScore_ml_breakout_probability_prop     sh:path bsip:ml_breakout_probabil
     sh:order "12"^^xsd:integer ;
     bsi:unit "probability" .
 
-_:EngineScore_ml_trend_probability_prop     sh:path bsip:ml_trend_probability ;
-    sh:name "ML trend probability" ;
-    sh:description "Model probability of trend continuation. A model output — not a feature." ;
-    sh:datatype xsd:decimal ;
-    sh:order "13"^^xsd:integer ;
-    bsi:unit "probability" .
-
 _:EngineScore_entry_zone_low_prop     sh:path bsip:entry_zone_low ;
     sh:name "Entry zone low" ;
     sh:description "Lower bound of the advised entry zone." ;
     sh:datatype xsd:decimal ;
-    sh:order "14"^^xsd:integer ;
+    sh:order "13"^^xsd:integer ;
     bsi:unit "per_share_INR" .
 
 _:EngineScore_entry_zone_high_prop     sh:path bsip:entry_zone_high ;
     sh:name "Entry zone high" ;
     sh:description "Upper bound of the advised entry zone." ;
     sh:datatype xsd:decimal ;
-    sh:order "15"^^xsd:integer ;
+    sh:order "14"^^xsd:integer ;
     bsi:unit "per_share_INR" .
 
 _:EngineScore_stop_loss_prop     sh:path bsip:stop_loss ;
     sh:name "Stop loss" ;
     sh:description "Advised protective stop." ;
     sh:datatype xsd:decimal ;
-    sh:order "16"^^xsd:integer ;
+    sh:order "15"^^xsd:integer ;
     bsi:unit "per_share_INR" .
 
 _:EngineScore_target_1_prop     sh:path bsip:target_1 ;
     sh:name "Target 1" ;
     sh:description "First advised target." ;
     sh:datatype xsd:decimal ;
-    sh:order "17"^^xsd:integer ;
+    sh:order "16"^^xsd:integer ;
     bsi:unit "per_share_INR" .
 
 _:EngineScore_target_2_prop     sh:path bsip:target_2 ;
     sh:name "Target 2" ;
     sh:description "Second advised target." ;
     sh:datatype xsd:decimal ;
-    sh:order "18"^^xsd:integer ;
+    sh:order "17"^^xsd:integer ;
     bsi:unit "per_share_INR" .
 
 _:EngineScore_target_3_prop     sh:path bsip:target_3 ;
     sh:name "Target 3" ;
     sh:description "Third advised target." ;
     sh:datatype xsd:decimal ;
-    sh:order "19"^^xsd:integer ;
+    sh:order "18"^^xsd:integer ;
     bsi:unit "per_share_INR" .
 
 _:EngineScore_risk_reward_prop     sh:path bsip:risk_reward ;
     sh:name "Risk/reward" ;
     sh:description "Target distance over stop distance on a served recommendation." ;
     sh:datatype xsd:decimal ;
-    sh:order "20"^^xsd:integer ;
+    sh:order "19"^^xsd:integer ;
     bsi:unit "ratio" .
-
-_:EngineScore_ai_insight_prop     sh:path bsip:ai_insight ;
-    sh:name "AI insight" ;
-    sh:description "Generated commentary attached to a signal." ;
-    sh:datatype xsd:string ;
-    sh:order "21"^^xsd:integer .
 
 _:EngineScore_trade_reasoning_prop     sh:path bsip:trade_reasoning ;
     sh:name "Trade reasoning" ;
     sh:description "Why the platform served this trade. Generated text — an explanation, not evidence." ;
     sh:datatype xsd:string ;
-    sh:order "22"^^xsd:integer .
+    sh:order "20"^^xsd:integer .
 
 _:EngineScore_sector_prop     sh:path bsip:sector ;
     sh:name "Sector" ;
     sh:description "Industry grouping label as supplied by the writing fetcher. No canonical table backs it, so a cross-table sector join can silently lose names." ;
     sh:datatype xsd:string ;
-    sh:order "23"^^xsd:integer .
+    sh:order "21"^^xsd:integer .
 
 _:EngineScore_market_cap_prop     sh:path bsip:market_cap ;
     sh:name "Market capitalisation" ;
     sh:description "Vendor-computed market cap. The stored unit is NOT declared anywhere in the schema — confirm it before aggregating across tables." ;
     sh:datatype xsd:decimal ;
-    sh:order "24"^^xsd:integer ;
+    sh:order "22"^^xsd:integer ;
     bsi:unit "INR_or_crore_UNDECLARED" .
 
 _:EngineScore_current_price_prop     sh:path bsip:current_price ;
     sh:name "Current price" ;
     sh:description "Snapshot price at write time." ;
     sh:datatype xsd:decimal ;
-    sh:order "25"^^xsd:integer ;
+    sh:order "23"^^xsd:integer ;
     bsi:unit "per_share_INR" .
 
 _:EngineScore_current_volume_prop     sh:path bsip:current_volume ;
     sh:name "Current volume" ;
     sh:description "Snapshot volume at write time." ;
     sh:datatype xsd:decimal ;
-    sh:order "26"^^xsd:integer .
+    sh:order "24"^^xsd:integer .
 
 _:EngineScore_rsi_prop     sh:path bsip:rsi ;
     sh:name "RSI (14)" ;
-    sh:description "Wilder RSI. Graded on this platform as a mean-reversion input with NEGATIVE rank-IC at 5 days — a finding, not a defect." ;
+    sh:description "14-period RSI. TWO definitions share this name (AF-20261119-15): rows written by the nightly `backfill_technical_features.py --full-today` grid use a simple mean of the last 14 gains/losses (Cutler RSI), while the live scanner and alerts read the vendor's Wilder-smoothed RSI; 70/30 thresholds do not mean the same thing on both. Graded on this platform as a mean-reversion input with NEGATIVE rank-IC at 5 days." ;
     sh:datatype xsd:decimal ;
-    sh:order "27"^^xsd:integer ;
+    sh:order "25"^^xsd:integer ;
     bsi:unit "index_points" .
 
 _:EngineScore_atr_prop     sh:path bsip:atr ;
     sh:name "ATR" ;
     sh:description "Average true range, used for stop placement." ;
     sh:datatype xsd:decimal ;
-    sh:order "28"^^xsd:integer ;
+    sh:order "26"^^xsd:integer ;
     bsi:unit "per_share_INR" .
 
 _:EngineScore_expiry_prop     sh:path bsip:expiry ;
     sh:name "Expiry" ;
     sh:description "Derivative contract expiry. Several expiries coexist per symbol per date." ;
     sh:datatype xsd:date ;
-    sh:order "29"^^xsd:integer ;
+    sh:order "27"^^xsd:integer ;
     bsi:unit "calendar_day" .
 
 _:EngineScore_date_prop     sh:path bsip:date ;
     sh:name "Date" ;
     sh:description "Trading-session date. Day cuts are Asia/Kolkata: a date column is a session, not a midnight-to-midnight instant." ;
     sh:datatype xsd:date ;
-    sh:order "30"^^xsd:integer ;
+    sh:order "28"^^xsd:integer ;
     sh:minCount "1"^^xsd:integer ;
     bsi:unit "calendar_day" .
 
@@ -2582,21 +2569,21 @@ _:EngineScore_composite_prop     sh:path bsip:composite ;
     sh:name "Composite" ;
     sh:description "Multi-engine composite stored per symbol and date." ;
     sh:datatype xsd:decimal ;
-    sh:order "31"^^xsd:integer ;
+    sh:order "29"^^xsd:integer ;
     bsi:unit "score_0_100" .
 
 _:EngineScore_engine_coverage_count_prop     sh:path bsip:engine_coverage_count ;
     sh:name "Engine coverage" ;
     sh:description "How many engines produced a score for this row — a coverage multiplier rather than a feature of the market." ;
     sh:datatype xsd:integer ;
-    sh:order "32"^^xsd:integer ;
+    sh:order "30"^^xsd:integer ;
     bsi:unit "count" .
 
 _:EngineScore_timeframe_prop     sh:path bsip:timeframe ;
     sh:name "Timeframe" ;
     sh:description "Horizon a signal or recommendation is expressed on." ;
     sh:datatype xsd:string ;
-    sh:order "33"^^xsd:integer ;
+    sh:order "31"^^xsd:integer ;
     bsi:vocabulary bsiv:timeframe ;
     sh:in _:EngineScore_timeframe_in0 .
 
@@ -2616,14 +2603,14 @@ _:EngineScore_win_probability_prop     sh:path bsip:win_probability ;
     sh:name "Win probability" ;
     sh:description "Raw model probability, isotonic-banded downstream. Forbidden as a feature: it is a model output, so feeding it back leaks the model into its own inputs." ;
     sh:datatype xsd:decimal ;
-    sh:order "34"^^xsd:integer ;
+    sh:order "32"^^xsd:integer ;
     bsi:unit "probability" .
 
 _:EngineScore_classification_prop     sh:path bsip:classification ;
     sh:name "Classification" ;
     sh:description "Human-readable action label." ;
     sh:datatype xsd:string ;
-    sh:order "35"^^xsd:integer ;
+    sh:order "33"^^xsd:integer ;
     bsi:vocabulary bsiv:recommendation_classification ;
     sh:in _:EngineScore_classification_in0 .
 
@@ -2646,14 +2633,14 @@ _:EngineScore_last_updated_prop     sh:path bsip:last_updated ;
     sh:name "Last updated" ;
     sh:description "Writer-supplied modification stamp. Trust it only when the writer is known to set it on every write." ;
     sh:datatype xsd:dateTime ;
-    sh:order "36"^^xsd:integer .
+    sh:order "34"^^xsd:integer .
 
 bsi:RecommendationShape     rdf:type sh:NodeShape ;
     sh:targetClass bsi:Recommendation ;
     sh:name "Recommendation" ;
     sh:description "The served trade: composite score, conviction bucket, action label, entry zone, stop, targets, risk/reward and position size for one symbol, date and timeframe." ;
     bsi:grain "(symbol, computed_at, timeframe)" ;
-    sh:property _:Recommendation_symbol_prop, _:Recommendation_computed_at_prop, _:Recommendation_last_updated_prop, _:Recommendation_regime_prop, _:Recommendation_unified_score_prop, _:Recommendation_conviction_level_prop, _:Recommendation_screener_stock_score_prop, _:Recommendation_ml_score_prop, _:Recommendation_confluence_score_prop, _:Recommendation_technical_score_prop, _:Recommendation_dl_score_prop, _:Recommendation_cs_score_prop, _:Recommendation_breakout_score_prop, _:Recommendation_smart_money_score_prop, _:Recommendation_fundamental_score_prop, _:Recommendation_bullish_screener_count_prop, _:Recommendation_bearish_screener_count_prop, _:Recommendation_screener_names_json_prop, _:Recommendation_entry_zone_low_prop, _:Recommendation_entry_zone_high_prop, _:Recommendation_stop_loss_prop, _:Recommendation_target_1_prop, _:Recommendation_target_2_prop, _:Recommendation_target_3_prop, _:Recommendation_risk_reward_prop, _:Recommendation_timeframe_prop, _:Recommendation_sector_prop, _:Recommendation_trade_reasoning_prop, _:Recommendation_classification_prop, _:Recommendation_position_size_pct_prop, _:Recommendation_engine_coverage_count_prop, _:Recommendation_win_probability_prop, _:Recommendation_intraday_regime_prop, _:Recommendation_cmp_prop, _:Recommendation_entry_price_prop, _:Recommendation_sentiment_score_prop .
+    sh:property _:Recommendation_symbol_prop, _:Recommendation_computed_at_prop, _:Recommendation_last_updated_prop, _:Recommendation_regime_prop, _:Recommendation_unified_score_prop, _:Recommendation_conviction_level_prop, _:Recommendation_screener_stock_score_prop, _:Recommendation_ml_score_prop, _:Recommendation_confluence_score_prop, _:Recommendation_technical_score_prop, _:Recommendation_dl_score_prop, _:Recommendation_cs_score_prop, _:Recommendation_breakout_score_prop, _:Recommendation_smart_money_score_prop, _:Recommendation_fundamental_score_prop, _:Recommendation_bullish_screener_count_prop, _:Recommendation_bearish_screener_count_prop, _:Recommendation_screener_names_json_prop, _:Recommendation_entry_zone_low_prop, _:Recommendation_entry_zone_high_prop, _:Recommendation_stop_loss_prop, _:Recommendation_target_1_prop, _:Recommendation_target_2_prop, _:Recommendation_target_3_prop, _:Recommendation_risk_reward_prop, _:Recommendation_timeframe_prop, _:Recommendation_sector_prop, _:Recommendation_trade_reasoning_prop, _:Recommendation_classification_prop, _:Recommendation_position_size_pct_prop, _:Recommendation_engine_coverage_count_prop, _:Recommendation_win_probability_prop, _:Recommendation_signal_date_prop, _:Recommendation_source_prop, _:Recommendation_entry_price_prop, _:Recommendation_trailing_stop_prop, _:Recommendation_outcome_prop, _:Recommendation_return_pct_prop, _:Recommendation_intraday_regime_prop, _:Recommendation_cmp_prop, _:Recommendation_sentiment_score_prop .
 
 _:Recommendation_symbol_prop     sh:path bsip:symbol ;
     sh:name "Symbol" ;
@@ -2931,20 +2918,18 @@ _:Recommendation_win_probability_prop     sh:path bsip:win_probability ;
     sh:order "32"^^xsd:integer ;
     bsi:unit "probability" .
 
-_:Recommendation_intraday_regime_prop     sh:path bsip:intraday_regime ;
-    sh:name "Intraday regime" ;
-    sh:description "Within-session risk state." ;
-    sh:datatype xsd:string ;
+_:Recommendation_signal_date_prop     sh:path bsip:signal_date ;
+    sh:name "Signal date" ;
+    sh:description "Session a signal was generated for. Entry happens at the NEXT session's open — the most common off-by-one in this repo." ;
+    sh:datatype xsd:date ;
     sh:order "33"^^xsd:integer ;
-    bsi:vocabulary bsiv:intraday_regime ;
-    bsi:openEndedVocabulary "intraday_recommendations.intraday_regime" .
+    bsi:unit "calendar_day" .
 
-_:Recommendation_cmp_prop     sh:path bsip:cmp ;
-    sh:name "Current market price" ;
-    sh:description "Last traded price at the moment the row was written — a point-in-time snapshot, not a session close. Do not substitute it for `close`." ;
-    sh:datatype xsd:decimal ;
-    sh:order "34"^^xsd:integer ;
-    bsi:unit "per_share_INR" .
+_:Recommendation_source_prop     sh:path bsip:source ;
+    sh:name "Source" ;
+    sh:description "Which provider or fetcher wrote the row. Provenance is per-row on this platform, so this is the first column to check before trusting a value." ;
+    sh:datatype xsd:string ;
+    sh:order "34"^^xsd:integer .
 
 _:Recommendation_entry_price_prop     sh:path bsip:entry_price ;
     sh:name "Entry price" ;
@@ -2953,11 +2938,63 @@ _:Recommendation_entry_price_prop     sh:path bsip:entry_price ;
     sh:order "35"^^xsd:integer ;
     bsi:unit "per_share_INR" .
 
+_:Recommendation_trailing_stop_prop     sh:path bsip:trailing_stop ;
+    sh:name "Trailing stop" ;
+    sh:description "Chandelier stop ratcheted up after publication from the highest high since entry (`trailingStopUpdater.ts`). Overwritten in place with the LATEST level, so a historical read carries later prices; the published stop stays in `stop_loss`." ;
+    sh:datatype xsd:decimal ;
+    sh:order "36"^^xsd:integer ;
+    bsi:unit "per_share_INR" .
+
+_:Recommendation_outcome_prop     sh:path bsip:outcome ;
+    sh:name "Outcome" ;
+    sh:description "Resolved result of a signal under its recorded labelling rule — the platform's primary supervised target." ;
+    sh:datatype xsd:string ;
+    sh:order "37"^^xsd:integer ;
+    bsi:vocabulary bsiv:outcome ;
+    sh:in _:Recommendation_outcome_in0 .
+
+_:Recommendation_outcome_in0     rdf:first "WIN" ;
+    rdf:rest _:Recommendation_outcome_in1 .
+
+_:Recommendation_outcome_in1     rdf:first "LOSS" ;
+    rdf:rest _:Recommendation_outcome_in2 .
+
+_:Recommendation_outcome_in2     rdf:first "STOP_LOSS" ;
+    rdf:rest _:Recommendation_outcome_in3 .
+
+_:Recommendation_outcome_in3     rdf:first "NEUTRAL" ;
+    rdf:rest _:Recommendation_outcome_in4 .
+
+_:Recommendation_outcome_in4     rdf:first "PENDING" ;
+    rdf:rest rdf:nil .
+
+_:Recommendation_return_pct_prop     sh:path bsip:return_pct ;
+    sh:name "Realised return" ;
+    sh:description "Terminal return over the horizon. Outcome-side: using it as a feature is a look-ahead bug." ;
+    sh:datatype xsd:decimal ;
+    sh:order "38"^^xsd:integer ;
+    bsi:unit "percent" .
+
+_:Recommendation_intraday_regime_prop     sh:path bsip:intraday_regime ;
+    sh:name "Intraday regime" ;
+    sh:description "Within-session risk state." ;
+    sh:datatype xsd:string ;
+    sh:order "39"^^xsd:integer ;
+    bsi:vocabulary bsiv:intraday_regime ;
+    bsi:openEndedVocabulary "intraday_recommendations.intraday_regime" .
+
+_:Recommendation_cmp_prop     sh:path bsip:cmp ;
+    sh:name "Current market price" ;
+    sh:description "Last traded price at the moment the row was written — a point-in-time snapshot, not a session close. Do not substitute it for `close`." ;
+    sh:datatype xsd:decimal ;
+    sh:order "40"^^xsd:integer ;
+    bsi:unit "per_share_INR" .
+
 _:Recommendation_sentiment_score_prop     sh:path bsip:sentiment_score ;
     sh:name "Vendor sentiment score" ;
     sh:description "Vendor's numeric sentiment." ;
     sh:datatype xsd:decimal ;
-    sh:order "36"^^xsd:integer ;
+    sh:order "41"^^xsd:integer ;
     bsi:unit "score_minus1_1" .
 
 bsi:ModelArtifactShape     rdf:type sh:NodeShape ;
@@ -3120,7 +3157,7 @@ bsi:SignalOutcomeShape     rdf:type sh:NodeShape ;
     sh:name "Signal outcome" ;
     sh:description "The resolved result of a signal: entry, exit, horizon, return and the outcome label, under one of two possibly-different labelling rules." ;
     bsi:grain "(symbol, signal_date, horizon_days, signal_source)" ;
-    sh:property _:SignalOutcome_symbol_prop, _:SignalOutcome_signal_date_prop, _:SignalOutcome_horizon_days_prop, _:SignalOutcome_entry_price_prop, _:SignalOutcome_check_date_prop, _:SignalOutcome_exit_price_prop, _:SignalOutcome_return_pct_prop, _:SignalOutcome_outcome_prop, _:SignalOutcome_signal_score_prop, _:SignalOutcome_signals_json_prop, _:SignalOutcome_computed_at_prop, _:SignalOutcome_max_return_pct_prop, _:SignalOutcome_label_definition_prop, _:SignalOutcome_is_suspect_prop, _:SignalOutcome_signal_source_prop, _:SignalOutcome_id_prop, _:SignalOutcome_exit_reason_prop .
+    sh:property _:SignalOutcome_symbol_prop, _:SignalOutcome_signal_date_prop, _:SignalOutcome_horizon_days_prop, _:SignalOutcome_classification_prop, _:SignalOutcome_unified_score_prop, _:SignalOutcome_sector_prop, _:SignalOutcome_regime_prop, _:SignalOutcome_return_pct_prop, _:SignalOutcome_excess_return_prop, _:SignalOutcome_mae_pct_prop, _:SignalOutcome_mfe_pct_prop, _:SignalOutcome_attribution_cause_prop, _:SignalOutcome_computed_at_prop, _:SignalOutcome_entry_price_prop, _:SignalOutcome_check_date_prop, _:SignalOutcome_exit_price_prop, _:SignalOutcome_outcome_prop, _:SignalOutcome_signal_score_prop, _:SignalOutcome_signals_json_prop, _:SignalOutcome_max_return_pct_prop, _:SignalOutcome_label_definition_prop, _:SignalOutcome_is_suspect_prop, _:SignalOutcome_signal_source_prop, _:SignalOutcome_id_prop, _:SignalOutcome_exit_reason_prop .
 
 _:SignalOutcome_symbol_prop     sh:path bsip:symbol ;
     sh:name "Symbol" ;
@@ -3145,39 +3182,157 @@ _:SignalOutcome_horizon_days_prop     sh:path bsip:horizon_days ;
     sh:minCount "1"^^xsd:integer ;
     bsi:unit "count" .
 
+_:SignalOutcome_classification_prop     sh:path bsip:classification ;
+    sh:name "Classification" ;
+    sh:description "Human-readable action label." ;
+    sh:datatype xsd:string ;
+    sh:order "4"^^xsd:integer ;
+    bsi:vocabulary bsiv:recommendation_classification ;
+    sh:in _:SignalOutcome_classification_in0 .
+
+_:SignalOutcome_classification_in0     rdf:first "Strong Buy" ;
+    rdf:rest _:SignalOutcome_classification_in1 .
+
+_:SignalOutcome_classification_in1     rdf:first "Buy" ;
+    rdf:rest _:SignalOutcome_classification_in2 .
+
+_:SignalOutcome_classification_in2     rdf:first "Hold" ;
+    rdf:rest _:SignalOutcome_classification_in3 .
+
+_:SignalOutcome_classification_in3     rdf:first "Sell" ;
+    rdf:rest _:SignalOutcome_classification_in4 .
+
+_:SignalOutcome_classification_in4     rdf:first "Strong Sell" ;
+    rdf:rest rdf:nil .
+
+_:SignalOutcome_unified_score_prop     sh:path bsip:unified_score ;
+    sh:name "Unified score" ;
+    sh:description "The composite the unified ranker serves. An OUTPUT of the platform, so it is a legitimate feature only for a model predicting something else." ;
+    sh:datatype xsd:decimal ;
+    sh:order "5"^^xsd:integer ;
+    bsi:unit "score_0_100" .
+
+_:SignalOutcome_sector_prop     sh:path bsip:sector ;
+    sh:name "Sector" ;
+    sh:description "Industry grouping label as supplied by the writing fetcher. No canonical table backs it, so a cross-table sector join can silently lose names." ;
+    sh:datatype xsd:string ;
+    sh:order "6"^^xsd:integer .
+
+_:SignalOutcome_regime_prop     sh:path bsip:regime ;
+    sh:name "Market regime" ;
+    sh:description "Macro regime label applied to the row's date." ;
+    sh:datatype xsd:string ;
+    sh:order "7"^^xsd:integer ;
+    bsi:vocabulary bsiv:market_regime ;
+    sh:in _:SignalOutcome_regime_in0 .
+
+_:SignalOutcome_regime_in0     rdf:first "BULL" ;
+    rdf:rest _:SignalOutcome_regime_in1 .
+
+_:SignalOutcome_regime_in1     rdf:first "BEAR" ;
+    rdf:rest _:SignalOutcome_regime_in2 .
+
+_:SignalOutcome_regime_in2     rdf:first "SIDEWAYS" ;
+    rdf:rest _:SignalOutcome_regime_in3 .
+
+_:SignalOutcome_regime_in3     rdf:first "HIGH_VOL" ;
+    rdf:rest _:SignalOutcome_regime_in4 .
+
+_:SignalOutcome_regime_in4     rdf:first "CRASH" ;
+    rdf:rest rdf:nil .
+
+_:SignalOutcome_return_pct_prop     sh:path bsip:return_pct ;
+    sh:name "Realised return" ;
+    sh:description "Terminal return over the horizon. Outcome-side: using it as a feature is a look-ahead bug." ;
+    sh:datatype xsd:decimal ;
+    sh:order "8"^^xsd:integer ;
+    bsi:unit "percent" .
+
+_:SignalOutcome_excess_return_prop     sh:path bsip:excess_return ;
+    sh:name "Excess return vs universe" ;
+    sh:description "Forward return (next-session open to the open `horizon` sessions later) net of the 25 bps-per-side round trip, minus the same session's equal-weight liquid-universe mean. The grading quantity of the forward test and of call attribution; a fraction, not a percent. Outcome-side." ;
+    sh:datatype xsd:decimal ;
+    sh:order "9"^^xsd:integer ;
+    bsi:unit "ratio" .
+
+_:SignalOutcome_mae_pct_prop     sh:path bsip:mae_pct ;
+    sh:name "Max adverse excursion" ;
+    sh:description "Worst unrealised drawdown inside the window. Outcome-side." ;
+    sh:datatype xsd:decimal ;
+    sh:order "10"^^xsd:integer ;
+    bsi:unit "percent" .
+
+_:SignalOutcome_mfe_pct_prop     sh:path bsip:mfe_pct ;
+    sh:name "Max favourable excursion" ;
+    sh:description "Best unrealised gain inside the window. Outcome-side." ;
+    sh:datatype xsd:decimal ;
+    sh:order "11"^^xsd:integer ;
+    bsi:unit "percent" .
+
+_:SignalOutcome_attribution_cause_prop     sh:path bsip:attribution_cause ;
+    sh:name "Miss cause" ;
+    sh:description "Why a published Buy missed (one primary cause, checked in a fixed priority order) or HIT. Points at the part of the plan that failed; descriptive, never a feature." ;
+    sh:datatype xsd:string ;
+    sh:order "12"^^xsd:integer ;
+    bsi:vocabulary bsiv:attribution_cause ;
+    sh:in _:SignalOutcome_attribution_cause_in0 .
+
+_:SignalOutcome_attribution_cause_in0     rdf:first "HIT" ;
+    rdf:rest _:SignalOutcome_attribution_cause_in1 .
+
+_:SignalOutcome_attribution_cause_in1     rdf:first "UNFILLABLE" ;
+    rdf:rest _:SignalOutcome_attribution_cause_in2 .
+
+_:SignalOutcome_attribution_cause_in2     rdf:first "EVENT" ;
+    rdf:rest _:SignalOutcome_attribution_cause_in3 .
+
+_:SignalOutcome_attribution_cause_in3     rdf:first "STOP_TOO_TIGHT" ;
+    rdf:rest _:SignalOutcome_attribution_cause_in4 .
+
+_:SignalOutcome_attribution_cause_in4     rdf:first "COST" ;
+    rdf:rest _:SignalOutcome_attribution_cause_in5 .
+
+_:SignalOutcome_attribution_cause_in5     rdf:first "TOO_SLOW" ;
+    rdf:rest _:SignalOutcome_attribution_cause_in6 .
+
+_:SignalOutcome_attribution_cause_in6     rdf:first "SECTOR_DRAG" ;
+    rdf:rest _:SignalOutcome_attribution_cause_in7 .
+
+_:SignalOutcome_attribution_cause_in7     rdf:first "WRONG_PICK" ;
+    rdf:rest rdf:nil .
+
+_:SignalOutcome_computed_at_prop     sh:path bsip:computed_at ;
+    sh:name "Computed at" ;
+    sh:description "When the platform produced the row. NOT uniform across tables: TEXT in `unified_recommendations`, native TIMESTAMPTZ in `confluence_signals`. Cast before comparing the two." ;
+    sh:datatype xsd:dateTime ;
+    sh:order "13"^^xsd:integer .
+
 _:SignalOutcome_entry_price_prop     sh:path bsip:entry_price ;
     sh:name "Entry price" ;
     sh:description "Assumed or realised entry fill used by an outcome calculation." ;
     sh:datatype xsd:decimal ;
-    sh:order "4"^^xsd:integer ;
+    sh:order "14"^^xsd:integer ;
     bsi:unit "per_share_INR" .
 
 _:SignalOutcome_check_date_prop     sh:path bsip:check_date ;
     sh:name "Check date" ;
     sh:description "Session an outcome was resolved on; with `signal_date` it bounds the window." ;
     sh:datatype xsd:date ;
-    sh:order "5"^^xsd:integer ;
+    sh:order "15"^^xsd:integer ;
     bsi:unit "calendar_day" .
 
 _:SignalOutcome_exit_price_prop     sh:path bsip:exit_price ;
     sh:name "Exit price" ;
     sh:description "Realised exit fill; only exists on resolved outcomes." ;
     sh:datatype xsd:decimal ;
-    sh:order "6"^^xsd:integer ;
+    sh:order "16"^^xsd:integer ;
     bsi:unit "per_share_INR" .
-
-_:SignalOutcome_return_pct_prop     sh:path bsip:return_pct ;
-    sh:name "Realised return" ;
-    sh:description "Terminal return over the horizon. Outcome-side: using it as a feature is a look-ahead bug." ;
-    sh:datatype xsd:decimal ;
-    sh:order "7"^^xsd:integer ;
-    bsi:unit "percent" .
 
 _:SignalOutcome_outcome_prop     sh:path bsip:outcome ;
     sh:name "Outcome" ;
     sh:description "Resolved result of a signal under its recorded labelling rule — the platform's primary supervised target." ;
     sh:datatype xsd:string ;
-    sh:order "8"^^xsd:integer ;
+    sh:order "17"^^xsd:integer ;
     bsi:vocabulary bsiv:outcome ;
     sh:in _:SignalOutcome_outcome_in0 .
 
@@ -3200,33 +3355,27 @@ _:SignalOutcome_signal_score_prop     sh:path bsip:signal_score ;
     sh:name "Signal score" ;
     sh:description "Score attached to a technical signal at creation." ;
     sh:datatype xsd:decimal ;
-    sh:order "9"^^xsd:integer ;
+    sh:order "18"^^xsd:integer ;
     bsi:unit "score_0_100" .
 
 _:SignalOutcome_signals_json_prop     sh:path bsip:signals_json ;
     sh:name "Signals payload" ;
     sh:description "Serialized signal bundle for the row." ;
     sh:datatype rdf:JSON ;
-    sh:order "10"^^xsd:integer .
-
-_:SignalOutcome_computed_at_prop     sh:path bsip:computed_at ;
-    sh:name "Computed at" ;
-    sh:description "When the platform produced the row. NOT uniform across tables: TEXT in `unified_recommendations`, native TIMESTAMPTZ in `confluence_signals`. Cast before comparing the two." ;
-    sh:datatype xsd:dateTime ;
-    sh:order "11"^^xsd:integer .
+    sh:order "19"^^xsd:integer .
 
 _:SignalOutcome_max_return_pct_prop     sh:path bsip:max_return_pct ;
     sh:name "Max return in window" ;
     sh:description "Peak return recorded for the signal." ;
     sh:datatype xsd:decimal ;
-    sh:order "12"^^xsd:integer ;
+    sh:order "20"^^xsd:integer ;
     bsi:unit "percent" .
 
 _:SignalOutcome_label_definition_prop     sh:path bsip:label_definition ;
     sh:name "Label definition" ;
     sh:description "Which rule produced the label. Labels are NOT comparable across definitions — always filter on this column before aggregating accuracy." ;
     sh:datatype xsd:string ;
-    sh:order "13"^^xsd:integer ;
+    sh:order "21"^^xsd:integer ;
     bsi:vocabulary bsiv:label_definition ;
     sh:in _:SignalOutcome_label_definition_in0 .
 
@@ -3240,13 +3389,13 @@ _:SignalOutcome_is_suspect_prop     sh:path bsip:is_suspect ;
     sh:name "Suspect row" ;
     sh:description "Quarantined by a data-quality rule. Filter it OUT of any training panel; never impute over it silently." ;
     sh:datatype xsd:boolean ;
-    sh:order "14"^^xsd:integer .
+    sh:order "22"^^xsd:integer .
 
 _:SignalOutcome_signal_source_prop     sh:path bsip:signal_source ;
     sh:name "Signal source" ;
     sh:description "Which producer emitted the signal." ;
     sh:datatype xsd:string ;
-    sh:order "15"^^xsd:integer ;
+    sh:order "23"^^xsd:integer ;
     bsi:vocabulary bsiv:signal_source ;
     bsi:openEndedVocabulary "signal_outcomes.signal_source + unified_signal_outcomes.signal_source" .
 
@@ -3254,13 +3403,13 @@ _:SignalOutcome_id_prop     sh:path bsip:id ;
     sh:name "Row id" ;
     sh:description "Surrogate key that is NOT stable across a re-fetch or backfill. Never join on this across runs — use the table's natural key." ;
     sh:datatype xsd:string ;
-    sh:order "16"^^xsd:integer .
+    sh:order "24"^^xsd:integer .
 
 _:SignalOutcome_exit_reason_prop     sh:path bsip:exit_reason ;
     sh:name "Exit reason" ;
     sh:description "Why a tracked position closed. `NO_ENTRY_PRICE` and `SUSPECT_DATA` are integrity exits, not labels, and must be dropped before grading." ;
     sh:datatype xsd:string ;
-    sh:order "17"^^xsd:integer ;
+    sh:order "25"^^xsd:integer ;
     bsi:vocabulary bsiv:exit_reason ;
     sh:in _:SignalOutcome_exit_reason_in0 .
 
@@ -3578,6 +3727,51 @@ bsi:GovernanceRecordShape     rdf:type sh:NodeShape ;
     sh:targetClass bsi:GovernanceRecord ;
     sh:name "Governance record" ;
     sh:description "Abstract parent for operational metadata. These answer 'when was this true and who wrote it', which on this platform is the difference between a usable value and a guess." .
+
+bsi:TechnicalSignalObservationShape     rdf:type sh:NodeShape ;
+    sh:targetClass bsi:TechnicalSignalObservation ;
+    sh:name "Technical signal observation" ;
+    sh:description "An immutable transaction-time record of one mutation to the technical signal compatibility projection, including writer provenance and changed values." ;
+    bsi:grain "one row per technical_signals mutation" ;
+    sh:property _:TechnicalSignalObservation_id_prop, _:TechnicalSignalObservation_symbol_prop, _:TechnicalSignalObservation_signal_date_prop, _:TechnicalSignalObservation_recorded_at_prop, _:TechnicalSignalObservation_source_prop, _:TechnicalSignalObservation_value_json_prop .
+
+_:TechnicalSignalObservation_id_prop     sh:path bsip:id ;
+    sh:name "Row id" ;
+    sh:description "Surrogate key that is NOT stable across a re-fetch or backfill. Never join on this across runs — use the table's natural key." ;
+    sh:datatype xsd:string ;
+    sh:order "1"^^xsd:integer ;
+    sh:minCount "1"^^xsd:integer .
+
+_:TechnicalSignalObservation_symbol_prop     sh:path bsip:symbol ;
+    sh:name "Symbol" ;
+    sh:description "Exchange ticker, NSE/BSE convention embedded in the string. The platform's universal join key across ~40 tables." ;
+    sh:datatype xsd:string ;
+    sh:order "2"^^xsd:integer .
+
+_:TechnicalSignalObservation_signal_date_prop     sh:path bsip:signal_date ;
+    sh:name "Signal date" ;
+    sh:description "Session a signal was generated for. Entry happens at the NEXT session's open — the most common off-by-one in this repo." ;
+    sh:datatype xsd:date ;
+    sh:order "3"^^xsd:integer ;
+    bsi:unit "calendar_day" .
+
+_:TechnicalSignalObservation_recorded_at_prop     sh:path bsip:recorded_at ;
+    sh:name "Recorded at" ;
+    sh:description "Time the platform recorded the assertion." ;
+    sh:datatype xsd:dateTime ;
+    sh:order "4"^^xsd:integer .
+
+_:TechnicalSignalObservation_source_prop     sh:path bsip:source ;
+    sh:name "Source" ;
+    sh:description "Which provider or fetcher wrote the row. Provenance is per-row on this platform, so this is the first column to check before trusting a value." ;
+    sh:datatype xsd:string ;
+    sh:order "5"^^xsd:integer .
+
+_:TechnicalSignalObservation_value_json_prop     sh:path bsip:value_json ;
+    sh:name "Decision evidence value" ;
+    sh:description "Structured value attached to decision evidence." ;
+    sh:datatype rdf:JSON ;
+    sh:order "6"^^xsd:integer .
 
 bsi:EndpointShape     rdf:type sh:NodeShape ;
     sh:targetClass bsi:Endpoint ;
@@ -5879,6 +6073,31 @@ bsis:technical_signals.iv_hv_ratio     rdf:type sh:NodeShape ;
     sh:targetNode bsis:technical_signals.iv_hv_ratio ;
     sh:path bsip:iv_hv_ratio .
 
+bsis:technical_signal_observations.observation_id     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:technical_signal_observations.observation_id ;
+    sh:path bsip:id ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:technical_signal_observations.symbol     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:technical_signal_observations.symbol ;
+    sh:path bsip:symbol .
+
+bsis:technical_signal_observations.signal_date     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:technical_signal_observations.signal_date ;
+    sh:path bsip:signal_date .
+
+bsis:technical_signal_observations.recorded_at     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:technical_signal_observations.recorded_at ;
+    sh:path bsip:recorded_at .
+
+bsis:technical_signal_observations.writer_hint     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:technical_signal_observations.writer_hint ;
+    sh:path bsip:source .
+
+bsis:technical_signal_observations.values_json     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:technical_signal_observations.values_json ;
+    sh:path bsip:value_json .
+
 bsis:feature_store.symbol     rdf:type sh:NodeShape ;
     sh:targetNode bsis:feature_store.symbol ;
     sh:path bsip:symbol ;
@@ -6165,6 +6384,156 @@ bsis:unified_recommendations_history.win_probability     rdf:type sh:NodeShape ;
     sh:maxCount "0"^^xsd:integer ;
     bsi:forbidden "Documented as never-usable as a feature for this table." .
 
+bsis:recommendation_log.symbol     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:recommendation_log.symbol ;
+    sh:path bsip:symbol ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:recommendation_log.signal_date     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:recommendation_log.signal_date ;
+    sh:path bsip:signal_date ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:recommendation_log.timeframe     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:recommendation_log.timeframe ;
+    sh:path bsip:timeframe ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:recommendation_log.source     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:recommendation_log.source ;
+    sh:path bsip:source ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:recommendation_log.rec_type     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:recommendation_log.rec_type ;
+    sh:path bsip:classification .
+
+bsis:recommendation_log.entry_price     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:recommendation_log.entry_price ;
+    sh:path bsip:entry_price .
+
+bsis:recommendation_log.stop_loss     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:recommendation_log.stop_loss ;
+    sh:path bsip:stop_loss .
+
+bsis:recommendation_log.target_1     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:recommendation_log.target_1 ;
+    sh:path bsip:target_1 .
+
+bsis:recommendation_log.trailing_stop     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:recommendation_log.trailing_stop ;
+    sh:path bsip:trailing_stop ;
+    sh:property _:recommendation_log_trailing_stop_forbidden .
+
+('bnode', '_:recommendation_log_trailing_stop_forbidden')     sh:path bsip:trailing_stop ;
+    sh:maxCount "0"^^xsd:integer ;
+    bsi:forbidden "Documented as never-usable as a feature for this table." .
+
+bsis:recommendation_log.outcome     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:recommendation_log.outcome ;
+    sh:path bsip:outcome ;
+    sh:readOnly true ;
+    sh:property _:recommendation_log_outcome_forbidden .
+
+('bnode', '_:recommendation_log_outcome_forbidden')     sh:path bsip:outcome ;
+    sh:maxCount "0"^^xsd:integer ;
+    bsi:forbidden "Documented as never-usable as a feature for this table." .
+
+bsis:recommendation_log.actual_return_pct     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:recommendation_log.actual_return_pct ;
+    sh:path bsip:return_pct ;
+    sh:readOnly true ;
+    sh:property _:recommendation_log_actual_return_pct_forbidden .
+
+('bnode', '_:recommendation_log_actual_return_pct_forbidden')     sh:path bsip:return_pct ;
+    sh:maxCount "0"^^xsd:integer ;
+    bsi:forbidden "Documented as never-usable as a feature for this table." .
+
+bsis:call_attribution.symbol     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.symbol ;
+    sh:path bsip:symbol ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:call_attribution.call_session     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.call_session ;
+    sh:path bsip:signal_date ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:call_attribution.horizon     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.horizon ;
+    sh:path bsip:horizon_days ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:call_attribution.classification     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.classification ;
+    sh:path bsip:classification .
+
+bsis:call_attribution.unified_score     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.unified_score ;
+    sh:path bsip:unified_score .
+
+bsis:call_attribution.sector     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.sector ;
+    sh:path bsip:sector .
+
+bsis:call_attribution.regime     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.regime ;
+    sh:path bsip:regime .
+
+bsis:call_attribution.fwd     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.fwd ;
+    sh:path bsip:return_pct ;
+    sh:readOnly true ;
+    sh:property _:call_attribution_fwd_forbidden .
+
+('bnode', '_:call_attribution_fwd_forbidden')     sh:path bsip:return_pct ;
+    sh:maxCount "0"^^xsd:integer ;
+    bsi:forbidden "Documented as never-usable as a feature for this table." .
+
+bsis:call_attribution.excess     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.excess ;
+    sh:path bsip:excess_return ;
+    sh:readOnly true ;
+    sh:property _:call_attribution_excess_forbidden .
+
+('bnode', '_:call_attribution_excess_forbidden')     sh:path bsip:excess_return ;
+    sh:maxCount "0"^^xsd:integer ;
+    bsi:forbidden "Documented as never-usable as a feature for this table." .
+
+bsis:call_attribution.mae     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.mae ;
+    sh:path bsip:mae_pct ;
+    sh:readOnly true ;
+    sh:property _:call_attribution_mae_forbidden .
+
+('bnode', '_:call_attribution_mae_forbidden')     sh:path bsip:mae_pct ;
+    sh:maxCount "0"^^xsd:integer ;
+    bsi:forbidden "Documented as never-usable as a feature for this table." .
+
+bsis:call_attribution.mfe     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.mfe ;
+    sh:path bsip:mfe_pct ;
+    sh:readOnly true ;
+    sh:property _:call_attribution_mfe_forbidden .
+
+('bnode', '_:call_attribution_mfe_forbidden')     sh:path bsip:mfe_pct ;
+    sh:maxCount "0"^^xsd:integer ;
+    bsi:forbidden "Documented as never-usable as a feature for this table." .
+
+bsis:call_attribution.cause     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.cause ;
+    sh:path bsip:attribution_cause ;
+    sh:readOnly true ;
+    sh:property _:call_attribution_cause_forbidden .
+
+('bnode', '_:call_attribution_cause_forbidden')     sh:path bsip:attribution_cause ;
+    sh:maxCount "0"^^xsd:integer ;
+    bsi:forbidden "Documented as never-usable as a feature for this table." .
+
+bsis:call_attribution.computed_at     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:call_attribution.computed_at ;
+    sh:path bsip:computed_at .
+
 bsis:intraday_recommendations.symbol     rdf:type sh:NodeShape ;
     sh:targetNode bsis:intraday_recommendations.symbol ;
     sh:path bsip:symbol ;
@@ -6294,10 +6663,6 @@ bsis:confluence_signals.ml_breakout_probability     rdf:type sh:NodeShape ;
     sh:targetNode bsis:confluence_signals.ml_breakout_probability ;
     sh:path bsip:ml_breakout_probability .
 
-bsis:confluence_signals.ml_trend_probability     rdf:type sh:NodeShape ;
-    sh:targetNode bsis:confluence_signals.ml_trend_probability ;
-    sh:path bsip:ml_trend_probability .
-
 bsis:confluence_signals.entry_zone_low     rdf:type sh:NodeShape ;
     sh:targetNode bsis:confluence_signals.entry_zone_low ;
     sh:path bsip:entry_zone_low .
@@ -6325,15 +6690,6 @@ bsis:confluence_signals.target_3     rdf:type sh:NodeShape ;
 bsis:confluence_signals.risk_reward     rdf:type sh:NodeShape ;
     sh:targetNode bsis:confluence_signals.risk_reward ;
     sh:path bsip:risk_reward .
-
-bsis:confluence_signals.ai_conclusion     rdf:type sh:NodeShape ;
-    sh:targetNode bsis:confluence_signals.ai_conclusion ;
-    sh:path bsip:ai_insight ;
-    sh:property _:confluence_signals_ai_conclusion_forbidden .
-
-('bnode', '_:confluence_signals_ai_conclusion_forbidden')     sh:path bsip:ai_insight ;
-    sh:maxCount "0"^^xsd:integer ;
-    bsi:forbidden "Documented as never-usable as a feature for this table." .
 
 bsis:confluence_signals.trade_reasoning     rdf:type sh:NodeShape ;
     sh:targetNode bsis:confluence_signals.trade_reasoning ;

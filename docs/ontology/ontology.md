@@ -9,20 +9,20 @@ table, and which external standard it aligns to.
 
 | | |
 |---|---|
-| Classes | 58 |
-| Properties | 309 |
-| Data cards (tables) | 65 |
-| Column bindings | 729 |
+| Classes | 59 |
+| Properties | 311 |
+| Data cards (tables) | 68 |
+| Column bindings | 757 |
 | Typed relations | 39 |
 | Executable metrics | 18 |
-| Controlled vocabularies | 32 (145 terms) |
+| Controlled vocabularies | 33 (153 terms) |
 
 ## How to use it
 
 ```bash
 cd src/server
 python -m ontology verify                    # integrity of the layer itself
-python -m ontology export --out ../docs/ontology
+python -m ontology export                    # writes <repo>/docs/ontology
 python -m ontology coverage --fresh          # drift vs the live database
 python -m ontology ask "delivery percentage"  # lexical concept search
 python -m ontology context "explain a swing signal for INFY"
@@ -129,7 +129,7 @@ flowchart LR
     direction TB
     OutcomeRecord["Outcome record"]
     EdgeReading["Edge reading<br/>factor_edge_history"]
-    SignalOutcome["Signal outcome<br/>signal_outcomes, unified_signal_outcomes"]
+    SignalOutcome["Signal outcome<br/>call_attribution, signal_outcomes, unifi..."]
     SignalExcursion["Signal excursion<br/>signal_excursions"]
     ScreenerOutcome["Screener outcome<br/>live_screener_outcomes"]
     DecisionOutcome["Decision outcome<br/>market_decision_outcome"]
@@ -137,6 +137,7 @@ flowchart LR
   subgraph governance["Provenance, quality & governance"]
     direction TB
     GovernanceRecord["Governance record"]
+    TechnicalSignalObservation["Technical signal observation<br/>technical_signal_observations"]
     Endpoint["Data endpoint<br/>market_endpoint_registry, url_endpoints"]
     JobRun["Job run<br/>job_heartbeat"]
     DataQualityCheck["Data-quality check<br/>data_quality_results"]
@@ -178,6 +179,7 @@ flowchart LR
   ScreenerAppearance -.->|subclass| CandidateRecord
   ScreenerOutcome -.->|subclass| OutcomeRecord
   EventTrigger -.->|subclass| CandidateRecord
+  TechnicalSignalObservation -.->|subclass| GovernanceRecord
   Endpoint -.->|subclass| GovernanceRecord
   JobRun -.->|subclass| GovernanceRecord
   DataQualityCheck -.->|subclass| GovernanceRecord
@@ -255,9 +257,12 @@ flowchart LR
   tbl_intraday_regime_history["intraday_regime_history"]:::tbl -.-> RegimeState
   tbl_sector_rrg_history["sector_rrg_history"]:::tbl -.-> SectorRotationPoint
   tbl_technical_signals["technical_signals"]:::tbl -.-> TechnicalSignal
+  tbl_technical_signal_observations["technical_signal_observations"]:::tbl -.-> TechnicalSignalObservation
   tbl_feature_store["feature_store"]:::tbl -.-> FeatureVector
   tbl_unified_recommendations["unified_recommendations"]:::tbl -.-> Recommendation
   tbl_unified_recommendations_history["unified_recommendations_history"]:::tbl -.-> Recommendation
+  tbl_recommendation_log["recommendation_log"]:::tbl -.-> Recommendation
+  tbl_call_attribution["call_attribution"]:::tbl -.-> SignalOutcome
   tbl_intraday_recommendations["intraday_recommendations"]:::tbl -.-> Recommendation
   tbl_confluence_signals["confluence_signals"]:::tbl -.-> EngineScore
   tbl_engine_composite_scores["engine_composite_scores"]:::tbl -.-> EngineScore
@@ -629,7 +634,7 @@ The served trade: composite score, conviction bucket, action label, entry zone, 
 - **Grain**: (symbol, computed_at, timeframe)
 - **Key**: `symbol`, `computed_at`, `timeframe`
 - **Subclass of**: `PlatformOutput`
-- **Realized by**: `unified_recommendations`, `unified_recommendations_history`, `intraday_recommendations`
+- **Realized by**: `unified_recommendations`, `unified_recommendations_history`, `recommendation_log`, `intraday_recommendations`
 - **Caveat**: `computed_at` is TEXT here and native TIMESTAMPTZ in `confluence_signals` — cast before joining the two.
 - **Caveat**: `trade_reasoning` is generated text: an explanation, never evidence.
 - **Caveat**: The history table carries the raw meta-label behind `position_size_pct`, which the serving table does not.
@@ -733,7 +738,7 @@ The resolved result of a signal: entry, exit, horizon, return and the outcome la
 - **Grain**: (symbol, signal_date, horizon_days, signal_source)
 - **Key**: `symbol`, `signal_date`, `horizon_days`
 - **Subclass of**: `OutcomeRecord`
-- **Realized by**: `signal_outcomes`, `unified_signal_outcomes`
+- **Realized by**: `call_attribution`, `signal_outcomes`, `unified_signal_outcomes`
 - **Caveat**: Labels are NOT comparable across `label_definition` (`path_barrier` vs `terminal_pct2`). Always filter on it before aggregating accuracy.
 - **Caveat**: `PENDING` rows have not elapsed — they are not negative examples.
 - **Caveat**: `NO_ENTRY_PRICE` / `SUSPECT_DATA` are integrity exits, not labels.
@@ -773,6 +778,15 @@ A realized outcome attached to a decision under an explicit label definition and
 Abstract parent for operational metadata. These answer 'when was this true and who wrote it', which on this platform is the difference between a usable value and a guess.
 
 - **Key**: `id`
+
+#### `TechnicalSignalObservation` — Technical signal observation
+
+An immutable transaction-time record of one mutation to the technical signal compatibility projection, including writer provenance and changed values.
+
+- **Grain**: one row per technical_signals mutation
+- **Key**: `id`
+- **Subclass of**: `GovernanceRecord`
+- **Realized by**: `technical_signal_observations`
 
 #### `Endpoint` — Data endpoint
 
@@ -875,7 +889,7 @@ excluded, and the two are not the same case.
 | `eff_dates` | count | count | coincident | platform | none | yes | — | 1 |
 | `engine_coverage_count` | count | count | coincident | platform | none | yes | — | 3 |
 | `expected_rows` | count | count | context | platform | none | yes | — | 1 |
-| `horizon_days` | count | count | coincident | platform | none | yes | — | 6 |
+| `horizon_days` | count | count | coincident | platform | none | yes | — | 7 |
 | `importance` | count | count | coincident | platform | none | yes | — | 1 |
 | `n_analysts` | count | count | coincident | platform | none | yes | — | 2 |
 | `news_count_5d` | count | count | coincident | platform | none | yes | — | 1 |
@@ -915,11 +929,11 @@ excluded, and the two are not the same case.
 | `quality_status` | dimension | — | context | raw | none | yes | — | 1 |
 | `relation` | dimension | — | context | raw | none | yes | — | 2 |
 | `scope` | dimension | — | context | vendor | none | yes | — | 1 |
-| `sector` | dimension | — | context | raw | none | yes | — | 6 |
+| `sector` | dimension | — | context | raw | none | yes | — | 7 |
 | `semantic_type` | dimension | — | context | raw | none | yes | — | 1 |
 | `series` | dimension | — | context | raw | none | yes | — | 3 |
 | `session` | dimension | — | context | raw | none | yes | — | 1 |
-| `source` | dimension | — | context | raw | none | yes | — | 18 |
+| `source` | dimension | — | context | raw | none | yes | — | 20 |
 | `source_kind` | dimension | — | context | raw | none | yes | — | 1 |
 | `source_table` | dimension | — | context | raw | none | yes | — | 3 |
 | `source_type` | dimension | — | context | raw | none | yes | — | 1 |
@@ -933,7 +947,7 @@ excluded, and the two are not the same case.
 | `version` | dimension | — | context | raw | none | yes | — | 1 |
 | `action_type` | enum | — | context | raw | none | yes | — | 1 |
 | `adjustment_basis` | enum | — | context | raw | none | yes | — | 1 |
-| `classification` | enum | — | context | platform | none | yes | — | 6 |
+| `classification` | enum | — | context | platform | none | yes | — | 8 |
 | `conviction_level` | enum | — | context | platform | none | yes | — | 4 |
 | `impact` | enum | — | context | vendor | none | yes | — | 1 |
 | `inferred_category` | enum | — | context | platform | none | yes | — | 1 |
@@ -942,13 +956,13 @@ excluded, and the two are not the same case.
 | `oi_buildup` | enum | — | context | raw | none | yes | — | 1 |
 | `option_buildup` | enum | — | context | vendor | none | yes | — | 1 |
 | `quadrant` | enum | — | context | platform | none | yes | — | 1 |
-| `regime` | enum | — | context | raw | none | yes | — | 4 |
+| `regime` | enum | — | context | raw | none | yes | — | 5 |
 | `sentiment` | enum | — | context | vendor | none | yes | — | 1 |
 | `signal_source` | enum | — | context | platform | none | yes | — | 2 |
 | `status` | enum | — | context | platform | none | yes | — | 1 |
 | `suspect_reason` | enum | — | context | raw | none | yes | — | 1 |
 | `tier` | enum | — | context | platform | none | yes | — | 1 |
-| `timeframe` | enum | — | context | raw | none | yes | — | 5 |
+| `timeframe` | enum | — | context | raw | none | yes | — | 6 |
 | `tone_label` | enum | — | context | platform | none | yes | — | 1 |
 | `trade_type` | enum | — | context | raw | none | yes | — | 2 |
 | `verdict` | enum | — | context | platform | none | yes | — | 1 |
@@ -974,7 +988,7 @@ excluded, and the two are not the same case.
 | `extraction_version` | identifier | — | context | raw | none | NO | — | 1 |
 | `feature_key` | identifier | — | context | raw | none | NO | — | 1 |
 | `feature_set_version` | identifier | — | context | raw | none | NO | — | 1 |
-| `id` | identifier | — | context | raw | none | NO | — | 20 |
+| `id` | identifier | — | context | raw | none | NO | — | 21 |
 | `identifier_value` | identifier | — | context | raw | none | NO | — | 2 |
 | `identity_basis` | identifier | — | context | raw | none | NO | — | 2 |
 | `instrument_key` | identifier | — | context | raw | none | NO | — | 1 |
@@ -998,7 +1012,7 @@ excluded, and the two are not the same case.
 | `source_uri` | identifier | — | context | raw | none | NO | — | 1 |
 | `source_version` | identifier | — | context | raw | none | NO | — | 1 |
 | `superseded_by` | identifier | — | context | raw | none | NO | — | 1 |
-| `symbol` | identifier | — | context | raw | none | NO | — | 37 |
+| `symbol` | identifier | — | context | raw | none | NO | — | 40 |
 | `attributes` | json | — | context | platform | none | NO | — | 4 |
 | `candidate_instrument_ids` | json | — | context | platform | none | NO | — | 1 |
 | `content` | json | — | context | platform | none | NO | — | 1 |
@@ -1018,16 +1032,18 @@ excluded, and the two are not the same case.
 | `symbols_json` | json | — | context | platform | none | NO | — | 1 |
 | `top_features_json` | json | — | context | platform | none | NO | — | 1 |
 | `triggers` | json | — | context | platform | none | NO | — | 1 |
-| `value_json` | json | — | context | platform | none | NO | — | 1 |
+| `value_json` | json | — | context | platform | none | NO | — | 2 |
 | `veto_reasons` | json | — | context | platform | none | NO | — | 1 |
 | `viterbi_path_json` | json | — | context | platform | none | NO | — | 1 |
+| `attribution_cause` | label | — | target | label | target | NO | yes | 1 |
+| `excess_return` | label | ratio | target | label | target | NO | yes | 1 |
 | `exit_reason` | label | — | target | label | target | NO | yes | 1 |
 | `label_definition` | label | — | target | label | target | NO | yes | 3 |
-| `mae_pct` | label | percent | target | label | target | NO | yes | 2 |
+| `mae_pct` | label | percent | target | label | target | NO | yes | 3 |
 | `max_return_pct` | label | percent | target | label | target | NO | yes | 1 |
-| `mfe_pct` | label | percent | target | label | target | NO | yes | 2 |
-| `outcome` | label | — | target | label | target | NO | yes | 2 |
-| `return_pct` | label | percent | target | label | target | NO | yes | 5 |
+| `mfe_pct` | label | percent | target | label | target | NO | yes | 3 |
+| `outcome` | label | — | target | label | target | NO | yes | 3 |
+| `return_pct` | label | percent | target | label | target | NO | yes | 7 |
 | `close` | measure | per_share_INR | coincident | raw | none | yes | — | 5 |
 | `cmp` | measure | per_share_INR | coincident | raw | none | yes | — | 3 |
 | `contracts` | measure | shares | coincident | raw | none | yes | — | 1 |
@@ -1035,7 +1051,7 @@ excluded, and the two are not the same case.
 | `current_volume` | measure | — | coincident | vendor | none | yes | — | 1 |
 | `deliverable_qty` | measure | shares | coincident | raw | none | yes | — | 1 |
 | `delivery_qty` | measure | shares | lagging | raw | none | yes | — | 1 |
-| `entry_price` | measure | per_share_INR | coincident | raw | low | yes | — | 6 |
+| `entry_price` | measure | per_share_INR | coincident | raw | low | yes | — | 7 |
 | `entry_zone_high` | measure | per_share_INR | coincident | platform | none | yes | — | 2 |
 | `entry_zone_low` | measure | per_share_INR | coincident | platform | none | yes | — | 3 |
 | `eps_actual` | measure | per_share_INR | coincident | vendor | none | yes | — | 1 |
@@ -1062,14 +1078,15 @@ excluded, and the two are not the same case.
 | `pcr_oi` | measure | ratio | coincident | vendor | none | yes | — | 3 |
 | `quantity` | measure | — | coincident | raw | none | yes | — | 2 |
 | `spot_price` | measure | per_share_INR | coincident | vendor | none | yes | — | 2 |
-| `stop_loss` | measure | per_share_INR | coincident | platform | none | yes | — | 5 |
+| `stop_loss` | measure | per_share_INR | coincident | platform | none | yes | — | 6 |
 | `strike` | measure | per_share_INR | coincident | raw | none | yes | — | 1 |
-| `target_1` | measure | per_share_INR | coincident | platform | none | yes | — | 4 |
+| `target_1` | measure | per_share_INR | coincident | platform | none | yes | — | 5 |
 | `target_2` | measure | per_share_INR | coincident | platform | none | yes | — | 2 |
 | `target_3` | measure | per_share_INR | coincident | platform | none | yes | — | 2 |
 | `target_mean` | measure | per_share_INR | coincident | vendor | none | yes | — | 1 |
 | `total_oi` | measure | shares | coincident | raw | none | yes | — | 1 |
 | `traded_qty` | measure | shares | coincident | raw | none | yes | — | 2 |
+| `trailing_stop` | measure | per_share_INR | coincident | platform | high | NO | — | 1 |
 | `value_cr` | measure | — | coincident | vendor | none | yes | — | 2 |
 | `value_inr` | measure | — | coincident | vendor | none | yes | — | 2 |
 | `volume` | measure | — | coincident | raw | none | yes | — | 4 |
@@ -1122,7 +1139,6 @@ excluded, and the two are not the same case.
 | `macd` | score | per_share_INR | coincident | platform | none | yes | — | 2 |
 | `ml_breakout_probability` | score | probability | coincident | platform | none | yes | — | 1 |
 | `ml_score` | score | score_0_100 | coincident | platform | none | yes | — | 2 |
-| `ml_trend_probability` | score | probability | coincident | platform | none | yes | — | 1 |
 | `piotroski_f_score` | score | score_0_100 | coincident | platform | none | yes | — | 1 |
 | `rsi` | score | index_points | coincident | platform | none | yes | — | 3 |
 | `screener_stock_score` | score | score_0_100 | coincident | platform | none | yes | — | 3 |
@@ -1131,8 +1147,8 @@ excluded, and the two are not the same case.
 | `sma50` | score | per_share_INR | coincident | platform | none | yes | — | 2 |
 | `smart_money_score` | score | score_0_100 | coincident | platform | none | yes | — | 2 |
 | `technical_score` | score | score_0_100 | coincident | platform | none | yes | — | 2 |
-| `unified_score` | score | score_0_100 | coincident | platform | none | yes | — | 3 |
-| `ai_insight` | text | — | context | raw | none | NO | — | 2 |
+| `unified_score` | score | score_0_100 | coincident | platform | none | yes | — | 4 |
+| `ai_insight` | text | — | context | raw | none | NO | — | 1 |
 | `client_name` | text | — | context | raw | none | NO | — | 1 |
 | `description` | text | — | context | raw | none | NO | — | 3 |
 | `detail` | text | — | context | raw | none | NO | — | 1 |
@@ -1153,7 +1169,7 @@ excluded, and the two are not the same case.
 | `available_at` | timestamp | — | context | raw | none | NO | — | 9 |
 | `captured_at` | timestamp | — | context | raw | none | NO | — | 5 |
 | `check_date` | timestamp | calendar_day | context | raw | high | NO | — | 3 |
-| `computed_at` | timestamp | — | context | raw | none | NO | — | 19 |
+| `computed_at` | timestamp | — | context | raw | none | NO | — | 20 |
 | `created_at` | timestamp | — | context | raw | none | NO | — | 4 |
 | `date` | timestamp | calendar_day | context | raw | none | NO | — | 19 |
 | `datetime` | timestamp | — | context | raw | none | NO | — | 2 |
@@ -1169,9 +1185,9 @@ excluded, and the two are not the same case.
 | `observed_at` | timestamp | — | context | raw | none | NO | — | 2 |
 | `output_watermark` | timestamp | — | context | raw | none | NO | — | 1 |
 | `published_at` | timestamp | — | leading | raw | none | NO | — | 2 |
-| `recorded_at` | timestamp | — | context | raw | none | NO | — | 9 |
+| `recorded_at` | timestamp | — | context | raw | none | NO | — | 10 |
 | `resolved_at` | timestamp | — | context | raw | none | NO | — | 1 |
-| `signal_date` | timestamp | calendar_day | context | raw | none | NO | — | 3 |
+| `signal_date` | timestamp | calendar_day | context | raw | none | NO | — | 6 |
 | `updated_at` | timestamp | — | context | raw | none | NO | — | 2 |
 | `valid_from` | timestamp | — | context | raw | none | NO | — | 6 |
 | `valid_to` | timestamp | — | context | raw | none | NO | — | 6 |
@@ -1916,6 +1932,23 @@ Source: `stock_futures_oi_history.oi_buildup`
 | `Long Unwinding` | Long unwinding | Price down, OI down. | — |
 | `Short Covering` | Short covering | Price up, OI down. | — |
 
+### `attribution_cause` (closed) — 8 terms
+
+Primary cause given to a published Buy call by call_attribution.py, checked in this order (AF-20261119-06).
+
+Source: `call_attribution.cause`
+
+| notation | label | definition | broader |
+|---|---|---|---|
+| `HIT` | Hit | Net return beat the same-session liquid-universe mean. | — |
+| `UNFILLABLE` | Unfillable | Entry session traded at one price above the prior close (locked limit-up). | — |
+| `EVENT` | Event | A corporate-action ex-date fell inside the hold. | — |
+| `STOP_TOO_TIGHT` | Stop too tight | Stop touched, yet the hold beat the universe gross or the target came later. | — |
+| `COST` | Cost | Beat the universe gross, lost only to the round-trip cost. | — |
+| `TOO_SLOW` | Too slow | Lost in the window; a 2x-horizon hold beat the universe net. | — |
+| `SECTOR_DRAG` | Sector drag | Beat its own sector; the sector lagged the universe. | — |
+| `WRONG_PICK` | Wrong pick | Lagged its own sector. | — |
+
 ### `option_buildup` (open) — 4 terms
 
 Option-chain buildup label. NOTE the spelling differs from `oi_buildup` ('Build Up' vs 'Buildup') — never compare these strings across tables without normalising first.
@@ -2459,9 +2492,10 @@ Stock-futures open interest, buildup label, rollover percentage, basis and cost 
 - **Primary key**: `source`, `symbol`, `date`, `expiry`
 - **Cadence**: daily
 - **Freshness column**: `fetched_at`
-- **Writers**: `fno_oi_fetcher.py`
+- **Writers**: `mc_stock_futures_oi_fetcher.py`, `nse_fo_bhav_history_fetcher.py`
 - **Training use**: **caution**
-- **Caveat**: LOW-DATA: the panel covers roughly two weeks of dates. Any 'measured' reading built on it is a calendar artefact rather than an edge — this is exactly the LOW-DATA verdict the master report records.
+- **Caveat**: `source` matters: the MoneyControl rows start 2026-08-21 and store the NEAR MONTH only, while the NSE F&O bhavcopy reduction (AF-20261113-03) carries history and every expiry. Filter on `source` before building a panel.
+- **Caveat**: Near-month rows are distorted around each monthly expiry: positions ROLL to the next month, so `oi_change` / `oi_buildup` read covering or unwinding while all-expiry OI is building (live 2026-11-19: IRFC -22.1% near month vs +9.1% all expiries). Sum all expiries, or exclude expiry week, before measuring (AF-20261119-09).
 - **Caveat**: `oi_buildup` uses 'Buildup' spelling while the option-chain table uses 'Build Up': never compare those strings across the two.
 
 | column | property | type | leakage | feature? | note |
@@ -2696,12 +2730,13 @@ The wide per-symbol, per-date technical panel: indicators, regime stamp, flow an
 - **Primary key**: `symbol`, `date`
 - **Cadence**: daily
 - **Freshness column**: `computed_at` (expected within 5.0h)
-- **Writers**: `technical_analysis_engine.py`, `feature_engineering.py`
+- **Writers**: `technical_analysis_engine.py`, `feature_engineering.py`, `backfill_technical_features.py`
 - **Training use**: **caution**
 - **Never as features**: `win_probability`, `calibrated_win_probability`, `ai_insight`
 - **Caveat**: Over 300 columns of MIXED provenance: raw indicators, vendor opinions (ext_* / mc_* / tl_* prefixes) and model outputs sit side by side. Use the binding table to tell them apart.
 - **Caveat**: `win_probability` and `calibrated_win_probability` are model OUTPUTS — feeding them back in leaks the model into its own inputs.
 - **Caveat**: `ai_insight` is generated text.
+- **Caveat**: `rsi` mixes two definitions by row origin: the nightly GRID rows (`signal_type = 'GRID'`, backfill_technical_features.py) hold a simple-mean (Cutler) RSI and overwrite a scanner row whenever `cmp` differs; scanner and alert paths use the vendor's Wilder RSI (AF-20261119-15).
 
 | column | property | type | leakage | feature? | note |
 |---|---|---|---|---|---|
@@ -2746,6 +2781,28 @@ The wide per-symbol, per-date technical panel: indicators, regime stamp, flow an
 | `news_sentiment_score` | `sentiment_score` | ratio | none | yes | — |
 | `nifty_regime` | `regime` | enum | none | yes | Regime stamped at write time. |
 | `iv_hv_ratio` | `iv_hv_ratio` | ratio | none | yes | — |
+
+### `technical_signal_observations` — Technical signal mutation ledger
+
+Immutable, transaction-time journal of every insert, update, and row removal applied to the technical_signals compatibility projection.
+
+- **Entity**: `TechnicalSignalObservation`  ·  **Grain**: (observation_id)
+- **Primary key**: `observation_id`
+- **Cadence**: on_write
+- **Freshness column**: `recorded_at`
+- **Writers**: `journal_technical_signal_mutation`
+- **Training use**: **context**
+- **Caveat**: This ledger records when the platform mutation occurred; a feature's economic observation/availability time still comes from its source contract.
+- **Caveat**: writer_hint is provenance metadata, not a model feature.
+
+| column | property | type | leakage | feature? | note |
+|---|---|---|---|---|---|
+| `observation_id` | `id` | identifier | none | NO | — |
+| `symbol` | `symbol` | identifier | none | NO | — |
+| `signal_date` | `signal_date` | timestamp | none | NO | — |
+| `recorded_at` | `recorded_at` | timestamp | none | NO | — |
+| `writer_hint` | `source` | dimension | none | yes | — |
+| `values_json` | `value_json` | json | none | NO | — |
 
 ### `feature_store` — Feature store
 
@@ -2866,6 +2923,68 @@ The accumulating record of every served recommendation with its raw win-probabil
 | `dl_score` | `dl_score` | score | none | yes | — |
 | `win_probability` | `win_probability` | probability | high | NO | — |
 
+### `recommendation_log` — Published trade plans
+
+One row per published BUY / STRONG_BUY plan: entry, published stop, targets T1-T3, the ratcheted trailing stop, lifecycle status and the graded outcome.
+
+- **Entity**: `Recommendation`  ·  **Grain**: (symbol, signal_date, timeframe, source)
+- **Primary key**: `symbol`, `signal_date`, `timeframe`, `source`
+- **Cadence**: daily
+- **Freshness column**: `signal_date`
+- **Writers**: `scoring_engine.py`, `technicalSignalsService.ts`, `trailingStopUpdater.ts`, `signal_lifecycle.py`, `outcome_resolver.py`, `recPlanAlerts.ts`
+- **Training use**: **caution**
+- **Never as features**: `outcome`, `actual_return_pct`, `trailing_stop`
+- **Caveat**: `stop_loss` is the PUBLISHED stop and is immutable after publication; the ratchet lives in `trailing_stop` (AF-20261117-03). Grading uses `stop_loss` as the initial stop.
+- **Caveat**: Graded from the next session's OPEN (AF-20261117-12), with levels rescaled to the back-adjusted price basis when a split or bonus falls inside the window (AF-20261117-13 / AF-20261118-05).
+- **Caveat**: `stop_alerted_at` / `target_alerted_at` are delivery stamps of the intraday Telegram alert (AF-20261117-15), not outcomes.
+- **Caveat**: Long-only: short setups are never written here.
+
+| column | property | type | leakage | feature? | note |
+|---|---|---|---|---|---|
+| `symbol` | `symbol` | identifier | none | NO | — |
+| `signal_date` | `signal_date` | timestamp | none | NO | — |
+| `timeframe` | `timeframe` | enum | none | yes | — |
+| `source` | `source` | dimension | none | yes | Writing engine (scoring_engine / technical_scan). |
+| `rec_type` | `classification` | enum | none | yes | BUY / STRONG_BUY only (long-only). |
+| `entry_price` | `entry_price` | measure | low | yes | — |
+| `stop_loss` | `stop_loss` | measure | none | yes | Published stop; immutable after publication. |
+| `target_1` | `target_1` | measure | none | yes | — |
+| `trailing_stop` | `trailing_stop` | measure | high | NO | — |
+| `outcome` | `outcome` | label | target | NO | — |
+| `actual_return_pct` | `return_pct` | label | target | NO | — |
+
+### `call_attribution` — Why each published Buy hit or missed
+
+One row per published Buy / Strong Buy whose window has closed: next-open entry, forward and excess return vs the same-session liquid universe, path statistics (MAE/MFE, stop and target touches) and ONE primary miss cause.
+
+- **Entity**: `SignalOutcome`  ·  **Grain**: (symbol, call_session, horizon)
+- **Primary key**: `symbol`, `call_session`, `horizon`
+- **Cadence**: daily
+- **Freshness column**: `computed_at`
+- **Writers**: `call_attribution.py`
+- **Training use**: **forbidden**
+- **Never as features**: `fwd`, `excess`, `mae`, `mfe`, `cause`
+- **Caveat**: Outcome-side end to end: every graded column is a label. Use it to decide which part of the plan to change, never as a model input.
+- **Caveat**: Fractions, not percents (`fwd`, `excess`, `mae`, `mfe`, `stop_dist`).
+- **Caveat**: Cause shares are descriptive. A rule built on them ships only as a shadow arm through ranker_challenger_gate.py (AF-20261119-06/-08).
+- **Caveat**: Re-derived nightly from unified_recommendations_history + stock_ohlcv, so a row can change when prices are repaired.
+
+| column | property | type | leakage | feature? | note |
+|---|---|---|---|---|---|
+| `symbol` | `symbol` | identifier | none | NO | — |
+| `call_session` | `signal_date` | timestamp | none | NO | Session the call belongs to (published before that session's next open). |
+| `horizon` | `horizon_days` | count | none | yes | Trading sessions, not calendar days. |
+| `classification` | `classification` | enum | none | yes | — |
+| `unified_score` | `unified_score` | score | none | yes | — |
+| `sector` | `sector` | dimension | none | yes | — |
+| `regime` | `regime` | enum | none | yes | — |
+| `fwd` | `return_pct` | label | target | NO | A FRACTION of the next-session open, not a percent; exit at the open `horizon` sessions later. |
+| `excess` | `excess_return` | label | target | NO | — |
+| `mae` | `mae_pct` | label | target | NO | A fraction of entry, not a percent. |
+| `mfe` | `mfe_pct` | label | target | NO | A fraction of entry, not a percent. |
+| `cause` | `attribution_cause` | label | target | NO | — |
+| `computed_at` | `computed_at` | timestamp | none | NO | — |
+
 ### `intraday_recommendations` — Intraday recommendations
 
 Within-session picks with their intraday risk state, entry price and size.
@@ -2911,10 +3030,10 @@ The multi-engine agreement score with the contributing screeners, their weights 
 - **Freshness column**: `computed_at` (expected within 0.5h)
 - **Writers**: `confluence_ml_engine.py`
 - **Training use**: **caution**
-- **Never as features**: `trade_reasoning`, `ai_conclusion`
+- **Never as features**: `trade_reasoning`
 - **Caveat**: The only engine score with a growing positive graded reading on this platform — which is what makes it the ranker's load-bearing input.
 - **Caveat**: `computed_at` here is native TIMESTAMPTZ, unlike the TEXT `computed_at` on `unified_recommendations`: cast across the join.
-- **Caveat**: `ml_breakout_probability` / `ml_trend_probability` are model outputs.
+- **Caveat**: `ml_breakout_probability` is the populated model output; the legacy `ml_trend_probability` schema field has no writer and is not exposed.
 - **Caveat**: `screener_weights_json` records the weights AT SCORING TIME — applying today's weights to an old row is a look-ahead bug.
 
 | column | property | type | leakage | feature? | note |
@@ -2931,7 +3050,6 @@ The multi-engine agreement score with the contributing screeners, their weights 
 | `screener_weights_json` | `screener_weights_json` | json | none | NO | — |
 | `fundamental_score` | `fundamental_score` | score | none | yes | — |
 | `ml_breakout_probability` | `ml_breakout_probability` | score | none | yes | — |
-| `ml_trend_probability` | `ml_trend_probability` | score | none | yes | — |
 | `entry_zone_low` | `entry_zone_low` | measure | none | yes | — |
 | `entry_zone_high` | `entry_zone_high` | measure | none | yes | — |
 | `stop_loss` | `stop_loss` | measure | none | yes | — |
@@ -2939,7 +3057,6 @@ The multi-engine agreement score with the contributing screeners, their weights 
 | `target_2` | `target_2` | measure | none | yes | — |
 | `target_3` | `target_3` | measure | none | yes | — |
 | `risk_reward` | `risk_reward` | ratio | none | yes | — |
-| `ai_conclusion` | `ai_insight` | text | none | NO | — |
 | `trade_reasoning` | `trade_reasoning` | text | none | NO | — |
 | `sector` | `sector` | dimension | none | yes | — |
 | `market_cap` | `market_cap` | measure | none | yes | — |

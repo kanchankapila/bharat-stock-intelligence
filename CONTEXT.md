@@ -130,6 +130,12 @@ intraday engine's emission gate, and "NO TRADE TODAY" means the ranking produced
 edge is unproven. An "honest refusal engine" (watch-list, no calls) appears only as an open decision in
 `docs/superpowers/specs/2026-10-19-full-data-honest-recommendations-design.md`; no code implements it.
 
+Learning from misses is a gated loop, not automatic reweighting: each published Buy is graded net of cost
+against its own session's universe, every miss gets one cause (`call_attribution.py`), and challenger blends
+(including weights learned from realised IC) are tested against the published ranking by
+`ranker_challenger_gate.py`, which only proposes. Promotion is an owner decision; the steps are in
+`.claude/rules/scoring-authority.md`.
+
 ## Contracts To Preserve
 - **One database:** PostgreSQL/TimescaleDB is the production database. Do not add a SQLite runtime
   path; Python tests use the explicit PostgreSQL test helpers described in `CLAUDE.md`.

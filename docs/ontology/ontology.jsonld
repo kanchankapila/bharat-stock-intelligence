@@ -996,6 +996,9 @@
           "@id": "bsis:unified_recommendations_history"
         },
         {
+          "@id": "bsis:recommendation_log"
+        },
+        {
           "@id": "bsis:intraday_recommendations"
         }
       ],
@@ -1123,6 +1126,9 @@
         "`NO_ENTRY_PRICE` / `SUSPECT_DATA` are integrity exits, not labels."
       ],
       "bsi:realizedBy": [
+        {
+          "@id": "bsis:call_attribution"
+        },
         {
           "@id": "bsis:signal_outcomes"
         },
@@ -1285,6 +1291,26 @@
       "bsi:realization": "abstract",
       "bsi:keyProperty": {
         "@id": "bsip:id"
+      }
+    },
+    {
+      "@id": "bsi:TechnicalSignalObservation",
+      "rdf:type": {
+        "@id": "owl:Class"
+      },
+      "rdfs:label": "Technical signal observation",
+      "rdfs:comment": "An immutable transaction-time record of one mutation to the technical signal compatibility projection, including writer provenance and changed values.",
+      "bsi:layer": "governance",
+      "bsi:realization": "table",
+      "bsi:grain": "one row per technical_signals mutation",
+      "rdfs:subClassOf": {
+        "@id": "bsi:GovernanceRecord"
+      },
+      "bsi:keyProperty": {
+        "@id": "bsip:id"
+      },
+      "bsi:realizedBy": {
+        "@id": "bsis:technical_signal_observations"
       }
     },
     {
@@ -1645,6 +1671,12 @@
           "@id": "bsis:unified_recommendations.symbol"
         },
         {
+          "@id": "bsis:recommendation_log.symbol"
+        },
+        {
+          "@id": "bsis:call_attribution.symbol"
+        },
+        {
           "@id": "bsis:unified_recommendations_history.symbol"
         },
         {
@@ -1688,6 +1720,9 @@
         },
         {
           "@id": "bsis:market_decision_event.symbol"
+        },
+        {
+          "@id": "bsis:technical_signal_observations.symbol"
         }
       ],
       "skos:closeMatch": {
@@ -1916,6 +1951,9 @@
         },
         {
           "@id": "bsis:market_claim.subject_node_id"
+        },
+        {
+          "@id": "bsis:technical_signal_observations.observation_id"
         }
       ]
     },
@@ -2206,6 +2244,9 @@
           "@id": "bsis:unified_recommendations.sector"
         },
         {
+          "@id": "bsis:call_attribution.sector"
+        },
+        {
           "@id": "bsis:unified_recommendations_history.sector"
         },
         {
@@ -2392,6 +2433,9 @@
           "@id": "bsis:sector_rrg_history.source"
         },
         {
+          "@id": "bsis:recommendation_log.source"
+        },
+        {
           "@id": "bsis:screener_master.source"
         },
         {
@@ -2423,6 +2467,9 @@
         },
         {
           "@id": "bsis:market_graph_edge.source"
+        },
+        {
+          "@id": "bsis:technical_signal_observations.writer_hint"
         }
       ]
     },
@@ -2564,6 +2611,12 @@
       "bsi:pointInTimeNote": "Entry is taken at the NEXT session's open. A feature dated on `signal_date` must have been knowable before that open.",
       "bsi:boundTo": [
         {
+          "@id": "bsis:recommendation_log.signal_date"
+        },
+        {
+          "@id": "bsis:call_attribution.call_session"
+        },
+        {
           "@id": "bsis:signal_outcomes.signal_date"
         },
         {
@@ -2571,6 +2624,9 @@
         },
         {
           "@id": "bsis:signal_excursions.signal_date"
+        },
+        {
+          "@id": "bsis:technical_signal_observations.signal_date"
         }
       ]
     },
@@ -2817,6 +2873,9 @@
         },
         {
           "@id": "bsis:unified_recommendations.computed_at"
+        },
+        {
+          "@id": "bsis:call_attribution.computed_at"
         },
         {
           "@id": "bsis:unified_recommendations_history.computed_at"
@@ -3321,6 +3380,9 @@
       },
       "qudt:unit": "per_share_INR",
       "bsi:boundTo": [
+        {
+          "@id": "bsis:recommendation_log.entry_price"
+        },
         {
           "@id": "bsis:intraday_recommendations.entry_price"
         },
@@ -4480,6 +4542,9 @@
           "@id": "bsis:unified_recommendations.unified_score"
         },
         {
+          "@id": "bsis:call_attribution.unified_score"
+        },
+        {
           "@id": "bsis:unified_recommendations_history.unified_score"
         },
         {
@@ -4899,7 +4964,7 @@
         "@id": "owl:DatatypeProperty"
       },
       "rdfs:label": "RSI (14)",
-      "rdfs:comment": "Wilder RSI. Graded on this platform as a mean-reversion input with NEGATIVE rank-IC at 5 days — a finding, not a defect.",
+      "rdfs:comment": "14-period RSI. TWO definitions share this name (AF-20261119-15): rows written by the nightly `backfill_technical_features.py --full-today` grid use a simple mean of the last 14 gains/losses (Cutler RSI), while the live scanner and alerts read the vendor's Wilder-smoothed RSI; 70/30 thresholds do not mean the same thing on both. Graded on this platform as a mean-reversion input with NEGATIVE rank-IC at 5 days.",
       "rdfs:range": {
         "@id": "xsd:decimal"
       },
@@ -5458,6 +5523,9 @@
       "bsi:pointInTimeNote": "A property of the evaluation setup, not of the market. Including it as a feature lets a model learn the label definition.",
       "bsi:boundTo": [
         {
+          "@id": "bsis:call_attribution.horizon"
+        },
+        {
           "@id": "bsis:signal_outcomes.horizon_days"
         },
         {
@@ -5936,6 +6004,9 @@
           "@id": "bsis:unified_recommendations.stop_loss"
         },
         {
+          "@id": "bsis:recommendation_log.stop_loss"
+        },
+        {
           "@id": "bsis:unified_recommendations_history.stop_loss"
         },
         {
@@ -5972,6 +6043,9 @@
       "bsi:boundTo": [
         {
           "@id": "bsis:unified_recommendations.target_1"
+        },
+        {
+          "@id": "bsis:recommendation_log.target_1"
         },
         {
           "@id": "bsis:unified_recommendations_history.target_1"
@@ -6084,6 +6158,9 @@
           "@id": "bsis:unified_recommendations.timeframe"
         },
         {
+          "@id": "bsis:recommendation_log.timeframe"
+        },
+        {
           "@id": "bsis:stock_scores.timeframe"
         },
         {
@@ -6125,6 +6202,9 @@
         },
         {
           "@id": "bsis:unified_recommendations.regime"
+        },
+        {
+          "@id": "bsis:call_attribution.regime"
         },
         {
           "@id": "bsis:unified_recommendations_history.regime"
@@ -6202,6 +6282,12 @@
         },
         {
           "@id": "bsis:unified_recommendations.classification"
+        },
+        {
+          "@id": "bsis:recommendation_log.rec_type"
+        },
+        {
+          "@id": "bsis:call_attribution.classification"
         },
         {
           "@id": "bsis:unified_recommendations_history.classification"
@@ -8617,6 +8703,9 @@
         },
         {
           "@id": "bsis:market_data_watermark.recorded_at"
+        },
+        {
+          "@id": "bsis:technical_signal_observations.recorded_at"
         }
       ]
     },
@@ -9121,9 +9210,14 @@
         "@value": "false",
         "@type": "xsd:boolean"
       },
-      "bsi:boundTo": {
-        "@id": "bsis:market_decision_evidence.value_json"
-      }
+      "bsi:boundTo": [
+        {
+          "@id": "bsis:market_decision_evidence.value_json"
+        },
+        {
+          "@id": "bsis:technical_signal_observations.values_json"
+        }
+      ]
     },
     {
       "@id": "bsip:revision",
@@ -9470,6 +9564,9 @@
       },
       "bsi:boundTo": [
         {
+          "@id": "bsis:recommendation_log.outcome"
+        },
+        {
           "@id": "bsis:signal_outcomes.outcome"
         },
         {
@@ -9575,6 +9672,12 @@
           "@id": "bsis:sector_rrg_history.sector_return"
         },
         {
+          "@id": "bsis:recommendation_log.actual_return_pct"
+        },
+        {
+          "@id": "bsis:call_attribution.fwd"
+        },
+        {
           "@id": "bsis:signal_outcomes.return_pct"
         },
         {
@@ -9619,6 +9722,9 @@
       "qudt:unit": "percent",
       "bsi:boundTo": [
         {
+          "@id": "bsis:call_attribution.mfe"
+        },
+        {
           "@id": "bsis:signal_excursions.mfe_pct"
         },
         {
@@ -9650,6 +9756,9 @@
       },
       "qudt:unit": "percent",
       "bsi:boundTo": [
+        {
+          "@id": "bsis:call_attribution.mae"
+        },
         {
           "@id": "bsis:signal_excursions.mae_pct"
         },
@@ -9793,14 +9902,9 @@
         "@value": "false",
         "@type": "xsd:boolean"
       },
-      "bsi:boundTo": [
-        {
-          "@id": "bsis:technical_signals.ai_insight"
-        },
-        {
-          "@id": "bsis:confluence_signals.ai_conclusion"
-        }
-      ]
+      "bsi:boundTo": {
+        "@id": "bsis:technical_signals.ai_insight"
+      }
     },
     {
       "@id": "bsip:trade_reasoning",
@@ -10467,33 +10571,6 @@
       "qudt:unit": "probability",
       "bsi:boundTo": {
         "@id": "bsis:confluence_signals.ml_breakout_probability"
-      }
-    },
-    {
-      "@id": "bsip:ml_trend_probability",
-      "rdf:type": {
-        "@id": "owl:DatatypeProperty"
-      },
-      "rdfs:label": "ML trend probability",
-      "rdfs:comment": "Model probability of trend continuation. A model output — not a feature.",
-      "rdfs:range": {
-        "@id": "xsd:decimal"
-      },
-      "bsi:semanticType": "score",
-      "bsi:timing": "coincident",
-      "bsi:derivation": "platform",
-      "bsi:leakageRisk": "none",
-      "bsi:usableAsFeature": {
-        "@value": "true",
-        "@type": "xsd:boolean"
-      },
-      "bsi:isLabel": {
-        "@value": "false",
-        "@type": "xsd:boolean"
-      },
-      "qudt:unit": "probability",
-      "bsi:boundTo": {
-        "@id": "bsis:confluence_signals.ml_trend_probability"
       }
     },
     {
@@ -11355,6 +11432,89 @@
           "@id": "bsis:fno_rollover.spot_price"
         }
       ]
+    },
+    {
+      "@id": "bsip:excess_return",
+      "rdf:type": {
+        "@id": "owl:DatatypeProperty"
+      },
+      "rdfs:label": "Excess return vs universe",
+      "rdfs:comment": "Forward return (next-session open to the open `horizon` sessions later) net of the 25 bps-per-side round trip, minus the same session's equal-weight liquid-universe mean. The grading quantity of the forward test and of call attribution; a fraction, not a percent. Outcome-side.",
+      "rdfs:range": {
+        "@id": "xsd:decimal"
+      },
+      "bsi:semanticType": "label",
+      "bsi:timing": "target",
+      "bsi:derivation": "label",
+      "bsi:leakageRisk": "target",
+      "bsi:usableAsFeature": {
+        "@value": "false",
+        "@type": "xsd:boolean"
+      },
+      "bsi:isLabel": {
+        "@value": "true",
+        "@type": "xsd:boolean"
+      },
+      "qudt:unit": "ratio",
+      "bsi:boundTo": {
+        "@id": "bsis:call_attribution.excess"
+      }
+    },
+    {
+      "@id": "bsip:attribution_cause",
+      "rdf:type": {
+        "@id": "owl:DatatypeProperty"
+      },
+      "rdfs:label": "Miss cause",
+      "rdfs:comment": "Why a published Buy missed (one primary cause, checked in a fixed priority order) or HIT. Points at the part of the plan that failed; descriptive, never a feature.",
+      "rdfs:range": {
+        "@id": "xsd:string"
+      },
+      "bsi:semanticType": "label",
+      "bsi:timing": "target",
+      "bsi:derivation": "label",
+      "bsi:leakageRisk": "target",
+      "bsi:usableAsFeature": {
+        "@value": "false",
+        "@type": "xsd:boolean"
+      },
+      "bsi:isLabel": {
+        "@value": "true",
+        "@type": "xsd:boolean"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:attribution_cause"
+      },
+      "bsi:boundTo": {
+        "@id": "bsis:call_attribution.cause"
+      }
+    },
+    {
+      "@id": "bsip:trailing_stop",
+      "rdf:type": {
+        "@id": "owl:DatatypeProperty"
+      },
+      "rdfs:label": "Trailing stop",
+      "rdfs:comment": "Chandelier stop ratcheted up after publication from the highest high since entry (`trailingStopUpdater.ts`). Overwritten in place with the LATEST level, so a historical read carries later prices; the published stop stays in `stop_loss`.",
+      "rdfs:range": {
+        "@id": "xsd:decimal"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:timing": "coincident",
+      "bsi:derivation": "platform",
+      "bsi:leakageRisk": "high",
+      "bsi:usableAsFeature": {
+        "@value": "false",
+        "@type": "xsd:boolean"
+      },
+      "bsi:isLabel": {
+        "@value": "false",
+        "@type": "xsd:boolean"
+      },
+      "qudt:unit": "per_share_INR",
+      "bsi:boundTo": {
+        "@id": "bsis:recommendation_log.trailing_stop"
+      }
     },
     {
       "@id": "bsip:option_buildup",
@@ -14712,6 +14872,114 @@
       "skos:definition": "Price up, OI down."
     },
     {
+      "@id": "bsiv:attribution_cause",
+      "rdf:type": {
+        "@id": "skos:ConceptScheme"
+      },
+      "rdfs:comment": "Primary cause given to a published Buy call by call_attribution.py, checked in this order (AF-20261119-06).",
+      "bsiv:source": "call_attribution.cause",
+      "bsiv:openEnded": {
+        "@value": "false",
+        "@type": "xsd:boolean"
+      }
+    },
+    {
+      "@id": "bsiv:attribution_cause.hit",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:attribution_cause"
+      },
+      "skos:notation": "HIT",
+      "skos:prefLabel": "Hit",
+      "skos:definition": "Net return beat the same-session liquid-universe mean."
+    },
+    {
+      "@id": "bsiv:attribution_cause.unfillable",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:attribution_cause"
+      },
+      "skos:notation": "UNFILLABLE",
+      "skos:prefLabel": "Unfillable",
+      "skos:definition": "Entry session traded at one price above the prior close (locked limit-up)."
+    },
+    {
+      "@id": "bsiv:attribution_cause.event",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:attribution_cause"
+      },
+      "skos:notation": "EVENT",
+      "skos:prefLabel": "Event",
+      "skos:definition": "A corporate-action ex-date fell inside the hold."
+    },
+    {
+      "@id": "bsiv:attribution_cause.stop-too-tight",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:attribution_cause"
+      },
+      "skos:notation": "STOP_TOO_TIGHT",
+      "skos:prefLabel": "Stop too tight",
+      "skos:definition": "Stop touched, yet the hold beat the universe gross or the target came later."
+    },
+    {
+      "@id": "bsiv:attribution_cause.cost",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:attribution_cause"
+      },
+      "skos:notation": "COST",
+      "skos:prefLabel": "Cost",
+      "skos:definition": "Beat the universe gross, lost only to the round-trip cost."
+    },
+    {
+      "@id": "bsiv:attribution_cause.too-slow",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:attribution_cause"
+      },
+      "skos:notation": "TOO_SLOW",
+      "skos:prefLabel": "Too slow",
+      "skos:definition": "Lost in the window; a 2x-horizon hold beat the universe net."
+    },
+    {
+      "@id": "bsiv:attribution_cause.sector-drag",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:attribution_cause"
+      },
+      "skos:notation": "SECTOR_DRAG",
+      "skos:prefLabel": "Sector drag",
+      "skos:definition": "Beat its own sector; the sector lagged the universe."
+    },
+    {
+      "@id": "bsiv:attribution_cause.wrong-pick",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:attribution_cause"
+      },
+      "skos:notation": "WRONG_PICK",
+      "skos:prefLabel": "Wrong pick",
+      "skos:definition": "Lagged its own sector."
+    },
+    {
       "@id": "bsiv:option_buildup",
       "rdf:type": {
         "@id": "skos:ConceptScheme"
@@ -17812,9 +18080,13 @@
         "expiry"
       ],
       "bsi:freshnessColumn": "fetched_at",
-      "bsi:writtenBy": "fno_oi_fetcher.py",
+      "bsi:writtenBy": [
+        "mc_stock_futures_oi_fetcher.py",
+        "nse_fo_bhav_history_fetcher.py"
+      ],
       "bsi:caveat": [
-        "LOW-DATA: the panel covers roughly two weeks of dates. Any 'measured' reading built on it is a calendar artefact rather than an edge — this is exactly the LOW-DATA verdict the master report records.",
+        "`source` matters: the MoneyControl rows start 2026-08-21 and store the NEAR MONTH only, while the NSE F&O bhavcopy reduction (AF-20261113-03) carries history and every expiry. Filter on `source` before building a panel.",
+        "Near-month rows are distorted around each monthly expiry: positions ROLL to the next month, so `oi_change` / `oi_buildup` read covering or unwinding while all-expiry OI is building (live 2026-11-19: IRFC -22.1% near month vs +9.1% all expiries). Sum all expiries, or exclude expiry week, before measuring (AF-20261119-09).",
         "`oi_buildup` uses 'Buildup' spelling while the option-chain table uses 'Build Up': never compare those strings across the two."
       ],
       "bsi:hasColumn": [
@@ -19208,7 +19480,8 @@
       },
       "bsi:writtenBy": [
         "technical_analysis_engine.py",
-        "feature_engineering.py"
+        "feature_engineering.py",
+        "backfill_technical_features.py"
       ],
       "bsi:forbiddenColumn": [
         "win_probability",
@@ -19218,7 +19491,8 @@
       "bsi:caveat": [
         "Over 300 columns of MIXED provenance: raw indicators, vendor opinions (ext_* / mc_* / tl_* prefixes) and model outputs sit side by side. Use the binding table to tell them apart.",
         "`win_probability` and `calibrated_win_probability` are model OUTPUTS — feeding them back in leaks the model into its own inputs.",
-        "`ai_insight` is generated text."
+        "`ai_insight` is generated text.",
+        "`rsi` mixes two definitions by row origin: the nightly GRID rows (`signal_type = 'GRID'`, backfill_technical_features.py) hold a simple-mean (Cutler) RSI and overwrite a scanner row whenever `cmp` differs; scanner and alert paths use the vendor's Wilder RSI (AF-20261119-15)."
       ],
       "bsi:hasColumn": [
         {
@@ -19727,6 +20001,115 @@
         "@id": "bsip:iv_hv_ratio"
       },
       "bsi:semanticType": "ratio",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "bsis:technical_signal_observations",
+      "rdf:type": {
+        "@id": "bsi:Table"
+      },
+      "rdfs:label": "Technical signal mutation ledger",
+      "rdfs:comment": "Immutable, transaction-time journal of every insert, update, and row removal applied to the technical_signals compatibility projection.",
+      "bsi:realizes": {
+        "@id": "bsi:TechnicalSignalObservation"
+      },
+      "bsi:rowClass": {
+        "@id": "bsit:technical_signal_observations"
+      },
+      "bsi:grain": "(observation_id)",
+      "bsi:cadence": "on_write",
+      "bsi:trainingUse": "context",
+      "bsi:primaryKey": "observation_id",
+      "bsi:freshnessColumn": "recorded_at",
+      "bsi:writtenBy": "journal_technical_signal_mutation",
+      "bsi:caveat": [
+        "This ledger records when the platform mutation occurred; a feature's economic observation/availability time still comes from its source contract.",
+        "writer_hint is provenance metadata, not a model feature."
+      ],
+      "bsi:hasColumn": [
+        {
+          "@id": "_:col_technical_signal_observations_observation_id"
+        },
+        {
+          "@id": "_:col_technical_signal_observations_symbol"
+        },
+        {
+          "@id": "_:col_technical_signal_observations_signal_date"
+        },
+        {
+          "@id": "_:col_technical_signal_observations_recorded_at"
+        },
+        {
+          "@id": "_:col_technical_signal_observations_writer_hint"
+        },
+        {
+          "@id": "_:col_technical_signal_observations_values_json"
+        }
+      ]
+    },
+    {
+      "@id": "bsit:technical_signal_observations",
+      "rdf:type": {
+        "@id": "owl:Class"
+      },
+      "rdfs:label": "technical_signal_observations row",
+      "rdfs:comment": "A row of technical_signal_observations. Grain: (observation_id). Subclass of TechnicalSignalObservation; the physical contract (column set) lives in bsi:technical_signal_observationsShape.",
+      "rdfs:subClassOf": {
+        "@id": "bsi:TechnicalSignalObservation"
+      }
+    },
+    {
+      "@id": "_:col_technical_signal_observations_observation_id",
+      "bsi:columnName": "observation_id",
+      "bsi:property": {
+        "@id": "bsip:id"
+      },
+      "bsi:semanticType": "identifier",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_technical_signal_observations_symbol",
+      "bsi:columnName": "symbol",
+      "bsi:property": {
+        "@id": "bsip:symbol"
+      },
+      "bsi:semanticType": "identifier",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_technical_signal_observations_signal_date",
+      "bsi:columnName": "signal_date",
+      "bsi:property": {
+        "@id": "bsip:signal_date"
+      },
+      "bsi:semanticType": "timestamp",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_technical_signal_observations_recorded_at",
+      "bsi:columnName": "recorded_at",
+      "bsi:property": {
+        "@id": "bsip:recorded_at"
+      },
+      "bsi:semanticType": "timestamp",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_technical_signal_observations_writer_hint",
+      "bsi:columnName": "writer_hint",
+      "bsi:property": {
+        "@id": "bsip:source"
+      },
+      "bsi:semanticType": "dimension",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_technical_signal_observations_values_json",
+      "bsi:columnName": "values_json",
+      "bsi:property": {
+        "@id": "bsip:value_json"
+      },
+      "bsi:semanticType": "json",
       "bsi:leakageRisk": "none"
     },
     {
@@ -20671,6 +21054,408 @@
       "bsi:leakageRisk": "high"
     },
     {
+      "@id": "bsis:recommendation_log",
+      "rdf:type": {
+        "@id": "bsi:Table"
+      },
+      "rdfs:label": "Published trade plans",
+      "rdfs:comment": "One row per published BUY / STRONG_BUY plan: entry, published stop, targets T1-T3, the ratcheted trailing stop, lifecycle status and the graded outcome.",
+      "bsi:realizes": {
+        "@id": "bsi:Recommendation"
+      },
+      "bsi:rowClass": {
+        "@id": "bsit:recommendation_log"
+      },
+      "bsi:grain": "(symbol, signal_date, timeframe, source)",
+      "bsi:cadence": "daily",
+      "bsi:trainingUse": "caution",
+      "bsi:primaryKey": [
+        "symbol",
+        "signal_date",
+        "timeframe",
+        "source"
+      ],
+      "bsi:freshnessColumn": "signal_date",
+      "bsi:writtenBy": [
+        "scoring_engine.py",
+        "technicalSignalsService.ts",
+        "trailingStopUpdater.ts",
+        "signal_lifecycle.py",
+        "outcome_resolver.py",
+        "recPlanAlerts.ts"
+      ],
+      "bsi:forbiddenColumn": [
+        "outcome",
+        "actual_return_pct",
+        "trailing_stop"
+      ],
+      "bsi:caveat": [
+        "`stop_loss` is the PUBLISHED stop and is immutable after publication; the ratchet lives in `trailing_stop` (AF-20261117-03). Grading uses `stop_loss` as the initial stop.",
+        "Graded from the next session's OPEN (AF-20261117-12), with levels rescaled to the back-adjusted price basis when a split or bonus falls inside the window (AF-20261117-13 / AF-20261118-05).",
+        "`stop_alerted_at` / `target_alerted_at` are delivery stamps of the intraday Telegram alert (AF-20261117-15), not outcomes.",
+        "Long-only: short setups are never written here."
+      ],
+      "bsi:hasColumn": [
+        {
+          "@id": "_:col_recommendation_log_symbol"
+        },
+        {
+          "@id": "_:col_recommendation_log_signal_date"
+        },
+        {
+          "@id": "_:col_recommendation_log_timeframe"
+        },
+        {
+          "@id": "_:col_recommendation_log_source"
+        },
+        {
+          "@id": "_:col_recommendation_log_rec_type"
+        },
+        {
+          "@id": "_:col_recommendation_log_entry_price"
+        },
+        {
+          "@id": "_:col_recommendation_log_stop_loss"
+        },
+        {
+          "@id": "_:col_recommendation_log_target_1"
+        },
+        {
+          "@id": "_:col_recommendation_log_trailing_stop"
+        },
+        {
+          "@id": "_:col_recommendation_log_outcome"
+        },
+        {
+          "@id": "_:col_recommendation_log_actual_return_pct"
+        }
+      ]
+    },
+    {
+      "@id": "bsit:recommendation_log",
+      "rdf:type": {
+        "@id": "owl:Class"
+      },
+      "rdfs:label": "recommendation_log row",
+      "rdfs:comment": "A row of recommendation_log. Grain: (symbol, signal_date, timeframe, source). Subclass of Recommendation; the physical contract (column set) lives in bsi:recommendation_logShape.",
+      "rdfs:subClassOf": {
+        "@id": "bsi:Recommendation"
+      }
+    },
+    {
+      "@id": "_:col_recommendation_log_symbol",
+      "bsi:columnName": "symbol",
+      "bsi:property": {
+        "@id": "bsip:symbol"
+      },
+      "bsi:semanticType": "identifier",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_recommendation_log_signal_date",
+      "bsi:columnName": "signal_date",
+      "bsi:property": {
+        "@id": "bsip:signal_date"
+      },
+      "bsi:semanticType": "timestamp",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_recommendation_log_timeframe",
+      "bsi:columnName": "timeframe",
+      "bsi:property": {
+        "@id": "bsip:timeframe"
+      },
+      "bsi:semanticType": "enum",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_recommendation_log_source",
+      "bsi:columnName": "source",
+      "bsi:property": {
+        "@id": "bsip:source"
+      },
+      "bsi:semanticType": "dimension",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "Writing engine (scoring_engine / technical_scan)."
+    },
+    {
+      "@id": "_:col_recommendation_log_rec_type",
+      "bsi:columnName": "rec_type",
+      "bsi:property": {
+        "@id": "bsip:classification"
+      },
+      "bsi:semanticType": "enum",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "BUY / STRONG_BUY only (long-only)."
+    },
+    {
+      "@id": "_:col_recommendation_log_entry_price",
+      "bsi:columnName": "entry_price",
+      "bsi:property": {
+        "@id": "bsip:entry_price"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "low"
+    },
+    {
+      "@id": "_:col_recommendation_log_stop_loss",
+      "bsi:columnName": "stop_loss",
+      "bsi:property": {
+        "@id": "bsip:stop_loss"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "Published stop; immutable after publication."
+    },
+    {
+      "@id": "_:col_recommendation_log_target_1",
+      "bsi:columnName": "target_1",
+      "bsi:property": {
+        "@id": "bsip:target_1"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_recommendation_log_trailing_stop",
+      "bsi:columnName": "trailing_stop",
+      "bsi:property": {
+        "@id": "bsip:trailing_stop"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "high"
+    },
+    {
+      "@id": "_:col_recommendation_log_outcome",
+      "bsi:columnName": "outcome",
+      "bsi:property": {
+        "@id": "bsip:outcome"
+      },
+      "bsi:semanticType": "label",
+      "bsi:leakageRisk": "target"
+    },
+    {
+      "@id": "_:col_recommendation_log_actual_return_pct",
+      "bsi:columnName": "actual_return_pct",
+      "bsi:property": {
+        "@id": "bsip:return_pct"
+      },
+      "bsi:semanticType": "label",
+      "bsi:leakageRisk": "target"
+    },
+    {
+      "@id": "bsis:call_attribution",
+      "rdf:type": {
+        "@id": "bsi:Table"
+      },
+      "rdfs:label": "Why each published Buy hit or missed",
+      "rdfs:comment": "One row per published Buy / Strong Buy whose window has closed: next-open entry, forward and excess return vs the same-session liquid universe, path statistics (MAE/MFE, stop and target touches) and ONE primary miss cause.",
+      "bsi:realizes": {
+        "@id": "bsi:SignalOutcome"
+      },
+      "bsi:rowClass": {
+        "@id": "bsit:call_attribution"
+      },
+      "bsi:grain": "(symbol, call_session, horizon)",
+      "bsi:cadence": "daily",
+      "bsi:trainingUse": "forbidden",
+      "bsi:primaryKey": [
+        "symbol",
+        "call_session",
+        "horizon"
+      ],
+      "bsi:freshnessColumn": "computed_at",
+      "bsi:writtenBy": "call_attribution.py",
+      "bsi:forbiddenColumn": [
+        "fwd",
+        "excess",
+        "mae",
+        "mfe",
+        "cause"
+      ],
+      "bsi:caveat": [
+        "Outcome-side end to end: every graded column is a label. Use it to decide which part of the plan to change, never as a model input.",
+        "Fractions, not percents (`fwd`, `excess`, `mae`, `mfe`, `stop_dist`).",
+        "Cause shares are descriptive. A rule built on them ships only as a shadow arm through ranker_challenger_gate.py (AF-20261119-06/-08).",
+        "Re-derived nightly from unified_recommendations_history + stock_ohlcv, so a row can change when prices are repaired."
+      ],
+      "bsi:hasColumn": [
+        {
+          "@id": "_:col_call_attribution_symbol"
+        },
+        {
+          "@id": "_:col_call_attribution_call_session"
+        },
+        {
+          "@id": "_:col_call_attribution_horizon"
+        },
+        {
+          "@id": "_:col_call_attribution_classification"
+        },
+        {
+          "@id": "_:col_call_attribution_unified_score"
+        },
+        {
+          "@id": "_:col_call_attribution_sector"
+        },
+        {
+          "@id": "_:col_call_attribution_regime"
+        },
+        {
+          "@id": "_:col_call_attribution_fwd"
+        },
+        {
+          "@id": "_:col_call_attribution_excess"
+        },
+        {
+          "@id": "_:col_call_attribution_mae"
+        },
+        {
+          "@id": "_:col_call_attribution_mfe"
+        },
+        {
+          "@id": "_:col_call_attribution_cause"
+        },
+        {
+          "@id": "_:col_call_attribution_computed_at"
+        }
+      ]
+    },
+    {
+      "@id": "bsit:call_attribution",
+      "rdf:type": {
+        "@id": "owl:Class"
+      },
+      "rdfs:label": "call_attribution row",
+      "rdfs:comment": "A row of call_attribution. Grain: (symbol, call_session, horizon). Subclass of SignalOutcome; the physical contract (column set) lives in bsi:call_attributionShape.",
+      "rdfs:subClassOf": {
+        "@id": "bsi:SignalOutcome"
+      }
+    },
+    {
+      "@id": "_:col_call_attribution_symbol",
+      "bsi:columnName": "symbol",
+      "bsi:property": {
+        "@id": "bsip:symbol"
+      },
+      "bsi:semanticType": "identifier",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_call_attribution_call_session",
+      "bsi:columnName": "call_session",
+      "bsi:property": {
+        "@id": "bsip:signal_date"
+      },
+      "bsi:semanticType": "timestamp",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "Session the call belongs to (published before that session's next open)."
+    },
+    {
+      "@id": "_:col_call_attribution_horizon",
+      "bsi:columnName": "horizon",
+      "bsi:property": {
+        "@id": "bsip:horizon_days"
+      },
+      "bsi:semanticType": "count",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "Trading sessions, not calendar days."
+    },
+    {
+      "@id": "_:col_call_attribution_classification",
+      "bsi:columnName": "classification",
+      "bsi:property": {
+        "@id": "bsip:classification"
+      },
+      "bsi:semanticType": "enum",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_call_attribution_unified_score",
+      "bsi:columnName": "unified_score",
+      "bsi:property": {
+        "@id": "bsip:unified_score"
+      },
+      "bsi:semanticType": "score",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_call_attribution_sector",
+      "bsi:columnName": "sector",
+      "bsi:property": {
+        "@id": "bsip:sector"
+      },
+      "bsi:semanticType": "dimension",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_call_attribution_regime",
+      "bsi:columnName": "regime",
+      "bsi:property": {
+        "@id": "bsip:regime"
+      },
+      "bsi:semanticType": "enum",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_call_attribution_fwd",
+      "bsi:columnName": "fwd",
+      "bsi:property": {
+        "@id": "bsip:return_pct"
+      },
+      "bsi:semanticType": "label",
+      "bsi:leakageRisk": "target",
+      "bsi:note": "A FRACTION of the next-session open, not a percent; exit at the open `horizon` sessions later."
+    },
+    {
+      "@id": "_:col_call_attribution_excess",
+      "bsi:columnName": "excess",
+      "bsi:property": {
+        "@id": "bsip:excess_return"
+      },
+      "bsi:semanticType": "label",
+      "bsi:leakageRisk": "target"
+    },
+    {
+      "@id": "_:col_call_attribution_mae",
+      "bsi:columnName": "mae",
+      "bsi:property": {
+        "@id": "bsip:mae_pct"
+      },
+      "bsi:semanticType": "label",
+      "bsi:leakageRisk": "target",
+      "bsi:note": "A fraction of entry, not a percent."
+    },
+    {
+      "@id": "_:col_call_attribution_mfe",
+      "bsi:columnName": "mfe",
+      "bsi:property": {
+        "@id": "bsip:mfe_pct"
+      },
+      "bsi:semanticType": "label",
+      "bsi:leakageRisk": "target",
+      "bsi:note": "A fraction of entry, not a percent."
+    },
+    {
+      "@id": "_:col_call_attribution_cause",
+      "bsi:columnName": "cause",
+      "bsi:property": {
+        "@id": "bsip:attribution_cause"
+      },
+      "bsi:semanticType": "label",
+      "bsi:leakageRisk": "target"
+    },
+    {
+      "@id": "_:col_call_attribution_computed_at",
+      "bsi:columnName": "computed_at",
+      "bsi:property": {
+        "@id": "bsip:computed_at"
+      },
+      "bsi:semanticType": "timestamp",
+      "bsi:leakageRisk": "none"
+    },
+    {
       "@id": "bsis:intraday_recommendations",
       "rdf:type": {
         "@id": "bsi:Table"
@@ -20958,14 +21743,11 @@
         "@type": "xsd:decimal"
       },
       "bsi:writtenBy": "confluence_ml_engine.py",
-      "bsi:forbiddenColumn": [
-        "trade_reasoning",
-        "ai_conclusion"
-      ],
+      "bsi:forbiddenColumn": "trade_reasoning",
       "bsi:caveat": [
         "The only engine score with a growing positive graded reading on this platform — which is what makes it the ranker's load-bearing input.",
         "`computed_at` here is native TIMESTAMPTZ, unlike the TEXT `computed_at` on `unified_recommendations`: cast across the join.",
-        "`ml_breakout_probability` / `ml_trend_probability` are model outputs.",
+        "`ml_breakout_probability` is the populated model output; the legacy `ml_trend_probability` schema field has no writer and is not exposed.",
         "`screener_weights_json` records the weights AT SCORING TIME — applying today's weights to an old row is a look-ahead bug."
       ],
       "bsi:hasColumn": [
@@ -21006,9 +21788,6 @@
           "@id": "_:col_confluence_signals_ml_breakout_probability"
         },
         {
-          "@id": "_:col_confluence_signals_ml_trend_probability"
-        },
-        {
           "@id": "_:col_confluence_signals_entry_zone_low"
         },
         {
@@ -21028,9 +21807,6 @@
         },
         {
           "@id": "_:col_confluence_signals_risk_reward"
-        },
-        {
-          "@id": "_:col_confluence_signals_ai_conclusion"
         },
         {
           "@id": "_:col_confluence_signals_trade_reasoning"
@@ -21178,15 +21954,6 @@
       "bsi:leakageRisk": "none"
     },
     {
-      "@id": "_:col_confluence_signals_ml_trend_probability",
-      "bsi:columnName": "ml_trend_probability",
-      "bsi:property": {
-        "@id": "bsip:ml_trend_probability"
-      },
-      "bsi:semanticType": "score",
-      "bsi:leakageRisk": "none"
-    },
-    {
       "@id": "_:col_confluence_signals_entry_zone_low",
       "bsi:columnName": "entry_zone_low",
       "bsi:property": {
@@ -21247,15 +22014,6 @@
         "@id": "bsip:risk_reward"
       },
       "bsi:semanticType": "ratio",
-      "bsi:leakageRisk": "none"
-    },
-    {
-      "@id": "_:col_confluence_signals_ai_conclusion",
-      "bsi:columnName": "ai_conclusion",
-      "bsi:property": {
-        "@id": "bsip:ai_insight"
-      },
-      "bsi:semanticType": "text",
       "bsi:leakageRisk": "none"
     },
     {

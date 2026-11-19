@@ -279,7 +279,7 @@
       <data key="label">Recommendation</data>
       <data key="layer">derived</data>
       <data key="grain">(symbol, computed_at, timeframe)</data>
-      <data key="tables">unified_recommendations, unified_recommendations_history, intraday_recommendations</data>
+      <data key="tables">unified_recommendations, unified_recommendations_history, recommendation_log, intraday_recommendations</data>
       <data key="description">The served trade: composite score, conviction bucket, action label, entry zone, stop, targets, risk/reward and position size for one symbol, date and timeframe.</data>
     </node>
     <node id="class:ModelArtifact">
@@ -317,7 +317,7 @@
       <data key="label">Signal outcome</data>
       <data key="layer">outcome</data>
       <data key="grain">(symbol, signal_date, horizon_days, signal_source)</data>
-      <data key="tables">signal_outcomes, unified_signal_outcomes</data>
+      <data key="tables">call_attribution, signal_outcomes, unified_signal_outcomes</data>
       <data key="description">The resolved result of a signal: entry, exit, horizon, return and the outcome label, under one of two possibly-different labelling rules.</data>
     </node>
     <node id="class:SignalExcursion">
@@ -371,6 +371,14 @@
       <data key="label">Governance record</data>
       <data key="layer">governance</data>
       <data key="description">Abstract parent for operational metadata. These answer 'when was this true and who wrote it', which on this platform is the difference between a usable value and a guess.</data>
+    </node>
+    <node id="class:TechnicalSignalObservation">
+      <data key="kind">class</data>
+      <data key="label">Technical signal observation</data>
+      <data key="layer">governance</data>
+      <data key="grain">one row per technical_signals mutation</data>
+      <data key="tables">technical_signal_observations</data>
+      <data key="description">An immutable transaction-time record of one mutation to the technical signal compatibility projection, including writer provenance and changed values.</data>
     </node>
     <node id="class:Endpoint">
       <data key="kind">class</data>
@@ -651,7 +659,7 @@
       <data key="grain">(source, symbol, date, expiry)</data>
       <data key="cadence">daily</data>
       <data key="training_use">caution</data>
-      <data key="writers">fno_oi_fetcher.py</data>
+      <data key="writers">mc_stock_futures_oi_fetcher.py, nse_fo_bhav_history_fetcher.py</data>
       <data key="pk">source, symbol, date, expiry</data>
       <data key="description">Stock-futures open interest, buildup label, rollover percentage, basis and cost of carry per expiry and session.</data>
     </node>
@@ -761,9 +769,20 @@
       <data key="grain">(symbol, date)</data>
       <data key="cadence">daily</data>
       <data key="training_use">caution</data>
-      <data key="writers">technical_analysis_engine.py, feature_engineering.py</data>
+      <data key="writers">technical_analysis_engine.py, feature_engineering.py, backfill_technical_features.py</data>
       <data key="pk">symbol, date</data>
       <data key="description">The wide per-symbol, per-date technical panel: indicators, regime stamp, flow and fundamental context columns, plus model probability outputs.</data>
+    </node>
+    <node id="table:technical_signal_observations">
+      <data key="kind">table</data>
+      <data key="label">Technical signal mutation ledger</data>
+      <data key="entity">TechnicalSignalObservation</data>
+      <data key="grain">(observation_id)</data>
+      <data key="cadence">on_write</data>
+      <data key="training_use">context</data>
+      <data key="writers">journal_technical_signal_mutation</data>
+      <data key="pk">observation_id</data>
+      <data key="description">Immutable, transaction-time journal of every insert, update, and row removal applied to the technical_signals compatibility projection.</data>
     </node>
     <node id="table:feature_store">
       <data key="kind">table</data>
@@ -797,6 +816,28 @@
       <data key="writers">unified_ranker.py</data>
       <data key="pk">symbol, computed_at</data>
       <data key="description">The accumulating record of every served recommendation with its raw win-probability meta-label — the substrate for forward testing the ranker.</data>
+    </node>
+    <node id="table:recommendation_log">
+      <data key="kind">table</data>
+      <data key="label">Published trade plans</data>
+      <data key="entity">Recommendation</data>
+      <data key="grain">(symbol, signal_date, timeframe, source)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">caution</data>
+      <data key="writers">scoring_engine.py, technicalSignalsService.ts, trailingStopUpdater.ts, signal_lifecycle.py, outcome_resolver.py, recPlanAlerts.ts</data>
+      <data key="pk">symbol, signal_date, timeframe, source</data>
+      <data key="description">One row per published BUY / STRONG_BUY plan: entry, published stop, targets T1-T3, the ratcheted trailing stop, lifecycle status and the graded outcome.</data>
+    </node>
+    <node id="table:call_attribution">
+      <data key="kind">table</data>
+      <data key="label">Why each published Buy hit or missed</data>
+      <data key="entity">SignalOutcome</data>
+      <data key="grain">(symbol, call_session, horizon)</data>
+      <data key="cadence">daily</data>
+      <data key="training_use">forbidden</data>
+      <data key="writers">call_attribution.py</data>
+      <data key="pk">symbol, call_session, horizon</data>
+      <data key="description">One row per published Buy / Strong Buy whose window has closed: next-open entry, forward and excess return vs the same-session liquid universe, path statistics (MAE/MFE, stop and target touches) and ONE primary miss cause.</data>
     </node>
     <node id="table:intraday_recommendations">
       <data key="kind">table</data>
@@ -1433,514 +1474,526 @@
     <edge id="e29" source="class:EventTrigger" target="class:CandidateRecord">
       <data key="label">subclass_of</data>
     </edge>
-    <edge id="e30" source="class:Endpoint" target="class:GovernanceRecord">
+    <edge id="e30" source="class:TechnicalSignalObservation" target="class:GovernanceRecord">
       <data key="label">subclass_of</data>
     </edge>
-    <edge id="e31" source="class:JobRun" target="class:GovernanceRecord">
+    <edge id="e31" source="class:Endpoint" target="class:GovernanceRecord">
       <data key="label">subclass_of</data>
     </edge>
-    <edge id="e32" source="class:DataQualityCheck" target="class:GovernanceRecord">
+    <edge id="e32" source="class:JobRun" target="class:GovernanceRecord">
       <data key="label">subclass_of</data>
     </edge>
-    <edge id="e33" source="class:DataContract" target="class:GovernanceRecord">
+    <edge id="e33" source="class:DataQualityCheck" target="class:GovernanceRecord">
       <data key="label">subclass_of</data>
     </edge>
-    <edge id="e34" source="class:FeatureDefinition" target="class:GovernanceRecord">
+    <edge id="e34" source="class:DataContract" target="class:GovernanceRecord">
       <data key="label">subclass_of</data>
     </edge>
-    <edge id="e35" source="class:DataWatermark" target="class:GovernanceRecord">
+    <edge id="e35" source="class:FeatureDefinition" target="class:GovernanceRecord">
       <data key="label">subclass_of</data>
     </edge>
-    <edge id="e36" source="class:GraphNode" target="class:GovernanceRecord">
+    <edge id="e36" source="class:DataWatermark" target="class:GovernanceRecord">
       <data key="label">subclass_of</data>
     </edge>
-    <edge id="e37" source="class:GraphEdge" target="class:GovernanceRecord">
+    <edge id="e37" source="class:GraphNode" target="class:GovernanceRecord">
       <data key="label">subclass_of</data>
     </edge>
-    <edge id="e38" source="class:EvidenceRecord" target="class:GovernanceRecord">
+    <edge id="e38" source="class:GraphEdge" target="class:GovernanceRecord">
       <data key="label">subclass_of</data>
     </edge>
-    <edge id="e39" source="table:stock_ohlcv" target="class:Bar">
+    <edge id="e39" source="class:EvidenceRecord" target="class:GovernanceRecord">
+      <data key="label">subclass_of</data>
+    </edge>
+    <edge id="e40" source="table:stock_ohlcv" target="class:Bar">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e41" source="table:intraday_ohlcv" target="class:IntradayBar">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e42" source="table:stock_delivery_data" target="class:DeliveryObservation">
+      <data key="label">realizes</data>
+    </edge>
+    <edge id="e43" source="table:stock_delivery_volume" target="class:DeliveryObservation">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e40" source="table:intraday_ohlcv" target="class:IntradayBar">
+    <edge id="e44" source="table:stock_master" target="class:Equity">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e41" source="table:stock_delivery_data" target="class:DeliveryObservation">
+    <edge id="e45" source="table:company_profiles" target="class:CompanyProfile">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e42" source="table:stock_delivery_volume" target="class:DeliveryObservation">
+    <edge id="e46" source="table:corporate_actions" target="class:CorporateAction">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e43" source="table:stock_master" target="class:Equity">
+    <edge id="e47" source="table:fundamentals_history" target="class:FundamentalSnapshot">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e44" source="table:company_profiles" target="class:CompanyProfile">
+    <edge id="e48" source="table:analyst_estimates_history" target="class:AnalystEstimate">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e45" source="table:corporate_actions" target="class:CorporateAction">
+    <edge id="e49" source="table:eps_surprise_history" target="class:EarningsSurprise">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e46" source="table:fundamentals_history" target="class:FundamentalSnapshot">
+    <edge id="e50" source="table:insider_trades" target="class:InsiderTransaction">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e47" source="table:analyst_estimates_history" target="class:AnalystEstimate">
+    <edge id="e51" source="table:block_deals" target="class:BlockDeal">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e48" source="table:eps_surprise_history" target="class:EarningsSurprise">
+    <edge id="e52" source="table:stock_mf_holdings" target="class:MFHolding">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e49" source="table:insider_trades" target="class:InsiderTransaction">
+    <edge id="e53" source="table:news_sentiment_items" target="class:NewsItem">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e50" source="table:block_deals" target="class:BlockDeal">
+    <edge id="e54" source="table:news_symbol_link" target="class:NewsItem">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e51" source="table:stock_mf_holdings" target="class:MFHolding">
+    <edge id="e55" source="table:so_option_chain" target="class:OptionChainRow">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e52" source="table:news_sentiment_items" target="class:NewsItem">
+    <edge id="e56" source="table:stock_futures_oi_history" target="class:FuturesPositioning">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e53" source="table:news_symbol_link" target="class:NewsItem">
+    <edge id="e57" source="table:fno_rollover" target="class:FuturesPositioning">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e54" source="table:so_option_chain" target="class:OptionChainRow">
+    <edge id="e58" source="table:index_max_pain" target="class:IndexDerivativesSnapshot">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e55" source="table:stock_futures_oi_history" target="class:FuturesPositioning">
+    <edge id="e59" source="table:nt_index_pcr_ts" target="class:IndexDerivativesSnapshot">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e56" source="table:fno_rollover" target="class:FuturesPositioning">
+    <edge id="e60" source="table:mover_snapshots" target="class:MoverSnapshot">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e57" source="table:index_max_pain" target="class:IndexDerivativesSnapshot">
+    <edge id="e61" source="table:stock_event_triggers" target="class:EventTrigger">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e58" source="table:nt_index_pcr_ts" target="class:IndexDerivativesSnapshot">
+    <edge id="e62" source="table:market_regimes" target="class:RegimeState">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e59" source="table:mover_snapshots" target="class:MoverSnapshot">
+    <edge id="e63" source="table:market_breadth" target="class:BreadthObservation">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e60" source="table:stock_event_triggers" target="class:EventTrigger">
+    <edge id="e64" source="table:intraday_regime_history" target="class:RegimeState">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e61" source="table:market_regimes" target="class:RegimeState">
+    <edge id="e65" source="table:sector_rrg_history" target="class:SectorRotationPoint">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e62" source="table:market_breadth" target="class:BreadthObservation">
+    <edge id="e66" source="table:technical_signals" target="class:TechnicalSignal">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e63" source="table:intraday_regime_history" target="class:RegimeState">
+    <edge id="e67" source="table:technical_signal_observations" target="class:TechnicalSignalObservation">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e64" source="table:sector_rrg_history" target="class:SectorRotationPoint">
+    <edge id="e68" source="table:feature_store" target="class:FeatureVector">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e65" source="table:technical_signals" target="class:TechnicalSignal">
+    <edge id="e69" source="table:unified_recommendations" target="class:Recommendation">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e66" source="table:feature_store" target="class:FeatureVector">
+    <edge id="e70" source="table:unified_recommendations_history" target="class:Recommendation">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e67" source="table:unified_recommendations" target="class:Recommendation">
+    <edge id="e71" source="table:recommendation_log" target="class:Recommendation">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e68" source="table:unified_recommendations_history" target="class:Recommendation">
+    <edge id="e72" source="table:call_attribution" target="class:SignalOutcome">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e69" source="table:intraday_recommendations" target="class:Recommendation">
+    <edge id="e73" source="table:intraday_recommendations" target="class:Recommendation">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e70" source="table:confluence_signals" target="class:EngineScore">
+    <edge id="e74" source="table:confluence_signals" target="class:EngineScore">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e71" source="table:engine_composite_scores" target="class:EngineScore">
+    <edge id="e75" source="table:engine_composite_scores" target="class:EngineScore">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e72" source="table:signal_outcomes" target="class:SignalOutcome">
+    <edge id="e76" source="table:signal_outcomes" target="class:SignalOutcome">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e73" source="table:unified_signal_outcomes" target="class:SignalOutcome">
+    <edge id="e77" source="table:unified_signal_outcomes" target="class:SignalOutcome">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e74" source="table:signal_excursions" target="class:SignalExcursion">
+    <edge id="e78" source="table:signal_excursions" target="class:SignalExcursion">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e75" source="table:screener_master" target="class:Screener">
+    <edge id="e79" source="table:screener_master" target="class:Screener">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e76" source="table:stock_scores" target="class:EngineScore">
+    <edge id="e80" source="table:stock_scores" target="class:EngineScore">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e77" source="table:live_screener_appearances" target="class:ScreenerAppearance">
+    <edge id="e81" source="table:live_screener_appearances" target="class:ScreenerAppearance">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e78" source="table:live_screener_outcomes" target="class:ScreenerOutcome">
+    <edge id="e82" source="table:live_screener_outcomes" target="class:ScreenerOutcome">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e79" source="table:job_heartbeat" target="class:JobRun">
+    <edge id="e83" source="table:job_heartbeat" target="class:JobRun">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e80" source="table:data_quality_results" target="class:DataQualityCheck">
+    <edge id="e84" source="table:data_quality_results" target="class:DataQualityCheck">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e81" source="table:model_registry" target="class:ModelArtifact">
+    <edge id="e85" source="table:model_registry" target="class:ModelArtifact">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e82" source="table:feature_importance_log" target="class:FeatureImportance">
+    <edge id="e86" source="table:feature_importance_log" target="class:FeatureImportance">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e83" source="table:factor_edge_history" target="class:EdgeReading">
+    <edge id="e87" source="table:factor_edge_history" target="class:EdgeReading">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e84" source="table:market_endpoint_registry" target="class:Endpoint">
+    <edge id="e88" source="table:market_endpoint_registry" target="class:Endpoint">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e85" source="table:url_endpoints" target="class:Endpoint">
+    <edge id="e89" source="table:url_endpoints" target="class:Endpoint">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e86" source="table:nse_stocks" target="class:Equity">
+    <edge id="e90" source="table:nse_stocks" target="class:Equity">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e87" source="table:mc_scid_map" target="class:ScripCodeMapping">
+    <edge id="e91" source="table:mc_scid_map" target="class:ScripCodeMapping">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e88" source="table:market_issuer" target="class:Issuer">
+    <edge id="e92" source="table:market_issuer" target="class:Issuer">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e89" source="table:market_instrument" target="class:Instrument">
+    <edge id="e93" source="table:market_instrument" target="class:Instrument">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e90" source="table:market_listing" target="class:Listing">
+    <edge id="e94" source="table:market_listing" target="class:Listing">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e91" source="table:market_identifier" target="class:ProviderIdentifier">
+    <edge id="e95" source="table:market_identifier" target="class:ProviderIdentifier">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e92" source="table:market_identifier_gap" target="class:ProviderIdentifier">
+    <edge id="e96" source="table:market_identifier_gap" target="class:ProviderIdentifier">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e93" source="table:market_graph_node" target="class:GraphNode">
+    <edge id="e97" source="table:market_graph_node" target="class:GraphNode">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e94" source="table:market_graph_edge" target="class:GraphEdge">
+    <edge id="e98" source="table:market_graph_edge" target="class:GraphEdge">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e95" source="table:market_evidence" target="class:EvidenceRecord">
+    <edge id="e99" source="table:market_evidence" target="class:EvidenceRecord">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e96" source="table:market_claim" target="class:MarketClaim">
+    <edge id="e100" source="table:market_claim" target="class:MarketClaim">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e97" source="table:market_claim_evidence" target="class:EvidenceRecord">
+    <edge id="e101" source="table:market_claim_evidence" target="class:EvidenceRecord">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e98" source="table:market_decision_event" target="class:DecisionEvent">
+    <edge id="e102" source="table:market_decision_event" target="class:DecisionEvent">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e99" source="table:market_decision_evidence" target="class:DecisionEvent">
+    <edge id="e103" source="table:market_decision_evidence" target="class:DecisionEvent">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e100" source="table:market_decision_outcome" target="class:DecisionOutcome">
+    <edge id="e104" source="table:market_decision_outcome" target="class:DecisionOutcome">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e101" source="table:market_data_contract" target="class:DataContract">
+    <edge id="e105" source="table:market_data_contract" target="class:DataContract">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e102" source="table:semantic_feature_definition" target="class:FeatureDefinition">
+    <edge id="e106" source="table:semantic_feature_definition" target="class:FeatureDefinition">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e103" source="table:market_data_watermark" target="class:DataWatermark">
+    <edge id="e107" source="table:market_data_watermark" target="class:DataWatermark">
       <data key="label">realizes</data>
     </edge>
-    <edge id="e104" source="class:Equity" target="class:Bar">
+    <edge id="e108" source="class:Equity" target="class:Bar">
       <data key="label">relation</data>
       <data key="label">instrumentHasBar</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e105" source="class:Equity" target="class:IntradayBar">
+    <edge id="e109" source="class:Equity" target="class:IntradayBar">
       <data key="label">relation</data>
       <data key="label">instrumentHasIntradayBar</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e106" source="class:Equity" target="class:DeliveryObservation">
+    <edge id="e110" source="class:Equity" target="class:DeliveryObservation">
       <data key="label">relation</data>
       <data key="label">instrumentHasDelivery</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">research-candidate</data>
     </edge>
-    <edge id="e107" source="class:Equity" target="class:CorporateAction">
+    <edge id="e111" source="class:Equity" target="class:CorporateAction">
       <data key="label">relation</data>
       <data key="label">instrumentHasCorporateAction</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e108" source="class:Equity" target="class:FundamentalSnapshot">
+    <edge id="e112" source="class:Equity" target="class:FundamentalSnapshot">
       <data key="label">relation</data>
       <data key="label">instrumentHasFundamentalSnapshot</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">measured</data>
     </edge>
-    <edge id="e109" source="class:Equity" target="class:AnalystEstimate">
+    <edge id="e113" source="class:Equity" target="class:AnalystEstimate">
       <data key="label">relation</data>
       <data key="label">instrumentHasAnalystEstimate</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">ungraded</data>
     </edge>
-    <edge id="e110" source="class:Equity" target="class:EarningsSurprise">
+    <edge id="e114" source="class:Equity" target="class:EarningsSurprise">
       <data key="label">relation</data>
       <data key="label">instrumentHasEarningsSurprise</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">ungraded</data>
     </edge>
-    <edge id="e111" source="class:Equity" target="class:InsiderTransaction">
+    <edge id="e115" source="class:Equity" target="class:InsiderTransaction">
       <data key="label">relation</data>
       <data key="label">instrumentHasInsiderTransaction</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">measured</data>
     </edge>
-    <edge id="e112" source="class:Equity" target="class:BlockDeal">
+    <edge id="e116" source="class:Equity" target="class:BlockDeal">
       <data key="label">relation</data>
       <data key="label">instrumentHasBlockDeal</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">measured</data>
     </edge>
-    <edge id="e113" source="class:Equity" target="class:MFHolding">
+    <edge id="e117" source="class:Equity" target="class:MFHolding">
       <data key="label">relation</data>
       <data key="label">instrumentHasMFHolding</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">ungraded</data>
     </edge>
-    <edge id="e114" source="class:Equity" target="class:OptionChainRow">
+    <edge id="e118" source="class:Equity" target="class:OptionChainRow">
       <data key="label">relation</data>
       <data key="label">instrumentHasOptionChain</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">ungraded</data>
     </edge>
-    <edge id="e115" source="class:Equity" target="class:FuturesPositioning">
+    <edge id="e119" source="class:Equity" target="class:FuturesPositioning">
       <data key="label">relation</data>
       <data key="label">instrumentHasFuturesPositioning</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">low-data</data>
     </edge>
-    <edge id="e116" source="class:Equity" target="class:FeatureVector">
+    <edge id="e120" source="class:Equity" target="class:FeatureVector">
       <data key="label">relation</data>
       <data key="label">instrumentHasFeatureVector</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e117" source="class:Equity" target="class:TechnicalSignal">
+    <edge id="e121" source="class:Equity" target="class:TechnicalSignal">
       <data key="label">relation</data>
       <data key="label">instrumentHasTechnicalSignal</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e118" source="class:Equity" target="class:Recommendation">
+    <edge id="e122" source="class:Equity" target="class:Recommendation">
       <data key="label">relation</data>
       <data key="label">instrumentServedRecommendation</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e119" source="class:TechnicalSignal" target="class:SignalOutcome">
+    <edge id="e123" source="class:TechnicalSignal" target="class:SignalOutcome">
       <data key="label">relation</data>
       <data key="label">signalResolvedToOutcome</data>
       <data key="cardinality">N:1</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e120" source="class:SignalOutcome" target="class:SignalExcursion">
+    <edge id="e124" source="class:SignalOutcome" target="class:SignalExcursion">
       <data key="label">relation</data>
       <data key="label">outcomeHasExcursion</data>
       <data key="cardinality">1:1</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e121" source="class:NewsItem" target="class:Equity">
+    <edge id="e125" source="class:NewsItem" target="class:Equity">
       <data key="label">relation</data>
       <data key="label">newsMentionsInstrument</data>
       <data key="cardinality">N:M</data>
       <data key="graded_status">measured</data>
     </edge>
-    <edge id="e122" source="class:Equity" target="class:EventTrigger">
+    <edge id="e126" source="class:Equity" target="class:EventTrigger">
       <data key="label">relation</data>
       <data key="label">instrumentHasEventTrigger</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">ungraded</data>
     </edge>
-    <edge id="e123" source="class:Equity" target="class:MoverSnapshot">
+    <edge id="e127" source="class:Equity" target="class:MoverSnapshot">
       <data key="label">relation</data>
       <data key="label">instrumentHasMoverSnapshot</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">measured</data>
     </edge>
-    <edge id="e124" source="class:Screener" target="class:Equity">
+    <edge id="e128" source="class:Screener" target="class:Equity">
       <data key="label">relation</data>
       <data key="label">screenerSurfacesInstrument</data>
       <data key="cardinality">N:M</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e125" source="class:ScreenerAppearance" target="class:ScreenerOutcome">
+    <edge id="e129" source="class:ScreenerAppearance" target="class:ScreenerOutcome">
       <data key="label">relation</data>
       <data key="label">appearanceHasOutcome</data>
       <data key="cardinality">1:1</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e126" source="class:Index" target="class:IndexDerivativesSnapshot">
+    <edge id="e130" source="class:Index" target="class:IndexDerivativesSnapshot">
       <data key="label">relation</data>
       <data key="label">indexHasDerivativesSnapshot</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">ungraded</data>
     </edge>
-    <edge id="e127" source="class:RegimeState" target="class:Bar">
+    <edge id="e131" source="class:RegimeState" target="class:Bar">
       <data key="label">relation</data>
       <data key="label">regimeConditionsBar</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e128" source="class:RegimeState" target="class:EngineScore">
+    <edge id="e132" source="class:RegimeState" target="class:EngineScore">
       <data key="label">relation</data>
       <data key="label">regimeModulatesEngineWeight</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e129" source="class:SectorRotationPoint" target="class:Equity">
+    <edge id="e133" source="class:SectorRotationPoint" target="class:Equity">
       <data key="label">relation</data>
       <data key="label">sectorRotationInformsInstrument</data>
       <data key="cardinality">N:M</data>
       <data key="graded_status">research-candidate</data>
     </edge>
-    <edge id="e130" source="class:EdgeReading" target="class:ModelArtifact">
+    <edge id="e134" source="class:EdgeReading" target="class:ModelArtifact">
       <data key="label">relation</data>
       <data key="label">edgeReadingGatesModelInput</data>
       <data key="cardinality">N:1</data>
       <data key="graded_status">measured</data>
     </edge>
-    <edge id="e131" source="class:ModelArtifact" target="class:FeatureImportance">
+    <edge id="e135" source="class:ModelArtifact" target="class:FeatureImportance">
       <data key="label">relation</data>
       <data key="label">modelProducesImportance</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e132" source="class:Endpoint" target="class:Observation">
+    <edge id="e136" source="class:Endpoint" target="class:Observation">
       <data key="label">relation</data>
       <data key="label">endpointServesObservation</data>
       <data key="cardinality">N:M</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e133" source="class:Issuer" target="class:Instrument">
+    <edge id="e137" source="class:Issuer" target="class:Instrument">
       <data key="label">relation</data>
       <data key="label">issuerIssuesInstrument</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e134" source="class:Instrument" target="class:Listing">
+    <edge id="e138" source="class:Instrument" target="class:Listing">
       <data key="label">relation</data>
       <data key="label">instrumentHasListing</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e135" source="class:Instrument" target="class:ProviderIdentifier">
+    <edge id="e139" source="class:Instrument" target="class:ProviderIdentifier">
       <data key="label">relation</data>
       <data key="label">instrumentHasProviderIdentifier</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e136" source="class:GraphNode" target="class:GraphNode">
+    <edge id="e140" source="class:GraphNode" target="class:GraphNode">
       <data key="label">relation</data>
       <data key="label">graphNodeConnects</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e137" source="class:EvidenceRecord" target="class:MarketClaim">
+    <edge id="e141" source="class:EvidenceRecord" target="class:MarketClaim">
       <data key="label">relation</data>
       <data key="label">evidenceSupportsClaim</data>
       <data key="cardinality">N:M</data>
       <data key="graded_status">ungraded</data>
     </edge>
-    <edge id="e138" source="class:DecisionEvent" target="class:EvidenceRecord">
+    <edge id="e142" source="class:DecisionEvent" target="class:EvidenceRecord">
       <data key="label">relation</data>
       <data key="label">decisionHasEvidence</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e139" source="class:DecisionEvent" target="class:DecisionOutcome">
+    <edge id="e143" source="class:DecisionEvent" target="class:DecisionOutcome">
       <data key="label">relation</data>
       <data key="label">decisionHasOutcome</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e140" source="class:DataContract" target="class:FeatureDefinition">
+    <edge id="e144" source="class:DataContract" target="class:FeatureDefinition">
       <data key="label">relation</data>
       <data key="label">contractDescribesFeature</data>
       <data key="cardinality">N:M</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e141" source="class:DataWatermark" target="class:DecisionEvent">
+    <edge id="e145" source="class:DataWatermark" target="class:DecisionEvent">
       <data key="label">relation</data>
       <data key="label">watermarkGatesDecision</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e142" source="class:JobRun" target="class:PlatformOutput">
+    <edge id="e146" source="class:JobRun" target="class:PlatformOutput">
       <data key="label">relation</data>
       <data key="label">jobProducesOutput</data>
       <data key="cardinality">1:N</data>
       <data key="graded_status">live</data>
     </edge>
-    <edge id="e143" source="metric:delivery_surprise_z" target="table:stock_delivery_data">
+    <edge id="e147" source="metric:delivery_surprise_z" target="table:stock_delivery_data">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e144" source="metric:close_price" target="table:stock_ohlcv">
+    <edge id="e148" source="metric:close_price" target="table:stock_ohlcv">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e145" source="metric:delivery_pct_latest" target="table:stock_delivery_data">
+    <edge id="e149" source="metric:delivery_pct_latest" target="table:stock_delivery_data">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e146" source="metric:delivery_pct_30d_average" target="table:stock_delivery_data">
+    <edge id="e150" source="metric:delivery_pct_30d_average" target="table:stock_delivery_data">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e147" source="metric:rsi_14_latest" target="table:technical_signals">
+    <edge id="e151" source="metric:rsi_14_latest" target="table:technical_signals">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e148" source="metric:signal_win_rate_5d" target="table:signal_outcomes">
+    <edge id="e152" source="metric:signal_win_rate_5d" target="table:signal_outcomes">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e149" source="metric:usable_factor_readings_5d" target="table:factor_edge_history">
+    <edge id="e153" source="metric:usable_factor_readings_5d" target="table:factor_edge_history">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e150" source="metric:unified_score_latest" target="table:unified_recommendations">
+    <edge id="e154" source="metric:unified_score_latest" target="table:unified_recommendations">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e151" source="metric:confluence_score_latest" target="table:confluence_signals">
+    <edge id="e155" source="metric:confluence_score_latest" target="table:confluence_signals">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e152" source="metric:index_pcr_latest" target="table:nt_index_pcr_ts">
+    <edge id="e156" source="metric:index_pcr_latest" target="table:nt_index_pcr_ts">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e153" source="metric:rollover_pct_latest" target="table:fno_rollover">
+    <edge id="e157" source="metric:rollover_pct_latest" target="table:fno_rollover">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e154" source="metric:market_breadth_latest" target="table:market_breadth">
+    <edge id="e158" source="metric:market_breadth_latest" target="table:market_breadth">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e155" source="metric:current_regime" target="table:market_regimes">
+    <edge id="e159" source="metric:current_regime" target="table:market_regimes">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e156" source="metric:asm_flag_latest" target="table:technical_signals">
+    <edge id="e160" source="metric:asm_flag_latest" target="table:technical_signals">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e157" source="metric:analyst_consensus_latest" target="table:analyst_estimates_history">
+    <edge id="e161" source="metric:analyst_consensus_latest" target="table:analyst_estimates_history">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e158" source="metric:screener_5d_forward_return" target="table:live_screener_outcomes">
+    <edge id="e162" source="metric:screener_5d_forward_return" target="table:live_screener_outcomes">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e159" source="metric:news_sentiment_5d" target="table:news_symbol_link">
+    <edge id="e163" source="metric:news_sentiment_5d" target="table:news_symbol_link">
       <data key="label">derived_from</data>
     </edge>
-    <edge id="e160" source="metric:excursion_path_5d" target="table:signal_excursions">
+    <edge id="e164" source="metric:excursion_path_5d" target="table:signal_excursions">
       <data key="label">derived_from</data>
     </edge>
   </graph>

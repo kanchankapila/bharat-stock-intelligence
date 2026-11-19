@@ -240,8 +240,11 @@ def _groups() -> Tuple[Tuple[Dict, list], ...]:
             ("piotroski_f_score", "Piotroski F-score",
              "Vendor-computed 0-9 accounting quality score."),
             ("rsi", "RSI (14)",
-             "Wilder RSI. Graded on this platform as a mean-reversion input with NEGATIVE "
-             "rank-IC at 5 days — a finding, not a defect."),
+             "14-period RSI. TWO definitions share this name (AF-20261119-15): rows written by "
+             "the nightly `backfill_technical_features.py --full-today` grid use a simple mean of "
+             "the last 14 gains/losses (Cutler RSI), while the live scanner and alerts read the "
+             "vendor's Wilder-smoothed RSI; 70/30 thresholds do not mean the same thing on both. "
+             "Graded on this platform as a mean-reversion input with NEGATIVE rank-IC at 5 days."),
             ("adx", "ADX", "Trend-strength indicator; measured edge approximately zero."),
             ("macd", "MACD", "MACD line value."),
             ("atr", "ATR", "Average true range, used for stop placement."),
@@ -643,6 +646,26 @@ def _groups() -> Tuple[Tuple[Dict, list], ...]:
             ("futures_price", "Futures price", "Price of the futures leg."),
             ("spot_price", "Spot price",
              "Underlying spot price captured at the same instant as the derivative."),
+        ]),
+        (_g("label", "decimal", "target", "label", leakage_risk="target", unit="ratio"), [
+            ("excess_return", "Excess return vs universe",
+             "Forward return (next-session open to the open `horizon` sessions later) net of the "
+             "25 bps-per-side round trip, minus the same session's equal-weight liquid-universe "
+             "mean. The grading quantity of the forward test and of call attribution; a fraction, "
+             "not a percent. Outcome-side."),
+        ]),
+        (_g("label", "string", "target", "label", leakage_risk="target",
+            vocabulary="attribution_cause"), [
+            ("attribution_cause", "Miss cause",
+             "Why a published Buy missed (one primary cause, checked in a fixed priority order) or "
+             "HIT. Points at the part of the plan that failed; descriptive, never a feature."),
+        ]),
+        (_g("measure", "decimal", "coincident", "platform", leakage_risk="high",
+            unit="per_share_INR"), [
+            ("trailing_stop", "Trailing stop",
+             "Chandelier stop ratcheted up after publication from the highest high since entry "
+             "(`trailingStopUpdater.ts`). Overwritten in place with the LATEST level, so a "
+             "historical read carries later prices; the published stop stays in `stop_loss`."),
         ]),
         (_g("enum", "string", "context", "vendor", vocabulary="option_buildup"), [
             ("option_buildup", "Option buildup", "Leg-level positioning label."),

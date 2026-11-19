@@ -119,3 +119,29 @@ non-empty result. The correct shape is `signal_type IN ('BUY','Bullish')` (see `
 ~L164, `chatbot/tools/sql_tool.py` ~L131). `routers/misc.router.ts` ~L453 filters `signal_type = 'BUY'` only, so the entry/target/stop
 levels it attaches can never come from a technical signal. Do not "fix" it by normalising the stored values: four readers already
 depend on the split; widen the reader's predicate and measure what the newly visible rows are worth first (AF-20261021-02).
+
+## The learning loop: grade, attribute, challenge — never auto-reweight (AF-20261119-06)
+
+Nothing in this loop edits `REGIME_WEIGHTS` or any published score. It runs inside `ml-daily-ops`:
+
+1. **Grade every published call** — `forward_test_report.py` (open entry, 25 bps a side, excess vs the
+   same session's liquid ranked universe, independent windows = dates / horizon).
+2. **Attribute every miss to one cause** — `call_attribution.py --persist` writes `call_attribution`
+   (UNFILLABLE, EVENT, STOP_TOO_TIGHT, COST, TOO_SLOW, SECTOR_DRAG, WRONG_PICK, checked in that order)
+   and `app_settings.call_attribution_summary` (cause shares, regime / liquidity / sector buckets, the
+   MAE winners survived vs the published stop). Each cause points at a different lever; a rule built on
+   one (stop placement, abstention) is a challenger arm, not a hand edit.
+3. **Shadow arms** — `accuracy_scorecard.py` rebuilds `published`, `reblend*`, `random_control` and
+   `reblend_learned` (`accuracy_shadow_arms.py`: weights learned only from windows already closed
+   before the session it scores, so it cannot see its own outcome).
+4. **Gate** — `ranker_challenger_gate.py` (protocol frozen in `app_settings.ranker_challenger_protocol`;
+   paired-by-date IC difference vs published, Bonferroni over arms, no secondary horizon significantly
+   worse, top-decile net excess not below published, LOW-DATA under `MIN_DATES_RELIABLE`, INVALID if
+   `random_control` passes). It **proposes**; promotion is an owner decision logged in
+   `docs/audit-findings.md`, then watched by the `forward-test-live-decay` check.
+5. **Report** — `learningReview.ts` sends the Friday Telegram digest of both snapshots.
+
+`call_attribution` and `recommendation_log` are labels and plans, not features: binding them into a
+model input leaks the outcome (the ontology cards mark `outcome`, `actual_return_pct`, `trailing_stop`
+and the whole `call_attribution` table forbidden as ML inputs).
+

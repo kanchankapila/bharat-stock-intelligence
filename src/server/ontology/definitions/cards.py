@@ -199,10 +199,15 @@ def cards() -> Tuple[DataCard, ...]:
            "Stock-futures open interest, buildup label, rollover percentage, basis and "
            "cost of carry per expiry and session.",
            cadence="daily", fresh="fetched_at", use="caution",
-           writers=("fno_oi_fetcher.py",),
-           caveats=("LOW-DATA: the panel covers roughly two weeks of dates. Any 'measured' "
-                    "reading built on it is a calendar artefact rather than an edge — this "
-                    "is exactly the LOW-DATA verdict the master report records.",
+           writers=("mc_stock_futures_oi_fetcher.py", "nse_fo_bhav_history_fetcher.py"),
+           caveats=("`source` matters: the MoneyControl rows start 2026-08-21 and store the NEAR "
+                    "MONTH only, while the NSE F&O bhavcopy reduction (AF-20261113-03) carries "
+                    "history and every expiry. Filter on `source` before building a panel.",
+                    "Near-month rows are distorted around each monthly expiry: positions ROLL to "
+                    "the next month, so `oi_change` / `oi_buildup` read covering or unwinding "
+                    "while all-expiry OI is building (live 2026-11-19: IRFC -22.1% near month vs "
+                    "+9.1% all expiries). Sum all expiries, or exclude expiry week, before "
+                    "measuring (AF-20261119-09).",
                     "`oi_buildup` uses 'Buildup' spelling while the option-chain table uses "
                     "'Build Up': never compare those strings across the two.")),
 
@@ -295,14 +300,19 @@ def cards() -> Tuple[DataCard, ...]:
            "The wide per-symbol, per-date technical panel: indicators, regime stamp, flow "
            "and fundamental context columns, plus model probability outputs.",
            cadence="daily", fresh="computed_at", lag=5.0, use="caution",
-           writers=("technical_analysis_engine.py", "feature_engineering.py"),
+           writers=("technical_analysis_engine.py", "feature_engineering.py",
+                    "backfill_technical_features.py"),
            forbidden=("win_probability", "calibrated_win_probability", "ai_insight"),
            caveats=("Over 300 columns of MIXED provenance: raw indicators, vendor opinions "
                     "(ext_* / mc_* / tl_* prefixes) and model outputs sit side by side. Use "
                     "the binding table to tell them apart.",
                     "`win_probability` and `calibrated_win_probability` are model OUTPUTS — "
                     "feeding them back in leaks the model into its own inputs.",
-                    "`ai_insight` is generated text.")),
+                    "`ai_insight` is generated text.",
+                    "`rsi` mixes two definitions by row origin: the nightly GRID rows "
+                    "(`signal_type = 'GRID'`, backfill_technical_features.py) hold a simple-mean "
+                    "(Cutler) RSI and overwrite a scanner row whenever `cmp` differs; scanner and "
+                    "alert paths use the vendor's Wilder RSI (AF-20261119-15).")),
 
         _c("technical_signal_observations", "Technical signal mutation ledger", "TechnicalSignalObservation",
            ("observation_id",),
@@ -351,6 +361,40 @@ def cards() -> Tuple[DataCard, ...]:
                     "`position_size_pct`: a model output, not an input.",
                     "Kept separately from the serving table so backtests need not "
                     "reconstruct history from a table that is truncated by design.",)),
+
+        _c("recommendation_log", "Published trade plans", "Recommendation",
+           ("symbol", "signal_date", "timeframe", "source"),
+           "One row per published BUY / STRONG_BUY plan: entry, published stop, targets T1-T3, "
+           "the ratcheted trailing stop, lifecycle status and the graded outcome.",
+           cadence="daily", fresh="signal_date", use="caution",
+           writers=("scoring_engine.py", "technicalSignalsService.ts", "trailingStopUpdater.ts",
+                    "signal_lifecycle.py", "outcome_resolver.py", "recPlanAlerts.ts"),
+           forbidden=("outcome", "actual_return_pct", "trailing_stop"),
+           caveats=("`stop_loss` is the PUBLISHED stop and is immutable after publication; the "
+                    "ratchet lives in `trailing_stop` (AF-20261117-03). Grading uses "
+                    "`stop_loss` as the initial stop.",
+                    "Graded from the next session's OPEN (AF-20261117-12), with levels rescaled "
+                    "to the back-adjusted price basis when a split or bonus falls inside the "
+                    "window (AF-20261117-13 / AF-20261118-05).",
+                    "`stop_alerted_at` / `target_alerted_at` are delivery stamps of the intraday "
+                    "Telegram alert (AF-20261117-15), not outcomes.",
+                    "Long-only: short setups are never written here.")),
+
+        _c("call_attribution", "Why each published Buy hit or missed", "SignalOutcome",
+           ("symbol", "call_session", "horizon"),
+           "One row per published Buy / Strong Buy whose window has closed: next-open entry, "
+           "forward and excess return vs the same-session liquid universe, path statistics "
+           "(MAE/MFE, stop and target touches) and ONE primary miss cause.",
+           cadence="daily", fresh="computed_at", use="forbidden",
+           writers=("call_attribution.py",),
+           forbidden=("fwd", "excess", "mae", "mfe", "cause"),
+           caveats=("Outcome-side end to end: every graded column is a label. Use it to decide "
+                    "which part of the plan to change, never as a model input.",
+                    "Fractions, not percents (`fwd`, `excess`, `mae`, `mfe`, `stop_dist`).",
+                    "Cause shares are descriptive. A rule built on them ships only as a shadow arm "
+                    "through ranker_challenger_gate.py (AF-20261119-06/-08).",
+                    "Re-derived nightly from unified_recommendations_history + stock_ohlcv, so a "
+                    "row can change when prices are repaired.")),
 
         _c("intraday_recommendations", "Intraday recommendations", "Recommendation",
            ("symbol", "computed_at"),

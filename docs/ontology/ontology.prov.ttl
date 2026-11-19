@@ -167,10 +167,13 @@ bsi:job_stock-option-chain-fetcher-py     rdf:type prov:Activity ;
 bsis:stock_futures_oi_history     rdf:type prov:Entity ;
     dct:title "Stock futures positioning" ;
     bsis:cadence "daily" ;
-    prov:wasGeneratedBy bsi:job_fno-oi-fetcher-py .
+    prov:wasGeneratedBy bsi:job_mc-stock-futures-oi-fetcher-py, bsi:job_nse-fo-bhav-history-fetcher-py .
 
-bsi:job_fno-oi-fetcher-py     rdf:type prov:Activity ;
-    rdfs:label "fno_oi_fetcher.py" .
+bsi:job_mc-stock-futures-oi-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "mc_stock_futures_oi_fetcher.py" .
+
+bsi:job_nse-fo-bhav-history-fetcher-py     rdf:type prov:Activity ;
+    rdfs:label "nse_fo_bhav_history_fetcher.py" .
 
 bsis:fno_rollover     rdf:type prov:Entity ;
     dct:title "Futures rollover" ;
@@ -251,13 +254,24 @@ bsis:technical_signals     rdf:type prov:Entity ;
     dct:title "Technical signal panel" ;
     bsis:cadence "daily" ;
     bsis:expectedLagHours "5.0"^^xsd:decimal ;
-    prov:wasGeneratedBy bsi:job_technical-analysis-engine-py, bsi:job_feature-engineering-py .
+    prov:wasGeneratedBy bsi:job_technical-analysis-engine-py, bsi:job_feature-engineering-py, bsi:job_backfill-technical-features-py .
 
 bsi:job_technical-analysis-engine-py     rdf:type prov:Activity ;
     rdfs:label "technical_analysis_engine.py" .
 
 bsi:job_feature-engineering-py     rdf:type prov:Activity, prov:Activity ;
     rdfs:label "feature_engineering.py", "feature_engineering.py" .
+
+bsi:job_backfill-technical-features-py     rdf:type prov:Activity ;
+    rdfs:label "backfill_technical_features.py" .
+
+bsis:technical_signal_observations     rdf:type prov:Entity ;
+    dct:title "Technical signal mutation ledger" ;
+    bsis:cadence "on_write" ;
+    prov:wasGeneratedBy bsi:job_journal-technical-signal-mutation .
+
+bsi:job_journal-technical-signal-mutation     rdf:type prov:Activity ;
+    rdfs:label "journal_technical_signal_mutation" .
 
 bsis:feature_store     rdf:type prov:Entity ;
     dct:title "Feature store" ;
@@ -278,6 +292,37 @@ bsis:unified_recommendations_history     rdf:type prov:Entity ;
     dct:title "Recommendation history" ;
     bsis:cadence "daily" ;
     prov:wasGeneratedBy bsi:job_unified-ranker-py .
+
+bsis:recommendation_log     rdf:type prov:Entity ;
+    dct:title "Published trade plans" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_scoring-engine-py, bsi:job_technicalsignalsservice-ts, bsi:job_trailingstopupdater-ts, bsi:job_signal-lifecycle-py, bsi:job_outcome-resolver-py, bsi:job_recplanalerts-ts .
+
+bsi:job_scoring-engine-py     rdf:type prov:Activity, prov:Activity ;
+    rdfs:label "scoring_engine.py", "scoring_engine.py" .
+
+bsi:job_technicalsignalsservice-ts     rdf:type prov:Activity ;
+    rdfs:label "technicalSignalsService.ts" .
+
+bsi:job_trailingstopupdater-ts     rdf:type prov:Activity ;
+    rdfs:label "trailingStopUpdater.ts" .
+
+bsi:job_signal-lifecycle-py     rdf:type prov:Activity ;
+    rdfs:label "signal_lifecycle.py" .
+
+bsi:job_outcome-resolver-py     rdf:type prov:Activity, prov:Activity, prov:Activity, prov:Activity, prov:Activity ;
+    rdfs:label "outcome_resolver.py", "outcome_resolver.py", "outcome_resolver.py", "outcome_resolver.py", "outcome_resolver.py" .
+
+bsi:job_recplanalerts-ts     rdf:type prov:Activity ;
+    rdfs:label "recPlanAlerts.ts" .
+
+bsis:call_attribution     rdf:type prov:Entity ;
+    dct:title "Why each published Buy hit or missed" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_call-attribution-py .
+
+bsi:job_call-attribution-py     rdf:type prov:Activity ;
+    rdfs:label "call_attribution.py" .
 
 bsis:intraday_recommendations     rdf:type prov:Entity ;
     dct:title "Intraday recommendations" ;
@@ -304,9 +349,6 @@ bsis:signal_outcomes     rdf:type prov:Entity ;
     bsis:cadence "daily" ;
     prov:wasGeneratedBy bsi:job_outcome-resolver-py .
 
-bsi:job_outcome-resolver-py     rdf:type prov:Activity, prov:Activity, prov:Activity, prov:Activity ;
-    rdfs:label "outcome_resolver.py", "outcome_resolver.py", "outcome_resolver.py", "outcome_resolver.py" .
-
 bsis:unified_signal_outcomes     rdf:type prov:Entity ;
     dct:title "Unified signal outcomes" ;
     bsis:cadence "daily" ;
@@ -332,9 +374,6 @@ bsis:stock_scores     rdf:type prov:Entity ;
     dct:title "Domain scores" ;
     bsis:cadence "on_write" ;
     prov:wasGeneratedBy bsi:job_scoring-engine-py .
-
-bsi:job_scoring-engine-py     rdf:type prov:Activity ;
-    rdfs:label "scoring_engine.py" .
 
 bsis:live_screener_appearances     rdf:type prov:Entity ;
     dct:title "Live screener appearances" ;
