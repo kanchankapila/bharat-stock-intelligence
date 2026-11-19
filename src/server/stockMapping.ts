@@ -1,4 +1,9 @@
 import stockData, { StockMapping } from '../data/stocklist';
+import { nseStocksData } from '../data/nseStocks';
+
+// An NSE symbol missing from stocklist must not fall through to another company's MC code/name
+// (LTM is Loyal Textile's MC code; LTIMindtree trades as LTM) -- AF-20261119-11.
+const _nseSymbols = new Set(nseStocksData.map(s => s.symbol.toUpperCase()));
 
 const _bySymbol = new Map<string, StockMapping>(stockData.map(s => [s.symbol.toUpperCase(), s]));
 const _byName   = new Map<string, StockMapping>(stockData.map(s => [s.name.toUpperCase(), s]));
@@ -9,7 +14,9 @@ const _byTlid   = new Map<string, StockMapping>(stockData.map(s => [s.tlid, s]))
 export function getStockMapping(query: string): StockMapping | undefined {
   if (!query) return undefined;
   const q = query.toUpperCase();
-  return _bySymbol.get(q) ?? _byName.get(q) ?? _byMcSym.get(q) ?? _byIsin.get(q) ?? _byTlid.get(query);
+  const hit = _bySymbol.get(q);
+  if (hit || _nseSymbols.has(q)) return hit;
+  return _byName.get(q) ?? _byMcSym.get(q) ?? _byIsin.get(q) ?? _byTlid.get(query);
 }
 
 /**
