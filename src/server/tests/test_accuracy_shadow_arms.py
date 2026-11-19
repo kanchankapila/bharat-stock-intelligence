@@ -143,3 +143,43 @@ def test_new_arm_leaves_every_existing_arm_unchanged_and_is_blank_without_the_co
     withcols = p.assign(**{c: 1.0 for c in A.SLOT_COLS})
     out2 = A.arm_scores(withcols, vol=vol, seed=3)
     pd.testing.assert_frame_equal(out.drop(columns="reblend_no_sector_slot"), out2.drop(columns="reblend_no_sector_slot"))
+
+
+# ── reblend_learned (AF-20261119: learn the blend from realised outcomes, no look-ahead) ──────────────
+
+def test_learned_weights_use_only_windows_closed_before_the_session():
+    p = _panel(n_dates=40)
+    sessions = pd.DatetimeIndex(sorted(p["session"].unique()))
+    ic = A.engine_session_ic(p, p["fwd"])
+    regimes = pd.Series("SIDEWAYS", index=ic.index)
+    i = 30
+    w = A.learned_weights(ic, regimes, sessions, sessions[i], "SIDEWAYS")
+    # Poison every window that had NOT closed by session i: the weights must not move.
+    poisoned = ic.copy()
+    late = sessions[i - A.LEARN_HORIZON:]
+    poisoned.loc[poisoned.index.isin(late), :] = 0.0
+    poisoned.loc[poisoned.index.isin(late), "breakout"] = 1.0
+    assert A.learned_weights(poisoned, regimes, sessions, sessions[i], "SIDEWAYS") == w
+    # The earliest sessions have nothing closed yet: the live weights are returned unchanged.
+    assert A.learned_weights(ic, regimes, sessions, sessions[3], "SIDEWAYS") == REGIME_WEIGHTS["SIDEWAYS"]
+
+
+def test_learned_weights_move_towards_the_engine_that_predicted_and_are_shrunk():
+    p = _panel(n_dates=60)
+    sessions = pd.DatetimeIndex(sorted(p["session"].unique()))
+    ic = A.engine_session_ic(p, p["fwd"])
+    w = A.learned_weights(ic, pd.Series("SIDEWAYS", index=ic.index), sessions, sessions[-1], "SIDEWAYS")
+    live = REGIME_WEIGHTS["SIDEWAYS"]
+    assert abs(sum(w.values()) - 1) < 1e-9
+    assert w["confluence"] > live["confluence"]          # confluence carries the signal in _panel
+    assert w["confluence"] < 1.0                         # shrunk: ~11 independent windows is not certainty
+
+
+def test_reblend_learned_is_nan_without_forward_returns_and_present_with_them():
+    p = _panel(n_dates=30)
+    sessions = pd.DatetimeIndex(sorted(p["session"].unique()))
+    assert A.reblend_learned(p, None, sessions).isna().all()
+    out = A.arm_scores(p, vol=pd.Series(1.0, index=p.index), fwd=p["fwd"], sessions=sessions)
+    assert out["reblend_learned"].notna().all()
+    first = p["session"] == sessions[0]                  # nothing closed yet -> identical to the live reblend
+    assert np.allclose(out.loc[first, "reblend_learned"], out.loc[first, "reblend"])

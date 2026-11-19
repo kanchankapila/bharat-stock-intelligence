@@ -1371,6 +1371,18 @@ describe('audit regression guards (2026-08-11)', () => {
       expect(c.evaluate({ last_date: null }, now).status).toBe('warn');   // never run yet
     });
 
+    it('ranker challenger gate surfaces candidates and an invalid control (AF-20261119)', () => {
+      const c = find('ranker-challenger-gate');
+      const snap = (o: object) => ({ last_date: ago(1), value: JSON.stringify(o) });
+      expect(c.evaluate(snap({ status: 'OK', candidates: [], arms: { reblend: { verdict: 'NO DIFFERENCE' } } }), now).status).toBe('pass');
+      const cand = c.evaluate(snap({ status: 'OK', candidates: ['reblend_learned'], arms: { reblend_learned: { verdict: 'CANDIDATE' } } }), now);
+      expect(cand.status).toBe('warn');
+      expect(cand.detail).toContain('reblend_learned');
+      expect(c.evaluate(snap({ status: 'INVALID', candidates: [] }), now).status).toBe('fail');
+      expect(c.evaluate({ last_date: ago(12), value: '{}' }, now).status).toBe('fail');
+      expect(c.evaluate({ last_date: null, value: null }, now).status).toBe('warn');
+    });
+
     it('forward-test live decay relays the harness verdict for the published Buys (AF-20261117-17)', () => {
       const c = find('forward-test-live-decay');
       const report = (verdict: string) => ({ value: JSON.stringify({ blocks: { forward: { tiers: { '5': [
