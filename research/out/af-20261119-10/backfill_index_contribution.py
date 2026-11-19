@@ -50,10 +50,11 @@ for prev, d in zip(sessions, sessions[1:]):
         except (requests.RequestException, ValueError) as e:
             j = {"message": f"error: {e}"[:120], "data": None}
             time.sleep(5)
-    rows = (j.get("data") or {}).get("list") or []
+    data = j.get("data")
+    rows = (data.get("list") or []) if isinstance(data, dict) else []
     if not rows:
         refused += 1
-        w.writerow({"date": d, "prev_date": prev, "message": j.get("message", "")[:120]})
+        w.writerow({"date": d, "prev_date": prev, "message": (j.get("message") or str(data))[:120]})
     for x in rows:
         ok += 1
         w.writerow({"date": d, "prev_date": prev, "index_id": x["indexId"], "index_name": x["index_name"],
