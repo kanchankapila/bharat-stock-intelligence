@@ -375,6 +375,21 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // block.csv is often "NO RECORDS", so it is not checked separately. Warn-only (sparse-by-nature style).
   { id: 'nse-bulk-block-deals-recency', label: 'nse_bulk_block_deals (NSE archive bulk/block files)',
     category: 'flows', critical: false, table: 'nse_bulk_block_deals', dateColumn: 'trade_date', warnDays: 3 },
+  // AF-20261119-19: exchange F&O files fetched nightly inside ml-daily-ops. The participant files are
+  // published for every session, so they fail; the ban list writes no row on a day nothing is banned,
+  // so it only warns (sparse-by-nature style). Its trade_date is the NEXT session, by design.
+  { id: 'nse-participant-positions-freshness', label: 'nse_participant_positions (NSE participant-wise OI/volume)',
+    category: 'flows', critical: false, table: 'nse_participant_positions', dateColumn: 'trade_date',
+    nativeDateColumn: true, warnDays: 2, failDays: 4 },
+  { id: 'nse-fo-ban-list-recency', label: 'nse_fo_ban_list (NSE F&O securities in ban period)',
+    category: 'flows', critical: false, table: 'nse_fo_ban_list', dateColumn: 'trade_date',
+    nativeDateColumn: true, warnDays: 10 },
+  { id: 'stock-futures-eod-history-freshness', label: 'stock_futures_eod_history (exchange F&O bhavcopy futures)',
+    category: 'flows', critical: false, table: 'stock_futures_eod_history', dateColumn: 'trade_date',
+    nativeDateColumn: true, warnDays: 3, failDays: 5 },
+  { id: 'stock-option-features-history-freshness', label: 'stock_option_features_history (exchange F&O bhavcopy option features)',
+    category: 'flows', critical: false, table: 'stock_option_features_history', dateColumn: 'trade_date',
+    nativeDateColumn: true, warnDays: 3, failDays: 5 },
   // Tightened from 3/5 to 1/3 on 2026-08-25: this table froze at 2026-08-21 through three
   // consecutive "successful" runs (mc_index_oi-style backdated upserts on the TS side are
   // impossible here, but a fetcher can still exit 0 without advancing THIS table -- NSE
@@ -3549,8 +3564,8 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       // bar reports a false failure 6 days in 7. A weekly column needs a weekly-cadence check,
       // not this one. measurement.md also records flyer_classifier as AUC 0.81 / IC -0.041,
       // i.e. a known-bad model -- worth deciding whether it should exist at all.
-      const cols = ['win_probability', 'calibrated_win_probability',
-                    'movement_probability', 'breakout_probability'];
+      // movement_probability left this list 2026-11-19: its producer was retired (AF-20261119-18).
+      const cols = ['win_probability', 'calibrated_win_probability', 'breakout_probability'];
       const dead = cols.filter(c => Number(row?.[c] ?? 0) === 0);
       const thin = cols.filter(c => {
         const n = Number(row?.[c] ?? 0);

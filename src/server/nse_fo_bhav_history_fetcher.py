@@ -48,6 +48,7 @@ computable, never 0. Realised volatility is NOT stored here; the research harnes
 Run (from src/server):
   python nse_fo_bhav_history_fetcher.py --since 2021-01-01 --until 2024-07-05 --max-requests 1200
   python nse_fo_bhav_history_fetcher.py --date 2022-01-03          # one day
+  python nse_fo_bhav_history_fetcher.py --days-back 10              # nightly (ml-daily-ops, AF-20261119-19)
 """
 from __future__ import annotations
 
@@ -65,6 +66,7 @@ import requests
 from scipy.optimize import brentq
 from scipy.stats import norm
 
+from as_of import logical_trading_date
 from db_compat import connect
 from nse_bhavcopy_fetcher import HEADERS
 
@@ -556,9 +558,15 @@ def main(argv=None) -> int:
     ap.add_argument("--until", default=OLD_FORMAT_LAST.isoformat())
     ap.add_argument("--date", help="one session (overrides --since/--until)")
     ap.add_argument("--max-requests", type=int, default=None)
+    ap.add_argument("--days-back", type=int, default=None,
+                    help="nightly mode: the last N calendar days up to the logical trading date "
+                         "(sessions already stored are skipped, so a missed night heals itself)")
     a = ap.parse_args(argv)
     since = until = dt.date.fromisoformat(a.date) if a.date else None
-    if not a.date:
+    if a.days_back is not None:
+        until = dt.date.fromisoformat(logical_trading_date())
+        since = until - dt.timedelta(days=a.days_back)
+    elif not a.date:
         since, until = dt.date.fromisoformat(a.since), dt.date.fromisoformat(a.until)
     conn = connect()
     try:

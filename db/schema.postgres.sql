@@ -2636,6 +2636,15 @@ CREATE TABLE IF NOT EXISTS "nse_filing_financials" (
 );
 CREATE INDEX nse_filing_financials_source_url_idx ON public.nse_filing_financials USING btree (source_url);
 
+-- ── nse_fo_ban_list ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "nse_fo_ban_list" (
+  "trade_date" DATE NOT NULL,
+  "symbol" TEXT NOT NULL,
+  "source" TEXT NOT NULL DEFAULT 'nse_archive'::text,
+  "fetched_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY ("trade_date", "symbol")
+);
+
 -- ── nse_ipo_calendar ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "nse_ipo_calendar" (
   "symbol" TEXT NOT NULL,
@@ -2651,6 +2660,30 @@ CREATE TABLE IF NOT EXISTS "nse_ipo_calendar" (
   "listing_date" TEXT,
   "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "phase")
+);
+
+-- ── nse_participant_positions ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "nse_participant_positions" (
+  "trade_date" DATE NOT NULL,
+  "kind" TEXT NOT NULL,
+  "client_type" TEXT NOT NULL,
+  "fut_idx_long" DOUBLE PRECISION,
+  "fut_idx_short" DOUBLE PRECISION,
+  "fut_stk_long" DOUBLE PRECISION,
+  "fut_stk_short" DOUBLE PRECISION,
+  "opt_idx_call_long" DOUBLE PRECISION,
+  "opt_idx_put_long" DOUBLE PRECISION,
+  "opt_idx_call_short" DOUBLE PRECISION,
+  "opt_idx_put_short" DOUBLE PRECISION,
+  "opt_stk_call_long" DOUBLE PRECISION,
+  "opt_stk_put_long" DOUBLE PRECISION,
+  "opt_stk_call_short" DOUBLE PRECISION,
+  "opt_stk_put_short" DOUBLE PRECISION,
+  "total_long" DOUBLE PRECISION,
+  "total_short" DOUBLE PRECISION,
+  "source" TEXT NOT NULL DEFAULT 'nse_archive'::text,
+  "fetched_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY ("trade_date", "kind", "client_type")
 );
 
 -- ── nse_pit_disclosures ─────────────────────────────────────────────

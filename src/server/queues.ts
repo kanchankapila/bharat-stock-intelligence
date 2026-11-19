@@ -779,6 +779,17 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // the ones that died. Runs before the quality/feature steps so today's row is available.
   await T.run('nse-bhavcopy-fetcher', () => runPython('nse_bhavcopy_fetcher.py', [], 10 * 60_000));
 
+  // Exchange F&O files (AF-20261119-19). Both read their sessions from the nse_universe_history row
+  // written just above and look back 10 days, so a night that misses a file (published late, NSE
+  // block) is filled on the next run. nse_fo_bhav_history_fetcher was a one-shot backfill whose
+  // history (2021-01..2026-11-12) went stale a session at a time; participant-wise OI/volume and
+  // the F&O ban list had no fetcher at all, and the ban list is served only for the next trade
+  // date, so a missed day is lost. Data only: nothing here feeds a score.
+  await runPython('nse_fo_bhav_history_fetcher.py', ['--days-back', '10', '--max-requests', '30'], 15 * 60_000)
+    .catch(e => T.fail('nse_fo_bhav_history', e));
+  await runPython('nse_fo_market_positioning_fetcher.py', ['--days-back', '10'], 5 * 60_000)
+    .catch(e => T.fail('nse_fo_market_positioning', e));
+
   // Reconcile today's stock_ohlcv (written earlier this evening by the stock-refresh queue's
   // own repeatable job, sourced from Yahoo's batch quote endpoint at market close) against the
   // bhavcopy row nse-bhavcopy-fetcher just wrote above.
@@ -1184,10 +1195,11 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // claim -- verified live, they're genuinely populated: 34,756 pead_score rows / 1,673 symbols
   // / 37 dates, 06-30->08-19, ~1,655-1,661/day most weekdays). Graded via factor_edge.py the
   // same session: no edge at 1/5/10/21d (IC 0.026-0.029, AUC 0.505-0.521, never clears
-  // USABLE), AND zero downstream readers -- not unified_ranker.py, not anywhere else, ever
-  // (grep confirmed). A real, correctly-functioning, measured no-edge score nothing reads is
-  // pure runtime cost. See measurement.md for the full grading. Re-add only if pead_score gets
-  // wired into a consumer AND re-graded positive.
+  // USABLE), and unified_ranker.py does not read it. It was NOT readerless, though: ml_ensemble
+  // build_features() (and exit_policy.py through it) kept pead_score / pead_x_event as features,
+  // trained on real pre-2026-08-20 values and scored on the 0 default ever since (AF-20261119-17;
+  // drop_retired_source_features() now drops them at training). See measurement.md for the
+  // grading. Re-add only if pead_score gets a measured consumer AND re-grades positive.
 
   // These were UNCAUGHT: if outcome resolution threw (e.g. a transient PG/IPv6 blip), the
   // whole daily-ops run aborted here — skipping ALL ML training below AND never reaching the
@@ -1289,12 +1301,6 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // materially worse than random — and its weight in the unified blend is now zeroed
   // (unified_ranker.py REGIME_WEIGHTS). No point scoring a deactivated engine daily.
 
-  // Breakout classifier (Lever #4): score today's universe with P(>=6% move in 10d) →
-  // technical_signals.breakout_probability. Advisory only for now (strong purged-OOF AUC
-  // ~0.73 but on limited history); the weekly --train refits as coverage grows.
-  await runPython('breakout_classifier.py', ['--score'], 3 * 60_000)
-    .catch(e => T.fail('breakout_classifier score', e));
-
   // Winner attribution: which stocks actually flew today, did we have them flagged,
   // and which precursors preceded the move → rolling lift → tomorrow's candidate list.
   await runPython('high_flyer_retrospective.py', [], 10 * 60_000)
@@ -1313,13 +1319,18 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // exit_policy/online_learner above -- breakout_classifier writes a promotion decision to its
   // baseline pickle file (model_promotion.file_staleness_override_applies) but its failure was
   // invisible to every monitor.
-  await T.run('breakout-classifier-train', () => runPython('breakout_classifier.py', ['--train', '--score'], 30 * 60_000));
-  // Day-movement predictor: cross-sectional model for which stocks will have an outsized
-  // intraday RANGE today (regardless of direction) -- purged-OOF AUC 0.76 on OHLCV alone
-  // (2026-07-17). Advisory-only for now: writes technical_signals.movement_probability,
-  // not yet blended into intraday_ranker.py's score or position sizing.
-  // T.run, same reason as breakout_classifier immediately above.
-  await T.run('movement-predictor-train', () => runPython('movement_predictor.py', ['--train', '--score'], 30 * 60_000));
+  // Train, then score once with whichever model is active (AF-20261119-18). It used to score
+  // twice per run: a --score before training (yesterday's model, as a fallback if training
+  // failed) and a --train --score after, which overwrote it. Scoring separately keeps the
+  // fallback with one pass. Its blend weight in unified_ranker is 0 (AF-20261026-44); the
+  // reader that keeps it scheduled is intraday_ranker.py's W_BREAKOUT.
+  await T.run('breakout-classifier-train', () => runPython('breakout_classifier.py', ['--train'], 30 * 60_000));
+  await runPython('breakout_classifier.py', ['--score'], 3 * 60_000)
+    .catch(e => T.fail('breakout_classifier score', e));
+  // movement_predictor.py RETIRED from the nightly chain 2026-11-19 (AF-20261119-18): graded
+  // no edge (open-entry 2026-09-11, measurement.md), never wired into any ranker or sizing,
+  // and its only readers were monitors. A daily 30-min retrain of an unread no-edge model is
+  // runtime cost, the same call as PEAD (above). Re-add only with a measured consumer.
 
   // Intraday feedback loop: paper-trade today's intraday recs vs the day's OHLC, then reverse-
   // engineer which signals preceded the winners → learned blend weights the ranker leans on.

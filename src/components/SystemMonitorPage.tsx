@@ -368,14 +368,14 @@ export default function SystemMonitorPage() {
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
           {[
-            { time: 'Every 15-30 min, market hours', scripts: 'Technical Signal Scan, Intraday Fetch/Rank, Live Screener Collect' },
-            { time: 'Daily 7:30 AM IST',             scripts: 'Unified Ranker (canonical daily picks)' },
-            { time: 'Daily 9:30 AM IST',             scripts: 'Outcome Resolver' },
-            { time: 'Daily ~4:00-6:40 PM IST',        scripts: 'OHLCV Refresh, Screener Syncs (MC/ETNow/ET-Marketstats/Trendlyne)' },
-            { time: 'Daily 7:30 PM IST',              scripts: 'Full ML Daily Ops (FII → FinBERT → Outcomes → Perf → Score → Drift → RL)' },
-            { time: 'Chain-triggered, ~5-8 PM IST',   scripts: 'DL Inference (fires right after DL Feature Refresh; 5 AM fallback)' },
-            { time: 'Daily 10:00-11:30 PM IST',       scripts: 'Quant EOD Sync, Stock/Quant Scoring, Confluence Outcomes' },
-            { time: 'Sunday 8:30-11:30 AM IST',       scripts: 'Fundamentals Sync, ML/DL Weekly Retrain, Strategy Optimizer' },
+            { time: 'Every 15-30 min, 8:30 AM-4:15 PM IST', scripts: 'Technical Signal Scan, Intraday Fetch/Regime/Rank, Live Screener Collect (each no-ops outside market hours)' },
+            { time: 'Daily 7:30 AM IST',             scripts: 'Outcome Resolver (1/5/15d, decision outcomes)' },
+            { time: 'Daily 8:20 / 9:10 AM IST',      scripts: 'Pre-open brief (Telegram), NSE pre-open snapshot' },
+            { time: 'Daily 4:00-6:40 PM IST',        scripts: 'OHLCV Refresh + Gap Fill, Mover Capture, Screener Syncs (MC/ETNow/ET-Marketstats/Trendlyne)' },
+            { time: 'Daily 6:50 PM IST',             scripts: 'ML Daily Ops (Bhavcopy, FII/DII, Outcomes, Ensemble Score, Breakout, Call Attribution, Challenger Gate)' },
+            { time: 'Daily 8:30-10:10 PM IST',       scripts: 'Stock/Quant Scoring, Confluence Outcomes, Quant EOD Sync, Screener Performance' },
+            { time: 'Daily 10:30-10:40 PM IST',      scripts: 'Unified Ranker (canonical picks), then the Recommendations digest' },
+            { time: 'Sat 6:00-8:30 AM / Sun 10:30 AM IST', scripts: 'Fundamentals + NSE master sync (Sat), ML Weekly Retrain + Strategy Optimizer (Sun)' },
           ].map(({ time, scripts }) => (
             <div key={time} className="space-y-1">
               <div className="text-[11px] font-semibold text-indigo-400">{time}</div>

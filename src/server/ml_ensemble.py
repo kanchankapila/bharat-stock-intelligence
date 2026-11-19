@@ -3074,6 +3074,66 @@ def feature_matrix_coverage_report(X: pd.DataFrame) -> dict:
     return report
 
 
+RETIRED_SOURCE_RECENT_SESSIONS = 20
+RETIRED_SOURCE_MIN_DATE_COVERAGE = 0.90
+_NOT_SOURCE_COLUMNS = {'outcome', 'signal_date', 'horizon_days', 'symbol', 'label', 'id'}
+
+
+def drop_retired_source_features(
+    df: pd.DataFrame,
+    X: pd.DataFrame,
+    *,
+    date_col: str = 'signal_date',
+    recent_sessions: int = RETIRED_SOURCE_RECENT_SESSIONS,
+    min_date_coverage: float = RETIRED_SOURCE_MIN_DATE_COVERAGE,
+) -> tuple[pd.DataFrame, dict]:
+    """Drop features whose raw source column has stopped being written (train/serve skew).
+
+    drop_untrainable_features() judges the training matrix as a whole, so a feature whose producer
+    was retired still looks healthy there: old rows carry real values, new rows get build_features'
+    fill default, and every row scored after the retirement sees only that default. pead_score is
+    the live case (its nightly job was retired 2026-08-20; ml_ensemble kept pead_score and
+    pead_x_event as features). A raw column counts as retired when it was written on at least
+    `min_date_coverage` of the sessions in its active span -- a daily producer, unlike quarterly
+    event columns that go quiet between results seasons -- and is NULL on every row of the last
+    `recent_sessions` sessions. The engineered features that depend on it are found by rebuilding
+    with that column blanked; any feature that changes is dropped.
+    """
+    report: dict = {'retired_sources': {}, 'dropped': []}
+    if date_col not in df.columns or len(df) != len(X):
+        return X, report
+    dates = pd.to_datetime(df[date_col], errors='coerce')
+    sessions = np.sort(dates.dropna().unique())
+    if len(sessions) < recent_sessions * 2:
+        return X, report
+    recent = dates >= sessions[-recent_sessions]
+
+    retired = []
+    for col in df.columns:
+        if col in _NOT_SOURCE_COLUMNS or not pd.api.types.is_numeric_dtype(df[col]):
+            continue
+        if df.loc[recent, col].notna().any():
+            continue
+        written = dates[~recent & df[col].notna()]
+        if written.empty:
+            continue
+        span = [d for d in sessions if written.min() <= d < sessions[-recent_sessions]]
+        coverage = written.nunique() / max(1, len(span))
+        if coverage >= min_date_coverage:
+            retired.append(col)
+            report['retired_sources'][col] = {
+                'last_written': str(written.max().date()), 'date_coverage': round(float(coverage), 3)}
+    if not retired:
+        return X, report
+
+    blanked = build_features(df.assign(**{c: np.nan for c in retired}))
+    drop = [c for c in X.columns if c in blanked.columns and not np.allclose(
+        pd.to_numeric(X[c], errors='coerce').to_numpy(dtype=float),
+        pd.to_numeric(blanked[c], errors='coerce').to_numpy(dtype=float), equal_nan=True)]
+    report['dropped'] = drop
+    return X.drop(columns=drop), report
+
+
 def drop_untrainable_features(
     X: pd.DataFrame,
     *,
@@ -4016,6 +4076,10 @@ def run(do_train: bool = True, do_score: bool = True,
                 do_train = False
             else:
                 X = build_features(df)
+                X, _retired = drop_retired_source_features(df, X)
+                if _retired['dropped']:
+                    print(f"[Ensemble]   Dropped {len(_retired['dropped'])} features from retired sources "
+                          f"{sorted(_retired['retired_sources'])}: {_retired['dropped']}")
                 y = df['outcome'].astype(int)
                 _hz = int(pd.to_numeric(df['horizon_days'], errors='coerce').median() or 15)
 
@@ -4069,6 +4133,10 @@ def run(do_train: bool = True, do_score: bool = True,
                 df = df.sort_values('signal_date').reset_index(drop=True)
                 if len(df) >= min_samples:
                     X = build_features(df)
+                    X, _retired = drop_retired_source_features(df, X)
+                    if _retired['dropped']:
+                        print(f"[Ensemble]   Dropped {len(_retired['dropped'])} features from retired sources "
+                              f"{sorted(_retired['retired_sources'])}: {_retired['dropped']}")
                     y = df['outcome'].astype(int)
                     _hz = int(pd.to_numeric(df['horizon_days'], errors='coerce').median() or 15)
                     ensemble_new = train_ensemble(X, y, dates=df['signal_date'],

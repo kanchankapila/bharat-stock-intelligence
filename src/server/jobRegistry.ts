@@ -159,7 +159,7 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // that took over 45 minutes, which per the job's own documented real runs is EVERY run.
   // Found 2026-08-03 while building the graceMinutes mirror-consistency test.
   { jobName: 'quant-eod-sync', label: 'Quant EOD Sync', cronPattern: '30 16 * * 1-5', graceMinutes: 360, critical: false },
-  { jobName: 'outcome-resolver', label: 'Outcome Resolver', cronPattern: '0 4 * * 1-5', graceMinutes: 45, critical: true },
+  { jobName: 'outcome-resolver', label: 'Outcome Resolver', cronPattern: '0 2 * * 1-5', graceMinutes: 45, critical: true },
   // Listed here from the day the job was created (2026-08-16), deliberately: the ChromaDB index
   // this refreshes sat frozen at its 2026-06-20 initial ingest for ~8 weeks precisely because
   // nothing watched it. graceMinutes 90 covers a slow CPU embedding pass (lockDuration is 30min
@@ -254,7 +254,6 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'news-symbol-link', label: 'ML Daily Ops: News Symbol Link', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'event-triggers', label: 'ML Daily Ops: Event Triggers', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'breakout-classifier-train', label: 'ML Daily Ops: Breakout Classifier Train', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
-  { jobName: 'movement-predictor-train', label: 'ML Daily Ops: Movement Predictor Train', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
 
   // Same story for ml-weekly-retrain's (cron '0 5 * * 0') StepTracker sub-steps.
   { jobName: 'ml-ensemble-train', label: 'ML Weekly Retrain: Ensemble Train', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },

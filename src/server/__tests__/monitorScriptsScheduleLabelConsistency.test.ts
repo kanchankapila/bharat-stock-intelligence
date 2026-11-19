@@ -17,8 +17,8 @@ import { MONITOR_SCRIPTS } from '../monitorScripts';
 describe('MONITOR_SCRIPTS schedule labels agree with their own cronPatterns', () => {
   // Exact single-pattern match, not .includes(): outcome-resolver-5d/-15d/performance-tracker
   // ALSO carry '20 13 * * 1-5' in a two-pattern cronPatterns array (they're graded a second time
-  // inside ml-daily-ops as a safety net), but their PRIMARY home is the 9:30 AM outcome-resolver
-  // job -- correctly labeled 'Daily 9:30 AM'. Only entries whose ONLY schedule is ml-daily-ops
+  // inside ml-daily-ops as a safety net), but their PRIMARY home is the 7:30 AM outcome-resolver
+  // job -- correctly labeled 'Daily 7:30 AM IST'. Only entries whose ONLY schedule is ml-daily-ops
   // itself are in scope for this check.
   const mlDailyOpsSteps = (MONITOR_SCRIPTS as readonly any[]).filter(
     s => s.cronPatterns?.length === 1 && s.cronPatterns[0] === '20 13 * * 1-5',

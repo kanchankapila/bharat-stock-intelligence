@@ -72,7 +72,7 @@ async function processResearchPostclose(_job: Job): Promise<{ success: boolean; 
 }
 
 async function processOutcomeResolver(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[]; monitorAlreadyRecorded?: boolean }> {
-  // 2026-08-06: skip the standalone 09:30 IST trigger on a trading holiday -- closed-day-early-
+  // 2026-08-06: skip the standalone 07:30 IST trigger on a trading holiday -- closed-day-early-
   // batch already dispatches a 'closed-day-early'-named run at ~07:10 IST that morning.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] outcome-resolver skipped — trading holiday (closed-day-early-batch already ran this morning)');
@@ -235,7 +235,12 @@ export async function registerOperationsJobs(connection: any) {
     connection,
     queueName: QUEUE_OUTCOME_RESOLVER,
     jobName: 'outcome-resolver-daily',
-    repeat: { pattern: '0 4 * * 1-5' },
+    // 07:30 IST (was 09:30, AF-20261119-18): pre-market. At 09:30 its ~30 min of resolvers held
+    // slots in the 5-process Python pool through the opening range, when the 15-min intraday
+    // pipeline needs them, and the session's first 15m bars were already in intraday_ohlcv.
+    // Every input it grades (yesterday's EOD bars) has landed by the night before, and 07:30
+    // puts fresh outcomes in front of the 08:20 morning brief.
+    repeat: { pattern: '0 2 * * 1-5' },
     jobId: 'outcome-resolver-daily',
     removeOnComplete: 3,
     removeOnFail: 3,
