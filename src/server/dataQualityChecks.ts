@@ -738,10 +738,9 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'marketsmojo-technical-history-freshness', label: 'marketsmojo_technical_history (MACD/RSI/BB/KST/MA/Dow/OBV/IndiGraph series)',
     category: 'signals', critical: false, table: 'marketsmojo_technical_history', dateColumn: 'date', warnDays: 3, failDays: 5 },
 
-  // Added 2026-08-15: trendlyneDailyFetchService.ts's runTrendlyneMetricsFetch() persists here
-  // now (was pure cache-warming before -- see that file's own comment for why). Same daily
-  // top-500-by-market-cap cadence as marketsmojo_technical_history above; not currently
-  // consumed by scoring (deliberate, see METRIC_COLUMNS' comment) so this is warn-only.
+  // Written by trendlyneDailyFetchService.ts's runTrendlyneMetricsBulkFetch() (one bulk sweep of
+  // every ACTIVE symbol per weekday since 2026-11-19; before that a top-500 per-symbol fan-out).
+  // Not consumed by scoring (deliberate, see METRIC_COLUMNS' comment) so this is warn-only.
   { id: 'trendlyne-stock-metrics-history-freshness', label: 'trendlyne_stock_metrics_history (PEG/PBV/institutional-holding/growth params, unconsumed)',
     category: 'reference', critical: false, table: 'trendlyne_stock_metrics_history', dateColumn: 'date', warnDays: 3 },
 

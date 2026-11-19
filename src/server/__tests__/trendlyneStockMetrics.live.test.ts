@@ -1,12 +1,10 @@
 /**
  * LIVE DATASOURCE TEST — skipped by default, opt in with RUN_LIVE_DATASOURCE_TESTS=1.
  *
- * trendlyneDailyFetchService.ts's runTrendlyneMetricsFetch() was pure cache-warming until
- * 2026-08-15 -- every fetched value discarded after a 12h TTL, including PEG_TTM/PBV_A/INSTIHOLD,
- * confirmed live to exist nowhere else in this schema. This is the mandatory test for the new
- * write path (data-sources.md), using the fetcher's own resolution (getTrendlyneMetricSymbols(),
- * not a hardcoded symbol), its own parser (extractMetricValues()), and its own writer
- * (saveStockMetricsToDB()) -- never a hand-rolled reimplementation of any of the three.
+ * The mandatory test for trendlyne_stock_metrics_history (data-sources.md). Since 2026-11-19
+ * (AF-20261119-03) the daily job reads Trendlyne's anonymous custom-query screener in bulk, so
+ * this calls the fetcher's own URL builder (bulkMetricsUrl), parser (parseBulkMetricsPage) and
+ * writer (saveStockMetricsToDB) -- never a hand-rolled reimplementation of any of the three.
  *
  *   RUN_LIVE_DATASOURCE_TESTS=1 npx vitest run src/server/__tests__/trendlyneStockMetrics.live.test.ts
  */
@@ -19,9 +17,8 @@ import { describe, it, expect } from 'vitest';
 const RUN_LIVE = process.env.RUN_LIVE_DATASOURCE_TESTS === '1';
 if (RUN_LIVE) await import('dotenv/config');
 
-const { getTrendlyneMetricSymbols, extractMetricValues, saveStockMetricsToDB } =
+const { bulkMetricsUrl, parseBulkMetricsPage, saveStockMetricsToDB } =
   await import('../trendlyneDailyFetchService');
-const { fetchTrendlyneStockMetrics } = await import('../trendlyneService');
 const { dbGet } = await import('../dbAsync');
 
 // saveStockMetricsToDB writes `date = today` into trendlyne_stock_metrics_history, and the real
@@ -33,33 +30,31 @@ const { dbGet } = await import('../dbAsync');
 const { shouldSkipOnTradingHoliday } = await import('../marketStatusService');
 const IS_TRADING_DAY = RUN_LIVE ? !(await shouldSkipOnTradingHoliday()) : false;
 
-describe.runIf(RUN_LIVE)('trendlyneDailyFetchService stock metrics [live]', () => {
-  it.runIf(IS_TRADING_DAY)('fetches real Stock Metrics for a real top-market-cap symbol, parses via the real ' +
-     'extractor, and persists ML-usable numeric values', async () => {
-    const symbols = await getTrendlyneMetricSymbols(5);
-    expect(symbols.length, 'getTrendlyneMetricSymbols returned zero symbols').toBeGreaterThan(0);
-    const symbol = symbols[0];
-
-    const data = await fetchTrendlyneStockMetrics(symbol);
-    expect(data?.body, `fetchTrendlyneStockMetrics returned no body for ${symbol}`).toBeTruthy();
-
-    const values = extractMetricValues(data!.body);
+describe.runIf(RUN_LIVE)('trendlyneDailyFetchService bulk stock metrics [live]', () => {
+  it.runIf(IS_TRADING_DAY)('fetches the first bulk page anonymously, parses it via the real parser, and ' +
+     'persists ML-usable numeric values', async () => {
+    const res = await fetch(bulkMetricsUrl(0), {
+      headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json', Referer: 'https://kayal.trendlyne.com/' },
+    });
+    expect(res.status, 'bulk metrics page 0 refused').toBe(200);
+    const { rows, isNextPage } = parseBulkMetricsPage(await res.json());
+    // Page 0 is the 100 largest companies by market cap; nearly all carry an NSE symbol.
+    expect(rows.size, 'bulk page 0 carried almost no NSE symbols -- payload shape changed?').toBeGreaterThan(50);
+    expect(isNextPage).toBe(true);
+    const [symbol, values] = [...rows][0];
     const populated = Object.values(values).filter(v => v !== null);
-    expect(populated.length, `extractMetricValues found zero populated params for ${symbol} -- ` +
-      `either the response shape changed or the METRIC_COLUMNS mapping is stale`).toBeGreaterThan(0);
-    // At minimum, market cap and PE should resolve for a genuine top-500-by-market-cap symbol --
-    // a real assertion on shape, not just "something non-null came back".
+    expect(populated.length, `${symbol}: under half the mapped columns populated -- METRIC_COLUMNS stale?`)
+      .toBeGreaterThan(Object.keys(values).length / 2);
     expect(values.mcap_q, `${symbol} has no market cap value -- response shape likely changed`).not.toBeNull();
 
-    const today = new Date().toISOString().slice(0, 10);
-    await saveStockMetricsToDB(symbol, today, data!.body);
+    const today = new Date(Date.now() + 5.5 * 60 * 60_000).toISOString().slice(0, 10);
+    await saveStockMetricsToDB(symbol, today, values);
 
     const written = await dbGet<Record<string, unknown>>(
       `SELECT * FROM trendlyne_stock_metrics_history WHERE symbol = ? AND date = ?`,
       [symbol, today],
     );
     expect(written, `no row found in trendlyne_stock_metrics_history for ${symbol}/${today} after saving`).toBeTruthy();
-    expect(written!.mcap_q).not.toBeNull();
-    expect(typeof written!.mcap_q === 'number' && Number.isFinite(written!.mcap_q as number)).toBe(true);
+    expect(Number.isFinite(Number(written!.mcap_q))).toBe(true);
   }, 30000);
 });

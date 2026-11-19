@@ -137,26 +137,24 @@ check('bqa-daily-shutdown-grace', 'code', bqaShutdownBounded ? 'PASS' : 'FAIL',
     ? `BQA daily shutdown grace is ${(bqaShutdownGraceMs / 60_000).toFixed(0)}m; the next cron cannot wait hours on a hung predecessor`
     : `BQA daily kill_timeout ${bqaShutdownGraceMs || 'missing'}ms is not a 1-15m shutdown grace`);
 
-// AF-20261014-10: a fan-out is not successful when the parent merely enqueues delayed children,
-// and arbitrary child successes must not overwrite a sibling failure.
+// AF-20261014-10 / AF-20261119-03: trendlyne-daily-fetch was a 500-child delayed fan-out whose
+// heartbeat needed retry-safe aggregate accounting; since 2026-11-19 it is one bulk sweep in the
+// parent job. Keep it that way: one heartbeat per run, and a leftover per-symbol child must be
+// skipped without stamping success.
 const queuesSource = read('src/server/queues.ts');
-const batchSource = read('src/server/trendlyneDailyBatch.ts');
 const jobRegistrySource = read('src/server/jobRegistry.ts');
 const trendlyneGraceMatch = jobRegistrySource.match(
   /jobName:\s*'trendlyne-daily-fetch'[\s\S]{0,250}?graceMinutes:\s*(\d+)/,
 );
 const trendlyneGraceMinutes = trendlyneGraceMatch ? Number(trendlyneGraceMatch[1]) : 0;
-const honestTrendlyneBatch = queuesSource.includes('initialiseTrendlyneBatch(')
-  && queuesSource.includes('settleTrendlyneBatch(')
-  && queuesSource.includes('job.attemptsMade < attempts')
-  && queuesSource.includes('legacy child completed')
-  && batchSource.includes("hsetnx(key, 'completed'")
-  && batchSource.includes('missing batch state for')
-  && trendlyneGraceMinutes >= 12 * 60;
-check('trendlyne-fanout-heartbeat', 'code', honestTrendlyneBatch ? 'PASS' : 'FAIL',
-  honestTrendlyneBatch
-    ? `Trendlyne daily heartbeat finalises once from retry-safe aggregate terminal child outcomes; grace=${trendlyneGraceMinutes}m`
-    : 'Trendlyne daily fan-out lacks retry-safe state, honest terminal aggregation, or enough grace for its delayed children');
+const honestTrendlyneDaily = queuesSource.includes('runTrendlyneMetricsBulkFetch(')
+  && queuesSource.includes('legacy child')
+  && !queuesSource.includes('enqueueTrendlyneMetricsFetchJobs(')
+  && trendlyneGraceMinutes >= 30;
+check('trendlyne-fanout-heartbeat', 'code', honestTrendlyneDaily ? 'PASS' : 'FAIL',
+  honestTrendlyneDaily
+    ? `Trendlyne daily metrics is one bulk sweep with one heartbeat; legacy children skipped; grace=${trendlyneGraceMinutes}m`
+    : 'Trendlyne daily metrics is not the single bulk sweep (or a per-symbol fan-out came back without aggregate accounting)');
 
 // Recurring class "notification gate reads a field its pipeline never populates" (heuristic)
 const suspectGates = new Set();

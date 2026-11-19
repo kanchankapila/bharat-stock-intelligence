@@ -1,38 +1,27 @@
-import { Queue } from 'bullmq';
-import { getAllStocks } from './stockMapping';
-import { fetchTrendlyneStockMetrics } from './trendlyneService';
 import { dbAll, dbRun } from './dbAsync';
-import { trendlyneChildJobId } from './trendlyneDailyBatch';
-import { TRENDLYNE_STOCK_METRICS_BLOCK_COOLDOWN_MS } from './trendlyneTechnicalCircuit';
 
-const DEFAULT_WINDOW_HOURS = 12;
-const MAX_WINDOW_HOURS = 24;
+// One anonymous custom-query sweep replaces the old 500-child logged-in fan-out
+// (getStockMetricParameterList per symbol, ~500 requests/day of the shared Trendlyne allowance,
+// dead whenever the account was). Live-probed 2026-11-19 (AF-20261119-03): the kayal
+// broker-webview screener accepts `columns=` with these same unique_names for 100 stocks per
+// page, no login; 97-stock parity against the per-symbol rows was within 1.5-2.4% median
+// (1-8 day old rows). The trendlyne.com host for the same path answers with a login page.
+export const BULK_METRICS_URL = 'https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/';
+// groupType=all is NSE + BSE; page 40 still had isNextPage on 2026-11-19. Reaching this cap
+// with isNextPage still set throws rather than silently truncating.
+const BULK_MAX_PAGES = 120;
+const BULK_PAGE_DELAY_MS = 1500;
 
-// Pre-warms fetchTrendlyneStockMetrics()'s 12h cache (see getTrendlyneStockMetrics in
-// trendlyne.router.ts, the on-demand caller sharing the same cache key) so a stock-detail
-// "Stock Metrics" popup loads fast on first click. Was the full ~2,000-symbol universe
-// (getAllStocks()), spread over a 10 AM-10 PM window that overlaps market hours and the
-// intraday Trendlyne scan/checklist cycle's own request load, to warm a popup most of those
-// symbols would never actually have opened. Restricted 2026-08-04 (job-timing audit) to the
-// top-N by market cap — the segment actually likely to be viewed.
-const TOP_N_BY_MARKET_CAP = 500;
-
-// Maps this endpoint's Trendlyne `unique_name` keys -> trendlyne_stock_metrics_history columns
-// (migration 1787060000000). Was pure cache-warming until 2026-08-15: every fetched value was
-// discarded after the 12h TTL, including PEG_TTM/PBV_A/INSTIHOLD, which live-verified 2026-08-15
-// exist NOWHERE else in this schema. Persisting costs nothing extra -- the HTTP call already
-// happens daily for these symbols regardless.
+// Maps Trendlyne `unique_name` keys -> trendlyne_stock_metrics_history columns
+// (migration 1787060000000).
 //
 // NOT wired to scoring_engine.py / ml_ensemble.py / feature_store, and that is deliberate, not
 // an oversight to fix later. measurement.md already measured the closest analogue to
 // institutional-holding data on this platform (`ticket_size`) as significantly INVERTED
 // (t=-2.36), and flagged the other (`smart_money`) as "never backtested for edge magnitude --
 // unmeasured, not proven." Wiring INSTIHOLD straight into a score would be a third instance of
-// exactly that mistake. This table exists so the data stops being thrown away and CAN be
-// measured once enough history accumulates -- not so it can be assumed useful today. Several of
-// these 16 fields also duplicate columns already in feature_store (piotroski_f, roe, op_margins)
-// that measurement.md's own sweep already found not significant -- kept anyway; curating at
-// persist time would just be re-deciding what's already been decided, badly.
+// exactly that mistake. This table exists so the data CAN be measured once enough history
+// accumulates -- not so it can be assumed useful today.
 const METRIC_COLUMNS: Record<string, string> = {
   MCAP_Q: 'mcap_q',
   PE_TTM: 'pe_ttm',
@@ -52,23 +41,30 @@ const METRIC_COLUMNS: Record<string, string> = {
   ROA_A: 'roa_a',
 };
 
-/** Extracts each known parameter's numeric `.value` from a fetchTrendlyneStockMetrics() response
- * body. Missing/non-numeric params come back null (the honest "not returned" marker), never 0 --
- * same reasoning as this repo's NaN/null convention elsewhere: a coerced 0 next to real values
- * is a lie a reader can't detect. */
-export function extractMetricValues(body: Record<string, any> | null | undefined): Record<string, number | null> {
-  const out: Record<string, number | null> = {};
-  for (const [srcKey, col] of Object.entries(METRIC_COLUMNS)) {
-    const raw = body?.[srcKey]?.value;
-    out[col] = typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
-  }
-  return out;
+export function bulkMetricsUrl(pageNumber: number): string {
+  const params = new URLSearchParams({
+    perPageCount: '100',
+    pageNumber: String(pageNumber),
+    query: 'MCAP_Q > 0',
+    columns: Object.keys(METRIC_COLUMNS).join(','),
+    groupType: 'all',
+    groupName: '',
+    sortBy: 'MCAP_Q',
+    order: 'DESC',
+  });
+  return `${BULK_METRICS_URL}?${params.toString()}`;
 }
 
-/** Upserts one symbol's parsed metrics for today. Exported for the live test to call directly,
- * same convention as saveScreenerStocksToDB. */
-export async function saveStockMetricsToDB(symbol: string, date: string, body: Record<string, any>): Promise<void> {
-  const values = extractMetricValues(body);
+/** An unknown column comes back as '' rather than an error, so anything non-numeric is null
+ * (never 0: a coerced 0 next to real values is a lie a reader can't detect). */
+function num(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+export async function saveStockMetricsToDB(symbol: string, date: string, values: Record<string, number | null>): Promise<void> {
   const cols = Object.values(METRIC_COLUMNS);
   const placeholders = cols.map(() => '?').join(', ');
   const updateSet = cols.map(c => `${c} = excluded.${c}`).join(', ');
@@ -76,87 +72,62 @@ export async function saveStockMetricsToDB(symbol: string, date: string, body: R
     `INSERT INTO trendlyne_stock_metrics_history (symbol, date, ${cols.join(', ')}, fetched_at)
      VALUES (?, ?, ${placeholders}, CURRENT_TIMESTAMP)
      ON CONFLICT(symbol, date) DO UPDATE SET ${updateSet}, fetched_at = excluded.fetched_at`,
-    [symbol, date, ...cols.map(c => values[c])],
+    [symbol, date, ...cols.map(c => values[c] ?? null)],
   );
 }
 
-export async function getTrendlyneMetricSymbols(limit = TOP_N_BY_MARKET_CAP): Promise<string[]> {
-  try {
-    const rows = await dbAll<{ symbol: string; tlid: string | null }>(
-      `SELECT symbol, tlid FROM nse_stocks WHERE market_cap IS NOT NULL AND status = 'ACTIVE'
-       ORDER BY market_cap DESC`,
-    );
-    // This endpoint accepts Trendlyne's numeric stock id, not an NSE symbol. The legacy
-    // screener table contains symbol-shaped stock_id debris (LMW -> "LMW"), which yields a
-    // deterministic 404 and would make tomorrow's honest aggregate batch fail every day.
-    const mapped = rows.filter(r => /^\d+$/.test(String(r.tlid ?? ''))).slice(0, limit);
-    if (mapped.length > 0) return mapped.map(r => r.symbol.toUpperCase());
-  } catch (err) {
-    console.warn('[TRENDLYNE DAILY FETCH] market-cap ranked query failed, falling back to full universe:', (err as Error).message);
+/** Parses one page into {symbol -> column values}, keyed by the NSE symbol the row carries. */
+export function parseBulkMetricsPage(json: any): { rows: Map<string, Record<string, number | null>>; isNextPage: boolean } {
+  const headers: string[] = (json?.body?.tableHeaders ?? []).map((h: any) => h?.unique_name);
+  const nseIdx = headers.indexOf('NSEcode');
+  if (json?.head?.status !== '0' || nseIdx < 0) {
+    throw new Error(`unexpected bulk metrics payload (head.status=${JSON.stringify(json?.head?.status)}, NSEcode column ${nseIdx < 0 ? 'missing' : 'present'})`);
   }
-  // Fallback (nse_stocks not yet populated, or the query failed): full universe, same as before.
-  return getAllStocks()
-    .filter(stock => /^\d+$/.test(String(stock.tlid ?? '')))
-    .slice(0, limit)
-    .map(stock => stock.symbol.toUpperCase());
-}
-
-export function randomDelayMs(windowHours = DEFAULT_WINDOW_HOURS): number {
-  const hrs = Math.max(0, Math.min(windowHours, MAX_WINDOW_HOURS));
-  return Math.floor(Math.random() * hrs * 60 * 60 * 1000);
-}
-
-export async function enqueueTrendlyneMetricsFetchJobs(
-  queue: Queue,
-  symbols: string[],
-  windowHours = DEFAULT_WINDOW_HOURS,
-  batchId?: string,
-): Promise<void> {
-  const maxDelayMs = Math.max(0, Math.min(windowHours, MAX_WINDOW_HOURS)) * 60 * 60 * 1000;
-
-  for (const symbol of symbols) {
-    const delay = Math.floor(Math.random() * maxDelayMs);
-
-    await queue.add(
-      'trendlyne-metrics-fetch',
-      { symbol, ...(batchId ? { batchId } : {}) },
-      {
-        delay,
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: TRENDLYNE_STOCK_METRICS_BLOCK_COOLDOWN_MS + 60_000,
-        },
-        jobId: batchId ? trendlyneChildJobId(batchId, symbol) : undefined,
-        removeOnComplete: batchId ? { age: 24 * 60 * 60, count: 5000 } : true,
-        removeOnFail: 3,
-      },
-    );
-  }
-}
-
-export async function runTrendlyneMetricsFetch(
-  symbol: string,
-  requirePersistence = false,
-): Promise<boolean> {
-  try {
-    const data = await fetchTrendlyneStockMetrics(symbol);
-    if (!data?.body) return requirePersistence ? false : data !== null && data !== undefined;
-
-    // Retries and manual runs can cross midnight; record the observation's IST calendar date.
-    try {
-      const today = new Date(Date.now() + 5.5 * 60 * 60_000).toISOString().slice(0, 10);
-      await saveStockMetricsToDB(symbol, today, data.body);
-    } catch (persistErr) {
-      // Persistence failing must not fail the fetch/cache-warm itself -- this call's original
-      // contract (a boolean success/failure signal for the caller) predates persistence and
-      // several callers key retry/backoff off it.
-      console.warn(`[TRENDLYNE DAILY FETCH] Metrics fetched but DB persist failed for ${symbol}:`, (persistErr as Error).message);
-      if (requirePersistence) throw persistErr;
+  const rows = new Map<string, Record<string, number | null>>();
+  for (const row of json.body.tableData ?? []) {
+    const symbol = String(row[nseIdx] ?? '').trim().toUpperCase();
+    if (!symbol) continue; // BSE-only listing
+    const values: Record<string, number | null> = {};
+    for (const [key, col] of Object.entries(METRIC_COLUMNS)) {
+      const i = headers.indexOf(key);
+      values[col] = i < 0 ? null : num(row[i]);
     }
-    return true;
-  } catch (error) {
-    console.error(`[TRENDLYNE DAILY FETCH] Failed for ${symbol}:`, (error as Error).message);
-    return false;
+    rows.set(symbol, values);
   }
+  return { rows, isNextPage: json.body.isNextPage === true || json.head?.isNextPage === true };
+}
+
+export async function runTrendlyneMetricsBulkFetch(
+  { fetchFn = fetch, pageDelayMs = BULK_PAGE_DELAY_MS }: { fetchFn?: typeof fetch; pageDelayMs?: number } = {},
+): Promise<{ pages: number; persisted: number }> {
+  const universe = new Set(
+    (await dbAll<{ symbol: string }>(`SELECT symbol FROM nse_stocks WHERE status = 'ACTIVE'`))
+      .map(r => r.symbol.toUpperCase()),
+  );
+  // Record the observation's IST calendar date; a manual run can cross midnight.
+  const today = new Date(Date.now() + 5.5 * 60 * 60_000).toISOString().slice(0, 10);
+  let persisted = 0;
+  for (let page = 0; page < BULK_MAX_PAGES; page++) {
+    if (page > 0 && pageDelayMs > 0) await new Promise(r => setTimeout(r, pageDelayMs));
+    const res = await fetchFn(bulkMetricsUrl(page), {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept: 'application/json',
+        Referer: 'https://kayal.trendlyne.com/',
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`bulk metrics page ${page} returned HTTP ${res.status} after ${persisted} symbols persisted`);
+    const { rows, isNextPage } = parseBulkMetricsPage(await res.json());
+    for (const [symbol, values] of rows) {
+      if (!universe.has(symbol)) continue;
+      await saveStockMetricsToDB(symbol, today, values);
+      persisted++;
+    }
+    if (!isNextPage) {
+      if (persisted === 0) throw new Error(`bulk metrics sweep matched 0 universe symbols over ${page + 1} pages`);
+      return { pages: page + 1, persisted };
+    }
+  }
+  throw new Error(`bulk metrics sweep still had isNextPage after ${BULK_MAX_PAGES} pages (${persisted} persisted); raise BULK_MAX_PAGES`);
 }

@@ -57,9 +57,10 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   retry from duplicating settled work. A retry attempt is not a final failure. Pre-batch legacy child
   successes must never overwrite a failure. The registry grace must cover the full intentional
   child-delay window plus execution margin; otherwise an honest in-progress batch is reported
-  late by design. Immunized by `trendlyneDailyBatch.test.ts` (retry initialisation, missing state,
-  incomplete, all-green and mixed/finalise-once cases), the 12-hour grace consistency test and
-  repo-doctor's `trendlyne-fanout-heartbeat` check, AF-20261014-10.
+  late by design. AF-20261014-10. The Trendlyne fan-out itself was retired 2026-11-19
+  (AF-20261119-03): one bulk request returns 100 stocks, so the job is a single sweep with one
+  heartbeat and `trendlyneDailyBatch.ts` is gone. The cheapest honest fan-out is none; repo-doctor's
+  `trendlyne-fanout-heartbeat` now fails if a per-symbol fan-out returns.
   The same completion error occurs with a zero-delay timer: `await` on a synchronous
   "started successfully" object does not await its detached transaction. NSE master sync
   did this while its scheduled caller immediately began dependent backfills. Return a shared
