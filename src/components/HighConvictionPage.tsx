@@ -46,6 +46,8 @@ interface CanonicalPick {
   planStatus?: string | null;
   upperCircuitLocked?: boolean;
   planEvents?: string[];
+  liveCheck?: { state: string; label: string; invalidated: boolean } | null;
+  eventRisk?: string[];
   trade_reasoning?: string | null;
   engine_coverage_count?: number | null;
   days_to_next_results?: number | null;
@@ -191,6 +193,16 @@ function CanonicalPickCard({ pick, onSelectStock }: { pick: CanonicalPick; onSel
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-base font-black tracking-wide text-white">{pick.symbol}</span>
+            {pick.liveCheck && (
+              <span className={cn(
+                'rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-wider',
+                pick.liveCheck.invalidated
+                  ? 'border-rose-400/40 bg-rose-400/10 text-rose-300'
+                  : 'border-emerald-400/30 bg-emerald-400/[0.07] text-emerald-300',
+              )} title="Today's session against this plan's entry zone, stop and target (live quote, ~5 min).">
+                {pick.liveCheck.label}
+              </span>
+            )}
             {pick.upperCircuitLocked && (
               <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-300"
                 title="The latest bar traded at one price at its upper circuit; the published entry was not fillable.">
@@ -265,6 +277,12 @@ function CanonicalPickCard({ pick, onSelectStock }: { pick: CanonicalPick; onSel
             Results in {pick.days_to_next_results}d
           </span>
         )}
+        {pick.eventRisk?.map((headline) => (
+          <span key={headline} className="rounded-full border border-rose-400/30 bg-rose-400/[0.07] px-2 py-1 text-rose-300"
+            title="High-impact bearish news published after this plan was built.">
+            News since plan: {headline.length > 70 ? `${headline.slice(0, 70)}…` : headline}
+          </span>
+        ))}
         {pick.planEvents?.map((e) => (
           <span key={e} className="rounded-full border border-amber-300/25 bg-amber-300/[0.07] px-2 py-1 text-amber-300"
             title="Scheduled before this plan expires; can gap the price past the stop or target.">

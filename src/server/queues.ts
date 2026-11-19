@@ -52,6 +52,7 @@ import { recordHeartbeat, startHeartbeatMonitor, bullJobDurationMs } from './job
 import { startJobWatchdog, buildDailyDigest } from './jobWatchdog';
 import { telegramService, sanitizeMarkdown, sanitizeMarkdownWithCode } from './telegramService';
 import { sendAccuracyDigest } from './signalAccuracyDigest';
+import { sendPlanGuardAlerts } from './planGuardAlerts';
 import { sendLearningReview } from './learningReview';
 import { waitForRankerInputsLogged } from './rankerReadiness';
 
@@ -2966,6 +2967,10 @@ export async function initQueues(): Promise<boolean> {
       async () => {
         const T = new StepTracker('q2-drift-shadow-arm');
         await T.run('nse-results-filings', () => runPython('nse_results_filings_fetcher.py', ['--daily'], 10 * 60_000));
+        // Beat/miss for the names that just reported, the same evening (AF-20261119-22). The full
+        // universe still refreshes weekly in ml-weekly-data; this keeps results season current.
+        await runPython('earnings_surprise_fetcher.py', ['--filed-within-days', '3'], 10 * 60_000)
+          .catch(e => T.fail('earnings_surprise_recent', e));
         await T.run('nse-xbrl-financials', () => runPython('nse_xbrl_fundamentals_fetcher.py',
           ['--only-latest-per-symbol-period', '--max-requests', '600', '--min-interval', '1.5'], 35 * 60_000));
         await T.run('q2-drift-grader', () => runPython('q2_drift_shadow_arm.py', ['--persist'], 10 * 60_000));
@@ -3059,6 +3064,9 @@ export async function initQueues(): Promise<boolean> {
           .catch(e => T.fail('intraday_regime', e));
         // 3) rank stocks for intraday off the fresh regime → intraday_recommendations
         await T.run('intraday-ranker', () => runPython('intraday_ranker.py', [], 5 * 60_000));
+        // 4) the night's published plans against today's session: Telegram once per newly
+        //    invalidated plan or post-plan bearish headline (AF-20261119-21). Report only.
+        await sendPlanGuardAlerts().catch(e => T.fail('plan_guard_alerts', e));
         T.finish();
       },
       // Generous lockDuration: four sequential runPython calls (~8.5 min worst case) plus the
@@ -3287,7 +3295,11 @@ export async function initQueues(): Promise<boolean> {
       'trendlyne-daily-fetch',
       {},
       {
-        repeat: { pattern: '30 4 * * 1-5' },
+        // 19:15 IST (was 10:00, AF-20261119-22): most of these columns are price-derived (MCAP_Q,
+        // PE_TTM, PBV_A, relative performance vs NIFTY/sector), so a 10:00 read stored a
+        // 45-minute-old session price as the day's value. After the close every row is the
+        // session's close-based value; withTrendlyneSlot serializes it behind the 18:10 screener sync.
+        repeat: { pattern: '45 13 * * 1-5' },
         jobId: 'trendlyne-daily-fetch-daily',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -3300,6 +3312,11 @@ export async function initQueues(): Promise<boolean> {
         if (job.data?.symbol) {
           // A per-symbol child left by the pre-2026-11-19 fan-out: the bulk sweep covers it.
           console.log(`[QUEUE] trendlyne-daily-fetch legacy child ${job.data.symbol} ignored (bulk sweep)`);
+          return { skipped: true };
+        }
+        // No session, no new close: a holiday run would stamp the holiday with the last session's values.
+        if (await shouldSkipOnTradingHoliday(job)) {
+          console.log('[QUEUE] trendlyne-daily-fetch skipped — trading holiday');
           return { skipped: true };
         }
         const { pages, persisted } = await withTrendlyneSlot(() => runTrendlyneMetricsBulkFetch());

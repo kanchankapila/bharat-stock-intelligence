@@ -188,7 +188,7 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // graceMinutes mirror-consistency test.
   { jobName: 'ml-daily-ops', label: 'ML Daily Ops', cronPattern: '20 13 * * 1-5', graceMinutes: 270, critical: true },
   // One bulk sweep since 2026-11-19 (AF-20261119-03), a few minutes; grace covers the 30-min lock.
-  { jobName: 'trendlyne-daily-fetch', label: 'Trendlyne Daily Metrics Fetch', cronPattern: '30 4 * * 1-5', graceMinutes: 60, critical: false },
+  { jobName: 'trendlyne-daily-fetch', label: 'Trendlyne Daily Metrics Fetch', cronPattern: '45 13 * * 1-5', graceMinutes: 60, critical: false },
   // graceMinutes 180 -> 390: the Worker's own lockDuration is 6h (360min) -- 180min grace
   // flagged 'late' on any run past 3 hours, well inside what the job's own declared budget
   // (which includes a 90min ml_ensemble.py --train --tune --score step alone) allows.

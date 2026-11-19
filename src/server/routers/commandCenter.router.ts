@@ -2,7 +2,9 @@ import { z } from 'zod';
 import { dbGet, dbAll } from '../dbAsync';
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { runPython } from '../pythonRunner';
-import { cacheGet, fetchWithCache } from '../cacheService';
+import { fetchWithCache } from '../cacheService';
+import { loadLiveQuotes } from '../liveQuotes';
+import { fetchEventRisk, livePlanCheck, planLevels, sessionAfterPublish } from '../planGuard';
 import { fetchBookRisk } from '../buyBookRisk';
 import { latestComputedAt, invalidateLatestComputedAt } from '../latestComputedAt';
 import { planStatus } from '../planLifecycle';
@@ -78,19 +80,15 @@ export const commandCenterRouter = router({
 
       const eodRows = await dbAll<any>(query, params);
 
-      let liveCache: Record<string, any> = {};
-      try {
-        const cached = await cacheGet('live-stocks-bulk');
-        if (cached) liveCache = JSON.parse(cached as string);
-      } catch { /* no cache */ }
+      const { quotes } = await loadLiveQuotes();
 
       const eodPicks = eodRows.map((row) => {
-        const live = liveCache[row.symbol];
-        const livePrice = live?.price ?? live?.lastPrice ?? null;
+        const live = quotes.get(row.symbol);
+        const livePrice = live?.price ?? null;
         const realizedReturnPct = (livePrice && row.entry_zone_low)
           ? parseFloat(((livePrice - row.entry_zone_low) / row.entry_zone_low * 100).toFixed(2))
           : null;
-        return { ...row, livePrice, realizedReturnPct, changePercent: live?.changePercent ?? null,
+        return { ...row, livePrice, realizedReturnPct, changePercent: live?.changePct ?? null,
                  planStatus: planStatus(row.valid_until) };
       });
 
@@ -266,21 +264,21 @@ export const commandCenterRouter = router({
           return new Map<string, string[]>();
         });
 
-      let liveCache: Record<string, any> = {};
-      try {
-        const cached = await cacheGet('live-stocks-bulk');
-        if (cached) liveCache = JSON.parse(cached as string);
-      } catch { /* no cache */ }
+      const live = await loadLiveQuotes();
+      const risk = await fetchEventRisk(rows.map((r) => ({ symbol: r.symbol, publishedAt: r.computed_at })));
 
       const picks = rows.map((r) => {
-        const live = liveCache[r.symbol];
+        const quote = live.quotes.get(r.symbol);
         return {
           ...r,
-          livePrice:    live?.price ?? live?.lastPrice ?? r.cmp ?? null,
-          changePercent: live?.changePercent ?? r.change_pct ?? null,
+          livePrice:    quote?.price ?? r.cmp ?? null,
+          changePercent: quote?.changePct ?? r.change_pct ?? null,
           planStatus: planStatus(r.valid_until),
           upperCircuitLocked: locked.has(r.symbol),
           planEvents: planEvents.get(r.symbol) ?? [],
+          // AF-20261119-21: the plan judged against the session it was published for (null before it opens).
+          liveCheck: sessionAfterPublish(r.computed_at, live) ? livePlanCheck(planLevels(r), quote) : null,
+          eventRisk: risk.get(r.symbol) ?? [],
         };
       });
 

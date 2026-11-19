@@ -1,3 +1,4 @@
+import { LIVE_META_KEY } from "./liveQuotes";
 import { MarketData } from "../services/marketService";
 import { getAllStocks, getStockMapping } from "./stockMapping";
 import { mcFetchJson } from "./mcApiService";
@@ -487,6 +488,9 @@ async function runBulkRefresh(): Promise<void> {
     // If market closed, cache for a long time (until next open approx), else standard TTL
     const ttl = marketOpen ? BULK_TTL : 12 * 60 * 60; // 12 hours when closed
     await cacheSet(BULK_CACHE_KEY, freshData, ttl);
+    // When this snapshot was taken and whether the session was live, so a reader can tell
+    // today's session high/low from a pre-open read of yesterday's (liveQuotes.ts, planGuard.ts).
+    await cacheSet(LIVE_META_KEY, { asOf: new Date().toISOString(), marketOpen }, ttl);
 
     console.log(
       `[LIVE DATA] Background refresh complete: ${freshData.length} stocks cached (TTL: ${ttl}s)`,

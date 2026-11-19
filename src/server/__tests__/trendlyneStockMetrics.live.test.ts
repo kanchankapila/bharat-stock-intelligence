@@ -22,7 +22,7 @@ const { bulkMetricsUrl, parseBulkMetricsPage, saveStockMetricsToDB } =
 const { dbGet } = await import('../dbAsync');
 
 // saveStockMetricsToDB writes `date = today` into trendlyne_stock_metrics_history, and the real
-// caller never runs on a non-trading day -- QUEUE_TRENDLYNE_DAILY_FETCH's cron is '30 4 * * 1-5'.
+// caller never runs on a non-trading day -- QUEUE_TRENDLYNE_DAILY_FETCH's cron is '45 13 * * 1-5' (19:15 IST, after the close).
 // Ungated, a weekend run of this test files a Sunday-dated row carrying Friday's market cap:
 // the same phantom-clone shape that put 2,148 fabricated bars in stock_ohlcv on 2026-08-16, and
 // it inflates the per-symbol distinct-date counts measurement.md's panel spec relies on.
