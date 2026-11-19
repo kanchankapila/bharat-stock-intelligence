@@ -223,3 +223,20 @@ class TestScreenerPkHistorySurvivesReassignment:
             "both the old and the reassigned pk must remain discoverable in history, even "
             "though only the newest one survives in trendlyne_screeners.screenpk"
         )
+
+
+class TestDiscoveryDoesNotWriteMembership:
+    """AF-20261119-04: discovery wrote screener membership keyed on the NSE SYMBOL as stock_id,
+    beside the TypeScript sync's rows keyed on Trendlyne's numeric stock_id, so 874 of 916
+    screeners held every member twice (54,884 symbol-keyed rows; 96,176 rows for 57,935 distinct
+    (screener, symbol) pairs on 2026-11-19). unified_ranker._add and intraday_ranker append
+    without de-duplicating. Membership belongs to trendlyneScreener.saveScreenerStocksToDB, the
+    only writer that also removes exits; discovery owns screener metadata only."""
+
+    def test_upsert_screener_writes_no_symbol_keyed_membership(self):
+        conn = _throwaway_db()
+        upsert_screener(conn, _info(stocks=["RELIANCE", "TCS"]))
+        conn.commit()
+        rows = conn.execute("SELECT stock_id FROM trendlyne_screener_stocks").fetchall()
+        assert rows == [], f"discovery wrote membership rows: {[r['stock_id'] for r in rows]}"
+        assert conn.execute("SELECT stock_count FROM trendlyne_screeners WHERE screener_id='42'").fetchone()[0] == 2

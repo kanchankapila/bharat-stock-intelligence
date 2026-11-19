@@ -82,3 +82,31 @@ test('a stale non-numeric row already in the DB is removed on the next sync', as
   const deleteCalls = tx.run.mock.calls.filter((c: any[]) => String(c[0]).includes('DELETE'));
   expect(deleteCalls.some((c: any[]) => c[1][1] === 'ALLCARGO')).toBe(true);
 });
+
+// AF-20261119-04: getStockMapping resolves a Trendlyne id only through stocklist.ts (2,000 names),
+// so 40,196 of 81,488 numeric-id rows were stored with symbol NULL and only the (now removed)
+// symbol-keyed duplicates from trendlyne_screener_discovery.py carried those members. Every
+// screener row carries the exchange's own NSEcode; it is the symbol.
+test('the row\'s own NSE symbol is stored, not a stocklist lookup that misses unmapped ids', async () => {
+  const tx = makeTx();
+  dbTransactionMock.mockImplementation(async (cb: any) => cb(tx));
+
+  await saveScreenerStocksToDB('adx-mild', [{ stockId: '2106579', name: 'JG Chemicals Ltd.', symbol: 'JGCHEM' }]);
+
+  const upsert = tx.run.mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO trendlyne_screener_stocks'));
+  expect(upsert![1]).toEqual(['adx-mild', '2106579', 'JGCHEM', expect.any(String), expect.any(String)]);
+});
+
+test('fetchTrendlyneScreenerData takes the symbol from the NSEcode column', async () => {
+  const { fetchTrendlyneScreenerData } = await import('../trendlyneScreener');
+  const headers = ['get_full_name', 'NSEcode', 'stock_id', 'currentPrice'].map(unique_name => ({ unique_name }));
+  const body = { head: { status: '0' }, body: { screenObj: { title: 'ADX' }, tableHeaders: headers,
+    tableData: [['JG Chemicals Ltd.', 'JGCHEM', 2106579, 412.5], ['Bse Only Ltd.', '', 99, 10]] } };
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+  try {
+    const res = await fetchTrendlyneScreenerData('756513', 'ADX', 0, true);
+    expect(res.data.map(s => [s.stockId, s.symbol])).toEqual([['2106579', 'JGCHEM'], ['99', undefined]]);
+  } finally {
+    fetchSpy.mockRestore();
+  }
+});

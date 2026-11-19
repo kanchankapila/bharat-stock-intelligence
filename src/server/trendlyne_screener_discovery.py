@@ -387,7 +387,6 @@ def extract_signal_keywords(name: str, description: str = "") -> str:
 def upsert_screener(con, info: dict):
     """Upsert into trendlyne_screeners + screener_master + screener_catalog."""
     keywords = extract_signal_keywords(info["name"], info["description"])
-    today = datetime.date.today().isoformat()
 
     # trendlyne_screeners
     con.execute("""
@@ -483,17 +482,9 @@ def upsert_screener(con, info: dict):
         """, (info["screener_id"], "trendlyne", info["name"], info["category"],
               info["category"], info["sentiment"], horizon, keywords, info["screener_url"]))
 
-    # trendlyne_screener_stocks
-    if info["stocks"]:
-        for sym in info["stocks"]:
-            con.execute("""
-                INSERT INTO trendlyne_screener_stocks
-                    (screener_id, stock_id, symbol, first_seen, last_seen)
-                VALUES (?,?,?,?,?)
-                ON CONFLICT(screener_id, stock_id) DO UPDATE SET
-                    symbol   = excluded.symbol,
-                    last_seen = excluded.last_seen
-            """, (info["screener_id"], sym, sym, today, today))
+    # No trendlyne_screener_stocks write here (AF-20261119-04): this wrote membership keyed on the
+    # SYMBOL beside trendlyneScreener.saveScreenerStocksToDB's rows keyed on the numeric stock_id,
+    # doubling every member. That TS writer owns membership and also removes exits.
 
 
 # ── Main sync loop ────────────────────────────────────────────────────────────

@@ -105,16 +105,6 @@ class TestTrendlyneScreenerLiveDataSource:
 
         conn = _make_test_db()
         upsert_screener(conn, info)
-        # Matches production's own upsert shape (trendlyne_screener_discovery.py's main sync
-        # loop) — ON CONFLICT DO UPDATE because the same symbol can legitimately appear more
-        # than once in a screener's row list.
-        for sym in info["stocks"]:
-            conn.execute(
-                "INSERT INTO trendlyne_screener_stocks (screener_id, stock_id, symbol, first_seen, last_seen) "
-                "VALUES (?, ?, ?, date('now'), date('now')) "
-                "ON CONFLICT(screener_id, stock_id) DO UPDATE SET symbol = excluded.symbol, last_seen = excluded.last_seen",
-                (info["screener_id"], sym, sym),
-            )
         conn.commit()
 
         screener_row = conn.execute(
@@ -128,13 +118,8 @@ class TestTrendlyneScreenerLiveDataSource:
             context="trendlyne_screeners",
         )
 
-        stock_rows = conn.execute(
-            "SELECT * FROM trendlyne_screener_stocks WHERE screener_id = ?", (info["screener_id"],)
-        ).fetchall()
-        distinct_symbols = len(set(info["stocks"]))
-        assert len(stock_rows) == distinct_symbols, \
-            f"expected {distinct_symbols} distinct stored stock rows, got {len(stock_rows)}"
-        for row in stock_rows:
-            assert_stored_row_ml_usable(
-                dict(row), numeric_cols=[], ticker_cols=["symbol"], context="trendlyne_screener_stocks",
-            )
+        # Membership is written by trendlyneScreener.saveScreenerStocksToDB (numeric stock_id),
+        # not here; discovery writing it too doubled every member (AF-20261119-04).
+        assert conn.execute(
+            "SELECT count(*) FROM trendlyne_screener_stocks WHERE screener_id = ?", (info["screener_id"],)
+        ).fetchone()[0] == 0

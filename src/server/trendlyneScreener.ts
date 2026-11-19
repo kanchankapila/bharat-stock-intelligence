@@ -150,9 +150,15 @@ export async function saveScreenerToDB(
   }
 }
 
+/** The row's own NSE symbol (Trendlyne's NSEcode) first; the stocklist lookup covers only 2,000
+ * names and left 40,196 of 81,488 membership rows with a NULL symbol (AF-20261119-04). */
+function rowSymbol(stock: { stockId: string; symbol?: string }): string | null {
+  return stock.symbol || getStockMapping(stock.stockId)?.symbol || null;
+}
+
 export async function saveScreenerStocksToDB(
   screenerId: string,
-  stocks: Array<{ stockId: string; name: string }>
+  stocks: Array<{ stockId: string; name: string; symbol?: string }>
 ): Promise<void> {
   try {
     const upsertSql = `
@@ -179,10 +185,9 @@ export async function saveScreenerStocksToDB(
     // instead of updating it -- 57,307 of 112,595 rows (50.9%) were duplicated this way as of
     // this audit, started 2026-08-08 and still active, silently doubling every screener-count-
     // based signal (unified_ranker.py's bull/bear tally, screener_appearances) for ~96% of
-    // symbols. Root cause not fully pinned (a fresh direct API probe returns correct numeric
-    // IDs; whatever's producing the bad values server-side wasn't reproducible from here) --
-    // this guard stops the corruption at the one place it's unconditionally verifiable, whatever
-    // upstream cause resurfaces it.
+    // symbols. Root cause (found 2026-11-19, AF-20261119-04): trendlyne_screener_discovery.py
+    // wrote the same membership keyed on the symbol; that write is removed. This guard stays as
+    // the second layer for this writer.
     const validStocks = stocks.filter(s => /^\d+$/.test(s.stockId));
     const skipped = stocks.length - validStocks.length;
     if (skipped > 0) {
@@ -200,9 +205,7 @@ export async function saveScreenerStocksToDB(
       }
       // Upsert current stocks
       for (const stock of validStocks) {
-        const mapping = getStockMapping(stock.stockId);
-        const symbol = mapping ? mapping.symbol : null;
-        await tx.run(upsertSql, [screenerId, stock.stockId, symbol, now, now]);
+        await tx.run(upsertSql, [screenerId, stock.stockId, rowSymbol(stock), now, now]);
       }
     });
 
@@ -214,9 +217,7 @@ export async function saveScreenerStocksToDB(
     // Diff patch: record entries/exits in screener_appearances
     const today = new Date().toISOString().slice(0, 10);
     const currentSymbols = new Set<string>(
-      stocks
-        .map(s => getStockMapping(s.stockId)?.symbol)
-        .filter((s): s is string => !!s)
+      stocks.map(rowSymbol).filter((s): s is string => !!s)
     );
 
     const entered = Array.from(currentSymbols).filter(s => !prevSymbols.has(s));
@@ -622,21 +623,24 @@ export async function fetchTrendlyneScreenerData(
       const changePctIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pPercentChange' || h.unique_name === 'percentChange');
       const return1wIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pReturn1W' || h.unique_name === 'return1W' || h.unique_name === 'pReturn5D');
       const return1mIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pReturn1M' || h.unique_name === 'return1M' || h.unique_name === 'pReturn21D');
+      const nseIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'NSEcode');
 
       // Map tableData rows to stock objects
       tableData.forEach((row: any[]) => {
         const tlId = String(row[stockIdIndex] || '');
         const fullName = String(row[nameIndex] || '');
-        
+
         let mapping = getStockMappingByTLId(tlId);
         if (!mapping) {
           mapping = getStockMappingByName(fullName);
         }
+        // The row's own NSE symbol beats the 2,000-name stocklist lookup (AF-20261119-04).
+        const nseCode = nseIndex !== -1 ? String(row[nseIndex] ?? '').trim().toUpperCase() : '';
 
         stocks.push({
           stockId: tlId,
           name: fullName,
-          symbol: mapping?.symbol,
+          symbol: /^[A-Z0-9&-]{1,20}$/.test(nseCode) ? nseCode : mapping?.symbol,
           ltp: parseFloat(row[priceIndex] || 0),
           change: changeIndex !== -1 ? parseFloat(row[changeIndex] || 0) : 0,
           changePercent: changePctIndex !== -1 ? parseFloat(row[changePctIndex] || 0) : 0,
@@ -1152,7 +1156,8 @@ export async function syncAllScreenerStocksToDB(timeframeFilter?: 'intraday' | '
         if (result.success && result.data) {
           const stocksToSave = result.data.map(s => ({
             stockId: s.stockId,
-            name: s.name
+            name: s.name,
+            symbol: s.symbol,
           }));
           
           await saveScreenerStocksToDB(screener.screener_id, stocksToSave);
