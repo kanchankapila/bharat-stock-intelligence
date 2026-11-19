@@ -1,6 +1,6 @@
 # Bharat Stock Intelligence — Market Knowledge Graph
 
-> A semantic layer over the `bharat_intel` Postgres database: 58 entity classes, 309 semantic properties, 65 table data cards, 39 typed relations, 18 executable metrics and 32 controlled vocabularies. Every fact here is generated from `src/server/ontology/definitions/`, which validates against the live schema.
+> A semantic layer over the `bharat_intel` Postgres database: 61 entity classes, 314 semantic properties, 70 table data cards, 39 typed relations, 18 executable metrics and 35 controlled vocabularies. Every fact here is generated from `src/server/ontology/definitions/`, which validates against the live schema.
 
 ## Guardrails (read before using any column as a feature)
 
@@ -55,6 +55,8 @@
 - **OptionChainRow** (Option chain row): One strike, one expiry, one session: call and put leg premium, volume, open interest, IV and greeks. A grid, not a time series. — `so_option_chain`
 - **FuturesPositioning** (Futures positioning): Stock-futures open interest, buildup label, rollover percentage, basis and cost of carry for one expiry and session. — `stock_futures_oi_history, fno_rollover`
 - **IndexDerivativesSnapshot** (Index derivatives snapshot): Index-level positioning: PCR (single-strike time series and EOD), max pain, and aggregate call/put open interest. — `index_max_pain, nt_index_pcr_ts`
+- **ParticipantPositioning** (F&O participant positioning): End-of-day equity-derivative positions (or traded volume) of FII, DII, Pro and Client participants by instrument class, from NSE's participant-wise files. — `nse_participant_positions`
+- **TradabilityConstraint** (Tradability constraint): An exchange restriction on a symbol for a session, e.g. the F&O ban period (open interest above 95% of the market-wide position limit: no new F&O positions). — `nse_fo_ban_list`
 - **MoverSnapshot** (Mover snapshot): A ranked intraday mover list entry from a vendor feed: the platform's within-day event backbone alongside the event triggers. — `mover_snapshots`
 
 ### Market context & regime
@@ -69,7 +71,7 @@
 - **FeatureVector** (Feature vector): The rolling per-symbol, per-date feature panel the models train on. Features, not information: they re-express price, flow and vendor data. — `feature_store`
 - **TechnicalSignal** (Technical signal): The wide per-symbol, per-date technical panel: indicators, regime stamp, flow and fundamental context columns, plus the model's probability outputs. — `technical_signals`
 - **EngineScore** (Engine score): A single engine's, or the multi-engine composite's, score for a symbol and date with its engine-coverage count. — `confluence_signals, engine_composite_scores, stock_scores`
-- **Recommendation** (Recommendation): The served trade: composite score, conviction bucket, action label, entry zone, stop, targets, risk/reward and position size for one symbol, date and timeframe. — `unified_recommendations, unified_recommendations_history, intraday_recommendations`
+- **Recommendation** (Recommendation): The served trade: composite score, conviction bucket, action label, entry zone, stop, targets, risk/reward and position size for one symbol, date and timeframe. — `unified_recommendations, unified_recommendations_history, recommendation_log, intraday_recommendations`
 - **ModelArtifact** (Model artifact): A registered trained model: type, version, evaluation metrics, feature count, horizon and active flag. — `model_registry`
 - **FeatureImportance** (Feature importance): Per-model, per-run feature importance with rank — the audit trail behind which inputs a model actually used. — `feature_importance_log`
 - **MarketClaim** (Market claim): An explicit, status-bearing assertion about a market entity, separate from raw evidence. — `market_claim`
@@ -86,7 +88,7 @@
 
 - **OutcomeRecord** (Outcome record): Abstract parent for resolved results. Labels live here and nowhere else: nothing in this branch may ever appear on the input side of a model.
 - **EdgeReading** (Edge reading): One factor-grading result: rank-IC and hit-AUC for a table/column, per regime and horizon, with the effective-date count and a verdict. — `factor_edge_history`
-- **SignalOutcome** (Signal outcome): The resolved result of a signal: entry, exit, horizon, return and the outcome label, under one of two possibly-different labelling rules. — `signal_outcomes, unified_signal_outcomes`
+- **SignalOutcome** (Signal outcome): The resolved result of a signal: entry, exit, horizon, return and the outcome label, under one of two possibly-different labelling rules. — `call_attribution, signal_outcomes, unified_signal_outcomes`
 - **SignalExcursion** (Signal excursion): Path statistics inside the evaluation window: maximum favourable and adverse excursion, days to each, and whether MFE preceded MAE. — `signal_excursions`
 - **ScreenerOutcome** (Screener outcome): Forward returns pre-tracked and attached to an appearance at surfacing time. — `live_screener_outcomes`
 - **DecisionOutcome** (Decision outcome): A realized outcome attached to a decision under an explicit label definition and horizon. — `market_decision_outcome`
@@ -94,6 +96,7 @@
 ### Provenance, quality & governance
 
 - **GovernanceRecord** (Governance record): Abstract parent for operational metadata. These answer 'when was this true and who wrote it', which on this platform is the difference between a usable value and a guess.
+- **TechnicalSignalObservation** (Technical signal observation): An immutable transaction-time record of one mutation to the technical signal compatibility projection, including writer provenance and changed values. — `technical_signal_observations`
 - **Endpoint** (Data endpoint): A discovered, verified market-data endpoint: provider, domain, scope, update frequency and the template to call it. The platform's data-sourcing registry. — `market_endpoint_registry, url_endpoints`
 - **JobRun** (Job run): Per-job heartbeat: last status, last success, last error and run/failure counts. — `job_heartbeat`
 - **DataQualityCheck** (Data-quality check): The result of one named validation check: category, criticality, status and a detail string. — `data_quality_results`

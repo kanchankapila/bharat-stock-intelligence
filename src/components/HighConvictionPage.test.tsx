@@ -32,6 +32,16 @@ vi.mock('../lib/trpc', () => ({
         isRefetching: false,
       }),
     },
+    getBuyBookRisk: {
+      useQuery: () => ({
+        data: {
+          names: 1, excluded: [], sessions: 120, beta: 1.31, annualVolPct: 24.5, avgPairCorr: null,
+          maxDrawdownPct: -9.4, sectorWeights: [{ sector: 'Energy', weightPct: 100 }], weighting: 'equal',
+        },
+        isLoading: false,
+        isError: false,
+      }),
+    },
     getBuyRecommendations: {
       useQuery: () => ({
         data: {
@@ -54,6 +64,8 @@ vi.mock('../lib/trpc', () => ({
             trade_reasoning: '[{"name":"Positive relative strength","sentiment":"bullish","source":"Trendlyne"},{"name":"Promoter pledge increased","sentiment":"bearish","source":"Exchange filing"}]',
             engine_coverage_count: 4,
             days_to_next_results: 18,
+            liveCheck: { state: 'GAPPED_BELOW_STOP', label: 'Opened below the stop: plan invalid', invalidated: true },
+            eventRisk: ['SEBI order against promoter entity'],
           }],
         },
         isLoading: false,
@@ -75,6 +87,19 @@ describe('Best Picks evidence-first redesign', () => {
     expect(html).toContain('0.51%');
     expect(html).toContain('net after 0.15% cost');
     expect(html).toContain('p=0.0005');
+  });
+
+  it('shows the live session check and post-plan bearish news on the card (AF-20261119-21)', () => {
+    expect(html).toContain('Opened below the stop: plan invalid');
+    expect(html).toContain('News since plan: SEBI order against promoter entity');
+  });
+
+  it('reads the shortlist as one book and flags what an analyst should check (AF-20261119-12)', () => {
+    expect(html).toContain('The shortlist as one book');
+    expect(html).toContain('not a track record');
+    expect(html).toContain('1.31');
+    expect(html).toContain('Moves more than the market');
+    expect(html).toContain('Above the ranker');
   });
 
   it('shows canonical recommendations instead of leaving the page empty', () => {

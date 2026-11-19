@@ -16,8 +16,7 @@ describe('promotion-gate training steps are tracked by StepTracker, not a bare .
 
   it.each([
     ['exit-policy-train', "runPython('exit_policy.py', ['--train']"],
-    ['breakout-classifier-train', "runPython('breakout_classifier.py', ['--train', '--score']"],
-    ['movement-predictor-train', "runPython('movement_predictor.py', ['--train', '--score']"],
+    ['breakout-classifier-train', "runPython('breakout_classifier.py', ['--train']"],
   ])('%s wraps its runPython call in T.run(...)', (stepName, callSnippet) => {
     const idx = src.indexOf(callSnippet);
     expect(idx, `${callSnippet} not found in queues.ts`).toBeGreaterThan(-1);
@@ -27,3 +26,20 @@ describe('promotion-gate training steps are tracked by StepTracker, not a bare .
     expect(statement).toContain(`T.run('${stepName}'`);
   });
 });
+
+// AF-20261119-18: breakout scores once per run (train, then score with the active model), and the
+// retired no-edge movement predictor stays off the nightly chain.
+describe('nightly model chain does no redundant or retired work', () => {
+  const src = readFileSync(join(__dirname, '..', 'queues.ts'), 'utf8');
+  const calls = (snippet: string) => src.split(snippet).length - 1;
+
+  it('scores breakout_classifier exactly once', () => {
+    expect(calls("runPython('breakout_classifier.py', ['--score']")).toBe(1);
+    expect(calls("'--train', '--score']")).toBe(0);
+  });
+
+  it('does not schedule movement_predictor.py', () => {
+    expect(calls("runPython('movement_predictor.py'")).toBe(0);
+  });
+});
+

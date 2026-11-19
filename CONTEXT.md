@@ -60,7 +60,18 @@ over this summary):
   brief re-sends the same ranking (nothing re-ranks overnight) with last session's graded scorecard; it
   keeps the unified INTRADAY picks, which are for that session.
 - `confluence-compute` runs every 30 min 06:00-07:30 and 17:00-23:30; its trade levels anchor on the
-  latest stored close. **09:30** `outcome-resolver` grades with next-open entry and horizons in sessions.
+  latest stored close. **07:30** `outcome-resolver` (moved from 09:30 on 2026-11-19, AF-20261119-18, off the
+  opening range) grades with next-open entry and horizons in sessions.
+- **In session, every 15 min (09:15-15:30):** the intraday pipeline (regime nowcast, PCR/GEX, intraday
+  ranker) and, after it, the plan guard (`planGuard.ts` / `planGuardAlerts.ts`, AF-20261119-21): each
+  published TOP Buy is checked against the session it was published for (gap below stop, stop/target
+  touched, opened above the entry zone and never came back) plus high-impact bearish news since
+  publication; shown on Best Picks and sent once per day per state to Telegram. Display and alerts only;
+  nothing re-ranks in session. Live quotes refresh every 5 min (`liveQuotes.ts` is the one reader).
+- **Inside `ml-daily-ops`, after the bhavcopy step:** exchange F&O files (`nse_fo_bhav_history_fetcher.py
+  --days-back 10`, participant-wise OI/volume and the F&O ban list via `nse_fo_market_positioning_fetcher.py`,
+  AF-20261119-19). **19:15** Trendlyne daily metrics (moved from 10:00, AF-20261119-22). **21:35**
+  results filings, then the earnings beat/miss refresh for names that reported in the last 3 days.
 - Known gap, recorded not fixed: the 17:00 `dl-feature-refresh` builds the latest `feature_store` row
   before its flow inputs land (AF-20261112-09); no effect on the blend while ML is gated out.
 
@@ -92,7 +103,7 @@ Outcome resolution, backtests, model evaluation, and monitoring provide feedback
 operations. Do not assume every source follows this exact path or that a feedback loop is
 autonomous; inspect the relevant writer, consumer, and job before changing one.
 
-This checkout currently has 90 Python `*_fetcher.py` modules and 74 `JOB_REGISTRY` entries
+This checkout currently has 91 Python `*_fetcher.py` modules and 73 `JOB_REGISTRY` entries
 (re-derived 2026-11-11). These are inventory snapshots, not targets or enduring truths; rerun
 `npm run doc:numbers` and `npm run doc:numbers:check` before quoting or updating them.
 
@@ -129,6 +140,12 @@ the "Unproven ranking" badge on `src/components/HighConvictionPage.tsx` and the 
 intraday engine's emission gate, and "NO TRADE TODAY" means the ranking produced no picks, not that the
 edge is unproven. An "honest refusal engine" (watch-list, no calls) appears only as an open decision in
 `docs/superpowers/specs/2026-10-19-full-data-honest-recommendations-design.md`; no code implements it.
+
+Learning from misses is a gated loop, not automatic reweighting: each published Buy is graded net of cost
+against its own session's universe, every miss gets one cause (`call_attribution.py`), and challenger blends
+(including weights learned from realised IC) are tested against the published ranking by
+`ranker_challenger_gate.py`, which only proposes. Promotion is an owner decision; the steps are in
+`.claude/rules/scoring-authority.md`.
 
 ## Contracts To Preserve
 - **One database:** PostgreSQL/TimescaleDB is the production database. Do not add a SQLite runtime

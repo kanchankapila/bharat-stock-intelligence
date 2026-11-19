@@ -158,7 +158,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     'densify-feature-matrix', 'nse-bhavcopy-fetcher', 'reconcile-stock-ohlcv', 'ml-ensemble-incremental',
     'ml-ensemble-score', 'drift-detector', 'reward-engine',
     'signal-type-stats', 'news-symbol-link',
-    'event-triggers', 'breakout-classifier-train', 'movement-predictor-train',
+    'event-triggers', 'breakout-classifier-train',
   ];
 
   const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer', 'exit-policy-train', 'backtest-optimizer'];
@@ -268,7 +268,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
 
   // outcome-resolver-5d/-15d are the two entries fed by a single ml-daily-ops cron in
   // JOB_REGISTRY (unlike the equivalent MONITOR_SCRIPTS entries, which additionally track the
-  // dedicated 9:30am outcome-resolver queue via a second cronPatterns element) -- sanity-check
+  // dedicated 7:30am outcome-resolver queue via a second cronPatterns element) -- sanity-check
   // that assumption still holds rather than silently trusting it.
   it('outcome-resolver-5d/-15d (JOB_REGISTRY) are single-pattern, tracking only ml-daily-ops', () => {
     const fiveD = JOB_REGISTRY.find(j => j.jobName === 'outcome-resolver-5d');

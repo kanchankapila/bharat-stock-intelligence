@@ -16,7 +16,29 @@ type Row = {
   decisive_rate?: number | null;
   neutral_rate?: number | null;
   avg_return?: number | null;
+  eff_windows?: number | null;
+  low_data?: boolean;
+  win_ci_lo?: number | null;
+  win_ci_hi?: number | null;
 };
+
+// AF-20261119-13: a cell with fewer than 20 independent windows (distinct signal dates / horizon)
+// is not evidence either way, so it is shown greyed rather than coloured as a verdict.
+const winCell = (r: Row) => {
+  const range = r.win_ci_lo != null && r.win_ci_hi != null ? `${r.win_ci_lo.toFixed(0)}–${r.win_ci_hi.toFixed(0)}` : null;
+  return (
+    <span title={range ? `95% interval ${range}% on ${r.eff_windows ?? '?'} independent windows` : undefined}>
+      {pct(r.win_rate)}
+      {range && <span className="ml-1 text-[10px] text-slate-500">({range})</span>}
+    </span>
+  );
+};
+const lowData = (r: Row) => r.low_data === true;
+const windowsCell = (r: Row) => (
+  <span className={lowData(r) ? 'text-slate-600' : 'text-slate-400'} title="Independent windows = distinct signal dates / horizon">
+    {r.eff_windows == null ? '—' : r.eff_windows.toFixed(1)}{lowData(r) ? ' · low data' : ''}
+  </span>
+);
 
 // Postgres returns ROUND()/NUMERIC as strings via node-pg — coerce everything to a number.
 const N = (v: unknown): number | null => {
@@ -52,6 +74,7 @@ function RollupTable({ title, keyName, rows }: { title: string; keyName: 'signal
             <tr className="text-left text-[11px] font-display uppercase tracking-wider text-slate-500">
               <th className="py-1.5 pr-2">{keyName === 'signal_source' ? 'Source' : 'Regime'}</th>
               <th className="py-1.5 px-2 text-right">n</th>
+              <th className="py-1.5 px-2 text-right">Windows</th>
               <th className="py-1.5 px-2 text-right">Decisive</th>
               <th className="py-1.5 px-2 text-right">Neutral</th>
               <th className="py-1.5 px-2 text-right">Win</th>
@@ -60,17 +83,18 @@ function RollupTable({ title, keyName, rows }: { title: string; keyName: 'signal
           </thead>
           <tbody>
             {rows.map((r, i) => (
-              <tr key={i} className="border-t border-slate-800/70">
+              <tr key={i} className={`border-t border-slate-800/70 ${lowData(r) ? 'opacity-50' : ''}`}>
                 <td className="py-1.5 pr-2 font-medium text-slate-200">{(r as any)[keyName] ?? '—'}</td>
                 <td className="py-1.5 px-2 text-right tabular-nums text-slate-400">{int(r.total)}</td>
+                <td className="py-1.5 px-2 text-right tabular-nums">{windowsCell(r)}</td>
                 <td className={`py-1.5 px-2 text-right tabular-nums ${decisiveColor(r.decisive_rate)}`}>{pct(r.decisive_rate)}</td>
                 <td className="py-1.5 px-2 text-right tabular-nums text-slate-400">{pct(r.neutral_rate)}</td>
-                <td className={`py-1.5 px-2 text-right tabular-nums ${winColor(r.win_rate)}`}>{pct(r.win_rate)}</td>
+                <td className={`py-1.5 px-2 text-right tabular-nums ${lowData(r) ? 'text-slate-500' : winColor(r.win_rate)}`}>{winCell(r)}</td>
                 <td className={`py-1.5 pl-2 text-right tabular-nums ${retColor(r.avg_return)}`}>{ret(r.avg_return)}</td>
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={6} className="py-4 text-center text-slate-500">No resolved outcomes in window.</td></tr>
+              <tr><td colSpan={7} className="py-4 text-center text-slate-500">No resolved outcomes in window.</td></tr>
             )}
           </tbody>
         </table>
@@ -95,6 +119,9 @@ export function LiveHitRates() {
             <p className="text-xs text-slate-500">
               Emitted-signal outcomes from <code className="text-slate-400">unified_signal_outcomes</code>, by source × regime × horizon.
               A low <span className="text-rose-400">decisive</span> rate means signals expire flat before resolving.
+              Rows overlap in time, so evidence is counted in independent windows (distinct dates ÷ horizon);
+              cells under 20 windows are greyed: not evidence either way. The honest verdict on published
+              calls is the frozen forward test.
             </p>
           </div>
         </div>
@@ -129,7 +156,8 @@ export function LiveHitRates() {
             <StatTile label="Resolved signals" value={int(data.overall?.total)} sub={`last ${data.windowDays}d`} />
             <StatTile label="Decisive rate" value={pct(data.overall?.decisive_rate)} tone={decisiveColor(data.overall?.decisive_rate)} sub="resolved directionally" />
             <StatTile label="Neutral rate" value={pct(data.overall?.neutral_rate)} sub="expired flat" />
-            <StatTile label="Win rate" value={pct(data.overall?.win_rate)} tone={winColor(data.overall?.win_rate)} sub="of decided" />
+            <StatTile label="Win rate" value={pct(data.overall?.win_rate)} tone={data.overall?.low_data ? 'text-slate-400' : winColor(data.overall?.win_rate)}
+              sub={data.overall?.win_ci_lo != null ? `95% ${data.overall.win_ci_lo.toFixed(0)}–${data.overall.win_ci_hi?.toFixed(0)}% · ${data.overall.eff_windows ?? '?'} windows${data.overall.low_data ? ' · low data' : ''}` : 'of decided'} />
             <StatTile label="Avg return" value={ret(data.overall?.avg_return)} tone={retColor(data.overall?.avg_return)} />
           </div>
 
@@ -147,6 +175,7 @@ export function LiveHitRates() {
                     <th className="py-1.5 px-2">Regime</th>
                     <th className="py-1.5 px-2 text-right">Hzn</th>
                     <th className="py-1.5 px-2 text-right">n</th>
+                    <th className="py-1.5 px-2 text-right">Windows</th>
                     <th className="py-1.5 px-2 text-right">Decisive</th>
                     <th className="py-1.5 px-2 text-right">Neutral</th>
                     <th className="py-1.5 px-2 text-right">Win</th>
@@ -156,20 +185,21 @@ export function LiveHitRates() {
                 </thead>
                 <tbody>
                   {(data.grid as Row[] ?? []).map((r, i) => (
-                    <tr key={i} className="border-t border-slate-800/70">
+                    <tr key={i} className={`border-t border-slate-800/70 ${lowData(r) ? 'opacity-50' : ''}`}>
                       <td className="py-1.5 pr-2 font-medium text-slate-200">{r.signal_source}</td>
                       <td className="py-1.5 px-2 text-slate-300">{r.regime}</td>
                       <td className="py-1.5 px-2 text-right tabular-nums text-slate-400">{r.horizon_days}d</td>
                       <td className="py-1.5 px-2 text-right tabular-nums text-slate-400">{int(r.total)}</td>
+                      <td className="py-1.5 px-2 text-right tabular-nums">{windowsCell(r)}</td>
                       <td className={`py-1.5 px-2 text-right tabular-nums ${decisiveColor(r.decisive_rate)}`}>{pct(r.decisive_rate)}</td>
                       <td className="py-1.5 px-2 text-right tabular-nums text-slate-400">{pct(r.neutral_rate)}</td>
-                      <td className={`py-1.5 px-2 text-right tabular-nums ${winColor(r.win_rate)}`}>{pct(r.win_rate)}</td>
+                      <td className={`py-1.5 px-2 text-right tabular-nums ${lowData(r) ? 'text-slate-500' : winColor(r.win_rate)}`}>{winCell(r)}</td>
                       <td className="py-1.5 px-2 text-right tabular-nums text-slate-400">{int(r.stops)}</td>
                       <td className={`py-1.5 pl-2 text-right tabular-nums ${retColor(r.avg_return)}`}>{ret(r.avg_return)}</td>
                     </tr>
                   ))}
                   {(data.grid as Row[] ?? []).length === 0 && (
-                    <tr><td colSpan={9} className="py-4 text-center text-slate-500">No source×regime×horizon cell has ≥10 resolved signals in this window.</td></tr>
+                    <tr><td colSpan={10} className="py-4 text-center text-slate-500">No source×regime×horizon cell has ≥10 resolved signals in this window.</td></tr>
                   )}
                 </tbody>
               </table>

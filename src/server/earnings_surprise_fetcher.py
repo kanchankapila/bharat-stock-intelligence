@@ -231,10 +231,24 @@ def upsert_rows(conn, symbol: str, rows: list[dict]) -> int:
 
 # ── main ────────────────────────────────────────────────────────────────────────
 
-def run(limit: int | None = None, symbol_filter: str | None = None) -> None:
+# Daily results-season mode (AF-20261119-22): the full weekly sweep left a stock's beat/miss up to
+# a week stale after it reported. This re-reads only names whose result NSE broadcast recently.
+FILED_SQL = (
+    "SELECT DISTINCT s.symbol, s.mcsymbol FROM nse_stocks s JOIN nse_results_filings f ON f.symbol = s.symbol "
+    "WHERE f.broadcast_ts >= now() - make_interval(days => :d) "
+    "AND s.mcsymbol IS NOT NULL AND s.mcsymbol != '' ORDER BY s.symbol"
+)
+
+
+def run(limit: int | None = None, symbol_filter: str | None = None, filed_within_days: int | None = None) -> None:
     engine = get_engine()
     with engine.connect() as conn:
-        if symbol_filter:
+        if filed_within_days is not None:
+            stocks = conn.execute(text(FILED_SQL), {"d": filed_within_days}).fetchall()
+            if not stocks:
+                print(f"[EARNINGS] No NSE result broadcast in the last {filed_within_days} day(s); nothing to refresh.")
+                return
+        elif symbol_filter:
             stocks = conn.execute(
                 text("SELECT symbol, mcsymbol FROM nse_stocks WHERE symbol = :s AND mcsymbol IS NOT NULL AND mcsymbol != ''"),
                 {"s": symbol_filter.upper()},
@@ -289,5 +303,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MoneyControl earnings surprise fetcher")
     parser.add_argument("--limit",  type=int, default=None, help="Fetch only first N stocks (for testing)")
     parser.add_argument("--symbol", default=None, help="Fetch a single NSE symbol")
+    parser.add_argument("--filed-within-days", type=int, default=None,
+                        help="Only stocks with an NSE result broadcast in the last N days (daily results-season run)")
     args = parser.parse_args()
-    run(limit=args.limit, symbol_filter=args.symbol)
+    run(limit=args.limit, symbol_filter=args.symbol, filed_within_days=args.filed_within_days)

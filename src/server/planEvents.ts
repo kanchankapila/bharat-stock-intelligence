@@ -59,12 +59,32 @@ export async function fetchPlanEvents(plans: PlanWindow[], now: Date = new Date(
   const ph = symbols.map(() => '?').join(',');
   const [actions, fno] = await Promise.all([
     dbAll<CorporateActionRow>(
-      // record_date is a DATE column: compare its ISO text (LIKE/substring on a DATE raises).
+      // Dates are DATE columns: compare their ISO text (LIKE/substring on a DATE raises). Since T+1
+      // settlement an Indian record date is the ex-date. The weekly per-stock history alone missed any
+      // action declared and executed between two Saturday crawls (AF-20261119-20), so the two daily
+      // forward calendars are read as well; one event seen by several sources collapses to one label.
       `SELECT symbol, action_type, record_date::text AS event_date
          FROM stock_corporate_action_history
         WHERE symbol IN (${ph}) AND record_date IS NOT NULL
-          AND record_date::text >= ?`,
-      [...symbols, today],
+          AND record_date::text >= ?
+       UNION ALL
+       SELECT symbol,
+              CASE WHEN action_type LIKE 'DIVIDEND%' THEN 'dividend' ELSE LOWER(action_type) END,
+              ex_date::text
+         FROM corporate_actions
+        WHERE symbol IN (${ph}) AND action_type IN ('DIVIDEND', 'DIVIDEND_SPECIAL', 'BONUS', 'SPLIT')
+          AND ex_date::text >= ?
+       UNION ALL
+       SELECT symbol,
+              CASE WHEN LOWER(category) LIKE '%bonus%' THEN 'bonus'
+                   WHEN LOWER(category) LIKE '%split%' THEN 'split'
+                   ELSE 'dividend' END,
+              COALESCE(ex_date, record_date)::text
+         FROM nse_filed_corporate_actions
+        WHERE symbol IN (${ph}) AND COALESCE(ex_date, record_date) IS NOT NULL
+          AND (LOWER(category) LIKE '%dividend%' OR LOWER(category) LIKE '%bonus%' OR LOWER(category) LIKE '%split%')
+          AND COALESCE(ex_date, record_date)::text >= ?`,
+      [...symbols, today, ...symbols, today, ...symbols, today],
     ),
     dbAll<{ symbol: string }>(`SELECT symbol FROM nse_stocks WHERE fno_eligible = 1 AND symbol IN (${ph})`, symbols),
   ]);

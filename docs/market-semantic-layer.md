@@ -114,6 +114,13 @@ that distinction.
 - Vendor screener membership is candidate/context evidence, never ground truth.
 - Outcomes from different `label_definition` values must never be aggregated together.
 - A `provisional_symbol` identity is intentionally not merged by company name.
+- `recommendation_log` (published plans and their realised outcome) and `call_attribution` (one
+  cause per missed Buy) are labels, not features. Their cards forbid `outcome`,
+  `actual_return_pct`, `trailing_stop` and the whole attribution table as model inputs; the
+  learning loop that reads them is described in `.claude/rules/scoring-authority.md`.
+- `technical_signals.rsi` currently mixes two definitions (Wilder from the scanners, a simple-mean
+  RSI from `backfill_technical_features.py`, AF-20261119-15); do not compare RSI values across
+  writers or dates until that row closes.
 
 ## Current follow-up work
 
@@ -127,6 +134,12 @@ that distinction.
   allowing those claims to influence a publishable decision.
 - Consider a read-only graph projection to Neo4j only after measured traversal workloads justify
   it; PostgreSQL remains authoritative for now.
+
+## Regenerating the ontology docs
+
+After editing anything under `src/server/ontology/definitions/` or `vocab.py`, run from `src/server`:
+`python -m ontology verify` (must report no issues) and then
+`python -m ontology export` (writes the repo-root `docs/ontology`), and commit the regenerated `docs/ontology/*`.
 
 ## Verification
 

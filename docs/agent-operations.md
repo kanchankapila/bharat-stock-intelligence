@@ -15,6 +15,10 @@ Any `*.sh` a hook calls must stay LF-only (`.gitattributes` pins it).
 
 Compare `graphify-out/GRAPH_REPORT.md`'s "Built from commit" with `git rev-parse HEAD` before trusting it; it is
 usually behind. `graph.html` is not emitted (over the 5,000-node cap); `query`/`path`/`explain` are the interface.
+`graphify-out/` is gitignored, so every machine builds its own: `pip install graphifyy`, then `python -m graphify
+update .` re-extracts code with no LLM (about 2 minutes for ~2,300 files; 2026-11-19: 25,386 nodes, 61,820 edges).
+Add `graphifyy[sql]` for the `.sql` files. A tree-sitter "syntax error" warning on a `.tsx` file is not a build
+error; check it with the TypeScript compiler before acting on it.
 
 ## Services
 

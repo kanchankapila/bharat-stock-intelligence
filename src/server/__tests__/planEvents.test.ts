@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { buildPlanEvents, istDay } from '../planEvents';
+import { describe, expect, it, vi } from 'vitest';
+
+const dbAll = vi.fn();
+vi.mock('../dbAsync', () => ({ dbAll: (...a: unknown[]) => dbAll(...a) }));
+
+import { buildPlanEvents, fetchPlanEvents, istDay } from '../planEvents';
 
 describe('buildPlanEvents (AF-20261117-14)', () => {
   const plans = [
@@ -27,3 +31,23 @@ describe('buildPlanEvents (AF-20261117-14)', () => {
     expect(istDay('garbage')).toBeNull();
   });
 });
+
+describe('fetchPlanEvents reads the daily corporate-action calendars (AF-20261119-20)', () => {
+  it('tags an ex-date the weekly history has not crawled yet, once per event', async () => {
+    dbAll.mockReset();
+    dbAll.mockImplementation(async (sql: string, params: unknown[]) => {
+      if (sql.includes('fno_eligible')) return [];
+      // Declared Monday, ex Thursday: only the two daily calendars have it, both report it.
+      expect(sql).toContain('FROM corporate_actions');
+      expect(sql).toContain('FROM nse_filed_corporate_actions');
+      expect(params.filter((p) => p === 'DIV')).toHaveLength(3);
+      return [
+        { symbol: 'DIV', action_type: 'dividend', event_date: '2026-11-26' },
+        { symbol: 'DIV', action_type: 'dividend', event_date: '2026-11-26' },
+      ];
+    });
+    const out = await fetchPlanEvents([{ symbol: 'DIV', validUntil: '2026-11-28' }], new Date('2026-11-23T04:00:00Z'));
+    expect(out.get('DIV')).toEqual(['Ex-dividend 26 Nov']);
+  });
+});
+

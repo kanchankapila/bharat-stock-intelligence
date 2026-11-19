@@ -300,7 +300,7 @@ bsi:FuturesPositioning     rdf:type owl:Class ;
     bsi:grain "(symbol, date, expiry)" ;
     rdfs:subClassOf bsi:Observation ;
     bsi:keyProperty bsip:symbol, bsip:date, bsip:expiry ;
-    bsi:caveat "LOW-DATA: the stock-futures panel covers roughly two weeks of dates. Any 'measured' claim built on it is a calendar artefact, not an edge — this is the specific finding the master report's LOW-DATA verdict records." ;
+    bsi:caveat "Graded: basis and every OI column read no edge by 2026-10-04 on the MoneyControl near-month panel. Exchange history back to 2021 now exists (stock_futures_eod_history, AF-20261113-03); the pre-registered all-expiry re-test is AF-20261119-09. Near-month OI is distorted at each monthly roll." ;
     bsi:realizedBy bsis:stock_futures_oi_history, bsis:fno_rollover .
 
 bsi:IndexDerivativesSnapshot     rdf:type owl:Class ;
@@ -313,6 +313,28 @@ bsi:IndexDerivativesSnapshot     rdf:type owl:Class ;
     bsi:keyProperty bsip:index_name, bsip:date, bsip:expiry ;
     bsi:caveat "The index panel is far deeper than the stock panel but remains ungraded as a standalone signal — treated here as a research candidate." ;
     bsi:realizedBy bsis:index_max_pain, bsis:nt_index_pcr_ts .
+
+bsi:ParticipantPositioning     rdf:type owl:Class ;
+    rdfs:label "F&O participant positioning"^^xsd:string ;
+    rdfs:comment "End-of-day equity-derivative positions (or traded volume) of FII, DII, Pro and Client participants by instrument class, from NSE's participant-wise files."^^xsd:string ;
+    bsi:layer "observation" ;
+    bsi:realization "table" ;
+    bsi:grain "(date, participant_measure, participant_type)" ;
+    rdfs:subClassOf bsi:Observation ;
+    bsi:keyProperty bsip:date, bsip:participant_measure, bsip:participant_type ;
+    bsi:caveat "Market-wide: one value per participant per day, identical for every stock. Use as regime or timing context; it has no cross-section to rank stocks on.", "Ungraded: no measurement yet (AF-20261119-19)." ;
+    bsi:realizedBy bsis:nse_participant_positions .
+
+bsi:TradabilityConstraint     rdf:type owl:Class ;
+    rdfs:label "Tradability constraint"^^xsd:string ;
+    rdfs:comment "An exchange restriction on a symbol for a session, e.g. the F&O ban period (open interest above 95% of the market-wide position limit: no new F&O positions)."^^xsd:string ;
+    bsi:layer "observation" ;
+    bsi:realization "table" ;
+    bsi:grain "(symbol, date)" ;
+    rdfs:subClassOf bsi:Observation ;
+    bsi:keyProperty bsip:symbol, bsip:date ;
+    bsi:caveat "A constraint, not a signal: it says what cannot be done, not what will move.", "The ban list is published for the NEXT session; `date` is that trade date." ;
+    bsi:realizedBy bsis:nse_fo_ban_list .
 
 bsi:MoverSnapshot     rdf:type owl:Class ;
     rdfs:label "Mover snapshot"^^xsd:string ;
@@ -407,7 +429,7 @@ bsi:Recommendation     rdf:type owl:Class ;
     rdfs:subClassOf bsi:PlatformOutput ;
     bsi:keyProperty bsip:symbol, bsip:computed_at, bsip:timeframe ;
     bsi:caveat "`computed_at` is TEXT here and native TIMESTAMPTZ in `confluence_signals` — cast before joining the two.", "`trade_reasoning` is generated text: an explanation, never evidence.", "The history table carries the raw meta-label behind `position_size_pct`, which the serving table does not." ;
-    bsi:realizedBy bsis:unified_recommendations, bsis:unified_recommendations_history, bsis:intraday_recommendations ;
+    bsi:realizedBy bsis:unified_recommendations, bsis:unified_recommendations_history, bsis:recommendation_log, bsis:intraday_recommendations ;
     bsi:noExternalCounterpart "platform_specific: `unified_score` is a composite of this platform's engines with a tracked per-engine track record. FIBO's nearest analogue is a research recommendation — a different object with a different lifecycle and no track record." .
 
 bsi:ModelArtifact     rdf:type owl:Class ;
@@ -459,7 +481,7 @@ bsi:SignalOutcome     rdf:type owl:Class ;
     rdfs:subClassOf bsi:OutcomeRecord ;
     bsi:keyProperty bsip:symbol, bsip:signal_date, bsip:horizon_days ;
     bsi:caveat "Labels are NOT comparable across `label_definition` (`path_barrier` vs `terminal_pct2`). Always filter on it before aggregating accuracy.", "`PENDING` rows have not elapsed — they are not negative examples.", "`NO_ENTRY_PRICE` / `SUSPECT_DATA` are integrity exits, not labels." ;
-    bsi:realizedBy bsis:signal_outcomes, bsis:unified_signal_outcomes ;
+    bsi:realizedBy bsis:call_attribution, bsis:signal_outcomes, bsis:unified_signal_outcomes ;
     bsi:noExternalCounterpart "platform_specific: Our labels come from two non-comparable rules (`path_barrier` vs `terminal_pct2`). That distinction is internal and load-bearing; no external vocabulary carries it." .
 
 bsi:SignalExcursion     rdf:type owl:Class ;
@@ -532,6 +554,16 @@ bsi:GovernanceRecord     rdf:type owl:Class ;
     bsi:layer "governance" ;
     bsi:realization "abstract" ;
     bsi:keyProperty bsip:id .
+
+bsi:TechnicalSignalObservation     rdf:type owl:Class ;
+    rdfs:label "Technical signal observation"^^xsd:string ;
+    rdfs:comment "An immutable transaction-time record of one mutation to the technical signal compatibility projection, including writer provenance and changed values."^^xsd:string ;
+    bsi:layer "governance" ;
+    bsi:realization "table" ;
+    bsi:grain "one row per technical_signals mutation" ;
+    rdfs:subClassOf bsi:GovernanceRecord ;
+    bsi:keyProperty bsip:id ;
+    bsi:realizedBy bsis:technical_signal_observations .
 
 bsi:Endpoint     rdf:type owl:Class ;
     rdfs:label "Data endpoint"^^xsd:string ;
@@ -666,7 +698,7 @@ bsip:symbol     rdf:type owl:DatatypeProperty ;
     bsi:leakageRisk "none" ;
     bsi:usableAsFeature "false"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
-    bsi:boundTo bsis:stock_ohlcv.symbol, bsis:intraday_ohlcv.symbol, bsis:stock_delivery_data.symbol, bsis:stock_delivery_volume.symbol, bsis:stock_master.symbol, bsis:company_profiles.symbol, bsis:corporate_actions.symbol, bsis:fundamentals_history.symbol, bsis:analyst_estimates_history.symbol, bsis:eps_surprise_history.symbol, bsis:insider_trades.symbol, bsis:block_deals.symbol, bsis:stock_mf_holdings.symbol, bsis:news_symbol_link.symbol, bsis:so_option_chain.symbol, bsis:stock_futures_oi_history.symbol, bsis:fno_rollover.symbol, bsis:mover_snapshots.symbol, bsis:stock_event_triggers.symbol, bsis:technical_signals.symbol, bsis:feature_store.symbol, bsis:unified_recommendations.symbol, bsis:unified_recommendations_history.symbol, bsis:intraday_recommendations.symbol, bsis:confluence_signals.symbol, bsis:engine_composite_scores.symbol, bsis:stock_scores.symbol, bsis:signal_outcomes.symbol, bsis:unified_signal_outcomes.symbol, bsis:signal_excursions.symbol, bsis:live_screener_appearances.symbol, bsis:live_screener_outcomes.symbol, bsis:nse_stocks.symbol, bsis:mc_scid_map.symbol, bsis:market_listing.symbol, bsis:market_graph_node.canonical_symbol, bsis:market_decision_event.symbol ;
+    bsi:boundTo bsis:stock_ohlcv.symbol, bsis:intraday_ohlcv.symbol, bsis:stock_delivery_data.symbol, bsis:stock_delivery_volume.symbol, bsis:stock_master.symbol, bsis:company_profiles.symbol, bsis:corporate_actions.symbol, bsis:fundamentals_history.symbol, bsis:analyst_estimates_history.symbol, bsis:eps_surprise_history.symbol, bsis:insider_trades.symbol, bsis:block_deals.symbol, bsis:stock_mf_holdings.symbol, bsis:news_symbol_link.symbol, bsis:so_option_chain.symbol, bsis:nse_fo_ban_list.symbol, bsis:stock_futures_oi_history.symbol, bsis:fno_rollover.symbol, bsis:mover_snapshots.symbol, bsis:stock_event_triggers.symbol, bsis:technical_signals.symbol, bsis:feature_store.symbol, bsis:unified_recommendations.symbol, bsis:recommendation_log.symbol, bsis:call_attribution.symbol, bsis:unified_recommendations_history.symbol, bsis:intraday_recommendations.symbol, bsis:confluence_signals.symbol, bsis:engine_composite_scores.symbol, bsis:stock_scores.symbol, bsis:signal_outcomes.symbol, bsis:unified_signal_outcomes.symbol, bsis:signal_excursions.symbol, bsis:live_screener_appearances.symbol, bsis:live_screener_outcomes.symbol, bsis:nse_stocks.symbol, bsis:mc_scid_map.symbol, bsis:market_listing.symbol, bsis:market_graph_node.canonical_symbol, bsis:market_decision_event.symbol, bsis:technical_signal_observations.symbol ;
     skos:closeMatch fibo-sec-sec-id:TickerSymbol ;
     bsi:alignmentRationale "[fibo-sec-sec-id:TickerSymbol] Ours is simultaneously the ticker AND the platform's primary join key across ~40 tables. FIBO treats a ticker as one identifier among several on a listing, which is why FIBO-correct joins key on the instrument rather than the ticker." ;
     bsi:verifiedFrom "https://github.com/edmcouncil/fibo (published prefix declarations) + FIBO IRI space under spec.edmcouncil.org; class symbols cross-checked against declared FIBO type stereotypes. Fetched 2026-09-21." .
@@ -717,7 +749,7 @@ bsip:id     rdf:type owl:DatatypeProperty ;
     bsi:leakageRisk "none" ;
     bsi:usableAsFeature "false"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
-    bsi:boundTo bsis:stock_master.mcsymbol, bsis:stock_master.tlid, bsis:stock_master.companyid, bsis:stock_master.tickertape_sid, bsis:stock_master.scripcode, bsis:stock_master.fincode, bsis:news_sentiment_items.id, bsis:news_symbol_link.news_id, bsis:unified_signal_outcomes.unified_signal_id, bsis:screener_master.scan_id, bsis:live_screener_appearances.id, bsis:live_screener_appearances.run_id, bsis:live_screener_outcomes.appearance_id, bsis:model_registry.id, bsis:feature_importance_log.id, bsis:market_endpoint_registry.uid, bsis:url_endpoints.id, bsis:block_deals.id, bsis:market_issuer.issuer_id, bsis:market_instrument.instrument_id, bsis:market_instrument.issuer_id, bsis:market_listing.listing_id, bsis:market_listing.instrument_id, bsis:market_identifier.identifier_id, bsis:market_identifier.instrument_id, bsis:market_identifier_gap.instrument_id, bsis:market_graph_node.node_id, bsis:market_graph_edge.edge_id, bsis:market_graph_edge.from_node_id, bsis:market_graph_edge.to_node_id, bsis:market_claim.subject_node_id .
+    bsi:boundTo bsis:stock_master.mcsymbol, bsis:stock_master.tlid, bsis:stock_master.companyid, bsis:stock_master.tickertape_sid, bsis:stock_master.scripcode, bsis:stock_master.fincode, bsis:news_sentiment_items.id, bsis:news_symbol_link.news_id, bsis:unified_signal_outcomes.unified_signal_id, bsis:screener_master.scan_id, bsis:live_screener_appearances.id, bsis:live_screener_appearances.run_id, bsis:live_screener_outcomes.appearance_id, bsis:model_registry.id, bsis:feature_importance_log.id, bsis:market_endpoint_registry.uid, bsis:url_endpoints.id, bsis:block_deals.id, bsis:market_issuer.issuer_id, bsis:market_instrument.instrument_id, bsis:market_instrument.issuer_id, bsis:market_listing.listing_id, bsis:market_listing.instrument_id, bsis:market_identifier.identifier_id, bsis:market_identifier.instrument_id, bsis:market_identifier_gap.instrument_id, bsis:market_graph_node.node_id, bsis:market_graph_edge.edge_id, bsis:market_graph_edge.from_node_id, bsis:market_graph_edge.to_node_id, bsis:market_claim.subject_node_id, bsis:technical_signal_observations.observation_id .
 
 bsip:check_id     rdf:type owl:DatatypeProperty ;
     rdfs:label "Check id" ;
@@ -837,7 +869,7 @@ bsip:sector     rdf:type owl:DatatypeProperty ;
     bsi:leakageRisk "none" ;
     bsi:usableAsFeature "true"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
-    bsi:boundTo bsis:news_sentiment_items.sector, bsis:sector_rrg_history.sector, bsis:unified_recommendations.sector, bsis:unified_recommendations_history.sector, bsis:confluence_signals.sector, bsis:nse_stocks.sector ;
+    bsi:boundTo bsis:news_sentiment_items.sector, bsis:sector_rrg_history.sector, bsis:unified_recommendations.sector, bsis:call_attribution.sector, bsis:unified_recommendations_history.sector, bsis:confluence_signals.sector, bsis:nse_stocks.sector ;
     bsi:noExternalCounterpart "gap: FIBO classifies entities through industry schemes. The platform stores sector as free text written fetcher-side and populated only downstream — not alignable until a scheme is settled." .
 
 bsip:industry     rdf:type owl:DatatypeProperty ;
@@ -898,7 +930,7 @@ bsip:source     rdf:type owl:DatatypeProperty ;
     bsi:leakageRisk "none" ;
     bsi:usableAsFeature "true"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
-    bsi:boundTo bsis:corporate_actions.source, bsis:insider_trades.source, bsis:block_deals.source, bsis:news_sentiment_items.source, bsis:stock_futures_oi_history.source, bsis:index_max_pain.source, bsis:mover_snapshots.source, bsis:sector_rrg_history.source, bsis:screener_master.source, bsis:factor_edge_history.table_name, bsis:market_endpoint_registry.provider, bsis:url_endpoints.host, bsis:url_endpoints.provider, bsis:market_issuer.source, bsis:market_instrument.source, bsis:market_listing.source, bsis:market_identifier.source, bsis:market_graph_node.source, bsis:market_graph_edge.source .
+    bsi:boundTo bsis:corporate_actions.source, bsis:insider_trades.source, bsis:block_deals.source, bsis:news_sentiment_items.source, bsis:nse_participant_positions.source, bsis:nse_fo_ban_list.source, bsis:stock_futures_oi_history.source, bsis:index_max_pain.source, bsis:mover_snapshots.source, bsis:sector_rrg_history.source, bsis:recommendation_log.source, bsis:screener_master.source, bsis:factor_edge_history.table_name, bsis:market_endpoint_registry.provider, bsis:url_endpoints.host, bsis:url_endpoints.provider, bsis:market_issuer.source, bsis:market_instrument.source, bsis:market_listing.source, bsis:market_identifier.source, bsis:market_graph_node.source, bsis:market_graph_edge.source, bsis:technical_signal_observations.writer_hint .
 
 bsip:session     rdf:type owl:DatatypeProperty ;
     rdfs:label "Session" ;
@@ -923,7 +955,7 @@ bsip:date     rdf:type owl:DatatypeProperty ;
     bsi:usableAsFeature "false"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
     qudt:unit "calendar_day" ;
-    bsi:boundTo bsis:stock_ohlcv.date, bsis:stock_delivery_data.date, bsis:stock_delivery_volume.date, bsis:insider_trades.date_iso, bsis:block_deals.date, bsis:stock_mf_holdings.date, bsis:so_option_chain.date, bsis:stock_futures_oi_history.date, bsis:fno_rollover.date, bsis:index_max_pain.date, bsis:mover_snapshots.trade_date, bsis:stock_event_triggers.date, bsis:market_regimes.date, bsis:market_breadth.date, bsis:intraday_regime_history.date, bsis:technical_signals.date, bsis:feature_store.date, bsis:engine_composite_scores.date, bsis:market_listing.listed_from, bsis:market_listing.listed_to .
+    bsi:boundTo bsis:stock_ohlcv.date, bsis:stock_delivery_data.date, bsis:stock_delivery_volume.date, bsis:insider_trades.date_iso, bsis:block_deals.date, bsis:stock_mf_holdings.date, bsis:so_option_chain.date, bsis:nse_participant_positions.trade_date, bsis:nse_fo_ban_list.trade_date, bsis:stock_futures_oi_history.date, bsis:fno_rollover.date, bsis:index_max_pain.date, bsis:mover_snapshots.trade_date, bsis:stock_event_triggers.date, bsis:market_regimes.date, bsis:market_breadth.date, bsis:intraday_regime_history.date, bsis:technical_signals.date, bsis:feature_store.date, bsis:engine_composite_scores.date, bsis:market_listing.listed_from, bsis:market_listing.listed_to .
 
 bsip:signal_date     rdf:type owl:DatatypeProperty ;
     rdfs:label "Signal date" ;
@@ -937,7 +969,7 @@ bsip:signal_date     rdf:type owl:DatatypeProperty ;
     bsi:isLabel "false"^^xsd:boolean ;
     qudt:unit "calendar_day" ;
     bsi:pointInTimeNote "Entry is taken at the NEXT session's open. A feature dated on `signal_date` must have been knowable before that open." ;
-    bsi:boundTo bsis:signal_outcomes.signal_date, bsis:unified_signal_outcomes.signal_date, bsis:signal_excursions.signal_date .
+    bsi:boundTo bsis:recommendation_log.signal_date, bsis:call_attribution.call_session, bsis:signal_outcomes.signal_date, bsis:unified_signal_outcomes.signal_date, bsis:signal_excursions.signal_date, bsis:technical_signal_observations.signal_date .
 
 bsip:check_date     rdf:type owl:DatatypeProperty ;
     rdfs:label "Check date" ;
@@ -1030,7 +1062,7 @@ bsip:computed_at     rdf:type owl:DatatypeProperty ;
     bsi:usableAsFeature "false"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
     bsi:pointInTimeNote "TEXT in `unified_recommendations`, native TIMESTAMPTZ in `confluence_signals`. Cast explicitly before comparing across the two." ;
-    bsi:boundTo bsis:stock_event_triggers.computed_at, bsis:market_regimes.computed_at, bsis:market_breadth.computed_at, bsis:intraday_regime_history.computed_at, bsis:technical_signals.computed_at, bsis:unified_recommendations.computed_at, bsis:unified_recommendations_history.computed_at, bsis:intraday_recommendations.computed_at, bsis:intraday_recommendations.computed_ts, bsis:confluence_signals.computed_at, bsis:engine_composite_scores.computed_at, bsis:signal_outcomes.computed_at, bsis:unified_signal_outcomes.computed_at, bsis:signal_excursions.computed_at, bsis:screener_master.created_at, bsis:job_heartbeat.last_run_at, bsis:job_heartbeat.last_success_at, bsis:model_registry.trained_at, bsis:feature_importance_log.computed_at, bsis:factor_edge_history.run_at, bsis:market_decision_event.computed_at .
+    bsi:boundTo bsis:stock_event_triggers.computed_at, bsis:market_regimes.computed_at, bsis:market_breadth.computed_at, bsis:intraday_regime_history.computed_at, bsis:technical_signals.computed_at, bsis:unified_recommendations.computed_at, bsis:call_attribution.computed_at, bsis:unified_recommendations_history.computed_at, bsis:intraday_recommendations.computed_at, bsis:intraday_recommendations.computed_ts, bsis:confluence_signals.computed_at, bsis:engine_composite_scores.computed_at, bsis:signal_outcomes.computed_at, bsis:unified_signal_outcomes.computed_at, bsis:signal_excursions.computed_at, bsis:screener_master.created_at, bsis:job_heartbeat.last_run_at, bsis:job_heartbeat.last_success_at, bsis:model_registry.trained_at, bsis:feature_importance_log.computed_at, bsis:factor_edge_history.run_at, bsis:market_decision_event.computed_at .
 
 bsip:fetched_at     rdf:type owl:DatatypeProperty ;
     rdfs:label "Fetched at" ;
@@ -1042,7 +1074,7 @@ bsip:fetched_at     rdf:type owl:DatatypeProperty ;
     bsi:leakageRisk "none" ;
     bsi:usableAsFeature "false"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
-    bsi:boundTo bsis:stock_delivery_data.updated_at, bsis:stock_delivery_volume.fetched_at, bsis:corporate_actions.ingested_at, bsis:eps_surprise_history.fetched_at, bsis:block_deals.fetched_at, bsis:stock_mf_holdings.fetched_at, bsis:so_option_chain.fetched_at, bsis:stock_futures_oi_history.fetched_at, bsis:fno_rollover.fetched_at, bsis:index_max_pain.fetched_at, bsis:nt_index_pcr_ts.fetched_at, bsis:sector_rrg_history.fetched_at .
+    bsi:boundTo bsis:stock_delivery_data.updated_at, bsis:stock_delivery_volume.fetched_at, bsis:corporate_actions.ingested_at, bsis:eps_surprise_history.fetched_at, bsis:block_deals.fetched_at, bsis:stock_mf_holdings.fetched_at, bsis:so_option_chain.fetched_at, bsis:nse_participant_positions.fetched_at, bsis:nse_fo_ban_list.fetched_at, bsis:stock_futures_oi_history.fetched_at, bsis:fno_rollover.fetched_at, bsis:index_max_pain.fetched_at, bsis:nt_index_pcr_ts.fetched_at, bsis:sector_rrg_history.fetched_at .
 
 bsip:captured_at     rdf:type owl:DatatypeProperty ;
     rdfs:label "Captured at" ;
@@ -1186,7 +1218,7 @@ bsip:entry_price     rdf:type owl:DatatypeProperty ;
     bsi:usableAsFeature "true"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
     qudt:unit "per_share_INR" ;
-    bsi:boundTo bsis:intraday_recommendations.entry_price, bsis:signal_outcomes.entry_price, bsis:unified_signal_outcomes.entry_price, bsis:signal_excursions.entry_price, bsis:live_screener_outcomes.entry_price, bsis:market_decision_outcome.entry_price .
+    bsi:boundTo bsis:recommendation_log.entry_price, bsis:intraday_recommendations.entry_price, bsis:signal_outcomes.entry_price, bsis:unified_signal_outcomes.entry_price, bsis:signal_excursions.entry_price, bsis:live_screener_outcomes.entry_price, bsis:market_decision_outcome.entry_price .
 
 bsip:exit_price     rdf:type owl:DatatypeProperty ;
     rdfs:label "Exit price" ;
@@ -1676,7 +1708,7 @@ bsip:unified_score     rdf:type owl:DatatypeProperty ;
     bsi:usableAsFeature "true"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
     qudt:unit "score_0_100" ;
-    bsi:boundTo bsis:unified_recommendations.unified_score, bsis:unified_recommendations_history.unified_score, bsis:market_decision_event.score .
+    bsi:boundTo bsis:unified_recommendations.unified_score, bsis:call_attribution.unified_score, bsis:unified_recommendations_history.unified_score, bsis:market_decision_event.score .
 
 bsip:confluence_score     rdf:type owl:DatatypeProperty ;
     rdfs:label "Confluence score" ;
@@ -1836,7 +1868,7 @@ bsip:piotroski_f_score     rdf:type owl:DatatypeProperty ;
 
 bsip:rsi     rdf:type owl:DatatypeProperty ;
     rdfs:label "RSI (14)" ;
-    rdfs:comment "Wilder RSI. Graded on this platform as a mean-reversion input with NEGATIVE rank-IC at 5 days — a finding, not a defect." ;
+    rdfs:comment "14-period RSI. TWO definitions share this name (AF-20261119-15): rows written by the nightly `backfill_technical_features.py --full-today` grid use a simple mean of the last 14 gains/losses (Cutler RSI), while the live scanner and alerts read the vendor's Wilder-smoothed RSI; 70/30 thresholds do not mean the same thing on both. Graded on this platform as a mean-reversion input with NEGATIVE rank-IC at 5 days." ;
     rdfs:range xsd:decimal ;
     bsi:semanticType "score" ;
     bsi:timing "coincident" ;
@@ -2068,7 +2100,7 @@ bsip:horizon_days     rdf:type owl:DatatypeProperty ;
     bsi:isLabel "false"^^xsd:boolean ;
     qudt:unit "count" ;
     bsi:pointInTimeNote "A property of the evaluation setup, not of the market. Including it as a feature lets a model learn the label definition." ;
-    bsi:boundTo bsis:signal_outcomes.horizon_days, bsis:unified_signal_outcomes.horizon_days, bsis:signal_excursions.horizon_days, bsis:model_registry.horizon_days, bsis:factor_edge_history.horizon_days, bsis:market_decision_outcome.horizon_days .
+    bsi:boundTo bsis:call_attribution.horizon, bsis:signal_outcomes.horizon_days, bsis:unified_signal_outcomes.horizon_days, bsis:signal_excursions.horizon_days, bsis:model_registry.horizon_days, bsis:factor_edge_history.horizon_days, bsis:market_decision_outcome.horizon_days .
 
 bsip:importance     rdf:type owl:DatatypeProperty ;
     rdfs:label "Feature importance" ;
@@ -2266,7 +2298,7 @@ bsip:stop_loss     rdf:type owl:DatatypeProperty ;
     bsi:usableAsFeature "true"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
     qudt:unit "per_share_INR" ;
-    bsi:boundTo bsis:technical_signals.stop_loss, bsis:unified_recommendations.stop_loss, bsis:unified_recommendations_history.stop_loss, bsis:intraday_recommendations.stop_loss, bsis:confluence_signals.stop_loss .
+    bsi:boundTo bsis:technical_signals.stop_loss, bsis:unified_recommendations.stop_loss, bsis:recommendation_log.stop_loss, bsis:unified_recommendations_history.stop_loss, bsis:intraday_recommendations.stop_loss, bsis:confluence_signals.stop_loss .
 
 bsip:target_1     rdf:type owl:DatatypeProperty ;
     rdfs:label "Target 1" ;
@@ -2279,7 +2311,7 @@ bsip:target_1     rdf:type owl:DatatypeProperty ;
     bsi:usableAsFeature "true"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
     qudt:unit "per_share_INR" ;
-    bsi:boundTo bsis:unified_recommendations.target_1, bsis:unified_recommendations_history.target_1, bsis:intraday_recommendations.target_1, bsis:confluence_signals.target_1 .
+    bsi:boundTo bsis:unified_recommendations.target_1, bsis:recommendation_log.target_1, bsis:unified_recommendations_history.target_1, bsis:intraday_recommendations.target_1, bsis:confluence_signals.target_1 .
 
 bsip:target_2     rdf:type owl:DatatypeProperty ;
     rdfs:label "Target 2" ;
@@ -2318,7 +2350,7 @@ bsip:timeframe     rdf:type owl:DatatypeProperty ;
     bsi:usableAsFeature "true"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
     skos:inScheme bsiv:timeframe ;
-    bsi:boundTo bsis:technical_signals.time_horizon, bsis:feature_store.timeframe, bsis:unified_recommendations.timeframe, bsis:stock_scores.timeframe, bsis:market_decision_event.timeframe .
+    bsi:boundTo bsis:technical_signals.time_horizon, bsis:feature_store.timeframe, bsis:unified_recommendations.timeframe, bsis:recommendation_log.timeframe, bsis:stock_scores.timeframe, bsis:market_decision_event.timeframe .
 
 bsip:regime     rdf:type owl:DatatypeProperty ;
     rdfs:label "Market regime" ;
@@ -2331,7 +2363,7 @@ bsip:regime     rdf:type owl:DatatypeProperty ;
     bsi:usableAsFeature "true"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
     skos:inScheme bsiv:market_regime ;
-    bsi:boundTo bsis:market_regimes.regime, bsis:technical_signals.nifty_regime, bsis:unified_recommendations.regime, bsis:unified_recommendations_history.regime .
+    bsi:boundTo bsis:market_regimes.regime, bsis:technical_signals.nifty_regime, bsis:unified_recommendations.regime, bsis:call_attribution.regime, bsis:unified_recommendations_history.regime .
 
 bsip:conviction_level     rdf:type owl:DatatypeProperty ;
     rdfs:label "Conviction level" ;
@@ -2357,7 +2389,7 @@ bsip:classification     rdf:type owl:DatatypeProperty ;
     bsi:usableAsFeature "true"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
     skos:inScheme bsiv:recommendation_classification ;
-    bsi:boundTo bsis:analyst_estimates_history.final_rating, bsis:unified_recommendations.classification, bsis:unified_recommendations_history.classification, bsis:intraday_recommendations.classification, bsis:stock_scores.classification, bsis:market_decision_event.classification .
+    bsi:boundTo bsis:analyst_estimates_history.final_rating, bsis:unified_recommendations.classification, bsis:recommendation_log.rec_type, bsis:call_attribution.classification, bsis:unified_recommendations_history.classification, bsis:intraday_recommendations.classification, bsis:stock_scores.classification, bsis:market_decision_event.classification .
 
 bsip:signal_source     rdf:type owl:DatatypeProperty ;
     rdfs:label "Signal source" ;
@@ -3375,7 +3407,7 @@ bsip:recorded_at     rdf:type owl:DatatypeProperty ;
     bsi:leakageRisk "none" ;
     bsi:usableAsFeature "false"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
-    bsi:boundTo bsis:market_issuer.recorded_at, bsis:market_instrument.recorded_at, bsis:market_listing.recorded_at, bsis:market_identifier.recorded_at, bsis:market_graph_node.recorded_at, bsis:market_graph_edge.recorded_at, bsis:market_evidence.recorded_at, bsis:market_claim.recorded_at, bsis:market_data_watermark.recorded_at .
+    bsi:boundTo bsis:market_issuer.recorded_at, bsis:market_instrument.recorded_at, bsis:market_listing.recorded_at, bsis:market_identifier.recorded_at, bsis:market_graph_node.recorded_at, bsis:market_graph_edge.recorded_at, bsis:market_evidence.recorded_at, bsis:market_claim.recorded_at, bsis:market_data_watermark.recorded_at, bsis:technical_signal_observations.recorded_at .
 
 bsip:created_at     rdf:type owl:DatatypeProperty ;
     rdfs:label "Created at" ;
@@ -3591,7 +3623,7 @@ bsip:value_json     rdf:type owl:DatatypeProperty ;
     bsi:leakageRisk "none" ;
     bsi:usableAsFeature "false"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
-    bsi:boundTo bsis:market_decision_evidence.value_json .
+    bsi:boundTo bsis:market_decision_evidence.value_json, bsis:technical_signal_observations.values_json .
 
 bsip:revision     rdf:type owl:DatatypeProperty ;
     rdfs:label "Revision" ;
@@ -3749,7 +3781,7 @@ bsip:outcome     rdf:type owl:DatatypeProperty ;
     bsi:usableAsFeature "false"^^xsd:boolean ;
     bsi:isLabel "true"^^xsd:boolean ;
     skos:inScheme bsiv:outcome ;
-    bsi:boundTo bsis:signal_outcomes.outcome, bsis:unified_signal_outcomes.outcome .
+    bsi:boundTo bsis:recommendation_log.outcome, bsis:signal_outcomes.outcome, bsis:unified_signal_outcomes.outcome .
 
 bsip:exit_reason     rdf:type owl:DatatypeProperty ;
     rdfs:label "Exit reason" ;
@@ -3789,7 +3821,7 @@ bsip:return_pct     rdf:type owl:DatatypeProperty ;
     bsi:isLabel "true"^^xsd:boolean ;
     qudt:unit "percent" ;
     skos:altLabel "forward_return_pct", "fwd_return" ;
-    bsi:boundTo bsis:sector_rrg_history.sector_return, bsis:signal_outcomes.return_pct, bsis:unified_signal_outcomes.return_pct, bsis:live_screener_outcomes.return_1d, bsis:live_screener_outcomes.return_3d, bsis:live_screener_outcomes.return_5d, bsis:market_decision_outcome.return_pct .
+    bsi:boundTo bsis:sector_rrg_history.sector_return, bsis:recommendation_log.actual_return_pct, bsis:call_attribution.fwd, bsis:signal_outcomes.return_pct, bsis:unified_signal_outcomes.return_pct, bsis:live_screener_outcomes.return_1d, bsis:live_screener_outcomes.return_3d, bsis:live_screener_outcomes.return_5d, bsis:market_decision_outcome.return_pct .
 
 bsip:mfe_pct     rdf:type owl:DatatypeProperty ;
     rdfs:label "Max favourable excursion" ;
@@ -3802,7 +3834,7 @@ bsip:mfe_pct     rdf:type owl:DatatypeProperty ;
     bsi:usableAsFeature "false"^^xsd:boolean ;
     bsi:isLabel "true"^^xsd:boolean ;
     qudt:unit "percent" ;
-    bsi:boundTo bsis:signal_excursions.mfe_pct, bsis:market_decision_outcome.mfe_pct .
+    bsi:boundTo bsis:call_attribution.mfe, bsis:signal_excursions.mfe_pct, bsis:market_decision_outcome.mfe_pct .
 
 bsip:mae_pct     rdf:type owl:DatatypeProperty ;
     rdfs:label "Max adverse excursion" ;
@@ -3815,7 +3847,7 @@ bsip:mae_pct     rdf:type owl:DatatypeProperty ;
     bsi:usableAsFeature "false"^^xsd:boolean ;
     bsi:isLabel "true"^^xsd:boolean ;
     qudt:unit "percent" ;
-    bsi:boundTo bsis:signal_excursions.mae_pct, bsis:market_decision_outcome.mae_pct .
+    bsi:boundTo bsis:call_attribution.mae, bsis:signal_excursions.mae_pct, bsis:market_decision_outcome.mae_pct .
 
 bsip:max_return_pct     rdf:type owl:DatatypeProperty ;
     rdfs:label "Max return in window" ;
@@ -3876,7 +3908,7 @@ bsip:ai_insight     rdf:type owl:DatatypeProperty ;
     bsi:leakageRisk "none" ;
     bsi:usableAsFeature "false"^^xsd:boolean ;
     bsi:isLabel "false"^^xsd:boolean ;
-    bsi:boundTo bsis:technical_signals.ai_insight, bsis:confluence_signals.ai_conclusion .
+    bsi:boundTo bsis:technical_signals.ai_insight .
 
 bsip:trade_reasoning     rdf:type owl:DatatypeProperty ;
     rdfs:label "Trade reasoning" ;
@@ -4159,19 +4191,6 @@ bsip:ml_breakout_probability     rdf:type owl:DatatypeProperty ;
     bsi:isLabel "false"^^xsd:boolean ;
     qudt:unit "probability" ;
     bsi:boundTo bsis:confluence_signals.ml_breakout_probability .
-
-bsip:ml_trend_probability     rdf:type owl:DatatypeProperty ;
-    rdfs:label "ML trend probability" ;
-    rdfs:comment "Model probability of trend continuation. A model output — not a feature." ;
-    rdfs:range xsd:decimal ;
-    bsi:semanticType "score" ;
-    bsi:timing "coincident" ;
-    bsi:derivation "platform" ;
-    bsi:leakageRisk "none" ;
-    bsi:usableAsFeature "true"^^xsd:boolean ;
-    bsi:isLabel "false"^^xsd:boolean ;
-    qudt:unit "probability" ;
-    bsi:boundTo bsis:confluence_signals.ml_trend_probability .
 
 bsip:oi_change     rdf:type owl:DatatypeProperty ;
     rdfs:label "OI change" ;
@@ -4536,6 +4555,45 @@ bsip:spot_price     rdf:type owl:DatatypeProperty ;
     qudt:unit "per_share_INR" ;
     bsi:boundTo bsis:stock_futures_oi_history.spot_price, bsis:fno_rollover.spot_price .
 
+bsip:excess_return     rdf:type owl:DatatypeProperty ;
+    rdfs:label "Excess return vs universe" ;
+    rdfs:comment "Forward return (next-session open to the open `horizon` sessions later) net of the 25 bps-per-side round trip, minus the same session's equal-weight liquid-universe mean. The grading quantity of the forward test and of call attribution; a fraction, not a percent. Outcome-side." ;
+    rdfs:range xsd:decimal ;
+    bsi:semanticType "label" ;
+    bsi:timing "target" ;
+    bsi:derivation "label" ;
+    bsi:leakageRisk "target" ;
+    bsi:usableAsFeature "false"^^xsd:boolean ;
+    bsi:isLabel "true"^^xsd:boolean ;
+    qudt:unit "ratio" ;
+    bsi:boundTo bsis:call_attribution.excess .
+
+bsip:attribution_cause     rdf:type owl:DatatypeProperty ;
+    rdfs:label "Miss cause" ;
+    rdfs:comment "Why a published Buy missed (one primary cause, checked in a fixed priority order) or HIT. Points at the part of the plan that failed; descriptive, never a feature." ;
+    rdfs:range xsd:string ;
+    bsi:semanticType "label" ;
+    bsi:timing "target" ;
+    bsi:derivation "label" ;
+    bsi:leakageRisk "target" ;
+    bsi:usableAsFeature "false"^^xsd:boolean ;
+    bsi:isLabel "true"^^xsd:boolean ;
+    skos:inScheme bsiv:attribution_cause ;
+    bsi:boundTo bsis:call_attribution.cause .
+
+bsip:trailing_stop     rdf:type owl:DatatypeProperty ;
+    rdfs:label "Trailing stop" ;
+    rdfs:comment "Chandelier stop ratcheted up after publication from the highest high since entry (`trailingStopUpdater.ts`). Overwritten in place with the LATEST level, so a historical read carries later prices; the published stop stays in `stop_loss`." ;
+    rdfs:range xsd:decimal ;
+    bsi:semanticType "measure" ;
+    bsi:timing "coincident" ;
+    bsi:derivation "platform" ;
+    bsi:leakageRisk "high" ;
+    bsi:usableAsFeature "false"^^xsd:boolean ;
+    bsi:isLabel "false"^^xsd:boolean ;
+    qudt:unit "per_share_INR" ;
+    bsi:boundTo bsis:recommendation_log.trailing_stop .
+
 bsip:option_buildup     rdf:type owl:DatatypeProperty ;
     rdfs:label "Option buildup" ;
     rdfs:comment "Leg-level positioning label." ;
@@ -4548,6 +4606,45 @@ bsip:option_buildup     rdf:type owl:DatatypeProperty ;
     bsi:isLabel "false"^^xsd:boolean ;
     skos:inScheme bsiv:option_buildup ;
     bsi:boundTo bsis:so_option_chain.ce_buildup, bsis:so_option_chain.pe_buildup .
+
+bsip:participant_type     rdf:type owl:DatatypeProperty ;
+    rdfs:label "F&O participant category" ;
+    rdfs:comment "NSE's participant split of equity-derivative positions: Client, DII, FII, Pro, plus the exchange TOTAL row." ;
+    rdfs:range xsd:string ;
+    bsi:semanticType "dimension" ;
+    bsi:timing "context" ;
+    bsi:derivation "vendor" ;
+    bsi:leakageRisk "none" ;
+    bsi:usableAsFeature "true"^^xsd:boolean ;
+    bsi:isLabel "false"^^xsd:boolean ;
+    skos:inScheme bsiv:fo_participant ;
+    bsi:boundTo bsis:nse_participant_positions.client_type .
+
+bsip:participant_measure     rdf:type owl:DatatypeProperty ;
+    rdfs:label "Participant file kind" ;
+    rdfs:comment "Which NSE participant file a row comes from: end-of-day open interest or the session's traded volume." ;
+    rdfs:range xsd:string ;
+    bsi:semanticType "dimension" ;
+    bsi:timing "context" ;
+    bsi:derivation "vendor" ;
+    bsi:leakageRisk "none" ;
+    bsi:usableAsFeature "true"^^xsd:boolean ;
+    bsi:isLabel "false"^^xsd:boolean ;
+    skos:inScheme bsiv:participant_measure ;
+    bsi:boundTo bsis:nse_participant_positions.kind .
+
+bsip:participant_contracts     rdf:type owl:DatatypeProperty ;
+    rdfs:label "Participant position (contracts)" ;
+    rdfs:comment "Contracts held long or short (OI file) or traded (volume file) by one participant category in one instrument class. Market-wide: the same value for every stock on a date, so it is a regime/timing input, never a cross-sectional factor. NSE's TOTAL can differ from the participant sum by a contract." ;
+    rdfs:range xsd:decimal ;
+    bsi:semanticType "measure" ;
+    bsi:timing "coincident" ;
+    bsi:derivation "vendor" ;
+    bsi:leakageRisk "none" ;
+    bsi:usableAsFeature "true"^^xsd:boolean ;
+    bsi:isLabel "false"^^xsd:boolean ;
+    qudt:unit "contracts" ;
+    bsi:boundTo bsis:nse_participant_positions.fut_idx_long, bsis:nse_participant_positions.fut_idx_short, bsis:nse_participant_positions.fut_stk_long, bsis:nse_participant_positions.fut_stk_short, bsis:nse_participant_positions.opt_idx_call_long, bsis:nse_participant_positions.opt_idx_put_long, bsis:nse_participant_positions.opt_idx_call_short, bsis:nse_participant_positions.opt_idx_put_short, bsis:nse_participant_positions.opt_stk_call_long, bsis:nse_participant_positions.opt_stk_put_long, bsis:nse_participant_positions.opt_stk_call_short, bsis:nse_participant_positions.opt_stk_put_short, bsis:nse_participant_positions.total_long, bsis:nse_participant_positions.total_short .
 
 bsir:instrumentHasBar     rdf:type owl:ObjectProperty ;
     rdfs:label "has daily bar" ;
@@ -6032,6 +6129,111 @@ bsiv:oi_buildup.short-covering     rdf:type skos:Concept ;
     skos:prefLabel "Short covering" ;
     skos:definition "Price up, OI down." .
 
+bsiv:attribution_cause     rdf:type skos:ConceptScheme ;
+    rdfs:comment "Primary cause given to a published Buy call by call_attribution.py, checked in this order (AF-20261119-06)." ;
+    bsiv:source "call_attribution.cause" ;
+    bsiv:openEnded "false"^^xsd:boolean .
+
+bsiv:attribution_cause.hit     rdf:type skos:Concept ;
+    skos:inScheme bsiv:attribution_cause ;
+    skos:notation "HIT" ;
+    skos:prefLabel "Hit" ;
+    skos:definition "Net return beat the same-session liquid-universe mean." .
+
+bsiv:attribution_cause.unfillable     rdf:type skos:Concept ;
+    skos:inScheme bsiv:attribution_cause ;
+    skos:notation "UNFILLABLE" ;
+    skos:prefLabel "Unfillable" ;
+    skos:definition "Entry session traded at one price above the prior close (locked limit-up)." .
+
+bsiv:attribution_cause.event     rdf:type skos:Concept ;
+    skos:inScheme bsiv:attribution_cause ;
+    skos:notation "EVENT" ;
+    skos:prefLabel "Event" ;
+    skos:definition "A corporate-action ex-date fell inside the hold." .
+
+bsiv:attribution_cause.stop-too-tight     rdf:type skos:Concept ;
+    skos:inScheme bsiv:attribution_cause ;
+    skos:notation "STOP_TOO_TIGHT" ;
+    skos:prefLabel "Stop too tight" ;
+    skos:definition "Stop touched, yet the hold beat the universe gross or the target came later." .
+
+bsiv:attribution_cause.cost     rdf:type skos:Concept ;
+    skos:inScheme bsiv:attribution_cause ;
+    skos:notation "COST" ;
+    skos:prefLabel "Cost" ;
+    skos:definition "Beat the universe gross, lost only to the round-trip cost." .
+
+bsiv:attribution_cause.too-slow     rdf:type skos:Concept ;
+    skos:inScheme bsiv:attribution_cause ;
+    skos:notation "TOO_SLOW" ;
+    skos:prefLabel "Too slow" ;
+    skos:definition "Lost in the window; a 2x-horizon hold beat the universe net." .
+
+bsiv:attribution_cause.sector-drag     rdf:type skos:Concept ;
+    skos:inScheme bsiv:attribution_cause ;
+    skos:notation "SECTOR_DRAG" ;
+    skos:prefLabel "Sector drag" ;
+    skos:definition "Beat its own sector; the sector lagged the universe." .
+
+bsiv:attribution_cause.wrong-pick     rdf:type skos:Concept ;
+    skos:inScheme bsiv:attribution_cause ;
+    skos:notation "WRONG_PICK" ;
+    skos:prefLabel "Wrong pick" ;
+    skos:definition "Lagged its own sector." .
+
+bsiv:fo_participant     rdf:type skos:ConceptScheme ;
+    rdfs:comment "NSE participant categories in the participant-wise OI and volume files (AF-20261119-19)." ;
+    bsiv:source "nse_participant_positions.client_type" ;
+    bsiv:openEnded "false"^^xsd:boolean .
+
+bsiv:fo_participant.client     rdf:type skos:Concept ;
+    skos:inScheme bsiv:fo_participant ;
+    skos:notation "CLIENT" ;
+    skos:prefLabel "Client" ;
+    skos:definition "Retail and other non-institutional clients." .
+
+bsiv:fo_participant.dii     rdf:type skos:Concept ;
+    skos:inScheme bsiv:fo_participant ;
+    skos:notation "DII" ;
+    skos:prefLabel "DII" ;
+    skos:definition "Domestic institutional investors." .
+
+bsiv:fo_participant.fii     rdf:type skos:Concept ;
+    skos:inScheme bsiv:fo_participant ;
+    skos:notation "FII" ;
+    skos:prefLabel "FII" ;
+    skos:definition "Foreign institutional investors (FPI)." .
+
+bsiv:fo_participant.pro     rdf:type skos:Concept ;
+    skos:inScheme bsiv:fo_participant ;
+    skos:notation "PRO" ;
+    skos:prefLabel "Pro" ;
+    skos:definition "Trading members' proprietary books." .
+
+bsiv:fo_participant.total     rdf:type skos:Concept ;
+    skos:inScheme bsiv:fo_participant ;
+    skos:notation "TOTAL" ;
+    skos:prefLabel "Total" ;
+    skos:definition "Exchange total row; long equals short per instrument class." .
+
+bsiv:participant_measure     rdf:type skos:ConceptScheme ;
+    rdfs:comment "Which NSE participant file a row came from." ;
+    bsiv:source "nse_participant_positions.kind" ;
+    bsiv:openEnded "false"^^xsd:boolean .
+
+bsiv:participant_measure.oi     rdf:type skos:Concept ;
+    skos:inScheme bsiv:participant_measure ;
+    skos:notation "oi" ;
+    skos:prefLabel "Open interest" ;
+    skos:definition "End-of-day open positions." .
+
+bsiv:participant_measure.vol     rdf:type skos:Concept ;
+    skos:inScheme bsiv:participant_measure ;
+    skos:notation "vol" ;
+    skos:prefLabel "Volume" ;
+    skos:definition "Contracts traded in the session." .
+
 bsiv:option_buildup     rdf:type skos:ConceptScheme ;
     rdfs:comment "Option-chain buildup label. NOTE the spelling differs from `oi_buildup` ('Build Up' vs 'Buildup') — never compare these strings across tables without normalising first." ;
     bsiv:source "so_option_chain.ce_buildup / so_option_chain.pe_buildup" ;
@@ -7393,8 +7595,8 @@ bsis:stock_futures_oi_history     rdf:type bsi:Table ;
     bsi:trainingUse "caution" ;
     bsi:primaryKey "source", "symbol", "date", "expiry" ;
     bsi:freshnessColumn "fetched_at" ;
-    bsi:writtenBy "fno_oi_fetcher.py" ;
-    bsi:caveat "LOW-DATA: the panel covers roughly two weeks of dates. Any 'measured' reading built on it is a calendar artefact rather than an edge — this is exactly the LOW-DATA verdict the master report records.", "`oi_buildup` uses 'Buildup' spelling while the option-chain table uses 'Build Up': never compare those strings across the two." ;
+    bsi:writtenBy "mc_stock_futures_oi_fetcher.py", "nse_fo_bhav_history_fetcher.py" ;
+    bsi:caveat "`source` matters: the MoneyControl rows start 2026-08-21 and store the NEAR MONTH only, while the NSE F&O bhavcopy reduction (AF-20261113-03) carries history and every expiry. Filter on `source` before building a panel.", "Near-month rows are distorted around each monthly expiry: positions ROLL to the next month, so `oi_change` / `oi_buildup` read covering or unwinding while all-expiry OI is building (live 2026-11-19: IRFC -22.1% near month vs +9.1% all expiries). Sum all expiries, or exclude expiry week, before measuring (AF-20261119-09).", "`oi_buildup` uses 'Buildup' spelling while the option-chain table uses 'Build Up': never compare those strings across the two." ;
     bsi:hasColumn _:col_stock_futures_oi_history_symbol, _:col_stock_futures_oi_history_date, _:col_stock_futures_oi_history_expiry, _:col_stock_futures_oi_history_open_interest, _:col_stock_futures_oi_history_oi_change, _:col_stock_futures_oi_history_oi_pct_change, _:col_stock_futures_oi_history_oi_buildup, _:col_stock_futures_oi_history_rollover_pct, _:col_stock_futures_oi_history_oi_pcr, _:col_stock_futures_oi_history_futures_price, _:col_stock_futures_oi_history_spot_price, _:col_stock_futures_oi_history_basis, _:col_stock_futures_oi_history_contracts, _:col_stock_futures_oi_history_futures_volume, _:col_stock_futures_oi_history_lot_size, _:col_stock_futures_oi_history_source, _:col_stock_futures_oi_history_fetched_at .
 
 bsit:stock_futures_oi_history     rdf:type owl:Class ;
@@ -7483,6 +7685,175 @@ _:col_stock_futures_oi_history_source     bsi:columnName "source" ;
     bsi:leakageRisk "none" .
 
 _:col_stock_futures_oi_history_fetched_at     bsi:columnName "fetched_at" ;
+    bsi:property bsip:fetched_at ;
+    bsi:semanticType "timestamp" ;
+    bsi:leakageRisk "none" .
+
+bsis:nse_participant_positions     rdf:type bsi:Table ;
+    rdfs:label "F&O participant positions" ;
+    rdfs:comment "NSE participant-wise open interest and volume: FII, DII, Pro and Client long/short contracts in index and stock futures and options, per session." ;
+    bsi:realizes bsi:ParticipantPositioning ;
+    bsi:rowClass bsit:nse_participant_positions ;
+    bsi:grain "(trade_date, kind, client_type)" ;
+    bsi:cadence "daily" ;
+    bsi:trainingUse "caution" ;
+    bsi:primaryKey "trade_date", "kind", "client_type" ;
+    bsi:freshnessColumn "fetched_at" ;
+    bsi:expectedLagHours "4"^^xsd:decimal ;
+    bsi:writtenBy "nse_fo_market_positioning_fetcher.py" ;
+    bsi:caveat "Market-wide (no symbol): a regime/timing input, never a cross-sectional factor. Contracts, not shares or notional.", "Served back to 2022-01-03; nightly from 2026-11-19, history only after the one-off backfill (AF-20261119-19). Ungraded." ;
+    bsi:hasColumn _:col_nse_participant_positions_trade_date, _:col_nse_participant_positions_kind, _:col_nse_participant_positions_client_type, _:col_nse_participant_positions_fut_idx_long, _:col_nse_participant_positions_fut_idx_short, _:col_nse_participant_positions_fut_stk_long, _:col_nse_participant_positions_fut_stk_short, _:col_nse_participant_positions_opt_idx_call_long, _:col_nse_participant_positions_opt_idx_put_long, _:col_nse_participant_positions_opt_idx_call_short, _:col_nse_participant_positions_opt_idx_put_short, _:col_nse_participant_positions_opt_stk_call_long, _:col_nse_participant_positions_opt_stk_put_long, _:col_nse_participant_positions_opt_stk_call_short, _:col_nse_participant_positions_opt_stk_put_short, _:col_nse_participant_positions_total_long, _:col_nse_participant_positions_total_short, _:col_nse_participant_positions_source, _:col_nse_participant_positions_fetched_at .
+
+bsit:nse_participant_positions     rdf:type owl:Class ;
+    rdfs:label "nse_participant_positions row" ;
+    rdfs:comment "A row of nse_participant_positions. Grain: (trade_date, kind, client_type). Subclass of ParticipantPositioning; the physical contract (column set) lives in bsi:nse_participant_positionsShape." ;
+    rdfs:subClassOf bsi:ParticipantPositioning .
+
+_:col_nse_participant_positions_trade_date     bsi:columnName "trade_date" ;
+    bsi:property bsip:date ;
+    bsi:semanticType "timestamp" ;
+    bsi:leakageRisk "none" .
+
+_:col_nse_participant_positions_kind     bsi:columnName "kind" ;
+    bsi:property bsip:participant_measure ;
+    bsi:semanticType "dimension" ;
+    bsi:leakageRisk "none" .
+
+_:col_nse_participant_positions_client_type     bsi:columnName "client_type" ;
+    bsi:property bsip:participant_type ;
+    bsi:semanticType "dimension" ;
+    bsi:leakageRisk "none" .
+
+_:col_nse_participant_positions_fut_idx_long     bsi:columnName "fut_idx_long" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "fut idx long." .
+
+_:col_nse_participant_positions_fut_idx_short     bsi:columnName "fut_idx_short" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "fut idx short." .
+
+_:col_nse_participant_positions_fut_stk_long     bsi:columnName "fut_stk_long" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "fut stk long." .
+
+_:col_nse_participant_positions_fut_stk_short     bsi:columnName "fut_stk_short" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "fut stk short." .
+
+_:col_nse_participant_positions_opt_idx_call_long     bsi:columnName "opt_idx_call_long" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "opt idx call long." .
+
+_:col_nse_participant_positions_opt_idx_put_long     bsi:columnName "opt_idx_put_long" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "opt idx put long." .
+
+_:col_nse_participant_positions_opt_idx_call_short     bsi:columnName "opt_idx_call_short" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "opt idx call short." .
+
+_:col_nse_participant_positions_opt_idx_put_short     bsi:columnName "opt_idx_put_short" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "opt idx put short." .
+
+_:col_nse_participant_positions_opt_stk_call_long     bsi:columnName "opt_stk_call_long" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "opt stk call long." .
+
+_:col_nse_participant_positions_opt_stk_put_long     bsi:columnName "opt_stk_put_long" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "opt stk put long." .
+
+_:col_nse_participant_positions_opt_stk_call_short     bsi:columnName "opt_stk_call_short" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "opt stk call short." .
+
+_:col_nse_participant_positions_opt_stk_put_short     bsi:columnName "opt_stk_put_short" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "opt stk put short." .
+
+_:col_nse_participant_positions_total_long     bsi:columnName "total_long" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "total long." .
+
+_:col_nse_participant_positions_total_short     bsi:columnName "total_short" ;
+    bsi:property bsip:participant_contracts ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "total short." .
+
+_:col_nse_participant_positions_source     bsi:columnName "source" ;
+    bsi:property bsip:source ;
+    bsi:semanticType "dimension" ;
+    bsi:leakageRisk "none" .
+
+_:col_nse_participant_positions_fetched_at     bsi:columnName "fetched_at" ;
+    bsi:property bsip:fetched_at ;
+    bsi:semanticType "timestamp" ;
+    bsi:leakageRisk "none" .
+
+bsis:nse_fo_ban_list     rdf:type bsi:Table ;
+    rdfs:label "F&O ban list" ;
+    rdfs:comment "Securities in the F&O ban period for a trade date (open interest above 95% of the market-wide position limit)." ;
+    bsi:realizes bsi:TradabilityConstraint ;
+    bsi:rowClass bsit:nse_fo_ban_list ;
+    bsi:grain "(trade_date, symbol)" ;
+    bsi:cadence "daily" ;
+    bsi:trainingUse "context" ;
+    bsi:primaryKey "trade_date", "symbol" ;
+    bsi:freshnessColumn "fetched_at" ;
+    bsi:writtenBy "nse_fo_market_positioning_fetcher.py" ;
+    bsi:caveat "`trade_date` is the NEXT session the ban applies to, taken from the file.", "No row on a day nothing is banned; history exists only from 2026-11-19 because NSE serves only the current file." ;
+    bsi:hasColumn _:col_nse_fo_ban_list_trade_date, _:col_nse_fo_ban_list_symbol, _:col_nse_fo_ban_list_source, _:col_nse_fo_ban_list_fetched_at .
+
+bsit:nse_fo_ban_list     rdf:type owl:Class ;
+    rdfs:label "nse_fo_ban_list row" ;
+    rdfs:comment "A row of nse_fo_ban_list. Grain: (trade_date, symbol). Subclass of TradabilityConstraint; the physical contract (column set) lives in bsi:nse_fo_ban_listShape." ;
+    rdfs:subClassOf bsi:TradabilityConstraint .
+
+_:col_nse_fo_ban_list_trade_date     bsi:columnName "trade_date" ;
+    bsi:property bsip:date ;
+    bsi:semanticType "timestamp" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "The session the ban applies to." .
+
+_:col_nse_fo_ban_list_symbol     bsi:columnName "symbol" ;
+    bsi:property bsip:symbol ;
+    bsi:semanticType "identifier" ;
+    bsi:leakageRisk "none" .
+
+_:col_nse_fo_ban_list_source     bsi:columnName "source" ;
+    bsi:property bsip:source ;
+    bsi:semanticType "dimension" ;
+    bsi:leakageRisk "none" .
+
+_:col_nse_fo_ban_list_fetched_at     bsi:columnName "fetched_at" ;
     bsi:property bsip:fetched_at ;
     bsi:semanticType "timestamp" ;
     bsi:leakageRisk "none" .
@@ -8008,9 +8379,9 @@ bsis:technical_signals     rdf:type bsi:Table ;
     bsi:primaryKey "symbol", "date" ;
     bsi:freshnessColumn "computed_at" ;
     bsi:expectedLagHours "5.0"^^xsd:decimal ;
-    bsi:writtenBy "technical_analysis_engine.py", "feature_engineering.py" ;
+    bsi:writtenBy "technical_analysis_engine.py", "feature_engineering.py", "backfill_technical_features.py" ;
     bsi:forbiddenColumn "win_probability", "calibrated_win_probability", "ai_insight" ;
-    bsi:caveat "Over 300 columns of MIXED provenance: raw indicators, vendor opinions (ext_* / mc_* / tl_* prefixes) and model outputs sit side by side. Use the binding table to tell them apart.", "`win_probability` and `calibrated_win_probability` are model OUTPUTS — feeding them back in leaks the model into its own inputs.", "`ai_insight` is generated text." ;
+    bsi:caveat "Over 300 columns of MIXED provenance: raw indicators, vendor opinions (ext_* / mc_* / tl_* prefixes) and model outputs sit side by side. Use the binding table to tell them apart.", "`win_probability` and `calibrated_win_probability` are model OUTPUTS — feeding them back in leaks the model into its own inputs.", "`ai_insight` is generated text.", "`rsi` mixes two definitions by row origin: the nightly GRID rows (`signal_type = 'GRID'`, backfill_technical_features.py) hold a simple-mean (Cutler) RSI and overwrite a scanner row whenever `cmp` differs; scanner and alert paths use the vendor's Wilder RSI (AF-20261119-15)." ;
     bsi:hasColumn _:col_technical_signals_symbol, _:col_technical_signals_date, _:col_technical_signals_signal_score, _:col_technical_signals_rsi, _:col_technical_signals_sma50, _:col_technical_signals_sma200, _:col_technical_signals_macd, _:col_technical_signals_adx, _:col_technical_signals_bb_width, _:col_technical_signals_volume_ratio, _:col_technical_signals_above_sma200, _:col_technical_signals_cmp, _:col_technical_signals_change_pct, _:col_technical_signals_ai_insight, _:col_technical_signals_stop_loss, _:col_technical_signals_time_horizon, _:col_technical_signals_computed_at, _:col_technical_signals_delivery_pct, _:col_technical_signals_fii_3d_net, _:col_technical_signals_dii_3d_net, _:col_technical_signals_win_probability, _:col_technical_signals_calibrated_win_probability, _:col_technical_signals_iv_rank, _:col_technical_signals_cs_score, _:col_technical_signals_oi_net_change_pct, _:col_technical_signals_rollover_pct, _:col_technical_signals_cost_of_carry_ann, _:col_technical_signals_mf_holding_pct, _:col_technical_signals_block_deal_value_cr, _:col_technical_signals_roe_annual, _:col_technical_signals_ebitda_margin, _:col_technical_signals_np_margin, _:col_technical_signals_pledge_pct, _:col_technical_signals_analyst_count, _:col_technical_signals_pcr_oi, _:col_technical_signals_asm_flag, _:col_technical_signals_fcf_positive, _:col_technical_signals_signals_json, _:col_technical_signals_news_sentiment_score, _:col_technical_signals_nifty_regime, _:col_technical_signals_iv_hv_ratio .
 
 bsit:technical_signals     rdf:type owl:Class ;
@@ -8224,6 +8595,55 @@ _:col_technical_signals_nifty_regime     bsi:columnName "nifty_regime" ;
 _:col_technical_signals_iv_hv_ratio     bsi:columnName "iv_hv_ratio" ;
     bsi:property bsip:iv_hv_ratio ;
     bsi:semanticType "ratio" ;
+    bsi:leakageRisk "none" .
+
+bsis:technical_signal_observations     rdf:type bsi:Table ;
+    rdfs:label "Technical signal mutation ledger" ;
+    rdfs:comment "Immutable, transaction-time journal of every insert, update, and row removal applied to the technical_signals compatibility projection." ;
+    bsi:realizes bsi:TechnicalSignalObservation ;
+    bsi:rowClass bsit:technical_signal_observations ;
+    bsi:grain "(observation_id)" ;
+    bsi:cadence "on_write" ;
+    bsi:trainingUse "context" ;
+    bsi:primaryKey "observation_id" ;
+    bsi:freshnessColumn "recorded_at" ;
+    bsi:writtenBy "journal_technical_signal_mutation" ;
+    bsi:caveat "This ledger records when the platform mutation occurred; a feature's economic observation/availability time still comes from its source contract.", "writer_hint is provenance metadata, not a model feature." ;
+    bsi:hasColumn _:col_technical_signal_observations_observation_id, _:col_technical_signal_observations_symbol, _:col_technical_signal_observations_signal_date, _:col_technical_signal_observations_recorded_at, _:col_technical_signal_observations_writer_hint, _:col_technical_signal_observations_values_json .
+
+bsit:technical_signal_observations     rdf:type owl:Class ;
+    rdfs:label "technical_signal_observations row" ;
+    rdfs:comment "A row of technical_signal_observations. Grain: (observation_id). Subclass of TechnicalSignalObservation; the physical contract (column set) lives in bsi:technical_signal_observationsShape." ;
+    rdfs:subClassOf bsi:TechnicalSignalObservation .
+
+_:col_technical_signal_observations_observation_id     bsi:columnName "observation_id" ;
+    bsi:property bsip:id ;
+    bsi:semanticType "identifier" ;
+    bsi:leakageRisk "none" .
+
+_:col_technical_signal_observations_symbol     bsi:columnName "symbol" ;
+    bsi:property bsip:symbol ;
+    bsi:semanticType "identifier" ;
+    bsi:leakageRisk "none" .
+
+_:col_technical_signal_observations_signal_date     bsi:columnName "signal_date" ;
+    bsi:property bsip:signal_date ;
+    bsi:semanticType "timestamp" ;
+    bsi:leakageRisk "none" .
+
+_:col_technical_signal_observations_recorded_at     bsi:columnName "recorded_at" ;
+    bsi:property bsip:recorded_at ;
+    bsi:semanticType "timestamp" ;
+    bsi:leakageRisk "none" .
+
+_:col_technical_signal_observations_writer_hint     bsi:columnName "writer_hint" ;
+    bsi:property bsip:source ;
+    bsi:semanticType "dimension" ;
+    bsi:leakageRisk "none" .
+
+_:col_technical_signal_observations_values_json     bsi:columnName "values_json" ;
+    bsi:property bsip:value_json ;
+    bsi:semanticType "json" ;
     bsi:leakageRisk "none" .
 
 bsis:feature_store     rdf:type bsi:Table ;
@@ -8625,6 +9045,174 @@ _:col_unified_recommendations_history_win_probability     bsi:columnName "win_pr
     bsi:semanticType "probability" ;
     bsi:leakageRisk "high" .
 
+bsis:recommendation_log     rdf:type bsi:Table ;
+    rdfs:label "Published trade plans" ;
+    rdfs:comment "One row per published BUY / STRONG_BUY plan: entry, published stop, targets T1-T3, the ratcheted trailing stop, lifecycle status and the graded outcome." ;
+    bsi:realizes bsi:Recommendation ;
+    bsi:rowClass bsit:recommendation_log ;
+    bsi:grain "(symbol, signal_date, timeframe, source)" ;
+    bsi:cadence "daily" ;
+    bsi:trainingUse "caution" ;
+    bsi:primaryKey "symbol", "signal_date", "timeframe", "source" ;
+    bsi:freshnessColumn "signal_date" ;
+    bsi:writtenBy "scoring_engine.py", "technicalSignalsService.ts", "trailingStopUpdater.ts", "signal_lifecycle.py", "outcome_resolver.py", "recPlanAlerts.ts" ;
+    bsi:forbiddenColumn "outcome", "actual_return_pct", "trailing_stop" ;
+    bsi:caveat "`stop_loss` is the PUBLISHED stop and is immutable after publication; the ratchet lives in `trailing_stop` (AF-20261117-03). Grading uses `stop_loss` as the initial stop.", "Graded from the next session's OPEN (AF-20261117-12), with levels rescaled to the back-adjusted price basis when a split or bonus falls inside the window (AF-20261117-13 / AF-20261118-05).", "`stop_alerted_at` / `target_alerted_at` are delivery stamps of the intraday Telegram alert (AF-20261117-15), not outcomes.", "Long-only: short setups are never written here." ;
+    bsi:hasColumn _:col_recommendation_log_symbol, _:col_recommendation_log_signal_date, _:col_recommendation_log_timeframe, _:col_recommendation_log_source, _:col_recommendation_log_rec_type, _:col_recommendation_log_entry_price, _:col_recommendation_log_stop_loss, _:col_recommendation_log_target_1, _:col_recommendation_log_trailing_stop, _:col_recommendation_log_outcome, _:col_recommendation_log_actual_return_pct .
+
+bsit:recommendation_log     rdf:type owl:Class ;
+    rdfs:label "recommendation_log row" ;
+    rdfs:comment "A row of recommendation_log. Grain: (symbol, signal_date, timeframe, source). Subclass of Recommendation; the physical contract (column set) lives in bsi:recommendation_logShape." ;
+    rdfs:subClassOf bsi:Recommendation .
+
+_:col_recommendation_log_symbol     bsi:columnName "symbol" ;
+    bsi:property bsip:symbol ;
+    bsi:semanticType "identifier" ;
+    bsi:leakageRisk "none" .
+
+_:col_recommendation_log_signal_date     bsi:columnName "signal_date" ;
+    bsi:property bsip:signal_date ;
+    bsi:semanticType "timestamp" ;
+    bsi:leakageRisk "none" .
+
+_:col_recommendation_log_timeframe     bsi:columnName "timeframe" ;
+    bsi:property bsip:timeframe ;
+    bsi:semanticType "enum" ;
+    bsi:leakageRisk "none" .
+
+_:col_recommendation_log_source     bsi:columnName "source" ;
+    bsi:property bsip:source ;
+    bsi:semanticType "dimension" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "Writing engine (scoring_engine / technical_scan)." .
+
+_:col_recommendation_log_rec_type     bsi:columnName "rec_type" ;
+    bsi:property bsip:classification ;
+    bsi:semanticType "enum" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "BUY / STRONG_BUY only (long-only)." .
+
+_:col_recommendation_log_entry_price     bsi:columnName "entry_price" ;
+    bsi:property bsip:entry_price ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "low" .
+
+_:col_recommendation_log_stop_loss     bsi:columnName "stop_loss" ;
+    bsi:property bsip:stop_loss ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "Published stop; immutable after publication." .
+
+_:col_recommendation_log_target_1     bsi:columnName "target_1" ;
+    bsi:property bsip:target_1 ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "none" .
+
+_:col_recommendation_log_trailing_stop     bsi:columnName "trailing_stop" ;
+    bsi:property bsip:trailing_stop ;
+    bsi:semanticType "measure" ;
+    bsi:leakageRisk "high" .
+
+_:col_recommendation_log_outcome     bsi:columnName "outcome" ;
+    bsi:property bsip:outcome ;
+    bsi:semanticType "label" ;
+    bsi:leakageRisk "target" .
+
+_:col_recommendation_log_actual_return_pct     bsi:columnName "actual_return_pct" ;
+    bsi:property bsip:return_pct ;
+    bsi:semanticType "label" ;
+    bsi:leakageRisk "target" .
+
+bsis:call_attribution     rdf:type bsi:Table ;
+    rdfs:label "Why each published Buy hit or missed" ;
+    rdfs:comment "One row per published Buy / Strong Buy whose window has closed: next-open entry, forward and excess return vs the same-session liquid universe, path statistics (MAE/MFE, stop and target touches) and ONE primary miss cause." ;
+    bsi:realizes bsi:SignalOutcome ;
+    bsi:rowClass bsit:call_attribution ;
+    bsi:grain "(symbol, call_session, horizon)" ;
+    bsi:cadence "daily" ;
+    bsi:trainingUse "forbidden" ;
+    bsi:primaryKey "symbol", "call_session", "horizon" ;
+    bsi:freshnessColumn "computed_at" ;
+    bsi:writtenBy "call_attribution.py" ;
+    bsi:forbiddenColumn "fwd", "excess", "mae", "mfe", "cause" ;
+    bsi:caveat "Outcome-side end to end: every graded column is a label. Use it to decide which part of the plan to change, never as a model input.", "Fractions, not percents (`fwd`, `excess`, `mae`, `mfe`, `stop_dist`).", "Cause shares are descriptive. A rule built on them ships only as a shadow arm through ranker_challenger_gate.py (AF-20261119-06/-08).", "Re-derived nightly from unified_recommendations_history + stock_ohlcv, so a row can change when prices are repaired." ;
+    bsi:hasColumn _:col_call_attribution_symbol, _:col_call_attribution_call_session, _:col_call_attribution_horizon, _:col_call_attribution_classification, _:col_call_attribution_unified_score, _:col_call_attribution_sector, _:col_call_attribution_regime, _:col_call_attribution_fwd, _:col_call_attribution_excess, _:col_call_attribution_mae, _:col_call_attribution_mfe, _:col_call_attribution_cause, _:col_call_attribution_computed_at .
+
+bsit:call_attribution     rdf:type owl:Class ;
+    rdfs:label "call_attribution row" ;
+    rdfs:comment "A row of call_attribution. Grain: (symbol, call_session, horizon). Subclass of SignalOutcome; the physical contract (column set) lives in bsi:call_attributionShape." ;
+    rdfs:subClassOf bsi:SignalOutcome .
+
+_:col_call_attribution_symbol     bsi:columnName "symbol" ;
+    bsi:property bsip:symbol ;
+    bsi:semanticType "identifier" ;
+    bsi:leakageRisk "none" .
+
+_:col_call_attribution_call_session     bsi:columnName "call_session" ;
+    bsi:property bsip:signal_date ;
+    bsi:semanticType "timestamp" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "Session the call belongs to (published before that session's next open)." .
+
+_:col_call_attribution_horizon     bsi:columnName "horizon" ;
+    bsi:property bsip:horizon_days ;
+    bsi:semanticType "count" ;
+    bsi:leakageRisk "none" ;
+    bsi:note "Trading sessions, not calendar days." .
+
+_:col_call_attribution_classification     bsi:columnName "classification" ;
+    bsi:property bsip:classification ;
+    bsi:semanticType "enum" ;
+    bsi:leakageRisk "none" .
+
+_:col_call_attribution_unified_score     bsi:columnName "unified_score" ;
+    bsi:property bsip:unified_score ;
+    bsi:semanticType "score" ;
+    bsi:leakageRisk "none" .
+
+_:col_call_attribution_sector     bsi:columnName "sector" ;
+    bsi:property bsip:sector ;
+    bsi:semanticType "dimension" ;
+    bsi:leakageRisk "none" .
+
+_:col_call_attribution_regime     bsi:columnName "regime" ;
+    bsi:property bsip:regime ;
+    bsi:semanticType "enum" ;
+    bsi:leakageRisk "none" .
+
+_:col_call_attribution_fwd     bsi:columnName "fwd" ;
+    bsi:property bsip:return_pct ;
+    bsi:semanticType "label" ;
+    bsi:leakageRisk "target" ;
+    bsi:note "A FRACTION of the next-session open, not a percent; exit at the open `horizon` sessions later." .
+
+_:col_call_attribution_excess     bsi:columnName "excess" ;
+    bsi:property bsip:excess_return ;
+    bsi:semanticType "label" ;
+    bsi:leakageRisk "target" .
+
+_:col_call_attribution_mae     bsi:columnName "mae" ;
+    bsi:property bsip:mae_pct ;
+    bsi:semanticType "label" ;
+    bsi:leakageRisk "target" ;
+    bsi:note "A fraction of entry, not a percent." .
+
+_:col_call_attribution_mfe     bsi:columnName "mfe" ;
+    bsi:property bsip:mfe_pct ;
+    bsi:semanticType "label" ;
+    bsi:leakageRisk "target" ;
+    bsi:note "A fraction of entry, not a percent." .
+
+_:col_call_attribution_cause     bsi:columnName "cause" ;
+    bsi:property bsip:attribution_cause ;
+    bsi:semanticType "label" ;
+    bsi:leakageRisk "target" .
+
+_:col_call_attribution_computed_at     bsi:columnName "computed_at" ;
+    bsi:property bsip:computed_at ;
+    bsi:semanticType "timestamp" ;
+    bsi:leakageRisk "none" .
+
 bsis:intraday_recommendations     rdf:type bsi:Table ;
     rdfs:label "Intraday recommendations" ;
     rdfs:comment "Within-session picks with their intraday risk state, entry price and size." ;
@@ -8749,9 +9337,9 @@ bsis:confluence_signals     rdf:type bsi:Table ;
     bsi:freshnessColumn "computed_at" ;
     bsi:expectedLagHours "0.5"^^xsd:decimal ;
     bsi:writtenBy "confluence_ml_engine.py" ;
-    bsi:forbiddenColumn "trade_reasoning", "ai_conclusion" ;
-    bsi:caveat "The only engine score with a growing positive graded reading on this platform — which is what makes it the ranker's load-bearing input.", "`computed_at` here is native TIMESTAMPTZ, unlike the TEXT `computed_at` on `unified_recommendations`: cast across the join.", "`ml_breakout_probability` / `ml_trend_probability` are model outputs.", "`screener_weights_json` records the weights AT SCORING TIME — applying today's weights to an old row is a look-ahead bug." ;
-    bsi:hasColumn _:col_confluence_signals_symbol, _:col_confluence_signals_computed_at, _:col_confluence_signals_confluence_score, _:col_confluence_signals_conviction_level, _:col_confluence_signals_active_screener_count, _:col_confluence_signals_bullish_screener_count, _:col_confluence_signals_bearish_screener_count, _:col_confluence_signals_screener_ids_json, _:col_confluence_signals_screener_names_json, _:col_confluence_signals_screener_weights_json, _:col_confluence_signals_fundamental_score, _:col_confluence_signals_ml_breakout_probability, _:col_confluence_signals_ml_trend_probability, _:col_confluence_signals_entry_zone_low, _:col_confluence_signals_entry_zone_high, _:col_confluence_signals_stop_loss, _:col_confluence_signals_target_1, _:col_confluence_signals_target_2, _:col_confluence_signals_target_3, _:col_confluence_signals_risk_reward, _:col_confluence_signals_ai_conclusion, _:col_confluence_signals_trade_reasoning, _:col_confluence_signals_sector, _:col_confluence_signals_market_cap, _:col_confluence_signals_current_price, _:col_confluence_signals_current_volume, _:col_confluence_signals_rsi, _:col_confluence_signals_atr, _:col_confluence_signals_expires_at .
+    bsi:forbiddenColumn "trade_reasoning" ;
+    bsi:caveat "The only engine score with a growing positive graded reading on this platform — which is what makes it the ranker's load-bearing input.", "`computed_at` here is native TIMESTAMPTZ, unlike the TEXT `computed_at` on `unified_recommendations`: cast across the join.", "`ml_breakout_probability` is the populated model output; the legacy `ml_trend_probability` schema field has no writer and is not exposed.", "`screener_weights_json` records the weights AT SCORING TIME — applying today's weights to an old row is a look-ahead bug." ;
+    bsi:hasColumn _:col_confluence_signals_symbol, _:col_confluence_signals_computed_at, _:col_confluence_signals_confluence_score, _:col_confluence_signals_conviction_level, _:col_confluence_signals_active_screener_count, _:col_confluence_signals_bullish_screener_count, _:col_confluence_signals_bearish_screener_count, _:col_confluence_signals_screener_ids_json, _:col_confluence_signals_screener_names_json, _:col_confluence_signals_screener_weights_json, _:col_confluence_signals_fundamental_score, _:col_confluence_signals_ml_breakout_probability, _:col_confluence_signals_entry_zone_low, _:col_confluence_signals_entry_zone_high, _:col_confluence_signals_stop_loss, _:col_confluence_signals_target_1, _:col_confluence_signals_target_2, _:col_confluence_signals_target_3, _:col_confluence_signals_risk_reward, _:col_confluence_signals_trade_reasoning, _:col_confluence_signals_sector, _:col_confluence_signals_market_cap, _:col_confluence_signals_current_price, _:col_confluence_signals_current_volume, _:col_confluence_signals_rsi, _:col_confluence_signals_atr, _:col_confluence_signals_expires_at .
 
 bsit:confluence_signals     rdf:type owl:Class ;
     rdfs:label "confluence_signals row" ;
@@ -8818,11 +9406,6 @@ _:col_confluence_signals_ml_breakout_probability     bsi:columnName "ml_breakout
     bsi:semanticType "score" ;
     bsi:leakageRisk "none" .
 
-_:col_confluence_signals_ml_trend_probability     bsi:columnName "ml_trend_probability" ;
-    bsi:property bsip:ml_trend_probability ;
-    bsi:semanticType "score" ;
-    bsi:leakageRisk "none" .
-
 _:col_confluence_signals_entry_zone_low     bsi:columnName "entry_zone_low" ;
     bsi:property bsip:entry_zone_low ;
     bsi:semanticType "measure" ;
@@ -8856,11 +9439,6 @@ _:col_confluence_signals_target_3     bsi:columnName "target_3" ;
 _:col_confluence_signals_risk_reward     bsi:columnName "risk_reward" ;
     bsi:property bsip:risk_reward ;
     bsi:semanticType "ratio" ;
-    bsi:leakageRisk "none" .
-
-_:col_confluence_signals_ai_conclusion     bsi:columnName "ai_conclusion" ;
-    bsi:property bsip:ai_insight ;
-    bsi:semanticType "text" ;
     bsi:leakageRisk "none" .
 
 _:col_confluence_signals_trade_reasoning     bsi:columnName "trade_reasoning" ;

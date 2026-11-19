@@ -94,3 +94,12 @@ def test_standards_command_lists_licenses():
     assert proc.returncode == 0
     for expected in ("SKOS", "FIBO", "QUDT"):
         assert expected in proc.stdout, expected
+
+
+def test_default_export_dir_is_the_committed_docs_ontology():
+    # Run from src/server (the documented cwd), a cwd-relative "../docs/ontology" lands in
+    # src/docs/ontology, a directory nothing reads, while the committed docs go stale.
+    from ontology.cli import DEFAULT_OUT
+
+    repo_root = os.path.abspath(os.path.join(SERVER_DIR, "..", ".."))
+    assert os.path.abspath(DEFAULT_OUT) == os.path.join(repo_root, "docs", "ontology")

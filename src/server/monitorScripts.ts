@@ -41,11 +41,11 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: true,
     description: 'Labels signal WIN/LOSS against OHLCV — 5-day horizon',
-    schedule: 'Daily 9:30 AM',
+    schedule: 'Daily 7:30 AM IST',
     pyScript: 'outcome_resolver.py --horizon 5',
     queueName: 'outcome-resolver',
     staleLimitHours: 26,
-    // Actually touched twice a day: the 9:30am outcome-resolver queue AND again inside the
+    // Actually touched twice a day: the 7:30am outcome-resolver queue AND again inside the
     // 6:50pm ml-daily-ops batch (queues.ts processMlDailyOps). Cron-aware lateness takes the
     // more recent of the two expected fire times instead of a flat hours threshold, so a
     // mid-day check (before either run) doesn't false-flag "stale" off Friday's success.
@@ -58,7 +58,7 @@ export const MONITOR_SCRIPTS = [
     // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
     // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
     // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['0 4 * * 1-5', '20 13 * * 1-5'],
+    cronPatterns: ['0 2 * * 1-5', '20 13 * * 1-5'],
     graceMinutes: 280,
   },
   {
@@ -67,7 +67,7 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Labels signal WIN/LOSS against OHLCV — 15-day horizon',
-    schedule: 'Daily 9:30 AM',
+    schedule: 'Daily 7:30 AM IST',
     pyScript: 'outcome_resolver.py --horizon 15',
     queueName: 'outcome-resolver',
     staleLimitHours: 26,
@@ -80,7 +80,7 @@ export const MONITOR_SCRIPTS = [
     // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
     // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
     // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['0 4 * * 1-5', '20 13 * * 1-5'],
+    cronPatterns: ['0 2 * * 1-5', '20 13 * * 1-5'],
     graceMinutes: 280,
   },
   {

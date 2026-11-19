@@ -200,7 +200,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     // Added 2026-09-04 alongside their JOB_REGISTRY entries: all three are T.run steps inside
     // processMlDailyOps (queues.ts), sharing ml-daily-ops's own '20 13 * * 1-5' cron, so they
     // have no Worker/lockDuration of their own to measure.
-    'event-triggers', 'breakout-classifier-train', 'movement-predictor-train',
+    'event-triggers', 'breakout-classifier-train',
   ];
   const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer', 'exit-policy-train', 'backtest-optimizer'];
   const eventDrivenIds = ['ai-signals'];

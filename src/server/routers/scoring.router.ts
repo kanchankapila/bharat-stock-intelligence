@@ -3,7 +3,8 @@ import { dbGet, dbAll } from "../dbAsync";
 import { getTopRatedStocks, syncAndScore, getStockScoreDetail } from "../scoringService";
 import { crossSourceFilter, regimeSectorFilter, qualityOversoldScanner } from "../strategySignalsService";
 import { router, publicProcedure, adminProcedure } from "../trpc";
-import { cacheGet, fetchWithCache } from "../cacheService";
+import { fetchWithCache } from "../cacheService";
+import { loadLiveQuotes } from "../liveQuotes";
 import { latestComputedAt, invalidateLatestComputedAt } from "../latestComputedAt";
 
 // Cached latest computed_at for unified_recommendations — avoids MAX() scan on every strategy query.
@@ -139,15 +140,10 @@ export const scoringRouter = router({
   // never serves data older than one poll cycle.
   getStrategyPicks: publicProcedure
     .query(() => fetchWithCache('scoring:strategy-picks', async () => {
-      let liveCache: Record<string, any> = {};
-      try {
-        const cached = await cacheGet('live-stocks-bulk');
-        if (cached) liveCache = JSON.parse(cached as string);
-      } catch { /* no cache — fall back to EOD price */ }
+      const { quotes } = await loadLiveQuotes();
 
       const resolvePriceAndSource = (symbol: string, eodClose: number | null): { price: number | null; priceSource: 'live' | 'eod' } => {
-        const live = liveCache[symbol];
-        const livePrice = live?.price ?? live?.lastPrice ?? null;
+        const livePrice = quotes.get(symbol)?.price ?? null;
         if (livePrice != null) return { price: parseFloat(livePrice.toFixed(2)), priceSource: 'live' };
         return { price: eodClose, priceSource: 'eod' };
       };

@@ -46,6 +46,8 @@ interface CanonicalPick {
   planStatus?: string | null;
   upperCircuitLocked?: boolean;
   planEvents?: string[];
+  liveCheck?: { state: string; label: string; invalidated: boolean } | null;
+  eventRisk?: string[];
   trade_reasoning?: string | null;
   engine_coverage_count?: number | null;
   days_to_next_results?: number | null;
@@ -191,6 +193,16 @@ function CanonicalPickCard({ pick, onSelectStock }: { pick: CanonicalPick; onSel
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-base font-black tracking-wide text-white">{pick.symbol}</span>
+            {pick.liveCheck && (
+              <span className={cn(
+                'rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-wider',
+                pick.liveCheck.invalidated
+                  ? 'border-rose-400/40 bg-rose-400/10 text-rose-300'
+                  : 'border-emerald-400/30 bg-emerald-400/[0.07] text-emerald-300',
+              )} title="Today's session against this plan's entry zone, stop and target (live quote, ~5 min).">
+                {pick.liveCheck.label}
+              </span>
+            )}
             {pick.upperCircuitLocked && (
               <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-300"
                 title="The latest bar traded at one price at its upper circuit; the published entry was not fillable.">
@@ -265,6 +277,12 @@ function CanonicalPickCard({ pick, onSelectStock }: { pick: CanonicalPick; onSel
             Results in {pick.days_to_next_results}d
           </span>
         )}
+        {pick.eventRisk?.map((headline) => (
+          <span key={headline} className="rounded-full border border-rose-400/30 bg-rose-400/[0.07] px-2 py-1 text-rose-300"
+            title="High-impact bearish news published after this plan was built.">
+            News since plan: {headline.length > 70 ? `${headline.slice(0, 70)}…` : headline}
+          </span>
+        ))}
         {pick.planEvents?.map((e) => (
           <span key={e} className="rounded-full border border-amber-300/25 bg-amber-300/[0.07] px-2 py-1 text-amber-300"
             title="Scheduled before this plan expires; can gap the price past the stop or target.">
@@ -273,6 +291,51 @@ function CanonicalPickCard({ pick, onSelectStock }: { pick: CanonicalPick; onSel
         ))}
       </div>
     </button>
+  );
+}
+
+// AF-20261119-12 (display only): the shortlist read as one equal-weight book. A look-back on
+// today's holdings over ~120 sessions, not a track record; nothing here changes a score.
+function BookRiskCard({ picks }: { picks: CanonicalPick[] }) {
+  const symbols = picks.map((p) => p.symbol);
+  const sectors = Object.fromEntries(picks.map((p) => [p.symbol, p.sector ?? null]));
+  const risk = trpc.getBuyBookRisk.useQuery(
+    { symbols, sectors },
+    { enabled: symbols.length > 0, staleTime: 15 * 60_000, refetchOnWindowFocus: false },
+  );
+  if (!symbols.length || risk.isLoading) return null;
+  if (risk.isError || !risk.data) {
+    return <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-500">Book view unavailable.</div>;
+  }
+  const d = risk.data;
+  const top = d.sectorWeights[0];
+  const fmt = (v: number | null | undefined, suffix = '') => (v == null ? '—' : `${v}${suffix}`);
+  const cells: Array<[string, string, string?]> = [
+    ['Beta to NIFTY 50', fmt(d.beta), d.beta != null && d.beta > 1.2 ? 'Moves more than the market' : undefined],
+    ['Annualised volatility', fmt(d.annualVolPct, '%')],
+    ['Avg pairwise correlation', fmt(d.avgPairCorr), d.avgPairCorr != null && d.avgPairCorr > 0.5 ? 'Names move together; fewer real bets' : undefined],
+    ['Max drawdown (look-back)', fmt(d.maxDrawdownPct, '%')],
+    ['Largest sector', top ? `${top.sector} ${top.weightPct}%` : '—', top && top.weightPct > 30 ? 'Above the ranker\'s 30% sector cap' : undefined],
+  ];
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">The shortlist as one book</div>
+        <div className="text-[10px] text-slate-500">
+          Equal weight · {d.names} names · last {d.sessions} sessions · look-back on today&apos;s list, not a track record
+          {d.excluded.length > 0 && ` · ${d.excluded.length} excluded (short history)`}
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        {cells.map(([label, value, warn]) => (
+          <div key={label} className="rounded-xl border border-slate-800 bg-slate-900/50 p-2.5">
+            <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">{label}</div>
+            <div className={cn('mt-1 text-base font-bold tabular-nums', warn ? 'text-amber-300' : 'text-white')}>{value}</div>
+            {warn && <div className="mt-0.5 text-[10px] text-amber-300/80">{warn}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -394,9 +457,12 @@ export function HighConvictionPage({ onSelectStock }: { onSelectStock?: (symbol:
               {[0, 1, 2].map((item) => <div key={item} className="h-72 animate-pulse rounded-2xl border border-slate-800 bg-slate-900/50" />)}
             </div>
           ) : picks.length > 0 ? (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {picks.map((pick) => <CanonicalPickCard key={pick.symbol} pick={pick} onSelectStock={onSelectStock} />)}
-            </div>
+            <>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {picks.map((pick) => <CanonicalPickCard key={pick.symbol} pick={pick} onSelectStock={onSelectStock} />)}
+              </div>
+              <BookRiskCard picks={picks} />
+            </>
           ) : (
             <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-950/35 p-6 text-center">
               <p className="text-sm font-semibold text-slate-300">No canonical Buy candidates in the latest batch</p>

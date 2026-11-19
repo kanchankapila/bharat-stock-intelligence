@@ -2,14 +2,14 @@
   "ontology_version": "1.1.0",
   "database": "bharat_intel",
   "counts": {
-    "classes": 58,
-    "properties": 309,
-    "cards": 65,
-    "bindings": 729,
+    "classes": 61,
+    "properties": 314,
+    "cards": 70,
+    "bindings": 780,
     "relations": 39,
     "metrics": 18,
-    "vocabularies": 32,
-    "vocabulary_terms": 145
+    "vocabularies": 35,
+    "vocabulary_terms": 160
   },
   "standards": [
     "skos",
@@ -37,13 +37,13 @@
   "files": [
     {
       "file": "ontology.ttl",
-      "bytes": 524535,
-      "sha256": "91ec9643dcc2729c75cf671f3a18fae8e47772b7520cd2c1557a3b1305236fdd"
+      "bytes": 556035,
+      "sha256": "03c044bf826d32affff1fb4451ef2f6d4106dee2a1a5703d0812aa83b2368a4b"
     },
     {
       "file": "ontology.jsonld",
-      "bytes": 777635,
-      "sha256": "bc264541472ddeca0706a006c8e46eedb34755984e29a371deb3b88323182162"
+      "bytes": 822397,
+      "sha256": "5ba9d609b294f39652f7dedef8e2631de8191609766f67cf27ad39fd81c16471"
     },
     {
       "file": "context.jsonld",
@@ -52,57 +52,54 @@
     },
     {
       "file": "ontology.shacl.ttl",
-      "bytes": 334073,
-      "sha256": "4d578d310172b866d7bec203d41c5ef34006eac168627c2bc155cdb14c7abbae"
+      "bytes": 360177,
+      "sha256": "0e08a67dc4a5dd7b22213efe60955323959d71a14a1c50e28caecaea60af5f8a"
     },
     {
       "file": "ontology.prov.ttl",
-      "bytes": 23184,
-      "sha256": "f5a8156b74a526504d828a200200d3fc86f6553be5f64d29870d5832b5f77031"
+      "bytes": 25570,
+      "sha256": "94138b270d345bea501af5881d91b39209247369b27663fbdf201f0fcc1728ea"
     },
     {
       "file": "catalog.ttl",
-      "bytes": 213821,
-      "sha256": "851a37ba20df8625f7f7eb9254174ff63c969a79265ef2731eb1c23c54111ac3"
+      "bytes": 231931,
+      "sha256": "8fcede51e0673f4bb1e63063ee3221a3a7515dd3d7e01ea5c3eb8da99d14aef2"
     },
     {
       "file": "catalog.jsonld",
-      "bytes": 317471,
-      "sha256": "55ec5dc8faaecaa9027f36d29f11a325b333e321ed0c0a0f3f9170acfac8922a"
+      "bytes": 342557,
+      "sha256": "43f708cb33177f7d580e8f0a4a4342a61e8ff0cdc17cbc248cc9e82c1337eba0"
     },
     {
       "file": "ontology.cypher",
-      "bytes": 675105,
-      "sha256": "c83f91f0a0be7048042b9543b6edbe104e49b59f6d9d32c18f5752ab85248790"
+      "bytes": 716453,
+      "sha256": "406406d729fcc789ad07486c7f8e87db7c4bfc95aceaca53ba7a36a96dadff67"
     },
     {
       "file": "ontology.graphml",
-      "bytes": 99999,
-      "sha256": "c4bc0ea7e7e286ee54e92b55fbf3fe9e0e3859097e0f4486b75fba7222531dba"
+      "bytes": 106195,
+      "sha256": "34a0d2e085c4a891d52a76ce24b0f1f629ed5de387b3de72870bd9e28f92c8ab"
     },
     {
       "file": "ontology.mmd",
-      "bytes": 12910,
-      "sha256": "c2131cf52fd2ce557263c6a1448963fe644712afa82be159d9b1c409f46d9c81"
+      "bytes": 13751,
+      "sha256": "1f4a07ddac2f773037d0d35926e53d411c63c4d48a57f81816736c4df0a4e29e"
     },
     {
       "file": "ontology.md",
-      "bytes": 230783,
-      "sha256": "265183ef9e04a37b8eb8dfc9e02675cf8379192e30ea6a66a94f50904f4d0be4"
+      "bytes": 245139,
+      "sha256": "f7138df3ccf62b4a12cdc85869eb42b42097b3caafb908b819f1d3a9d3dd4615"
     },
     {
       "file": "llms.txt",
-      "bytes": 14303,
-      "sha256": "8164c70424829a0974c0beac20de19de8533aad85870b013e5b9299270412c60"
+      "bytes": 15074,
+      "sha256": "12ddebebd48a77447baa8ca6784d603beab87f425a1aae5d1b3dcbca543fc6f5"
     },
     {
       "file": "standards.txt",
       "bytes": 10496,
       "sha256": "583e858ca90c5825d550e6ea63c74c656d895c74b51d770249dbb07bab0a258c"
     }
-  ],
-  "removed": [
-    "coverage.json"
   ],
   "coverage": {
     "status": "unavailable",

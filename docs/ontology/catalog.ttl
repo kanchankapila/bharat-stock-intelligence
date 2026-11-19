@@ -963,8 +963,8 @@ bsis:stock_futures_oi_history     rdf:type dcat:Dataset, schema:Dataset ;
     bsis:entity bsi:FuturesPositioning ;
     dcat:inCatalog bsi:catalog ;
     bsis:freshnessColumn "fetched_at" ;
-    bsis:writtenBy "fno_oi_fetcher.py" ;
-    bsis:caveat "LOW-DATA: the panel covers roughly two weeks of dates. Any 'measured' reading built on it is a calendar artefact rather than an edge — this is exactly the LOW-DATA verdict the master report records.", "`oi_buildup` uses 'Buildup' spelling while the option-chain table uses 'Build Up': never compare those strings across the two." ;
+    bsis:writtenBy "mc_stock_futures_oi_fetcher.py", "nse_fo_bhav_history_fetcher.py" ;
+    bsis:caveat "`source` matters: the MoneyControl rows start 2026-08-21 and store the NEAR MONTH only, while the NSE F&O bhavcopy reduction (AF-20261113-03) carries history and every expiry. Filter on `source` before building a panel.", "Near-month rows are distorted around each monthly expiry: positions ROLL to the next month, so `oi_change` / `oi_buildup` read covering or unwinding while all-expiry OI is building (live 2026-11-19: IRFC -22.1% near month vs +9.1% all expiries). Sum all expiries, or exclude expiry week, before measuring (AF-20261119-09).", "`oi_buildup` uses 'Buildup' spelling while the option-chain table uses 'Build Up': never compare those strings across the two." ;
     schema:variableMeasured _:pv_stock_futures_oi_history_symbol, _:pv_stock_futures_oi_history_date, _:pv_stock_futures_oi_history_expiry, _:pv_stock_futures_oi_history_open_interest, _:pv_stock_futures_oi_history_oi_change, _:pv_stock_futures_oi_history_oi_pct_change, _:pv_stock_futures_oi_history_oi_buildup, _:pv_stock_futures_oi_history_rollover_pct, _:pv_stock_futures_oi_history_oi_pcr, _:pv_stock_futures_oi_history_futures_price, _:pv_stock_futures_oi_history_spot_price, _:pv_stock_futures_oi_history_basis, _:pv_stock_futures_oi_history_contracts, _:pv_stock_futures_oi_history_futures_volume, _:pv_stock_futures_oi_history_lot_size, _:pv_stock_futures_oi_history_source, _:pv_stock_futures_oi_history_fetched_at .
 
 _:pv_stock_futures_oi_history_symbol     rdf:type schema:PropertyValue ;
@@ -1044,6 +1044,150 @@ _:pv_stock_futures_oi_history_source     rdf:type schema:PropertyValue ;
     schema:description "Source" .
 
 _:pv_stock_futures_oi_history_fetched_at     rdf:type schema:PropertyValue ;
+    schema:name "fetched_at" ;
+    schema:description "Fetched at" .
+
+bsis:nse_participant_positions     rdf:type dcat:Dataset, schema:Dataset ;
+    dct:title "F&O participant positions" ;
+    dct:description "NSE participant-wise open interest and volume: FII, DII, Pro and Client long/short contracts in index and stock futures and options, per session." ;
+    dct:identifier "nse_participant_positions" ;
+    schema:name "nse_participant_positions" ;
+    schema:description "NSE participant-wise open interest and volume: FII, DII, Pro and Client long/short contracts in index and stock futures and options, per session." ;
+    dct:accrualPeriodicity "daily" ;
+    bsis:cadence "daily" ;
+    bsis:grain "(trade_date, kind, client_type)" ;
+    bsis:primaryKey "trade_date, kind, client_type" ;
+    bsis:trainingUse "caution" ;
+    bsis:entity bsi:ParticipantPositioning ;
+    dcat:inCatalog bsi:catalog ;
+    bsis:freshnessColumn "fetched_at" ;
+    bsis:writtenBy "nse_fo_market_positioning_fetcher.py" ;
+    bsis:caveat "Market-wide (no symbol): a regime/timing input, never a cross-sectional factor. Contracts, not shares or notional.", "Served back to 2022-01-03; nightly from 2026-11-19, history only after the one-off backfill (AF-20261119-19). Ungraded." ;
+    schema:variableMeasured _:pv_nse_participant_positions_trade_date, _:pv_nse_participant_positions_kind, _:pv_nse_participant_positions_client_type, _:pv_nse_participant_positions_fut_idx_long, _:pv_nse_participant_positions_fut_idx_short, _:pv_nse_participant_positions_fut_stk_long, _:pv_nse_participant_positions_fut_stk_short, _:pv_nse_participant_positions_opt_idx_call_long, _:pv_nse_participant_positions_opt_idx_put_long, _:pv_nse_participant_positions_opt_idx_call_short, _:pv_nse_participant_positions_opt_idx_put_short, _:pv_nse_participant_positions_opt_stk_call_long, _:pv_nse_participant_positions_opt_stk_put_long, _:pv_nse_participant_positions_opt_stk_call_short, _:pv_nse_participant_positions_opt_stk_put_short, _:pv_nse_participant_positions_total_long, _:pv_nse_participant_positions_total_short, _:pv_nse_participant_positions_source, _:pv_nse_participant_positions_fetched_at .
+
+_:pv_nse_participant_positions_trade_date     rdf:type schema:PropertyValue ;
+    schema:name "trade_date" ;
+    schema:description "Date" ;
+    schema:unitText "calendar_day" .
+
+_:pv_nse_participant_positions_kind     rdf:type schema:PropertyValue ;
+    schema:name "kind" ;
+    schema:description "Participant file kind" .
+
+_:pv_nse_participant_positions_client_type     rdf:type schema:PropertyValue ;
+    schema:name "client_type" ;
+    schema:description "F&O participant category" .
+
+_:pv_nse_participant_positions_fut_idx_long     rdf:type schema:PropertyValue ;
+    schema:name "fut_idx_long" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_fut_idx_short     rdf:type schema:PropertyValue ;
+    schema:name "fut_idx_short" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_fut_stk_long     rdf:type schema:PropertyValue ;
+    schema:name "fut_stk_long" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_fut_stk_short     rdf:type schema:PropertyValue ;
+    schema:name "fut_stk_short" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_opt_idx_call_long     rdf:type schema:PropertyValue ;
+    schema:name "opt_idx_call_long" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_opt_idx_put_long     rdf:type schema:PropertyValue ;
+    schema:name "opt_idx_put_long" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_opt_idx_call_short     rdf:type schema:PropertyValue ;
+    schema:name "opt_idx_call_short" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_opt_idx_put_short     rdf:type schema:PropertyValue ;
+    schema:name "opt_idx_put_short" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_opt_stk_call_long     rdf:type schema:PropertyValue ;
+    schema:name "opt_stk_call_long" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_opt_stk_put_long     rdf:type schema:PropertyValue ;
+    schema:name "opt_stk_put_long" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_opt_stk_call_short     rdf:type schema:PropertyValue ;
+    schema:name "opt_stk_call_short" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_opt_stk_put_short     rdf:type schema:PropertyValue ;
+    schema:name "opt_stk_put_short" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_total_long     rdf:type schema:PropertyValue ;
+    schema:name "total_long" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_total_short     rdf:type schema:PropertyValue ;
+    schema:name "total_short" ;
+    schema:description "Participant position (contracts)" ;
+    schema:unitText "contracts" .
+
+_:pv_nse_participant_positions_source     rdf:type schema:PropertyValue ;
+    schema:name "source" ;
+    schema:description "Source" .
+
+_:pv_nse_participant_positions_fetched_at     rdf:type schema:PropertyValue ;
+    schema:name "fetched_at" ;
+    schema:description "Fetched at" .
+
+bsis:nse_fo_ban_list     rdf:type dcat:Dataset, schema:Dataset ;
+    dct:title "F&O ban list" ;
+    dct:description "Securities in the F&O ban period for a trade date (open interest above 95% of the market-wide position limit)." ;
+    dct:identifier "nse_fo_ban_list" ;
+    schema:name "nse_fo_ban_list" ;
+    schema:description "Securities in the F&O ban period for a trade date (open interest above 95% of the market-wide position limit)." ;
+    dct:accrualPeriodicity "daily" ;
+    bsis:cadence "daily" ;
+    bsis:grain "(trade_date, symbol)" ;
+    bsis:primaryKey "trade_date, symbol" ;
+    bsis:trainingUse "context" ;
+    bsis:entity bsi:TradabilityConstraint ;
+    dcat:inCatalog bsi:catalog ;
+    bsis:freshnessColumn "fetched_at" ;
+    bsis:writtenBy "nse_fo_market_positioning_fetcher.py" ;
+    bsis:caveat "`trade_date` is the NEXT session the ban applies to, taken from the file.", "No row on a day nothing is banned; history exists only from 2026-11-19 because NSE serves only the current file." ;
+    schema:variableMeasured _:pv_nse_fo_ban_list_trade_date, _:pv_nse_fo_ban_list_symbol, _:pv_nse_fo_ban_list_source, _:pv_nse_fo_ban_list_fetched_at .
+
+_:pv_nse_fo_ban_list_trade_date     rdf:type schema:PropertyValue ;
+    schema:name "trade_date" ;
+    schema:description "Date" ;
+    schema:unitText "calendar_day" .
+
+_:pv_nse_fo_ban_list_symbol     rdf:type schema:PropertyValue ;
+    schema:name "symbol" ;
+    schema:description "Symbol" .
+
+_:pv_nse_fo_ban_list_source     rdf:type schema:PropertyValue ;
+    schema:name "source" ;
+    schema:description "Source" .
+
+_:pv_nse_fo_ban_list_fetched_at     rdf:type schema:PropertyValue ;
     schema:name "fetched_at" ;
     schema:description "Fetched at" .
 
@@ -1522,8 +1666,8 @@ bsis:technical_signals     rdf:type dcat:Dataset, schema:Dataset ;
     bsis:entity bsi:TechnicalSignal ;
     dcat:inCatalog bsi:catalog ;
     bsis:freshnessColumn "computed_at" ;
-    bsis:writtenBy "technical_analysis_engine.py", "feature_engineering.py" ;
-    bsis:caveat "Over 300 columns of MIXED provenance: raw indicators, vendor opinions (ext_* / mc_* / tl_* prefixes) and model outputs sit side by side. Use the binding table to tell them apart.", "`win_probability` and `calibrated_win_probability` are model OUTPUTS — feeding them back in leaks the model into its own inputs.", "`ai_insight` is generated text." ;
+    bsis:writtenBy "technical_analysis_engine.py", "feature_engineering.py", "backfill_technical_features.py" ;
+    bsis:caveat "Over 300 columns of MIXED provenance: raw indicators, vendor opinions (ext_* / mc_* / tl_* prefixes) and model outputs sit side by side. Use the binding table to tell them apart.", "`win_probability` and `calibrated_win_probability` are model OUTPUTS — feeding them back in leaks the model into its own inputs.", "`ai_insight` is generated text.", "`rsi` mixes two definitions by row origin: the nightly GRID rows (`signal_type = 'GRID'`, backfill_technical_features.py) hold a simple-mean (Cutler) RSI and overwrite a scanner row whenever `cmp` differs; scanner and alert paths use the vendor's Wilder RSI (AF-20261119-15)." ;
     schema:variableMeasured _:pv_technical_signals_symbol, _:pv_technical_signals_date, _:pv_technical_signals_signal_score, _:pv_technical_signals_rsi, _:pv_technical_signals_sma50, _:pv_technical_signals_sma200, _:pv_technical_signals_macd, _:pv_technical_signals_adx, _:pv_technical_signals_bb_width, _:pv_technical_signals_volume_ratio, _:pv_technical_signals_above_sma200, _:pv_technical_signals_cmp, _:pv_technical_signals_change_pct, _:pv_technical_signals_ai_insight, _:pv_technical_signals_stop_loss, _:pv_technical_signals_time_horizon, _:pv_technical_signals_computed_at, _:pv_technical_signals_delivery_pct, _:pv_technical_signals_fii_3d_net, _:pv_technical_signals_dii_3d_net, _:pv_technical_signals_win_probability, _:pv_technical_signals_calibrated_win_probability, _:pv_technical_signals_iv_rank, _:pv_technical_signals_cs_score, _:pv_technical_signals_oi_net_change_pct, _:pv_technical_signals_rollover_pct, _:pv_technical_signals_cost_of_carry_ann, _:pv_technical_signals_mf_holding_pct, _:pv_technical_signals_block_deal_value_cr, _:pv_technical_signals_roe_annual, _:pv_technical_signals_ebitda_margin, _:pv_technical_signals_np_margin, _:pv_technical_signals_pledge_pct, _:pv_technical_signals_analyst_count, _:pv_technical_signals_pcr_oi, _:pv_technical_signals_asm_flag, _:pv_technical_signals_fcf_positive, _:pv_technical_signals_signals_json, _:pv_technical_signals_news_sentiment_score, _:pv_technical_signals_nifty_regime, _:pv_technical_signals_iv_hv_ratio .
 
 _:pv_technical_signals_symbol     rdf:type schema:PropertyValue ;
@@ -1720,6 +1864,49 @@ _:pv_technical_signals_iv_hv_ratio     rdf:type schema:PropertyValue ;
     schema:name "iv_hv_ratio" ;
     schema:description "IV/HV ratio" ;
     schema:unitText "ratio" .
+
+bsis:technical_signal_observations     rdf:type dcat:Dataset, schema:Dataset ;
+    dct:title "Technical signal mutation ledger" ;
+    dct:description "Immutable, transaction-time journal of every insert, update, and row removal applied to the technical_signals compatibility projection." ;
+    dct:identifier "technical_signal_observations" ;
+    schema:name "technical_signal_observations" ;
+    schema:description "Immutable, transaction-time journal of every insert, update, and row removal applied to the technical_signals compatibility projection." ;
+    dct:accrualPeriodicity "on_write" ;
+    bsis:cadence "on_write" ;
+    bsis:grain "(observation_id)" ;
+    bsis:primaryKey "observation_id" ;
+    bsis:trainingUse "context" ;
+    bsis:entity bsi:TechnicalSignalObservation ;
+    dcat:inCatalog bsi:catalog ;
+    bsis:freshnessColumn "recorded_at" ;
+    bsis:writtenBy "journal_technical_signal_mutation" ;
+    bsis:caveat "This ledger records when the platform mutation occurred; a feature's economic observation/availability time still comes from its source contract.", "writer_hint is provenance metadata, not a model feature." ;
+    schema:variableMeasured _:pv_technical_signal_observations_observation_id, _:pv_technical_signal_observations_symbol, _:pv_technical_signal_observations_signal_date, _:pv_technical_signal_observations_recorded_at, _:pv_technical_signal_observations_writer_hint, _:pv_technical_signal_observations_values_json .
+
+_:pv_technical_signal_observations_observation_id     rdf:type schema:PropertyValue ;
+    schema:name "observation_id" ;
+    schema:description "Row id" .
+
+_:pv_technical_signal_observations_symbol     rdf:type schema:PropertyValue ;
+    schema:name "symbol" ;
+    schema:description "Symbol" .
+
+_:pv_technical_signal_observations_signal_date     rdf:type schema:PropertyValue ;
+    schema:name "signal_date" ;
+    schema:description "Signal date" ;
+    schema:unitText "calendar_day" .
+
+_:pv_technical_signal_observations_recorded_at     rdf:type schema:PropertyValue ;
+    schema:name "recorded_at" ;
+    schema:description "Recorded at" .
+
+_:pv_technical_signal_observations_writer_hint     rdf:type schema:PropertyValue ;
+    schema:name "writer_hint" ;
+    schema:description "Source" .
+
+_:pv_technical_signal_observations_values_json     rdf:type schema:PropertyValue ;
+    schema:name "values_json" ;
+    schema:description "Decision evidence value" .
 
 bsis:feature_store     rdf:type dcat:Dataset, schema:Dataset ;
     dct:title "Feature store" ;
@@ -2090,6 +2277,151 @@ _:pv_unified_recommendations_history_win_probability     rdf:type schema:Propert
     schema:description "Win probability" ;
     schema:unitText "probability" .
 
+bsis:recommendation_log     rdf:type dcat:Dataset, schema:Dataset ;
+    dct:title "Published trade plans" ;
+    dct:description "One row per published BUY / STRONG_BUY plan: entry, published stop, targets T1-T3, the ratcheted trailing stop, lifecycle status and the graded outcome." ;
+    dct:identifier "recommendation_log" ;
+    schema:name "recommendation_log" ;
+    schema:description "One row per published BUY / STRONG_BUY plan: entry, published stop, targets T1-T3, the ratcheted trailing stop, lifecycle status and the graded outcome." ;
+    dct:accrualPeriodicity "daily" ;
+    bsis:cadence "daily" ;
+    bsis:grain "(symbol, signal_date, timeframe, source)" ;
+    bsis:primaryKey "symbol, signal_date, timeframe, source" ;
+    bsis:trainingUse "caution" ;
+    bsis:entity bsi:Recommendation ;
+    dcat:inCatalog bsi:catalog ;
+    bsis:freshnessColumn "signal_date" ;
+    bsis:writtenBy "scoring_engine.py", "technicalSignalsService.ts", "trailingStopUpdater.ts", "signal_lifecycle.py", "outcome_resolver.py", "recPlanAlerts.ts" ;
+    bsis:caveat "`stop_loss` is the PUBLISHED stop and is immutable after publication; the ratchet lives in `trailing_stop` (AF-20261117-03). Grading uses `stop_loss` as the initial stop.", "Graded from the next session's OPEN (AF-20261117-12), with levels rescaled to the back-adjusted price basis when a split or bonus falls inside the window (AF-20261117-13 / AF-20261118-05).", "`stop_alerted_at` / `target_alerted_at` are delivery stamps of the intraday Telegram alert (AF-20261117-15), not outcomes.", "Long-only: short setups are never written here." ;
+    schema:variableMeasured _:pv_recommendation_log_symbol, _:pv_recommendation_log_signal_date, _:pv_recommendation_log_timeframe, _:pv_recommendation_log_source, _:pv_recommendation_log_rec_type, _:pv_recommendation_log_entry_price, _:pv_recommendation_log_stop_loss, _:pv_recommendation_log_target_1, _:pv_recommendation_log_trailing_stop, _:pv_recommendation_log_outcome, _:pv_recommendation_log_actual_return_pct .
+
+_:pv_recommendation_log_symbol     rdf:type schema:PropertyValue ;
+    schema:name "symbol" ;
+    schema:description "Symbol" .
+
+_:pv_recommendation_log_signal_date     rdf:type schema:PropertyValue ;
+    schema:name "signal_date" ;
+    schema:description "Signal date" ;
+    schema:unitText "calendar_day" .
+
+_:pv_recommendation_log_timeframe     rdf:type schema:PropertyValue ;
+    schema:name "timeframe" ;
+    schema:description "Timeframe" .
+
+_:pv_recommendation_log_source     rdf:type schema:PropertyValue ;
+    schema:name "source" ;
+    schema:description "Source" .
+
+_:pv_recommendation_log_rec_type     rdf:type schema:PropertyValue ;
+    schema:name "rec_type" ;
+    schema:description "Classification" .
+
+_:pv_recommendation_log_entry_price     rdf:type schema:PropertyValue ;
+    schema:name "entry_price" ;
+    schema:description "Entry price" ;
+    schema:unitText "per_share_INR" .
+
+_:pv_recommendation_log_stop_loss     rdf:type schema:PropertyValue ;
+    schema:name "stop_loss" ;
+    schema:description "Stop loss" ;
+    schema:unitText "per_share_INR" .
+
+_:pv_recommendation_log_target_1     rdf:type schema:PropertyValue ;
+    schema:name "target_1" ;
+    schema:description "Target 1" ;
+    schema:unitText "per_share_INR" .
+
+_:pv_recommendation_log_trailing_stop     rdf:type schema:PropertyValue ;
+    schema:name "trailing_stop" ;
+    schema:description "Trailing stop" ;
+    schema:unitText "per_share_INR" .
+
+_:pv_recommendation_log_outcome     rdf:type schema:PropertyValue ;
+    schema:name "outcome" ;
+    schema:description "Outcome" .
+
+_:pv_recommendation_log_actual_return_pct     rdf:type schema:PropertyValue ;
+    schema:name "actual_return_pct" ;
+    schema:description "Realised return" ;
+    schema:unitText "percent" .
+
+bsis:call_attribution     rdf:type dcat:Dataset, schema:Dataset ;
+    dct:title "Why each published Buy hit or missed" ;
+    dct:description "One row per published Buy / Strong Buy whose window has closed: next-open entry, forward and excess return vs the same-session liquid universe, path statistics (MAE/MFE, stop and target touches) and ONE primary miss cause." ;
+    dct:identifier "call_attribution" ;
+    schema:name "call_attribution" ;
+    schema:description "One row per published Buy / Strong Buy whose window has closed: next-open entry, forward and excess return vs the same-session liquid universe, path statistics (MAE/MFE, stop and target touches) and ONE primary miss cause." ;
+    dct:accrualPeriodicity "daily" ;
+    bsis:cadence "daily" ;
+    bsis:grain "(symbol, call_session, horizon)" ;
+    bsis:primaryKey "symbol, call_session, horizon" ;
+    bsis:trainingUse "forbidden" ;
+    bsis:entity bsi:SignalOutcome ;
+    dcat:inCatalog bsi:catalog ;
+    bsis:freshnessColumn "computed_at" ;
+    bsis:writtenBy "call_attribution.py" ;
+    bsis:caveat "Outcome-side end to end: every graded column is a label. Use it to decide which part of the plan to change, never as a model input.", "Fractions, not percents (`fwd`, `excess`, `mae`, `mfe`, `stop_dist`).", "Cause shares are descriptive. A rule built on them ships only as a shadow arm through ranker_challenger_gate.py (AF-20261119-06/-08).", "Re-derived nightly from unified_recommendations_history + stock_ohlcv, so a row can change when prices are repaired." ;
+    schema:variableMeasured _:pv_call_attribution_symbol, _:pv_call_attribution_call_session, _:pv_call_attribution_horizon, _:pv_call_attribution_classification, _:pv_call_attribution_unified_score, _:pv_call_attribution_sector, _:pv_call_attribution_regime, _:pv_call_attribution_fwd, _:pv_call_attribution_excess, _:pv_call_attribution_mae, _:pv_call_attribution_mfe, _:pv_call_attribution_cause, _:pv_call_attribution_computed_at .
+
+_:pv_call_attribution_symbol     rdf:type schema:PropertyValue ;
+    schema:name "symbol" ;
+    schema:description "Symbol" .
+
+_:pv_call_attribution_call_session     rdf:type schema:PropertyValue ;
+    schema:name "call_session" ;
+    schema:description "Signal date" ;
+    schema:unitText "calendar_day" .
+
+_:pv_call_attribution_horizon     rdf:type schema:PropertyValue ;
+    schema:name "horizon" ;
+    schema:description "Horizon (days)" ;
+    schema:unitText "count" .
+
+_:pv_call_attribution_classification     rdf:type schema:PropertyValue ;
+    schema:name "classification" ;
+    schema:description "Classification" .
+
+_:pv_call_attribution_unified_score     rdf:type schema:PropertyValue ;
+    schema:name "unified_score" ;
+    schema:description "Unified score" ;
+    schema:unitText "score_0_100" .
+
+_:pv_call_attribution_sector     rdf:type schema:PropertyValue ;
+    schema:name "sector" ;
+    schema:description "Sector" .
+
+_:pv_call_attribution_regime     rdf:type schema:PropertyValue ;
+    schema:name "regime" ;
+    schema:description "Market regime" .
+
+_:pv_call_attribution_fwd     rdf:type schema:PropertyValue ;
+    schema:name "fwd" ;
+    schema:description "Realised return" ;
+    schema:unitText "percent" .
+
+_:pv_call_attribution_excess     rdf:type schema:PropertyValue ;
+    schema:name "excess" ;
+    schema:description "Excess return vs universe" ;
+    schema:unitText "ratio" .
+
+_:pv_call_attribution_mae     rdf:type schema:PropertyValue ;
+    schema:name "mae" ;
+    schema:description "Max adverse excursion" ;
+    schema:unitText "percent" .
+
+_:pv_call_attribution_mfe     rdf:type schema:PropertyValue ;
+    schema:name "mfe" ;
+    schema:description "Max favourable excursion" ;
+    schema:unitText "percent" .
+
+_:pv_call_attribution_cause     rdf:type schema:PropertyValue ;
+    schema:name "cause" ;
+    schema:description "Miss cause" .
+
+_:pv_call_attribution_computed_at     rdf:type schema:PropertyValue ;
+    schema:name "computed_at" ;
+    schema:description "Computed at" .
+
 bsis:intraday_recommendations     rdf:type dcat:Dataset, schema:Dataset ;
     dct:title "Intraday recommendations" ;
     dct:description "Within-session picks with their intraday risk state, entry price and size." ;
@@ -2206,8 +2538,8 @@ bsis:confluence_signals     rdf:type dcat:Dataset, schema:Dataset ;
     dcat:inCatalog bsi:catalog ;
     bsis:freshnessColumn "computed_at" ;
     bsis:writtenBy "confluence_ml_engine.py" ;
-    bsis:caveat "The only engine score with a growing positive graded reading on this platform — which is what makes it the ranker's load-bearing input.", "`computed_at` here is native TIMESTAMPTZ, unlike the TEXT `computed_at` on `unified_recommendations`: cast across the join.", "`ml_breakout_probability` / `ml_trend_probability` are model outputs.", "`screener_weights_json` records the weights AT SCORING TIME — applying today's weights to an old row is a look-ahead bug." ;
-    schema:variableMeasured _:pv_confluence_signals_symbol, _:pv_confluence_signals_computed_at, _:pv_confluence_signals_confluence_score, _:pv_confluence_signals_conviction_level, _:pv_confluence_signals_active_screener_count, _:pv_confluence_signals_bullish_screener_count, _:pv_confluence_signals_bearish_screener_count, _:pv_confluence_signals_screener_ids_json, _:pv_confluence_signals_screener_names_json, _:pv_confluence_signals_screener_weights_json, _:pv_confluence_signals_fundamental_score, _:pv_confluence_signals_ml_breakout_probability, _:pv_confluence_signals_ml_trend_probability, _:pv_confluence_signals_entry_zone_low, _:pv_confluence_signals_entry_zone_high, _:pv_confluence_signals_stop_loss, _:pv_confluence_signals_target_1, _:pv_confluence_signals_target_2, _:pv_confluence_signals_target_3, _:pv_confluence_signals_risk_reward, _:pv_confluence_signals_ai_conclusion, _:pv_confluence_signals_trade_reasoning, _:pv_confluence_signals_sector, _:pv_confluence_signals_market_cap, _:pv_confluence_signals_current_price, _:pv_confluence_signals_current_volume, _:pv_confluence_signals_rsi, _:pv_confluence_signals_atr, _:pv_confluence_signals_expires_at .
+    bsis:caveat "The only engine score with a growing positive graded reading on this platform — which is what makes it the ranker's load-bearing input.", "`computed_at` here is native TIMESTAMPTZ, unlike the TEXT `computed_at` on `unified_recommendations`: cast across the join.", "`ml_breakout_probability` is the populated model output; the legacy `ml_trend_probability` schema field has no writer and is not exposed.", "`screener_weights_json` records the weights AT SCORING TIME — applying today's weights to an old row is a look-ahead bug." ;
+    schema:variableMeasured _:pv_confluence_signals_symbol, _:pv_confluence_signals_computed_at, _:pv_confluence_signals_confluence_score, _:pv_confluence_signals_conviction_level, _:pv_confluence_signals_active_screener_count, _:pv_confluence_signals_bullish_screener_count, _:pv_confluence_signals_bearish_screener_count, _:pv_confluence_signals_screener_ids_json, _:pv_confluence_signals_screener_names_json, _:pv_confluence_signals_screener_weights_json, _:pv_confluence_signals_fundamental_score, _:pv_confluence_signals_ml_breakout_probability, _:pv_confluence_signals_entry_zone_low, _:pv_confluence_signals_entry_zone_high, _:pv_confluence_signals_stop_loss, _:pv_confluence_signals_target_1, _:pv_confluence_signals_target_2, _:pv_confluence_signals_target_3, _:pv_confluence_signals_risk_reward, _:pv_confluence_signals_trade_reasoning, _:pv_confluence_signals_sector, _:pv_confluence_signals_market_cap, _:pv_confluence_signals_current_price, _:pv_confluence_signals_current_volume, _:pv_confluence_signals_rsi, _:pv_confluence_signals_atr, _:pv_confluence_signals_expires_at .
 
 _:pv_confluence_signals_symbol     rdf:type schema:PropertyValue ;
     schema:name "symbol" ;
@@ -2263,11 +2595,6 @@ _:pv_confluence_signals_ml_breakout_probability     rdf:type schema:PropertyValu
     schema:description "ML breakout probability" ;
     schema:unitText "probability" .
 
-_:pv_confluence_signals_ml_trend_probability     rdf:type schema:PropertyValue ;
-    schema:name "ml_trend_probability" ;
-    schema:description "ML trend probability" ;
-    schema:unitText "probability" .
-
 _:pv_confluence_signals_entry_zone_low     rdf:type schema:PropertyValue ;
     schema:name "entry_zone_low" ;
     schema:description "Entry zone low" ;
@@ -2302,10 +2629,6 @@ _:pv_confluence_signals_risk_reward     rdf:type schema:PropertyValue ;
     schema:name "risk_reward" ;
     schema:description "Risk/reward" ;
     schema:unitText "ratio" .
-
-_:pv_confluence_signals_ai_conclusion     rdf:type schema:PropertyValue ;
-    schema:name "ai_conclusion" ;
-    schema:description "AI insight" .
 
 _:pv_confluence_signals_trade_reasoning     rdf:type schema:PropertyValue ;
     schema:name "trade_reasoning" ;
