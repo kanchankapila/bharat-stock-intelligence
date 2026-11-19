@@ -46,7 +46,7 @@ A finding may stay **open** only for one of these reasons, stated in its row:
   an `information_schema` sweep for the column across every table plus a `graphify query` for an existing
   backfill — not three plausible tables. For a vendor that stopped returning data, or a new source:
   1. Query the discovery registry first: `market_endpoint_registry` in Postgres (`bharat_intel` on `:5433`,
-     3,408 endpoints: 2,864 GET / 544 POST; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`).
+     3,450 endpoints: 2,906 GET / 544 POST; views `v_working_market_endpoints`, `v_stock_screeners`, `v_fno_endpoints`).
   2. The consolidated catalog `url_endpoints` (834 templates): `python -m url_explorer.ingest --find-alternates "<targets>" --exclude <failing-host>` from `src/server`.
   3. If present, the optional local raw URL corpus `urls_v2.db` (SQLite: `url_catalog`, `url_data`; gitignored and
      absent from a fresh checkout). The older flat list unique_urls.txt was deleted 2026-10-23 (`c2ceae0e`);

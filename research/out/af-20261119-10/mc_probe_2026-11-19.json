@@ -1,0 +1,867 @@
+[
+ {
+  "name": "getFnoOiTrends",
+  "url": "https://priceapi.moneycontrol.com/technicalCompanyData/oiData/getFnoOiTrends?category=Active%20Buying%2CStrong%20Buying%2CShort%20Covering%2CActive%20Selling%2CStrong%20Selling%2CProfit%20Booking&expiry=ALL&type=ALL&deviceType=W&limit=6",
+  "status": 200,
+  "bytes": 3567,
+  "latency_ms": 150,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "bullishPercentage",
+   "bearishPercentage",
+   "ltt",
+   "data",
+   "expiryList"
+  ],
+  "list_path": ".data",
+  "list_len": 6,
+  "item_keys": [
+   "trend",
+   "category",
+   "name",
+   "scId",
+   "expiryDate",
+   "openInt",
+   "oiPerChange",
+   "price",
+   "pricePerChange",
+   "oiBuildup",
+   "timestamp",
+   "instrument",
+   "volume",
+   "prevVolume",
+   "oiBuildupHistory"
+  ],
+  "date_range": [
+   "2026-11-23",
+   "2027-01-25"
+  ],
+  "empty_values": 0
+ },
+ {
+  "name": "upwardpotential",
+  "url": "https://www.moneycontrol.com/mc/widget/upwardpotential?classic=true",
+  "status": 200,
+  "bytes": 22608,
+  "latency_ms": 430,
+  "ctype": "text/html; charset=UTF-8",
+  "format": "HTML",
+  "text_sample": " Upward Potential Investing at market highs? Here are stocks with good upside potential! Reco on : November 18, 2026 J Kumar Infra BUY Research by Anand Rathi Reco Price 435.25 Target Target Revised Downwards 699 (56.7%) Current Returns 2.4% Reco on : November 16, 2026 Inox Wind BUY Research by ICIC"
+ },
+ {
+  "name": "getMostActiveData",
+  "url": "https://www.moneycontrol.com/mc/widget/marketaction/getMostActiveData?classic=true&show=widget&token=-1",
+  "status": 200,
+  "bytes": 3886,
+  "latency_ms": 347,
+  "ctype": "text/html; charset=UTF-8",
+  "format": "HTML",
+  "text_sample": " Company Price Val. (Cr.) Analysis One 97 Paytm 1,725.90 -8.68% 3,721.45 Analysis SBI 1,156.00 1.85% 3,044.87 Analysis Reliance 1,375.60 0.92% 1,981.97 Analysis HDFC Bank 821.80 1.69% 1,962.67 Analysis View More "
+ },
+ {
+  "name": "stockaction/technicalTrends",
+  "url": "https://www.moneycontrol.com/mc/widget/stockaction/technicalTrends?classic=true&ajax=1",
+  "status": 200,
+  "bytes": 31940,
+  "latency_ms": 735,
+  "ctype": "text/html; charset=UTF-8",
+  "format": "HTML",
+  "text_sample": " Company Price Current Trend Previous Trend 44.86 Very Bullish Very Bearish 1,271.60 Bullish Bearish 293.00 Bullish Bearish 400.25 Very Bullish Bearish 174.67 Bullish Very Bearish View More Company Price Current Trend Previous Trend 305.20 Bearish Very Bullish 529.00 Very Bearish Bullish 2,618.00 Ve"
+ },
+ {
+  "name": "stockaction/topGainers",
+  "url": "https://www.moneycontrol.com/mc/widget/stockaction/topGainers?classic=true&show=widget&token=-1",
+  "status": 200,
+  "bytes": 5866,
+  "latency_ms": 184,
+  "ctype": "text/html; charset=UTF-8",
+  "format": "HTML",
+  "text_sample": " Company Current Analysis Voltas 1,237.00 9.03% Analysis Blue Star 1,764.00 8.77% Analysis Indian Renew 129.80 8.35% Analysis Maruti Suzuki 13,589.00 7.58% Analysis Amber Enterpris 6,697.00 7.38% Analysis View More "
+ },
+ {
+  "name": "stockaction/priceShockers",
+  "url": "https://www.moneycontrol.com/mc/widget/stockaction/priceShockers?classic=true&show=widget&token=-1",
+  "status": 200,
+  "bytes": 1769,
+  "latency_ms": 179,
+  "ctype": "text/html; charset=UTF-8",
+  "format": "HTML",
+  "text_sample": " Company Current Analysis Indian Renew 129.80 8.35% Analysis View More "
+ },
+ {
+  "name": "prostocklist",
+  "url": "https://www.moneycontrol.com/mc/widget/prostocklist",
+  "status": 200,
+  "bytes": 43403,
+  "latency_ms": 420,
+  "ctype": "text/html; charset=UTF-8",
+  "format": "HTML",
+  "text_sample": " .pro_stock_lists_container { background-color: #FAFAFA; padding: 15px; } .pro_stock_lists_container .top_block { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; margin-bottom: 10px; } .pro_stock_lists_container .top_block .left_block { font: 700 20px/18px \""
+ },
+ {
+  "name": "mc_widgets/radar",
+  "url": "https://www.moneycontrol.com/techmvc/mc_widgets/radar/?classic=true",
+  "status": 200,
+  "bytes": 54522,
+  "latency_ms": 194,
+  "ctype": "text/html; charset=UTF-8",
+  "format": "HTML",
+  "text_sample": " widget = 0|environment = live .asclose{fill:#fff;}.bsclose{fill:none;stroke:#0065a1;stroke-width:1.5px;} Quick View Stock in News Stock Last Visited Watchlist Portfolio .asmp,.bfvs{fill:none;stroke:#666;stroke-miterlimit:10;stroke-width:0.8px;}.asmp{stroke-linejoin:bevel;} Full View .asmp,.bfvs{fil"
+ },
+ {
+  "name": "get-bse-reports",
+  "url": "https://api.moneycontrol.com/marketinsights/v1/markets/get-bse-reports?type=all&scId=RI&limit=5",
+  "status": 200,
+  "bytes": 3811,
+  "latency_ms": 91,
+  "ctype": "application/json; charset=utf-8",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "data"
+  ],
+  "list_path": ".data.quarterly.data",
+  "list_len": 5,
+  "item_keys": [
+   "scComp",
+   "headline",
+   "earning_description",
+   "announcementtype",
+   "descriptorid",
+   "pubdate",
+   "earning_title",
+   "earning_url"
+  ],
+  "date_range": [
+   "2025-07-18",
+   "2026-10-30"
+  ],
+  "empty_values": 0
+ },
+ {
+  "name": "peers/landing",
+  "url": "https://api.moneycontrol.com/swiftapi/v1/stock/peers/landing?scId=RI&deviceType=W&type=mcap&appVersion=170",
+  "status": 200,
+  "bytes": 1437,
+  "latency_ms": 75,
+  "ctype": "application/x-protobuf",
+  "format": "TEXT",
+  "text_sample": "\b\u0001\u0012\ufffd \u0012 \u0005STOCK\u0012 stockName \u0018 \u0010MARKET CAP (Cr.)\u0012\u0004mcap \u0004RANK\u0012\u0004rank\u0012C \u0002RI\u0012\bReliance\u0018\u0001\"\u0002st* refineries/relianceindustries/RI2 1,861,536h\u0001\u0012R \u0003ONG\u0012\u0004ONGC\u0018\u0002\"\u0002nd*4oil-drillingexploration/oilnaturalgascorporation/ONG2\u0007282,452h\u0001\u0012H \u0004OI13\u0012 Oil India\u0018\u0003\"\u0002rd*%oil-drillingexploration/oilindia/OI132\u000671,229h\u0001\u0012L \u0003PLN\u0012 Pe"
+ },
+ {
+  "name": "returns/stock",
+  "url": "https://api.moneycontrol.com/swiftapi/v1/returns/stock?scId=RI&type=absolute&exchange=N&responseType=json",
+  "status": 200,
+  "bytes": 859,
+  "latency_ms": 88,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "type",
+   "viewType",
+   "returns",
+   "ctaList"
+  ],
+  "list_path": ".returns",
+  "list_len": 9,
+  "item_keys": [
+   "label",
+   "return"
+  ],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "check-forecast",
+  "url": "https://api.moneycontrol.com/mcapi/v1/stock/estimates/check-forecast?deviceType=W&scId=RI&ex=N",
+  "status": 200,
+  "bytes": 25,
+  "latency_ms": 39,
+  "ctype": "application/json; charset=utf-8",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "data"
+  ],
+  "list_path": "",
+  "list_len": 0,
+  "item_keys": [],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "changeTableData",
+  "url": "https://www.moneycontrol.com/markets/indian-indices/changeTableData?deviceType=web&exName=N&indicesID=9&selTab=o&subTabOT=o&subTabOPL=cl&selPage=marketTerminal&classic=true",
+  "status": 200,
+  "bytes": 121827,
+  "latency_ms": 365,
+  "ctype": "text/html; charset=utf-8",
+  "format": "HTML",
+  "text_sample": " Name LTP %Chg Chg Volume Buy Price Sell Price Buy Qty Sell Qty Analysis Technical Rating Adani Enterpris 2,703.10 0.70 18.90 700,085 0.00 2,703.10 0 500 Analysis Adani Ports 1,917.10 0.76 14.50 1,526,697 0.00 1,917.10 0 1,376 Analysis Apollo Hospital 8,738.00 -0.94 -83.00 317,366 8,738.00 0.00 6 0 "
+ },
+ {
+  "name": "usMarket/bond",
+  "url": "https://priceapi.moneycontrol.com/pricefeed/usMarket/bond/GIND5Y:IND",
+  "status": 200,
+  "bytes": 876,
+  "latency_ms": 63,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "code",
+   "message",
+   "data"
+  ],
+  "list_path": "",
+  "list_len": 0,
+  "item_keys": [],
+  "date_range": [
+   "2026-11-19",
+   "2026-11-19"
+  ],
+  "empty_values": 0
+ },
+ {
+  "name": "techCharts/intra",
+  "url": "https://priceapi.moneycontrol.com/techCharts/intra?symbol=HEROMOTOCO&resolution=1&from=1795059900&to=1795082400",
+  "status": 200,
+  "bytes": 13004,
+  "latency_ms": 156,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "s",
+   "data"
+  ],
+  "list_path": ".data",
+  "list_len": 371,
+  "item_keys": [
+   "time",
+   "value"
+  ],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "explore-market",
+  "url": "https://api.moneycontrol.com/mcapi/v1//explore/explore-market?deviceType=A&version=155&language=EN",
+  "status": 200,
+  "bytes": 2118,
+  "latency_ms": 196,
+  "ctype": "application/json; charset=utf-8",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "data"
+  ],
+  "list_path": ".data.left.exploreData",
+  "list_len": 7,
+  "item_keys": [
+   "uniqueId",
+   "displayText",
+   "url",
+   "displayTextDarkColor",
+   "displayTextLightColor",
+   "tile_header",
+   "tile_header_color",
+   "tile_header_bgcolor",
+   "tile_header_img",
+   "tile_header_blink"
+  ],
+  "date_range": null,
+  "empty_values": 36
+ },
+ {
+  "name": "multi-asset-info",
+  "url": "https://api.moneycontrol.com/swiftapi/v1/markets/multi-asset-info?asset_ids=in;SEN-II,in;NSX-II&responseType=pb",
+  "status": 200,
+  "bytes": 287,
+  "latency_ms": 99,
+  "ctype": "application/x-protobuf",
+  "format": "PROTOBUF",
+  "text_sample": "\b\u0001\u0012\ufffd\u0002 \ufffd\u0001 \u0006in;SEN\u0012 in;SEN-II\u001a\u0006SENSEX\"\b83021.75*\u0006989.942\u00041.21:\u00010B\u00011J\u0001BR\u0006in;SENZ Nov 19, 16:10b MMM dd, HH:mmj 1795084801r\u000eIndian Indicesz in;SEN-II \ufffd\u0001 \u0006in;NSX\u0012 in;NSX-II\u001a\bNIFTY 50\"\b25514.30*\u0006286.352\u00041.14:\u00010B\u00011J\u0001NR\u0006in;NSXZ Nov 19, 16:10b MMM dd, HH:mmj 1795084801r\u000eIndian Indicesz in;NSX-II"
+ },
+ {
+  "name": "stats/gainer",
+  "url": "https://api.moneycontrol.com/swiftapi/v1/markets/stats/gainer?deviceType=W&appVersion=180&ex=N&section=overview&indexId=7&dur=1d&fields=&page=1&sortBy=perChange&orderBy=desc&stocklbl=true",
+  "status": 200,
+  "bytes": 21820,
+  "latency_ms": 180,
+  "ctype": "application/x-protobuf",
+  "format": "TEXT",
+  "text_sample": "\b\u0001\u0012\ufffd\ufffd\u0001 \u0017 Stock Name\u0012 stockName \u0015 \u0005Price\u0012 currentPrice \u0012 Day's High\u0012\u0004high \u0010 Day's Low\u0012\u0003low \u0004Open\u0012\u0004open \u0004VWAP\u0012\u0004vwap \u0014 \bAnalysis\u0012\banalysis\u0012\ufffd\u0003 \u0001V\u0012\u0006Voltas\u001a\b1,237.00\"\u0014diversified/voltas/V*\u0001N2\u0003V-N:\u00059.03%B\u0006102.40J\b1,243.70R\b1,131.00j\b1,131.00r\b1,134.60z\u0003771\ufffd\u0001 6,235,827\ufffd\u0001\b1,214.72\ufffd\u0001\bpositive\ufffd\u0001 Nov 19, 15:59\ufffd"
+ },
+ {
+  "name": "stats/52-week-high",
+  "url": "https://api.moneycontrol.com/swiftapi/v1/markets/stats/52-week-high?deviceType=W&appVersion=180&ex=N&section=overview&indexId=7&dur=1d&fields=&page=1&sortBy=perChange&orderBy=desc&stocklbl=true",
+  "status": 200,
+  "bytes": 4986,
+  "latency_ms": 203,
+  "ctype": "application/x-protobuf",
+  "format": "TEXT",
+  "text_sample": "\b\u0001\u0012\ufffd& \u0017 Stock Name\u0012 stockName \u0015 \u0005Price\u0012 currentPrice \u0012 Day's High\u0012\u0004high \u0010 Day's Low\u0012\u0003low \u0016 52 wk High\u0012\bwk52High \u0004Open\u0012\u0004open \u0014 \bAnalysis\u0012\banalysis\u0012\ufffd\u0004 \u0004CA07\u0012 Craftsman\u001a 11,930.00\"$engineering/craftsmanautomation/CA04*\u0001N2\u0006CA07-N:\u00055.16%B\u0006585.00J 12,210.00R 11,271.00Z 12,210.00j 11,344.00r 11,345.00z\u0003117"
+ },
+ {
+  "name": "get_opt_chain",
+  "url": "https://www.moneycontrol.com/mccode/fno/get_opt_chain.php?sel_symbol=NIFTY&instrument_type=FUTIDX&sel_exp_date=2026-11-23",
+  "status": 200,
+  "bytes": 5803,
+  "latency_ms": 554,
+  "ctype": "text/html; charset=UTF-8",
+  "format": "HTML",
+  "text_sample": " CALLS PUTS Premium Volume Open Int Stike Price Open Int Volume Premium 259.7 (121.40%) 114,655,645 1,399,580 (-58.76%) 25,350.00 6,315,010 (465.28%) 80,258,620 59.75 -73.46 224.4 (126.21%) 175,485,115 4,425,720 (-43.34%) 25,400.00 7,664,215 (161.29%) 99,336,120 73.7 -71.43 191.05 (129.77%) 90,789,0"
+ },
+ {
+  "name": "get-option-details",
+  "url": "https://priceapi.moneycontrol.com/technicalCompanyData/oiData/get-option-details?scId=in;NSX&expiryDate=2026-11-23&assetType=I&deviceType=A",
+  "status": 200,
+  "bytes": 33070,
+  "latency_ms": 114,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "message",
+   "data"
+  ],
+  "list_path": ".data.expiry[0].options",
+  "list_len": 274,
+  "item_keys": [
+   "strikePrice",
+   "call",
+   "put"
+  ],
+  "date_range": [
+   "2026-11-19",
+   "2026-11-23"
+  ],
+  "empty_values": 0
+ },
+ {
+  "name": "multi-strike-chart",
+  "url": "https://priceapi.moneycontrol.com/technicalCompanyData/oiData/multi-strike-chart?scId=in;NSX&assetType=I&deviceType=W&contracts=2026-11-23_25400.00_CE,2026-11-23_25400.00_PE&interval=5MIN",
+  "status": 200,
+  "bytes": 13912,
+  "latency_ms": 105,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "status",
+   "message",
+   "data"
+  ],
+  "list_path": ".data.spot",
+  "list_len": 76,
+  "item_keys": [
+   "price",
+   "time"
+  ],
+  "date_range": [
+   "2026-11-23",
+   "2026-11-23"
+  ],
+  "empty_values": 1
+ },
+ {
+  "name": "totaloi-pcr-chart",
+  "url": "https://priceapi.moneycontrol.com/technicalCompanyData/oiData/totaloi-pcr-chart?scId=in;NSX&expiry=2026-11-23&assetType=I&count=10&deviceType=W",
+  "status": 200,
+  "bytes": 1154,
+  "latency_ms": 148,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "data",
+   "success",
+   "message"
+  ],
+  "list_path": "",
+  "list_len": 0,
+  "item_keys": [],
+  "date_range": null,
+  "empty_values": 1
+ },
+ {
+  "name": "max-pain-chart",
+  "url": "https://priceapi.moneycontrol.com/technicalCompanyData/oiData/max-pain-chart?scId=in;NSX&expiry=2026-11-23&assetType=I&count=31&deviceType=W",
+  "status": 200,
+  "bytes": 4337,
+  "latency_ms": 191,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "status",
+   "message",
+   "data"
+  ],
+  "list_path": ".data.list",
+  "list_len": 31,
+  "item_keys": [
+   "strikePrice",
+   "callOi",
+   "putOi",
+   "callPain",
+   "putPain",
+   "totalPain"
+  ],
+  "date_range": null,
+  "empty_values": 1
+ },
+ {
+  "name": "stock/search",
+  "url": "https://api.moneycontrol.com/mcapi/v1/stock/search?type=fno&query=NIFTY%2050",
+  "status": 200,
+  "bytes": 153,
+  "latency_ms": 166,
+  "ctype": "application/json; charset=utf-8",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "data"
+  ],
+  "list_path": ".data",
+  "list_len": 1,
+  "item_keys": [
+   "id",
+   "short_name",
+   "full_name",
+   "did",
+   "exchange",
+   "marketcap",
+   "assetType",
+   "symbol"
+  ],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "ipo/calendar-data",
+  "url": "https://api.moneycontrol.com/mcapi/v1/ipo/calendar-data",
+  "status": 200,
+  "bytes": 6169,
+  "latency_ms": 107,
+  "ctype": "application/json; charset=utf-8",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "data"
+  ],
+  "list_path": ".data.list",
+  "list_len": 18,
+  "item_keys": [
+   "date",
+   "type",
+   "company_name",
+   "color_code",
+   "open_date",
+   "close_date",
+   "allotment_date",
+   "refund_date",
+   "credit_to_demat_date",
+   "listing_date",
+   "sc_did",
+   "url"
+  ],
+  "date_range": [
+   "2026-18-11",
+   "2026-27-11"
+  ],
+  "empty_values": 0
+ },
+ {
+  "name": "economic-widget",
+  "url": "https://www.moneycontrol.com/economic-widget?duration=T&startDate=&endDate=&impact=&country=&deviceType=web&classic=true",
+  "status": 200,
+  "bytes": 311022,
+  "latency_ms": 543,
+  "ctype": "text/html; charset=utf-8",
+  "format": "HTML",
+  "text_sample": " Thursday, November 19, 2026 .research_box .a { fill: #999; } --> Time Country .research_box .a { fill: #999; } .acls{fill:none;stroke:#555657;stroke-linecap:round;stroke-width:1.5px;} Impact Actual Previous Consensus Trend Country Full Name 00:05 USA Fed Barr Speech showImpactStar(\"252_0_0\",'2') - "
+ },
+ {
+  "name": "get-indicator-details",
+  "url": "https://api.moneycontrol.com/mcapi/v1/ecalendar/get-indicator-details?country=India&category=Major%20Indicators",
+  "status": 200,
+  "bytes": 2621,
+  "latency_ms": 150,
+  "ctype": "application/json; charset=utf-8",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "data"
+  ],
+  "list_path": ".data.tableData",
+  "list_len": 17,
+  "item_keys": [],
+  "date_range": [
+   "2024-08-31",
+   "2026-12-31"
+  ],
+  "empty_values": 68
+ },
+ {
+  "name": "commodityindex",
+  "url": "https://priceapi.moneycontrol.com/pricefeed/mcx/commodityindex/MCXENRGDEX",
+  "status": 200,
+  "bytes": 331,
+  "latency_ms": 138,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "code",
+   "message",
+   "data"
+  ],
+  "list_path": "",
+  "list_len": 0,
+  "item_keys": [],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "etf/getListingData",
+  "url": "https://priceapi.moneycontrol.com/technicalCompanyData/etf/getListingData?category=Bullion&subCategory=Gold&deviceType=W&limit=500",
+  "status": 200,
+  "bytes": 7790,
+  "latency_ms": 95,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "response",
+   "data",
+   "sortByKeys"
+  ],
+  "list_path": ".data[0].list",
+  "list_len": 18,
+  "item_keys": [
+   "scId",
+   "fullName",
+   "name",
+   "price",
+   "netChange",
+   "perChange",
+   "ltt",
+   "volume",
+   "value",
+   "category",
+   "subCategory",
+   "isinID",
+   "exchange",
+   "returns3yrs",
+   "returns5yrs",
+   "returns10yrs",
+   "trackingError",
+   "expenseRatio",
+   "aumInCrs",
+   "returns1yr"
+  ],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "getMajorCommodities",
+  "url": "https://priceapi.moneycontrol.com/technicalCompanyData/commodity/getMajorCommodities?tabName=MCX&deviceType=W",
+  "status": 200,
+  "bytes": 1447,
+  "latency_ms": 154,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "response",
+   "data",
+   "tabs"
+  ],
+  "list_path": ".data.list",
+  "list_len": 6,
+  "item_keys": [
+   "symbol",
+   "lastPrice",
+   "priceChange",
+   "priceChangePercentage",
+   "expDate"
+  ],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "commodity/getMarketStats",
+  "url": "https://priceapi.moneycontrol.com/technicalCompanyData/commodity/getMarketStats?category=bullion&view=overview&deviceType=W",
+  "status": 200,
+  "bytes": 960,
+  "latency_ms": 60,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "response",
+   "data"
+  ],
+  "list_path": ".data.header",
+  "list_len": 11,
+  "item_keys": [
+   "name",
+   "type"
+  ],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "commodity/abValue",
+  "url": "https://priceapi.moneycontrol.com/technicalCompanyData/commodity/abValue?category=bullion&deviceType=W",
+  "status": 200,
+  "bytes": 1265,
+  "latency_ms": 86,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "response",
+   "data"
+  ],
+  "list_path": ".data.list",
+  "list_len": 4,
+  "item_keys": [
+   "symbol",
+   "expiry",
+   "lastPrice",
+   "priceChange",
+   "priceChangePer",
+   "value",
+   "volume",
+   "openInt",
+   "openIntChg",
+   "openIntChgPer",
+   "category",
+   "exchange",
+   "openIntChgPerAsDouble"
+  ],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "getGlobalCurrencyRates",
+  "url": "https://api.moneycontrol.com/mcapi/v1/currency/getGlobalCurrencyRates",
+  "status": 200,
+  "bytes": 1404,
+  "latency_ms": 78,
+  "ctype": "application/json; charset=utf-8",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "data"
+  ],
+  "list_path": ".data.headers",
+  "list_len": 10,
+  "item_keys": [],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "usMarket/currency",
+  "url": "https://priceapi.moneycontrol.com/pricefeed/usMarket/currency/DXY:CUR",
+  "status": 200,
+  "bytes": 846,
+  "latency_ms": 56,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "code",
+   "message",
+   "data"
+  ],
+  "list_path": "",
+  "list_len": 0,
+  "item_keys": [],
+  "date_range": [
+   "2026-11-19",
+   "2026-11-19"
+  ],
+  "empty_values": 0
+ },
+ {
+  "name": "currencyfuture",
+  "url": "https://priceapi.moneycontrol.com/pricefeed/nse/currencyfuture/EURINR?expiry=2026-11-26",
+  "status": 200,
+  "bytes": 655,
+  "latency_ms": 115,
+  "ctype": "application/json",
+  "format": "JSON",
+  "top_keys": [
+   "code",
+   "message",
+   "data"
+  ],
+  "list_path": "",
+  "list_len": 0,
+  "item_keys": [],
+  "date_range": [
+   "2026-11-19",
+   "2026-11-26"
+  ],
+  "empty_values": 0
+ },
+ {
+  "name": "bonds/list",
+  "url": "https://api.moneycontrol.com/mcapi/v1/bonds/list?cat=corporate-bonds&ip_freq=&credit_rating=&yeild=0.00_100.00&dur=2026%2F11%2F19_2080%2F11%2F19",
+  "status": 200,
+  "bytes": 31723,
+  "latency_ms": 135,
+  "ctype": "application/json; charset=utf-8",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "data"
+  ],
+  "list_path": ".data",
+  "list_len": 42,
+  "item_keys": [
+   "bond_name",
+   "issuer_name",
+   "issue_date",
+   "price",
+   "yield",
+   "maturity",
+   "secured",
+   "rating",
+   "ip_frequency",
+   "coupon_rate",
+   "url",
+   "tfi_redirect_url"
+  ],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "market-terminal/category",
+  "url": "https://api.moneycontrol.com/mcapi/v1/indices/market-terminal/category?ex=N",
+  "status": 200,
+  "bytes": 10221,
+  "latency_ms": 188,
+  "ctype": "application/json; charset=utf-8",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "data"
+  ],
+  "list_path": ".data[1].list",
+  "list_len": 22,
+  "item_keys": [
+   "indexId",
+   "name",
+   "seoUrl",
+   "slug",
+   "symbol"
+  ],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "news/indices",
+  "url": "https://api.moneycontrol.com/mcapi/v1/news/indices",
+  "status": 200,
+  "bytes": 1827,
+  "latency_ms": 433,
+  "ctype": "application/json; charset=utf-8",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "data"
+  ],
+  "list_path": ".data.newsData",
+  "list_len": 4,
+  "item_keys": [
+   "weburl",
+   "headline",
+   "image",
+   "updatedDate"
+  ],
+  "date_range": null,
+  "empty_values": 0
+ },
+ {
+  "name": "getAllIndexContribution",
+  "url": "https://api.moneycontrol.com/mcapi/v1/indices/getAllIndexContribution?ex=N&fromDate=2026-11-18&toDate=2026-11-19&deviceType=W&indexIds=9,23,27,6,28,49,7,53,31,113,36,136",
+  "status": 200,
+  "bytes": 2726,
+  "latency_ms": 892,
+  "ctype": "application/json; charset=utf-8",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "message",
+   "data"
+  ],
+  "list_path": ".data.list",
+  "list_len": 11,
+  "item_keys": [
+   "indexId",
+   "bridgesymbol",
+   "index_name",
+   "ltp",
+   "change",
+   "perChange",
+   "slug",
+   "positive_contri",
+   "negative_contri",
+   "net_contri"
+  ],
+  "date_range": null,
+  "empty_values": 2
+ },
+ {
+  "name": "broker-research/stock-ideas",
+  "url": "https://api.moneycontrol.com/mcapi/v1/broker-research/stock-ideas?start=0&limit=24&deviceType=W",
+  "status": 200,
+  "bytes": 24781,
+  "latency_ms": 452,
+  "ctype": "application/json; charset=utf-8",
+  "format": "JSON",
+  "top_keys": [
+   "success",
+   "data"
+  ],
+  "list_path": ".data",
+  "list_len": 24,
+  "item_keys": [
+   "id",
+   "organization",
+   "entry_date",
+   "heading",
+   "attachment",
+   "creation_date",
+   "recommend_date",
+   "target_price_date",
+   "target_price_date_epoch",
+   "target_price",
+   "recommended_price",
+   "scid",
+   "stkname",
+   "stockShortName",
+   "cmp",
+   "change",
+   "perChange",
+   "current_returns",
+   "potential_returns_per",
+   "exchange",
+   "recommended_price_falg",
+   "target_price_flag",
+   "stock_data",
+   "stk_url",
+   "recommend_flag"
+  ],
+  "date_range": [
+   "2026-11-16",
+   "2026-11-19"
+  ],
+  "empty_values": 0
+ },
+ {
+  "name": "marketturnover/tabs",
+  "url": "https://api.moneycontrol.com/swiftapi/v1/marketturnover/tabs",
+  "status": 200,
+  "bytes": 255,
+  "latency_ms": 108,
+  "ctype": "application/x-protobuf",
+  "format": "HTML",
+  "text_sample": "\b\u0001\u0012\u0019Data fetched successfully\u001a\ufffd\u0001 F \u0004Cash\u0010\u0001\u001a<https://api.moneycontrol.com/swiftapi/v1/marketturnover/cash D \u0003F&O\u0010\u0002\u001a;https://api.moneycontrol.com/swiftapi/v1/marketturnover/fno O Cash & F&O\u0010\u0003\u001a?https://api.moneycontrol.com/swiftapi/v1/marketturnover/cashFno"
+ }
+]

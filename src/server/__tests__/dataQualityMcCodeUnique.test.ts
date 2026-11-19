@@ -17,3 +17,19 @@ describe('nse-stocks-mcsymbol-unique', () => {
     expect(check.evaluate({ shared: 0, codes: '' }, new Date()).status).toBe('pass');
   });
 });
+
+// AF-20261119-11: three Trendlyne ids (2668, 220, 2492906) were carried by two active stocks each.
+describe('nse-stocks-tlid-unique', () => {
+  const check = DATA_QUALITY_CHECKS.find((c) => c.id === 'nse-stocks-tlid-unique')!;
+
+  it('exists and fails when an active tlid is shared', () => {
+    expect(check).toBeDefined();
+    const r = check.evaluate({ shared: 3, ids: '220, 2492906, 2668' }, new Date());
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('2668');
+  });
+
+  it('passes when no tlid is shared', () => {
+    expect(check.evaluate({ shared: 0, ids: '' }, new Date()).status).toBe('pass');
+  });
+});

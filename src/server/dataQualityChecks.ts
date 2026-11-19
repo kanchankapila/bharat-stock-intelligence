@@ -2526,6 +2526,29 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'nse-stocks-tlid-unique',
+    label: 'nse_stocks: a Trendlyne id carried by more than one active stock',
+    category: 'reference',
+    critical: false,
+    // AF-20261119-11: LTM (LTIMindtree), BI and UEL inherited Loyal Textile's, Britannia's and Unicommerce's
+    // whole provider-id set because getStockMapping fell through to the MC code; every per-symbol Trendlyne
+    // fetch resolving nse_stocks.tlid then wrote the other company's data under them.
+    sql: `SELECT COUNT(*) AS shared, COALESCE(string_agg(tlid, ', ' ORDER BY tlid), '') AS ids
+          FROM (SELECT trim(tlid) AS tlid FROM nse_stocks
+                WHERE status = 'ACTIVE' AND trim(COALESCE(tlid, '')) <> ''
+                GROUP BY 1 HAVING COUNT(DISTINCT symbol) > 1) s`,
+    evaluate: (row) => {
+      const n = Number(row?.shared) || 0;
+      if (n > 0) return {
+        status: 'fail',
+        detail: `${n} Trendlyne id(s) shared by several active stocks (${String(row?.ids).slice(0, 200)}); `
+          + `per-symbol Trendlyne fetchers write one company's data under another. The owner is the row whose `
+          + `symbol Trendlyne's screener rows return as NSEcode for that stock_id; clear the others`,
+      };
+      return { status: 'pass', detail: '0 Trendlyne ids shared by more than one active stock' };
+    },
+  },
+  {
     id: 'unified-recommendations-liquid-coverage',
     label: 'unified_recommendations coverage of the liquid (>=Rs 1cr ADT) universe',
     category: 'scoring',
