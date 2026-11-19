@@ -110,3 +110,20 @@ test('fetchTrendlyneScreenerData takes the symbol from the NSEcode column', asyn
     fetchSpy.mockRestore();
   }
 });
+
+test('a canonically mapped id keeps our symbol when Trendlyne\'s NSEcode differs (LTM vs LTIM)', async () => {
+  const { fetchTrendlyneScreenerData } = await import('../trendlyneScreener');
+  const { getStockMappingByTLId } = await import('../stockMapping');
+  vi.mocked(getStockMappingByTLId).mockImplementation((id: string) => (id === '4596' ? { symbol: 'LTIM' } as any : undefined));
+  const headers = ['get_full_name', 'NSEcode', 'stock_id'].map(unique_name => ({ unique_name }));
+  const body = { head: { status: '0' }, body: { screenObj: { title: 'X' }, tableHeaders: headers,
+    tableData: [['LTIMindtree Ltd.', 'LTM', 4596]] } };
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+  try {
+    const res = await fetchTrendlyneScreenerData('1', 'X', 0, true);
+    expect(res.data[0].symbol).toBe('LTIM');
+  } finally {
+    fetchSpy.mockRestore();
+    vi.mocked(getStockMappingByTLId).mockReturnValue(undefined);
+  }
+});

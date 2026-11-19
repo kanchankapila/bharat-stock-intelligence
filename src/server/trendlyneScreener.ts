@@ -150,8 +150,9 @@ export async function saveScreenerToDB(
   }
 }
 
-/** The row's own NSE symbol (Trendlyne's NSEcode) first; the stocklist lookup covers only 2,000
- * names and left 40,196 of 81,488 membership rows with a NULL symbol (AF-20261119-04). */
+/** The symbol fetchTrendlyneScreenerData resolved (canonical mapping, else the row's NSEcode);
+ * a bare stocklist lookup covers only 2,000 names and left 40,196 of 81,488 membership rows with
+ * a NULL symbol (AF-20261119-04). */
 function rowSymbol(stock: { stockId: string; symbol?: string }): string | null {
   return stock.symbol || getStockMapping(stock.stockId)?.symbol || null;
 }
@@ -634,13 +635,14 @@ export async function fetchTrendlyneScreenerData(
         if (!mapping) {
           mapping = getStockMappingByName(fullName);
         }
-        // The row's own NSE symbol beats the 2,000-name stocklist lookup (AF-20261119-04).
+        // Canonical mapping first (Trendlyne's NSEcode can lag or lead a rename: LTM vs our LTIM);
+        // the row's own NSEcode covers the ids the 2,000-name stocklist lacks (AF-20261119-04).
         const nseCode = nseIndex !== -1 ? String(row[nseIndex] ?? '').trim().toUpperCase() : '';
 
         stocks.push({
           stockId: tlId,
           name: fullName,
-          symbol: /^[A-Z0-9&-]{1,20}$/.test(nseCode) ? nseCode : mapping?.symbol,
+          symbol: mapping?.symbol ?? (/^[A-Z0-9&-]{1,20}$/.test(nseCode) ? nseCode : undefined),
           ltp: parseFloat(row[priceIndex] || 0),
           change: changeIndex !== -1 ? parseFloat(row[changeIndex] || 0) : 0,
           changePercent: changePctIndex !== -1 ? parseFloat(row[changePctIndex] || 0) : 0,
