@@ -117,12 +117,13 @@ describe('repo-doctor secret hygiene', () => {
     expect(source).toContain("bot_token=${hasTok ? 'configured' : 'missing'}");
   });
 
-  it('keeps the Trendlyne fan-out lifecycle in the consolidated doctor', () => {
+  it('keeps the Trendlyne bulk-sweep lifecycle in the consolidated doctor', () => {
     const source = fs.readFileSync(new URL('./doctor.mjs', import.meta.url), 'utf8');
     expect(source).toContain("check('trendlyne-fanout-heartbeat'");
-    expect(source).toContain("queuesSource.includes('settleTrendlyneBatch('");
-    expect(source).toContain('trendlyneGraceMinutes >= 12 * 60');
-    expect(source).toContain("batchSource.includes('missing batch state for')");
+    expect(source).toContain("queuesSource.includes('runTrendlyneMetricsBulkFetch('");
+    expect(source).toContain("queuesSource.includes('legacy child'");
+    expect(source).toContain("!queuesSource.includes('enqueueTrendlyneMetricsFetchJobs('");
+    expect(source).toContain('trendlyneGraceMinutes >= 30');
   });
 });
 
