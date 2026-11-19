@@ -9,13 +9,13 @@ table, and which external standard it aligns to.
 
 | | |
 |---|---|
-| Classes | 59 |
-| Properties | 311 |
-| Data cards (tables) | 68 |
-| Column bindings | 757 |
+| Classes | 61 |
+| Properties | 314 |
+| Data cards (tables) | 70 |
+| Column bindings | 780 |
 | Typed relations | 39 |
 | Executable metrics | 18 |
-| Controlled vocabularies | 33 (153 terms) |
+| Controlled vocabularies | 35 (160 terms) |
 
 ## How to use it
 
@@ -98,6 +98,8 @@ flowchart LR
     OptionChainRow["Option chain row<br/>so_option_chain"]
     FuturesPositioning["Futures positioning<br/>stock_futures_oi_history, fno_rollover"]
     IndexDerivativesSnapshot["Index derivatives snapshot<br/>index_max_pain, nt_index_pcr_ts"]
+    ParticipantPositioning["F&O participant positioning<br/>nse_participant_positions"]
+    TradabilityConstraint["Tradability constraint<br/>nse_fo_ban_list"]
     MoverSnapshot["Mover snapshot<br/>mover_snapshots"]
   end
   subgraph context["Market context & regime"]
@@ -166,6 +168,8 @@ flowchart LR
   OptionChainRow -.->|subclass| Observation
   FuturesPositioning -.->|subclass| Observation
   IndexDerivativesSnapshot -.->|subclass| Observation
+  ParticipantPositioning -.->|subclass| Observation
+  TradabilityConstraint -.->|subclass| Observation
   MoverSnapshot -.->|subclass| Observation
   FeatureVector -.->|subclass| PlatformOutput
   TechnicalSignal -.->|subclass| PlatformOutput
@@ -247,6 +251,8 @@ flowchart LR
   tbl_news_symbol_link["news_symbol_link"]:::tbl -.-> NewsItem
   tbl_so_option_chain["so_option_chain"]:::tbl -.-> OptionChainRow
   tbl_stock_futures_oi_history["stock_futures_oi_history"]:::tbl -.-> FuturesPositioning
+  tbl_nse_participant_positions["nse_participant_positions"]:::tbl -.-> ParticipantPositioning
+  tbl_nse_fo_ban_list["nse_fo_ban_list"]:::tbl -.-> TradabilityConstraint
   tbl_fno_rollover["fno_rollover"]:::tbl -.-> FuturesPositioning
   tbl_index_max_pain["index_max_pain"]:::tbl -.-> IndexDerivativesSnapshot
   tbl_nt_index_pcr_ts["nt_index_pcr_ts"]:::tbl -.-> IndexDerivativesSnapshot
@@ -536,7 +542,7 @@ Stock-futures open interest, buildup label, rollover percentage, basis and cost 
 - **Key**: `symbol`, `date`, `expiry`
 - **Subclass of**: `Observation`
 - **Realized by**: `stock_futures_oi_history`, `fno_rollover`
-- **Caveat**: LOW-DATA: the stock-futures panel covers roughly two weeks of dates. Any 'measured' claim built on it is a calendar artefact, not an edge — this is the specific finding the master report's LOW-DATA verdict records.
+- **Caveat**: Graded: basis and every OI column read no edge by 2026-10-04 on the MoneyControl near-month panel. Exchange history back to 2021 now exists (stock_futures_eod_history, AF-20261113-03); the pre-registered all-expiry re-test is AF-20261119-09. Near-month OI is distorted at each monthly roll.
 
 #### `IndexDerivativesSnapshot` — Index derivatives snapshot
 
@@ -547,6 +553,28 @@ Index-level positioning: PCR (single-strike time series and EOD), max pain, and 
 - **Subclass of**: `Observation`
 - **Realized by**: `index_max_pain`, `nt_index_pcr_ts`
 - **Caveat**: The index panel is far deeper than the stock panel but remains ungraded as a standalone signal — treated here as a research candidate.
+
+#### `ParticipantPositioning` — F&O participant positioning
+
+End-of-day equity-derivative positions (or traded volume) of FII, DII, Pro and Client participants by instrument class, from NSE's participant-wise files.
+
+- **Grain**: (date, participant_measure, participant_type)
+- **Key**: `date`, `participant_measure`, `participant_type`
+- **Subclass of**: `Observation`
+- **Realized by**: `nse_participant_positions`
+- **Caveat**: Market-wide: one value per participant per day, identical for every stock. Use as regime or timing context; it has no cross-section to rank stocks on.
+- **Caveat**: Ungraded: no measurement yet (AF-20261119-19).
+
+#### `TradabilityConstraint` — Tradability constraint
+
+An exchange restriction on a symbol for a session, e.g. the F&O ban period (open interest above 95% of the market-wide position limit: no new F&O positions).
+
+- **Grain**: (symbol, date)
+- **Key**: `symbol`, `date`
+- **Subclass of**: `Observation`
+- **Realized by**: `nse_fo_ban_list`
+- **Caveat**: A constraint, not a signal: it says what cannot be done, not what will move.
+- **Caveat**: The ban list is published for the NEXT session; `date` is that trade date.
 
 #### `MoverSnapshot` — Mover snapshot
 
@@ -925,6 +953,8 @@ excluded, and the two are not the same case.
 | `node_type` | dimension | — | context | raw | none | yes | — | 1 |
 | `outcome_status` | dimension | — | context | raw | none | yes | — | 1 |
 | `output_fields` | dimension | — | context | vendor | none | yes | — | 1 |
+| `participant_measure` | dimension | — | context | vendor | none | yes | — | 1 |
+| `participant_type` | dimension | — | context | vendor | none | yes | — | 1 |
 | `predicate` | dimension | — | context | raw | none | yes | — | 2 |
 | `quality_status` | dimension | — | context | raw | none | yes | — | 1 |
 | `relation` | dimension | — | context | raw | none | yes | — | 2 |
@@ -933,7 +963,7 @@ excluded, and the two are not the same case.
 | `semantic_type` | dimension | — | context | raw | none | yes | — | 1 |
 | `series` | dimension | — | context | raw | none | yes | — | 3 |
 | `session` | dimension | — | context | raw | none | yes | — | 1 |
-| `source` | dimension | — | context | raw | none | yes | — | 20 |
+| `source` | dimension | — | context | raw | none | yes | — | 22 |
 | `source_kind` | dimension | — | context | raw | none | yes | — | 1 |
 | `source_table` | dimension | — | context | raw | none | yes | — | 3 |
 | `source_type` | dimension | — | context | raw | none | yes | — | 1 |
@@ -1012,7 +1042,7 @@ excluded, and the two are not the same case.
 | `source_uri` | identifier | — | context | raw | none | NO | — | 1 |
 | `source_version` | identifier | — | context | raw | none | NO | — | 1 |
 | `superseded_by` | identifier | — | context | raw | none | NO | — | 1 |
-| `symbol` | identifier | — | context | raw | none | NO | — | 40 |
+| `symbol` | identifier | — | context | raw | none | NO | — | 41 |
 | `attributes` | json | — | context | platform | none | NO | — | 4 |
 | `candidate_instrument_ids` | json | — | context | platform | none | NO | — | 1 |
 | `content` | json | — | context | platform | none | NO | — | 1 |
@@ -1074,6 +1104,7 @@ excluded, and the two are not the same case.
 | `option_oi_chg_pct` | measure | per_share_INR | coincident | vendor | none | yes | — | 1 |
 | `option_premium` | measure | per_share_INR | coincident | vendor | none | yes | — | 1 |
 | `option_volume` | measure | per_share_INR | coincident | vendor | none | yes | — | 1 |
+| `participant_contracts` | measure | contracts | coincident | vendor | none | yes | — | 1 |
 | `pcr` | measure | ratio | coincident | vendor | none | yes | — | 2 |
 | `pcr_oi` | measure | ratio | coincident | vendor | none | yes | — | 3 |
 | `quantity` | measure | — | coincident | raw | none | yes | — | 2 |
@@ -1171,11 +1202,11 @@ excluded, and the two are not the same case.
 | `check_date` | timestamp | calendar_day | context | raw | high | NO | — | 3 |
 | `computed_at` | timestamp | — | context | raw | none | NO | — | 20 |
 | `created_at` | timestamp | — | context | raw | none | NO | — | 4 |
-| `date` | timestamp | calendar_day | context | raw | none | NO | — | 19 |
+| `date` | timestamp | calendar_day | context | raw | none | NO | — | 21 |
 | `datetime` | timestamp | — | context | raw | none | NO | — | 2 |
 | `ex_date` | timestamp | calendar_day | context | raw | none | NO | — | 1 |
 | `expiry` | timestamp | calendar_day | context | raw | none | NO | — | 6 |
-| `fetched_at` | timestamp | — | context | raw | none | NO | — | 12 |
+| `fetched_at` | timestamp | — | context | raw | none | NO | — | 14 |
 | `first_seen` | timestamp | — | context | raw | none | NO | — | 1 |
 | `generated_at` | timestamp | — | context | raw | none | NO | — | 1 |
 | `input_watermark` | timestamp | — | context | raw | none | NO | — | 1 |
@@ -1949,6 +1980,31 @@ Source: `call_attribution.cause`
 | `SECTOR_DRAG` | Sector drag | Beat its own sector; the sector lagged the universe. | — |
 | `WRONG_PICK` | Wrong pick | Lagged its own sector. | — |
 
+### `fo_participant` (closed) — 5 terms
+
+NSE participant categories in the participant-wise OI and volume files (AF-20261119-19).
+
+Source: `nse_participant_positions.client_type`
+
+| notation | label | definition | broader |
+|---|---|---|---|
+| `CLIENT` | Client | Retail and other non-institutional clients. | — |
+| `DII` | DII | Domestic institutional investors. | — |
+| `FII` | FII | Foreign institutional investors (FPI). | — |
+| `PRO` | Pro | Trading members' proprietary books. | — |
+| `TOTAL` | Total | Exchange total row; long equals short per instrument class. | — |
+
+### `participant_measure` (closed) — 2 terms
+
+Which NSE participant file a row came from.
+
+Source: `nse_participant_positions.kind`
+
+| notation | label | definition | broader |
+|---|---|---|---|
+| `oi` | Open interest | End-of-day open positions. | — |
+| `vol` | Volume | Contracts traded in the session. | — |
+
 ### `option_buildup` (open) — 4 terms
 
 Option-chain buildup label. NOTE the spelling differs from `oi_buildup` ('Build Up' vs 'Buildup') — never compare these strings across tables without normalising first.
@@ -2515,6 +2571,61 @@ Stock-futures open interest, buildup label, rollover percentage, basis and cost 
 | `contracts` | `contracts` | measure | none | yes | — |
 | `futures_volume` | `volume` | measure | none | yes | — |
 | `lot_size` | `lot_size` | measure | none | yes | — |
+| `source` | `source` | dimension | none | yes | — |
+| `fetched_at` | `fetched_at` | timestamp | none | NO | — |
+
+### `nse_participant_positions` — F&O participant positions
+
+NSE participant-wise open interest and volume: FII, DII, Pro and Client long/short contracts in index and stock futures and options, per session.
+
+- **Entity**: `ParticipantPositioning`  ·  **Grain**: (trade_date, kind, client_type)
+- **Primary key**: `trade_date`, `kind`, `client_type`
+- **Cadence**: daily
+- **Freshness column**: `fetched_at` (expected within 4h)
+- **Writers**: `nse_fo_market_positioning_fetcher.py`
+- **Training use**: **caution**
+- **Caveat**: Market-wide (no symbol): a regime/timing input, never a cross-sectional factor. Contracts, not shares or notional.
+- **Caveat**: Served back to 2022-01-03; nightly from 2026-11-19, history only after the one-off backfill (AF-20261119-19). Ungraded.
+
+| column | property | type | leakage | feature? | note |
+|---|---|---|---|---|---|
+| `trade_date` | `date` | timestamp | none | NO | — |
+| `kind` | `participant_measure` | dimension | none | yes | — |
+| `client_type` | `participant_type` | dimension | none | yes | — |
+| `fut_idx_long` | `participant_contracts` | measure | none | yes | fut idx long. |
+| `fut_idx_short` | `participant_contracts` | measure | none | yes | fut idx short. |
+| `fut_stk_long` | `participant_contracts` | measure | none | yes | fut stk long. |
+| `fut_stk_short` | `participant_contracts` | measure | none | yes | fut stk short. |
+| `opt_idx_call_long` | `participant_contracts` | measure | none | yes | opt idx call long. |
+| `opt_idx_put_long` | `participant_contracts` | measure | none | yes | opt idx put long. |
+| `opt_idx_call_short` | `participant_contracts` | measure | none | yes | opt idx call short. |
+| `opt_idx_put_short` | `participant_contracts` | measure | none | yes | opt idx put short. |
+| `opt_stk_call_long` | `participant_contracts` | measure | none | yes | opt stk call long. |
+| `opt_stk_put_long` | `participant_contracts` | measure | none | yes | opt stk put long. |
+| `opt_stk_call_short` | `participant_contracts` | measure | none | yes | opt stk call short. |
+| `opt_stk_put_short` | `participant_contracts` | measure | none | yes | opt stk put short. |
+| `total_long` | `participant_contracts` | measure | none | yes | total long. |
+| `total_short` | `participant_contracts` | measure | none | yes | total short. |
+| `source` | `source` | dimension | none | yes | — |
+| `fetched_at` | `fetched_at` | timestamp | none | NO | — |
+
+### `nse_fo_ban_list` — F&O ban list
+
+Securities in the F&O ban period for a trade date (open interest above 95% of the market-wide position limit).
+
+- **Entity**: `TradabilityConstraint`  ·  **Grain**: (trade_date, symbol)
+- **Primary key**: `trade_date`, `symbol`
+- **Cadence**: daily
+- **Freshness column**: `fetched_at`
+- **Writers**: `nse_fo_market_positioning_fetcher.py`
+- **Training use**: **context**
+- **Caveat**: `trade_date` is the NEXT session the ban applies to, taken from the file.
+- **Caveat**: No row on a day nothing is banned; history exists only from 2026-11-19 because NSE serves only the current file.
+
+| column | property | type | leakage | feature? | note |
+|---|---|---|---|---|---|
+| `trade_date` | `date` | timestamp | none | NO | The session the ban applies to. |
+| `symbol` | `symbol` | identifier | none | NO | — |
 | `source` | `source` | dimension | none | yes | — |
 | `fetched_at` | `fetched_at` | timestamp | none | NO | — |
 

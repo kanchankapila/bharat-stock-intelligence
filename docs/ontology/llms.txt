@@ -1,6 +1,6 @@
 # Bharat Stock Intelligence — Market Knowledge Graph
 
-> A semantic layer over the `bharat_intel` Postgres database: 59 entity classes, 311 semantic properties, 68 table data cards, 39 typed relations, 18 executable metrics and 33 controlled vocabularies. Every fact here is generated from `src/server/ontology/definitions/`, which validates against the live schema.
+> A semantic layer over the `bharat_intel` Postgres database: 61 entity classes, 314 semantic properties, 70 table data cards, 39 typed relations, 18 executable metrics and 35 controlled vocabularies. Every fact here is generated from `src/server/ontology/definitions/`, which validates against the live schema.
 
 ## Guardrails (read before using any column as a feature)
 
@@ -55,6 +55,8 @@
 - **OptionChainRow** (Option chain row): One strike, one expiry, one session: call and put leg premium, volume, open interest, IV and greeks. A grid, not a time series. — `so_option_chain`
 - **FuturesPositioning** (Futures positioning): Stock-futures open interest, buildup label, rollover percentage, basis and cost of carry for one expiry and session. — `stock_futures_oi_history, fno_rollover`
 - **IndexDerivativesSnapshot** (Index derivatives snapshot): Index-level positioning: PCR (single-strike time series and EOD), max pain, and aggregate call/put open interest. — `index_max_pain, nt_index_pcr_ts`
+- **ParticipantPositioning** (F&O participant positioning): End-of-day equity-derivative positions (or traded volume) of FII, DII, Pro and Client participants by instrument class, from NSE's participant-wise files. — `nse_participant_positions`
+- **TradabilityConstraint** (Tradability constraint): An exchange restriction on a symbol for a session, e.g. the F&O ban period (open interest above 95% of the market-wide position limit: no new F&O positions). — `nse_fo_ban_list`
 - **MoverSnapshot** (Mover snapshot): A ranked intraday mover list entry from a vendor feed: the platform's within-day event backbone alongside the event triggers. — `mover_snapshots`
 
 ### Market context & regime

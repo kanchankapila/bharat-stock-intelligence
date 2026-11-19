@@ -1687,6 +1687,113 @@ _:IndexDerivativesSnapshot_close_prop     sh:path bsip:close ;
     sh:order "11"^^xsd:integer ;
     bsi:unit "per_share_INR" .
 
+bsi:ParticipantPositioningShape     rdf:type sh:NodeShape ;
+    sh:targetClass bsi:ParticipantPositioning ;
+    sh:name "F&O participant positioning" ;
+    sh:description "End-of-day equity-derivative positions (or traded volume) of FII, DII, Pro and Client participants by instrument class, from NSE's participant-wise files." ;
+    bsi:grain "(date, participant_measure, participant_type)" ;
+    sh:property _:ParticipantPositioning_date_prop, _:ParticipantPositioning_participant_measure_prop, _:ParticipantPositioning_participant_type_prop, _:ParticipantPositioning_participant_contracts_prop, _:ParticipantPositioning_source_prop, _:ParticipantPositioning_fetched_at_prop .
+
+_:ParticipantPositioning_date_prop     sh:path bsip:date ;
+    sh:name "Date" ;
+    sh:description "Trading-session date. Day cuts are Asia/Kolkata: a date column is a session, not a midnight-to-midnight instant." ;
+    sh:datatype xsd:date ;
+    sh:order "1"^^xsd:integer ;
+    sh:minCount "1"^^xsd:integer ;
+    bsi:unit "calendar_day" .
+
+_:ParticipantPositioning_participant_measure_prop     sh:path bsip:participant_measure ;
+    sh:name "Participant file kind" ;
+    sh:description "Which NSE participant file a row comes from: end-of-day open interest or the session's traded volume." ;
+    sh:datatype xsd:string ;
+    sh:order "2"^^xsd:integer ;
+    sh:minCount "1"^^xsd:integer ;
+    bsi:vocabulary bsiv:participant_measure ;
+    sh:in _:ParticipantPositioning_participant_measure_in0 .
+
+_:ParticipantPositioning_participant_measure_in0     rdf:first "oi" ;
+    rdf:rest _:ParticipantPositioning_participant_measure_in1 .
+
+_:ParticipantPositioning_participant_measure_in1     rdf:first "vol" ;
+    rdf:rest rdf:nil .
+
+_:ParticipantPositioning_participant_type_prop     sh:path bsip:participant_type ;
+    sh:name "F&O participant category" ;
+    sh:description "NSE's participant split of equity-derivative positions: Client, DII, FII, Pro, plus the exchange TOTAL row." ;
+    sh:datatype xsd:string ;
+    sh:order "3"^^xsd:integer ;
+    sh:minCount "1"^^xsd:integer ;
+    bsi:vocabulary bsiv:fo_participant ;
+    sh:in _:ParticipantPositioning_participant_type_in0 .
+
+_:ParticipantPositioning_participant_type_in0     rdf:first "CLIENT" ;
+    rdf:rest _:ParticipantPositioning_participant_type_in1 .
+
+_:ParticipantPositioning_participant_type_in1     rdf:first "DII" ;
+    rdf:rest _:ParticipantPositioning_participant_type_in2 .
+
+_:ParticipantPositioning_participant_type_in2     rdf:first "FII" ;
+    rdf:rest _:ParticipantPositioning_participant_type_in3 .
+
+_:ParticipantPositioning_participant_type_in3     rdf:first "PRO" ;
+    rdf:rest _:ParticipantPositioning_participant_type_in4 .
+
+_:ParticipantPositioning_participant_type_in4     rdf:first "TOTAL" ;
+    rdf:rest rdf:nil .
+
+_:ParticipantPositioning_participant_contracts_prop     sh:path bsip:participant_contracts ;
+    sh:name "Participant position (contracts)" ;
+    sh:description "Contracts held long or short (OI file) or traded (volume file) by one participant category in one instrument class. Market-wide: the same value for every stock on a date, so it is a regime/timing input, never a cross-sectional factor. NSE's TOTAL can differ from the participant sum by a contract." ;
+    sh:datatype xsd:decimal ;
+    sh:order "4"^^xsd:integer ;
+    bsi:unit "contracts" .
+
+_:ParticipantPositioning_source_prop     sh:path bsip:source ;
+    sh:name "Source" ;
+    sh:description "Which provider or fetcher wrote the row. Provenance is per-row on this platform, so this is the first column to check before trusting a value." ;
+    sh:datatype xsd:string ;
+    sh:order "5"^^xsd:integer .
+
+_:ParticipantPositioning_fetched_at_prop     sh:path bsip:fetched_at ;
+    sh:name "Fetched at" ;
+    sh:description "When the provider response was received — distinct from the date the observation refers to." ;
+    sh:datatype xsd:dateTime ;
+    sh:order "6"^^xsd:integer .
+
+bsi:TradabilityConstraintShape     rdf:type sh:NodeShape ;
+    sh:targetClass bsi:TradabilityConstraint ;
+    sh:name "Tradability constraint" ;
+    sh:description "An exchange restriction on a symbol for a session, e.g. the F&O ban period (open interest above 95% of the market-wide position limit: no new F&O positions)." ;
+    bsi:grain "(symbol, date)" ;
+    sh:property _:TradabilityConstraint_date_prop, _:TradabilityConstraint_symbol_prop, _:TradabilityConstraint_source_prop, _:TradabilityConstraint_fetched_at_prop .
+
+_:TradabilityConstraint_date_prop     sh:path bsip:date ;
+    sh:name "Date" ;
+    sh:description "Trading-session date. Day cuts are Asia/Kolkata: a date column is a session, not a midnight-to-midnight instant." ;
+    sh:datatype xsd:date ;
+    sh:order "1"^^xsd:integer ;
+    sh:minCount "1"^^xsd:integer ;
+    bsi:unit "calendar_day" .
+
+_:TradabilityConstraint_symbol_prop     sh:path bsip:symbol ;
+    sh:name "Symbol" ;
+    sh:description "Exchange ticker, NSE/BSE convention embedded in the string. The platform's universal join key across ~40 tables." ;
+    sh:datatype xsd:string ;
+    sh:order "2"^^xsd:integer ;
+    sh:minCount "1"^^xsd:integer .
+
+_:TradabilityConstraint_source_prop     sh:path bsip:source ;
+    sh:name "Source" ;
+    sh:description "Which provider or fetcher wrote the row. Provenance is per-row on this platform, so this is the first column to check before trusting a value." ;
+    sh:datatype xsd:string ;
+    sh:order "3"^^xsd:integer .
+
+_:TradabilityConstraint_fetched_at_prop     sh:path bsip:fetched_at ;
+    sh:name "Fetched at" ;
+    sh:description "When the provider response was received — distinct from the date the observation refers to." ;
+    sh:datatype xsd:dateTime ;
+    sh:order "4"^^xsd:integer .
+
 bsi:MoverSnapshotShape     rdf:type sh:NodeShape ;
     sh:targetClass bsi:MoverSnapshot ;
     sh:name "Mover snapshot" ;
@@ -5609,6 +5716,103 @@ bsis:stock_futures_oi_history.source     rdf:type sh:NodeShape ;
 
 bsis:stock_futures_oi_history.fetched_at     rdf:type sh:NodeShape ;
     sh:targetNode bsis:stock_futures_oi_history.fetched_at ;
+    sh:path bsip:fetched_at .
+
+bsis:nse_participant_positions.trade_date     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.trade_date ;
+    sh:path bsip:date ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:nse_participant_positions.kind     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.kind ;
+    sh:path bsip:participant_measure ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:nse_participant_positions.client_type     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.client_type ;
+    sh:path bsip:participant_type ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:nse_participant_positions.fut_idx_long     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.fut_idx_long ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.fut_idx_short     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.fut_idx_short ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.fut_stk_long     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.fut_stk_long ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.fut_stk_short     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.fut_stk_short ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.opt_idx_call_long     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.opt_idx_call_long ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.opt_idx_put_long     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.opt_idx_put_long ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.opt_idx_call_short     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.opt_idx_call_short ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.opt_idx_put_short     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.opt_idx_put_short ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.opt_stk_call_long     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.opt_stk_call_long ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.opt_stk_put_long     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.opt_stk_put_long ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.opt_stk_call_short     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.opt_stk_call_short ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.opt_stk_put_short     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.opt_stk_put_short ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.total_long     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.total_long ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.total_short     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.total_short ;
+    sh:path bsip:participant_contracts .
+
+bsis:nse_participant_positions.source     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.source ;
+    sh:path bsip:source .
+
+bsis:nse_participant_positions.fetched_at     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_participant_positions.fetched_at ;
+    sh:path bsip:fetched_at .
+
+bsis:nse_fo_ban_list.trade_date     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_fo_ban_list.trade_date ;
+    sh:path bsip:date ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:nse_fo_ban_list.symbol     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_fo_ban_list.symbol ;
+    sh:path bsip:symbol ;
+    sh:minCount "1"^^xsd:integer .
+
+bsis:nse_fo_ban_list.source     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_fo_ban_list.source ;
+    sh:path bsip:source .
+
+bsis:nse_fo_ban_list.fetched_at     rdf:type sh:NodeShape ;
+    sh:targetNode bsis:nse_fo_ban_list.fetched_at ;
     sh:path bsip:fetched_at .
 
 bsis:fno_rollover.symbol     rdf:type sh:NodeShape ;

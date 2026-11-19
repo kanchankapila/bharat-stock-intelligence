@@ -670,6 +670,23 @@ def _groups() -> Tuple[Tuple[Dict, list], ...]:
         (_g("enum", "string", "context", "vendor", vocabulary="option_buildup"), [
             ("option_buildup", "Option buildup", "Leg-level positioning label."),
         ]),
+        (_g("dimension", "string", "context", "vendor", vocabulary="fo_participant"), [
+            ("participant_type", "F&O participant category",
+             "NSE's participant split of equity-derivative positions: Client, DII, FII, Pro, plus "
+             "the exchange TOTAL row."),
+        ]),
+        (_g("dimension", "string", "context", "vendor", vocabulary="participant_measure"), [
+            ("participant_measure", "Participant file kind",
+             "Which NSE participant file a row comes from: end-of-day open interest or the "
+             "session's traded volume."),
+        ]),
+        (_g("measure", "decimal", "coincident", "vendor", unit="contracts"), [
+            ("participant_contracts", "Participant position (contracts)",
+             "Contracts held long or short (OI file) or traded (volume file) by one participant "
+             "category in one instrument class. Market-wide: the same value for every stock on a "
+             "date, so it is a regime/timing input, never a cross-sectional factor. NSE's TOTAL "
+             "can differ from the participant sum by a contract."),
+        ]),
     )
 
 

@@ -484,7 +484,7 @@ python src/server/feature_engineering.py --lookback 252
 | RL | `rl_q_table`, `rl_episodes` |
 | Market Data | `stock_scores`, `stock_factor_breakdown`, `quant_scores`, `market_regimes`, `market_sentiment_snapshots` |
 | Macro | `macro_asset_prices`, `macro_indicators`, `fii_dii_flow` |
-| Options / F&O | `stock_options_oi`, `intraday_ohlcv`, `stock_futures_oi_history` (long/short buildup, rollover, basis) |
+| Options / F&O | `stock_options_oi`, `intraday_ohlcv`, `stock_futures_oi_history` (long/short buildup, rollover, basis), `stock_futures_eod_history` / `stock_option_features_history` (exchange F&O bhavcopy, 2021+, nightly), `nse_participant_positions` (FII/DII/Pro/Client OI and volume), `nse_fo_ban_list` (F&O ban period) |
 | News | `news_articles`, `news_sentiment_items` |
 | Events | `block_deals`, `bulk_block_deals`, `insider_trades` |
 | MarketsMojo | `marketsmojo_{technical,financials,fintrend,index,shareholding}_history` |

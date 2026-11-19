@@ -2502,6 +2502,345 @@
       "schema:description": "Fetched at"
     },
     {
+      "@id": "bsis:nse_participant_positions",
+      "rdf:type": [
+        {
+          "@id": "dcat:Dataset"
+        },
+        {
+          "@id": "schema:Dataset"
+        }
+      ],
+      "dct:title": "F&O participant positions",
+      "dct:description": "NSE participant-wise open interest and volume: FII, DII, Pro and Client long/short contracts in index and stock futures and options, per session.",
+      "dct:identifier": "nse_participant_positions",
+      "schema:name": "nse_participant_positions",
+      "schema:description": "NSE participant-wise open interest and volume: FII, DII, Pro and Client long/short contracts in index and stock futures and options, per session.",
+      "dct:accrualPeriodicity": "daily",
+      "bsis:cadence": "daily",
+      "bsis:grain": "(trade_date, kind, client_type)",
+      "bsis:primaryKey": "trade_date, kind, client_type",
+      "bsis:trainingUse": "caution",
+      "bsis:entity": {
+        "@id": "bsi:ParticipantPositioning"
+      },
+      "dcat:inCatalog": {
+        "@id": "bsi:catalog"
+      },
+      "bsis:freshnessColumn": "fetched_at",
+      "bsis:writtenBy": "nse_fo_market_positioning_fetcher.py",
+      "bsis:caveat": [
+        "Market-wide (no symbol): a regime/timing input, never a cross-sectional factor. Contracts, not shares or notional.",
+        "Served back to 2022-01-03; nightly from 2026-11-19, history only after the one-off backfill (AF-20261119-19). Ungraded."
+      ],
+      "schema:variableMeasured": [
+        {
+          "@id": "_:pv_nse_participant_positions_trade_date"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_kind"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_client_type"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_fut_idx_long"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_fut_idx_short"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_fut_stk_long"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_fut_stk_short"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_opt_idx_call_long"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_opt_idx_put_long"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_opt_idx_call_short"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_opt_idx_put_short"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_opt_stk_call_long"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_opt_stk_put_long"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_opt_stk_call_short"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_opt_stk_put_short"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_total_long"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_total_short"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_source"
+        },
+        {
+          "@id": "_:pv_nse_participant_positions_fetched_at"
+        }
+      ]
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_trade_date",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "trade_date",
+      "schema:description": "Date",
+      "schema:unitText": "calendar_day"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_kind",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "kind",
+      "schema:description": "Participant file kind"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_client_type",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "client_type",
+      "schema:description": "F&O participant category"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_fut_idx_long",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "fut_idx_long",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_fut_idx_short",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "fut_idx_short",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_fut_stk_long",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "fut_stk_long",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_fut_stk_short",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "fut_stk_short",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_opt_idx_call_long",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "opt_idx_call_long",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_opt_idx_put_long",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "opt_idx_put_long",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_opt_idx_call_short",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "opt_idx_call_short",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_opt_idx_put_short",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "opt_idx_put_short",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_opt_stk_call_long",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "opt_stk_call_long",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_opt_stk_put_long",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "opt_stk_put_long",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_opt_stk_call_short",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "opt_stk_call_short",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_opt_stk_put_short",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "opt_stk_put_short",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_total_long",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "total_long",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_total_short",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "total_short",
+      "schema:description": "Participant position (contracts)",
+      "schema:unitText": "contracts"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_source",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "source",
+      "schema:description": "Source"
+    },
+    {
+      "@id": "_:pv_nse_participant_positions_fetched_at",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "fetched_at",
+      "schema:description": "Fetched at"
+    },
+    {
+      "@id": "bsis:nse_fo_ban_list",
+      "rdf:type": [
+        {
+          "@id": "dcat:Dataset"
+        },
+        {
+          "@id": "schema:Dataset"
+        }
+      ],
+      "dct:title": "F&O ban list",
+      "dct:description": "Securities in the F&O ban period for a trade date (open interest above 95% of the market-wide position limit).",
+      "dct:identifier": "nse_fo_ban_list",
+      "schema:name": "nse_fo_ban_list",
+      "schema:description": "Securities in the F&O ban period for a trade date (open interest above 95% of the market-wide position limit).",
+      "dct:accrualPeriodicity": "daily",
+      "bsis:cadence": "daily",
+      "bsis:grain": "(trade_date, symbol)",
+      "bsis:primaryKey": "trade_date, symbol",
+      "bsis:trainingUse": "context",
+      "bsis:entity": {
+        "@id": "bsi:TradabilityConstraint"
+      },
+      "dcat:inCatalog": {
+        "@id": "bsi:catalog"
+      },
+      "bsis:freshnessColumn": "fetched_at",
+      "bsis:writtenBy": "nse_fo_market_positioning_fetcher.py",
+      "bsis:caveat": [
+        "`trade_date` is the NEXT session the ban applies to, taken from the file.",
+        "No row on a day nothing is banned; history exists only from 2026-11-19 because NSE serves only the current file."
+      ],
+      "schema:variableMeasured": [
+        {
+          "@id": "_:pv_nse_fo_ban_list_trade_date"
+        },
+        {
+          "@id": "_:pv_nse_fo_ban_list_symbol"
+        },
+        {
+          "@id": "_:pv_nse_fo_ban_list_source"
+        },
+        {
+          "@id": "_:pv_nse_fo_ban_list_fetched_at"
+        }
+      ]
+    },
+    {
+      "@id": "_:pv_nse_fo_ban_list_trade_date",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "trade_date",
+      "schema:description": "Date",
+      "schema:unitText": "calendar_day"
+    },
+    {
+      "@id": "_:pv_nse_fo_ban_list_symbol",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "symbol",
+      "schema:description": "Symbol"
+    },
+    {
+      "@id": "_:pv_nse_fo_ban_list_source",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "source",
+      "schema:description": "Source"
+    },
+    {
+      "@id": "_:pv_nse_fo_ban_list_fetched_at",
+      "rdf:type": {
+        "@id": "schema:PropertyValue"
+      },
+      "schema:name": "fetched_at",
+      "schema:description": "Fetched at"
+    },
+    {
       "@id": "bsis:fno_rollover",
       "rdf:type": [
         {

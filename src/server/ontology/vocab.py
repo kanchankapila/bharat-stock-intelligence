@@ -420,6 +420,17 @@ def vocabularies() -> Tuple[Vocabulary, ...]:
                     _t("TOO_SLOW", "Too slow", "Lost in the window; a 2x-horizon hold beat the universe net."),
                     _t("SECTOR_DRAG", "Sector drag", "Beat its own sector; the sector lagged the universe."),
                     _t("WRONG_PICK", "Wrong pick", "Lagged its own sector."))),
+        Vocabulary("fo_participant", "NSE participant categories in the participant-wise OI and "
+                   "volume files (AF-20261119-19).", "nse_participant_positions.client_type",
+                   (_t("CLIENT", "Client", "Retail and other non-institutional clients."),
+                    _t("DII", "DII", "Domestic institutional investors."),
+                    _t("FII", "FII", "Foreign institutional investors (FPI)."),
+                    _t("PRO", "Pro", "Trading members' proprietary books."),
+                    _t("TOTAL", "Total", "Exchange total row; long equals short per instrument class."))),
+        Vocabulary("participant_measure", "Which NSE participant file a row came from.",
+                   "nse_participant_positions.kind",
+                   (_t("oi", "Open interest", "End-of-day open positions."),
+                    _t("vol", "Volume", "Contracts traded in the session."))),
         Vocabulary("option_buildup", "Option-chain buildup label. NOTE the spelling differs "
                    "from `oi_buildup` ('Build Up' vs 'Buildup') — never compare these strings "
                    "across tables without normalising first.",

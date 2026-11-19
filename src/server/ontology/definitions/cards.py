@@ -211,6 +211,26 @@ def cards() -> Tuple[DataCard, ...]:
                     "`oi_buildup` uses 'Buildup' spelling while the option-chain table uses "
                     "'Build Up': never compare those strings across the two.")),
 
+        _c("nse_participant_positions", "F&O participant positions", "ParticipantPositioning",
+           ("trade_date", "kind", "client_type"),
+           "NSE participant-wise open interest and volume: FII, DII, Pro and Client long/short "
+           "contracts in index and stock futures and options, per session.",
+           cadence="daily", fresh="fetched_at", lag=4, use="caution",
+           writers=("nse_fo_market_positioning_fetcher.py",),
+           caveats=("Market-wide (no symbol): a regime/timing input, never a cross-sectional "
+                    "factor. Contracts, not shares or notional.",
+                    "Served back to 2022-01-03; nightly from 2026-11-19, history only after the "
+                    "one-off backfill (AF-20261119-19). Ungraded.")),
+
+        _c("nse_fo_ban_list", "F&O ban list", "TradabilityConstraint", ("trade_date", "symbol"),
+           "Securities in the F&O ban period for a trade date (open interest above 95% of the "
+           "market-wide position limit).",
+           cadence="daily", fresh="fetched_at", use="context",
+           writers=("nse_fo_market_positioning_fetcher.py",),
+           caveats=("`trade_date` is the NEXT session the ban applies to, taken from the file.",
+                    "No row on a day nothing is banned; history exists only from 2026-11-19 "
+                    "because NSE serves only the current file.")),
+
         _c("fno_rollover", "Futures rollover", "FuturesPositioning", ("symbol", "date"),
            "Near-versus-next expiry open interest with the rollover percentage and the "
            "annualised cost of carry.",

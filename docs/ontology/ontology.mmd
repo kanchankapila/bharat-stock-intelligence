@@ -31,6 +31,8 @@ flowchart LR
     OptionChainRow["Option chain row<br/>so_option_chain"]
     FuturesPositioning["Futures positioning<br/>stock_futures_oi_history, fno_rollover"]
     IndexDerivativesSnapshot["Index derivatives snapshot<br/>index_max_pain, nt_index_pcr_ts"]
+    ParticipantPositioning["F&O participant positioning<br/>nse_participant_positions"]
+    TradabilityConstraint["Tradability constraint<br/>nse_fo_ban_list"]
     MoverSnapshot["Mover snapshot<br/>mover_snapshots"]
   end
   subgraph context["Market context & regime"]
@@ -99,6 +101,8 @@ flowchart LR
   OptionChainRow -.->|subclass| Observation
   FuturesPositioning -.->|subclass| Observation
   IndexDerivativesSnapshot -.->|subclass| Observation
+  ParticipantPositioning -.->|subclass| Observation
+  TradabilityConstraint -.->|subclass| Observation
   MoverSnapshot -.->|subclass| Observation
   FeatureVector -.->|subclass| PlatformOutput
   TechnicalSignal -.->|subclass| PlatformOutput
@@ -180,6 +184,8 @@ flowchart LR
   tbl_news_symbol_link["news_symbol_link"]:::tbl -.-> NewsItem
   tbl_so_option_chain["so_option_chain"]:::tbl -.-> OptionChainRow
   tbl_stock_futures_oi_history["stock_futures_oi_history"]:::tbl -.-> FuturesPositioning
+  tbl_nse_participant_positions["nse_participant_positions"]:::tbl -.-> ParticipantPositioning
+  tbl_nse_fo_ban_list["nse_fo_ban_list"]:::tbl -.-> TradabilityConstraint
   tbl_fno_rollover["fno_rollover"]:::tbl -.-> FuturesPositioning
   tbl_index_max_pain["index_max_pain"]:::tbl -.-> IndexDerivativesSnapshot
   tbl_nt_index_pcr_ts["nt_index_pcr_ts"]:::tbl -.-> IndexDerivativesSnapshot

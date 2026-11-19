@@ -708,7 +708,7 @@
           "@id": "bsip:expiry"
         }
       ],
-      "bsi:caveat": "LOW-DATA: the stock-futures panel covers roughly two weeks of dates. Any 'measured' claim built on it is a calendar artefact, not an edge — this is the specific finding the master report's LOW-DATA verdict records.",
+      "bsi:caveat": "Graded: basis and every OI column read no edge by 2026-10-04 on the MoneyControl near-month panel. Exchange history back to 2021 now exists (stock_futures_eod_history, AF-20261113-03); the pre-registered all-expiry re-test is AF-20261119-09. Near-month OI is distorted at each monthly roll.",
       "bsi:realizedBy": [
         {
           "@id": "bsis:stock_futures_oi_history"
@@ -751,6 +751,67 @@
           "@id": "bsis:nt_index_pcr_ts"
         }
       ]
+    },
+    {
+      "@id": "bsi:ParticipantPositioning",
+      "rdf:type": {
+        "@id": "owl:Class"
+      },
+      "rdfs:label": "F&O participant positioning",
+      "rdfs:comment": "End-of-day equity-derivative positions (or traded volume) of FII, DII, Pro and Client participants by instrument class, from NSE's participant-wise files.",
+      "bsi:layer": "observation",
+      "bsi:realization": "table",
+      "bsi:grain": "(date, participant_measure, participant_type)",
+      "rdfs:subClassOf": {
+        "@id": "bsi:Observation"
+      },
+      "bsi:keyProperty": [
+        {
+          "@id": "bsip:date"
+        },
+        {
+          "@id": "bsip:participant_measure"
+        },
+        {
+          "@id": "bsip:participant_type"
+        }
+      ],
+      "bsi:caveat": [
+        "Market-wide: one value per participant per day, identical for every stock. Use as regime or timing context; it has no cross-section to rank stocks on.",
+        "Ungraded: no measurement yet (AF-20261119-19)."
+      ],
+      "bsi:realizedBy": {
+        "@id": "bsis:nse_participant_positions"
+      }
+    },
+    {
+      "@id": "bsi:TradabilityConstraint",
+      "rdf:type": {
+        "@id": "owl:Class"
+      },
+      "rdfs:label": "Tradability constraint",
+      "rdfs:comment": "An exchange restriction on a symbol for a session, e.g. the F&O ban period (open interest above 95% of the market-wide position limit: no new F&O positions).",
+      "bsi:layer": "observation",
+      "bsi:realization": "table",
+      "bsi:grain": "(symbol, date)",
+      "rdfs:subClassOf": {
+        "@id": "bsi:Observation"
+      },
+      "bsi:keyProperty": [
+        {
+          "@id": "bsip:symbol"
+        },
+        {
+          "@id": "bsip:date"
+        }
+      ],
+      "bsi:caveat": [
+        "A constraint, not a signal: it says what cannot be done, not what will move.",
+        "The ban list is published for the NEXT session; `date` is that trade date."
+      ],
+      "bsi:realizedBy": {
+        "@id": "bsis:nse_fo_ban_list"
+      }
     },
     {
       "@id": "bsi:MoverSnapshot",
@@ -1650,6 +1711,9 @@
           "@id": "bsis:so_option_chain.symbol"
         },
         {
+          "@id": "bsis:nse_fo_ban_list.symbol"
+        },
+        {
           "@id": "bsis:stock_futures_oi_history.symbol"
         },
         {
@@ -2421,6 +2485,12 @@
           "@id": "bsis:news_sentiment_items.source"
         },
         {
+          "@id": "bsis:nse_participant_positions.source"
+        },
+        {
+          "@id": "bsis:nse_fo_ban_list.source"
+        },
+        {
           "@id": "bsis:stock_futures_oi_history.source"
         },
         {
@@ -2543,6 +2613,12 @@
         },
         {
           "@id": "bsis:so_option_chain.date"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.trade_date"
+        },
+        {
+          "@id": "bsis:nse_fo_ban_list.trade_date"
         },
         {
           "@id": "bsis:stock_futures_oi_history.date"
@@ -2967,6 +3043,12 @@
         },
         {
           "@id": "bsis:so_option_chain.fetched_at"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.fetched_at"
+        },
+        {
+          "@id": "bsis:nse_fo_ban_list.fetched_at"
         },
         {
           "@id": "bsis:stock_futures_oi_history.fetched_at"
@@ -11551,6 +11633,132 @@
       ]
     },
     {
+      "@id": "bsip:participant_type",
+      "rdf:type": {
+        "@id": "owl:DatatypeProperty"
+      },
+      "rdfs:label": "F&O participant category",
+      "rdfs:comment": "NSE's participant split of equity-derivative positions: Client, DII, FII, Pro, plus the exchange TOTAL row.",
+      "rdfs:range": {
+        "@id": "xsd:string"
+      },
+      "bsi:semanticType": "dimension",
+      "bsi:timing": "context",
+      "bsi:derivation": "vendor",
+      "bsi:leakageRisk": "none",
+      "bsi:usableAsFeature": {
+        "@value": "true",
+        "@type": "xsd:boolean"
+      },
+      "bsi:isLabel": {
+        "@value": "false",
+        "@type": "xsd:boolean"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:fo_participant"
+      },
+      "bsi:boundTo": {
+        "@id": "bsis:nse_participant_positions.client_type"
+      }
+    },
+    {
+      "@id": "bsip:participant_measure",
+      "rdf:type": {
+        "@id": "owl:DatatypeProperty"
+      },
+      "rdfs:label": "Participant file kind",
+      "rdfs:comment": "Which NSE participant file a row comes from: end-of-day open interest or the session's traded volume.",
+      "rdfs:range": {
+        "@id": "xsd:string"
+      },
+      "bsi:semanticType": "dimension",
+      "bsi:timing": "context",
+      "bsi:derivation": "vendor",
+      "bsi:leakageRisk": "none",
+      "bsi:usableAsFeature": {
+        "@value": "true",
+        "@type": "xsd:boolean"
+      },
+      "bsi:isLabel": {
+        "@value": "false",
+        "@type": "xsd:boolean"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:participant_measure"
+      },
+      "bsi:boundTo": {
+        "@id": "bsis:nse_participant_positions.kind"
+      }
+    },
+    {
+      "@id": "bsip:participant_contracts",
+      "rdf:type": {
+        "@id": "owl:DatatypeProperty"
+      },
+      "rdfs:label": "Participant position (contracts)",
+      "rdfs:comment": "Contracts held long or short (OI file) or traded (volume file) by one participant category in one instrument class. Market-wide: the same value for every stock on a date, so it is a regime/timing input, never a cross-sectional factor. NSE's TOTAL can differ from the participant sum by a contract.",
+      "rdfs:range": {
+        "@id": "xsd:decimal"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:timing": "coincident",
+      "bsi:derivation": "vendor",
+      "bsi:leakageRisk": "none",
+      "bsi:usableAsFeature": {
+        "@value": "true",
+        "@type": "xsd:boolean"
+      },
+      "bsi:isLabel": {
+        "@value": "false",
+        "@type": "xsd:boolean"
+      },
+      "qudt:unit": "contracts",
+      "bsi:boundTo": [
+        {
+          "@id": "bsis:nse_participant_positions.fut_idx_long"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.fut_idx_short"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.fut_stk_long"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.fut_stk_short"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.opt_idx_call_long"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.opt_idx_put_long"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.opt_idx_call_short"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.opt_idx_put_short"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.opt_stk_call_long"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.opt_stk_put_long"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.opt_stk_call_short"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.opt_stk_put_short"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.total_long"
+        },
+        {
+          "@id": "bsis:nse_participant_positions.total_short"
+        }
+      ]
+    },
+    {
       "@id": "bsir:instrumentHasBar",
       "rdf:type": {
         "@id": "owl:ObjectProperty"
@@ -14980,6 +15188,114 @@
       "skos:definition": "Lagged its own sector."
     },
     {
+      "@id": "bsiv:fo_participant",
+      "rdf:type": {
+        "@id": "skos:ConceptScheme"
+      },
+      "rdfs:comment": "NSE participant categories in the participant-wise OI and volume files (AF-20261119-19).",
+      "bsiv:source": "nse_participant_positions.client_type",
+      "bsiv:openEnded": {
+        "@value": "false",
+        "@type": "xsd:boolean"
+      }
+    },
+    {
+      "@id": "bsiv:fo_participant.client",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:fo_participant"
+      },
+      "skos:notation": "CLIENT",
+      "skos:prefLabel": "Client",
+      "skos:definition": "Retail and other non-institutional clients."
+    },
+    {
+      "@id": "bsiv:fo_participant.dii",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:fo_participant"
+      },
+      "skos:notation": "DII",
+      "skos:prefLabel": "DII",
+      "skos:definition": "Domestic institutional investors."
+    },
+    {
+      "@id": "bsiv:fo_participant.fii",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:fo_participant"
+      },
+      "skos:notation": "FII",
+      "skos:prefLabel": "FII",
+      "skos:definition": "Foreign institutional investors (FPI)."
+    },
+    {
+      "@id": "bsiv:fo_participant.pro",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:fo_participant"
+      },
+      "skos:notation": "PRO",
+      "skos:prefLabel": "Pro",
+      "skos:definition": "Trading members' proprietary books."
+    },
+    {
+      "@id": "bsiv:fo_participant.total",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:fo_participant"
+      },
+      "skos:notation": "TOTAL",
+      "skos:prefLabel": "Total",
+      "skos:definition": "Exchange total row; long equals short per instrument class."
+    },
+    {
+      "@id": "bsiv:participant_measure",
+      "rdf:type": {
+        "@id": "skos:ConceptScheme"
+      },
+      "rdfs:comment": "Which NSE participant file a row came from.",
+      "bsiv:source": "nse_participant_positions.kind",
+      "bsiv:openEnded": {
+        "@value": "false",
+        "@type": "xsd:boolean"
+      }
+    },
+    {
+      "@id": "bsiv:participant_measure.oi",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:participant_measure"
+      },
+      "skos:notation": "oi",
+      "skos:prefLabel": "Open interest",
+      "skos:definition": "End-of-day open positions."
+    },
+    {
+      "@id": "bsiv:participant_measure.vol",
+      "rdf:type": {
+        "@id": "skos:Concept"
+      },
+      "skos:inScheme": {
+        "@id": "bsiv:participant_measure"
+      },
+      "skos:notation": "vol",
+      "skos:prefLabel": "Volume",
+      "skos:definition": "Contracts traded in the session."
+    },
+    {
       "@id": "bsiv:option_buildup",
       "rdf:type": {
         "@id": "skos:ConceptScheme"
@@ -18300,6 +18616,382 @@
     },
     {
       "@id": "_:col_stock_futures_oi_history_fetched_at",
+      "bsi:columnName": "fetched_at",
+      "bsi:property": {
+        "@id": "bsip:fetched_at"
+      },
+      "bsi:semanticType": "timestamp",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "bsis:nse_participant_positions",
+      "rdf:type": {
+        "@id": "bsi:Table"
+      },
+      "rdfs:label": "F&O participant positions",
+      "rdfs:comment": "NSE participant-wise open interest and volume: FII, DII, Pro and Client long/short contracts in index and stock futures and options, per session.",
+      "bsi:realizes": {
+        "@id": "bsi:ParticipantPositioning"
+      },
+      "bsi:rowClass": {
+        "@id": "bsit:nse_participant_positions"
+      },
+      "bsi:grain": "(trade_date, kind, client_type)",
+      "bsi:cadence": "daily",
+      "bsi:trainingUse": "caution",
+      "bsi:primaryKey": [
+        "trade_date",
+        "kind",
+        "client_type"
+      ],
+      "bsi:freshnessColumn": "fetched_at",
+      "bsi:expectedLagHours": {
+        "@value": "4",
+        "@type": "xsd:decimal"
+      },
+      "bsi:writtenBy": "nse_fo_market_positioning_fetcher.py",
+      "bsi:caveat": [
+        "Market-wide (no symbol): a regime/timing input, never a cross-sectional factor. Contracts, not shares or notional.",
+        "Served back to 2022-01-03; nightly from 2026-11-19, history only after the one-off backfill (AF-20261119-19). Ungraded."
+      ],
+      "bsi:hasColumn": [
+        {
+          "@id": "_:col_nse_participant_positions_trade_date"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_kind"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_client_type"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_fut_idx_long"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_fut_idx_short"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_fut_stk_long"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_fut_stk_short"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_opt_idx_call_long"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_opt_idx_put_long"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_opt_idx_call_short"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_opt_idx_put_short"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_opt_stk_call_long"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_opt_stk_put_long"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_opt_stk_call_short"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_opt_stk_put_short"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_total_long"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_total_short"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_source"
+        },
+        {
+          "@id": "_:col_nse_participant_positions_fetched_at"
+        }
+      ]
+    },
+    {
+      "@id": "bsit:nse_participant_positions",
+      "rdf:type": {
+        "@id": "owl:Class"
+      },
+      "rdfs:label": "nse_participant_positions row",
+      "rdfs:comment": "A row of nse_participant_positions. Grain: (trade_date, kind, client_type). Subclass of ParticipantPositioning; the physical contract (column set) lives in bsi:nse_participant_positionsShape.",
+      "rdfs:subClassOf": {
+        "@id": "bsi:ParticipantPositioning"
+      }
+    },
+    {
+      "@id": "_:col_nse_participant_positions_trade_date",
+      "bsi:columnName": "trade_date",
+      "bsi:property": {
+        "@id": "bsip:date"
+      },
+      "bsi:semanticType": "timestamp",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_nse_participant_positions_kind",
+      "bsi:columnName": "kind",
+      "bsi:property": {
+        "@id": "bsip:participant_measure"
+      },
+      "bsi:semanticType": "dimension",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_nse_participant_positions_client_type",
+      "bsi:columnName": "client_type",
+      "bsi:property": {
+        "@id": "bsip:participant_type"
+      },
+      "bsi:semanticType": "dimension",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_nse_participant_positions_fut_idx_long",
+      "bsi:columnName": "fut_idx_long",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "fut idx long."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_fut_idx_short",
+      "bsi:columnName": "fut_idx_short",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "fut idx short."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_fut_stk_long",
+      "bsi:columnName": "fut_stk_long",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "fut stk long."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_fut_stk_short",
+      "bsi:columnName": "fut_stk_short",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "fut stk short."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_opt_idx_call_long",
+      "bsi:columnName": "opt_idx_call_long",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "opt idx call long."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_opt_idx_put_long",
+      "bsi:columnName": "opt_idx_put_long",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "opt idx put long."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_opt_idx_call_short",
+      "bsi:columnName": "opt_idx_call_short",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "opt idx call short."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_opt_idx_put_short",
+      "bsi:columnName": "opt_idx_put_short",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "opt idx put short."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_opt_stk_call_long",
+      "bsi:columnName": "opt_stk_call_long",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "opt stk call long."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_opt_stk_put_long",
+      "bsi:columnName": "opt_stk_put_long",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "opt stk put long."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_opt_stk_call_short",
+      "bsi:columnName": "opt_stk_call_short",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "opt stk call short."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_opt_stk_put_short",
+      "bsi:columnName": "opt_stk_put_short",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "opt stk put short."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_total_long",
+      "bsi:columnName": "total_long",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "total long."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_total_short",
+      "bsi:columnName": "total_short",
+      "bsi:property": {
+        "@id": "bsip:participant_contracts"
+      },
+      "bsi:semanticType": "measure",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "total short."
+    },
+    {
+      "@id": "_:col_nse_participant_positions_source",
+      "bsi:columnName": "source",
+      "bsi:property": {
+        "@id": "bsip:source"
+      },
+      "bsi:semanticType": "dimension",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_nse_participant_positions_fetched_at",
+      "bsi:columnName": "fetched_at",
+      "bsi:property": {
+        "@id": "bsip:fetched_at"
+      },
+      "bsi:semanticType": "timestamp",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "bsis:nse_fo_ban_list",
+      "rdf:type": {
+        "@id": "bsi:Table"
+      },
+      "rdfs:label": "F&O ban list",
+      "rdfs:comment": "Securities in the F&O ban period for a trade date (open interest above 95% of the market-wide position limit).",
+      "bsi:realizes": {
+        "@id": "bsi:TradabilityConstraint"
+      },
+      "bsi:rowClass": {
+        "@id": "bsit:nse_fo_ban_list"
+      },
+      "bsi:grain": "(trade_date, symbol)",
+      "bsi:cadence": "daily",
+      "bsi:trainingUse": "context",
+      "bsi:primaryKey": [
+        "trade_date",
+        "symbol"
+      ],
+      "bsi:freshnessColumn": "fetched_at",
+      "bsi:writtenBy": "nse_fo_market_positioning_fetcher.py",
+      "bsi:caveat": [
+        "`trade_date` is the NEXT session the ban applies to, taken from the file.",
+        "No row on a day nothing is banned; history exists only from 2026-11-19 because NSE serves only the current file."
+      ],
+      "bsi:hasColumn": [
+        {
+          "@id": "_:col_nse_fo_ban_list_trade_date"
+        },
+        {
+          "@id": "_:col_nse_fo_ban_list_symbol"
+        },
+        {
+          "@id": "_:col_nse_fo_ban_list_source"
+        },
+        {
+          "@id": "_:col_nse_fo_ban_list_fetched_at"
+        }
+      ]
+    },
+    {
+      "@id": "bsit:nse_fo_ban_list",
+      "rdf:type": {
+        "@id": "owl:Class"
+      },
+      "rdfs:label": "nse_fo_ban_list row",
+      "rdfs:comment": "A row of nse_fo_ban_list. Grain: (trade_date, symbol). Subclass of TradabilityConstraint; the physical contract (column set) lives in bsi:nse_fo_ban_listShape.",
+      "rdfs:subClassOf": {
+        "@id": "bsi:TradabilityConstraint"
+      }
+    },
+    {
+      "@id": "_:col_nse_fo_ban_list_trade_date",
+      "bsi:columnName": "trade_date",
+      "bsi:property": {
+        "@id": "bsip:date"
+      },
+      "bsi:semanticType": "timestamp",
+      "bsi:leakageRisk": "none",
+      "bsi:note": "The session the ban applies to."
+    },
+    {
+      "@id": "_:col_nse_fo_ban_list_symbol",
+      "bsi:columnName": "symbol",
+      "bsi:property": {
+        "@id": "bsip:symbol"
+      },
+      "bsi:semanticType": "identifier",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_nse_fo_ban_list_source",
+      "bsi:columnName": "source",
+      "bsi:property": {
+        "@id": "bsip:source"
+      },
+      "bsi:semanticType": "dimension",
+      "bsi:leakageRisk": "none"
+    },
+    {
+      "@id": "_:col_nse_fo_ban_list_fetched_at",
       "bsi:columnName": "fetched_at",
       "bsi:property": {
         "@id": "bsip:fetched_at"

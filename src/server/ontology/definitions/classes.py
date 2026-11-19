@@ -240,9 +240,10 @@ def classes() -> Tuple[ClassDef, ...]:
           "cost of carry for one expiry and session.",
           parents=("Observation",), key_properties=("symbol", "date", "expiry"),
           grain="(symbol, date, expiry)",
-          caveats=("LOW-DATA: the stock-futures panel covers roughly two weeks of dates. Any "
-                   "'measured' claim built on it is a calendar artefact, not an edge — this "
-                   "is the specific finding the master report's LOW-DATA verdict records.",)),
+          caveats=("Graded: basis and every OI column read no edge by 2026-10-04 on the "
+                   "MoneyControl near-month panel. Exchange history back to 2021 now exists "
+                   "(stock_futures_eod_history, AF-20261113-03); the pre-registered all-expiry "
+                   "re-test is AF-20261119-09. Near-month OI is distorted at each monthly roll.",)),
 
         C("IndexDerivativesSnapshot", "Index derivatives snapshot", "observation",
           "Index-level positioning: PCR (single-strike time series and EOD), max pain, and "
@@ -251,6 +252,22 @@ def classes() -> Tuple[ClassDef, ...]:
           grain="(index_name, date, expiry)",
           caveats=("The index panel is far deeper than the stock panel but remains ungraded "
                    "as a standalone signal — treated here as a research candidate.",)),
+
+        C("ParticipantPositioning", "F&O participant positioning", "observation",
+          "End-of-day equity-derivative positions (or traded volume) of FII, DII, Pro and Client "
+          "participants by instrument class, from NSE's participant-wise files.",
+          parents=("Observation",), key_properties=("date", "participant_measure", "participant_type"),
+          grain="(date, participant_measure, participant_type)",
+          caveats=("Market-wide: one value per participant per day, identical for every stock. "
+                   "Use as regime or timing context; it has no cross-section to rank stocks on.",
+                   "Ungraded: no measurement yet (AF-20261119-19).")),
+
+        C("TradabilityConstraint", "Tradability constraint", "observation",
+          "An exchange restriction on a symbol for a session, e.g. the F&O ban period (open "
+          "interest above 95% of the market-wide position limit: no new F&O positions).",
+          parents=("Observation",), key_properties=("symbol", "date"), grain="(symbol, date)",
+          caveats=("A constraint, not a signal: it says what cannot be done, not what will move.",
+                   "The ban list is published for the NEXT session; `date` is that trade date.")),
 
         C("MoverSnapshot", "Mover snapshot", "observation",
           "A ranked intraday mover list entry from a vendor feed: the platform's within-day "

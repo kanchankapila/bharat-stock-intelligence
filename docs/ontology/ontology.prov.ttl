@@ -175,6 +175,20 @@ bsi:job_mc-stock-futures-oi-fetcher-py     rdf:type prov:Activity ;
 bsi:job_nse-fo-bhav-history-fetcher-py     rdf:type prov:Activity ;
     rdfs:label "nse_fo_bhav_history_fetcher.py" .
 
+bsis:nse_participant_positions     rdf:type prov:Entity ;
+    dct:title "F&O participant positions" ;
+    bsis:cadence "daily" ;
+    bsis:expectedLagHours "4"^^xsd:decimal ;
+    prov:wasGeneratedBy bsi:job_nse-fo-market-positioning-fetcher-py .
+
+bsi:job_nse-fo-market-positioning-fetcher-py     rdf:type prov:Activity, prov:Activity ;
+    rdfs:label "nse_fo_market_positioning_fetcher.py", "nse_fo_market_positioning_fetcher.py" .
+
+bsis:nse_fo_ban_list     rdf:type prov:Entity ;
+    dct:title "F&O ban list" ;
+    bsis:cadence "daily" ;
+    prov:wasGeneratedBy bsi:job_nse-fo-market-positioning-fetcher-py .
+
 bsis:fno_rollover     rdf:type prov:Entity ;
     dct:title "Futures rollover" ;
     bsis:cadence "daily" ;
