@@ -49,6 +49,17 @@ def monthly_expiry(year: int, month: int) -> datetime.date:
     return last - datetime.timedelta(days=(last.weekday() - weekday) % 7)
 
 
+def load_ex_dates(con, since: str) -> dict[str, list[datetime.date]]:
+    """Corporate-action ex-dates per symbol on/after `since`. record_date is a DATE column, so it is compared as
+    ISO text (LIKE/substring on a DATE raises in Postgres; AF-20261117-14 review)."""
+    out: dict[str, list[datetime.date]] = {}
+    for sym, d in con.execute(
+            "SELECT symbol, record_date::text FROM stock_corporate_action_history "
+            "WHERE record_date IS NOT NULL AND record_date::text >= ?", (since,)).fetchall():
+        out.setdefault(sym, []).append(datetime.date.fromisoformat(str(d)[:10]))
+    return out
+
+
 def holding_window(sessions: pd.DatetimeIndex, session: pd.Timestamp, horizon: int):
     """(entry session, exit session) for a call on `session`: entry next open, exit H sessions later."""
     i = sessions.get_loc(session)
@@ -147,11 +158,7 @@ def run_events(con, since: str, horizon: int) -> dict:
     from fno_universe_asof import fno_eligible_asof
     sessions, _, panel, _ = _load(con, since, horizon)
     buys = panel[panel["classification"].isin(BUY)]
-    ex_dates: dict[str, list[datetime.date]] = {}
-    for sym, d in con.execute(
-            "SELECT symbol, substring(record_date, 1, 10) FROM stock_corporate_action_history "
-            "WHERE record_date LIKE '____-__-__%' AND substring(record_date, 1, 10) >= ?", (since,)).fetchall():
-        ex_dates.setdefault(sym, []).append(datetime.date.fromisoformat(d))
+    ex_dates = load_ex_dates(con, since)
     cache: dict = {}
     fno = lambda d: cache.setdefault(d, fno_eligible_asof(con, d.strftime("%Y-%m-%d")))
     flagged = flag_events(buys, sessions, horizon, ex_dates, fno)

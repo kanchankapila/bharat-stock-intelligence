@@ -4,7 +4,7 @@ A sibling of forward_test_report.py. It imports that module's frozen machinery (
 next-session-OPEN entry, per-date winsorisation, the equal-weight benchmark, selective_accuracy, dates/h windows)
 and never touches its PROTOCOL; the frozen forward test remains the arbiter. This report adds breadth around it:
 
-  arms      published | reblend | reblend_vol_veto | reblend_no_ml | random_control | reblend_no_sector_slot   (accuracy_shadow_arms.py)
+  arms      published | reblend | reblend_vol_veto | reblend_no_ml | random_control | reblend_no_sector_slot | reblend_learned   (accuracy_shadow_arms.py)
   tiers     top 1/5/10/25/100% of each session's liquid ranked set, plus Buy/Strong Buy as published
   horizons  5, 10, 21 sessions;  liquidity floors Rs 10cr and Rs 50cr trailing-20d ADT
   regimes   ALL; UP/DOWN = NIFTY50 close vs its own 200-session mean; BROAD/NARROW = share of names above their
@@ -34,7 +34,7 @@ import pandas as pd
 
 import accuracy_shadow_arms as A
 import forward_test_report as F
-from factor_edge import MIN_DATES_RELIABLE, _effective_dates
+from factor_edge import MIN_DATES_RELIABLE, _effective_dates, _forward_returns
 from win_definition import classify_outcome
 
 KEY = "accuracy_scorecard"
@@ -308,7 +308,17 @@ def build_scorecard(con, since: str) -> dict:
         calls = attach_confluence_parts(con, calls, sessions)
     except Exception as e:                                  # a shadow arm must not take the scorecard (and its alerts) down; db_compat rolls the aborted transaction back
         out["no_sector_slot_error"] = f"{type(e).__name__}: {e}"[:300]
-    arms = A.arm_scores(calls, calls["vol20"])
+    learn_fwd = None
+    try:
+        # reblend_learned fits weights to realised forward returns; learned_weights() admits only windows that had
+        # closed before each session, so the full series can be passed in without look-ahead.
+        start = (calls["session"].min() - pd.Timedelta(days=10)).strftime("%Y-%m-%d")
+        fr = _forward_returns(con, start, [A.LEARN_HORIZON], entry="open")[["symbol", "date", f"fwd_{A.LEARN_HORIZON}"]]
+        learn_fwd = calls[["symbol", "session"]].merge(fr.rename(columns={"date": "session"}), on=["symbol", "session"],
+                                                       how="left")[f"fwd_{A.LEARN_HORIZON}"].set_axis(calls.index)
+    except Exception as e:                                  # a shadow arm must not take the scorecard down
+        out["learned_error"] = f"{type(e).__name__}: {e}"[:300]
+    arms = A.arm_scores(calls, calls["vol20"], fwd=learn_fwd, sessions=sessions)
     for a in A.ARMS:
         calls[f"arm_{a}"] = arms[a]
     covered = calls["arm_reblend_no_sector_slot"].notna().groupby(calls["session"]).any()
