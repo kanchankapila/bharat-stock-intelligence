@@ -607,7 +607,7 @@ Re-grade the Python history at ~20 effective 5d dates (~mid-December).
   (open-entry): 21d +0.1764/0.5772 on 21 dates → USABLE; 10d +0.0977/0.5513 on 32 dates →
   USABLE; 5d +0.0620/0.5343 on 37 dates → no edge.** Still LOW-DATA at 21d (21 dates) — the
   platform's strongest vendor-column lead, not a result.
-- **`movement_probability` is now GRADED — no edge.** Open-entry 2026-09-11 run on 33/28 dates
+- **`movement_probability` is now GRADED — no edge.** **Producer retired from the nightly chain 2026-11-19 (AF-20261119-18): no edge and no consumer; the column stops advancing after that date.** Open-entry 2026-09-11 run on 33/28 dates
   (WAS -> "15 dates, neither gradeable yet"): 5d rank_IC **-0.0116** ("no edge"), 10d **-0.0109**
   ("no edge"), 21d -0.0149 (LOW-DATA, 17 dates). Closed; do not re-run as "highest-value".
 - **`stock_futures_oi_history` graded 2026-09-19 (close-entry, LOW-DATA 13-17 dates), RE-GRADED
