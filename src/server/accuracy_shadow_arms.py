@@ -14,6 +14,10 @@ Arms:
                   confluence_signals); NaN for a session whose rebuild does not reproduce the stored score, and for every
                   session when the columns are absent
   random_control  the published scores shuffled within each session (same distribution, no information), seeded
+  reblend_learned  reblend with weights learned from each engine's realised rank IC (AF-20261119): for a session, only
+                  sessions whose forward window had CLOSED by then are used (no look-ahead), same regime when it has
+                  enough history, shrunk towards the live REGIME_WEIGHTS by n_eff / (n_eff + LEARN_SHRINK_K). NaN
+                  when no forward returns are passed in
 ponytail: the ranker's zero-dispersion engine drop, quality gate and red-flag vetoes are not replayed; `published` carries them.
 """
 from __future__ import annotations
@@ -21,14 +25,20 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from factor_edge import _effective_dates
 from unified_ranker import REGIME_WEIGHTS
 
 ENGINES = ("ml", "confluence", "technical", "breakout")
-ARMS = ("published", "reblend", "reblend_vol_veto", "reblend_no_ml", "random_control", "reblend_no_sector_slot")
+ARMS = ("published", "reblend", "reblend_vol_veto", "reblend_no_ml", "random_control", "reblend_no_sector_slot",
+        "reblend_learned")
 VOL_VETO_TOP_SHARE = 0.20
 VOL_VETO_MULT = 0.7
 SLOT_COLS = ("cs_trend", "cs_vol", "cs_sector", "cs_fund")   # confluence_signals.{trend_alignment,volume,sector_strength,fundamental}_score
 SLOT_REBUILD_MIN_RANK_CORR = 0.9999
+LEARN_HORIZON = 5          # sessions; the forward return the learned weights are fitted to
+LEARN_SHRINK_K = 20.0      # = factor_edge.MIN_DATES_RELIABLE: half-way to the IC weights at 20 independent windows
+LEARN_MIN_REGIME_EFF = 5.0 # below this many independent windows in the session's own regime, pool all regimes
+LEARN_MIN_N = 30           # names per session for an engine IC (accuracy_scorecard.MIN_PER_DATE)
 
 
 def _pct100(s: pd.Series) -> pd.Series:
@@ -36,7 +46,12 @@ def _pct100(s: pd.Series) -> pd.Series:
     return (s.rank(method="average") - 0.5) / s.notna().sum() * 100.0
 
 
-def reblend(df: pd.DataFrame, drop=()) -> pd.Series:
+def _live_weights(regime: str) -> dict:
+    return REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS["BULL"])      # the ranker falls back to BULL
+
+
+def reblend(df: pd.DataFrame, drop=(), weights: pd.DataFrame | None = None) -> pd.Series:
+    """`weights` (optional): one column per engine, row-aligned with df, replacing the live REGIME_WEIGHTS."""
     num = pd.Series(0.0, index=df.index)
     den = pd.Series(0.0, index=df.index)
     regime = df["regime"].astype(str).str.upper()
@@ -44,7 +59,7 @@ def reblend(df: pd.DataFrame, drop=()) -> pd.Series:
         if e in drop:
             continue
         v = df.groupby("session")[f"{e}_score"].transform(_pct100)
-        w = regime.map(lambda r: REGIME_WEIGHTS.get(r, REGIME_WEIGHTS["BULL"])[e])   # ranker falls back to BULL
+        w = weights[e] if weights is not None else regime.map(lambda r: _live_weights(r)[e])
         ok = v.notna() & (w > 0)
         num += np.where(ok, w * v.fillna(0.0), 0.0)
         den += np.where(ok, w, 0.0)
@@ -95,11 +110,64 @@ def random_control(df: pd.DataFrame, seed: int = 0) -> pd.Series:
     return out
 
 
-def arm_scores(df: pd.DataFrame, vol: pd.Series, seed: int = 0) -> pd.DataFrame:
+def engine_session_ic(df: pd.DataFrame, fwd: pd.Series, min_n: int = LEARN_MIN_N) -> pd.DataFrame:
+    """Per session x engine Spearman IC of the engine score against the forward return (NaN when thin)."""
+    out = {}
+    for e in ENGINES:
+        out[e] = session_ic(df, df[f"{e}_score"], fwd, date_col="session", min_n=min_n)
+    return pd.DataFrame(out)
+
+
+def learned_weights(ic: pd.DataFrame, regimes: pd.Series, sessions: pd.DatetimeIndex, session, regime: str,
+                    horizon: int = LEARN_HORIZON) -> dict:
+    """Engine weights for `session`, from ICs of sessions whose forward window had closed by then.
+
+    A call on session j enters at the open of j+1 and exits at the open of j+1+horizon, so its return is known
+    when session i is ranked only if pos(j) <= pos(i) - (horizon + 1). Weights are the positive mean ICs,
+    normalised, shrunk towards the live REGIME_WEIGHTS by n_eff / (n_eff + LEARN_SHRINK_K)."""
+    live = _live_weights(regime)
+    i = sessions.get_indexer([session])[0]
+    if i < 0 or ic.empty:
+        return dict(live)
+    pos = pd.Series(sessions.get_indexer(ic.index), index=ic.index)
+    known = ic[(pos >= 0) & (pos <= i - (horizon + 1))]
+    same = known[regimes.reindex(known.index).astype(str).str.upper() == regime]
+    use = same if _effective_dates(len(same), horizon) >= LEARN_MIN_REGIME_EFF else known
+    if use.empty:
+        return dict(live)
+    mean = use.mean().clip(lower=0).fillna(0.0)
+    if mean.sum() <= 0:
+        return dict(live)
+    target = (mean / mean.sum()).to_dict()
+    n_eff = _effective_dates(len(use), horizon)
+    lam = n_eff / (n_eff + LEARN_SHRINK_K)
+    w = {e: (1 - lam) * live.get(e, 0.0) + lam * target.get(e, 0.0) for e in ENGINES}
+    tot = sum(w.values())
+    return {e: v / tot for e, v in w.items()} if tot > 0 else dict(live)
+
+
+def reblend_learned(df: pd.DataFrame, fwd: pd.Series | None, sessions: pd.DatetimeIndex,
+                    horizon: int = LEARN_HORIZON) -> pd.Series:
+    if fwd is None or fwd.notna().sum() == 0:
+        return pd.Series(np.nan, index=df.index, name="reblend_learned")
+    ic = engine_session_ic(df, fwd)
+    regimes = df.groupby("session")["regime"].agg(lambda r: str(r.mode().iat[0]).upper() if len(r.mode()) else "BULL")
+    rows = []
+    for sess, idx in df.groupby("session").groups.items():
+        w = learned_weights(ic, regimes, sessions, sess, regimes.get(sess, "BULL"), horizon)
+        rows.append(pd.DataFrame({e: w[e] for e in ENGINES}, index=idx))
+    weights = pd.concat(rows).reindex(df.index)
+    return reblend(df, weights=weights).rename("reblend_learned")
+
+
+def arm_scores(df: pd.DataFrame, vol: pd.Series, seed: int = 0, fwd: pd.Series | None = None,
+               sessions: pd.DatetimeIndex | None = None) -> pd.DataFrame:
     return pd.DataFrame({"published": published(df), "reblend": reblend(df), "reblend_vol_veto": reblend_vol_veto(df, vol),
                          "reblend_no_ml": reblend_no_ml(df), "random_control": random_control(df, seed),
                          "reblend_no_sector_slot": (reblend_no_sector_slot(df) if set(SLOT_COLS) <= set(df.columns)
-                                                    else pd.Series(np.nan, index=df.index))}, index=df.index)
+                                                    else pd.Series(np.nan, index=df.index)),
+                         "reblend_learned": (reblend_learned(df, fwd, sessions) if sessions is not None
+                                             else pd.Series(np.nan, index=df.index))}, index=df.index)
 
 
 def session_ic(df: pd.DataFrame, score: pd.Series, fwd: pd.Series, date_col: str = "session", min_n: int = 30) -> pd.Series:

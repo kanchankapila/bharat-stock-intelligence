@@ -52,6 +52,7 @@ import { recordHeartbeat, startHeartbeatMonitor, bullJobDurationMs } from './job
 import { startJobWatchdog, buildDailyDigest } from './jobWatchdog';
 import { telegramService, sanitizeMarkdown, sanitizeMarkdownWithCode } from './telegramService';
 import { sendAccuracyDigest } from './signalAccuracyDigest';
+import { sendLearningReview } from './learningReview';
 import { waitForRankerInputsLogged } from './rankerReadiness';
 
 // Keep the literal failed-heartbeat write for this aggregate in one place. The worker has
@@ -1372,6 +1373,15 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   await runPython('accuracy_scorecard.py', ['--persist'], 10 * 60_000)
     .catch(e => T.fail('accuracy_scorecard', e));
 
+  // Learning loop (AF-20261119). Why each published Buy missed (one primary cause per miss), then the
+  // pre-registered champion/challenger test of every shadow arm against the published ranking. The gate reads
+  // the scorecard snapshot written just above. Both are read-only apart from their own outputs and never change a
+  // score; watched by `call-attribution-freshness` and `ranker-challenger-gate`. The gate exits 2 on protocol drift.
+  await runPython('call_attribution.py', ['--persist'], 10 * 60_000)
+    .catch(e => T.fail('call_attribution', e));
+  await runPython('ranker_challenger_gate.py', ['--persist'], 2 * 60_000)
+    .catch(e => T.fail('ranker_challenger_gate', e));
+
   // Frozen paper book (2026-10-27, AF-20261026-73): trades the ranking as a 10-name low-turnover long book
   // after costs and grades it against 200 random books with the same mechanics. Same contract as the
   // forward test (one app_settings snapshot, exits 2 on protocol drift); watched by `paper-book-freshness`.
@@ -1394,6 +1404,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // This shadow report starts from actual receipt times and never changes a trading score.
   await runPython('earnings_revision_shadow.py', ['--persist'], 2 * 60_000)
     .catch(e => T.fail('earnings_revision_shadow', e));
+
+  // Fridays only (IST): the week's attribution + challenger verdicts as one Telegram message. Never throws.
+  await sendLearningReview();
 
   // Surface the real per-step outcomes (and a degraded job state if any failed) instead of the
   // old blanket 'success' the completed handler used to stamp on all of these.
