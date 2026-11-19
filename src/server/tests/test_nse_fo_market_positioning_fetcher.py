@@ -56,6 +56,22 @@ def test_a_file_for_another_session_is_refused():
         parse_participant(_read("fao_participant_oi_19112026.csv"), "oi", dt.date(2026, 11, 18))
 
 
+def _with_title(name, title):
+    text = _read(name)
+    return title + text[text.index("\n"):]
+
+
+# The exchange's 14-Oct-2022 volume file quotes the year: '... as on Oct 14,"2022""""",,,' (2026-11-20 backfill
+# stopped there). The date is still unambiguous; the file-date check must stay as strict as before.
+def test_a_title_with_a_quoted_year_still_parses_and_is_still_date_checked():
+    odd = '""Participant wise Trading Volume (no. of contracts) in Equity Derivatives as on Nov 18,"2026""""",,,,,,,,,,,,,'
+    text = _with_title("fao_participant_vol_18112026.csv", odd)
+    rows = parse_participant(text, "vol", dt.date(2026, 11, 18))
+    assert {r["client_type"] for r in rows} == set(PARTICIPANTS)
+    with pytest.raises(NseFetchError, match="file is for 2026-11-18"):
+        parse_participant(text, "vol", dt.date(2026, 11, 17))
+
+
 def test_an_html_page_is_refused_not_stored_as_empty():
     with pytest.raises(NseFetchError):
         parse_participant("<!DOCTYPE html><html><body>Not found</body></html>\n<p>x</p>\n<p>y</p>", "oi",
