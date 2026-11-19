@@ -32,6 +32,16 @@ vi.mock('../lib/trpc', () => ({
         isRefetching: false,
       }),
     },
+    getBuyBookRisk: {
+      useQuery: () => ({
+        data: {
+          names: 1, excluded: [], sessions: 120, beta: 1.31, annualVolPct: 24.5, avgPairCorr: null,
+          maxDrawdownPct: -9.4, sectorWeights: [{ sector: 'Energy', weightPct: 100 }], weighting: 'equal',
+        },
+        isLoading: false,
+        isError: false,
+      }),
+    },
     getBuyRecommendations: {
       useQuery: () => ({
         data: {
@@ -75,6 +85,14 @@ describe('Best Picks evidence-first redesign', () => {
     expect(html).toContain('0.51%');
     expect(html).toContain('net after 0.15% cost');
     expect(html).toContain('p=0.0005');
+  });
+
+  it('reads the shortlist as one book and flags what an analyst should check (AF-20261119-12)', () => {
+    expect(html).toContain('The shortlist as one book');
+    expect(html).toContain('not a track record');
+    expect(html).toContain('1.31');
+    expect(html).toContain('Moves more than the market');
+    expect(html).toContain('Above the ranker');
   });
 
   it('shows canonical recommendations instead of leaving the page empty', () => {

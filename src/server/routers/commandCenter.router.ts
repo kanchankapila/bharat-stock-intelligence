@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { dbGet, dbAll } from '../dbAsync';
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { runPython } from '../pythonRunner';
-import { cacheGet } from '../cacheService';
+import { cacheGet, fetchWithCache } from '../cacheService';
+import { fetchBookRisk } from '../buyBookRisk';
 import { latestComputedAt, invalidateLatestComputedAt } from '../latestComputedAt';
 import { planStatus } from '../planLifecycle';
 import { fetchPlanEvents } from '../planEvents';
@@ -297,6 +298,19 @@ export const commandCenterRouter = router({
   // trailing realised PnL (see EMISSION_GATE in that file) -- when the gate is closed this
   // legitimately returns zero picks, which is the correct behavior, not a bug, so gateOpen/
   // gateReason are returned explicitly rather than leaving an empty list unexplained.
+  // AF-20261119-12 (display only): the shown Buy list as one equal-weight book over the last
+  // ~120 sessions -- beta to NIFTY 50, volatility, average correlation, drawdown, sector weights.
+  // A look-back on today's holdings, not a track record; no score reads it.
+  getBuyBookRisk: publicProcedure
+    .input(z.object({
+      symbols: z.array(z.string().min(1).max(20)).max(60),
+      sectors: z.record(z.string(), z.string().nullable()).optional(),
+    }))
+    .query(async ({ input }) => {
+      const key = [...new Set(input.symbols)].sort().join(',');
+      return fetchWithCache(`cc:buy-book-risk:${key}`, () => fetchBookRisk(input.symbols, input.sectors ?? {}), 900);
+    }),
+
   getIntradayTopPicks: publicProcedure
     .query(async () => {
       const latestRow = await dbGet<{ ts: string }>(

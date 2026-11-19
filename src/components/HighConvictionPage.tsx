@@ -276,6 +276,51 @@ function CanonicalPickCard({ pick, onSelectStock }: { pick: CanonicalPick; onSel
   );
 }
 
+// AF-20261119-12 (display only): the shortlist read as one equal-weight book. A look-back on
+// today's holdings over ~120 sessions, not a track record; nothing here changes a score.
+function BookRiskCard({ picks }: { picks: CanonicalPick[] }) {
+  const symbols = picks.map((p) => p.symbol);
+  const sectors = Object.fromEntries(picks.map((p) => [p.symbol, p.sector ?? null]));
+  const risk = trpc.getBuyBookRisk.useQuery(
+    { symbols, sectors },
+    { enabled: symbols.length > 0, staleTime: 15 * 60_000, refetchOnWindowFocus: false },
+  );
+  if (!symbols.length || risk.isLoading) return null;
+  if (risk.isError || !risk.data) {
+    return <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-500">Book view unavailable.</div>;
+  }
+  const d = risk.data;
+  const top = d.sectorWeights[0];
+  const fmt = (v: number | null | undefined, suffix = '') => (v == null ? '—' : `${v}${suffix}`);
+  const cells: Array<[string, string, string?]> = [
+    ['Beta to NIFTY 50', fmt(d.beta), d.beta != null && d.beta > 1.2 ? 'Moves more than the market' : undefined],
+    ['Annualised volatility', fmt(d.annualVolPct, '%')],
+    ['Avg pairwise correlation', fmt(d.avgPairCorr), d.avgPairCorr != null && d.avgPairCorr > 0.5 ? 'Names move together; fewer real bets' : undefined],
+    ['Max drawdown (look-back)', fmt(d.maxDrawdownPct, '%')],
+    ['Largest sector', top ? `${top.sector} ${top.weightPct}%` : '—', top && top.weightPct > 30 ? 'Above the ranker\'s 30% sector cap' : undefined],
+  ];
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">The shortlist as one book</div>
+        <div className="text-[10px] text-slate-500">
+          Equal weight · {d.names} names · last {d.sessions} sessions · look-back on today&apos;s list, not a track record
+          {d.excluded.length > 0 && ` · ${d.excluded.length} excluded (short history)`}
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        {cells.map(([label, value, warn]) => (
+          <div key={label} className="rounded-xl border border-slate-800 bg-slate-900/50 p-2.5">
+            <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">{label}</div>
+            <div className={cn('mt-1 text-base font-bold tabular-nums', warn ? 'text-amber-300' : 'text-white')}>{value}</div>
+            {warn && <div className="mt-0.5 text-[10px] text-amber-300/80">{warn}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function HighConvictionPage({ onSelectStock }: { onSelectStock?: (symbol: string) => void }) {
   const validated = trpc.getCapitulationSignal.useQuery(undefined, {
     refetchInterval: 60_000,
@@ -394,9 +439,12 @@ export function HighConvictionPage({ onSelectStock }: { onSelectStock?: (symbol:
               {[0, 1, 2].map((item) => <div key={item} className="h-72 animate-pulse rounded-2xl border border-slate-800 bg-slate-900/50" />)}
             </div>
           ) : picks.length > 0 ? (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {picks.map((pick) => <CanonicalPickCard key={pick.symbol} pick={pick} onSelectStock={onSelectStock} />)}
-            </div>
+            <>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {picks.map((pick) => <CanonicalPickCard key={pick.symbol} pick={pick} onSelectStock={onSelectStock} />)}
+              </div>
+              <BookRiskCard picks={picks} />
+            </>
           ) : (
             <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-950/35 p-6 text-center">
               <p className="text-sm font-semibold text-slate-300">No canonical Buy candidates in the latest batch</p>

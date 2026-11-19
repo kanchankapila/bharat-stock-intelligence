@@ -5,6 +5,7 @@ import { alphaQuant } from "../alphaQuantClient";
 import { enqueueWalkForwardOptimize, getWalkForwardOptimizeJobStatus } from "../queues";
 import { router, publicProcedure, adminProcedure, expensiveProcedure } from "../trpc";
 import { fetchWithCache } from "../cacheService";
+import { MIN_DATES_RELIABLE, withUncertainty } from "../hitRateStats";
 
 type RocResult = {
   regime: string; n: number; positives: number; negatives: number;
@@ -305,7 +306,11 @@ export const mlRouter = router({
               / NULLIF(COUNT(*), 0), 1) AS decisive_rate,
         ROUND(100.0 * SUM(CASE WHEN uso.outcome='NEUTRAL' THEN 1 ELSE 0 END)
               / NULLIF(COUNT(*), 0), 1) AS neutral_rate,
-        ROUND(AVG(uso.return_pct), 2) AS avg_return`;
+        ROUND(AVG(uso.return_pct), 2) AS avg_return,
+        -- AF-20261119-13: inputs for independent windows and the win-rate interval.
+        SUM(CASE WHEN uso.outcome IN ('WIN','LOSS','STOP_LOSS') THEN 1 ELSE 0 END) AS decided,
+        COUNT(DISTINCT substr(uso.signal_date, 1, 10)) AS dates,
+        MAX(uso.horizon_days) AS max_horizon`;
       const base = `
         FROM unified_signal_outcomes uso
         -- signal_date is stored in mixed formats ('YYYY-MM-DD' and 'YYYY-MM-DD HH:MM:SS+00');
@@ -326,7 +331,12 @@ export const mlRouter = router({
            HAVING COUNT(*) >= ? ORDER BY total DESC`, [cutoff, minSignals]),
       ]);
 
-      return { asOf: cutoff, windowDays: days, overall, bySource, byRegime, byHorizon, grid };
+      const u = (rows: any[]) => rows.map((r) => withUncertainty(r));
+      return {
+        asOf: cutoff, windowDays: days, minReliableWindows: MIN_DATES_RELIABLE,
+        overall: withUncertainty(overall as any), bySource: u(bySource), byRegime: u(byRegime),
+        byHorizon: u(byHorizon), grid: u(grid),
+      };
     }),
 
   getSignalReportCard: publicProcedure
