@@ -89,7 +89,7 @@ def parse_participant(text: str, kind: str, expected: dt.date) -> list[dict]:
     lines = [ln for ln in text.lstrip("\ufeff").splitlines() if ln.strip()]
     if len(lines) < 3:
         raise NseFetchError(f"participant {kind}: {len(lines)} non-empty lines")
-    m = _TITLE_DATE.search(lines[0])
+    m = _TITLE_DATE.search(lines[0].replace('"', ''))  # 14-Oct-2022 vol title: 'as on Oct 14,"2022"""""'
     if not m:
         raise NseFetchError(f"participant {kind}: no 'as on <date>' in title {lines[0][:120]!r}")
     file_date = dt.datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)}", "%b %d %Y").date()
