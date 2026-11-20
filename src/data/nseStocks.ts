@@ -236,8 +236,8 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "2017-09-01"
   },
   {
-    "symbol": "ABCOTS",
-    "name": "A B Cotspin India Limited",
+    "symbol": "ABCIND",
+    "name": "ABC Industries India Limited",
     "sector": "Unknown",
     "industry": "Unknown",
     "isin": "INE08PH01015",
@@ -1020,7 +1020,7 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "2007-03-19"
   },
   {
-    "symbol": "AMIRCHAND",
+    "symbol": "AEROPLANE",
     "name": "Amir Chand Jagdish Kumar (Exports) Limited",
     "sector": "Unknown",
     "industry": "Unknown",
@@ -1484,8 +1484,8 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "2011-06-29"
   },
   {
-    "symbol": "ASHIKA",
-    "name": "Ashika Credit Capital Limited",
+    "symbol": "ASHIKAG",
+    "name": "Ashika Global Securities Limited",
     "sector": "Unknown",
     "industry": "Unknown",
     "isin": "INE094B01013",
@@ -2027,14 +2027,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE0O9T01021",
     "listing_date": "2025-02-21"
   },
-  {
-    "symbol": "BAJAJINSUR",
-    "name": "Bajaj Allianz Insurance Company",
-    "sector": "Financials",
-    "industry": "Insurance",
-    "isin": "INE217A01017",
-    "listing_date": "2006-11-02"
-  },
+  
   {
     "symbol": "BAJAJST",
     "name": "Bajaj Steel Industries Limited",
@@ -3291,14 +3284,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE281A01026",
     "listing_date": "2004-07-20"
   },
-  {
-    "symbol": "CENTRALBANK",
-    "name": "Central Bank of India",
-    "sector": "Financials",
-    "industry": "Banks",
-    "isin": "INE209A01023",
-    "listing_date": "1994-05-27"
-  },
+  
   {
     "symbol": "CENTRALBK",
     "name": "Central Bank of India",
@@ -3459,14 +3445,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE121A01024",
     "listing_date": "1996-05-15"
   },
-  {
-    "symbol": "CHOLAFINSV",
-    "name": "Chola Insurance Company Limited",
-    "sector": "Financials",
-    "industry": "Insurance",
-    "isin": "INE470A01017",
-    "listing_date": "2006-10-25"
-  },
+  
   {
     "symbol": "CHOLAHLDNG",
     "name": "Cholamandalam Financial Holdings Limited",
@@ -3490,14 +3469,6 @@ const nseStocksSeedData: NSEStock[] = [
     "industry": "Unknown",
     "isin": "INE345H01024",
     "listing_date": "2025-04-17"
-  },
-  {
-    "symbol": "CIGNITITEC",
-    "name": "Cigniti Technologies Limited",
-    "sector": "Unknown",
-    "industry": "Unknown",
-    "isin": "INE675C01017",
-    "listing_date": "2014-10-13"
   },
   {
     "symbol": "CINELINE",
@@ -5852,8 +5823,8 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "1995-05-25"
   },
   {
-    "symbol": "GFSTEELS",
-    "name": "Grand Foundry Limited",
+    "symbol": "TIKONA",
+    "name": "Tikona Communication Limited",
     "sector": "Unknown",
     "industry": "Unknown",
     "isin": "INE534A01028",
@@ -6492,14 +6463,6 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "2026-03-24"
   },
   {
-    "symbol": "GSPL",
-    "name": "Gujarat State Petronet Limited",
-    "sector": "Unknown",
-    "industry": "Unknown",
-    "isin": "INE246F01010",
-    "listing_date": "2006-02-16"
-  },
-  {
     "symbol": "GSS",
     "name": "GSS Infotech Limited",
     "sector": "Unknown",
@@ -6564,8 +6527,8 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "2007-06-04"
   },
   {
-    "symbol": "GUJGASLTD",
-    "name": "Gujarat Gas Limited",
+    "symbol": "GUJENERGY",
+    "name": "GUJARAT ENERGY LIMITED",
     "sector": "Unknown",
     "industry": "Unknown",
     "isin": "INE844O01030",
@@ -6876,8 +6839,8 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "2021-12-30"
   },
   {
-    "symbol": "HEG",
-    "name": "HEG Limited",
+    "symbol": "HEGAM",
+    "name": "HEG Advanced Materials Limited",
     "sector": "Unknown",
     "industry": "Unknown",
     "isin": "INE545A01024",
@@ -7324,11 +7287,11 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "2008-12-10"
   },
   {
-    "symbol": "ICICIPRULI",
-    "name": "ICICI Prudential Life Insurance Company",
+    "symbol": "ICICILIFE",
+    "name": "ICICI Life Insurance Limited",
     "sector": "Financials",
     "industry": "Insurance",
-    "isin": "INE451L01025",
+    "isin": "INE726G01019",
     "listing_date": "2016-10-28"
   },
   {
@@ -7763,14 +7726,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE611L01021",
     "listing_date": "2011-03-11"
   },
-  {
-    "symbol": "INDUSIND",
-    "name": "IndusInd Bank Limited",
-    "sector": "Financials",
-    "industry": "Banks",
-    "isin": "INE095A01012",
-    "listing_date": "1994-12-08"
-  },
+  
   {
     "symbol": "INDUSINDBK",
     "name": "IndusInd Bank Limited",
@@ -8268,14 +8224,6 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "1995-02-15"
   },
   {
-    "symbol": "JBCHEPHARM",
-    "name": "JB Chemicals & Pharmaceuticals Limited",
-    "sector": "Unknown",
-    "industry": "Unknown",
-    "isin": "INE572A01036",
-    "listing_date": "2003-04-29"
-  },
-  {
     "symbol": "JBMA",
     "name": "JBM Auto Limited",
     "sector": "Unknown",
@@ -8363,14 +8311,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE758E01017",
     "listing_date": "2023-08-21"
   },
-  {
-    "symbol": "JIOFINANCIAL",
-    "name": "Jio Financial Services Limited",
-    "sector": "Financials",
-    "industry": "Finance",
-    "isin": "INE0I8I01017",
-    "listing_date": "2023-10-20"
-  },
+  
   {
     "symbol": "JISLDVREQS",
     "name": "Jain Irrigation Systems Limited",
@@ -9187,14 +9128,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE082A01010",
     "listing_date": "1999-06-09"
   },
-  {
-    "symbol": "KOTAK",
-    "name": "Kotak Mahindra Bank Limited",
-    "sector": "Financials",
-    "industry": "Banks",
-    "isin": "INE237A01028",
-    "listing_date": "1995-07-24"
-  },
+  
   {
     "symbol": "KOTAKBANK",
     "name": "Kotak Mahindra Bank Limited",
@@ -9563,14 +9497,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE059D01020",
     "listing_date": "2007-03-16"
   },
-  {
-    "symbol": "LARSEN",
-    "name": "Larsen & Toubro Limited",
-    "sector": "Industrials",
-    "industry": "Construction & Engineering",
-    "isin": "INE018A01030",
-    "listing_date": "1991-08-13"
-  },
+  
   {
     "symbol": "LASA",
     "name": "Lasa Supergenerics Limited",
@@ -9875,14 +9802,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE498L01015",
     "listing_date": "2011-08-12"
   },
-  {
-    "symbol": "LTFH",
-    "name": "L&T Finance Holdings Limited",
-    "sector": "Financials",
-    "industry": "Finance",
-    "isin": "INE108A01028",
-    "listing_date": "2006-12-20"
-  },
+  
   {
     "symbol": "LTFOODS",
     "name": "LT Foods Limited",
@@ -9891,14 +9811,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE818H01020",
     "listing_date": "2006-12-18"
   },
-  {
-    "symbol": "LTIM",
-    "name": "LTIMindtree Limited",
-    "sector": "Information Technology",
-    "industry": "IT Services",
-    "isin": "INE214T01019",
-    "listing_date": "2021-11-25"
-  },
+  
   {
     "symbol": "LTM",
     "name": "LTM Limited",
@@ -9964,8 +9877,8 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "1995-02-08"
   },
   {
-    "symbol": "LYPSAGEMS",
-    "name": "Lypsa Gems & Jewellery Limited",
+    "symbol": "AURUS",
+    "name": "AURUS GEM CORPORATION LIMITED",
     "sector": "Unknown",
     "industry": "Unknown",
     "isin": "INE142K01011",
@@ -10099,14 +10012,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE263W01010",
     "listing_date": "2019-04-15"
   },
-  {
-    "symbol": "MAHINDRA",
-    "name": "Mahindra & Mahindra Limited",
-    "sector": "Consumer Discretionary",
-    "industry": "Automobiles",
-    "isin": "INE101A01026",
-    "listing_date": "1993-02-05"
-  },
+  
   {
     "symbol": "MAHLIFE",
     "name": "Mahindra Lifespace Developers Limited",
@@ -10523,14 +10429,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE435D01014",
     "listing_date": "2026-04-20"
   },
-  {
-    "symbol": "MCDOWELL",
-    "name": "McDowell No.1",
-    "sector": "Consumer Staples",
-    "industry": "Beverages & Alcoholic Beverages",
-    "isin": "INE139I01026",
-    "listing_date": "1994-12-23"
-  },
+  
   {
     "symbol": "MCL",
     "name": "Madhav Copper Limited",
@@ -10764,8 +10663,8 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "2016-08-02"
   },
   {
-    "symbol": "MIRCELECTR",
-    "name": "MIRC Electronics Limited",
+    "symbol": "ONIDA",
+    "name": "Onida Electronics Limited",
     "sector": "Unknown",
     "industry": "Unknown",
     "isin": "INE831A01028",
@@ -11491,14 +11390,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE317F01035",
     "listing_date": "2008-04-08"
   },
-  {
-    "symbol": "NESTLE",
-    "name": "Nestle India Limited",
-    "sector": "Consumer Staples",
-    "industry": "Food & Beverages",
-    "isin": "INE239A01016",
-    "listing_date": "1991-08-13"
-  },
+  
   {
     "symbol": "NESTLEIND",
     "name": "Nestle India Limited",
@@ -11828,8 +11720,8 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "2024-01-31"
   },
   {
-    "symbol": "NOVARTIND",
-    "name": "Novartis India Limited",
+    "symbol": "EVONILE",
+    "name": "Evonile Pharma Limited",
     "sector": "Unknown",
     "industry": "Unknown",
     "isin": "INE234A01025",
@@ -11955,14 +11847,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE426Z01016",
     "listing_date": "2022-04-07"
   },
-  {
-    "symbol": "OBEROI",
-    "name": "Oberoi Realty Limited",
-    "sector": "Real Estate",
-    "industry": "Real Estate Development",
-    "isin": "INE093I01014",
-    "listing_date": "2009-02-25"
-  },
+  
   {
     "symbol": "OBEROIRLTY",
     "name": "Oberoi Realty Limited",
@@ -12883,14 +12768,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE637C01025",
     "listing_date": "2016-07-07"
   },
-  {
-    "symbol": "POLICYBAZAAR",
-    "name": "PB Fintech Limited",
-    "sector": "Financials",
-    "industry": "Fintech",
-    "isin": "INE9L0Z01011",
-    "listing_date": "2021-11-09"
-  },
+  
   {
     "symbol": "POLICYBZR",
     "name": "PB Fintech Limited",
@@ -14299,14 +14177,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE13B501022",
     "listing_date": "2025-09-26"
   },
-  {
-    "symbol": "SABEVENTS",
-    "name": "Sab Events & Governance Now Media Limited",
-    "sector": "Unknown",
-    "industry": "Unknown",
-    "isin": "INE860T01019",
-    "listing_date": "2016-09-15"
-  },
+  
   {
     "symbol": "SADBHAV",
     "name": "Sadbhav Engineering Limited",
@@ -14556,8 +14427,8 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "2007-01-24"
   },
   {
-    "symbol": "SANGINITA",
-    "name": "Sanginita Chemicals Limited",
+    "symbol": "AGASTYAEN",
+    "name": "Agastya Energy and Infrastructure Limited",
     "sector": "Unknown",
     "industry": "Unknown",
     "isin": "INE753W01010",
@@ -15436,8 +15307,8 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "1996-05-22"
   },
   {
-    "symbol": "SILLYMONKS",
-    "name": "Silly Monks Entertainment Limited",
+    "symbol": "CRESTO",
+    "name": "CRESTO TECHNO LIMITED",
     "sector": "Unknown",
     "industry": "Unknown",
     "isin": "INE203Y01012",
@@ -15907,14 +15778,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE19GK01015",
     "listing_date": "2026-03-02"
   },
-  {
-    "symbol": "SRTRANSFIN",
-    "name": "Sremco Trading And Financial Services",
-    "sector": "Consumer Discretionary",
-    "industry": "Automobiles",
-    "isin": "INE003A01027",
-    "listing_date": "1994-01-13"
-  },
+  
   {
     "symbol": "SSDL",
     "name": "Saraswati Saree Depot Limited",
@@ -16699,14 +16563,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE672A01026",
     "listing_date": "1998-06-24"
   },
-  {
-    "symbol": "TATAMOTORS",
-    "name": "Tata Motors Limited",
-    "sector": "Consumer Discretionary",
-    "industry": "Automobiles",
-    "isin": "INE155A01022",
-    "listing_date": "1994-11-16"
-  },
+  
   {
     "symbol": "TATAPOWER",
     "name": "Tata Power Company Limited",
@@ -18252,8 +18109,8 @@ const nseStocksSeedData: NSEStock[] = [
     "listing_date": "1996-08-28"
   },
   {
-    "symbol": "VISASTEEL",
-    "name": "Visa Steel Limited",
+    "symbol": "VISACHROME",
+    "name": "VISA Chrome Limited",
     "sector": "Unknown",
     "industry": "Unknown",
     "isin": "INE286H01012",
@@ -18347,14 +18204,7 @@ const nseStocksSeedData: NSEStock[] = [
     "isin": "INE0SJA01013",
     "listing_date": "2025-09-24"
   },
-  {
-    "symbol": "VODAFONE",
-    "name": "Vodafone Idea Limited",
-    "sector": "Telecommunications",
-    "industry": "Telecom",
-    "isin": "INE951I01020",
-    "listing_date": "2007-11-21"
-  },
+  
   {
     "symbol": "VOLTAMP",
     "name": "Voltamp Transformers Limited",
