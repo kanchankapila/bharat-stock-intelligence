@@ -232,6 +232,35 @@ def test_identity_sync_uses_isin_and_keeps_provisionals_separate(pg_db_conn):
     assert {row["predicate"] for row in edges} == {"ISSUES", "LISTED_AS"}
 
 
+# AF-20261119-25: market_identifier only ever added mappings, so ids nse_stocks stopped carrying (LTM/BI/UEL had
+# inherited Loyal Textile's / Britannia's / Unicommerce's ids, AF-20261119-11; 52 shared MC codes, AF-20261118-06)
+# stayed 'verified' and current forever. Two symbols on one ISIN (LTIM -> LTM rename) must keep both rows' ids.
+def test_identity_sync_retires_ids_the_master_no_longer_carries(pg_db_conn):
+    conn = pg_db_conn
+    for table in ("market_identifier_gap", "market_identifier", "market_listing",
+                  "market_instrument", "market_issuer", "market_graph_edge", "market_graph_node"):
+        conn.execute("DELETE FROM " + table)
+    conn.execute("DELETE FROM nse_stocks")
+    ins = ("INSERT INTO nse_stocks (symbol, name, isin, exchange, status, tlid, last_updated) "
+           "VALUES (?, ?, ?, 'NSE', ?, ?, now())")
+    conn.execute(ins, ("LTM", "LTIMindtree Limited", "INE214T01019", "ACTIVE", "2668"))
+    conn.execute(ins, ("LTIM", "LTIMindtree Limited", "INE214T01019", "INACTIVE", "4596"))
+    sync_identity(conn=conn)
+    conn.execute("UPDATE nse_stocks SET tlid = '9999' WHERE symbol = 'LTM'")
+    sync_identity(conn=conn)
+    conn.commit()
+
+    def state(value):
+        return conn.execute(
+            "SELECT mapping_status, valid_to FROM market_identifier WHERE provider = 'trendlyne' AND identifier_value = ?",
+            (value,)).fetchone()
+    old = state("2668")
+    assert old["mapping_status"] == "rejected" and old["valid_to"] is not None
+    for current in ("9999", "4596"):
+        row = state(current)
+        assert row["mapping_status"] == "verified" and row["valid_to"] is None, current
+
+
 def test_migration_and_schema_snapshot_declare_the_same_semantic_tables(pg_schema):
     conn, schema = pg_schema
     root = Path(__file__).resolve().parents[3]
