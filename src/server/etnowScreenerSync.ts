@@ -159,7 +159,7 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
           bulkUpsert(tx, entered.map(s => [screener.screener_id, s, today, appearedAt]), 4, buildAppSql));
       }
       if (exited.length > 0) {
-        await dbRun(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,
+        await dbRun(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL AND source = 'etnow'`,
           [today, screener.screener_id, ...exited]);
       }
 

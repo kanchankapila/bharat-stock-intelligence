@@ -346,7 +346,7 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
         });
       }
       if (exited.length > 0) {
-        await dbRun(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,
+        await dbRun(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL AND source = 'moneycontrol'`,
           [today, config.scanId, ...exited]);
 
         await dbRun(`UPDATE screener_history_log SET exit_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exit_date IS NULL`,

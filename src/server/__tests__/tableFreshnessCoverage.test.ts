@@ -90,7 +90,6 @@ const EXCLUDED_TABLES: Record<string, string> = {
   nt_fno_expiry: 'NiftyTrader FNO expiry calendar reference',
   stock_master: 'legacy provider-id master (nse_stocks is the canonical, checked master)',
   et_mf_universe: 'ET mutual-fund universe reference (small slow-changing ref)',
-  technical_composite_scores: 'TS composite score output; derived',
   technical_scans: 'TS technical scan output; derived',
   factor_edge_history: 'factor_edge.py research backtest log; derived',
   feature_importance_log: 'ML feature importance bookkeeping; derived',

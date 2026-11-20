@@ -241,7 +241,7 @@ export async function saveScreenerStocksToDB(
 
     if (exited.length > 0) {
       await dbRun(
-        `UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,
+        `UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL AND source = 'trendlyne'`,
         [today, screenerId, ...exited]
       );
       await dbTransaction(async (tx) => {

@@ -180,7 +180,7 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
       }
       if (exited.length > 0) {
         await dbRun(
-          `UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,
+          `UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL AND source = 'et_marketstats'`,
           [today, def.screenerKey, ...exited]);
       }
 
