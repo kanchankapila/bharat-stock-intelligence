@@ -5,6 +5,7 @@ const state = vi.hoisted(() => ({
   big: 107,
   unanalyzed: 104,
   postmasterStart: '2026-11-09T04:50:48.253Z',
+  checkpointerStart: '2026-11-09T04:50:49.000Z' as string | null,
   releaseAnalyze: null as null | (() => void),
   holdAnalyze: false,
 }));
@@ -13,7 +14,10 @@ vi.mock('../pgClient', () => ({
   withClient: async (fn: (c: unknown) => Promise<unknown>) => fn({
     query: async (text: string) => {
       state.queries.push(text);
-      if (text.includes('pg_postmaster_start_time')) return { rows: [{ started: state.postmasterStart }] };
+      if (text.includes('pg_postmaster_start_time')) {
+        const started = text.includes('checkpointer') ? (state.checkpointerStart ?? state.postmasterStart) : state.postmasterStart;
+        return { rows: [{ started }] };
+      }
       if (text.includes('pg_stat_user_tables')) return { rows: [{ big: state.big, unanalyzed: state.unanalyzed, sample: 'x' }] };
       if (/^\s*ANALYZE\s*$/i.test(text) && state.holdAnalyze) {
         await new Promise<void>(resolve => { state.releaseAnalyze = resolve; });
@@ -35,6 +39,7 @@ describe('recoverPgStatsIfReset (AF-20261028-22: stats reset after an unclean Po
     state.big = 107;
     state.unanalyzed = 104;
     state.postmasterStart = '2026-11-09T04:50:48.253Z';
+    state.checkpointerStart = '2026-11-09T04:50:49.000Z';
     state.holdAnalyze = false;
     state.releaseAnalyze = null;
   });
@@ -65,8 +70,24 @@ describe('recoverPgStatsIfReset (AF-20261028-22: stats reset after an unclean Po
     expect(await recoverPgStatsIfReset()).toBe('already-attempted');
     expect(analyzeCount()).toBe(1);
     state.postmasterStart = '2026-11-10T03:00:00.000Z';
+    state.checkpointerStart = '2026-11-10T03:00:01.000Z';
     expect(await recoverPgStatsIfReset()).toBe('analyzed');
     expect(analyzeCount()).toBe(2);
+  });
+
+  it('treats a crash-recovery reinitialisation as a new start although the postmaster start time is unchanged', async () => {
+    // 2026-11-20 09:39 IST: a backend was OOM-killed, Postgres reinitialised (stats reset) and
+    // pg_postmaster_start_time() still read the 11-15 start; only the auxiliary processes restarted.
+    await recoverPgStatsIfReset();
+    state.checkpointerStart = '2026-11-20T04:09:15.618Z';
+    expect(await recoverPgStatsIfReset()).toBe('analyzed');
+    expect(analyzeCount()).toBe(2);
+  });
+
+  it('falls back to the postmaster start when the checkpointer row is not visible', async () => {
+    state.checkpointerStart = null;
+    expect(await recoverPgStatsIfReset()).toBe('analyzed');
+    expect(await recoverPgStatsIfReset()).toBe('already-attempted');
   });
 
   it('does not start a second ANALYZE while one is running', async () => {
