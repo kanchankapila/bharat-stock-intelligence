@@ -1,0 +1,5 @@
+symbol,status,isin,mcsymbol,tlid,tlname,stockid,companyid,tickertape_sid,fincode,scripcode
+BI,ACTIVE,INE986A01012,,220,britannia-industries-ltd,963994,13934,BRIT,100825,500825
+LTIM,INACTIVE,INE214T01019,LI09,4596,ltimindtree-ltd,1000372,3318,LRTI,,
+LTM,ACTIVE,INE214T01019,,2668,loyal-textiles-mills-ltd,504152,11420,LOYA,114036,514036
+UEL,ACTIVE,INE899L01030,,2492906,unicommerce-esolutions-ltd,10039348,2206563,UNIE,313495,544227

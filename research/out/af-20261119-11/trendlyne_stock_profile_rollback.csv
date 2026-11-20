@@ -1,0 +1,559 @@
+symbol,date,np_annual,ebitda_annual,revenue_annual,eps_annual,ebitda_margin,np_margin,cfo_annual,roe,roce,ltde_ratio,current_ratio,promoter_pct,fii_pct,mf_pct,pledge_pct,rev_cagr_5y,np_cagr_5y,rev_growth_yoy_q,np_growth_yoy_q,analyst_target_mean,analyst_count,analyst_buy_pct,analyst_upside_pct,last_dividend_amt,last_ex_date,days_since_dividend,fetched_at,company_description,promoter_chg_qoq,fii_chg_qoq,mf_chg_qoq,pledge_chg_qoq
+BI,2026-07-05,2533.49,3768.46,19375.62,105.18155,19.67,13.4,2611.6,49.61,61.8,0.056,1.119,50.55,15.63,10.39,,7.58,6.33,6.4692626,21.14296,6593.8,5,0.0,21.87,90.5,2026-07-31,-26,2026-07-05 06:29:07.292469+00,"#### About the company - Business Profile
+Britannia Industries Ltd. is a major Indian food-products corporation primarily engaged in the manufacturing and sale of biscuits, bakery products, and dairy offerings. With a legacy spanning over a century, the company maintains a dominant position in the Indian biscuits market through a multi-brand strategy and an extensive pan-India distribution network. Britannia operates in the Fast-Moving Consumer Goods (FMCG) sector, providing a wide range of products including biscuits, bread, cakes, rusks, and dairy items such as cheese, milk, and yogurt.
+
+### Key Points
+
+*   **Key Facts:**
+    *   **Founded:** 1918 (Incorporated).
+    *   **Headquarters:** Bengaluru, Karnataka (Executive Office); Kolkata, West Bengal (Registered Office).
+    *   **Parent Company:** Part of the Wadia Group; The Bombay Burmah Trading Corporation Ltd. is a promoter.
+    *   **Stock Listing:** Listed on Bombay Stock Exchange (BSE: 500825) and National Stock Exchange (NSE: BRITANNIA).
+    *   **Major Products:** Good Day, Marie Gold, NutriChoice, Milk Bikis, Tiger, 50-50 (Biscuits); Treat (Croissants and Wafers); various bread, cake, and rusk varieties; and Dairy products.
+*   **Operations and Resources:**
+    *   The company operates through a network of owned manufacturing facilities and contract manufacturing units across India and international locations (e.g., Nepal, Egypt).
+    *   It maintains a significant retail reach, with direct distribution to millions of outlets.
+*   **Privatization and Ownership:**
+    *   As of March 2025, the company is a subsidiary of The Bombay Burmah Trading Corporation Limited (part of the Wadia Group).
+*   **Market Significance:**
+    *   One of India's oldest and largest food companies, holding a leading market share in the organized biscuit market.
+    *   Serves domestic consumers and exports to over 80 countries globally.
+*   **Sustainability and Innovation:**
+    *   Achieved a 15.4% improvement in the S&P Global Corporate Sustainability Assessment (CSA) score, rising from 52 in 2024 to 60 in 2025.
+    *   Reported a 13% increase in renewable electricity share and a 3.4% reduction in specific water consumption in Q2 FY2025-26.
+    *   The Britannia Nutrition Foundation (BNF) saw a 22% increase in beneficiaries.
+*   **Business Model:**
+    *   Focuses on brand building, distribution expansion (particularly in rural markets), and continuous product innovation.
+    *   Excels in supply chain management and maintaining a premium positioning in core biscuit segments while expanding into adjacent bakery and dairy categories.
+*   **Financial Highlights (Consolidated Annual Numbers):**
+    *   **Revenue from Operations (FY 2024-25):** ₹17,942.67 Crore (7.0% growth vs. FY 2023-24).
+    *   **Operating Profit (FY 2024-25):** ₹2,873.81 Crore.
+    *   **Profit After Tax (Owner's Share, FY 2024-25):** ₹2,178.73 Crore.
+    *   **Revenue from Operations (FY 2023-24):** ₹16,769.27 Crore.
+    *   **Profit After Tax (Owner's Share, FY 2023-24):** ₹2,139.81 Crore.
+*   **Quarterly Performance (FY 2025-26):**
+    *   **Q3 FY26 Net Sales:** ₹4,885 Crore (9.5% YoY growth).
+    *   **Q2 FY26 Net Sales:** ₹4,752 Crore (4.1% YoY growth).
+    *   **H1 FY26 Revenue Growth:** 7%.
+*   **Key Products and Technology:**
+    *   Recent focus on ""Treat"" Croissants and Creme Wafers, and ""NutriChoice"" 100% Atta biscuits.
+    *   Implementation of cost-saving initiatives and digital transformation in supply chain and distribution.
+*   **Subsidiaries:**
+    *   Major subsidiaries include Nalanda Biscuits Company Limited, Sunandaram Foods Private Limited, and Britannia Bel Foods Private Limited (a joint venture for dairy).
+*   **Strategic Initiatives:**
+    *   Driving volume-led growth through region-specific and consumer-centric products.
+    *   Sustaining margins via cost-saving programs despite commodity price fluctuations.
+    *   Strategic focus on expanding the dairy and international business segments.
+
+References
+1. [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1880292/)
+2. [Annual Report May 2024](https://trendlyne.com/get-document/document/pdf/1542133/)
+3. [Investor Presentation Feb 2026](https://trendlyne.com/get-document/document/pdf/2081284/)
+4. [Investor Presentation Nov 2025](https://trendlyne.com/get-document/document/pdf/2000753/)
+5. [Result Nov 2025](https://trendlyne.com/get-document/document/pdf/2013830/)
+
+",,,,
+BI,2026-10-19,2533.49,3768.46,19375.62,105.18155,19.67,13.4,2611.6,49.61,61.8,0.056,1.119,50.55,15.63,10.39,,7.58,6.33,8.17248,13.563911,6503.8,5,60.0,18.04,90.5,2026-07-31,80,2026-10-19 15:31:37.889651+00,"## About the company - Business Profile
+Britannia Industries Ltd. is a major Indian food-products corporation primarily engaged in the manufacturing and sale of biscuits, bakery products, and dairy offerings. With a legacy spanning over a century, the company maintains a dominant position in the Indian biscuits market through a multi-brand strategy and an extensive pan-India distribution network. Britannia operates in the Fast-Moving Consumer Goods (FMCG) sector, providing a wide range of products including biscuits, bread, cakes, rusks, and dairy items such as cheese, milk, and yogurt.
+
+### Key Points
+
+*   **Key Facts:**
+    *   **Founded:** 1918 (Incorporated).
+    *   **Headquarters:** Bengaluru, Karnataka (Executive Office); Kolkata, West Bengal (Registered Office).
+    *   **Parent Company:** Part of the Wadia Group; The Bombay Burmah Trading Corporation Ltd. is a promoter.
+    *   **Stock Listing:** Listed on Bombay Stock Exchange (BSE: 500825) and National Stock Exchange (NSE: BRITANNIA).
+    *   **Major Products:** Good Day, Marie Gold, NutriChoice, Milk Bikis, Tiger, 50-50 (Biscuits); Treat (Croissants and Wafers); various bread, cake, and rusk varieties; and Dairy products.
+*   **Operations and Resources:**
+    *   The company operates through a network of owned manufacturing facilities and contract manufacturing units across India and international locations (e.g., Nepal, Egypt).
+    *   It maintains a significant retail reach, with direct distribution to millions of outlets.
+*   **Privatization and Ownership:**
+    *   As of March 2025, the company is a subsidiary of The Bombay Burmah Trading Corporation Limited (part of the Wadia Group).
+*   **Market Significance:**
+    *   One of India's oldest and largest food companies, holding a leading market share in the organized biscuit market.
+    *   Serves domestic consumers and exports to over 80 countries globally.
+*   **Sustainability and Innovation:**
+    *   Achieved a 15.4% improvement in the S&P Global Corporate Sustainability Assessment (CSA) score, rising from 52 in 2024 to 60 in 2025.
+    *   Reported a 13% increase in renewable electricity share and a 3.4% reduction in specific water consumption in Q2 FY2025-26.
+    *   The Britannia Nutrition Foundation (BNF) saw a 22% increase in beneficiaries.
+*   **Business Model:**
+    *   Focuses on brand building, distribution expansion (particularly in rural markets), and continuous product innovation.
+    *   Excels in supply chain management and maintaining a premium positioning in core biscuit segments while expanding into adjacent bakery and dairy categories.
+*   **Financial Highlights (Consolidated Annual Numbers):**
+    *   **Revenue from Operations (FY 2024-25):** ₹17,942.67 Crore (7.0% growth vs. FY 2023-24).
+    *   **Operating Profit (FY 2024-25):** ₹2,873.81 Crore.
+    *   **Profit After Tax (Owner's Share, FY 2024-25):** ₹2,178.73 Crore.
+    *   **Revenue from Operations (FY 2023-24):** ₹16,769.27 Crore.
+    *   **Profit After Tax (Owner's Share, FY 2023-24):** ₹2,139.81 Crore.
+*   **Quarterly Performance (FY 2025-26):**
+    *   **Q3 FY26 Net Sales:** ₹4,885 Crore (9.5% YoY growth).
+    *   **Q2 FY26 Net Sales:** ₹4,752 Crore (4.1% YoY growth).
+    *   **H1 FY26 Revenue Growth:** 7%.
+*   **Key Products and Technology:**
+    *   Recent focus on ""Treat"" Croissants and Creme Wafers, and ""NutriChoice"" 100% Atta biscuits.
+    *   Implementation of cost-saving initiatives and digital transformation in supply chain and distribution.
+*   **Subsidiaries:**
+    *   Major subsidiaries include Nalanda Biscuits Company Limited, Sunandaram Foods Private Limited, and Britannia Bel Foods Private Limited (a joint venture for dairy).
+*   **Strategic Initiatives:**
+    *   Driving volume-led growth through region-specific and consumer-centric products.
+    *   Sustaining margins via cost-saving programs despite commodity price fluctuations.
+    *   Strategic focus on expanding the dairy and international business segments.
+
+References
+1. [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1880292/)
+2. [Annual Report May 2024](https://trendlyne.com/get-document/document/pdf/1542133/)
+3. [Investor Presentation Feb 2026](https://trendlyne.com/get-document/document/pdf/2081284/)
+4. [Investor Presentation Nov 2025](https://trendlyne.com/get-document/document/pdf/2000753/)
+5. [Result Nov 2025](https://trendlyne.com/get-document/document/pdf/2013830/)
+
+",0.0,-0.09,2.22,
+BI,2026-10-27,2533.49,3768.46,19375.62,105.18155,19.67,13.4,2611.6,49.61,61.8,0.056,1.119,50.55,15.63,10.39,,7.58,6.33,8.17248,13.563911,6503.8,5,60.0,18.04,90.5,2026-07-31,88,2026-10-26 22:19:13.689193+00,"## About the company - Business Profile
+Britannia Industries Ltd. is a major Indian food-products corporation primarily engaged in the manufacturing and sale of biscuits, bakery products, and dairy offerings. With a legacy spanning over a century, the company maintains a dominant position in the Indian biscuits market through a multi-brand strategy and an extensive pan-India distribution network. Britannia operates in the Fast-Moving Consumer Goods (FMCG) sector, providing a wide range of products including biscuits, bread, cakes, rusks, and dairy items such as cheese, milk, and yogurt.
+
+### Key Points
+
+*   **Key Facts:**
+    *   **Founded:** 1918 (Incorporated).
+    *   **Headquarters:** Bengaluru, Karnataka (Executive Office); Kolkata, West Bengal (Registered Office).
+    *   **Parent Company:** Part of the Wadia Group; The Bombay Burmah Trading Corporation Ltd. is a promoter.
+    *   **Stock Listing:** Listed on Bombay Stock Exchange (BSE: 500825) and National Stock Exchange (NSE: BRITANNIA).
+    *   **Major Products:** Good Day, Marie Gold, NutriChoice, Milk Bikis, Tiger, 50-50 (Biscuits); Treat (Croissants and Wafers); various bread, cake, and rusk varieties; and Dairy products.
+*   **Operations and Resources:**
+    *   The company operates through a network of owned manufacturing facilities and contract manufacturing units across India and international locations (e.g., Nepal, Egypt).
+    *   It maintains a significant retail reach, with direct distribution to millions of outlets.
+*   **Privatization and Ownership:**
+    *   As of March 2025, the company is a subsidiary of The Bombay Burmah Trading Corporation Limited (part of the Wadia Group).
+*   **Market Significance:**
+    *   One of India's oldest and largest food companies, holding a leading market share in the organized biscuit market.
+    *   Serves domestic consumers and exports to over 80 countries globally.
+*   **Sustainability and Innovation:**
+    *   Achieved a 15.4% improvement in the S&P Global Corporate Sustainability Assessment (CSA) score, rising from 52 in 2024 to 60 in 2025.
+    *   Reported a 13% increase in renewable electricity share and a 3.4% reduction in specific water consumption in Q2 FY2025-26.
+    *   The Britannia Nutrition Foundation (BNF) saw a 22% increase in beneficiaries.
+*   **Business Model:**
+    *   Focuses on brand building, distribution expansion (particularly in rural markets), and continuous product innovation.
+    *   Excels in supply chain management and maintaining a premium positioning in core biscuit segments while expanding into adjacent bakery and dairy categories.
+*   **Financial Highlights (Consolidated Annual Numbers):**
+    *   **Revenue from Operations (FY 2024-25):** ₹17,942.67 Crore (7.0% growth vs. FY 2023-24).
+    *   **Operating Profit (FY 2024-25):** ₹2,873.81 Crore.
+    *   **Profit After Tax (Owner's Share, FY 2024-25):** ₹2,178.73 Crore.
+    *   **Revenue from Operations (FY 2023-24):** ₹16,769.27 Crore.
+    *   **Profit After Tax (Owner's Share, FY 2023-24):** ₹2,139.81 Crore.
+*   **Quarterly Performance (FY 2025-26):**
+    *   **Q3 FY26 Net Sales:** ₹4,885 Crore (9.5% YoY growth).
+    *   **Q2 FY26 Net Sales:** ₹4,752 Crore (4.1% YoY growth).
+    *   **H1 FY26 Revenue Growth:** 7%.
+*   **Key Products and Technology:**
+    *   Recent focus on ""Treat"" Croissants and Creme Wafers, and ""NutriChoice"" 100% Atta biscuits.
+    *   Implementation of cost-saving initiatives and digital transformation in supply chain and distribution.
+*   **Subsidiaries:**
+    *   Major subsidiaries include Nalanda Biscuits Company Limited, Sunandaram Foods Private Limited, and Britannia Bel Foods Private Limited (a joint venture for dairy).
+*   **Strategic Initiatives:**
+    *   Driving volume-led growth through region-specific and consumer-centric products.
+    *   Sustaining margins via cost-saving programs despite commodity price fluctuations.
+    *   Strategic focus on expanding the dairy and international business segments.
+
+References
+1. [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1880292/)
+2. [Annual Report May 2024](https://trendlyne.com/get-document/document/pdf/1542133/)
+3. [Investor Presentation Feb 2026](https://trendlyne.com/get-document/document/pdf/2081284/)
+4. [Investor Presentation Nov 2025](https://trendlyne.com/get-document/document/pdf/2000753/)
+5. [Result Nov 2025](https://trendlyne.com/get-document/document/pdf/2013830/)
+
+",0.0,-0.09,2.22,
+BI,2026-11-04,2533.49,3768.46,19375.62,105.18155,19.67,13.4,2611.6,49.61,61.8,0.056,1.119,50.55,15.63,10.39,,7.58,6.33,8.17248,13.563911,6503.8,5,60.0,18.04,90.5,2026-07-31,96,2026-11-03 22:19:09.063748+00,"## About the company - Business Profile
+Britannia Industries Ltd. is a major Indian food-products corporation primarily engaged in the manufacturing and sale of biscuits, bakery products, and dairy offerings. With a legacy spanning over a century, the company maintains a dominant position in the Indian biscuits market through a multi-brand strategy and an extensive pan-India distribution network. Britannia operates in the Fast-Moving Consumer Goods (FMCG) sector, providing a wide range of products including biscuits, bread, cakes, rusks, and dairy items such as cheese, milk, and yogurt.
+
+### Key Points
+
+*   **Key Facts:**
+    *   **Founded:** 1918 (Incorporated).
+    *   **Headquarters:** Bengaluru, Karnataka (Executive Office); Kolkata, West Bengal (Registered Office).
+    *   **Parent Company:** Part of the Wadia Group; The Bombay Burmah Trading Corporation Ltd. is a promoter.
+    *   **Stock Listing:** Listed on Bombay Stock Exchange (BSE: 500825) and National Stock Exchange (NSE: BRITANNIA).
+    *   **Major Products:** Good Day, Marie Gold, NutriChoice, Milk Bikis, Tiger, 50-50 (Biscuits); Treat (Croissants and Wafers); various bread, cake, and rusk varieties; and Dairy products.
+*   **Operations and Resources:**
+    *   The company operates through a network of owned manufacturing facilities and contract manufacturing units across India and international locations (e.g., Nepal, Egypt).
+    *   It maintains a significant retail reach, with direct distribution to millions of outlets.
+*   **Privatization and Ownership:**
+    *   As of March 2025, the company is a subsidiary of The Bombay Burmah Trading Corporation Limited (part of the Wadia Group).
+*   **Market Significance:**
+    *   One of India's oldest and largest food companies, holding a leading market share in the organized biscuit market.
+    *   Serves domestic consumers and exports to over 80 countries globally.
+*   **Sustainability and Innovation:**
+    *   Achieved a 15.4% improvement in the S&P Global Corporate Sustainability Assessment (CSA) score, rising from 52 in 2024 to 60 in 2025.
+    *   Reported a 13% increase in renewable electricity share and a 3.4% reduction in specific water consumption in Q2 FY2025-26.
+    *   The Britannia Nutrition Foundation (BNF) saw a 22% increase in beneficiaries.
+*   **Business Model:**
+    *   Focuses on brand building, distribution expansion (particularly in rural markets), and continuous product innovation.
+    *   Excels in supply chain management and maintaining a premium positioning in core biscuit segments while expanding into adjacent bakery and dairy categories.
+*   **Financial Highlights (Consolidated Annual Numbers):**
+    *   **Revenue from Operations (FY 2024-25):** ₹17,942.67 Crore (7.0% growth vs. FY 2023-24).
+    *   **Operating Profit (FY 2024-25):** ₹2,873.81 Crore.
+    *   **Profit After Tax (Owner's Share, FY 2024-25):** ₹2,178.73 Crore.
+    *   **Revenue from Operations (FY 2023-24):** ₹16,769.27 Crore.
+    *   **Profit After Tax (Owner's Share, FY 2023-24):** ₹2,139.81 Crore.
+*   **Quarterly Performance (FY 2025-26):**
+    *   **Q3 FY26 Net Sales:** ₹4,885 Crore (9.5% YoY growth).
+    *   **Q2 FY26 Net Sales:** ₹4,752 Crore (4.1% YoY growth).
+    *   **H1 FY26 Revenue Growth:** 7%.
+*   **Key Products and Technology:**
+    *   Recent focus on ""Treat"" Croissants and Creme Wafers, and ""NutriChoice"" 100% Atta biscuits.
+    *   Implementation of cost-saving initiatives and digital transformation in supply chain and distribution.
+*   **Subsidiaries:**
+    *   Major subsidiaries include Nalanda Biscuits Company Limited, Sunandaram Foods Private Limited, and Britannia Bel Foods Private Limited (a joint venture for dairy).
+*   **Strategic Initiatives:**
+    *   Driving volume-led growth through region-specific and consumer-centric products.
+    *   Sustaining margins via cost-saving programs despite commodity price fluctuations.
+    *   Strategic focus on expanding the dairy and international business segments.
+
+References
+1. [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1880292/)
+2. [Annual Report May 2024](https://trendlyne.com/get-document/document/pdf/1542133/)
+3. [Investor Presentation Feb 2026](https://trendlyne.com/get-document/document/pdf/2081284/)
+4. [Investor Presentation Nov 2025](https://trendlyne.com/get-document/document/pdf/2000753/)
+5. [Result Nov 2025](https://trendlyne.com/get-document/document/pdf/2013830/)
+
+",0.0,-0.09,2.22,
+BI,2026-11-12,2533.49,3768.46,19375.62,105.18155,19.67,13.4,2611.6,49.61,61.8,0.056,1.119,50.55,15.63,10.39,,7.58,6.33,15.641766,10.160893,6184.8,5,60.0,29.12,90.5,2026-07-31,104,2026-11-11 22:18:39.684097+00,"## About the company - Business Profile
+Britannia Industries Ltd. is a major Indian food-products corporation primarily engaged in the manufacturing and sale of biscuits, bakery products, and dairy offerings. With a legacy spanning over a century, the company maintains a dominant position in the Indian biscuits market through a multi-brand strategy and an extensive pan-India distribution network. Britannia operates in the Fast-Moving Consumer Goods (FMCG) sector, providing a wide range of products including biscuits, bread, cakes, rusks, and dairy items such as cheese, milk, and yogurt.
+
+### Key Points
+
+*   **Key Facts:**
+    *   **Founded:** 1918 (Incorporated).
+    *   **Headquarters:** Bengaluru, Karnataka (Executive Office); Kolkata, West Bengal (Registered Office).
+    *   **Parent Company:** Part of the Wadia Group; The Bombay Burmah Trading Corporation Ltd. is a promoter.
+    *   **Stock Listing:** Listed on Bombay Stock Exchange (BSE: 500825) and National Stock Exchange (NSE: BRITANNIA).
+    *   **Major Products:** Good Day, Marie Gold, NutriChoice, Milk Bikis, Tiger, 50-50 (Biscuits); Treat (Croissants and Wafers); various bread, cake, and rusk varieties; and Dairy products.
+*   **Operations and Resources:**
+    *   The company operates through a network of owned manufacturing facilities and contract manufacturing units across India and international locations (e.g., Nepal, Egypt).
+    *   It maintains a significant retail reach, with direct distribution to millions of outlets.
+*   **Privatization and Ownership:**
+    *   As of March 2025, the company is a subsidiary of The Bombay Burmah Trading Corporation Limited (part of the Wadia Group).
+*   **Market Significance:**
+    *   One of India's oldest and largest food companies, holding a leading market share in the organized biscuit market.
+    *   Serves domestic consumers and exports to over 80 countries globally.
+*   **Sustainability and Innovation:**
+    *   Achieved a 15.4% improvement in the S&P Global Corporate Sustainability Assessment (CSA) score, rising from 52 in 2024 to 60 in 2025.
+    *   Reported a 13% increase in renewable electricity share and a 3.4% reduction in specific water consumption in Q2 FY2025-26.
+    *   The Britannia Nutrition Foundation (BNF) saw a 22% increase in beneficiaries.
+*   **Business Model:**
+    *   Focuses on brand building, distribution expansion (particularly in rural markets), and continuous product innovation.
+    *   Excels in supply chain management and maintaining a premium positioning in core biscuit segments while expanding into adjacent bakery and dairy categories.
+*   **Financial Highlights (Consolidated Annual Numbers):**
+    *   **Revenue from Operations (FY 2024-25):** ₹17,942.67 Crore (7.0% growth vs. FY 2023-24).
+    *   **Operating Profit (FY 2024-25):** ₹2,873.81 Crore.
+    *   **Profit After Tax (Owner's Share, FY 2024-25):** ₹2,178.73 Crore.
+    *   **Revenue from Operations (FY 2023-24):** ₹16,769.27 Crore.
+    *   **Profit After Tax (Owner's Share, FY 2023-24):** ₹2,139.81 Crore.
+*   **Quarterly Performance (FY 2025-26):**
+    *   **Q3 FY26 Net Sales:** ₹4,885 Crore (9.5% YoY growth).
+    *   **Q2 FY26 Net Sales:** ₹4,752 Crore (4.1% YoY growth).
+    *   **H1 FY26 Revenue Growth:** 7%.
+*   **Key Products and Technology:**
+    *   Recent focus on ""Treat"" Croissants and Creme Wafers, and ""NutriChoice"" 100% Atta biscuits.
+    *   Implementation of cost-saving initiatives and digital transformation in supply chain and distribution.
+*   **Subsidiaries:**
+    *   Major subsidiaries include Nalanda Biscuits Company Limited, Sunandaram Foods Private Limited, and Britannia Bel Foods Private Limited (a joint venture for dairy).
+*   **Strategic Initiatives:**
+    *   Driving volume-led growth through region-specific and consumer-centric products.
+    *   Sustaining margins via cost-saving programs despite commodity price fluctuations.
+    *   Strategic focus on expanding the dairy and international business segments.
+
+References
+1. [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1880292/)
+2. [Annual Report May 2024](https://trendlyne.com/get-document/document/pdf/1542133/)
+3. [Investor Presentation Feb 2026](https://trendlyne.com/get-document/document/pdf/2081284/)
+4. [Investor Presentation Nov 2025](https://trendlyne.com/get-document/document/pdf/2000753/)
+5. [Result Nov 2025](https://trendlyne.com/get-document/document/pdf/2013830/)
+
+",0.0,-0.09,2.22,
+LTM,2026-10-20,-64.6734,-10.0244,431.084,-134.27747,-2.37,-17.03,88.5744,-31.71,-14.46,0.0,0.8964,73.49,,,,-17.45,,-36.447792,91.20223,,0,,,10.0,2022-09-14,1497,2026-10-20 12:49:29.55275+00,"## About the company - Business Profile
+Loyal Textiles Mills Ltd. is a vertically integrated textile player in India with a heritage spanning over seven decades. The company maintains a comprehensive presence across the textile value chain, from spinning and weaving to knitting and garment manufacturing. It operates multiple manufacturing units across Tamil Nadu and Andhra Pradesh, focusing on a diverse product portfolio that includes yarn, woven fabrics, knitted fabrics, and specialized technical clothing.
+
+### Key Points
+
+-   **Key Facts**: Founded in 1946 and headquartered in Kovilpatti, Tamil Nadu, Loyal Textiles Mills Ltd. is a publicly listed company on both the BSE and NSE. The promoter group holds a majority stake of **73.49%** as of March 2024.
+-   **Operations and Resources**: The company operates manufacturing plants in **Kovilpatti, Sattur, Cuddalore, and Sivagangai** in Tamil Nadu, and **Naidupeta** in Andhra Pradesh. Assets include spinning, weaving, and knitting capacities alongside garmenting units.
+-   **Revenue and Financial Performance**: 
+    -   The company reported a revenue from operations of **Rs 68,215 Lakhs** for FY 2024-25, a decrease from **Rs 93,919 Lakhs** in FY 2023-24. 
+    -   Total income for FY 2024-25 stood at **Rs 69,485 Lakhs**, with a net loss before tax of **Rs 15,086 Lakhs**.
+    -   Export performance remained significant, contributing **Rs 39,041 Lakhs** to the total revenue in FY 2024-25.
+    -   Production volumes for FY 2024-25 included **107.43 lakh kg** of yarn and **223.42 lakh meters** of cloth.
+-   **Business Model and Strategy**: Loyal Textiles operates as a vertically integrated manufacturer. It is currently shifting its strategy to focus on **high-value segments** such as **Technical Textiles** and **Personal Protective Wear** to reduce dependence on low-margin commodity products like yarn. 
+-   **Strategic Initiatives**:
+    -   **Asset Monetization**: The company is actively pursuing an asset monetization plan, including the sale of windmills and specific plant and machinery, which generated an exceptional income of **Rs 10.72 Crores** in the half-year ended September 2025.
+    -   **Product Realignment**: Restructuring the product mix to prioritize garments and specialized textiles to improve capacity utilization and downstream efficiency.
+    -   **Sustainability and Compliance**: Increasing focus on workplace safety and compliance standards to attract institutional buyers in the technical textile segment.
+-   **Employee and Management**: The company is led by Mrs. Valli M Ramaswami (Chairperson & Whole Time Director) and Ms. Vishala Ramaswami (Executive Director). Employee benefit expenses for FY 2024-25 were **Rs 11,936 Lakhs**, reflecting a downward trend from the previous year's **Rs 15,698 Lakhs** due to restructuring efforts.
+-   **Future Outlook**: Management aims to achieve profitability in the coming year, supported by a strong order book and strategic repositioning into less price-sensitive market segments.
+
+References
+1.  [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1945748/)
+2.  [Annual Report May 2024](https://trendlyne.com/get-document/document/pdf/1596238/)
+3.  [Result Nov 2025](https://trendlyne.com/get-document/document/pdf/2007393/)
+
+",0.0,,,
+LTM,2026-10-28,-64.6734,-10.0244,431.084,-134.27747,-2.37,-17.03,88.5744,-31.71,-14.46,0.0,0.8964,73.49,,,,-17.45,,-36.447792,91.20223,,0,,,10.0,2022-09-14,1505,2026-10-28 12:48:55.027464+00,"## About the company - Business Profile
+Loyal Textiles Mills Ltd. is a vertically integrated textile player in India with a heritage spanning over seven decades. The company maintains a comprehensive presence across the textile value chain, from spinning and weaving to knitting and garment manufacturing. It operates multiple manufacturing units across Tamil Nadu and Andhra Pradesh, focusing on a diverse product portfolio that includes yarn, woven fabrics, knitted fabrics, and specialized technical clothing.
+
+### Key Points
+
+-   **Key Facts**: Founded in 1946 and headquartered in Kovilpatti, Tamil Nadu, Loyal Textiles Mills Ltd. is a publicly listed company on both the BSE and NSE. The promoter group holds a majority stake of **73.49%** as of March 2024.
+-   **Operations and Resources**: The company operates manufacturing plants in **Kovilpatti, Sattur, Cuddalore, and Sivagangai** in Tamil Nadu, and **Naidupeta** in Andhra Pradesh. Assets include spinning, weaving, and knitting capacities alongside garmenting units.
+-   **Revenue and Financial Performance**: 
+    -   The company reported a revenue from operations of **Rs 68,215 Lakhs** for FY 2024-25, a decrease from **Rs 93,919 Lakhs** in FY 2023-24. 
+    -   Total income for FY 2024-25 stood at **Rs 69,485 Lakhs**, with a net loss before tax of **Rs 15,086 Lakhs**.
+    -   Export performance remained significant, contributing **Rs 39,041 Lakhs** to the total revenue in FY 2024-25.
+    -   Production volumes for FY 2024-25 included **107.43 lakh kg** of yarn and **223.42 lakh meters** of cloth.
+-   **Business Model and Strategy**: Loyal Textiles operates as a vertically integrated manufacturer. It is currently shifting its strategy to focus on **high-value segments** such as **Technical Textiles** and **Personal Protective Wear** to reduce dependence on low-margin commodity products like yarn. 
+-   **Strategic Initiatives**:
+    -   **Asset Monetization**: The company is actively pursuing an asset monetization plan, including the sale of windmills and specific plant and machinery, which generated an exceptional income of **Rs 10.72 Crores** in the half-year ended September 2025.
+    -   **Product Realignment**: Restructuring the product mix to prioritize garments and specialized textiles to improve capacity utilization and downstream efficiency.
+    -   **Sustainability and Compliance**: Increasing focus on workplace safety and compliance standards to attract institutional buyers in the technical textile segment.
+-   **Employee and Management**: The company is led by Mrs. Valli M Ramaswami (Chairperson & Whole Time Director) and Ms. Vishala Ramaswami (Executive Director). Employee benefit expenses for FY 2024-25 were **Rs 11,936 Lakhs**, reflecting a downward trend from the previous year's **Rs 15,698 Lakhs** due to restructuring efforts.
+-   **Future Outlook**: Management aims to achieve profitability in the coming year, supported by a strong order book and strategic repositioning into less price-sensitive market segments.
+
+References
+1.  [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1945748/)
+2.  [Annual Report May 2024](https://trendlyne.com/get-document/document/pdf/1596238/)
+3.  [Result Nov 2025](https://trendlyne.com/get-document/document/pdf/2007393/)
+
+",0.0,,,
+LTM,2026-11-05,-64.6734,-10.0244,431.084,-134.27747,-2.37,-17.03,88.5744,-31.71,-14.46,0.0,0.8964,73.49,,,,-17.45,,-36.447792,91.20223,,0,,,10.0,2022-09-14,1513,2026-11-05 12:48:26.686674+00,"## About the company - Business Profile
+Loyal Textiles Mills Ltd. is a vertically integrated textile player in India with a heritage spanning over seven decades. The company maintains a comprehensive presence across the textile value chain, from spinning and weaving to knitting and garment manufacturing. It operates multiple manufacturing units across Tamil Nadu and Andhra Pradesh, focusing on a diverse product portfolio that includes yarn, woven fabrics, knitted fabrics, and specialized technical clothing.
+
+### Key Points
+
+-   **Key Facts**: Founded in 1946 and headquartered in Kovilpatti, Tamil Nadu, Loyal Textiles Mills Ltd. is a publicly listed company on both the BSE and NSE. The promoter group holds a majority stake of **73.49%** as of March 2024.
+-   **Operations and Resources**: The company operates manufacturing plants in **Kovilpatti, Sattur, Cuddalore, and Sivagangai** in Tamil Nadu, and **Naidupeta** in Andhra Pradesh. Assets include spinning, weaving, and knitting capacities alongside garmenting units.
+-   **Revenue and Financial Performance**: 
+    -   The company reported a revenue from operations of **Rs 68,215 Lakhs** for FY 2024-25, a decrease from **Rs 93,919 Lakhs** in FY 2023-24. 
+    -   Total income for FY 2024-25 stood at **Rs 69,485 Lakhs**, with a net loss before tax of **Rs 15,086 Lakhs**.
+    -   Export performance remained significant, contributing **Rs 39,041 Lakhs** to the total revenue in FY 2024-25.
+    -   Production volumes for FY 2024-25 included **107.43 lakh kg** of yarn and **223.42 lakh meters** of cloth.
+-   **Business Model and Strategy**: Loyal Textiles operates as a vertically integrated manufacturer. It is currently shifting its strategy to focus on **high-value segments** such as **Technical Textiles** and **Personal Protective Wear** to reduce dependence on low-margin commodity products like yarn. 
+-   **Strategic Initiatives**:
+    -   **Asset Monetization**: The company is actively pursuing an asset monetization plan, including the sale of windmills and specific plant and machinery, which generated an exceptional income of **Rs 10.72 Crores** in the half-year ended September 2025.
+    -   **Product Realignment**: Restructuring the product mix to prioritize garments and specialized textiles to improve capacity utilization and downstream efficiency.
+    -   **Sustainability and Compliance**: Increasing focus on workplace safety and compliance standards to attract institutional buyers in the technical textile segment.
+-   **Employee and Management**: The company is led by Mrs. Valli M Ramaswami (Chairperson & Whole Time Director) and Ms. Vishala Ramaswami (Executive Director). Employee benefit expenses for FY 2024-25 were **Rs 11,936 Lakhs**, reflecting a downward trend from the previous year's **Rs 15,698 Lakhs** due to restructuring efforts.
+-   **Future Outlook**: Management aims to achieve profitability in the coming year, supported by a strong order book and strategic repositioning into less price-sensitive market segments.
+
+References
+1.  [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1945748/)
+2.  [Annual Report May 2024](https://trendlyne.com/get-document/document/pdf/1596238/)
+3.  [Result Nov 2025](https://trendlyne.com/get-document/document/pdf/2007393/)
+
+",0.0,,,
+LTM,2026-11-17,-64.6734,-10.0244,431.084,-134.27747,-2.37,-17.03,88.5744,-31.71,-14.46,0.0,0.8964,73.49,,,,-17.45,,-14.895814,100.61729,,0,,,10.0,2022-09-14,1525,2026-11-17 05:33:58.592431+00,"## About the company - Business Profile
+Loyal Textiles Mills Ltd. is a vertically integrated textile player in India with a heritage spanning over seven decades. The company maintains a comprehensive presence across the textile value chain, from spinning and weaving to knitting and garment manufacturing. It operates multiple manufacturing units across Tamil Nadu and Andhra Pradesh, focusing on a diverse product portfolio that includes yarn, woven fabrics, knitted fabrics, and specialized technical clothing.
+
+### Key Points
+
+-   **Key Facts**: Founded in 1946 and headquartered in Kovilpatti, Tamil Nadu, Loyal Textiles Mills Ltd. is a publicly listed company on both the BSE and NSE. The promoter group holds a majority stake of **73.49%** as of March 2024.
+-   **Operations and Resources**: The company operates manufacturing plants in **Kovilpatti, Sattur, Cuddalore, and Sivagangai** in Tamil Nadu, and **Naidupeta** in Andhra Pradesh. Assets include spinning, weaving, and knitting capacities alongside garmenting units.
+-   **Revenue and Financial Performance**: 
+    -   The company reported a revenue from operations of **Rs 68,215 Lakhs** for FY 2024-25, a decrease from **Rs 93,919 Lakhs** in FY 2023-24. 
+    -   Total income for FY 2024-25 stood at **Rs 69,485 Lakhs**, with a net loss before tax of **Rs 15,086 Lakhs**.
+    -   Export performance remained significant, contributing **Rs 39,041 Lakhs** to the total revenue in FY 2024-25.
+    -   Production volumes for FY 2024-25 included **107.43 lakh kg** of yarn and **223.42 lakh meters** of cloth.
+-   **Business Model and Strategy**: Loyal Textiles operates as a vertically integrated manufacturer. It is currently shifting its strategy to focus on **high-value segments** such as **Technical Textiles** and **Personal Protective Wear** to reduce dependence on low-margin commodity products like yarn. 
+-   **Strategic Initiatives**:
+    -   **Asset Monetization**: The company is actively pursuing an asset monetization plan, including the sale of windmills and specific plant and machinery, which generated an exceptional income of **Rs 10.72 Crores** in the half-year ended September 2025.
+    -   **Product Realignment**: Restructuring the product mix to prioritize garments and specialized textiles to improve capacity utilization and downstream efficiency.
+    -   **Sustainability and Compliance**: Increasing focus on workplace safety and compliance standards to attract institutional buyers in the technical textile segment.
+-   **Employee and Management**: The company is led by Mrs. Valli M Ramaswami (Chairperson & Whole Time Director) and Ms. Vishala Ramaswami (Executive Director). Employee benefit expenses for FY 2024-25 were **Rs 11,936 Lakhs**, reflecting a downward trend from the previous year's **Rs 15,698 Lakhs** due to restructuring efforts.
+-   **Future Outlook**: Management aims to achieve profitability in the coming year, supported by a strong order book and strategic repositioning into less price-sensitive market segments.
+
+References
+1.  [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1945748/)
+2.  [Annual Report May 2024](https://trendlyne.com/get-document/document/pdf/1596238/)
+3.  [Result Nov 2025](https://trendlyne.com/get-document/document/pdf/2007393/)
+
+",0.0,,,
+UEL,2026-10-21,20.458,39.508,208.422,1.8370702,19.33,10.01,47.001,10.6,14.15,,1.2113,36.02,0.15,3.82,,,,14.32323,20.458645,,0,,,,,,2026-10-21 10:00:29.8022+00,"## About the company - Business Profile
+Unicommerce eSolutions Ltd. is India’s largest e-commerce enablement Software-as-a-Service (SaaS) platform within the transaction processing layer. It provides a comprehensive technology stack that serves as the operational backbone for e-commerce businesses, handling approximately **25-30% of all dropship volumes** in India as of FY25. The company’s suite of platforms manages the entire e-commerce value chain, from pre-purchase customer engagement to order processing and post-purchase logistics.
+
+### Key Points
+
+*   **Key Facts**:
+    *   **Founded**: 2012 (Incorporated as Unicommerce eSolutions).
+    *   **Headquarters**: New Delhi, India.
+    *   **Stock Listing**: Listed on the National Stock Exchange (NSE) and Bombay Stock Exchange (BSE) in 2024.
+    *   **Parent Company**: Part of the AceVector Group (formerly Snapdeal).
+
+*   **Business Model and Core Strengths**:
+    *   Unicommerce operates a multi-platform SaaS model that integrates deeply into client workflows, acting as a ""system of record"" for mission-critical operations.
+    *   The company excels in managing high-volume, multi-channel e-commerce complexity, supporting **7,572+ clients** including marquee brands like Lenskart, Mamaearth, and FabIndia.
+    *   As of Q4 FY25, it achieved an annual transactions run-rate of **982.6 million items**.
+
+*   **Financial Performance (Annual & Recent)**:
+    *   **Annual Recurring Revenue (ARR)**: Reached **₹21,800+ million** for FY25.
+    *   **Q2 FY26 Revenue**: Reported at **₹513.8 million**, representing a **75.3% YoY growth**.
+    *   **Adjusted EBITDA (Q2 FY26)**: **₹114.2 million** with a margin of **22.2%**.
+    *   **Profit After Tax (PAT - Q2 FY26)**: **₹57.8 million**, up **29.2% YoY**.
+    *   **Revenue Segments**: The business transitioned from a single-product company to a multi-platform entity in FY26. While specific geographical revenue splits are not detailed, the international business turned profitable in FY26 and is outpacing domestic growth.
+
+*   **Key Platforms and Technology Advancements**:
+    *   **Uniware**: A multi-tenant platform for Order Management (OMS) and Warehouse Management (WMS). Recent additions include **Unireco** for payment reconciliation and a **Quick Commerce Management System**.
+    *   **Convertway**: An AI-led marketing automation and customer engagement platform acquired to handle pre-purchase activities.
+    *   **Shipway**: A logistics automation and courier aggregation platform acquired to manage post-purchase tracking and returns.
+    *   **AI Initiatives**: Deployment of **UniBot AI** for warehouse assistance, **ShipSense AI** for logistics optimization, and **Catalyst AI Voice Agent** for customer support.
+
+*   **Operations and Strategic Initiatives**:
+    *   **Client Base**: Onboarded over **450 enterprise clients** on Uniware in FY26, the highest in its history. Approximately **35-40%** of enterprise clients now use B2B and quick commerce modules.
+    *   **Inorganic Growth**: Recent acquisitions of **Shipway** and **Convertway** have expanded the product suite to cover the full e-commerce lifecycle.
+    *   **Future Outlook**: Focus remains on AI-first innovation, expanding international operations, and evaluating further selective inorganic opportunities to deepen its platform strategy.
+
+*   **Major Subsidiaries and Units**:
+    *   The company has integrated its acquisitions (Shipway, Convertway) as core business units to offer a unified multi-platform experience.
+
+References
+1. [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1949996/)
+2. [Investor Presentation Nov 2025](https://trendlyne.com/get-document/document/pdf/2006742/)
+3. [Investor Presentation Feb 2026](https://trendlyne.com/get-document/document/pdf/2090046/)
+4. [Earnings Call Feb 2026](https://trendlyne.com/get-document/document/pdf/2095300/)
+5. [Investor Presentation Apr 2026](https://trendlyne.com/get-document/document/pdf/2138209/)
+6. [Earnings Call May 2026](https://trendlyne.com/get-document/document/pdf/2144105/)
+
+",-3.17,-0.27,-2.94,
+UEL,2026-10-29,20.458,39.508,208.422,1.8370702,19.33,10.01,47.001,10.6,14.15,,1.2113,36.02,0.15,3.82,,,,14.978008,10.551807,,0,,,,,,2026-10-29 10:16:16.848869+00,"## About the company - Business Profile
+Unicommerce eSolutions Ltd. is India’s largest e-commerce enablement Software-as-a-Service (SaaS) platform within the transaction processing layer. It provides a comprehensive technology stack that serves as the operational backbone for e-commerce businesses, handling approximately **25-30% of all dropship volumes** in India as of FY25. The company’s suite of platforms manages the entire e-commerce value chain, from pre-purchase customer engagement to order processing and post-purchase logistics.
+
+### Key Points
+
+*   **Key Facts**:
+    *   **Founded**: 2012 (Incorporated as Unicommerce eSolutions).
+    *   **Headquarters**: New Delhi, India.
+    *   **Stock Listing**: Listed on the National Stock Exchange (NSE) and Bombay Stock Exchange (BSE) in 2024.
+    *   **Parent Company**: Part of the AceVector Group (formerly Snapdeal).
+
+*   **Business Model and Core Strengths**:
+    *   Unicommerce operates a multi-platform SaaS model that integrates deeply into client workflows, acting as a ""system of record"" for mission-critical operations.
+    *   The company excels in managing high-volume, multi-channel e-commerce complexity, supporting **7,572+ clients** including marquee brands like Lenskart, Mamaearth, and FabIndia.
+    *   As of Q4 FY25, it achieved an annual transactions run-rate of **982.6 million items**.
+
+*   **Financial Performance (Annual & Recent)**:
+    *   **Annual Recurring Revenue (ARR)**: Reached **₹21,800+ million** for FY25.
+    *   **Q2 FY26 Revenue**: Reported at **₹513.8 million**, representing a **75.3% YoY growth**.
+    *   **Adjusted EBITDA (Q2 FY26)**: **₹114.2 million** with a margin of **22.2%**.
+    *   **Profit After Tax (PAT - Q2 FY26)**: **₹57.8 million**, up **29.2% YoY**.
+    *   **Revenue Segments**: The business transitioned from a single-product company to a multi-platform entity in FY26. While specific geographical revenue splits are not detailed, the international business turned profitable in FY26 and is outpacing domestic growth.
+
+*   **Key Platforms and Technology Advancements**:
+    *   **Uniware**: A multi-tenant platform for Order Management (OMS) and Warehouse Management (WMS). Recent additions include **Unireco** for payment reconciliation and a **Quick Commerce Management System**.
+    *   **Convertway**: An AI-led marketing automation and customer engagement platform acquired to handle pre-purchase activities.
+    *   **Shipway**: A logistics automation and courier aggregation platform acquired to manage post-purchase tracking and returns.
+    *   **AI Initiatives**: Deployment of **UniBot AI** for warehouse assistance, **ShipSense AI** for logistics optimization, and **Catalyst AI Voice Agent** for customer support.
+
+*   **Operations and Strategic Initiatives**:
+    *   **Client Base**: Onboarded over **450 enterprise clients** on Uniware in FY26, the highest in its history. Approximately **35-40%** of enterprise clients now use B2B and quick commerce modules.
+    *   **Inorganic Growth**: Recent acquisitions of **Shipway** and **Convertway** have expanded the product suite to cover the full e-commerce lifecycle.
+    *   **Future Outlook**: Focus remains on AI-first innovation, expanding international operations, and evaluating further selective inorganic opportunities to deepen its platform strategy.
+
+*   **Major Subsidiaries and Units**:
+    *   The company has integrated its acquisitions (Shipway, Convertway) as core business units to offer a unified multi-platform experience.
+
+References
+1. [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1949996/)
+2. [Investor Presentation Nov 2025](https://trendlyne.com/get-document/document/pdf/2006742/)
+3. [Investor Presentation Feb 2026](https://trendlyne.com/get-document/document/pdf/2090046/)
+4. [Earnings Call Feb 2026](https://trendlyne.com/get-document/document/pdf/2095300/)
+5. [Investor Presentation Apr 2026](https://trendlyne.com/get-document/document/pdf/2138209/)
+6. [Earnings Call May 2026](https://trendlyne.com/get-document/document/pdf/2144105/)
+
+",-3.17,-0.27,-2.94,
+UEL,2026-11-06,20.458,39.508,208.422,1.8370702,19.33,10.01,47.001,10.6,14.15,,1.2113,36.02,0.15,3.82,,,,14.978008,10.551807,,0,,,,,,2026-11-06 10:16:11.185853+00,"## About the company - Business Profile
+Unicommerce eSolutions Ltd. is India’s largest e-commerce enablement Software-as-a-Service (SaaS) platform within the transaction processing layer. It provides a comprehensive technology stack that serves as the operational backbone for e-commerce businesses, handling approximately **25-30% of all dropship volumes** in India as of FY25. The company’s suite of platforms manages the entire e-commerce value chain, from pre-purchase customer engagement to order processing and post-purchase logistics.
+
+### Key Points
+
+*   **Key Facts**:
+    *   **Founded**: 2012 (Incorporated as Unicommerce eSolutions).
+    *   **Headquarters**: New Delhi, India.
+    *   **Stock Listing**: Listed on the National Stock Exchange (NSE) and Bombay Stock Exchange (BSE) in 2024.
+    *   **Parent Company**: Part of the AceVector Group (formerly Snapdeal).
+
+*   **Business Model and Core Strengths**:
+    *   Unicommerce operates a multi-platform SaaS model that integrates deeply into client workflows, acting as a ""system of record"" for mission-critical operations.
+    *   The company excels in managing high-volume, multi-channel e-commerce complexity, supporting **7,572+ clients** including marquee brands like Lenskart, Mamaearth, and FabIndia.
+    *   As of Q4 FY25, it achieved an annual transactions run-rate of **982.6 million items**.
+
+*   **Financial Performance (Annual & Recent)**:
+    *   **Annual Recurring Revenue (ARR)**: Reached **₹21,800+ million** for FY25.
+    *   **Q2 FY26 Revenue**: Reported at **₹513.8 million**, representing a **75.3% YoY growth**.
+    *   **Adjusted EBITDA (Q2 FY26)**: **₹114.2 million** with a margin of **22.2%**.
+    *   **Profit After Tax (PAT - Q2 FY26)**: **₹57.8 million**, up **29.2% YoY**.
+    *   **Revenue Segments**: The business transitioned from a single-product company to a multi-platform entity in FY26. While specific geographical revenue splits are not detailed, the international business turned profitable in FY26 and is outpacing domestic growth.
+
+*   **Key Platforms and Technology Advancements**:
+    *   **Uniware**: A multi-tenant platform for Order Management (OMS) and Warehouse Management (WMS). Recent additions include **Unireco** for payment reconciliation and a **Quick Commerce Management System**.
+    *   **Convertway**: An AI-led marketing automation and customer engagement platform acquired to handle pre-purchase activities.
+    *   **Shipway**: A logistics automation and courier aggregation platform acquired to manage post-purchase tracking and returns.
+    *   **AI Initiatives**: Deployment of **UniBot AI** for warehouse assistance, **ShipSense AI** for logistics optimization, and **Catalyst AI Voice Agent** for customer support.
+
+*   **Operations and Strategic Initiatives**:
+    *   **Client Base**: Onboarded over **450 enterprise clients** on Uniware in FY26, the highest in its history. Approximately **35-40%** of enterprise clients now use B2B and quick commerce modules.
+    *   **Inorganic Growth**: Recent acquisitions of **Shipway** and **Convertway** have expanded the product suite to cover the full e-commerce lifecycle.
+    *   **Future Outlook**: Focus remains on AI-first innovation, expanding international operations, and evaluating further selective inorganic opportunities to deepen its platform strategy.
+
+*   **Major Subsidiaries and Units**:
+    *   The company has integrated its acquisitions (Shipway, Convertway) as core business units to offer a unified multi-platform experience.
+
+References
+1. [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1949996/)
+2. [Investor Presentation Nov 2025](https://trendlyne.com/get-document/document/pdf/2006742/)
+3. [Investor Presentation Feb 2026](https://trendlyne.com/get-document/document/pdf/2090046/)
+4. [Earnings Call Feb 2026](https://trendlyne.com/get-document/document/pdf/2095300/)
+5. [Investor Presentation Apr 2026](https://trendlyne.com/get-document/document/pdf/2138209/)
+6. [Earnings Call May 2026](https://trendlyne.com/get-document/document/pdf/2144105/)
+
+",-3.17,-0.27,-2.94,
+UEL,2026-11-18,20.458,39.508,208.422,1.8370702,19.33,10.01,47.001,10.6,14.15,,1.2113,36.02,0.15,3.82,,,,14.978008,10.551807,,0,,,,,,2026-11-18 03:30:02.644889+00,"## About the company - Business Profile
+Unicommerce eSolutions Ltd. is India’s largest e-commerce enablement Software-as-a-Service (SaaS) platform within the transaction processing layer. It provides a comprehensive technology stack that serves as the operational backbone for e-commerce businesses, handling approximately **25-30% of all dropship volumes** in India as of FY25. The company’s suite of platforms manages the entire e-commerce value chain, from pre-purchase customer engagement to order processing and post-purchase logistics.
+
+### Key Points
+
+*   **Key Facts**:
+    *   **Founded**: 2012 (Incorporated as Unicommerce eSolutions).
+    *   **Headquarters**: New Delhi, India.
+    *   **Stock Listing**: Listed on the National Stock Exchange (NSE) and Bombay Stock Exchange (BSE) in 2024.
+    *   **Parent Company**: Part of the AceVector Group (formerly Snapdeal).
+
+*   **Business Model and Core Strengths**:
+    *   Unicommerce operates a multi-platform SaaS model that integrates deeply into client workflows, acting as a ""system of record"" for mission-critical operations.
+    *   The company excels in managing high-volume, multi-channel e-commerce complexity, supporting **7,572+ clients** including marquee brands like Lenskart, Mamaearth, and FabIndia.
+    *   As of Q4 FY25, it achieved an annual transactions run-rate of **982.6 million items**.
+
+*   **Financial Performance (Annual & Recent)**:
+    *   **Annual Recurring Revenue (ARR)**: Reached **₹21,800+ million** for FY25.
+    *   **Q2 FY26 Revenue**: Reported at **₹513.8 million**, representing a **75.3% YoY growth**.
+    *   **Adjusted EBITDA (Q2 FY26)**: **₹114.2 million** with a margin of **22.2%**.
+    *   **Profit After Tax (PAT - Q2 FY26)**: **₹57.8 million**, up **29.2% YoY**.
+    *   **Revenue Segments**: The business transitioned from a single-product company to a multi-platform entity in FY26. While specific geographical revenue splits are not detailed, the international business turned profitable in FY26 and is outpacing domestic growth.
+
+*   **Key Platforms and Technology Advancements**:
+    *   **Uniware**: A multi-tenant platform for Order Management (OMS) and Warehouse Management (WMS). Recent additions include **Unireco** for payment reconciliation and a **Quick Commerce Management System**.
+    *   **Convertway**: An AI-led marketing automation and customer engagement platform acquired to handle pre-purchase activities.
+    *   **Shipway**: A logistics automation and courier aggregation platform acquired to manage post-purchase tracking and returns.
+    *   **AI Initiatives**: Deployment of **UniBot AI** for warehouse assistance, **ShipSense AI** for logistics optimization, and **Catalyst AI Voice Agent** for customer support.
+
+*   **Operations and Strategic Initiatives**:
+    *   **Client Base**: Onboarded over **450 enterprise clients** on Uniware in FY26, the highest in its history. Approximately **35-40%** of enterprise clients now use B2B and quick commerce modules.
+    *   **Inorganic Growth**: Recent acquisitions of **Shipway** and **Convertway** have expanded the product suite to cover the full e-commerce lifecycle.
+    *   **Future Outlook**: Focus remains on AI-first innovation, expanding international operations, and evaluating further selective inorganic opportunities to deepen its platform strategy.
+
+*   **Major Subsidiaries and Units**:
+    *   The company has integrated its acquisitions (Shipway, Convertway) as core business units to offer a unified multi-platform experience.
+
+References
+1. [Annual Report May 2025](https://trendlyne.com/get-document/document/pdf/1949996/)
+2. [Investor Presentation Nov 2025](https://trendlyne.com/get-document/document/pdf/2006742/)
+3. [Investor Presentation Feb 2026](https://trendlyne.com/get-document/document/pdf/2090046/)
+4. [Earnings Call Feb 2026](https://trendlyne.com/get-document/document/pdf/2095300/)
+5. [Investor Presentation Apr 2026](https://trendlyne.com/get-document/document/pdf/2138209/)
+6. [Earnings Call May 2026](https://trendlyne.com/get-document/document/pdf/2144105/)
+
+",-3.17,-0.27,-2.94,

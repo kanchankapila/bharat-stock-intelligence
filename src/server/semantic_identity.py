@@ -309,6 +309,8 @@ def sync_identity(conn=None) -> Dict[str, Any]:
         valid_isins: set = set()
         provisional = 0
         identifiers = 0
+        emitted: set = set()
+        seen_instruments: set = set()
         for row in rows:
             symbol = str(row.get("symbol") or "").strip().upper()
             if not _SYMBOL_RE.fullmatch(symbol):
@@ -330,17 +332,31 @@ def sync_identity(conn=None) -> Dict[str, Any]:
             # (look-ahead). None lets the writers' COALESCE(..., now()) stamp the sync's own time.
             available_at = None
             listing_id = _upsert_listing(conn, row, instrument_id, available_at)
+            seen_instruments.add(instrument_id)
             if instrument_basis == "isin":
-                _upsert_identifier(conn, instrument_id, "iso", "isin", instrument_key.split(":", 2)[2], 1.0, available_at)
+                isin = instrument_key.split(":", 2)[2]
+                _upsert_identifier(conn, instrument_id, "iso", "isin", isin, 1.0, available_at)
+                emitted.add(f"iso:isin:{isin}:{instrument_id}")
                 identifiers += 1
             for provider, scheme, value, id_confidence in _provider_identifiers(row):
                 _upsert_identifier(
                     conn, instrument_id, provider, scheme, value, id_confidence, available_at
                 )
+                emitted.add(f"{provider}:{scheme}:{value}:{instrument_id}")
                 identifiers += 1
             _project_graph_identity(
                 conn, issuer_id, instrument_id, listing_id, issuer_key, instrument_key, row
             )
+        # AF-20261119-25: close mappings the master no longer carries, run-wide (two symbols can share an ISIN,
+        # LTIM -> LTM), and only on instruments this run saw, so an empty or partial master retires nothing else.
+        retired = 0
+        if seen_instruments:
+            retired = conn.execute(
+                """UPDATE market_identifier SET mapping_status = 'rejected', valid_to = now()
+                   WHERE source = 'nse_stocks' AND valid_to IS NULL
+                     AND instrument_id = ANY(?) AND NOT (mapping_key = ANY(?))""",
+                [sorted(seen_instruments), sorted(emitted)],
+            ).rowcount
         gaps = _mark_identifier_collisions(conn, rows)
         record_dataset_watermark(
             conn,
@@ -362,6 +378,7 @@ def sync_identity(conn=None) -> Dict[str, Any]:
             "instruments_with_isin": len(valid_isins),
             "provisional_instruments": provisional,
             "identifier_mappings": identifiers,
+            "identifier_mappings_retired": retired,
             "identifier_gaps": gaps,
         }
     except Exception:
