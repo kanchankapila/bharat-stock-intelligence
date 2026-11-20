@@ -790,6 +790,13 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
     .catch(e => T.fail('nse_fo_bhav_history', e));
   await runPython('nse_fo_market_positioning_fetcher.py', ['--days-back', '10'], 5 * 60_000)
     .catch(e => T.fail('nse_fo_market_positioning', e));
+  // AF-20261120-01: the exchange's own screens replace two Trendlyne steps refused with HTTP 405 every night
+  // from 2026-11-18 (smartoptions F&O activity, equity market-insight). Most-active contracts and OI spurts are
+  // dated by NSE's closing-snapshot timestamp; announcements re-read 3 days so a missed night is filled.
+  await runPython('nse_fo_activity_fetcher.py', [], 2 * 60_000)
+    .catch(e => T.fail('nse_fo_activity', e));
+  await runPython('nse_corporate_announcements_fetcher.py', ['--days-back', '3'], 2 * 60_000)
+    .catch(e => T.fail('nse_corporate_announcements', e));
 
   // Reconcile today's stock_ohlcv (written earlier this evening by the stock-refresh queue's
   // own repeatable job, sourced from Yahoo's batch quote endpoint at market close) against the
@@ -951,12 +958,6 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
     // generous because it is 2 requests per F&O name at a 0.25s pace.
     runPython('mc_stock_futures_oi_fetcher.py', [], 30 * 60_000)
       .catch(e => T.fail('mc_stock_futures_oi_fetcher', e)),
-    // SmartOptions cross-market F&O activity screeners (most-active-value/oi-gainers/oi-losers)
-    // at the current monthly expiry -- distinct from so_option_chain_fetcher's per-stock chain
-    // above (that one needs stockCode; this one is a ranked cross-market screener with no
-    // per-stock id). Promoted 2026-07-30 from a stale-expiry URL found in updated_urls.json.
-    withTrendlyneSlot(() => runPython('trendlyne_fno_activity_fetcher.py', [], 3 * 60_000))
-      .catch(e => T.fail('trendlyne_fno_activity_fetcher', e)),
     // Sector Relative Rotation Graph + sector x sector correlation matrix (2026-08-06 urls.txt
     // analysis) → sector_rrg_history/sector_correlation_{pairs,stats,summary}.
     runPython('investsights_sector_intel_fetcher.py', [], 2 * 60_000)
@@ -984,12 +985,6 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
     // endpoint_registry.py's marketsmojo_stock_picks_history) → marketsmojo_stock_picks.
     runPython('marketsmojo_stock_picks_fetcher.py', [], 60_000)
       .catch(e => T.fail('marketsmojo_stock_picks_fetcher', e)),
-    // Trendlyne's pre-classified corporate-event feed (order wins, margin moves, estimate
-    // beats/misses, block deals, ...) — 2026-08-15, promoted from endpoint_registry.py's
-    // trendlyne_market_insight after re-inspection showed it arrives pre-labeled, not raw
-    // headlines needing NLP (see the fetcher's own docstring) → trendlyne_market_insights.
-    withTrendlyneSlot(() => runPython('trendlyne_market_insight_fetcher.py', [], 60_000))
-      .catch(e => T.fail('trendlyne_market_insight_fetcher', e)),
     // Market-wide corporate-actions calendar sourced from real NSE filings (2026-08-07
     // urls.txt open-source sourcing pass) → nse_filed_corporate_actions. Daily and cheap (one
     // API call, ~40 rows): the completeness cross-check for mc_corporate_actions_fetcher.py's

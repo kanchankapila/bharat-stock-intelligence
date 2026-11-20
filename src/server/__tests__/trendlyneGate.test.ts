@@ -45,7 +45,8 @@ describe('trendlyne gate', () => {
         }
       }
     }
-    expect(found).toBeGreaterThanOrEqual(10);
+    // Non-vacuity floor: 10 call sites until AF-20261120-01 unscheduled trendlyne_fno_activity and market_insight.
+    expect(found).toBeGreaterThanOrEqual(8);
     expect(bare).toEqual([]);
   });
 
