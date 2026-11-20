@@ -2736,7 +2736,7 @@ var stockData = [
     },
     {
         "name": "Housing Development and Infrastructure Limited",
-        "mcsymbol": "HDIL",
+        "mcsymbol": "HDI",
         "tlid": "534",
         "tlname": "housing-development-infrastructure-ltd",
         "isin": "INE191I01012",
@@ -17198,7 +17198,7 @@ var stockData = [
     },
     {
         "name": "Compuage Infocom Limited",
-        "mcsymbol": "COMPINFO",
+        "mcsymbol": "CI28",
         "tlid": "277",
         "tlname": "compuage-infocom-ltd",
         "isin": "INE070C01037",
@@ -18335,7 +18335,7 @@ var stockData = [
     },
     {
         "name": "Golden Tobacco Limited",
-        "mcsymbol": "GOLDENTOBC",
+        "mcsymbol": "GTC",
         "tlid": "482",
         "tlname": "golden-tobacco-ltd",
         "isin": "INE973A01010",
@@ -21641,7 +21641,7 @@ var stockData = [
     },
     {
         "name": "Reliance Home Finance Limited",
-        "mcsymbol": "RHFL",
+        "mcsymbol": "RHF02",
         "tlid": "71312",
         "tlname": "reliance-home-finance-ltd",
         "isin": "INE217K01011",
@@ -21988,7 +21988,7 @@ var stockData = [
     },
     {
         "name": "Agastya Energy and Infrastructure Limited",
-        "mcsymbol": "SC56",
+        "mcsymbol": "SC52",
         "tlid": "87737",
         "tlname": "sanginita-chemicals-ltd",
         "isin": "INE753W01010",
@@ -22129,7 +22129,7 @@ var stockData = [
     },
     {
         "name": "Setubandhan Infrastructure Limited",
-        "mcsymbol": "SETUINFRA",
+        "mcsymbol": "PC20",
         "tlid": "1063",
         "tlname": "setubandhan-infrastructure-ltd",
         "isin": "INE023M01027",
