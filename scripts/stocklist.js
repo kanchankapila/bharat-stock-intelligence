@@ -2736,7 +2736,7 @@ var stockData = [
     },
     {
         "name": "Housing Development and Infrastructure Limited",
-        "mcsymbol": "",
+        "mcsymbol": "HDIL",
         "tlid": "534",
         "tlname": "housing-development-infrastructure-ltd",
         "isin": "INE191I01012",
@@ -17198,7 +17198,7 @@ var stockData = [
     },
     {
         "name": "Compuage Infocom Limited",
-        "mcsymbol": "",
+        "mcsymbol": "COMPINFO",
         "tlid": "277",
         "tlname": "compuage-infocom-ltd",
         "isin": "INE070C01037",
@@ -18335,7 +18335,7 @@ var stockData = [
     },
     {
         "name": "Golden Tobacco Limited",
-        "mcsymbol": "",
+        "mcsymbol": "GOLDENTOBC",
         "tlid": "482",
         "tlname": "golden-tobacco-ltd",
         "isin": "INE973A01010",
@@ -21641,7 +21641,7 @@ var stockData = [
     },
     {
         "name": "Reliance Home Finance Limited",
-        "mcsymbol": "",
+        "mcsymbol": "RHFL",
         "tlid": "71312",
         "tlname": "reliance-home-finance-ltd",
         "isin": "INE217K01011",
@@ -22129,7 +22129,7 @@ var stockData = [
     },
     {
         "name": "Setubandhan Infrastructure Limited",
-        "mcsymbol": "",
+        "mcsymbol": "SETUINFRA",
         "tlid": "1063",
         "tlname": "setubandhan-infrastructure-ltd",
         "isin": "INE023M01027",
