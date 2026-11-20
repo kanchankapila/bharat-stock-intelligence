@@ -2573,6 +2573,24 @@ CREATE TABLE IF NOT EXISTS "nse_bulk_block_deals" (
 );
 CREATE INDEX idx_nbbd_sym_date ON public.nse_bulk_block_deals USING btree (symbol, trade_date DESC);
 
+-- ── nse_corporate_announcements ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "nse_corporate_announcements" (
+  "seq_id" TEXT NOT NULL PRIMARY KEY,
+  "symbol" TEXT NOT NULL,
+  "isin" TEXT,
+  "company_name" TEXT,
+  "category" TEXT,
+  "summary" TEXT,
+  "attachment_url" TEXT,
+  "industry" TEXT,
+  "announced_at" TIMESTAMPTZ,
+  "disseminated_at" TIMESTAMPTZ NOT NULL,
+  "has_xbrl" BOOLEAN,
+  "source" TEXT NOT NULL DEFAULT 'nse_api'::text,
+  "fetched_at" TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX nse_corporate_announcements_symbol_time_idx ON public.nse_corporate_announcements USING btree (symbol, disseminated_at DESC);
+
 -- ── nse_filed_corporate_actions ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "nse_filed_corporate_actions" (
   "source_url" TEXT NOT NULL PRIMARY KEY,
@@ -2636,11 +2654,58 @@ CREATE TABLE IF NOT EXISTS "nse_filing_financials" (
 );
 CREATE INDEX nse_filing_financials_source_url_idx ON public.nse_filing_financials USING btree (source_url);
 
+-- ── nse_fo_activity_contracts ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "nse_fo_activity_contracts" (
+  "trade_date" DATE NOT NULL,
+  "screen" TEXT NOT NULL,
+  "rank" INTEGER NOT NULL,
+  "identifier" TEXT NOT NULL,
+  "symbol" TEXT NOT NULL,
+  "instrument_type" TEXT,
+  "expiry" DATE,
+  "option_type" TEXT,
+  "strike" DOUBLE PRECISION,
+  "ltp" DOUBLE PRECISION,
+  "pchange" DOUBLE PRECISION,
+  "contracts" DOUBLE PRECISION,
+  "turnover" DOUBLE PRECISION,
+  "premium_turnover" DOUBLE PRECISION,
+  "open_interest" DOUBLE PRECISION,
+  "prev_oi" DOUBLE PRECISION,
+  "change_in_oi" DOUBLE PRECISION,
+  "pchange_in_oi" DOUBLE PRECISION,
+  "underlying_value" DOUBLE PRECISION,
+  "snapshot_at" TIMESTAMPTZ NOT NULL,
+  "source" TEXT NOT NULL DEFAULT 'nse_api'::text,
+  "fetched_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY ("trade_date", "screen", "identifier")
+);
+
 -- ── nse_fo_ban_list ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "nse_fo_ban_list" (
   "trade_date" DATE NOT NULL,
   "symbol" TEXT NOT NULL,
   "source" TEXT NOT NULL DEFAULT 'nse_archive'::text,
+  "fetched_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY ("trade_date", "symbol")
+);
+
+-- ── nse_fo_oi_spurts_underlyings ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "nse_fo_oi_spurts_underlyings" (
+  "trade_date" DATE NOT NULL,
+  "symbol" TEXT NOT NULL,
+  "latest_oi" DOUBLE PRECISION,
+  "prev_oi" DOUBLE PRECISION,
+  "change_in_oi" DOUBLE PRECISION,
+  "avg_in_oi" DOUBLE PRECISION,
+  "volume" DOUBLE PRECISION,
+  "fut_value" DOUBLE PRECISION,
+  "opt_value" DOUBLE PRECISION,
+  "total_value" DOUBLE PRECISION,
+  "prem_value" DOUBLE PRECISION,
+  "underlying_value" DOUBLE PRECISION,
+  "snapshot_at" TIMESTAMPTZ NOT NULL,
+  "source" TEXT NOT NULL DEFAULT 'nse_api'::text,
   "fetched_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY ("trade_date", "symbol")
 );

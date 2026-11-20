@@ -140,6 +140,10 @@ const EXCLUDED_TABLES: Record<string, string> = {
   market_claim_evidence: 'semantic claim->evidence link table; no timestamp column',
   // AF-20261111-01: DL inference retired 2026-11-11, so no cadence remains to assert.
   deep_learning_predictions: 'dl_engine.py output; inference retired 2026-11-11, frozen history',
+  // AF-20261120-01: producers unscheduled (Trendlyne refused both with HTTP 405 nightly from 2026-11-18; no reader);
+  // replaced by nse_fo_activity_contracts / nse_fo_oi_spurts_underlyings and nse_corporate_announcements.
+  trendlyne_fno_activity: 'trendlyne_fno_activity_fetcher.py unscheduled 2026-11-20, frozen history; NSE screens replace it',
+  trendlyne_market_insights: 'trendlyne_market_insight_fetcher.py unscheduled 2026-11-20, frozen history; NSE announcements replace it',
   dl_model_performance: 'drift_detector.py drift_score log, a step of ml-daily-ops whose StepTracker monitors it; derived',
 };
 

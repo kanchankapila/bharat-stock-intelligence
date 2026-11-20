@@ -441,10 +441,11 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // verdict dq-uninformative-checks exists to catch.
   { id: 'marketsmojo-stock-picks-recency', label: 'marketsmojo_stock_picks (MarketsMojo vendor model-portfolio picks)',
     category: 'flows', critical: false, table: 'marketsmojo_stock_picks', dateColumn: 'fetched_at', warnDays: 30, failDays: 90 },
-  // 2026-08-15 -- see trendlyne_market_insight_fetcher.py. event_time is corporate-event
-  // driven (order wins, results, deals), not a fixed daily cadence, so a short warn window.
-  { id: 'trendlyne-market-insights-recency', label: 'trendlyne_market_insights (pre-classified corporate-event feed)',
-    category: 'flows', critical: false, table: 'trendlyne_market_insights', dateColumn: 'event_time', warnDays: 3, failDays: 7 },
+  // AF-20261120-01: NSE corporate announcements (replaces trendlyne_market_insights, unscheduled). Hundreds of
+  // filings are disseminated every trading day, so a gap means the ml-daily-ops step stopped.
+  { id: 'nse-corporate-announcements-freshness', label: 'nse_corporate_announcements (NSE equity filings)',
+    category: 'flows', critical: false, table: 'nse_corporate_announcements', dateColumn: 'disseminated_at',
+    warnDays: 2, failDays: 4 },
   // Found 2026-08-13 (fetcher-accuracy-review sweep, batch 2).
   { id: 'stock-block-deal-daily-recency', label: 'stock_block_deal_daily (per-symbol daily block-deal roll-up)',
     category: 'flows', critical: false, table: 'stock_block_deal_daily', dateColumn: 'date', warnDays: 14 },
@@ -825,8 +826,14 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'reference', critical: false, table: 'preopen_stock_snapshot', dateColumn: 'snapshot_date', warnDays: 3, failDays: 5 },
   { id: 'nt-fno-dashboard-freshness', label: 'nt_fno_dashboard (NiftyTrader F&O dashboard)',
     category: 'reference', critical: false, table: 'nt_fno_dashboard', dateColumn: 'date', warnDays: 3, failDays: 5 },
-  { id: 'trendlyne-fno-activity-freshness', label: 'trendlyne_fno_activity',
-    category: 'reference', critical: false, table: 'trendlyne_fno_activity', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // AF-20261120-01: NSE most-active contracts and OI spurts (replace trendlyne_fno_activity, unscheduled),
+  // dated by NSE's closing-snapshot timestamp, one session per ml-daily-ops run.
+  { id: 'nse-fo-activity-contracts-freshness', label: 'nse_fo_activity_contracts (NSE most-active + OI-spurt contracts)',
+    category: 'options', critical: false, table: 'nse_fo_activity_contracts', dateColumn: 'trade_date',
+    nativeDateColumn: true, warnDays: 2, failDays: 4 },
+  { id: 'nse-fo-oi-spurts-underlyings-freshness', label: 'nse_fo_oi_spurts_underlyings (NSE OI change per F&O underlying)',
+    category: 'options', critical: false, table: 'nse_fo_oi_spurts_underlyings', dateColumn: 'trade_date',
+    nativeDateColumn: true, warnDays: 2, failDays: 4 },
   { id: 'mc-pricefeed-daily-freshness', label: 'mc_pricefeed_daily (IND_PE/CAGR/consensus/delivery)',
     category: 'reference', critical: false, table: 'mc_pricefeed_daily', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'extra-endpoint-responses-recency', label: 'extra_endpoint_responses',
