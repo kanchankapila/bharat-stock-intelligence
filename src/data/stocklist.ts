@@ -3262,7 +3262,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Grauer & Weil India Limited",
-    "mcsymbol": "",
+    "mcsymbol": "GWI",
     "tlid": "2241",
     "tlname": "grauer-weil-india-ltd",
     "isin": "INE266D01021",
