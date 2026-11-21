@@ -588,13 +588,6 @@
     "et_seoname": "alphageo-india-ltd"
   },
   {
-    "symbol": "ALPSINDUS",
-    "name": "Alps Industries Ltd.",
-    "companyid": "7696",
-    "et_symbol": "ALPSINDUSBE",
-    "et_seoname": "alps-industries-ltd"
-  },
-  {
     "symbol": "AMBER",
     "name": "Amber Enterprises India Ltd.",
     "companyid": "67404",
@@ -5010,13 +5003,6 @@
     "companyid": "13646",
     "et_symbol": "HNDFDSEQ",
     "et_seoname": "hindustan-foods-ltd"
-  },
-  {
-    "symbol": "HOCL",
-    "name": "Hindustan Organic Chemicals Ltd.",
-    "companyid": "11979",
-    "et_symbol": "HOCL",
-    "et_seoname": "hindustan-organic-chemicals-ltd"
   },
   {
     "symbol": "HOMEFIRST",
@@ -10220,13 +10206,6 @@
     "et_seoname": "sammaan-capital-ltd"
   },
   {
-    "symbol": "SANCO",
-    "name": "Sanco Industries Ltd.",
-    "companyid": "50526",
-    "et_symbol": "SANCOBZ",
-    "et_seoname": "sanco-industries-ltd"
-  },
-  {
     "symbol": "SANDESH",
     "name": "Sandesh Ltd.",
     "companyid": "8483",
@@ -11688,13 +11667,6 @@
     "companyid": "12919",
     "et_symbol": "TALBROAUTOEQ",
     "et_seoname": "talbros-automotive-components-ltd"
-  },
-  {
-    "symbol": "TANFACIND",
-    "name": "Tanfac Industries Ltd.",
-    "companyid": "12952",
-    "et_symbol": "TANFACIND",
-    "et_seoname": "tanfac-industries-ltd"
   },
   {
     "symbol": "TANLA",

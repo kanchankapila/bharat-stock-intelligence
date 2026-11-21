@@ -4567,19 +4567,6 @@ const stockData: StockMapping[] =
     "scripcode": 500227
   },
   {
-    "name": "Hindustan Organic Chemicals",
-    "mcsymbol": "HOC",
-    "tlid": "568",
-    "tlname": "hindustan-organic-chemicals-ltd",
-    "isin": "INE048A01011",
-    "symbol": "HOCL",
-    "stockid": "501399",
-    "companyid": "11979",
-    "tickertape_sid": "HOCL",
-    "fincode": 100449,
-    "scripcode": 500449
-  },
-  {
     "name": "Smartlink Holdings      ",
     "mcsymbol": "DLI",
     "tlid": "1256",
@@ -8841,19 +8828,6 @@ const stockData: StockMapping[] =
     "tickertape_sid": "SYMP",
     "fincode": 117385,
     "scripcode": 517385
-  },
-  {
-    "name": "Tanfac Industries Limited",
-    "mcsymbol": "",
-    "tlid": "1349",
-    "tlname": "tanfac-industries-ltd",
-    "isin": "",
-    "symbol": "TANFACIND",
-    "stockid": "1003761",
-    "companyid": "12952",
-    "tickertape_sid": "AHL",
-    "fincode": 106854,
-    "scripcode": 506854
   },
   {
     "name": "Xchanging Solutions",
@@ -16126,17 +16100,6 @@ const stockData: StockMapping[] =
     "scripcode": 526397
   },
   {
-    "name": "Alps Industries Limited",
-    "mcsymbol": "AI12",
-    "tlid": "66",
-    "tlname": "alps-industries-ltd",
-    "isin": "INE093B01015",
-    "symbol": "ALPSINDUS",
-    "stockid": "621626",
-    "companyid": "7696",
-    "tickertape_sid": "ALPS"
-  },
-  {
     "name": "Ambica Agarbathies & Aroma industries Limited",
     "mcsymbol": "AA09",
     "tlid": "82702",
@@ -18026,7 +17989,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Future Enterprises Limited",
-    "mcsymbol": "FELDV57000",
+    "mcsymbol": "PRI",
     "tlid": "427",
     "tlname": "future-retail-limited-dvr",
     "isin": "IN9623B01058",
@@ -21833,7 +21796,6 @@ const stockData: StockMapping[] =
     "fincode": 300179,
     "scripcode": 543251
   },
-  
   {
     "name": "Sadbhav Engineering Limited",
     "mcsymbol": "SE19",
@@ -21978,16 +21940,6 @@ const stockData: StockMapping[] =
     "scripcode": 511630
   },
   {
-    "name": "Sanco Industries Limited",
-    "mcsymbol": "SI05",
-    "tlid": "87822",
-    "tlname": "sanco-industries-ltd",
-    "isin": "INE782L01012",
-    "symbol": "SANCO",
-    "stockid": "277774",
-    "companyid": "50526"
-  },
-  {
     "name": "The Sandesh Limited",
     "mcsymbol": "S01",
     "tlid": "1177",
@@ -22092,7 +22044,7 @@ const stockData: StockMapping[] =
   },
   {
     "name": "Sejal Glass Limited",
-    "mcsymbol": "",
+    "mcsymbol": "SAG",
     "tlid": "1205",
     "tlname": "sejal-glass-ltd",
     "isin": "INE955I01044",
@@ -23970,9 +23922,6 @@ const stockData: StockMapping[] =
     "fincode": 295952,
     "scripcode": 542774
   },
-  
-  
-  
   {
     "name": "GVT&D",
     "mcsymbol": "GEC",
