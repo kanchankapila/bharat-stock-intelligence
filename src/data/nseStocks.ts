@@ -18788,6 +18788,1390 @@ const nseStocksSeedData: NSEStock[] = [
     "industry": "Unknown",
     "isin": "INE768C01028",
     "listing_date": "2009-11-13"
+  },
+  {
+    "symbol": "AASTHA",
+    "name": "Aastha Spintex Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textile - Spinning",
+    "isin": "INE2FMX01012",
+    "listing_date": "2026-07-06"
+  },
+  {
+    "symbol": "ACGL",
+    "name": "Automobile Corporation of Goa Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Auto Ancillaries - Bus Body",
+    "isin": "INE451C01013",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ADDIND",
+    "name": "Addi Industries Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles & Apparel",
+    "isin": "INE757C01021",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ADVIKCA",
+    "name": "Advik Capital Limited",
+    "sector": "Industrials",
+    "industry": "Electric Equipment",
+    "isin": "INE178T01024",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "AGL",
+    "name": "Allcargo Global Limited",
+    "sector": "Industrials",
+    "industry": "Ground Freight & Logistics Services",
+    "isin": "INE1YPB01014",
+    "listing_date": "2026-07-03"
+  },
+  {
+    "symbol": "ALPINETEX",
+    "name": "Alpine Texworld Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles",
+    "isin": "INE1JCQ01037",
+    "listing_date": "2026-07-21"
+  },
+  {
+    "symbol": "ALUFLUOR",
+    "name": "Alufluoride Limited",
+    "sector": "Materials",
+    "industry": "Commodity Chemicals",
+    "isin": "INE058F01019",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "AMAL",
+    "name": "Amal Limited",
+    "sector": "Materials",
+    "industry": "Speciality Chemicals",
+    "isin": "INE841D01013",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "AMARJOTHI",
+    "name": "Amarjothi Spinning Mills Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles & Apparel",
+    "isin": "INE484D01012",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ANNAPURNA",
+    "name": "Annapurna Swadisht Limited",
+    "sector": "Consumer Staples",
+    "industry": "Consumer Food",
+    "isin": "INE0MGM01017",
+    "listing_date": "2026-08-12"
+  },
+  {
+    "symbol": "ANSALAPI",
+    "name": "Ansal Properties & Infrastructure Limited",
+    "sector": "Real Estate",
+    "industry": "Construction - Residential & Commercial Complexes",
+    "isin": "INE436A01026",
+    "listing_date": "2006-01-27"
+  },
+  {
+    "symbol": "ANSALBU",
+    "name": "Ansal Buildwell Limited",
+    "sector": "Real Estate",
+    "industry": "Construction - Residential & Commercial Complexes",
+    "isin": "INE030C01015",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ARCL",
+    "name": "ARCL Organics Limited",
+    "sector": "Materials",
+    "industry": "Chemicals",
+    "isin": "INE372M01010",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ARDEE",
+    "name": "Ardee Industries Limited",
+    "sector": "Materials",
+    "industry": "Metals - Non Ferrous",
+    "isin": "INE0XNF01022",
+    "listing_date": "2026-08-12"
+  },
+  {
+    "symbol": "ARHAM",
+    "name": "Arham Technologies Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Electronic Goods",
+    "isin": "INE0L2Y01011",
+    "listing_date": "2026-10-30"
+  },
+  {
+    "symbol": "ARYAMAN",
+    "name": "Aryaman Financial Services Limited",
+    "sector": "Financials",
+    "industry": "Finance - Investment",
+    "isin": "INE032E01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ASIANTNE",
+    "name": "Asian Tea & Exports Limited",
+    "sector": "Consumer Staples",
+    "industry": "Tea/Coffee",
+    "isin": "INE822B01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "AUSTENG",
+    "name": "Austin Engineering Company  Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Auto Ancillaries - Bearings",
+    "isin": "INE759F01012",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "AVANCE",
+    "name": "Avance Technologies Limited",
+    "sector": "Information Technology",
+    "industry": "IT Services & Consulting",
+    "isin": "INE758A01072",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "AXTEL",
+    "name": "Axtel Industries Limited",
+    "sector": "Industrials",
+    "industry": "Engineering - Industrial Equipments",
+    "isin": "INE767C01012",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "AZADIND",
+    "name": "Azad India Mobility Limited",
+    "sector": "Materials",
+    "industry": "Iron & Steel",
+    "isin": "INE566M01025",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "BAHETI",
+    "name": "Baheti Recycling Industries Limited",
+    "sector": "Materials",
+    "industry": "Aluminium & Aluminium Products",
+    "isin": "INE029Q01017",
+    "listing_date": "2026-11-06"
+  },
+  {
+    "symbol": "BENARAS",
+    "name": "Benares Hotels Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Hotel, Resort & Restaurants",
+    "isin": "INE664D01019",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "BLEL",
+    "name": "Behari Lal Engineering Limited",
+    "sector": "Materials",
+    "industry": "Metals - Castings/Forgings",
+    "isin": "INE1EEM01017",
+    "listing_date": "2026-08-19"
+  },
+  {
+    "symbol": "BLUECLOUDS",
+    "name": "Blue Cloud Softech Solutions Limited",
+    "sector": "Information Technology",
+    "industry": "Information Technology Services",
+    "isin": "INE373T01047",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "BPLPHARMA",
+    "name": "Bharat Parenterals Limited",
+    "sector": "Healthcare",
+    "industry": "Pharmaceuticals & Drugs",
+    "isin": "INE365Y01019",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "BRAHMINFRA",
+    "name": "Brahmaputra Infrastructure Limited",
+    "sector": "Industrials",
+    "industry": "Construction - Infrastructure",
+    "isin": "INE320I01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "BRAHMVIRAT",
+    "name": "BRAHM VIRAT INDUSTRIES CORPORATION LIMITED",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles & Apparel",
+    "isin": "INE467D01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "BRIGHTBR",
+    "name": "Bright Brothers Limited",
+    "sector": "Materials",
+    "industry": "Plastic Products - Others",
+    "isin": "INE630D01010",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "CFEL",
+    "name": "Confidence Futuristic Energetech Limited",
+    "sector": "Industrials",
+    "industry": "Trading",
+    "isin": "INE700F01024",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "CGVAK",
+    "name": "CG Vak Software & Exports Limited",
+    "sector": "Information Technology",
+    "industry": "IT Services & Consulting",
+    "isin": "INE084D01010",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "CHEMCRUX",
+    "name": "Chemcrux Enterprises Limited",
+    "sector": "Materials",
+    "industry": "Speciality Chemicals",
+    "isin": "INE298W01016",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "CMLL",
+    "name": "Caliber Mining and Logistics Limited",
+    "sector": "Materials",
+    "industry": "Coal",
+    "isin": "INE11XY01018",
+    "listing_date": "2026-07-24"
+  },
+  {
+    "symbol": "CMRGREEN",
+    "name": "CMR Green Technologies Limited",
+    "sector": "Materials",
+    "industry": "Metals - Non Ferrous",
+    "isin": "INE00WV01027",
+    "listing_date": "2026-06-10"
+  },
+  {
+    "symbol": "COMPEAU",
+    "name": "Competent Automobiles Company Limited",
+    "sector": "Industrials",
+    "industry": "Trading",
+    "isin": "INE823B01015",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "CORDELIA",
+    "name": "Waterways Leisure Tourism Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Leisure Services",
+    "isin": "INE0LZF01039",
+    "listing_date": "2026-07-01"
+  },
+  {
+    "symbol": "CPL",
+    "name": "Captain Polyplast Limited",
+    "sector": "Materials",
+    "industry": "Plastic Products - Others",
+    "isin": "INE536P01021",
+    "listing_date": "2026-07-23"
+  },
+  {
+    "symbol": "CRAVATEX",
+    "name": "Cravatex Limited",
+    "sector": "Industrials",
+    "industry": "Trading",
+    "isin": "INE145E01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "CRSL",
+    "name": "Cressanda Railway Solutions Limited",
+    "sector": "Information Technology",
+    "industry": "IT Services & Consulting",
+    "isin": "INE716D01033",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "CSM",
+    "name": "CSM Technologies Limited",
+    "sector": "Information Technology",
+    "industry": "IT Services & Consulting",
+    "isin": "INE0ZK601013",
+    "listing_date": "2026-07-02"
+  },
+  {
+    "symbol": "DEEP",
+    "name": "Deep Polymers Limited",
+    "sector": "Materials",
+    "industry": "Chemicals",
+    "isin": "INE00IY01012",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "DHABRIYA",
+    "name": "Dhabriya Polywood Limited",
+    "sector": "Materials",
+    "industry": "Plastic Products",
+    "isin": "INE260R01016",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "DHARAN",
+    "name": "DHARAN INFRA-EPC LIMITED",
+    "sector": "Real Estate",
+    "industry": "Construction - Real Estate",
+    "isin": "INE278R01034",
+    "listing_date": "2018-04-02"
+  },
+  {
+    "symbol": "DHATRE",
+    "name": "Dhatre Udyog Limited",
+    "sector": "Materials",
+    "industry": "Iron & Steel",
+    "isin": "INE715T01031",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "DHOOTTRANS",
+    "name": "Dhoot Transmission Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Auto Ancillaries - Auto, Truck & Motorcycle Parts",
+    "isin": "INE01NH01023",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "DOLLEX",
+    "name": "Dollex Agrotech Limited",
+    "sector": "Consumer Staples",
+    "industry": "Sugar",
+    "isin": "INE0JHH01011",
+    "listing_date": "2026-09-11"
+  },
+  {
+    "symbol": "DSKULKARNI",
+    "name": "DS Kulkarni Developers Limited",
+    "sector": "Real Estate",
+    "industry": "Construction & Contracting - Housing",
+    "isin": "INE891A01022",
+    "listing_date": "1995-02-08"
+  },
+  {
+    "symbol": "EASTWEST",
+    "name": "East West Freight Carriers Limited",
+    "sector": "Financials",
+    "industry": "Finance - Investment",
+    "isin": "INE595R01023",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "EBIX",
+    "name": "EBIX Limited",
+    "sector": "Information Technology",
+    "industry": "Software - Application",
+    "isin": "INE432F01032",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ECORECO",
+    "name": "Eco Recycling Limited",
+    "sector": "Information Technology",
+    "industry": "Software",
+    "isin": "INE316A01038",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "EKI",
+    "name": "EKI Energy Services Limited",
+    "sector": "Industrials",
+    "industry": "Diversified",
+    "isin": "INE0CPR01018",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "EMPIND",
+    "name": "Empire Industries Limited",
+    "sector": "Materials",
+    "industry": "Glass & Glass Products",
+    "isin": "INE515H01014",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ENKEIWHEL",
+    "name": "Enkei Wheels (India) Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Auto Ancillaries",
+    "isin": "INE130L01014",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ESFL",
+    "name": "Essen Speciality Films Limited",
+    "sector": "Materials",
+    "industry": "Plastic Products",
+    "isin": "INE0ITO01014",
+    "listing_date": "2026-11-13"
+  },
+  {
+    "symbol": "FREDUN",
+    "name": "Fredun Pharmaceuticals Limited",
+    "sector": "Healthcare",
+    "industry": "Pharmaceuticals & Drugs",
+    "isin": "INE194R01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "GKB",
+    "name": "GKB Ophthalmics Limited",
+    "sector": "Healthcare",
+    "industry": "Medical Equipment/Supplies/Accessories",
+    "isin": "INE265D01015",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "GYFTR",
+    "name": "Gyftr Limited",
+    "sector": "Financials",
+    "industry": "Finance - Investment",
+    "isin": "INE724A01017",
+    "listing_date": "2026-07-10"
+  },
+  {
+    "symbol": "HAMPTON",
+    "name": "Hampton Sky Realty Limited",
+    "sector": "Real Estate",
+    "industry": "Real Estate Operations",
+    "isin": "INE299D01022",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "HAZOOR",
+    "name": "Hazoor Multi Projects Limited",
+    "sector": "Real Estate",
+    "industry": "Construction - Residential & Commercial Complexes",
+    "isin": "INE550F01049",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "HBPOR",
+    "name": "HB Portfolio Limited",
+    "sector": "Financials",
+    "industry": "Finance - Investment",
+    "isin": "INE638B01025",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "HEXAGON",
+    "name": "Hexagon Nutrition Limited",
+    "sector": "Healthcare",
+    "industry": "Pharmaceuticals & Drugs",
+    "isin": "INE0JUI01012",
+    "listing_date": "2026-06-12"
+  },
+  {
+    "symbol": "HINDADH",
+    "name": "Hindustan Adhesives Limited",
+    "sector": "Materials",
+    "industry": "Plastics - Self Adhesive Tapes",
+    "isin": "INE074C01013",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "HINDALUMI",
+    "name": "Hind Aluminium Industries Limited",
+    "sector": "Materials",
+    "industry": "Aluminium & Aluminium Products",
+    "isin": "INE227B01019",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "HRYNSHP",
+    "name": "Hariyana Ship Breakers Limited",
+    "sector": "Industrials",
+    "industry": "Shipping",
+    "isin": "INE400G01011",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "INDOKEM",
+    "name": "Indokem Limited",
+    "sector": "Materials",
+    "industry": "Speciality Chemicals",
+    "isin": "INE716F01012",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "INDOMIM",
+    "name": "INDO-MIM Limited",
+    "sector": "Materials",
+    "industry": "Metals - Castings/Forgings",
+    "isin": "INE084101034",
+    "listing_date": "2026-07-30"
+  },
+  {
+    "symbol": "IPRINGLTD",
+    "name": "IP Rings Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Auto Ancillaries - Pistons",
+    "isin": "INE558A01019",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ISTLTD",
+    "name": "I S T Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Auto Parts",
+    "isin": "INE684B01029",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ITL",
+    "name": "ITL Industries Limited",
+    "sector": "Industrials",
+    "industry": "Engineering - Industrial Equipments",
+    "isin": "INE478D01014",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "JENBURPH",
+    "name": "Jenburkt Pharmaceuticals Limited",
+    "sector": "Healthcare",
+    "industry": "Pharmaceuticals & Drugs",
+    "isin": "INE354A01013",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "JNPR",
+    "name": "Juniper Green Energy Limited",
+    "sector": "Utilities",
+    "industry": "Renewables",
+    "isin": "INE05C901015",
+    "listing_date": "2026-08-06"
+  },
+  {
+    "symbol": "JYOTIRES",
+    "name": "Jyoti Resins & Adhesives Limited",
+    "sector": "Materials",
+    "industry": "Speciality Chemicals",
+    "isin": "INE577D01013",
+    "listing_date": "2026-10-08"
+  },
+  {
+    "symbol": "KAMANWALA",
+    "name": "Kamanwala Housing Construction Limited",
+    "sector": "Real Estate",
+    "industry": "Construction - Residential & Commercial Complexes",
+    "isin": "INE344D01018",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "KANCOTEA",
+    "name": "Kanco Tea & Industries Limited",
+    "sector": "Consumer Staples",
+    "industry": "Tea/Coffee",
+    "isin": "INE398L01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "KDGREEN",
+    "name": "KD Green Industries Limited",
+    "sector": "Industrials",
+    "industry": "Trading",
+    "isin": "INE348N01042",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "KJMCFIN",
+    "name": "KJMC Financial Services Limited",
+    "sector": "Financials",
+    "industry": "Finance - NBFC",
+    "isin": "INE533C01018",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "KMCSHIL",
+    "name": "K M C Speciality Hospitals (India) Limited",
+    "sector": "Healthcare",
+    "industry": "Hospital & Healthcare Services",
+    "isin": "INE879K01018",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "KNACK",
+    "name": "Knack Packaging Limited",
+    "sector": "Materials",
+    "industry": "Packaging - Sacks and Bags",
+    "isin": "INE17QZ01016",
+    "listing_date": "2026-07-08"
+  },
+  {
+    "symbol": "KSE",
+    "name": "KSE Limited",
+    "sector": "Consumer Staples",
+    "industry": "Consumer Food",
+    "isin": "INE953E01022",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "KUSUMGAR",
+    "name": "Kusumgar Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles",
+    "isin": "INE0ISX01025",
+    "listing_date": "2026-07-15"
+  },
+  {
+    "symbol": "LADDERUP",
+    "name": "Ladderup Finance Limited",
+    "sector": "Financials",
+    "industry": "Finance - NBFC",
+    "isin": "INE519D01015",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "LAKSHMIMIL",
+    "name": "Lakshmi Mills Company Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles & Apparel",
+    "isin": "INE938C01019",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "LASERPOWER",
+    "name": "Laser Power & Infra Limited",
+    "sector": "Industrials",
+    "industry": "Transmission Towers / Equipments",
+    "isin": "INE17IR01028",
+    "listing_date": "2026-07-16"
+  },
+  {
+    "symbol": "LCL",
+    "name": "Lohia Corp Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textile - Machinery",
+    "isin": "INE0QJW01029",
+    "listing_date": "2026-07-30"
+  },
+  {
+    "symbol": "LEAPIND",
+    "name": "LEAP India Limited",
+    "sector": "Industrials",
+    "industry": "Logistics",
+    "isin": "INE00GO01025",
+    "listing_date": "2026-08-14"
+  },
+  {
+    "symbol": "LEENEE",
+    "name": "Lee & Nee Softwares Exports Limited",
+    "sector": "Information Technology",
+    "industry": "Software",
+    "isin": "INE791B01014",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "LKPSEC",
+    "name": "LKP Securities Limited",
+    "sector": "Financials",
+    "industry": "Finance - Stock Broking",
+    "isin": "INE341H01023",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "LOTUSCHO",
+    "name": "Lotus Chocolate Company Limited",
+    "sector": "Consumer Staples",
+    "industry": "Consumer Food",
+    "isin": "INE026D01011",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "MAKERSL",
+    "name": "Makers Laboratories Limited",
+    "sector": "Healthcare",
+    "industry": "Pharmaceuticals & Drugs",
+    "isin": "INE987A01010",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "MANIPALHOS",
+    "name": "Manipal Health Enterprises Limited",
+    "sector": "Healthcare",
+    "industry": "Hospital & Healthcare Services",
+    "isin": "INE459N01021",
+    "listing_date": "2026-08-05"
+  },
+  {
+    "symbol": "MEDICAPQ",
+    "name": "Medi Caps Limited",
+    "sector": "Healthcare",
+    "industry": "Pharmaceuticals & Drugs",
+    "isin": "INE442D01010",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "MERCURYEV",
+    "name": "Mercury Ev-Tech Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Automobile - Passenger Cars",
+    "isin": "INE763M01028",
+    "listing_date": "2026-06-02"
+  },
+  {
+    "symbol": "MIIL",
+    "name": "Meghna Infracon Infrastructure Limited",
+    "sector": "Financials",
+    "industry": "Finance - Stock Broking",
+    "isin": "INE898Q01015",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "MILKYMIST",
+    "name": "Milky Mist Dairy Food Limited",
+    "sector": "Consumer Staples",
+    "industry": "Consumer Food",
+    "isin": "INE00IT01020",
+    "listing_date": "2026-08-18"
+  },
+  {
+    "symbol": "MINALIND",
+    "name": "Minal Industries Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Diamond  &  Jewellery",
+    "isin": "INE097E01028",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "MKEXIM",
+    "name": "M.K. Exim (India) Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles & Apparel",
+    "isin": "INE227F01010",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "MLKFOOD",
+    "name": "Milkfood Limited",
+    "sector": "Consumer Staples",
+    "industry": "Consumer Food",
+    "isin": "INE588G01021",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "MOHITE",
+    "name": "Mohite Industries Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles & Apparel",
+    "isin": "INE154B01023",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "MOLBIO",
+    "name": "Molbio Diagnostics Limited",
+    "sector": "Healthcare",
+    "industry": "Medical Equipment/Supplies/Accessories",
+    "isin": "INE869T01028",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "MSL",
+    "name": "Mangalam Seeds Limited",
+    "sector": "Consumer Staples",
+    "industry": "Agriculture",
+    "isin": "INE829S01016",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "MVELECTRO",
+    "name": "MV Electrosystems Limited",
+    "sector": "Industrials",
+    "industry": "Electric Equipment - Switchgears",
+    "isin": "INE0OWZ01020",
+    "listing_date": "2026-08-06"
+  },
+  {
+    "symbol": "MYSORPETRO",
+    "name": "Mysore Petro Chemicals Limited",
+    "sector": "Materials",
+    "industry": "Commodity Chemicals",
+    "isin": "INE741A01011",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "NICCOPAR",
+    "name": "Nicco Parks & Resorts Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Amusement Parks/Recreation/Club",
+    "isin": "INE653C01022",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "NTCIND",
+    "name": "NTC Industries Limited",
+    "sector": "Consumer Staples",
+    "industry": "Cigarettes/Tobacco",
+    "isin": "INE920C01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ODYCORP",
+    "name": "Odyssey Corporation Limited",
+    "sector": "Financials",
+    "industry": "Finance - Investment",
+    "isin": "INE839E01023",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ONEGLOBAL",
+    "name": "One Global Service Provider Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles & Apparel",
+    "isin": "INE670O01013",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ONIXSOLAR",
+    "name": "Onix Solar Energy Limited",
+    "sector": "Materials",
+    "industry": "Metals - Non Ferrous",
+    "isin": "INE173M01012",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "OPTIFIN",
+    "name": "Optimus Finance Limited",
+    "sector": "Financials",
+    "industry": "Finance - NBFC",
+    "isin": "INE031G01022",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ORIRAIL",
+    "name": "Oriental Rail Infrastructure Limited",
+    "sector": "Industrials",
+    "industry": "Railways Wagons",
+    "isin": "INE457G01029",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ORTEL",
+    "name": "Ortel Communications Limited",
+    "sector": "Media & Entertainment",
+    "industry": "TV Broadcasting & Software Production",
+    "isin": "INE849L01019",
+    "listing_date": "2015-03-19"
+  },
+  {
+    "symbol": "PACIFICI",
+    "name": "Pacific Industries Limited",
+    "sector": "Materials",
+    "industry": "Ceramics/Marble/Granite/Sanitaryware",
+    "isin": "INE883C01025",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "PANORAMA",
+    "name": "Panorama Studios International Limited",
+    "sector": "Media & Entertainment",
+    "industry": "Film Production, Distribution & Entertainment",
+    "isin": "INE258R01028",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "PARIN",
+    "name": "Parin Enterprises Limited",
+    "sector": "Consumer Staples",
+    "industry": "Household & Personal Products",
+    "isin": "INE00U801010",
+    "listing_date": "2026-09-25"
+  },
+  {
+    "symbol": "PARNAXLAB",
+    "name": "Parnax Lab Limited",
+    "sector": "Healthcare",
+    "industry": "Pharmaceuticals & Drugs",
+    "isin": "INE383L01019",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "PERMAGN",
+    "name": "Permanent Magnets Limited",
+    "sector": "Industrials",
+    "industry": "Electric Equipment",
+    "isin": "INE418E01018",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "PHOENXINTL",
+    "name": "Phoenix International Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Leather",
+    "isin": "INE245B01011",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "POEL",
+    "name": "POCL Enterprises Limited",
+    "sector": "Materials",
+    "industry": "Commodity Chemicals",
+    "isin": "INE035S01028",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "POLYSPIN",
+    "name": "Polyspin Exports Limited",
+    "sector": "Materials",
+    "industry": "Plastic Products",
+    "isin": "INE914G01029",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "PRISMX",
+    "name": "Prismx Global Ventures Limited",
+    "sector": "Financials",
+    "industry": "Finance - Investment",
+    "isin": "INE286N01028",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "QMSMEDI",
+    "name": "QMS Medical Allied Services Limited",
+    "sector": "Healthcare",
+    "industry": "Medical Equipment/Supplies/Accessories",
+    "isin": "INE0FMW01018",
+    "listing_date": "2026-06-18"
+  },
+  {
+    "symbol": "RAMBHAJO",
+    "name": "Advit Jewels Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Diamond  &  Jewellery",
+    "isin": "INE1SJO01012",
+    "listing_date": "2026-07-01"
+  },
+  {
+    "symbol": "RIR",
+    "name": "RIR Power Electronics Limited",
+    "sector": "Industrials",
+    "industry": "Electronics - Components",
+    "isin": "INE302D01024",
+    "listing_date": "2026-07-16"
+  },
+  {
+    "symbol": "RRECL",
+    "name": "RDB Real Estate Constructions Limited",
+    "sector": "Real Estate",
+    "industry": "Real Estate Services",
+    "isin": "INE0AK901016",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "RTSPOWR",
+    "name": "RTS Power Corporation Limited",
+    "sector": "Industrials",
+    "industry": "Electric Equipment",
+    "isin": "INE005C01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SAICAPI",
+    "name": "Sai Capital Limited",
+    "sector": "Financials",
+    "industry": "Capital Markets",
+    "isin": "INE531X01018",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SAYAJIIND",
+    "name": "Sayaji Industries Limited",
+    "sector": "Consumer Staples",
+    "industry": "Food Processing",
+    "isin": "INE327G01032",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SBIFUNDS",
+    "name": "SBI Funds Management Limited",
+    "sector": "Financials",
+    "industry": "Finance - Investment",
+    "isin": "INE640G01020",
+    "listing_date": "2026-07-21"
+  },
+  {
+    "symbol": "SEKURITIND",
+    "name": "Saint Gobain Sekurit India Limited",
+    "sector": "Materials",
+    "industry": "Glass & Glass Products",
+    "isin": "INE068B01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SGLRES",
+    "name": "SGL Resources Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Photographic Products",
+    "isin": "INE967B01028",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SGRL",
+    "name": "Shree Ganesh Remedies Limited",
+    "sector": "Healthcare",
+    "industry": "Pharmaceuticals & Drugs",
+    "isin": "INE414Y01015",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SHILGRAVQ",
+    "name": "Shilp Gravures Limited",
+    "sector": "Industrials",
+    "industry": "Engineering - Industrial Equipments",
+    "isin": "INE960A01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SHIPROCKET",
+    "name": "Shiprocket Limited",
+    "sector": "Information Technology",
+    "industry": "Online Services",
+    "isin": "INE0FOO01011",
+    "listing_date": "2026-08-19"
+  },
+  {
+    "symbol": "SHIVAAGRO",
+    "name": "Shiva Global Agro Industries Limited",
+    "sector": "Materials",
+    "industry": "Fertilizers",
+    "isin": "INE960E01019",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SHIVACEM",
+    "name": "Shiva Cement Limited",
+    "sector": "Materials",
+    "industry": "Cement",
+    "isin": "INE555C01029",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SHRADDHA",
+    "name": "Shraddha Prime Projects Limited",
+    "sector": "Real Estate",
+    "industry": "Real Estate - Development",
+    "isin": "INE311M01018",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SHRJAGP",
+    "name": "Shri Jagdamba Polymers Limited",
+    "sector": "Materials",
+    "industry": "Packaging Materials-Plastic Products",
+    "isin": "INE564J01026",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SHUKRAMED",
+    "name": "Shukra Medtech Limited",
+    "sector": "Healthcare",
+    "industry": "Pharmaceuticals & Drugs",
+    "isin": "INE551C01044",
+    "listing_date": "2026-08-14"
+  },
+  {
+    "symbol": "SRIKPRIND",
+    "name": "Sri KPR Industries Limited",
+    "sector": "Materials",
+    "industry": "Other Construction Materials",
+    "isin": "INE009C01019",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "STLSTRINF",
+    "name": "Steel Strips Infrastructures Limited",
+    "sector": "Real Estate",
+    "industry": "Construction - Real Estate",
+    "isin": "INE205F01016",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SUMEDHA",
+    "name": "Sumedha Fiscal Services Limited",
+    "sector": "Financials",
+    "industry": "Finance - Investment",
+    "isin": "INE886B01012",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SUNRAKSHAK",
+    "name": "Sunrakshakk Industries India Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles & Apparel",
+    "isin": "INE671K01027",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SUNSHIEL",
+    "name": "Sunshield Chemicals Limited",
+    "sector": "Materials",
+    "industry": "Speciality Chemicals",
+    "isin": "INE199E01014",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SUPTANERY",
+    "name": "Super Tannery Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Leather",
+    "isin": "INE460D01038",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SVGLOBAL",
+    "name": "S V Global Mill Limited",
+    "sector": "Real Estate",
+    "industry": "Real Estate Rental, Development & Operations",
+    "isin": "INE159L01013",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SWARAJ",
+    "name": "Swaraj Suiting Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles",
+    "isin": "INE0GMR01016",
+    "listing_date": "2026-08-13"
+  },
+  {
+    "symbol": "SWARNSAR",
+    "name": "Swarnsarita Jewels India Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Diamond  &  Jewellery",
+    "isin": "INE967A01012",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "SWISSMLTRY",
+    "name": "Swiss Military Consumer Goods Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Computer Peripherals",
+    "isin": "INE010C01025",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "TANAA",
+    "name": "Taneja Aerospace & Aviation Limited",
+    "sector": "Industrials",
+    "industry": "Aerospace & Defence",
+    "isin": "INE692C01020",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "TECHNOCRAF",
+    "name": "Technocraft Ventures Limited",
+    "sector": "Industrials",
+    "industry": "Construction - Infrastructure",
+    "isin": "INE1D0W01018",
+    "listing_date": "2026-08-14"
+  },
+  {
+    "symbol": "TGVSL",
+    "name": "TGV Sraac Limited",
+    "sector": "Materials",
+    "industry": "Commodity Chemicals",
+    "isin": "INE284B01028",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "TOYAMSL",
+    "name": "Toyam Sports Limited",
+    "sector": "Financials",
+    "industry": "Finance - Stock Broking",
+    "isin": "INE457P01020",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "TRANSCOR",
+    "name": "Transcorp International Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Travel Services",
+    "isin": "INE330E01023",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "TRITONV",
+    "name": "Triton Valves Limited",
+    "sector": "Industrials",
+    "industry": "Engineering - Industrial Equipments",
+    "isin": "INE440G01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "TURTLEMINT",
+    "name": "Turtlemint Fintech Solutions Limited",
+    "sector": "Financials",
+    "industry": "Multiline Insurance & Brokers",
+    "isin": "INE0OC301013",
+    "listing_date": "2026-06-29"
+  },
+  {
+    "symbol": "TUTIALKA",
+    "name": "Tuticorin Alkali Chemicals & Fertilizers Limited",
+    "sector": "Materials",
+    "industry": "Commodity Chemicals",
+    "isin": "INE400A01014",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "UDAYJEW",
+    "name": "Uday Jewellery Industries Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Diamond  &  Jewellery",
+    "isin": "INE551B01012",
+    "listing_date": "2026-09-25"
+  },
+  {
+    "symbol": "VADILENT",
+    "name": "Vadilal Enterprises Limited",
+    "sector": "Consumer Staples",
+    "industry": "Consumer Food",
+    "isin": "INE693D01018",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "VAML",
+    "name": "Vedanta Aluminium Metal Limited",
+    "sector": "Materials",
+    "industry": "Aluminium & Aluminium Products",
+    "isin": "INE1CDF01017",
+    "listing_date": "2026-06-15"
+  },
+  {
+    "symbol": "VEDAVAAG",
+    "name": "VEDAVAAG Systems Limited",
+    "sector": "Information Technology",
+    "industry": "IT Services & Consulting",
+    "isin": "INE359B01010",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "VEDPOWER",
+    "name": "Vedanta Power Limited",
+    "sector": "Utilities",
+    "industry": "Power Generation/Distribution",
+    "isin": "INE694L01019",
+    "listing_date": "2026-06-15"
+  },
+  {
+    "symbol": "VGCL",
+    "name": "Vibrant Global Capital Limited",
+    "sector": "Financials",
+    "industry": "Finance - Investment",
+    "isin": "INE761Q01015",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "VIJSOLX",
+    "name": "Vijay Solvex Limited",
+    "sector": "Consumer Staples",
+    "industry": "Vegetable Oils & Products",
+    "isin": "INE362D01010",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "VIRTUALG",
+    "name": "Virtual Global Education Limited",
+    "sector": "Consumer Staples",
+    "industry": "Education & Training Services",
+    "isin": "INE247C01023",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "VISL",
+    "name": "Vedanta Iron and Steel Limited",
+    "sector": "Materials",
+    "industry": "Iron & Steel",
+    "isin": "INE1CLE01013",
+    "listing_date": "2026-06-15"
+  },
+  {
+    "symbol": "VIVIANA",
+    "name": "Viviana Power Tech Limited",
+    "sector": "Industrials",
+    "industry": "Engineering",
+    "isin": "INE0MEG01014",
+    "listing_date": "2026-06-02"
+  },
+  {
+    "symbol": "VIVOBIOT",
+    "name": "Vivo Bio Tech Limited",
+    "sector": "Healthcare",
+    "industry": "Biotechnology & Medical Research",
+    "isin": "INE380K01017",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "VOEPL",
+    "name": "Virtuoso Optoelectronics Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Air Conditioners",
+    "isin": "INE0I0T01010",
+    "listing_date": "2026-07-01"
+  },
+  {
+    "symbol": "VOGL",
+    "name": "Vedanta Oil and Gas Limited",
+    "sector": "Energy",
+    "industry": "Refineries",
+    "isin": "INE704J01044",
+    "listing_date": "2026-06-15"
+  },
+  {
+    "symbol": "VOITHPAPR",
+    "name": "Voith Paper Fabrics India Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles",
+    "isin": "INE285C01015",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "VTMLTD",
+    "name": "VTM Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles & Apparel",
+    "isin": "INE222F01029",
+    "listing_date": "2026-09-23"
+  },
+  {
+    "symbol": "WARDINMOBI",
+    "name": "Wardwizard Innovations & Mobility Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Automobile - 2 & 3 Wheelers",
+    "isin": "INE945P01024",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "XTRANET",
+    "name": "Xtranet Technologies Limited",
+    "sector": "Information Technology",
+    "industry": "IT Services & Consulting",
+    "isin": "INE0NG701011",
+    "listing_date": "2026-07-30"
+  },
+  {
+    "symbol": "YOGI",
+    "name": "Yogi Limited",
+    "sector": "Financials",
+    "industry": "Finance - NBFC",
+    "isin": "INE290E01011",
+    "listing_date": "2026-08-17"
   }
 ];
 
