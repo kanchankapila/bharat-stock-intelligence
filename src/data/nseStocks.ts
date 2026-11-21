@@ -20172,6 +20172,222 @@ const nseStocksSeedData: NSEStock[] = [
     "industry": "Finance - NBFC",
     "isin": "INE290E01011",
     "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "AGSTRA",
+    "name": "AGS Transact Technologies Limited",
+    "sector": "Information Technology",
+    "industry": "Online Services",
+    "isin": "INE583L01014",
+    "listing_date": "2022-01-31"
+  },
+  {
+    "symbol": "ANDREWYU",
+    "name": "Andrew Yule & Company Limited",
+    "sector": "Industrials",
+    "industry": "Diversified",
+    "isin": "INE449C01025",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "ANKITMETAL",
+    "name": "Ankit Metal & Power Limited",
+    "sector": "Materials",
+    "industry": "Iron & Steel",
+    "isin": "INE106I01010",
+    "listing_date": "2013-03-14"
+  },
+  {
+    "symbol": "ARSHIYA",
+    "name": "Arshiya Limited",
+    "sector": "Industrials",
+    "industry": "Ground Freight & Logistics Services",
+    "isin": "INE968D01022",
+    "listing_date": "2009-12-14"
+  },
+  {
+    "symbol": "BURNPUR",
+    "name": "Burnpur Cement Limited",
+    "sector": "Materials",
+    "industry": "Cement",
+    "isin": "INE817H01022",
+    "listing_date": "2008-01-03"
+  },
+  {
+    "symbol": "FEL",
+    "name": "Future Enterprises Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Retailing",
+    "isin": "INE623B01027",
+    "listing_date": "2001-11-05"
+  },
+  {
+    "symbol": "FLFL",
+    "name": "Future Lifestyle Fashions Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles & Apparel",
+    "isin": "INE452O01016",
+    "listing_date": "2013-10-01"
+  },
+  {
+    "symbol": "GENSOL",
+    "name": "Gensol Engineering Limited",
+    "sector": "Industrials",
+    "industry": "Engineering - Industrial Equipments",
+    "isin": "INE06H201014",
+    "listing_date": "2023-07-03"
+  },
+  {
+    "symbol": "GOLDENTOBC",
+    "name": "Golden Tobacco Limited",
+    "sector": "Consumer Staples",
+    "industry": "Cigarettes/Tobacco",
+    "isin": "INE973A01010",
+    "listing_date": "1995-02-08"
+  },
+  {
+    "symbol": "HDIL",
+    "name": "Housing Development and Infrastructure Limited",
+    "sector": "Real Estate",
+    "industry": "Construction - Residential & Commercial Complexes",
+    "isin": "INE191I01012",
+    "listing_date": "2007-07-24"
+  },
+  {
+    "symbol": "HMT",
+    "name": "HMT Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Automobile - Tractors",
+    "isin": "INE262A01018",
+    "listing_date": "2003-08-29"
+  },
+  {
+    "symbol": "IL&FSENGG",
+    "name": "IL&FS Engineering and Construction Company Limited",
+    "sector": "Industrials",
+    "industry": "Construction - Infrastructure",
+    "isin": "INE369I01014",
+    "listing_date": "2007-10-25"
+  },
+  {
+    "symbol": "IL&FSTRANS",
+    "name": "IL&FS Transportation Networks Limited",
+    "sector": "Industrials",
+    "industry": "Infrastructure",
+    "isin": "INE975G01012",
+    "listing_date": "2010-03-30"
+  },
+  {
+    "symbol": "LAKPRE",
+    "name": "Lakshmi Precision Screws Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Fasteners",
+    "isin": "INE651C01018",
+    "listing_date": "2006-09-26"
+  },
+  {
+    "symbol": "LANCER",
+    "name": "Lancer Container Lines Limited",
+    "sector": "Industrials",
+    "industry": "Courier Services",
+    "isin": "INE359U01028",
+    "listing_date": "2026-10-14"
+  },
+  {
+    "symbol": "MEP",
+    "name": "MEP Infrastructure Developers Limited",
+    "sector": "Industrials",
+    "industry": "Infrastructure",
+    "isin": "INE776I01010",
+    "listing_date": "2015-05-06"
+  },
+  {
+    "symbol": "MORARJEE",
+    "name": "Morarjee Textiles Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles & Apparel",
+    "isin": "INE161G01027",
+    "listing_date": "2012-09-14"
+  },
+  {
+    "symbol": "RAJESHEXPO",
+    "name": "Rajesh Exports Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Diamond  &  Jewellery",
+    "isin": "INE343B01030",
+    "listing_date": "2000-02-09"
+  },
+  {
+    "symbol": "RHFL",
+    "name": "Reliance Home Finance Limited",
+    "sector": "Financials",
+    "industry": "Finance - Housing",
+    "isin": "INE217K01011",
+    "listing_date": "2017-09-22"
+  },
+  {
+    "symbol": "SANWARIA",
+    "name": "Sanwaria Consumer Limited",
+    "sector": "Consumer Staples",
+    "industry": "Vegetable Oils & Products",
+    "isin": "INE890C01046",
+    "listing_date": "2006-03-27"
+  },
+  {
+    "symbol": "SETUINFRA",
+    "name": "Setubandhan Infrastructure Limited",
+    "sector": "Industrials",
+    "industry": "Construction - Infrastructure",
+    "isin": "INE023M01027",
+    "listing_date": "2011-10-04"
+  },
+  {
+    "symbol": "SHRENIK",
+    "name": "Shrenik Limited",
+    "sector": "Industrials",
+    "industry": "Trading",
+    "isin": "INE632X01030",
+    "listing_date": "2019-08-02"
+  },
+  {
+    "symbol": "SIMBHALS",
+    "name": "Simbhaoli Sugars Limited",
+    "sector": "Consumer Staples",
+    "industry": "Sugar",
+    "isin": "INE748T01016",
+    "listing_date": "2016-03-14"
+  },
+  {
+    "symbol": "SITINET",
+    "name": "Siti Networks Limited",
+    "sector": "Media & Entertainment",
+    "industry": "TV Broadcasting & Software Production",
+    "isin": "INE965H01011",
+    "listing_date": "2007-01-10"
+  },
+  {
+    "symbol": "SUPREMEENG",
+    "name": "Supreme Engineering Limited",
+    "sector": "Materials",
+    "industry": "Iron & Steel",
+    "isin": "INE319Z01021",
+    "listing_date": "2020-12-04"
+  },
+  {
+    "symbol": "VISHAL",
+    "name": "Vishal Fabrics Limited",
+    "sector": "Consumer Discretionary",
+    "industry": "Textiles & Apparel",
+    "isin": "INE755Q01025",
+    "listing_date": "2026-08-17"
+  },
+  {
+    "symbol": "WATERBASE",
+    "name": "Waterbase Limited",
+    "sector": "Consumer Staples",
+    "industry": "Aquaculture",
+    "isin": "INE054C01015",
+    "listing_date": "2026-08-17"
   }
 ];
 

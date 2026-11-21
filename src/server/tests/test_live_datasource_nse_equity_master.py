@@ -24,3 +24,14 @@ def test_live_official_masters_are_complete_disjoint_and_current():
     assert {"RELIANCE", "HDFCBANK", "INFY"} <= equity_symbols
     assert "NIFTYBEES" in etf_symbols
 
+
+
+def test_live_symbol_change_archive_follows_a_known_rename():
+    # AF-20261120-07: admission carries a renamed company's sessions. ICICIPRULI -> ICICILIFE took
+    # effect 2026-10-23 and stays inside the 400-day lookback until late 2027.
+    predecessors = master.fetch_predecessors()
+    assert len(predecessors) >= 20, "symbol-change archive unreadable or schema moved"
+    for current, olds in predecessors.items():
+        assert_looks_like_ticker(current)
+        assert olds and all(o != current for o in olds)
+    assert "ICICIPRULI" in predecessors.get("ICICILIFE", [])

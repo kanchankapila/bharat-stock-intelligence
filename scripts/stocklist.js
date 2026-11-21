@@ -23937,7 +23937,7 @@ var stockData = [
         "mcsymbol": "SEI11",
         "tlid": "3145560",
         "tlname": "siemens-energy-india-ltd",
-        "isin": "",
+        "isin": "INE1NPP01017",
         "symbol": "ENRIN",
         "stockid": "",
         "companyid": "2258438",
@@ -23949,7 +23949,7 @@ var stockData = [
         "mcsymbol": "APMFI54277",
         "tlid": "166312",
         "tlname": "mufin-green-finance-ltd",
-        "isin": "",
+        "isin": "INE08KJ01020",
         "symbol": "MUFIN",
         "stockid": "",
         "companyid": "67150",
@@ -23961,7 +23961,7 @@ var stockData = [
         "mcsymbol": "GEC",
         "tlid": "67",
         "tlname": "ge-vernova-t-d-india-ltd",
-        "isin": "",
+        "isin": "INE200A01026",
         "symbol": "GVT&D",
         "stockid": "",
         "companyid": "13800",
@@ -24018,7 +24018,7 @@ var stockData = [
     },
     {
         "name": "Abans Enterprises Limited",
-        "mcsymbol": "",
+        "mcsymbol": "MST03",
         "tlid": "",
         "tlname": "",
         "isin": "INE365O01028",
@@ -24262,7 +24262,7 @@ var stockData = [
     },
     {
         "name": "Aeroflex Neu Limited",
-        "mcsymbol": "",
+        "mcsymbol": "SP45",
         "tlid": "1270010",
         "tlname": "aeroflex-neu-ltd",
         "isin": "INE035801013",
@@ -24776,7 +24776,7 @@ var stockData = [
     },
     {
         "name": "Asian Star Company Limited",
-        "mcsymbol": "",
+        "mcsymbol": "AS15",
         "tlid": "",
         "tlname": "",
         "isin": "INE194D01017",
@@ -25076,7 +25076,7 @@ var stockData = [
     },
     {
         "name": "Bengal & Assam Company Limited",
-        "mcsymbol": "",
+        "mcsymbol": "BAC01",
         "tlid": "",
         "tlname": "",
         "isin": "INE083K01017",
@@ -25123,7 +25123,7 @@ var stockData = [
     },
     {
         "name": "Bilcare Limited",
-        "mcsymbol": "",
+        "mcsymbol": "BI05",
         "tlid": "",
         "tlname": "",
         "isin": "INE986A01012",
@@ -25229,7 +25229,7 @@ var stockData = [
     },
     {
         "name": "Balmer Lawrie Investments Limited",
-        "mcsymbol": "",
+        "mcsymbol": "BLI01",
         "tlid": "",
         "tlname": "",
         "isin": "INE525F01025",
@@ -25333,7 +25333,7 @@ var stockData = [
     },
     {
         "name": "B & A Limited",
-        "mcsymbol": "",
+        "mcsymbol": "BAP",
         "tlid": "",
         "tlname": "",
         "isin": "INE489D01011",
@@ -25445,7 +25445,7 @@ var stockData = [
     },
     {
         "name": "Bhilwara Technical Textiles Limited",
-        "mcsymbol": "",
+        "mcsymbol": "BTT",
         "tlid": "",
         "tlname": "",
         "isin": "INE274K01012",
@@ -25701,7 +25701,7 @@ var stockData = [
     },
     {
         "name": "Comfort Intech Limited",
-        "mcsymbol": "",
+        "mcsymbol": "CF05",
         "tlid": "",
         "tlname": "",
         "isin": "INE819A01049",
@@ -26081,7 +26081,7 @@ var stockData = [
     },
     {
         "name": "Disa India Limited",
-        "mcsymbol": "",
+        "mcsymbol": "GFD",
         "tlid": "",
         "tlname": "",
         "isin": "INE131C01011",
@@ -26237,7 +26237,7 @@ var stockData = [
     },
     {
         "name": "EL CID Investments Limited",
-        "mcsymbol": "",
+        "mcsymbol": "EIL",
         "tlid": "",
         "tlname": "",
         "isin": "INE927X01018",
@@ -26249,7 +26249,7 @@ var stockData = [
     },
     {
         "name": "Elitecon International Limited",
-        "mcsymbol": "",
+        "mcsymbol": "KJA",
         "tlid": "",
         "tlname": "",
         "isin": "INE669R01026",
@@ -26295,7 +26295,7 @@ var stockData = [
     },
     {
         "name": "Empower India Limited",
-        "mcsymbol": "",
+        "mcsymbol": "EI17",
         "tlid": "",
         "tlname": "",
         "isin": "INE507F01023",
@@ -26541,7 +26541,7 @@ var stockData = [
     },
     {
         "name": "GACM Technologies Limited",
-        "mcsymbol": "",
+        "mcsymbol": "BS11",
         "tlid": "3678",
         "tlname": "gacm-technologies-ltd",
         "isin": "INE224E01028",
@@ -26742,7 +26742,7 @@ var stockData = [
     },
     {
         "name": "Grand Oak Canyons Distillery Limited",
-        "mcsymbol": "",
+        "mcsymbol": "DI09",
         "tlid": "",
         "tlname": "",
         "isin": "INE926B01016",
@@ -26754,7 +26754,7 @@ var stockData = [
     },
     {
         "name": "Graviss Hospitality Limited",
-        "mcsymbol": "",
+        "mcsymbol": "GLH",
         "tlid": "",
         "tlname": "",
         "isin": "INE214F01026",
@@ -26916,7 +26916,7 @@ var stockData = [
     },
     {
         "name": "HB Estate Developers Limited",
-        "mcsymbol": "",
+        "mcsymbol": "HBE",
         "tlid": "",
         "tlname": "",
         "isin": "INE640B01021",
@@ -27192,7 +27192,7 @@ var stockData = [
     },
     {
         "name": "Industrial & Prudential Investment Company Limited",
-        "mcsymbol": "",
+        "mcsymbol": "IPI",
         "tlid": "",
         "tlname": "",
         "isin": "INE620D01011",
@@ -27240,7 +27240,7 @@ var stockData = [
     },
     {
         "name": "Investment & Precision Castings Limited",
-        "mcsymbol": "",
+        "mcsymbol": "IPC01",
         "tlid": "",
         "tlname": "",
         "isin": "INE155E01016",
@@ -27330,7 +27330,7 @@ var stockData = [
     },
     {
         "name": "The Indian Wood Products Company Limited",
-        "mcsymbol": "",
+        "mcsymbol": "IWP540954",
         "tlid": "",
         "tlname": "",
         "isin": "INE586E01020",
@@ -27504,7 +27504,7 @@ var stockData = [
     },
     {
         "name": "Kama Holdings Limited",
-        "mcsymbol": "",
+        "mcsymbol": "SRF03",
         "tlid": "",
         "tlname": "",
         "isin": "INE411F01010",
@@ -27570,7 +27570,7 @@ var stockData = [
     },
     {
         "name": "Kiran Vyapar Limited",
-        "mcsymbol": "",
+        "mcsymbol": "KV02",
         "tlid": "",
         "tlname": "",
         "isin": "INE555P01013",
@@ -27661,7 +27661,7 @@ var stockData = [
     },
     {
         "name": "Kothari Industrial Corporation Limited",
-        "mcsymbol": "",
+        "mcsymbol": "KIC01",
         "tlid": "",
         "tlname": "",
         "isin": "INE972A01020",
@@ -27822,7 +27822,7 @@ var stockData = [
     },
     {
         "name": "Lahoti Overseas Limited",
-        "mcsymbol": "",
+        "mcsymbol": "LO01",
         "tlid": "",
         "tlname": "",
         "isin": "INE515C01023",
@@ -28083,7 +28083,7 @@ var stockData = [
     },
     {
         "name": "Madhav Infra Projects Limited",
-        "mcsymbol": "",
+        "mcsymbol": "MADHA75576",
         "tlid": "",
         "tlname": "",
         "isin": "INE631R01026",
@@ -28235,7 +28235,7 @@ var stockData = [
     },
     {
         "name": "Mac Charles India Limited",
-        "mcsymbol": "",
+        "mcsymbol": "MCI",
         "tlid": "",
         "tlname": "",
         "isin": "INE435D01014",
@@ -28305,7 +28305,7 @@ var stockData = [
     },
     {
         "name": "Mercantile Ventures Limited",
-        "mcsymbol": "",
+        "mcsymbol": "MV03",
         "tlid": "",
         "tlname": "",
         "isin": "INE689O01013",
@@ -28329,7 +28329,7 @@ var stockData = [
     },
     {
         "name": "Metroglobal Limited",
-        "mcsymbol": "",
+        "mcsymbol": "GB05",
         "tlid": "",
         "tlname": "",
         "isin": "INE085D01033",
@@ -28573,7 +28573,7 @@ var stockData = [
     },
     {
         "name": "National Standard (India) Limited",
-        "mcsymbol": "",
+        "mcsymbol": "NSD",
         "tlid": "",
         "tlname": "",
         "isin": "INE166R01015",
@@ -28597,7 +28597,7 @@ var stockData = [
     },
     {
         "name": "Neelamalai Agro Industries Limited",
-        "mcsymbol": "",
+        "mcsymbol": "NAI02",
         "tlid": "",
         "tlname": "",
         "isin": "INE605D01012",
@@ -28621,7 +28621,7 @@ var stockData = [
     },
     {
         "name": "Neueon Corporation Limited",
-        "mcsymbol": "",
+        "mcsymbol": "ST19",
         "tlid": "1305",
         "tlname": "neueon-corporation-ltd",
         "isin": "INE333I01044",
@@ -29146,7 +29146,7 @@ var stockData = [
     },
     {
         "name": "Pioneer Investcorp Limited",
-        "mcsymbol": "",
+        "mcsymbol": "PI12",
         "tlid": "",
         "tlname": "",
         "isin": "INE746D01014",
@@ -29194,7 +29194,7 @@ var stockData = [
     },
     {
         "name": "Paul Merchants Limited",
-        "mcsymbol": "",
+        "mcsymbol": "PM07",
         "tlid": "",
         "tlname": "",
         "isin": "INE291E01019",
@@ -29427,7 +29427,7 @@ var stockData = [
     },
     {
         "name": "Quint Digital Limited",
-        "mcsymbol": "",
+        "mcsymbol": "GM03",
         "tlid": "",
         "tlname": "",
         "isin": "INE641R01017",
@@ -29710,7 +29710,7 @@ var stockData = [
     },
     {
         "name": "RRIL Limited",
-        "mcsymbol": "",
+        "mcsymbol": "ATR",
         "tlid": "",
         "tlname": "",
         "isin": "INE951M01037",
@@ -29722,7 +29722,7 @@ var stockData = [
     },
     {
         "name": "RSD Finance Limited",
-        "mcsymbol": "",
+        "mcsymbol": "RSD",
         "tlid": "",
         "tlname": "",
         "isin": "INE616F01022",
@@ -30050,7 +30050,7 @@ var stockData = [
     },
     {
         "name": "Shanti Educational Initiatives Limited",
-        "mcsymbol": "",
+        "mcsymbol": "SEI07",
         "tlid": "",
         "tlname": "",
         "isin": "INE440T01028",
@@ -30188,7 +30188,7 @@ var stockData = [
     },
     {
         "name": "Shardul Securities Limited",
-        "mcsymbol": "",
+        "mcsymbol": "SS13",
         "tlid": "",
         "tlname": "",
         "isin": "INE037B01020",
@@ -30200,7 +30200,7 @@ var stockData = [
     },
     {
         "name": "Shri Bajrang Alliance Limited",
-        "mcsymbol": "",
+        "mcsymbol": "SBA",
         "tlid": "",
         "tlname": "",
         "isin": "INE402H01015",
@@ -30321,7 +30321,7 @@ var stockData = [
     },
     {
         "name": "Shri Krishna Devcon Limited",
-        "mcsymbol": "",
+        "mcsymbol": "EFS",
         "tlid": "",
         "tlname": "",
         "isin": "INE997I01012",
@@ -30520,7 +30520,7 @@ var stockData = [
     },
     {
         "name": "Sonal Mercantile Limited",
-        "mcsymbol": "",
+        "mcsymbol": "SM19",
         "tlid": "",
         "tlname": "",
         "isin": "INE321M01017",
@@ -31009,7 +31009,7 @@ var stockData = [
     },
     {
         "name": "TechNVision Ventures Limited",
-        "mcsymbol": "",
+        "mcsymbol": "STL01",
         "tlid": "",
         "tlname": "",
         "isin": "INE314H01012",
@@ -31055,7 +31055,7 @@ var stockData = [
     },
     {
         "name": "Thacker & Company Limited",
-        "mcsymbol": "",
+        "mcsymbol": "TC03",
         "tlid": "",
         "tlname": "",
         "isin": "INE077P01034",
@@ -31067,7 +31067,7 @@ var stockData = [
     },
     {
         "name": "Thakkers Developers Limited",
-        "mcsymbol": "",
+        "mcsymbol": "TD01",
         "tlid": "",
         "tlname": "",
         "isin": "INE403F01017",
@@ -31148,7 +31148,7 @@ var stockData = [
     },
     {
         "name": "Tinna Rubber and Infrastructure Limited",
-        "mcsymbol": "",
+        "mcsymbol": "TO",
         "tlid": "3340",
         "tlname": "tinna-rubber-and-infrastructure-ltd",
         "isin": "INE015C01016",
@@ -31989,7 +31989,7 @@ var stockData = [
     },
     {
         "name": "Saraswati Commercial India Limited",
-        "mcsymbol": "",
+        "mcsymbol": "SCI06",
         "tlid": "",
         "tlname": "",
         "isin": "INE967G01019",

@@ -701,3 +701,7 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 - User selected staging source identity capture while holding source-aware performance/signal behavior until a paired replay.
 - Read-only production check confirmed `bharat_intel` still has the old `screener_appearances` PK. The online `bharat-server` shares the dirty checkout and started before the source-qualified writer edits; do not restart or migrate until an isolated capture-only release is prepared.
 - Prior `bharat_pgtest` migration rehearsal passed and was cleaned. Capture-only schema/migration/writer/test changes are committed locally as `4286bf76`, not deployed or applied. Track the release blocker and EVIDENCE gate in AF-20261120-06; replay population boundary remains in AF-20261106-04.
+
+## 2026-11-21 - Stale symbols and provider ids (Claude 2b)
+- Full account: docs/session-log.md same date; ledger AF-20261120-07 (symbols), -04 (stats recovery), -05 (monitoring), -06 review note.
+- Rules to carry: a rename restarts per-symbol admission (use symbolchange.csv); a provider code is proven only by the vendor payload's ISIN; a writer fix scopes read and write sides; backfills get diffed against raw closes; doc counts quote the tracked tree.
