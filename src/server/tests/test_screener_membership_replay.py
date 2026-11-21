@@ -78,3 +78,48 @@ def test_old_arm_equals_production_load_today_appearances(pg_conn):
     arm = R.old_arm(ep, D)
     assert produced == set(zip(arm["symbol"], arm["source"], arm["screener_id"]))
     assert produced and "LONG" not in {s for s, _, _ in produced}
+
+
+# ── capture-only fix (AF-20261106-04): the snapshot records the gated open set, features keep the old window ──
+
+def _create_capture_tables(conn):
+    conn.execute("""CREATE TABLE screener_appearances (
+        screener_id TEXT NOT NULL, source TEXT NOT NULL, symbol TEXT NOT NULL, appeared_date TIMESTAMPTZ NOT NULL,
+        exited_date TIMESTAMPTZ, PRIMARY KEY (source, screener_id, symbol, appeared_date))""")
+    conn.execute("CREATE TABLE etnow_screener_stocks (screener_id TEXT, symbol TEXT, last_seen TEXT)")
+    conn.execute("CREATE TABLE moneycontrol_screener_stocks (scan_id TEXT, symbol TEXT, last_seen TEXT)")
+    conn.execute("CREATE TABLE trendlyne_screener_stocks (screener_id TEXT, symbol TEXT, last_seen TEXT)")
+    conn.execute("CREATE TABLE et_marketstats_screener_stocks (screener_key TEXT, symbol TEXT, last_seen TEXT)")
+
+
+def test_open_memberships_sql_equals_the_replay_new_arm(pg_conn):
+    _create_capture_tables(pg_conn)
+    ep = [("1", "etnow", "LIVE", "2026-06-01", None), ("1", "etnow", "DEAD", "2026-06-01", None),
+          ("1", "etnow", "NOROW", "2026-06-01", None), ("1", "etnow", "EXITS_LATER", "2026-06-01", "2026-11-25"),
+          ("2", "moneycontrol", "NEW", "2026-11-19", None), ("3", "trendlyne", "OLD", "2026-07-01", None),
+          ("4", "et_marketstats", "ETM", "2026-07-01", None), ("4", "et_marketstats", "CLOSED", "2026-07-01", "2026-11-10")]
+    for r in ep:
+        pg_conn.execute("INSERT INTO screener_appearances VALUES (?, ?, ?, ?, ?)", r)
+    pg_conn.execute("INSERT INTO etnow_screener_stocks VALUES ('1', 'LIVE', '2026-11-20'), ('1', 'DEAD', '2026-11-05')")
+    pg_conn.execute("INSERT INTO moneycontrol_screener_stocks VALUES ('2', 'NEW', '2026-11-20')")
+    pg_conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('3', 'OLD', '2026-11-17')")
+    pg_conn.execute("INSERT INTO et_marketstats_screener_stocks VALUES ('4', 'ETM', '2026-11-20')")
+    produced = {(sym, src, sid) for sym, ids in F.load_open_memberships(pg_conn, D.isoformat()).items() for src, sid in ids}
+    arm = R.new_arm(R.attach_last_seen(R.load_episodes(pg_conn, dt.date(2026, 5, 1)), R.load_last_seen(pg_conn)), D)
+    assert produced == set(zip(arm["symbol"], arm["source"], arm["screener_id"]))
+    assert {s for s, _, _ in produced} == {"LIVE", "EXITS_LATER", "NEW", "OLD", "ETM"}   # DEAD and NOROW are not confirmed
+
+
+def test_snapshot_writes_every_member_once_and_a_repeat_run_adds_no_duplicates(pg_conn):
+    members = {"AAA": [("etnow", "1"), ("trendlyne", "9")], "BBB": [("etnow", "1")]}
+    assert F.snapshot_membership(pg_conn, D.isoformat(), members) == 3
+    F.snapshot_membership(pg_conn, D.isoformat(), members)
+    assert pg_conn.execute("SELECT count(*) FROM screener_membership_snapshot").fetchone()[0] == 3
+    assert pg_conn.execute("SELECT count(*) FROM screener_membership_runs").fetchone()[0] == 2
+
+
+def test_run_captures_the_open_set_but_builds_features_from_the_legacy_window():
+    import inspect
+    src = inspect.getsource(F.run)
+    assert "load_open_memberships(" in src and "snapshot_membership(con, as_of, open_members)" in src
+    assert "for symbol, screener_ids in appearances.items()" in src      # features: unchanged definition

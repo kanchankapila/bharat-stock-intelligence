@@ -25,7 +25,7 @@ import json
 import time
 import datetime
 from collections import defaultdict
-from db_compat import connect
+from db_compat import connect, executemany_batched
 from as_of import logical_trading_date
 import sys
 
@@ -209,23 +209,25 @@ def snapshot_membership(con, as_of: str, appearances: dict) -> int:
     sufficient to reconstruct one run. A separate append-only timestamped run stores this
     invocation's membership set; it does not capture the other inputs to the feature score.
 
-    ~42k rows/day at current screener coverage.
+    ~110k rows/day since the capture records every confirmed open membership (AF-20261106-04, see
+    `load_open_memberships`; 110,026 on 2026-11-20 against 56,928 in the 3-day window); rows dated before
+    the first run of that change are not comparable and must not be pooled with later ones. The inserts are
+    batched: 110k rows take ~11 s, and one round trip per row cost ~40 s at half that size against a
+    5-minute job budget.
     """
     ensure_snapshot_schema(con)
-    n = 0
     members = sorted({(str(symbol), str(src).lower(), str(sid))
                       for symbol, ids in appearances.items() for src, sid in ids})
-    for symbol, ids in appearances.items():
-        # Provider identity is part of the fact.  scan_id/screener_id values overlap across
-        # MoneyControl, ETnow and Trendlyne, so dropping source here makes the supposedly
-        # immutable PIT snapshot lossy and lets ON CONFLICT collapse two real memberships.
-        for src, sid in set(ids):
-            con.execute(
-                "INSERT INTO screener_membership_snapshot (as_of_date, symbol, source, screener_id) "
-                "VALUES (?,?,?,?) "
-                "ON CONFLICT (as_of_date, symbol, source, screener_id) DO NOTHING",
-                (as_of, symbol, str(src).lower(), sid))
-            n += 1
+    # Provider identity is part of the fact.  scan_id/screener_id values overlap across
+    # MoneyControl, ETnow and Trendlyne, so dropping source here makes the supposedly
+    # immutable PIT snapshot lossy and lets ON CONFLICT collapse two real memberships.
+    executemany_batched(
+        con,
+        "INSERT INTO screener_membership_snapshot (as_of_date, symbol, source, screener_id) "
+        "VALUES (?,?,?,?) "
+        "ON CONFLICT (as_of_date, symbol, source, screener_id) DO NOTHING",
+        [(as_of, symbol, src, sid) for symbol, src, sid in members])
+    n = len(members)
     # One append-only record per invocation. The capture time is after the input was
     # read, a conservative cutoff for deciding when the complete set was available.
     con.execute("""INSERT INTO screener_membership_runs (as_of_date, membership_count, memberships)
@@ -255,6 +257,42 @@ def load_today_appearances(con, as_of: str) -> dict:
     result = defaultdict(list)
     for sym, sid, src in rows:
         result[sym].append((src, sid))
+    return result
+
+
+OPEN_MEMBERSHIPS_SQL = """
+    SELECT a.symbol, a.screener_id, LOWER(a.source) AS source
+    FROM screener_appearances a
+    LEFT JOIN (
+        SELECT 'etnow' AS source, screener_id AS sid, symbol, last_seen FROM etnow_screener_stocks
+        UNION ALL SELECT 'moneycontrol', scan_id, symbol, last_seen FROM moneycontrol_screener_stocks
+        UNION ALL SELECT 'trendlyne', screener_id, symbol, last_seen FROM trendlyne_screener_stocks
+        UNION ALL SELECT 'et_marketstats', screener_key, symbol, last_seen FROM et_marketstats_screener_stocks
+    ) s ON s.source = LOWER(a.source) AND s.sid = a.screener_id AND s.symbol = a.symbol
+    WHERE a.appeared_date::date <= CAST(? AS date)
+      AND (a.exited_date IS NULL OR a.exited_date::date >= CAST(? AS date))
+      AND (a.exited_date IS NOT NULL OR SUBSTR(s.last_seen, 1, 10) >= ?)
+"""
+
+
+def load_open_memberships(con, as_of: str, grace_days: int = 3) -> dict:
+    """Every membership that is open on `as_of` and still confirmed by its provider.
+
+    AF-20261106-04: `load_today_appearances` keeps only episodes that appeared in the last 3 days, so
+    long-running memberships (5,526 of 7,200 open ETnow episodes on 2026-11-05) never reached the
+    point-in-time capture. This is what "active" means: appeared on or before `as_of`, not yet exited, and,
+    for an episode still open, the provider's own `last_seen` within `grace_days` of `as_of`. A sync
+    refreshes `last_seen` on every current member, so a stale value marks a dead sync (measured 2026-11-21:
+    ETnow 32 and ET Marketstats 300 of 88,527 open episodes). An episode with no stocks row is unconfirmed.
+
+    The result feeds ONLY the capture. The features keep `load_today_appearances`: `screener_momentum_score`
+    carries the largest engine weight and `ml_ensemble` trains on it, so a new window is a scoring change
+    that needs rebuilt history and a retrain, not a side effect of a fix to the record.
+    """
+    cutoff = (datetime.date.fromisoformat(as_of) - datetime.timedelta(days=grace_days)).isoformat()
+    result = defaultdict(list)
+    for symbol, sid, src in con.execute(OPEN_MEMBERSHIPS_SQL, (as_of, as_of, cutoff)).fetchall():
+        result[symbol].append((src, sid))
     return result
 
 
@@ -385,11 +423,14 @@ def run():
         appearances = load_today_appearances(con, as_of)
         print(f"[ScreenerFeatures] {len(appearances)} symbols active in screeners")
 
-        # Immutable record of the inputs, written BEFORE the features are computed from them.
+        # Immutable record of what was true on as_of, written BEFORE the features are computed. It records
+        # every confirmed open membership, not the 3-day window the features use (AF-20261106-04).
         try:
-            n_snap = snapshot_membership(con, as_of, appearances)
-            print(f"[ScreenerFeatures] snapshotted {n_snap} (symbol, screener) memberships "
-                  f"for {as_of}")
+            open_members = load_open_memberships(con, as_of)
+            n_snap = snapshot_membership(con, as_of, open_members)
+            print(f"[ScreenerFeatures] snapshotted {n_snap} (symbol, screener) open memberships "
+                  f"for {as_of} (features use {sum(len(v) for v in appearances.values())} "
+                  f"from the 3-day window)")
         except Exception as e:
             con.rollback()
             print(f"[ScreenerFeatures] membership snapshot failed: {e}", file=sys.stderr)

@@ -91,6 +91,10 @@ class TestRunWiresLogicalTradingDateIntoAsOf:
             seen["appearances_as_of"] = as_of
             return {}
 
+        def _fake_open_members(con, as_of):
+            seen["open_members_as_of"] = as_of
+            return {}
+
         def _fake_snapshot(con, as_of, appearances):
             seen["snapshot_as_of"] = as_of
             return 0
@@ -100,6 +104,7 @@ class TestRunWiresLogicalTradingDateIntoAsOf:
         monkeypatch.setattr(sff, "logical_trading_date", lambda: "2099-01-01")
         monkeypatch.setattr(sff, "load_screener_meta", _fake_load_meta)
         monkeypatch.setattr(sff, "load_today_appearances", _fake_load_appearances)
+        monkeypatch.setattr(sff, "load_open_memberships", _fake_open_members)
         monkeypatch.setattr(sff, "snapshot_membership", _fake_snapshot)
         monkeypatch.setattr(sff, "load_streaks", lambda con: {})
         monkeypatch.setattr(sff, "stamp_features", lambda con, f, s: 0)
@@ -108,6 +113,7 @@ class TestRunWiresLogicalTradingDateIntoAsOf:
 
         assert seen["meta_as_of"] == "2099-01-01"
         assert seen["appearances_as_of"] == "2099-01-01"
+        assert seen["open_members_as_of"] == "2099-01-01"
         assert seen["snapshot_as_of"] == "2099-01-01"
 
 
@@ -156,8 +162,11 @@ class TestMembershipSnapshotSourceDisambiguation:
     """The immutable input snapshot must preserve the same composite provider identity used
     by compute_features().  A bare screener_id is not unique across providers."""
 
-    def test_snapshot_schema_and_insert_keep_source_in_the_key(self):
+    def test_snapshot_schema_and_insert_keep_source_in_the_key(self, monkeypatch):
         conn = _FakeConn()
+        batched: list = []
+        # the insert is batched (one round trip per page, not per row); capture the statement and its rows
+        monkeypatch.setattr(sff, "executemany_batched", lambda c, sql, rows, **kw: batched.append((sql, list(rows))))
 
         sff.snapshot_membership(
             conn,
@@ -171,10 +180,11 @@ class TestMembershipSnapshotSourceDisambiguation:
             create_sql.split()
         )
 
-        inserts = [(sql, params) for sql, params in conn.executed if "INSERT INTO screener_membership_snapshot" in sql]
-        assert len(inserts) == 2
-        assert "source" in inserts[0][0]
-        assert {params for _, params in inserts} == {
+        assert len(batched) == 1
+        sql, rows = batched[0]
+        assert "INSERT INTO screener_membership_snapshot" in sql and "source" in sql
+        assert "ON CONFLICT (as_of_date, symbol, source, screener_id)" in " ".join(sql.split())
+        assert set(rows) == {
             ("2026-10-09", "INFY", "moneycontrol", "173"),
             ("2026-10-09", "INFY", "etnow", "173"),
         }
