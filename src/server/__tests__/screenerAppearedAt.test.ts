@@ -82,7 +82,7 @@ describe('screener_appearances.appeared_at', () => {
     const pg = readFileSync(join(__dirname, '..', '..', '..', 'db', 'schema.postgres.sql'), 'utf8');
     const tbl = pg.slice(pg.indexOf('CREATE TABLE IF NOT EXISTS "screener_appearances"'));
     const pk = tbl.slice(tbl.indexOf('PRIMARY KEY'), tbl.indexOf(');'));
-    expect(pk).toContain('"screener_id", "symbol", "appeared_date"');
+    expect(pk).toContain('"source", "screener_id", "symbol", "appeared_date"');
     expect(pk).not.toContain('appeared_at');
   });
 });

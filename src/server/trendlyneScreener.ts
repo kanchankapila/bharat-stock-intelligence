@@ -172,7 +172,7 @@ export async function saveScreenerStocksToDB(
 
     // Snapshot previous active symbols BEFORE delete
     const prevSymbols = new Set<string>(
-      (await dbAll(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`, [screenerId]) as Array<{ symbol: string }>)
+      (await dbAll(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL AND source = 'trendlyne'`, [screenerId]) as Array<{ symbol: string }>)
         .map(r => r.symbol)
         .filter(Boolean)
     );

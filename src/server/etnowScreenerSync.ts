@@ -89,7 +89,7 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
 
       // Snapshot previous active symbols BEFORE delete
       const prevSymbols = new Set<string>(
-        (await dbAll<{ symbol: string }>(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`,
+        (await dbAll<{ symbol: string }>(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL AND source = 'etnow'`,
           [screener.screener_id]))
           .map(r => r.symbol).filter(Boolean)
       );

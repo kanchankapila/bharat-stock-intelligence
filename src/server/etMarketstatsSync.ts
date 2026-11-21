@@ -97,7 +97,7 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
       }
 
       const prevSymbols = new Set<string>(
-        (await dbAll<{ symbol: string }>(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`,
+        (await dbAll<{ symbol: string }>(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL AND source = 'et_marketstats'`,
           [def.screenerKey])).map(r => r.symbol).filter(Boolean)
       );
 
