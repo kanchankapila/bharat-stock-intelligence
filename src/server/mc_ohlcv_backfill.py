@@ -35,7 +35,6 @@ URL = "https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
 }
-MAX_TS = 1783900800   # ~2026-07; countback grabs the full series regardless
 COUNTBACK = 12772     # ~50y of trading days — asks for everything available
 INSERT_CHUNK = 5000   # 7 cols × 5000 = 35k binds, under PG's 65535 ceiling
 
@@ -54,7 +53,8 @@ def fetch_one(sym: str, session: requests.Session, from_year: int) -> tuple:
     try:
         r = session.get(URL, params={
             "symbol": sym, "resolution": "1D", "from": 239068800,
-            "to": MAX_TS, "countback": COUNTBACK, "currencyCode": "INR",
+            # A fixed upper bound (it was ~2026-07-13) silently truncated every later backfill.
+            "to": int(time.time()) + 86400, "countback": COUNTBACK, "currencyCode": "INR",
         }, timeout=25)
         if r.status_code != 200:
             return (sym, f"HTTP{r.status_code}", [])
