@@ -705,3 +705,7 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 ## 2026-11-21 - Stale symbols and provider ids (Claude 2b)
 - Full account: docs/session-log.md same date; ledger AF-20261120-07 (symbols), -04 (stats recovery), -05 (monitoring), -06 review note.
 - Rules to carry: a rename restarts per-symbol admission (use symbolchange.csv); a provider code is proven only by the vendor payload's ISIN; a writer fix scopes read and write sides; backfills get diffed against raw closes; doc counts quote the tracked tree.
+
+## 2026-11-21 - Screener membership replay and the last symbol items (Claude 2b)
+- Full account: docs/session-log.md same date; ledger AF-20261106-04 (open: features window is an owner decision), AF-20261106-01 (closed, candidate rejected), AF-20261121-03 (alerts dismissed), AF-20261120-07.
+- Rules to carry: results and definitions in `.claude/rules/measurement.md` 2026-11-21; the capture population boundary is the first run on 2026-11-23.
