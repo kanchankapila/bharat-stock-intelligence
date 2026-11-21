@@ -692,12 +692,12 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 - Before naming why the platform was down, read `~/.pm2/pm2.log` (local IST timestamps; `grep -a`, it reads as binary): "Stopping app:" is a manual stop, a "New PM2 Daemon started" banner is a resurrect. The event log alone mis-attributed the 11-15 gap to the reboot.
 - Git Bash heredocs here collapse a double backslash to a single one; write JS regex code with Edit/Write, not a heredoc.
 
-## 2026-11-21 — Screener identity rollout sequencing (Copilot)
-- User selected staging source identity capture while holding source-aware performance/signal behavior until a paired replay.
-- Read-only production check confirmed `bharat_intel` still has the old `screener_appearances` PK. The online `bharat-server` shares the dirty checkout and started before the source-qualified writer edits; do not restart or migrate until an isolated capture-only release is prepared.
-- Prior `bharat_pgtest` migration rehearsal passed and was cleaned. Track the release blocker and EVIDENCE gate in AF-20261120-06; replay population boundary remains in AF-20261106-04.
-
 ## 2026-11-19 (evening) — Copilot on a Mac worktree, no DB: gaps, timing, models, realtime
 - Full account: docs/session-log.md same date; deploy steps for the Windows host are ledger row AF-20261119-24 (merge order, gates, restarts `bharat-server ml-api chatbot`, backfill, ontology build, graphify update, read-backs).
 - Open after deploy: EVIDENCE -09/-10/-15/-16/-23 and -12's exposure rule; owner decisions AF-20261103-05, AF-20261017-11, AF-20261103-15.
 - Rules to carry: `cacheGet('live-stocks-bulk')` returns a parsed MarketData ARRAY, read it only through `liveQuotes.ts`; before unscheduling a writer grep every training SELECT for its column; price-derived daily snapshots belong after the close; graphify-out is per machine.
+
+## 2026-11-21 — Screener identity rollout sequencing (Copilot)
+- User selected staging source identity capture while holding source-aware performance/signal behavior until a paired replay.
+- Read-only production check confirmed `bharat_intel` still has the old `screener_appearances` PK. The online `bharat-server` shares the dirty checkout and started before the source-qualified writer edits; do not restart or migrate until an isolated capture-only release is prepared.
+- Prior `bharat_pgtest` migration rehearsal passed and was cleaned. Capture-only schema/migration/writer/test changes are committed locally as `4286bf76`, not deployed or applied. Track the release blocker and EVIDENCE gate in AF-20261120-06; replay population boundary remains in AF-20261106-04.
