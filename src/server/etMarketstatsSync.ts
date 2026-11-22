@@ -97,7 +97,7 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
       }
 
       const prevSymbols = new Set<string>(
-        (await dbAll<{ symbol: string }>(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`,
+        (await dbAll<{ symbol: string }>(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL AND source = 'et_marketstats'`,
           [def.screenerKey])).map(r => r.symbol).filter(Boolean)
       );
 
@@ -180,7 +180,7 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
       }
       if (exited.length > 0) {
         await dbRun(
-          `UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,
+          `UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL AND source = 'et_marketstats'`,
           [today, def.screenerKey, ...exited]);
       }
 

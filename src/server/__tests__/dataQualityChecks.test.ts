@@ -1276,6 +1276,26 @@ describe('audit regression guards (2026-08-11)', () => {
     expect(c.sql).toContain('technical_composite_scores');
   });
 
+  it('technical-composite-age counts only listed symbols and names them (AF-20261120-05)', () => {
+    // 2026-11-20: 143 of the 145 stale rows were symbols no longer in nse_stocks (never refreshed,
+    // never ranked), which pinned the check at a byte-identical 145/2002 for 382 runs.
+    const c = find('technical-composite-age');
+    expect(c.sql).toContain('nse_stocks');
+    expect(c.sql).toContain("n.status = 'ACTIVE'");   // renamed-away rows (LTIM, TATAMOTORS) stay INACTIVE in nse_stocks
+    const r = c.evaluate({ total: 1859, stale: 2, sample: 'AAA BBB' }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toContain('AAA BBB');
+  });
+
+  it('technical_composite_scores has a writer freshness check, so a dead Trendlyne TA refresh is seen in days (AF-20261120-05)', () => {
+    // The age check above can only notice a dead writer once 15% of rows pass 30 days.
+    const c = find('technical-composite-scores-freshness');
+    expect(c.sql).toContain('technical_composite_scores');
+    expect(c.sql).toContain('last_updated');
+    expect(c.evaluate({ last_date: new Date(now.getTime() - 86_400_000).toISOString() }, now).status).toBe('pass');
+    expect(c.evaluate({ last_date: new Date(now.getTime() - 14 * 86_400_000).toISOString() }, now).status).not.toBe('pass');
+  });
+
   it('synthetic-neutral-outcomes warns on the real 2026-10-05 shape and stays quiet on the residue (AF-20261005-03)', () => {
     const c = find('synthetic-neutral-outcomes');
     // ml-api held the pre-fix outcome_resolver in memory and wrote 8,615 fake 0% NEUTRAL rows in 24h.

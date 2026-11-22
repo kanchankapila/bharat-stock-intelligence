@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
+import sys
 
 import requests
 
@@ -31,9 +32,39 @@ HEADERS = {
     "Referer": "https://www.nseindia.com/",
     "Accept": "text/csv,*/*",
 }
+SYMBOL_CHANGE_URL = "https://nsearchives.nseindia.com/content/equities/symbolchange.csv"
 MIN_EQUITY_ROWS = 2_000
 MIN_ETF_ROWS = 200
 MIN_ADMISSION_SESSIONS = 60
+RENAME_LOOKBACK_DAYS = 400  # the admission window is 365 days; older renames cannot matter
+
+
+def parse_symbol_changes(text: str, since: dt.date) -> dict[str, list[str]]:
+    """NSE's symbol-change file -> {current symbol: [previous symbols, newest first]}.
+
+    AF-20261120-07: admission counted sessions per symbol, so a rename (ICICIPRULI -> ICICILIFE)
+    restarted the 60-session clock and dropped the company from every ACTIVE read for months.
+    """
+    step: dict[str, str] = {}
+    for raw in csv.reader(io.StringIO(text)):
+        if len(raw) < 4:
+            continue
+        old, new = raw[1].strip().upper(), raw[2].strip().upper()
+        try:
+            eff = dt.datetime.strptime(raw[3].strip().upper(), "%d-%b-%Y").date()
+        except ValueError:
+            continue
+        if old and new and old != new and eff >= since:
+            step[old] = new
+    rev = {new: old for old, new in step.items()}
+    out: dict[str, list[str]] = {}
+    for head in set(step.values()) - set(step):   # symbols that were not renamed again
+        chain, s = [], head
+        while s in rev and rev[s] not in chain and rev[s] != head:
+            s = rev[s]
+            chain.append(s)
+        out[head] = chain
+    return out
 
 
 def _normalise(raw: dict) -> dict[str, str]:
@@ -80,8 +111,12 @@ def fetch_official_masters() -> tuple[list[dict], list[dict]]:
     return parse_equity_master(equity.text), parse_etf_master(etf.text)
 
 
-def reconcile_master(conn: ConnWrapper, equities: list[dict], etfs: list[dict]) -> dict[str, int]:
-    """Apply a complete validated snapshot. Callers must pass the parser outputs."""
+def reconcile_master(conn: ConnWrapper, equities: list[dict], etfs: list[dict],
+                     predecessors: dict[str, list[str]] | None = None) -> dict[str, int]:
+    """Apply a complete validated snapshot. Callers must pass the parser outputs.
+
+    `predecessors` ({current symbol: [previous NSE symbols]}, from parse_symbol_changes) lets a
+    renamed company keep its observed sessions instead of restarting the admission count."""
     if len(equities) < MIN_EQUITY_ROWS or len(etfs) < MIN_ETF_ROWS:
         raise ValueError("refusing reconciliation from an incomplete NSE master snapshot")
     equity_symbols = {row["symbol"] for row in equities}
@@ -109,13 +144,21 @@ def reconcile_master(conn: ConnWrapper, equities: list[dict], etfs: list[dict]) 
         [(r["symbol"], r["name"], r["isin"]) for r in etfs],
     )
 
+    conn.execute("CREATE TEMP TABLE nse_symbol_alias_stage (symbol TEXT NOT NULL, alias TEXT NOT NULL) ON COMMIT DROP")
+    conn.executemany(
+        "INSERT INTO nse_symbol_alias_stage(symbol, alias) VALUES (?, ?)",
+        [(s, s) for s in equity_symbols]
+        + [(s, old) for s, olds in (predecessors or {}).items() if s in equity_symbols for old in olds],
+    )
+
     # Use the history table's own latest session. This remains deterministic on weekends and
     # during publication lag, and 365 calendar days comfortably contains 60 sessions.
     conn.execute("""
-        CREATE TEMP TABLE nse_equity_admission_stage AS
+        CREATE TEMP TABLE nse_equity_admission_stage ON COMMIT DROP AS
         SELECT e.symbol, e.name, e.isin, e.listing_date, count(DISTINCT h.date)::bigint AS sessions
         FROM nse_equity_master_stage e
-        JOIN nse_universe_history h ON h.symbol=e.symbol
+        JOIN nse_symbol_alias_stage a ON a.symbol=e.symbol
+        JOIN nse_universe_history h ON h.symbol=a.alias
         WHERE h.date >= (SELECT max(date) FROM nse_universe_history) - 365
         GROUP BY e.symbol,e.name,e.isin,e.listing_date
         HAVING count(DISTINCT h.date) >= 60
@@ -176,10 +219,21 @@ def reconcile_master(conn: ConnWrapper, equities: list[dict], etfs: list[dict]) 
             "active_after": after_active, "inactive_total": inactive}
 
 
+def fetch_predecessors() -> dict[str, list[str]]:
+    """Best effort: without the file the policy falls back to per-symbol sessions (the old rule)."""
+    try:
+        text = retry_get(requests, SYMBOL_CHANGE_URL, headers=HEADERS, timeout=30).text
+        return parse_symbol_changes(text, dt.date.today() - dt.timedelta(days=RENAME_LOOKBACK_DAYS))
+    except Exception as e:  # noqa: BLE001
+        print(f"[NSEMaster] symbol-change file unavailable, renames restart admission: {e}", file=sys.stderr)
+        return {}
+
+
 def main() -> None:
     equities, etfs = fetch_official_masters()
+    predecessors = fetch_predecessors()
     with connect() as conn:
-        result = reconcile_master(conn, equities, etfs)
+        result = reconcile_master(conn, equities, etfs, predecessors)
     print(f"[NSEMaster] equities={len(equities)} etfs={len(etfs)} "
           f"eligible={result['eligible_snapshot']} active={result['active_after']} "
           f"inactive={result['inactive_total']}")

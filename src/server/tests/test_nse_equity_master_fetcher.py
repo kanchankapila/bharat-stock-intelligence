@@ -104,3 +104,49 @@ def test_checked_in_schema_uses_lossless_bhavcopy_types():
     for col in ("open", "high", "low", "close", "avg_price", "turnover_lacs", "deliv_pct"):
         assert f'"{col}" DOUBLE PRECISION' in block
 
+
+
+def test_symbol_change_parser_follows_chains_and_skips_old_changes():
+    text = ("NAME OF THE COMPANY,OLD SYMBOL,NEW SYMBOL,EFFECTIVE DATE\n"
+            "Alpha Ltd,AAA,BBB,01-MAR-2026\n"
+            "Alpha Ltd,BBB,CCC,01-OCT-2026\n"
+            "Old Ltd,OLD1,NEW1,01-JAN-2010\n"
+            "Same Ltd,SAME,SAME,01-OCT-2026\n")
+    got = master.parse_symbol_changes(text, since=date(2024, 1, 1))
+    assert got == {"CCC": ["BBB", "AAA"]}   # only the current symbol, with every predecessor
+
+
+def test_rename_keeps_its_admission_history(pg_conn):
+    """AF-20261120-07: ICICIPRULI -> ICICILIFE (2026-10-23) restarted the 60-session count, so
+    ICICI Prudential Life fell out of nse_stocks and every ACTIVE read for weeks."""
+    pg_conn.execute("""
+        CREATE TABLE nse_stocks (
+          symbol TEXT PRIMARY KEY, name TEXT NOT NULL, isin TEXT, listing_date DATE,
+          exchange TEXT, status TEXT, instrument_type TEXT,
+          exchange_master_updated_at TIMESTAMPTZ, admission_sessions BIGINT,
+          admission_reason TEXT, last_updated TIMESTAMPTZ
+        )
+    """)
+    pg_conn.execute("""
+        CREATE TABLE nse_universe_history (
+          date DATE NOT NULL, symbol TEXT NOT NULL, series TEXT NOT NULL, close DOUBLE PRECISION,
+          PRIMARY KEY(date,symbol,series)
+        )
+    """)
+    latest = date(2026, 11, 19)
+    for i in range(70):
+        sym = "RENAMED" if i < 20 else "OLDSYM"
+        pg_conn.execute("INSERT INTO nse_universe_history(date,symbol,series,close) VALUES (?, ?, 'EQ', 50)",
+                        (latest - timedelta(days=i), sym))
+    equities = [{"symbol": "RENAMED", "name": "Renamed Ltd", "isin": "INE000A01009",
+                 "series": "EQ", "listing_date": "2015-01-01"}]
+    equities.extend({"symbol": f"DUMMY{i:04d}", "name": f"Dummy {i}", "isin": f"INE{i:09d}",
+                     "series": "EQ", "listing_date": "2020-01-01"} for i in range(master.MIN_EQUITY_ROWS - 1))
+    etfs = [{"symbol": f"ETF{i:04d}", "name": f"ETF {i}", "isin": f"INF{i:09d}"} for i in range(master.MIN_ETF_ROWS)]
+
+    master.reconcile_master(pg_conn, equities, etfs)
+    assert pg_conn.execute("SELECT count(*) FROM nse_stocks WHERE symbol='RENAMED'").fetchone()[0] == 0
+
+    master.reconcile_master(pg_conn, equities, etfs, predecessors={"RENAMED": ["OLDSYM"]})
+    row = pg_conn.execute("SELECT status, admission_sessions FROM nse_stocks WHERE symbol='RENAMED'").fetchone()
+    assert tuple(row) == ("ACTIVE", 70)

@@ -40,6 +40,7 @@ import os
 import re
 import sys
 import time
+import urllib.parse
 
 import requests
 
@@ -85,7 +86,7 @@ def _first_json(text: str):
 def _lookup(query: str):
     """Autosuggestion lookup. Returns the raw entry list, or None on failure."""
     try:
-        r = requests.get(AUTOSUGGEST_URL.format(query=query), headers=HEADERS, timeout=10)
+        r = requests.get(AUTOSUGGEST_URL.format(query=urllib.parse.quote(query)), headers=HEADERS, timeout=10)
         return _first_json(r.text)
     except Exception as e:
         print(f"  [http] {query!r}: {e}", file=sys.stderr)

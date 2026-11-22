@@ -89,7 +89,7 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
 
       // Snapshot previous active symbols BEFORE delete
       const prevSymbols = new Set<string>(
-        (await dbAll<{ symbol: string }>(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`,
+        (await dbAll<{ symbol: string }>(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL AND source = 'etnow'`,
           [screener.screener_id]))
           .map(r => r.symbol).filter(Boolean)
       );
@@ -159,7 +159,7 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
           bulkUpsert(tx, entered.map(s => [screener.screener_id, s, today, appearedAt]), 4, buildAppSql));
       }
       if (exited.length > 0) {
-        await dbRun(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,
+        await dbRun(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL AND source = 'etnow'`,
           [today, screener.screener_id, ...exited]);
       }
 

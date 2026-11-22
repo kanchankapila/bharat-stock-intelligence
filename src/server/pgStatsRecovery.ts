@@ -29,7 +29,7 @@ const ANALYZE_TIMEOUT = '45min';
 
 export type PgStatsRecoveryOutcome = 'healthy' | 'analyzed' | 'already-attempted' | 'in-progress' | 'failed';
 
-// One attempt per postmaster start: the counters only reset on a restart, and a failed attempt
+// One attempt per server start or crash-recovery reinit (the only events that reset the counters); a failed attempt
 // must not turn into an ANALYZE every 15 minutes. The data-quality check keeps reporting it.
 let attemptedForStart: string | null = null;
 let inFlight = false;
@@ -49,7 +49,11 @@ export async function recoverPgStatsIfReset(): Promise<PgStatsRecoveryOutcome> {
       const unanalyzed = Number(counts?.unanalyzed) || 0;
       if (!isStatsReset(big, unanalyzed)) return 'healthy';
 
-      const { rows: [pm] } = await client.query('SELECT pg_postmaster_start_time() AS started');
+      // A crash-recovery reinit (a backend OOM-killed, 2026-11-20) resets the statistics but keeps
+      // pg_postmaster_start_time(); the checkpointer is restarted by both, so its start marks either.
+      const { rows: [pm] } = await client.query(
+        `SELECT COALESCE((SELECT backend_start FROM pg_stat_activity WHERE backend_type = 'checkpointer'),
+                         pg_postmaster_start_time()) AS started`);
       const started = String(pm?.started);
       if (attemptedForStart === started) return 'already-attempted';
       attemptedForStart = started;

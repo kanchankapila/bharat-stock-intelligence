@@ -60,5 +60,13 @@ describe('unified-signals-expiry-overdue timing around the closer slot', () => {
     const row = await dbGet(check().sql, check().params ?? []) as Record<string, unknown>;
     expect(Number(row.overdue)).toBe(1);
     expect(Number(row.overdue_pre_close)).toBe(0);
+    expect(Number(row.active)).toBe(1);
+  });
+
+  it('evaluate: a pass names how many ACTIVE signals it inspected (AF-20261120-05)', () => {
+    // A bare "none overdue" read byte-identical for 200+ runs; the denominator shows the input moves.
+    const r = check().evaluate({ overdue: 0, overdue_pre_close: 0, active: 1234 }, IST(12, 0));
+    expect(r.status).toBe('pass');
+    expect(r.detail).toContain('1234');
   });
 });

@@ -384,6 +384,11 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'nse-fo-ban-list-recency', label: 'nse_fo_ban_list (NSE F&O securities in ban period)',
     category: 'flows', critical: false, table: 'nse_fo_ban_list', dateColumn: 'trade_date',
     nativeDateColumn: true, warnDays: 10 },
+  // AF-20261120-05: the Trendlyne TA writer (technicalIntelligenceService.ts) refreshes a rolling
+  // ~330 rows every few sessions; technical-composite-age could only notice it dying after 30 days.
+  { id: 'technical-composite-scores-freshness', label: 'technical_composite_scores (Trendlyne TA composite refresh)',
+    category: 'scoring', critical: false, table: 'technical_composite_scores', dateColumn: 'last_updated',
+    warnDays: 3, failDays: 5 },
   { id: 'stock-futures-eod-history-freshness', label: 'stock_futures_eod_history (exchange F&O bhavcopy futures)',
     category: 'flows', critical: false, table: 'stock_futures_eod_history', dateColumn: 'trade_date',
     nativeDateColumn: true, warnDays: 3, failDays: 5 },
@@ -2364,12 +2369,16 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // persists (Spearman 0.65 at 30 sessions) but its RSI/trend components decay to 0.17-0.32, and there
     // is no return evidence either way (1d no edge, 5d/21d LOW-DATA on the Python daily history), so
     // zeroing or substituting stale rows is not justified -- but the exposure must be visible.
+    // ACTIVE listed symbols only (AF-20261120-05): rows for names that left nse_stocks or were renamed
+    // away are never refreshed or ranked, and 145 of them pinned this check at a byte-identical count.
     sql: `SELECT COUNT(*) AS total,
-                 COUNT(*) FILTER (WHERE last_updated < NOW() - INTERVAL '30 days') AS stale
-          FROM technical_composite_scores`,
+                 COUNT(*) FILTER (WHERE t.last_updated < NOW() - INTERVAL '30 days') AS stale,
+                 STRING_AGG(t.symbol, ' ' ORDER BY t.symbol) FILTER (WHERE t.last_updated < NOW() - INTERVAL '30 days') AS sample
+          FROM technical_composite_scores t JOIN nse_stocks n ON n.symbol = t.symbol AND n.status = 'ACTIVE'`,
     evaluate: (row) => {
       const total = Number(row?.total) || 0;
       const stale = Number(row?.stale) || 0;
+      const names = row?.sample ? ` (${String(row.sample).slice(0, 120)})` : '';
       if (total === 0) return { status: 'warn', detail: 'technical_composite_scores is empty' };
       const share = stale / total;
       const pct = (share * 100).toFixed(1);
@@ -2378,7 +2387,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         detail: `${stale}/${total} (${pct}%) composite rows are 30+ days old but still feed scoring_engine's ` +
                 `technical factor; the Trendlyne TA refresh is allowance-limited (AF-20261003-02)`,
       };
-      return { status: 'pass', detail: `${stale}/${total} (${pct}%) composite rows are 30+ days old` };
+      return { status: 'pass', detail: `${stale}/${total} (${pct}%) composite rows are 30+ days old${names}` };
     },
   },
   {
@@ -2419,7 +2428,8 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
             UNION ALL SELECT 15, (SELECT date FROM sess WHERE rn = 15), (SELECT date FROM sess_pre WHERE rn = 15))
           SELECT
             COUNT(*) FILTER (WHERE (u.signal_date AT TIME ZONE 'Asia/Kolkata')::date < c.cutoff)     AS overdue,
-            COUNT(*) FILTER (WHERE (u.signal_date AT TIME ZONE 'Asia/Kolkata')::date < c.cutoff_pre) AS overdue_pre_close
+            COUNT(*) FILTER (WHERE (u.signal_date AT TIME ZONE 'Asia/Kolkata')::date < c.cutoff_pre) AS overdue_pre_close,
+            COUNT(*) AS active
           FROM unified_signals u
           JOIN cut c ON c.horizon = CASE u.signal_source
                                       WHEN 'screener' THEN 0
@@ -2444,7 +2454,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         status: 'warn',
         detail: `${n} ACTIVE unified_signals are past their validity window (a run is probably pending)`,
       };
-      return { status: 'pass', detail: 'no ACTIVE signal is past its own validity window' };
+      return { status: 'pass', detail: `no ACTIVE signal is past its own validity window (${Number(row?.active) || 0} ACTIVE inspected)` };
     },
   },
   {

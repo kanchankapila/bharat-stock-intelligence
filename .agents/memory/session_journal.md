@@ -696,3 +696,16 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 - Full account: docs/session-log.md same date; deploy steps for the Windows host are ledger row AF-20261119-24 (merge order, gates, restarts `bharat-server ml-api chatbot`, backfill, ontology build, graphify update, read-backs).
 - Open after deploy: EVIDENCE -09/-10/-15/-16/-23 and -12's exposure rule; owner decisions AF-20261103-05, AF-20261017-11, AF-20261103-15.
 - Rules to carry: `cacheGet('live-stocks-bulk')` returns a parsed MarketData ARRAY, read it only through `liveQuotes.ts`; before unscheduling a writer grep every training SELECT for its column; price-derived daily snapshots belong after the close; graphify-out is per machine.
+
+## 2026-11-21 — Screener identity rollout sequencing (Copilot)
+- User selected staging source identity capture while holding source-aware performance/signal behavior until a paired replay.
+- Read-only production check confirmed `bharat_intel` still has the old `screener_appearances` PK. The online `bharat-server` shares the dirty checkout and started before the source-qualified writer edits; do not restart or migrate until an isolated capture-only release is prepared.
+- Prior `bharat_pgtest` migration rehearsal passed and was cleaned. Capture-only schema/migration/writer/test changes are committed locally as `4286bf76`, not deployed or applied. Track the release blocker and EVIDENCE gate in AF-20261120-06; replay population boundary remains in AF-20261106-04.
+
+## 2026-11-21 - Stale symbols and provider ids (Claude 2b)
+- Full account: docs/session-log.md same date; ledger AF-20261120-07 (symbols), -04 (stats recovery), -05 (monitoring), -06 review note.
+- Rules to carry: a rename restarts per-symbol admission (use symbolchange.csv); a provider code is proven only by the vendor payload's ISIN; a writer fix scopes read and write sides; backfills get diffed against raw closes; doc counts quote the tracked tree.
+
+## 2026-11-21 - Screener membership replay and the last symbol items (Claude 2b)
+- Full account: docs/session-log.md same date; ledger AF-20261106-04 (open: features window is an owner decision), AF-20261106-01 (closed, candidate rejected), AF-20261121-03 (alerts dismissed), AF-20261120-07.
+- Rules to carry: results and definitions in `.claude/rules/measurement.md` 2026-11-21; the capture population boundary is the first run on 2026-11-23.

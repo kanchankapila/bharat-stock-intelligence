@@ -109,6 +109,9 @@ curl_cffi==0.16.2
 nse==3.2.1
 hmmlearn==0.3.3
 langchain==1.3.9
+# GHSA-3fx2-cqw9-xr3c (CVE-2026-118667) affects langgraph >= 1.2.3, < 1.2.14; 1.2.14 is the first
+# patched release and is what runs in production. tests/chatbot/test_langgraph_sdk_path_security.py
+# pins the SDK path-encoding boundary the advisory is about.
 langgraph==1.2.14
 langgraph-sdk==0.4.10
 langchain-community==0.4.2

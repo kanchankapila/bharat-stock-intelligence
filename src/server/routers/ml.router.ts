@@ -309,13 +309,12 @@ export const mlRouter = router({
         ROUND(AVG(uso.return_pct), 2) AS avg_return,
         -- AF-20261119-13: inputs for independent windows and the win-rate interval.
         SUM(CASE WHEN uso.outcome IN ('WIN','LOSS','STOP_LOSS') THEN 1 ELSE 0 END) AS decided,
-        COUNT(DISTINCT substr(uso.signal_date, 1, 10)) AS dates,
+        COUNT(DISTINCT uso.signal_date) AS dates,
         MAX(uso.horizon_days) AS max_horizon`;
       const base = `
         FROM unified_signal_outcomes uso
-        -- signal_date is stored in mixed formats ('YYYY-MM-DD' and 'YYYY-MM-DD HH:MM:SS+00');
-        -- normalise to the 10-char date so the regime join matches either way.
-        LEFT JOIN market_regimes mr ON mr.date = substr(uso.signal_date, 1, 10)
+        -- Both columns are native DATE since the 2026-09-03 TEXT->DATE migration; substr() on them raised.
+        LEFT JOIN market_regimes mr ON mr.date = uso.signal_date
         WHERE uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
           AND uso.return_pct IS NOT NULL
           AND uso.signal_date >= ?`;
