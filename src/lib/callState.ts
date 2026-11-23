@@ -5,10 +5,38 @@
 export type CallState = 'UNPROVEN' | 'NO_CALL' | 'EDGE';
 
 export interface ForwardTier { tier: number | string; verdict?: string; eff_dates?: number | null; [k: string]: unknown }
+export interface TradeProfitability {
+  side?: 'long' | 'short';
+  horizon?: string;
+  cost_round_trip_pct?: number;
+  entries_seen?: number;
+  trades?: number;
+  wins?: number;
+  win_rate?: number | null;
+  avg_net_return_pct?: number | null;
+  avg_win_pct?: number | null;
+  avg_loss_pct?: number | null;
+  profit_factor?: number | null;
+  base_win_rate?: number | null;
+  base_avg_net_return_pct?: number | null;
+  win_rate_lift?: number | null;
+  win_rate_lift_ci95?: number | null;
+  dates?: number;
+  eff_dates?: number;
+  low_data?: boolean;
+}
 export interface ForwardTestReport {
   protocol_hash?: string;
+  trade_profitability_protocol_hash?: string;
   generated_at?: string;
-  blocks?: Record<string, { since?: string; calls?: number; sessions?: number; tiers?: Record<string, ForwardTier[]> }>;
+  blocks?: Record<string, {
+    since?: string;
+    calls?: number;
+    sessions?: number;
+    tiers?: Record<string, ForwardTier[]>;
+    // forward_test_report.trade_profitability: keys long_5 / long_10 / long_21 / short_intraday.
+    trade_profitability?: Record<string, TradeProfitability>;
+  }>;
 }
 
 export const MIN_DATES_RELIABLE = 20; // mirrors factor_edge.MIN_DATES_RELIABLE

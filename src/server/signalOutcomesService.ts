@@ -35,11 +35,13 @@ export interface WinRateStats {
   byHorizon: Record<HorizonDays, Bucket & { signalDates: number }>;
   byScoreBucket: Record<string, Bucket>;
   recentOutcomes: OutcomeRow[];
-  /** Which labeling convention every number above was computed under. Surfaced so a consumer
-   *  can disclose it: `.claude/rules/measurement.md` records path_barrier and terminal_pct2
-   *  producing 88-91% vs 41-44% win rates over the IDENTICAL calendar window, so a win rate
-   *  quoted without its label definition is not a comparable number. */
+  /** Resolver used for this technical-signal population. Profitability uses terminal simulated
+   *  return after costs, not the resolver's path-barrier WIN label. */
   labelDefinition: 'path_barrier';
+  profitabilityDefinition: 'net_return_pct_gt_zero';
+  /** The technical rows are the daily full-universe grid, each graded as a long: a base rate for any
+   *  stock, not a recommendation win rate (those are getAccuracyMetrics / forward_test_report). */
+  population: 'every_scanned_stock_long';
 }
 
 // The grader that lived here (computeSignalOutcomes) was retired 2026-09-30 (AF-20260930-31):
@@ -66,11 +68,11 @@ const BASE = `
         AND s2.horizon_days = ? AND s2.exit_price IS NOT NULL) - ${WINDOW_DAYS}`;
 
 const AGG = `COUNT(*)::int AS total,
-  COUNT(*) FILTER (WHERE so.outcome = 'WIN')::int AS wins,
-  COUNT(*) FILTER (WHERE so.outcome IN ('LOSS', 'STOP_LOSS'))::int AS losses,
+  COUNT(*) FILTER (WHERE so.return_pct > 0)::int AS wins,
+  COUNT(*) FILTER (WHERE so.return_pct <= 0)::int AS losses,
   COALESCE(AVG(so.return_pct), 0) AS avg_return,
-  COALESCE(AVG(so.return_pct) FILTER (WHERE so.outcome = 'WIN'), 0) AS avg_win,
-  COALESCE(AVG(so.return_pct) FILTER (WHERE so.outcome IN ('LOSS', 'STOP_LOSS')), 0) AS avg_loss,
+  COALESCE(AVG(so.return_pct) FILTER (WHERE so.return_pct > 0), 0) AS avg_win,
+  COALESCE(AVG(so.return_pct) FILTER (WHERE so.return_pct <= 0), 0) AS avg_loss,
   COUNT(DISTINCT so.signal_date)::int AS signal_dates`;
 
 const bucket = (r: any): Bucket => {
@@ -110,6 +112,8 @@ export async function getWinRateStats(): Promise<WinRateStats> {
 
   return {
     labelDefinition: 'path_barrier',
+    profitabilityDefinition: 'net_return_pct_gt_zero',
+    population: 'every_scanned_stock_long',
     overallHorizonDays: h,
     windowDays: WINDOW_DAYS,
     overall,

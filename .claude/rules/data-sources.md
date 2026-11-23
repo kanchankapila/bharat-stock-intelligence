@@ -28,7 +28,11 @@ feature, a constraint or a model is underperforming.
 2. **The scripts** — `graphify query "<thing> backfill"`, or grep for `backfill_*`, `*_sync`,
    `*_fetcher`. Check existing implementations before concluding a new one is needed.
 3. **`market_endpoint_registry`**, the `url_endpoints` catalog, and, if present, the
-   optional local raw URL corpus `urls_v2.db` (gitignored and absent from fresh checkouts). If
+   optional local raw URL corpus `urls_v2.db` (gitignored and absent from fresh checkouts). Also
+   inspect the companion `urls-explorer` repository's catalogs: `all_market_sources.csv`/`.json`
+   (9,554 request variants across 47 host families), `unique_successful_endpoints.csv` (1,395
+   normalized endpoint patterns), `working_urls_consolidated.xlsx` (3,408 validated endpoints),
+   and `DATA_CATALOG.md` (1,068 endpoints with key-value data dictionary across 14 categories). If
    present, also inspect the recovered `unique_urls.txt`; with full Git history the deleted
    version remains available through `git show c2ceae0e^:unique_urls.txt`. Concrete paths can
    differ even when the catalog groups them into one structural template.
@@ -82,6 +86,10 @@ The **NSE symbol** (e.g., `HDFCBANK`, `INFY`, `BAJAJ-AUTO`) is the single source
 | ISIN (universal) | `isin` | 12-char alphanumeric | `INE040A01034` |
 | MoneyControl stockid | `stockid` | Numeric string | `592009` |
 | MarketsMojo | `stockid` _(shared)_ | Numeric string | `592009` |
+| Tickertape | `tickertape_sid` | Provider slug / ticker | `HDFCBANK` / `AUFI` |
+| Upstox V3 | _(derived from isin)_ | `"NSE_EQ\|" + isin` | `NSE_EQ\|INE040A01034` |
+| TejHQ | `symbol` | Uppercase ticker | `HDFCBANK` |
+| BSE | `scripcode` / `fincode` | Numeric integer/string | `500180` / `132921` |
 
 **Verifying a MoneyControl code (2026-11-18, AF-20261118-06).** `mcsymbol` names ONE company on MoneyControl's side;
 `https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{code}` returns its `NSEID` and `isinid` (no auth). A code
@@ -90,6 +98,12 @@ does not carry the symbol (the old "first suggestion as best effort" seeded 54 w
 active stock carries. DQ check `nse-stocks-mcsymbol-unique` fails on any shared active code.
 
 **MarketsMojo (onboarded 2026-08-11)** — 5 fetchers (`marketsmojo_{technical,financials,fintrend,index,shareholding}_fetcher.py`) writing 5 `marketsmojo_*_history` tables. It reuses the **MoneyControl `stockid`**, read from `scripts/stocklist.json` via each fetcher's `load_sid_map()`; there is no new opaque id, so nothing was added to `StockMapping`. Requires a `Referer: https://www.marketsmojo.com/` header. Note the shared id: a `stockid` alone does not identify the *provider*, so any future table keyed on it needs the provider in the PK per the composite-key rule below — the existing 5 are keyed on `symbol`, which sidesteps it.
+
+**Tickertape** — `tickertape_sid` is populated for **1,812 stocks (~90%)** in `stocklist.ts`. Powers batch live quotes (`https://quotes-api.tickertape.in/quotes?sids=...`), scorecards (`analyze.api.tickertape.in/stocks/scorecard/{symbol}`), and deals insights (`analyze.api.tickertape.in/stocks/deals/insight`). When querying by SID, always map via `(symbol, isin, tickertape_sid)` to avoid collision, and verify timestamp `ts` age (<10 min) and prior close agreement within 0.5%.
+
+**Upstox V3** — Intraday 1-minute and 5-minute historical candles from January 2022 (`https://api.upstox.com/v3/historical-candle/NSE_EQ%7C{isin}/minutes/{interval}/{to_date}/{from_date}`) and 5-level market quote depth (`/v3/market-quote/quotes`). Derives cleanly from universal `isin` (`StockMapping.isin`, 99% populated), needing no new opaque provider ID column.
+
+**TejHQ** — Keyless raw EOD OHLCV (`https://api.tejhq.dev/v1/ohlcv/nse/{symbol}`), corporate actions (`https://api.tejhq.dev/v1/actions/{symbol}`), and whole-market daily snapshot (`https://api.tejhq.dev/v1/snapshot/nse?date={date}`). Uses canonical NSE `symbol`.
 
 ### Resolution Files
 
@@ -430,3 +444,116 @@ metrics fetcher skipped the canonical table, requested `/LMW/`, and received a d
 Resolution order is static mapping → `nse_stocks.tlid` → numeric-only screener fallback. Validate
 the identifier shape before constructing the URL. A non-empty provider-id column is not sufficient
 evidence that it contains provider IDs.
+
+## Upstox V3 historical minute candles & quote depth (2026-11-11 discovery)
+
+Upstox V3 exposes historical 1-minute and 5-minute OHLCV candles back to January 2022 and 5-level
+bid/ask market quote depth. It requires no opaque provider ID: its instrument key format is
+`NSE_EQ|{isin}` (or URL-encoded `NSE_EQ%7C{isin}`), which resolves directly from universal `isin`
+(`StockMapping.isin`, 99% populated in `stocklist.ts`).
+
+- **Minute candles endpoint**: `GET https://api.upstox.com/v3/historical-candle/NSE_EQ%7C{isin}/minutes/{interval}/{to_date}/{from_date}`
+  (`interval`: `1` or `5`; date format: `YYYY-MM-DD`; maximum date range per request: 1 month).
+  Tested live: 375 one-minute bars returned per session for tested tickers (INFY, HDFCBANK).
+- **Full market quote & depth**: `GET https://api.upstox.com/v3/market-quote/quotes?instrument_key=NSE_EQ%7C{isin}`
+  returns 5-level bid/ask depth and timestamped quotes.
+
+**CRITICAL GOTCHA — Retrospective corporate-action adjustment on minute candles:**
+Upstox retroactively applies bonus and split adjustments to historical minute bars. For HDFCBANK on
+2025-01-03 (preceding the 1:1 bonus of 2025-08-26), the first-minute open was ~₹842 (half the raw NSE
+daily open of ₹1684.50) with ~2x volume. **Never mix Upstox minute candles with raw exchange daily bars
+without verifying and documenting the adjustment basis.** Minute OHLCV cannot prove historical first-seen
+availability, queue position, or fill probability.
+
+## TejHQ keyless market data & corporate actions (2026-11-11 discovery)
+
+TejHQ (`api.tejhq.dev`) provides keyless endpoints keyed directly on the canonical NSE `symbol`:
+
+- **Raw EOD OHLCV**: `GET https://api.tejhq.dev/v1/ohlcv/nse/{symbol}?from={YYYY-MM-DD}&to={YYYY-MM-DD}`
+- **Corporate actions**: `GET https://api.tejhq.dev/v1/actions/{symbol}` returns structured bonus,
+  split, cash dividend amounts, ex-dates, and ratio numerator/denominator (`ratio_num`, `ratio_den`).
+- **Whole-market daily snapshot**: `GET https://api.tejhq.dev/v1/snapshot/nse?date={YYYY-MM-DD}`.
+  Tested live on 2024-03-02: 2,129 shared symbols matched official NSE closes within ₹0.011.
+
+**Caveats:**
+1. **Omission of non-EQ series**: The snapshot omitted 288 rows present in NSE's security-wise file,
+   including 158 SME (`SM`) series and 20 `ST` series. It is an EQ-only snapshot.
+2. **Keyless limit**: Keyless requests return only unadjusted raw prices. Requesting adjusted history
+   returns HTTP 401 `key_required` (requires a free API key from the provider).
+
+## NSE official feeds: Legacy Bhavcopy recovery, Pre-Open auction & MarketWatch
+
+Empirical audits in `urls-explorer` verified three high-value official exchange access paths:
+
+1. **Legacy Bhavcopy Archive (BE / trade-to-trade recovery)**:
+   Modern `sec_bhavdata_full` exchange files omit certain non-EQ series on historical dates. Legacy
+   bhavcopies hosted at `https://archives.nseindia.com/content/historical/EQUITIES/{YYYY}/{MON}/cm{DDMONYYYY}bhav.csv.zip`
+   recovered 57 previously missing observations across 5 tickers (E2E, GEEKAYWIRE, MASKINVEST,
+   MHLXMIRU, NDRAUTO) as verified `BE` series rows. Check the legacy bhavcopy ZIP archive before
+   declaring historical exchange price data missing for trade-to-trade or surveillance-stage stocks.
+2. **Pre-Open Market Auction**:
+   `GET https://www.nseindia.com/api/market-data-pre-open?key=ALL` returns indicative equilibrium price,
+   matched quantity, order quantities, and pre-open gap during the auction window (09:00–09:08 IST).
+   **Rule**: Must be captured strictly during the auction with provider and local observation timestamps;
+   fetching post-open only captures the final static state and loses intermediate order book dynamics.
+3. **MarketWatch NextApi**:
+   `GET https://www.nseindia.com/api/NextApi/apiClient/marketWatchApi?functionName=getIndicesData&symbol=NIFTY%2050`
+   (or `NIFTY%20500`) provides real-time constituent quotes (`lastPrice`, `previousClose`,
+   `lastUpdateTime`). Requires verifying `container.marketStatus.market == 'CM'` and `marketStatus == 'open'`.
+
+## MoneyControl corporate actions & multi-decade financials pagination
+
+1. **Structured corporate actions by section**:
+   `GET https://api.moneycontrol.com/mcapi/v1/stock/corporate-action?deviceType=W&scId={mcsymbol}&section={section}&start=0&limit={limit}`
+   Valid sections: `d` (dividends), `b` (bonus), `s` (splits), `bm` (board meetings). Returns announcement
+   dates, ex-dates, and record dates.
+2. **Multi-decade quarterly results pagination**:
+   `GET https://appfeeds.moneycontrol.com/jsonapi/stocks/quarterly_results_responsive?sc_id={mcsymbol}&type_format={quarterly|cons_quarterly}&start={start}&limit=40`
+   Paginates cleanly via `start=0, 40, 80...` with `limit=40`. Tested live back to 1998 (over 28 years of
+   quarterly financials). Consolidated (`cons_quarterly`) typically has fewer historical periods than
+   standalone (`quarterly`).
+3. **Market breadth snapshot**:
+   `GET https://api.moneycontrol.com/mcapi/v1/indices/chart/exchange-advdec?ex=N` returns active advances,
+   declines, and unchanged counts.
+
+## Economic Times screener V2 pagination protocol & page-clamp trap
+
+Tested across `screenerByScreenerIdForWeb`, `technical-data`, and `intraday-stats` (POST endpoints):
+
+- **Page size**: Supports `pagesize=1000` (and up to `10000` for saved and technical screens), allowing
+  full-universe ingestion in 1–2 requests rather than tens of 25-row requests. Intraday stats cap at 5,000.
+- **1-based `pageno`**: Page index starts at `1`, not `0`.
+- **Page-clamp trap on saved screens**: When requesting `pageno=2` on a screen whose total records fit on
+  page 1, the response echoes `requestObj.pageno: 2` but sets `pageSummary.pageno: 1` and **re-returns
+  page 1 rows**. Never evaluate pagination termination from `requestObj.pageno`; terminate strictly when
+  `pageSummary.pageno >= pageSummary.totalpages`.
+- **Sector breadth**: `GET https://etmarketsapis.indiatimes.com/ET_Stats/sectorperformance?pagesize=25&exchange=NSE&pageno=1`
+  returns 25 top sectors with `marketCapPercentChange` and `lasttradeddate`.
+
+## NiftyTrader dual-auth & stale contract protocol
+
+1. **Host update**: `www.niftytrader.in/api/niftytrader/*` is the active host; `webapi.niftytrader.in` is retired.
+2. **Dual-token requirement for webapi routes**: Account login (`user_email`, `user_password`) yields a Bearer
+   token. Webapi data requests additionally require a short-lived `x-api-key`, which the browser frontend
+   retrieves and caches in `niftytrader-api-key-cache-v1`. Both credentials must be sent if calling webapi routes.
+3. **Stale chain trap**: Calling `/api/option/option-chain-data` with an empty `expiryDate=` returns historical
+   or stale options (e.g. contracts from May 2026). Always supply an explicit `expiryDate=YYYY-MM-DD`.
+4. **Cross-symbol inventory trap**: `/api/Symbol/symbol-expiry-all` returns expiries across multiple symbols
+   even when queried for a specific ticker; always filter rows by `symbol_name`.
+
+## MarketsMojo pagination limits & blur flags
+
+- **Page size cap**: Uses 1-based `page` and `per_page`. Maximum allowed `per_page` is **50**. Passing
+  `per_page=1000` returns HTTP 200 with application error `422`.
+- **Blur flag (`is_blur=1`)**: Mover endpoints (`/market_Gainersloser/getData`) and peer endpoints mark
+  certain fields with `is_blur=1`. Verify field-level entitlement before consuming.
+
+## Specialized catalog feeds: StockEdge, SapphireBroking, TapeTide
+
+- **StockEdge**: `GET https://api.stockedge.com/Api/IPODashboardApi/GetOngoingIPOs` provides structured ongoing
+  and upcoming IPO details, issue sizes, price bands, and dates.
+- **SapphireBroking**: Requires fetching a homepage session cookie (`sapp_session` from
+  `https://stocks.sapphirebroking.com/`) combined with `Origin: https://stocks.sapphirebroking.com` and
+  `Referer` headers before calling market breadth endpoints.
+- **TapeTide**: `GET https://ai-chat.tapetide.com/insights/{symbol}?period_type=quarterly` provides
+  AI-structured earnings summaries and document metadata.

@@ -52,6 +52,26 @@ PROTOCOL = {
 }
 PROTOCOL_KEY = "forward_test_protocol"
 REPORT_KEY = "forward_test_report"
+TRADE_PNL_PROTOCOL_KEY = "trade_profitability_protocol"
+LONG_CLASSES = ("Buy", "Strong Buy")
+SHORT_CLASSES = ("Sell", "Strong Sell")
+TRADE_PNL_PROTOCOL = {
+    "version": 2,
+    "population": "unified_recommendations_history, latest call per symbol before next session open",
+    "position": "one trade per entry into the class: a symbol that keeps the same call on consecutive "
+                "sessions is one position, not one trade per day",
+    "long": {"classes": list(LONG_CLASSES), "entry": "next session open", "exit": "open N sessions after entry",
+             "horizons": [5, 10, 21], "cost_per_side": 0.0025},
+    "short": {"classes": list(SHORT_CLASSES), "trade": "intraday short sale: sell at the next session open, "
+              "buy back at that session's close", "cost_per_side": 0.0009,
+              "eligible": "EQ series on the call date in nse_universe_history (BE/BZ trade-to-trade and SME "
+                          "series cannot be squared off intraday, so they are not short trades)"},
+    "universe": "ranked names with >= Rs 1cr trailing-20d ADT",
+    "win_rule": "direction-signed return after transaction costs > 0",
+    "base_rate": "same rule applied to every universe name on the same entry dates (a random pick)",
+    "return_basis": "price return; dividends excluded",
+    "uncertainty": "distinct entry dates / horizon; LOW-DATA below MIN_DATES_RELIABLE",
+}
 _OPEN = datetime.time(9, 15)
 
 
@@ -154,6 +174,8 @@ def build_panel(con, calls: pd.DataFrame, sessions: pd.DatetimeIndex, horizons, 
     """calls (symbol, session, unified_score, classification) joined to open-entry forward returns and ADT."""
     start = (calls["session"].min() - pd.Timedelta(days=45)).strftime("%Y-%m-%d")
     oh = _forward_returns(con, start, horizons, entry="open")
+    g = oh.groupby("symbol")
+    oh["raw_intraday"] = g["close"].shift(-1) / g["open"].shift(-1) - 1   # the entry session, open to close
     vol = pd.DataFrame(con.execute(
         "SELECT symbol, date, close AS c, volume AS v FROM stock_ohlcv WHERE date >= ? AND (is_suspect IS NULL OR is_suspect = 0)",
         (start,)).fetchall(), columns=["symbol", "date", "c", "v"])
@@ -161,14 +183,94 @@ def build_panel(con, calls: pd.DataFrame, sessions: pd.DatetimeIndex, horizons, 
     vol["dv"] = pd.to_numeric(vol["c"], errors="coerce") * pd.to_numeric(vol["v"], errors="coerce")
     vol = vol.sort_values(["symbol", "date"])
     vol["adt"] = vol.groupby("symbol")["dv"].transform(lambda s: s.rolling(20, min_periods=15).mean())
-    m = calls.merge(oh[["symbol", "date"] + [f"fwd_{h}" for h in horizons]], left_on=["symbol", "session"],
+    m = calls.merge(oh[["symbol", "date", "raw_intraday"] + [f"fwd_{h}" for h in horizons]], left_on=["symbol", "session"],
                     right_on=["symbol", "date"], how="inner").drop(columns=["date"])
     m = m.merge(vol[["symbol", "date", "adt"]], left_on=["symbol", "session"], right_on=["symbol", "date"], how="left")
     m = m.drop(columns=["date"])
     m = m[m["adt"] >= min_adt].rename(columns={"session": "date"})
     for h in horizons:
+        m[f"raw_fwd_{h}"] = pd.to_numeric(m[f"fwd_{h}"], errors="coerce")
         m[f"fwd_{h}"] = m.groupby("date")[f"fwd_{h}"].transform(_winsorise)
     return m
+
+
+def position_entries(panel: pd.DataFrame, classes, sessions: pd.DatetimeIndex) -> pd.Series:
+    """True on the first session of each run of consecutive sessions a symbol carries one of `classes`.
+
+    A name that stays Buy for 21 sessions is one position; counting each day would grade the same trade 21 times."""
+    p = panel[["symbol", "date", "classification"]].copy()
+    p["pos"] = sessions.get_indexer(pd.DatetimeIndex(p["date"]))
+    p["in"] = p["classification"].isin(classes)
+    p = p.sort_values(["symbol", "pos"])
+    prev_in = p.groupby("symbol")["in"].shift(1, fill_value=False)
+    prev_pos = p.groupby("symbol")["pos"].shift(1)
+    continuing = prev_in & (prev_pos == p["pos"] - 1)
+    return (p["in"] & ~continuing).reindex(panel.index)
+
+
+def trade_profitability(panel: pd.DataFrame, entries: pd.Series, ret_col: str, side: str, cost: float,
+                        horizon: int, horizon_label: str) -> dict:
+    """Win rate of the positions opened on `entries`, with the comparators a win rate needs.
+
+    A win is a direction-signed return after the round-trip `cost` above zero (a short profits when the price
+    falls). base_win_rate is the same rule for every universe name on the same entry dates, so win_rate_lift is
+    skill above a random pick; a rising tape alone lifts every long win rate."""
+    sign = -1.0 if side == "short" else 1.0
+    graded = panel[entries.fillna(False).astype(bool)].dropna(subset=[ret_col])
+    net = (sign * graded[ret_col] - cost) * 100
+    trades = int(len(net))
+    universe = panel[panel["date"].isin(graded["date"].unique())].dropna(subset=[ret_col])
+    base_net = (sign * universe[ret_col] - cost) * 100
+    wins, losses = net[net > 0], net[net <= 0]
+    dates = int(graded["date"].nunique())
+    eff = float(_effective_dates(dates, horizon)) if trades else 0.0
+    rate = float(len(wins) / trades) if trades else None
+    base_rate = float((base_net > 0).mean()) if len(base_net) else None
+    # Lift interval from per-date lifts over independent windows (the tiers' _aggregate convention): trades on one
+    # date share that day's tape, so the raw trade count would overstate the evidence.
+    per_date = ((net > 0).groupby(graded["date"]).mean() - (base_net > 0).groupby(universe["date"]).mean()).dropna()
+    lift_ci = float(1.96 * per_date.std(ddof=1) / math.sqrt(max(eff, 1.0))) if len(per_date) > 1 else None
+    return {
+        "side": side,
+        "horizon": horizon_label,
+        "cost_round_trip_pct": cost * 100,
+        "entries_seen": int(entries.fillna(False).sum()),
+        "trades": trades,
+        "wins": int(len(wins)),
+        "win_rate": rate,
+        "avg_net_return_pct": float(net.mean()) if trades else None,
+        "avg_win_pct": float(wins.mean()) if len(wins) else None,
+        "avg_loss_pct": float(losses.mean()) if len(losses) else None,
+        "profit_factor": float(wins.sum() / -losses.sum()) if len(losses) and losses.sum() < 0 else None,
+        "base_win_rate": base_rate,
+        "base_avg_net_return_pct": float(base_net.mean()) if len(base_net) else None,
+        "win_rate_lift": rate - base_rate if rate is not None and base_rate is not None else None,
+        "win_rate_lift_ci95": lift_ci,
+        "dates": dates,
+        "eff_dates": eff,
+        "low_data": eff < MIN_DATES_RELIABLE,
+    }
+
+
+def trade_profitability_block(panel: pd.DataFrame, sessions: pd.DatetimeIndex) -> dict:
+    long_p, short_p = TRADE_PNL_PROTOCOL["long"], TRADE_PNL_PROTOCOL["short"]
+    long_in = position_entries(panel, LONG_CLASSES, sessions)
+    short_in = position_entries(panel, SHORT_CLASSES, sessions) & panel["eq"].fillna(False).astype(bool)
+    out = {f"long_{h}": trade_profitability(panel, long_in, f"raw_fwd_{h}", "long", 2 * long_p["cost_per_side"], h, f"{h}d")
+           for h in long_p["horizons"]}
+    out["short_intraday"] = trade_profitability(panel, short_in, "raw_intraday", "short",
+                                                2 * short_p["cost_per_side"], 1, "intraday")
+    return out
+
+
+def attach_eq_series(con, panel: pd.DataFrame) -> pd.DataFrame:
+    """Add `eq`: the symbol traded in the EQ series on the call date (only EQ names can be sold short intraday)."""
+    lo = panel["date"].min().strftime("%Y-%m-%d")
+    eq = pd.DataFrame(con.execute(
+        "SELECT symbol, date, bool_or(series = 'EQ') AS eq FROM nse_universe_history WHERE date >= ? GROUP BY 1, 2",
+        (lo,)).fetchall(), columns=["symbol", "date", "eq"])
+    eq["date"] = pd.to_datetime(eq["date"])
+    return panel.merge(eq, on=["symbol", "date"], how="left")
 
 
 def load_calls(con, since: str) -> pd.DataFrame:
@@ -187,11 +289,15 @@ def load_sessions(con) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(pd.to_datetime([r[0] for r in rows]))
 
 
-def ensure_protocol(con, key: str = PROTOCOL_KEY, protocol: dict = PROTOCOL) -> tuple[str, bool]:
-    """Freeze the protocol on first run; afterwards report whether this code still matches it."""
+def ensure_protocol(con, key: str = PROTOCOL_KEY, protocol: dict = PROTOCOL, freeze: bool = True) -> tuple[str, bool]:
+    """Freeze the protocol on first run; afterwards report whether this code still matches it.
+
+    Only a persisting run freezes: an ad-hoc preview must not pin an unreviewed protocol for good."""
     h = protocol_hash(protocol)
     row = con.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
     if row is None:
+        if not freeze:
+            return h, True
         con.execute("INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING",
                     (key, json.dumps({"hash": h, "protocol": protocol}, sort_keys=True)))
         con.commit()
@@ -201,13 +307,18 @@ def ensure_protocol(con, key: str = PROTOCOL_KEY, protocol: dict = PROTOCOL) -> 
 
 def run(since: str, retro: str | None, as_json: bool, persist: bool) -> int:
     con = connect()
-    h, same = ensure_protocol(con)
+    h, same = ensure_protocol(con, freeze=persist)
     if not same:
         print(f"[forward_test] PROTOCOL DRIFT: code hash {h} differs from the frozen protocol in app_settings."
               " Results are NOT comparable with earlier runs; change PROTOCOL only by starting a new version.",
               file=sys.stderr)
         con.close()
         return 2
+    trade_hash, trade_same = ensure_protocol(con, TRADE_PNL_PROTOCOL_KEY, TRADE_PNL_PROTOCOL, freeze=persist)
+    if not trade_same:
+        # The tiers feed the live-decay check; a trade-protocol edit must not take them down with it.
+        print(f"[forward_test] TRADE PROTOCOL DRIFT: code hash {trade_hash} differs from the frozen trade protocol;"
+              " trade_profitability is omitted from this report. Start a new version to change it.", file=sys.stderr)
     sessions = load_sessions(con)
     blocks = {}
     for name, start in (("forward", since), ("retrospective", retro)):
@@ -215,7 +326,7 @@ def run(since: str, retro: str | None, as_json: bool, persist: bool) -> int:
             continue
         calls = apply_protocol_start(latest_call_per_session(load_calls(con, start), sessions), start)
         if calls.empty:
-            blocks[name] = {"since": start, "calls": 0, "tiers": {}}
+            blocks[name] = {"since": start, "calls": 0, "tiers": {}, "trade_profitability": {}}
             continue
         panel = build_panel(con, calls, sessions, PROTOCOL["horizons"], PROTOCOL["min_adt"])
         res = {}
@@ -224,8 +335,11 @@ def run(since: str, retro: str | None, as_json: bool, persist: bool) -> int:
             p["buy"] = p["classification"].isin(["Buy", "Strong Buy"])
             res[str(hz)] = selective_accuracy(p, hz, cost=2 * PROTOCOL["cost_per_side"])
             res[str(hz)] += selective_accuracy(p, hz, cost=2 * PROTOCOL["cost_per_side"], flag_col="buy")
-        blocks[name] = {"since": start, "calls": int(len(calls)), "sessions": int(calls["session"].nunique()), "tiers": res}
-    out = {"protocol_hash": h, "generated_at": datetime.datetime.now().isoformat(timespec="seconds"), "blocks": blocks}
+        blocks[name] = {"since": start, "calls": int(len(calls)), "sessions": int(calls["session"].nunique()),
+                        "tiers": res,
+                        "trade_profitability": trade_profitability_block(attach_eq_series(con, panel), sessions) if trade_same else {}}
+    out = {"protocol_hash": h, "trade_profitability_protocol_hash": trade_hash,
+           "generated_at": datetime.datetime.now().isoformat(timespec="seconds"), "blocks": blocks}
     if as_json:
         print(json.dumps(out, indent=2, default=str))
     else:

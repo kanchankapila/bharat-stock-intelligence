@@ -10,7 +10,8 @@ const caller = createCallerFactory(appRouter)({} as any);
 // totalSignals was COUNT(*) -- PENDING rows included (live: 440,335 shown vs 438,940 resolved).
 // V-09 (2026-10-08): it also counted NEUTRAL in the denominator, pooled the 1/5/15d horizons, and
 // mixed in short-geometry rows (target < stop) -- 111,665 of which were graded by a LONG-only
-// simulation (AF-20261008-10). The tile is now LONG-only, 15d, decisive outcomes only.
+// simulation (AF-20261008-10). 2026-11-20: the headline is the trade win rate (net, direction-signed
+// return > 0 over every resolved outcome) per side; the decisive-label rate is kept as a diagnostic.
 describe('getAccuracyMetrics', () => {
   beforeEach(async () => {
     await dbRun(`DELETE FROM unified_signal_outcomes`);
@@ -48,17 +49,26 @@ describe('getAccuracyMetrics', () => {
     );
   });
 
-  it('reports a LONG-only 15d win rate over decisive outcomes, NEUTRAL shown separately', async () => {
+  it('grades each side as trades: net return > 0 over every resolved outcome, label rate kept separately', async () => {
     const m = await caller.getAccuracyMetrics();
-    expect(m.side).toBe('LONG');
     expect(m.horizonDays).toBe(15);
-    expect(m.wins).toBe(1);
-    expect(m.decisiveSignals).toBe(3);
-    expect(m.neutralSignals).toBe(1);
-    expect(m.profitHitRate).toBeCloseTo(100 / 3, 5);
-    expect(m.resolvedSignals).toBe(4);
-    expect(m.totalSignals).toBe(5);
-    expect(m.avgGrossReturnPct).toBeCloseTo(-0.75, 5);
-    expect(String(m.asOf)).toContain('2026-09-22');
+    const L = m.long;
+    expect(L.totalSignals).toBe(5);              // PENDING counted in the total only
+    expect(L.resolvedSignals).toBe(4);           // NEUTRAL is a trade that was taken
+    expect(L.profitableSignals).toBe(1);         // only the +4% trade made money
+    expect(L.netProfitRate).toBeCloseTo(25, 5);
+    expect(L.avgNetReturnPct).toBeCloseTo(-0.75, 5);
+    expect(L.avgWinPct).toBeCloseTo(4, 5);
+    expect(L.avgLossPct).toBeCloseTo(-7 / 3, 5);
+    expect(L.labelWins).toBe(1);
+    expect(L.decisiveSignals).toBe(3);
+    expect(L.neutralSignals).toBe(1);
+    expect(L.labelWinRate).toBeCloseTo(100 / 3, 5);
+    expect(String(L.asOf)).toContain('2026-09-22');
+    // SHORT geometry (target below stop): return_pct is direction-signed by the resolver, so both made money.
+    expect(m.short.resolvedSignals).toBe(2);
+    expect(m.short.profitableSignals).toBe(2);
+    expect(m.short.netProfitRate).toBeCloseTo(100, 5);
+    expect(m.short.labelWinRate).toBeCloseTo(50, 5);
   });
 });

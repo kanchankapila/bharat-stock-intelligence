@@ -18,6 +18,9 @@ Arms:
                   sessions whose forward window had CLOSED by then are used (no look-ahead), same regime when it has
                   enough history, shrunk towards the live REGIME_WEIGHTS by n_eff / (n_eff + LEARN_SHRINK_K). NaN
                   when no forward returns are passed in
+  reblend_sector_rs_gate  reblend x0.7 on stocks that lag their sector benchmark (rs_vs_sector_21d < 0, RS_20d < 0,
+                  AF-20261119-08 / learning-loop review). Fails open (no haircut) for missing/NaN sector RS; NaN
+                  for sessions where sector RS is entirely absent
 ponytail: the ranker's zero-dispersion engine drop, quality gate and red-flag vetoes are not replayed; `published` carries them.
 """
 from __future__ import annotations
@@ -30,9 +33,10 @@ from unified_ranker import REGIME_WEIGHTS
 
 ENGINES = ("ml", "confluence", "technical", "breakout")
 ARMS = ("published", "reblend", "reblend_vol_veto", "reblend_no_ml", "random_control", "reblend_no_sector_slot",
-        "reblend_learned")
+        "reblend_learned", "reblend_sector_rs_gate")
 VOL_VETO_TOP_SHARE = 0.20
 VOL_VETO_MULT = 0.7
+SECTOR_RS_GATE_MULT = 0.7
 SLOT_COLS = ("cs_trend", "cs_vol", "cs_sector", "cs_fund")   # confluence_signals.{trend_alignment,volume,sector_strength,fundamental}_score
 SLOT_REBUILD_MIN_RANK_CORR = 0.9999
 LEARN_HORIZON = 5          # sessions; the forward return the learned weights are fitted to
@@ -98,6 +102,30 @@ def reblend_vol_veto(df: pd.DataFrame, vol: pd.Series) -> pd.Series:
     return base.where(~(rank > 1 - VOL_VETO_TOP_SHARE), base * VOL_VETO_MULT).rename("reblend_vol_veto")
 
 
+def reblend_sector_rs_gate(df: pd.DataFrame, sector_rs: pd.Series | None = None) -> pd.Series:
+    """reblend with a haircut (x0.7) on stocks that lag their sector (sector_rs < 0, RS_20d < 0).
+
+    Fails open (keeps base score) for missing or NaN sector RS. If sector RS is entirely absent
+    or all-NaN across a session, that session is left NaN so unpopulated windows are not graded."""
+    if sector_rs is None:
+        if "sector_rs" in df.columns:
+            sector_rs = df["sector_rs"]
+        elif "rs_vs_sector_21d" in df.columns:
+            sector_rs = df["rs_vs_sector_21d"]
+        else:
+            return pd.Series(np.nan, index=df.index, name="reblend_sector_rs_gate")
+    out = pd.Series(np.nan, index=df.index, name="reblend_sector_rs_gate")
+    base = reblend(df)
+    for _, idx in df.groupby("session").groups.items():
+        s = sector_rs.loc[idx]
+        if s.isna().all():
+            continue
+        gated = s.notna() & (s < 0.0)
+        b = base.loc[idx]
+        out.loc[idx] = b.where(~gated, b * SECTOR_RS_GATE_MULT).to_numpy()
+    return out
+
+
 def published(df: pd.DataFrame) -> pd.Series:
     return df["unified_score"]
 
@@ -161,13 +189,15 @@ def reblend_learned(df: pd.DataFrame, fwd: pd.Series | None, sessions: pd.Dateti
 
 
 def arm_scores(df: pd.DataFrame, vol: pd.Series, seed: int = 0, fwd: pd.Series | None = None,
-               sessions: pd.DatetimeIndex | None = None) -> pd.DataFrame:
+               sessions: pd.DatetimeIndex | None = None,
+               sector_rs: pd.Series | None = None) -> pd.DataFrame:
     return pd.DataFrame({"published": published(df), "reblend": reblend(df), "reblend_vol_veto": reblend_vol_veto(df, vol),
                          "reblend_no_ml": reblend_no_ml(df), "random_control": random_control(df, seed),
                          "reblend_no_sector_slot": (reblend_no_sector_slot(df) if set(SLOT_COLS) <= set(df.columns)
                                                     else pd.Series(np.nan, index=df.index)),
                          "reblend_learned": (reblend_learned(df, fwd, sessions) if sessions is not None
-                                             else pd.Series(np.nan, index=df.index))}, index=df.index)
+                                             else pd.Series(np.nan, index=df.index)),
+                         "reblend_sector_rs_gate": reblend_sector_rs_gate(df, sector_rs)}, index=df.index)
 
 
 def session_ic(df: pd.DataFrame, score: pd.Series, fwd: pd.Series, date_col: str = "session", min_n: int = 30) -> pd.Series:

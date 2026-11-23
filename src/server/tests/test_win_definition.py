@@ -18,7 +18,7 @@ ROUTER = Path(__file__).resolve().parents[1] / "routers" / "signals.router.ts"
 def _router_sql():
     text = ROUTER.read_text(encoding="utf-8")
     block = text[text.index("getAccuracyMetrics:"):]
-    start = block.index("dbGet<any>(`") + len("dbGet<any>(`")
+    start = block.index("dbAll<any>(`") + len("dbAll<any>(`")
     sql = block[start:block.index("`, [HORIZON]")]
     horizon = int(re.search(r"const HORIZON = (\d+);", block).group(1))
     return sql, horizon
@@ -30,6 +30,7 @@ def test_router_text_pins_the_same_definition():
     assert "o.outcome = 'WIN'" in sql
     assert "o.outcome IN (" + ",".join(f"'{o}'" for o in W.DECISIVE) + ")" in sql
     assert "s.target_price > s.stop_loss" in sql        # LONG = target above stop, the resolver's own geometry rule
+    assert "o.return_pct > 0" in sql                    # the headline is the net, direction-signed trade return
 
 
 def test_classify_outcome():
@@ -67,16 +68,27 @@ def test_win_rate_matches_the_router_sql_on_the_same_rows():
     con.executemany("INSERT INTO unified_signals VALUES (?,?,?)", [(r[0], r[1], r[2]) for r in rows])
     con.executemany("INSERT INTO unified_signal_outcomes VALUES (?,?,?,?, DATE '2026-10-01')", [(r[0], r[3], r[4], r[5]) for r in rows])
     con.commit()
-    got = dict(con.execute(sql, (horizon,)).fetchone())
+    got = {r["side"]: dict(r) for r in con.execute(sql, (horizon,)).fetchall()}
     con.close()
 
     df = pd.DataFrame(rows, columns=["id", "target_price", "stop_loss", "horizon_days", "outcome", "return_pct"])
     w = W.win_rate(df, "LONG", horizon)
-    assert w["wins"] == int(got["wins"]) == 2
-    assert w["decisive"] == int(got["decisive"]) == 4
-    assert w["neutral"] == int(got["neutral"]) == 1
+    g = got["LONG"]
+    assert w["wins"] == int(g["label_wins"]) == 2
+    assert w["decisive"] == int(g["decisive"]) == 4
+    assert w["neutral"] == int(g["neutral"]) == 1
     assert abs(w["win_rate"] - 0.5) < 1e-12
-    assert abs(w["avg_return_pct"] - float(got["avg_ret"])) < 1e-9
+    assert abs(w["avg_return_pct"] - float(g["avg_ret"])) < 1e-9
+
+    # Trade win rate: WIN 6, LOSS -3, STOP -5, NEUTRAL +0.5, WIN 2 -> 3 of 5 made money (the NEUTRAL exit at +0.5
+    # counts as a profitable trade the label calls flat); PENDING is not a trade.
+    n = W.net_profit_rate(df, "LONG", horizon)
+    assert n["trades"] == int(g["resolved"]) == 5
+    assert n["profitable"] == int(g["profitable"]) == 3
+    assert abs(n["avg_win_pct"] - float(g["avg_win"])) < 1e-9 and abs(n["avg_loss_pct"] - float(g["avg_loss"])) < 1e-9
+
+    ns, gs = W.net_profit_rate(df, "SHORT", horizon), got["SHORT"]
+    assert ns["trades"] == int(gs["resolved"]) == 1 and ns["profitable"] == int(gs["profitable"]) == 1
 
 
 def test_short_side_uses_geometry_not_the_label():

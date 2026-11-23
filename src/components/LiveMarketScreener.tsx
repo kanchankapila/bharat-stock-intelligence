@@ -201,7 +201,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
           <div className="flex items-center gap-2 text-indigo-300">
             <Brain className="w-4 h-4 text-indigo-400 animate-pulse" />
             <span>
-              <strong>AI Recommendation:</strong> Strategy <code>{optimalCombos.optimal_combinations[0].filters.join(' + ')}</code> has a <strong>{(optimalCombos.optimal_combinations[0].win_rate * 100).toFixed(1)}%</strong> win-rate.
+              <strong>Suggested screener combo:</strong> <code>{optimalCombos.optimal_combinations[0].filters.join(' + ')}</code> has a <strong>{(optimalCombos.optimal_combinations[0].win_rate * 100).toFixed(1)}%</strong> historical gross win rate (return above zero before costs) on held-out sessions; this is not a stock Buy/Sell call.
             </span>
           </div>
           <button 
@@ -398,7 +398,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                         {/* Stats block */}
                         <div className="grid grid-cols-3 gap-2 bg-slate-950/40 border border-slate-900 rounded-lg p-3 mb-4">
                           <div>
-                            <p className="font-data text-[9px] text-slate-500 uppercase">Win Rate</p>
+                            <p className="font-data text-[9px] text-slate-500 uppercase">Backtest Win Rate (gross, no costs)</p>
                             <p className="font-data text-sm font-bold text-emerald-400 mt-0.5">{wr.toFixed(1)}%</p>
                           </div>
                           <div>
@@ -428,7 +428,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                                 <span className="font-bold text-indigo-400">+{backtest.alpha_pct.toFixed(2)}%</span>
                               </div>
                               <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
-                                <span className="text-slate-500 text-[10px]">WIN RATE:</span>
+                                <span className="text-slate-500 text-[10px]">BACKTEST WIN RATE (GROSS):</span>
                                 <span className="font-bold text-slate-200">{(backtest.win_rate * 100).toFixed(0)}%</span>
                               </div>
                               <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
@@ -578,7 +578,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                             <code className="text-[10px] font-data bg-slate-850 px-2 py-1 rounded text-indigo-300 border border-slate-800/80">{s.best_filter}</code>
                             <div className="grid grid-cols-3 gap-2 mt-3">
                               <div>
-                                <p className="font-data text-[9px] text-slate-500 uppercase">Win Rate</p>
+                                <p className="font-data text-[9px] text-slate-500 uppercase">Backtest Win Rate (gross, no costs)</p>
                                 <p className={cn("font-data text-sm font-bold mt-0.5", s.best_win_rate >= 0.5 ? 'text-emerald-400' : 'text-amber-400')}>
                                   {(s.best_win_rate * 100).toFixed(0)}%
                                 </p>
@@ -643,7 +643,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                           </div>
                           <div className="grid grid-cols-3 gap-2 bg-slate-950/40 border border-slate-900 rounded-lg p-3 mb-4">
                             <div>
-                              <p className="font-data text-[9px] text-slate-500 uppercase">Win Rate</p>
+                              <p className="font-data text-[9px] text-slate-500 uppercase">Backtest Win Rate (gross, no costs)</p>
                               <p className="font-data text-sm font-bold text-emerald-400 mt-0.5">{wr.toFixed(1)}%</p>
                             </div>
                             <div>
@@ -671,7 +671,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                                   <span className="font-bold text-indigo-400">{backtest.alpha_pct >= 0 ? '+' : ''}{backtest.alpha_pct.toFixed(2)}%</span>
                                 </div>
                                 <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
-                                  <span className="text-slate-500 text-[10px]">WIN RATE:</span>
+                                  <span className="text-slate-500 text-[10px]">BACKTEST WIN RATE (GROSS):</span>
                                   <span className="font-bold text-slate-200">{(backtest.win_rate * 100).toFixed(0)}%</span>
                                 </div>
                                 <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">

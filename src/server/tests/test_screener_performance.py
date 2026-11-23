@@ -1,4 +1,4 @@
-import sqlite3, sys, os, datetime
+import sqlite3, sys, os, datetime, json
 from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from pg_test_support import pg_memory_conn  # noqa: E402
@@ -59,12 +59,13 @@ def make_db():
     return conn
 
 
-def _seed_appearance(conn, screener_id, symbol, appeared_days_ago, return_20d, nifty_ret_20d=0.0):
+def _seed_appearance(conn, screener_id, symbol, appeared_days_ago, return_20d, nifty_ret_20d=0.0,
+                     source='trendlyne'):
     d = (TODAY - datetime.timedelta(days=appeared_days_ago)).isoformat()
     conn.execute(
         "INSERT INTO screener_appearances (screener_id, source, symbol, appeared_date, "
-        "return_20d, nifty_ret_20d, outcome_20d) VALUES (?, 'trendlyne', ?, ?, ?, ?, 'WIN')",
-        (screener_id, symbol, d, return_20d, nifty_ret_20d),
+        "return_20d, nifty_ret_20d, outcome_20d) VALUES (?, ?, ?, ?, ?, ?, 'WIN')",
+        (screener_id, source, symbol, d, return_20d, nifty_ret_20d),
     )
 
 
@@ -160,6 +161,55 @@ def test_phase_c_bearish_screener_that_predicted_wrong_scores_as_a_loss():
     ).fetchone()
     assert row['wr_20d'] == 0.0, "a bearish screener whose stock rose must NOT register as a win"
     assert row['avg_ret_20d'] == -8.0
+
+
+def test_phase_c_keeps_colliding_provider_screeners_separate():
+    conn = make_db()
+    conn.executemany(
+        "INSERT INTO screener_master (scan_id, source, inferred_sentiment) VALUES (?, ?, ?)",
+        [('shared-id', 'trendlyne', 'bullish'), ('shared-id', 'moneycontrol', 'bearish')],
+    )
+    _seed_appearance(conn, 'shared-id', 'AAA', 40, 12.0, source='trendlyne')
+    _seed_appearance(conn, 'shared-id', 'BBB', 40, -12.0, source='moneycontrol')
+    conn.commit()
+
+    phase_c_bayesian(CastStrippingConn(conn), {})
+
+    rows = conn.execute(
+        "SELECT source, wr_20d, avg_ret_20d FROM screener_performance_v2 WHERE screener_id='shared-id'"
+    ).fetchall()
+    by_source = {row['source']: (row['wr_20d'], row['avg_ret_20d']) for row in rows}
+    assert by_source == {'trendlyne': (1.0, 12.0), 'moneycontrol': (1.0, 12.0)}
+
+
+def test_phase_a_drops_source_less_proxy_for_colliding_screeners():
+    conn = make_db()
+    conn.executemany(
+        "INSERT INTO screener_master (scan_id, source, inferred_sentiment) VALUES (?, ?, ?)",
+        [
+            ('shared-id', 'trendlyne', 'bullish'),
+            ('shared-id', 'moneycontrol', 'bearish'),
+            ('unique-id', 'etnow', 'bullish'),
+        ],
+    )
+    signal_date = (TODAY - datetime.timedelta(days=5)).isoformat()
+    conn.execute(
+        "INSERT INTO signal_outcomes "
+        "(symbol, signal_date, horizon_days, return_pct, outcome, signal_source) "
+        "VALUES ('AAA', ?, 5, 3.0, 'WIN', 'technical')",
+        (signal_date,),
+    )
+    conn.execute(
+        "INSERT INTO confluence_signals (symbol, screener_ids_json, computed_at) "
+        "VALUES ('AAA', ?, ?)",
+        (json.dumps(['shared-id', 'unique-id']), signal_date),
+    )
+    conn.commit()
+
+    outcomes = phase_a_bootstrap(CastStrippingConn(conn))
+
+    assert set(outcomes) == {'unique-id'}
+
 
 # NOTE: compute_pit_scores() (Phase F) has the identical sign-awareness fix applied, covered in
 # test_screener_pit_scores.py (that file already owns compute_pit_scores' test fixture/FakeConn
@@ -320,6 +370,36 @@ def test_phase_b_does_not_reselect_a_fully_filled_row():
     conn.commit()
     filled = phase_b_fill_returns(CastStrippingConn(conn))
     assert filled == 0, "a fully-filled row must not be re-processed"
+
+
+def test_phase_b_update_does_not_overwrite_a_colliding_provider_episode():
+    conn = make_db()
+    appeared = (TODAY - datetime.timedelta(days=30)).isoformat()
+    _seed_ohlcv_run(conn, 'SHARED', appeared, 8)
+    conn.executemany(
+        "INSERT INTO screener_appearances "
+        "(screener_id, source, symbol, appeared_date, return_5d, return_10d, "
+        "return_20d, return_60d, return_120d, outcome_20d) "
+        "VALUES ('shared-id', ?, 'SHARED', ?, ?, ?, ?, ?, ?, 'WIN')",
+        [
+            ('trendlyne', appeared, None, None, None, None, None),
+            ('moneycontrol', appeared, 77.0, 77.0, 77.0, 77.0, 77.0),
+        ],
+    )
+    conn.commit()
+
+    filled = phase_b_fill_returns(CastStrippingConn(conn))
+
+    assert filled == 1
+    rows = {
+        row['source']: row
+        for row in conn.execute(
+            "SELECT source, return_5d, outcome_20d FROM screener_appearances"
+        ).fetchall()
+    }
+    assert rows['trendlyne']['return_5d'] is not None
+    assert rows['moneycontrol']['return_5d'] == 77.0
+    assert rows['moneycontrol']['outcome_20d'] == 'WIN'
 
 
 def test_phase_b_does_not_join_stock_ohlcv_in_the_candidates_query():

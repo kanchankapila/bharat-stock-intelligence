@@ -78,38 +78,52 @@ export const signalsRouter = router({
 
   getAccuracyMetrics: publicProcedure
     .query(async () => {
-      // V-09 (2026-10-08): LONG geometry only (target > stop, the resolver's own direction rule),
-      // one horizon, WIN / (WIN+LOSS+STOP_LOSS) per measurement.md. Short rows were graded by a
-      // LONG-only simulation (AF-20261008-10) and NEUTRAL is not a decisive outcome. return_pct is
-      // GROSS of costs.
+      // One row per side, read from the geometry (target above stop = LONG, below = SHORT), never the label.
+      // Headline = net profit rate: resolved trades with return_pct > 0, NEUTRAL included. return_pct is already
+      // direction-signed and net of the round trip (outcome_resolver), so a SHORT wins when the price falls.
+      // The label rate is WIN/(WIN+LOSS+STOP_LOSS), a volatility-threshold label, kept as a diagnostic.
+      // win_definition.py (net_profit_rate, win_rate) mirrors this SQL; test_win_definition.py runs both.
       const HORIZON = 15;
-      const s = (await dbGet<any>(`
+      const rows = await dbAll<any>(`
         SELECT
+          CASE WHEN s.target_price > s.stop_loss THEN 'LONG' ELSE 'SHORT' END AS side,
           COUNT(*) AS total,
-          SUM(CASE WHEN o.outcome = 'WIN' THEN 1 ELSE 0 END) AS wins,
+          COUNT(*) FILTER (WHERE o.outcome IN ('WIN','LOSS','STOP_LOSS','NEUTRAL') AND o.return_pct IS NOT NULL) AS resolved,
+          COUNT(*) FILTER (WHERE o.outcome IN ('WIN','LOSS','STOP_LOSS','NEUTRAL') AND o.return_pct > 0) AS profitable,
+          SUM(CASE WHEN o.outcome = 'WIN' THEN 1 ELSE 0 END) AS label_wins,
           SUM(CASE WHEN o.outcome IN ('WIN','LOSS','STOP_LOSS') THEN 1 ELSE 0 END) AS decisive,
           SUM(CASE WHEN o.outcome = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutral,
-          AVG(CASE WHEN o.outcome IN ('WIN','LOSS','STOP_LOSS','NEUTRAL') THEN o.return_pct END) AS avg_ret,
+          AVG(o.return_pct) FILTER (WHERE o.outcome IN ('WIN','LOSS','STOP_LOSS','NEUTRAL')) AS avg_ret,
+          AVG(o.return_pct) FILTER (WHERE o.outcome IN ('WIN','LOSS','STOP_LOSS','NEUTRAL') AND o.return_pct > 0) AS avg_win,
+          AVG(o.return_pct) FILTER (WHERE o.outcome IN ('WIN','LOSS','STOP_LOSS','NEUTRAL') AND o.return_pct <= 0) AS avg_loss,
           MAX(o.check_date) AS as_of
         FROM unified_signal_outcomes o
         JOIN unified_signals s ON s.id = o.unified_signal_id
-        WHERE o.horizon_days = ? AND s.target_price > s.stop_loss
-      `, [HORIZON]))!;
-      const wins = Number(s.wins) || 0, decisive = Number(s.decisive) || 0, neutral = Number(s.neutral) || 0;
-      const rate = decisive > 0 ? (wins / decisive) * 100 : 0;
-      return {
-        side: 'LONG' as const,
-        horizonDays: HORIZON,
-        precision: rate,
-        profitHitRate: rate,
-        wins,
-        decisiveSignals: decisive,
-        neutralSignals: neutral,
-        resolvedSignals: decisive + neutral,
-        totalSignals: Number(s.total) || 0,   // includes PENDING (AF-20260930-40)
-        avgGrossReturnPct: s.avg_ret == null ? null : Number(s.avg_ret),
-        asOf: s.as_of ?? null,
+        WHERE o.horizon_days = ? AND s.target_price <> s.stop_loss
+        GROUP BY 1
+      `, [HORIZON]);
+      const num = (v: unknown) => (v == null ? null : Number(v));
+      const side = (name: 'LONG' | 'SHORT') => {
+        const r = rows.find(x => x.side === name) ?? {};
+        const resolved = Number(r.resolved) || 0, profitable = Number(r.profitable) || 0;
+        const decisive = Number(r.decisive) || 0;
+        return {
+          side: name,
+          totalSignals: Number(r.total) || 0,
+          resolvedSignals: resolved,
+          profitableSignals: profitable,
+          netProfitRate: resolved > 0 ? (profitable / resolved) * 100 : null,
+          avgNetReturnPct: num(r.avg_ret),
+          avgWinPct: num(r.avg_win),
+          avgLossPct: num(r.avg_loss),
+          labelWins: Number(r.label_wins) || 0,
+          decisiveSignals: decisive,
+          neutralSignals: Number(r.neutral) || 0,
+          labelWinRate: decisive > 0 ? (Number(r.label_wins || 0) / decisive) * 100 : null,
+          asOf: r.as_of ?? null,
+        };
       };
+      return { horizonDays: HORIZON, long: side('LONG'), short: side('SHORT') };
     }),
 
   // user_id below is always ctx.uid (the verified token owner), never client input — this is
@@ -180,7 +194,8 @@ export const signalsRouter = router({
       let totalPnl = 0, winCount = 0, totalCount = 0;
       for (const a of actions) {
         const pnl = a.pnl as number | null;
-        if (pnl !== null) { totalPnl += pnl; if (pnl > 0) winCount++; totalCount++; }
+        const isTrade = a.action_type === 'BUY' || a.action_type === 'SELL';
+        if (isTrade && pnl !== null) { totalPnl += pnl; if (pnl > 0) winCount++; totalCount++; }
       }
       return {
         actions,

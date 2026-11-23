@@ -91,6 +91,15 @@ def phase_a_bootstrap(conn: ConnWrapper) -> dict:
         print("[PhaseA] No resolved outcomes found. Skipping bootstrap.")
         return {}
 
+    ambiguous_ids = {
+        row[0] for row in conn.execute("""
+            SELECT scan_id
+            FROM screener_master
+            GROUP BY scan_id
+            HAVING COUNT(DISTINCT COALESCE(LOWER(source), '')) > 1
+        """).fetchall()
+    }
+
     # Build symbol -> [(date, screener_ids)] from confluence_signals.
     #
     # BUG FOUND 2026-08-09: this previously fetched EVERY confluence_signals row unfiltered --
@@ -152,9 +161,14 @@ def phase_a_bootstrap(conn: ConnWrapper) -> dict:
         if not best_ids:
             continue
 
+        matched = False
         for screener_id in best_ids:
+            if screener_id in ambiguous_ids:
+                continue
             screener_outcomes[screener_id].append((return_pct, outcome))
-        attributed += 1
+            matched = True
+        if matched:
+            attributed += 1
 
     total = len(screener_outcomes)
     total_signals = sum(len(v) for v in screener_outcomes.values())
@@ -213,7 +227,7 @@ def phase_b_fill_returns(conn: ConnWrapper) -> int:
     # by explicit (symbol, date) key in small batches" to avoid the identical decompression
     # trap). A symbol with no bars costs one empty read and is skipped.
     candidates = conn.execute("""
-        SELECT screener_id, symbol, appeared_date
+        SELECT source, screener_id, symbol, appeared_date
         FROM screener_appearances
         WHERE (return_5d IS NULL AND appeared_date <= ?)
            OR (return_60d IS NULL AND appeared_date <= ?)
@@ -224,13 +238,13 @@ def phase_b_fill_returns(conn: ConnWrapper) -> int:
         print("[PhaseB] Nothing to fill.")
         return 0
 
-    distinct_symbols = {row[1] for row in candidates}
+    distinct_symbols = {row[2] for row in candidates}
     # One literal `WHERE symbol = ?` price read per symbol (2026-11-17, AF-20261112-03). The loop
     # used to issue 8 reads per APPEARANCE (entry + 5 horizons + 2 index): 1,527 s of a 1,776 s run.
     by_symbol = defaultdict(list)
     for row in candidates:
-        by_symbol[row[1]].append(row)
-    earliest = min(str(row[2])[:10] for row in candidates)
+        by_symbol[row[2]].append(row)
+    earliest = min(str(row[3])[:10] for row in candidates)
     nifty_dates, nifty_closes = _clean_closes(conn, NIFTY_SYMBOL, earliest)
 
     print(f"[PhaseB] {len(candidates)} candidates ({len(distinct_symbols)} symbols) -- filling...")
@@ -238,11 +252,11 @@ def phase_b_fill_returns(conn: ConnWrapper) -> int:
     covered = 0
 
     for symbol, rows in by_symbol.items():
-        dates, closes = _clean_closes(conn, symbol, min(str(r[2])[:10] for r in rows))
+        dates, closes = _clean_closes(conn, symbol, min(str(r[3])[:10] for r in rows))
         if not dates:
             continue
         covered += 1
-        for screener_id, _, appeared_date in rows:
+        for source, screener_id, _, appeared_date in rows:
             # appeared_date is a timestamptz (datetime) on Postgres; use its date portion for
             # the OHLCV lookups but keep the original value for the UPDATE WHERE row match.
             lookup_date = str(appeared_date)[:10]
@@ -258,7 +272,8 @@ def phase_b_fill_returns(conn: ConnWrapper) -> int:
             nifty_ret_20d = compute_return(
                 _close_on_or_after(nifty_dates, nifty_closes, lookup_date),
                 _close_n_bars_after(nifty_dates, nifty_closes, lookup_date, 20))
-            filled += _write_phase_b_row(conn, screener_id, symbol, appeared_date, returns, nifty_ret_20d)
+            filled += _write_phase_b_row(
+                conn, source, screener_id, symbol, appeared_date, returns, nifty_ret_20d)
             # Batched commit (2026-08-09): a timeout-killed run keeps what it already filled.
             if filled % 500 == 0:
                 conn.commit()
@@ -291,7 +306,7 @@ def _close_n_bars_after(dates, closes, date: str, n: int):
     return closes[i] if i < len(dates) else None
 
 
-def _write_phase_b_row(conn, screener_id, symbol, appeared_date, returns, nifty_ret_20d) -> int:
+def _write_phase_b_row(conn, source, screener_id, symbol, appeared_date, returns, nifty_ret_20d) -> int:
     r20 = returns.get('return_20d')
     if r20 is None:
         outcome_20d = 'PENDING'
@@ -305,12 +320,12 @@ def _write_phase_b_row(conn, screener_id, symbol, appeared_date, returns, nifty_
         UPDATE screener_appearances
         SET return_5d=?, return_10d=?, return_20d=?, return_60d=?, return_120d=?,
             nifty_ret_20d=?, outcome_20d=?
-        WHERE screener_id=? AND symbol=? AND appeared_date=?
+        WHERE source=? AND screener_id=? AND symbol=? AND appeared_date=?
     """, (
         returns['return_5d'], returns['return_10d'], returns['return_20d'],
         returns['return_60d'], returns['return_120d'],
         nifty_ret_20d, outcome_20d,
-        screener_id, symbol, appeared_date
+        source, screener_id, symbol, appeared_date
     ))
     return 1
 
@@ -388,17 +403,17 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
 
     # Compute global mean win rate from well-tested screeners
     qualified = conn.execute("""
-        SELECT screener_id,
+        SELECT screener_id, LOWER(source) AS source,
                COUNT(*) as n,
                AVG(CASE WHEN outcome_20d = 'WIN' THEN 1.0 ELSE 0.0 END) as wr
         FROM screener_appearances
         WHERE outcome_20d IN ('WIN','LOSS','NEUTRAL')
-        GROUP BY screener_id
+        GROUP BY screener_id, LOWER(source)
         HAVING COUNT(*) >= 10
     """).fetchall()
 
     if qualified:
-        global_mean_wr = float(statistics.mean(float(r[2]) for r in qualified))
+        global_mean_wr = float(statistics.mean(float(r[3]) for r in qualified))
     else:
         global_mean_wr = 0.52
 
@@ -415,14 +430,15 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
             SELECT return_5d, return_10d, return_20d, return_60d, return_120d,
                    nifty_ret_20d, outcome_20d
             FROM screener_appearances
-            WHERE screener_id = ? AND outcome_20d IN ('WIN','LOSS','NEUTRAL')
-        """, (screener_id,)).fetchall()
+            WHERE screener_id = ? AND LOWER(source) = LOWER(?)
+              AND outcome_20d IN ('WIN','LOSS','NEUTRAL')
+        """, (screener_id, source)).fetchall()
 
         proxy = proxy_outcomes.get(screener_id, [])
 
         total_appearances = conn.execute(
-            "SELECT COUNT(*) FROM screener_appearances WHERE screener_id = ?",
-            (screener_id,)
+            "SELECT COUNT(*) FROM screener_appearances WHERE screener_id = ? AND LOWER(source) = LOWER(?)",
+            (screener_id, source)
         ).fetchone()[0]
 
         ret20_list, nifty20_list = [], []
@@ -465,8 +481,8 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
         if ret60_list:
             nifty60_rows = conn.execute("""
                 SELECT nifty_ret_20d FROM screener_appearances
-                WHERE screener_id = ? AND return_60d IS NOT NULL
-            """, (screener_id,)).fetchall()
+                WHERE screener_id = ? AND LOWER(source) = LOWER(?) AND return_60d IS NOT NULL
+            """, (screener_id, source)).fetchall()
             if nifty60_rows and len(nifty60_rows) == len(ret60_list):
                 alphas60 = [r - (n[0] or 0) for r, n in zip(ret60_list, nifty60_rows)]
                 alpha_60d = round(statistics.mean(alphas60), 4)

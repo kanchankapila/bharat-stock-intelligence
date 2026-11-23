@@ -243,10 +243,8 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
             <div key={r.scan_id} className="flex items-center justify-between text-[10px]">
               <span className="text-slate-400 truncate max-w-[140px]">{r.screener_name}</span>
               <div className="flex items-center gap-2">
-                <span className="text-slate-500">7d Win</span>
-                <span className={cn('font-data', r.win_rate_7d > 0.6 ? 'text-emerald-400' : r.win_rate_7d > 0.4 ? 'text-amber-400' : 'text-slate-400')}>
-                  {((r.win_rate_7d ?? 0) * 100).toFixed(0)}%
-                </span>
+                <span className="text-slate-500">7d Win Rate</span>
+                <span className="font-data text-slate-500" title="This screener win-rate table did not reproduce on remeasurement">Unverified</span>
               </div>
             </div>
           ))}
@@ -526,13 +524,8 @@ export function SignalIntelligence() {
                     <div className="text-[10px] text-slate-500">{r.source} • {r.total_signals} signals</div>
                   </div>
                   <div className="text-right shrink-0">
-                    <div className={cn('text-xs font-bold',
-                      r.win_rate_7d > 0.65 ? 'text-emerald-400' :
-                      r.win_rate_7d > 0.45 ? 'text-amber-400' : 'text-slate-400'
-                    )}>
-                      {((r.win_rate_7d ?? 0) * 100).toFixed(0)}%
-                    </div>
-                    <div className="text-[10px] text-slate-500">7d win</div>
+                    <div className="text-xs font-bold text-slate-500" title="This screener win-rate table did not reproduce on remeasurement">Unverified</div>
+                    <div className="text-[10px] text-slate-500">7d win rate</div>
                   </div>
                   <div className="w-12 text-right shrink-0">
                     <div className={cn('text-xs font-bold',

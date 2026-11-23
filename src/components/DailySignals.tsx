@@ -588,7 +588,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
             )}
           >
             <BarChart2 className="w-4 h-4" />
-            Win Rates
+            Trade Outcomes
           </button>
           <button
             onClick={() => rescan.mutate({})}
@@ -666,37 +666,35 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
           <div className="flex items-center justify-between">
             <p className="v1-title-section flex items-center gap-2">
               <BarChart2 className="w-4 h-4" />
-              Historical Win Rates
+              Scanner Universe Base Rate
             </p>
-            <p className="text-[10px] text-slate-400">Based on actual stock prices N days after signal date</p>
+            <p className="text-[10px] text-slate-400">Every stock the technical scanner grades, simulated as a long on actual prices</p>
           </div>
 
-          {/* A win rate is not a comparable number without the labeling convention behind it:
-              measurement.md records path_barrier (max-favorable-excursion) and terminal_pct2
-              (fixed +/-2% terminal) producing 88-91% vs 41-44% over the IDENTICAL calendar
-              window, i.e. the gap is almost entirely the label, not skill. Rendering the
-              percentage alone invites reading a path-barrier number as if it were a terminal
-              one. Same disclosure principle as LegacyScoreBanner on the non-canonical scoring
-              pages. */}
+          {/* signal_outcomes 'technical' rows are the daily full-universe grid (~2,150 stocks a day), each
+              graded as a long whether its reading was bullish or bearish. Their win rate is what a random
+              pick earns, not a recommendation's win rate; that lives on the dashboard and Edge Evidence. */}
           {winRates?.labelDefinition && (
             <p className="text-[10px] leading-relaxed text-amber-300/80 border border-amber-500/20 bg-amber-500/5 rounded-lg px-2.5 py-1.5">
-              Labeled <span className="font-data font-bold">{winRates.labelDefinition}</span> —
-              a path-based max-favorable-excursion rule, counting a WIN if the barrier was touched
-              at any point in the window. It is <span className="font-bold">not comparable</span> to
-              a fixed terminal-return win rate, which runs far lower on the same signals. Technical
-              scanner outcomes only; confluence-sourced signals use a different rule and are excluded.
+              <span className="font-bold">This is a base rate, not a recommendation win rate.</span> Every stock the
+              technical scanner grades each day (about 2,150) is simulated as a long from the next open, bullish or
+              bearish alike; a win is a net <code>return_pct &gt; 0</code> after the resolver exit and costs, flat exits
+              included. Use it as the bar a call has to beat: the score buckets below show whether higher scanner scores
+              do better than any stock. Recommendation trade win rates (Buy as a long, Sell as an intraday short) are on
+              the dashboard and the Edge Evidence page. Resolver population: <span className="font-data font-bold">{winRates.labelDefinition}</span>.
+              Simulated from recorded prices, not broker fills.
             </p>
           )}
 
           {!winRates && (
             <div className="flex items-center gap-2 text-sm text-slate-400">
               <Loader2 className="w-4 h-4 animate-spin" />
-              Loading win rate data…
+              Loading net profit-rate data…
             </div>
           )}
 
           {winRates && winRates.overall.total === 0 && (
-            <p className="text-sm text-slate-400">No resolved outcomes yet. Win rates populate automatically as signal dates age past 5 and 15 days.</p>
+            <p className="text-sm text-slate-400">No resolved outcomes yet. Profit rates populate as signal dates age past the 5- and 15-day horizons.</p>
           )}
 
           {winRates && winRates.overall.total > 0 && (
@@ -704,11 +702,11 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
               {/* Overall stats */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 {[
-                  { label: 'Total Trades', value: winRates.overall.total.toString(), color: 'text-slate-100', card: 'v1-card-neutral' as const },
-                  { label: 'Win Rate', value: `${winRates.overall.winRate.toFixed(1)}%`, color: winRates.overall.winRate >= 55 ? 'text-emerald-400' : winRates.overall.winRate >= 45 ? 'text-amber-400' : 'text-rose-400', card: winRates.overall.winRate >= 55 ? 'v1-card-up' as const : winRates.overall.winRate >= 45 ? 'v1-card-neutral' as const : 'v1-card-down' as const },
-                  { label: 'Avg Return', value: `${winRates.overall.avgReturn >= 0 ? '+' : ''}${winRates.overall.avgReturn.toFixed(2)}%`, color: winRates.overall.avgReturn >= 0 ? 'text-emerald-400' : 'text-rose-400', card: winRates.overall.avgReturn >= 0 ? 'v1-card-up' as const : 'v1-card-down' as const },
-                  { label: 'Avg Win', value: `+${winRates.overall.avgWin.toFixed(2)}%`, color: 'text-emerald-400', card: 'v1-card-up' as const },
-                  { label: 'Avg Loss', value: `${winRates.overall.avgLoss.toFixed(2)}%`, color: 'text-rose-400', card: 'v1-card-down' as const },
+                  { label: 'Stocks Graded', value: winRates.overall.total.toString(), color: 'text-slate-100', card: 'v1-card-neutral' as const },
+                  { label: 'Base Win Rate (any stock)', value: `${winRates.overall.winRate.toFixed(1)}%`, color: 'text-slate-100', card: 'v1-card-neutral' as const },
+                  { label: 'Avg Net Return', value: `${winRates.overall.avgReturn >= 0 ? '+' : ''}${winRates.overall.avgReturn.toFixed(2)}%`, color: winRates.overall.avgReturn >= 0 ? 'text-emerald-400' : 'text-rose-400', card: winRates.overall.avgReturn >= 0 ? 'v1-card-up' as const : 'v1-card-down' as const },
+                  { label: 'Avg Profitable Trade', value: `+${winRates.overall.avgWin.toFixed(2)}%`, color: 'text-emerald-400', card: 'v1-card-up' as const },
+                  { label: 'Avg Nonprofitable Trade', value: `${winRates.overall.avgLoss.toFixed(2)}%`, color: 'text-rose-400', card: 'v1-card-down' as const },
                 ].map(({ label, value, color, card }) => (
                   <div key={label} className={cn(card, 'p-3 text-center')}>
                     <div className="v1-data-label mb-1">{label}</div>
@@ -728,7 +726,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-slate-400">{hd.total} trades</span>
                         <span className={cn('text-lg font-black', hd.winRate >= 55 ? 'text-emerald-400' : hd.winRate >= 45 ? 'text-amber-400' : 'text-rose-400')}>
-                          {hd.winRate.toFixed(1)}% WR
+                          {hd.winRate.toFixed(1)}% profitable
                         </span>
                         <span className={cn('text-sm font-bold', hd.avgReturn >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                           {hd.avgReturn >= 0 ? '+' : ''}{hd.avgReturn.toFixed(2)}%
@@ -742,7 +740,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
               {/* By signal type */}
               {Object.keys(winRates.bySignalType).length > 0 && (
                 <div>
-                  <p className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400 mb-2">Win Rate by Signal Type</p>
+                  <p className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400 mb-2">Net Profit Rate by Signal Type</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {(Object.entries(winRates.bySignalType) as [SignalType, { total: number; wins: number; winRate: number; avgReturn: number }][])
                       .sort((a, b) => b[1].winRate - a[1].winRate)
@@ -772,7 +770,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
               {/* By score bucket */}
               {Object.keys(winRates.byScoreBucket).length > 0 && (
                 <div>
-                  <p className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400 mb-2">Win Rate by Signal Score</p>
+                  <p className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400 mb-2">Net Profit Rate by Signal Score</p>
                   <div className="grid grid-cols-3 gap-2">
                     {(['7-10', '4-6', '1-3'] as const).map(bucket => {
                       const b = winRates.byScoreBucket[bucket];

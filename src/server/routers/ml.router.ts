@@ -285,23 +285,31 @@ export const mlRouter = router({
     .input(z.object({
       days:       z.number().min(7).max(1825).default(180),
       minSignals: z.number().min(1).max(100).default(10),
+      side:       z.enum(['LONG', 'SHORT']).default('LONG'),
     }).optional())
     .query(async ({ input }) => {
       const days = input?.days ?? 180;
       const minSignals = input?.minSignals ?? 10;
+      const side = input?.side ?? 'LONG';
       const cutoff = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
 
-      // Shared aggregate expressions. win_rate is among DECIDED signals (win/loss/stop);
+      // Shared aggregate expressions. profitable_rate is the trade win rate: return_pct > 0 over every
+      // resolved row (return_pct is direction-signed and net of costs, so a short wins when the price
+      // falls). win_rate is the resolver LABEL among decided signals (win/loss/stop);
       // decisive_rate = fraction that resolved to any directional outcome (the key emission
-      // metric); neutral_rate = fraction that expired flat.
+      // metric); neutral_rate = fraction that expired flat. One side per call: pooling longs and
+      // shorts would average two different trades into one number.
       const agg = `
         COUNT(*) AS total,
         SUM(CASE WHEN uso.outcome='WIN'       THEN 1 ELSE 0 END) AS wins,
         SUM(CASE WHEN uso.outcome='LOSS'      THEN 1 ELSE 0 END) AS losses,
         SUM(CASE WHEN uso.outcome='NEUTRAL'   THEN 1 ELSE 0 END) AS neutrals,
         SUM(CASE WHEN uso.outcome='STOP_LOSS' THEN 1 ELSE 0 END) AS stops,
+        SUM(CASE WHEN uso.return_pct > 0 THEN 1 ELSE 0 END) AS profitable,
         ROUND(100.0 * SUM(CASE WHEN uso.outcome='WIN' THEN 1 ELSE 0 END)
               / NULLIF(SUM(CASE WHEN uso.outcome IN ('WIN','LOSS','STOP_LOSS') THEN 1 ELSE 0 END), 0), 1) AS win_rate,
+        ROUND(100.0 * SUM(CASE WHEN uso.return_pct > 0 THEN 1 ELSE 0 END)
+              / NULLIF(COUNT(*), 0), 1) AS profitable_rate,
         ROUND(100.0 * SUM(CASE WHEN uso.outcome != 'NEUTRAL' THEN 1 ELSE 0 END)
               / NULLIF(COUNT(*), 0), 1) AS decisive_rate,
         ROUND(100.0 * SUM(CASE WHEN uso.outcome='NEUTRAL' THEN 1 ELSE 0 END)
@@ -315,9 +323,11 @@ export const mlRouter = router({
         FROM unified_signal_outcomes uso
         -- Both columns are native DATE since the 2026-09-03 TEXT->DATE migration; substr() on them raised.
         LEFT JOIN market_regimes mr ON mr.date = uso.signal_date
+        JOIN unified_signals us ON us.id = uso.unified_signal_id
         WHERE uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
           AND uso.return_pct IS NOT NULL
-          AND uso.signal_date >= ?`;
+          AND uso.signal_date >= ?
+          AND ${side === 'LONG' ? 'us.target_price > us.stop_loss' : 'us.target_price < us.stop_loss'}`;
 
       const [overall, bySource, byRegime, byHorizon, grid] = await Promise.all([
         dbGet(`SELECT ${agg} ${base}`, [cutoff]),
@@ -332,7 +342,7 @@ export const mlRouter = router({
 
       const u = (rows: any[]) => rows.map((r) => withUncertainty(r));
       return {
-        asOf: cutoff, windowDays: days, minReliableWindows: MIN_DATES_RELIABLE,
+        asOf: cutoff, windowDays: days, side, minReliableWindows: MIN_DATES_RELIABLE,
         overall: withUncertainty(overall as any), bySource: u(bySource), byRegime: u(byRegime),
         byHorizon: u(byHorizon), grid: u(grid),
       };
@@ -401,6 +411,7 @@ export const mlRouter = router({
                SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
                SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS loss_count,
                SUM(CASE WHEN outcome = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutral_count,
+               SUM(CASE WHEN return_pct > 0 THEN 1 ELSE 0 END) AS profitable_count,
                AVG(return_pct) AS avg_return_pct,
                AVG(max_return_pct) AS avg_max_return_pct,
                NULL AS avg_min_return_pct
@@ -415,11 +426,13 @@ export const mlRouter = router({
                SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
                SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS loss_count,
                SUM(CASE WHEN outcome = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutral_count,
+               SUM(CASE WHEN actual_return_pct > 0 THEN 1 ELSE 0 END) AS profitable_count,
                AVG(actual_return_pct) AS avg_return_pct,
                NULL AS avg_max_return_pct,
                NULL AS avg_min_return_pct
         FROM recommendation_log
         WHERE outcome IN ('WIN', 'LOSS', 'NEUTRAL') AND actual_exit_price IS NOT NULL
+          AND actual_return_pct IS NOT NULL AND rec_type IN ('BUY','STRONG_BUY')
         GROUP BY COALESCE(horizon_days, 15)
         ORDER BY signal_source, win_count DESC
       `);
@@ -451,15 +464,19 @@ export const mlRouter = router({
       `, [activeLimit]);
 
       const recommendationSummary = dbGet<any>(`
+        -- Trade win rate: every graded Buy is a trade; it won when its net return is above zero, lost
+        -- otherwise. win_count + loss_count = total, so there is no separate NEUTRAL bucket to add.
         SELECT COUNT(*) AS total_recommendations,
-               SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
-               SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS loss_count,
-               SUM(CASE WHEN outcome = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutral_count,
+               SUM(CASE WHEN actual_return_pct > 0 THEN 1 ELSE 0 END) AS win_count,
+               SUM(CASE WHEN actual_return_pct <= 0 THEN 1 ELSE 0 END) AS loss_count,
                AVG(actual_return_pct) AS avg_actual_return_pct,
+               AVG(actual_return_pct) FILTER (WHERE actual_return_pct > 0) AS avg_win_pct,
+               AVG(actual_return_pct) FILTER (WHERE actual_return_pct <= 0) AS avg_loss_pct,
                MAX(actual_return_pct) AS best_actual_return_pct,
                MIN(actual_return_pct) AS worst_actual_return_pct
         FROM recommendation_log
-        WHERE actual_return_pct IS NOT NULL
+        WHERE actual_return_pct IS NOT NULL AND actual_exit_price IS NOT NULL
+          AND outcome IN ('WIN','LOSS','NEUTRAL') AND rec_type IN ('BUY','STRONG_BUY')
       `);
 
       const recommendationSourceBreakdown = dbAll<any>(`

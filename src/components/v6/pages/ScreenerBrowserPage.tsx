@@ -276,13 +276,7 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
   // already read (screener_performance_v2, see LegacyScoreBanner) -- not a fabricated global
   // count, and not computed from the current 30-row page.
   const totalScreeners = categories.reduce((sum: number, c: any) => sum + (c.screener_count ?? 0), 0);
-  const weightedWinRate = totalScreeners > 0
-    ? categories.reduce((sum: number, c: any) => sum + (c.avg_win_rate ?? 0) * (c.screener_count ?? 0), 0) / totalScreeners
-    : null;
   const categoryCount = new Set(categories.map((c: any) => c.category).filter(Boolean)).size;
-  const bestCategory = categories.length
-    ? [...categories].filter((c: any) => c.avg_win_rate != null).sort((a: any, b: any) => b.avg_win_rate - a.avg_win_rate)[0]
-    : null;
 
   return (
     <div className="space-y-4">
@@ -296,8 +290,8 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
         <div className="v1-grid-4">
           <StatTile label="Categories" value={String(categoryCount)} sub={`${horizon} horizon`} />
           <StatTile label="Screeners Tracked" value={totalScreeners.toLocaleString('en-IN')} sub="across all categories" />
-          <StatTile label="Weighted Avg Win Rate" value={fmtPct(weightedWinRate)} sub="screener_performance_v2" />
-          <StatTile label="Top Category" value={bestCategory?.category ?? '—'} sub={bestCategory ? `${fmtPct(bestCategory.avg_win_rate)} avg WR` : undefined} />
+          <StatTile label="Screener profit rate" value="Unverified" sub="Historical table failed remeasurement" />
+          <StatTile label="Top Category" value="Not ranked by win rate" sub="No validated screener outcome rate" />
         </div>
       )}
 
@@ -384,7 +378,7 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
               )}
             >
               <p className="text-[10px] font-bold text-[var(--v6-ink-soft)]">{c.category}</p>
-              <p className="text-[10px] text-[var(--v6-faint)]">{c.screener_count} screeners · {fmtPct(c.avg_win_rate)} avg WR</p>
+              <p className="text-[10px] text-[var(--v6-faint)]">{c.screener_count} screeners · historical rate unverified</p>
             </button>
           ))}
           </div>
@@ -406,7 +400,7 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
                   <th className="text-left py-2 px-3">Source</th>
                   <th className="text-left py-2 px-3">Category</th>
                   <th className="text-center py-2 px-3">Tier</th>
-                  <th className="text-right py-2 px-3">Win Rate</th>
+                  <th className="text-right py-2 px-3">Win Rate (unverified)</th>
                   <th className="text-right py-2 px-3">Avg Return</th>
                   <th className="text-right py-2 px-3">Alpha</th>
                   <th className="text-right py-2 pl-3">Appearances</th>
@@ -429,7 +423,7 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
                         {r.tier ?? '—'}
                       </span>
                     </td>
-                    <td className="text-right py-2.5 px-3 font-data text-slate-200">{fmtPct(r.win_rate)}</td>
+                    <td className="text-right py-2.5 px-3 font-data text-slate-500">Unverified</td>
                     <td className={cn('text-right py-2.5 px-3 font-data', r.avg_return == null ? 'text-slate-400' : r.avg_return >= 0 ? 'text-emerald-400' : 'text-rose-400')}>{fmtNum(r.avg_return)}%</td>
                     <td className={cn('text-right py-2.5 px-3 font-data', r.alpha == null ? 'text-slate-400' : r.alpha >= 0 ? 'text-emerald-400' : 'text-rose-400')}>{fmtNum(r.alpha)}%</td>
                     <td className="text-right py-2.5 pl-3 font-data text-slate-400">{r.total_appearances ?? '—'}</td>

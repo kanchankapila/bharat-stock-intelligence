@@ -10,6 +10,7 @@ import { vi, test, expect, beforeEach } from 'vitest';
 const dbAllMock = vi.fn();
 const dbTransactionMock = vi.fn();
 const dbRunMock = vi.fn();
+const loadLiveQuotesMock = vi.fn();
 
 vi.mock('../dbAsync', () => ({
   dbGet: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock('../stockMapping', () => ({
   getStockMappingByTLId: vi.fn().mockReturnValue(undefined),
   getStockMappingByName: vi.fn().mockReturnValue(undefined),
 }));
+vi.mock('../liveQuotes', () => ({ loadLiveQuotes: loadLiveQuotesMock }));
 
 const { saveScreenerStocksToDB } = await import('../trendlyneScreener');
 
@@ -35,6 +37,7 @@ beforeEach(() => {
   dbAllMock.mockReset().mockResolvedValue([]); // screener_appearances snapshot
   dbRunMock.mockReset();
   dbTransactionMock.mockReset();
+  loadLiveQuotesMock.mockReset().mockResolvedValue({ quotes: new Map(), asOf: null, marketOpen: null });
 });
 
 test('a non-numeric stockId (e.g. the NSE symbol itself) is never upserted', async () => {
@@ -106,6 +109,31 @@ test('fetchTrendlyneScreenerData takes the symbol from the NSEcode column', asyn
   try {
     const res = await fetchTrendlyneScreenerData('756513', 'ADX', 0, true);
     expect(res.data.map(s => [s.stockId, s.symbol])).toEqual([['2106579', 'JGCHEM'], ['99', undefined]]);
+  } finally {
+    fetchSpy.mockRestore();
+  }
+});
+
+test('screener performance keeps missing movement blank, uses live 1D, and preserves provider 5D', async () => {
+  const { fetchTrendlyneScreenerData } = await import('../trendlyneScreener');
+  const headers = ['get_full_name', 'NSEcode', 'stock_id', 'currentPrice', 'pReturn1D', 'pPercentChange', 'pReturn1W', 'pReturn5D', 'pReturn1M']
+    .map(unique_name => ({ unique_name }));
+  const body = { head: { status: '0' }, body: { screenObj: { title: 'ADX' }, tableHeaders: headers,
+    tableData: [
+      ['JG Chemicals Ltd.', 'JGCHEM', 2106579, 412.5, '1.2', '', '-2.1', '3.25', '5.4'],
+      ['Second Ltd.', 'NEWSYM', 100, 10, '0.85', '', '1.1', '1.4', '4.2'],
+    ] } };
+  loadLiveQuotesMock.mockResolvedValue({
+    quotes: new Map([['JGCHEM', { symbol: 'JGCHEM', price: 415, changePct: 1.7 }]]),
+    asOf: '2026-11-20T06:00:00.000Z', marketOpen: true,
+  });
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+  try {
+    const res = await fetchTrendlyneScreenerData('756513', 'ADX', 0, true);
+    expect(res.data.map(s => [s.ltp, s.changePercent, s.return_1d, s.return_1w, s.return_5d, s.return_1m])).toEqual([
+      [415, 1.7, 1.2, -2.1, 3.25, 5.4],
+      [10, 0.85, 0.85, 1.1, 1.4, 4.2],
+    ]);
   } finally {
     fetchSpy.mockRestore();
   }

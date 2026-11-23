@@ -310,6 +310,10 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
       console.log(`[QUEUE] stock-mapping sync completed (updated ${mapResult.updatedCount}, `
         + `skipped ${mapResult.skippedCount}, failed ${mapResult.failedCount})`);
     });
+    // Reconcile every canonical/static source ticker against NSE's current equity master and
+    // symbol-change archive only after both the NSE master and provider-ID sync have settled.
+    // This is report-only: provider IDs are never inferred from a new NSE ticker.
+    await T.run('ticker-mapping-audit', () => runPython('nse_symbol_mapping_audit.py', [], 180_000));
     // Index membership flags (Nifty50/100/200/Midcap150/Smallcap250) — passive ETF flow signal.
     await runPython('index_membership_fetcher.py', [], 180_000)
       .catch(err => T.fail('index_membership_fetcher', err));

@@ -53,7 +53,8 @@ def _seed(con, n_sym=40, n_sess=260, calls_last=40, seed=5):
                 "unified_score DOUBLE PRECISION, classification TEXT, ml_score DOUBLE PRECISION, confluence_score DOUBLE PRECISION, "
                 "technical_score DOUBLE PRECISION, breakout_score DOUBLE PRECISION)")
     con.execute("CREATE TABLE unified_recommendations (symbol TEXT, generated_at TIMESTAMPTZ, est_cost_bps DOUBLE PRECISION)")
-    con.execute("CREATE TABLE technical_signals (symbol TEXT, date DATE, calibrated_win_probability DOUBLE PRECISION)")
+    con.execute("CREATE TABLE technical_signals (symbol TEXT, date DATE, calibrated_win_probability DOUBLE PRECISION, "
+                "rs_vs_sector_21d DOUBLE PRECISION)")
     con.execute("CREATE TABLE signal_outcomes (symbol TEXT, signal_date DATE, horizon_days INTEGER, outcome TEXT, "
                 "signal_source TEXT, label_definition TEXT)")
     con.execute("CREATE TABLE confluence_signals (symbol TEXT, computed_at TIMESTAMPTZ, trend_alignment_score DOUBLE PRECISION, "
@@ -79,12 +80,12 @@ def _seed(con, n_sym=40, n_sess=260, calls_last=40, seed=5):
                 ur.append((f"S{s}", g, 100.0 if s < 4 else None))
             if s == 5:                                                   # another run's cost is not this call's own cost
                 ur.append(("S5", (pd.Timestamp(g) + pd.Timedelta(hours=1)).isoformat(), 999.0))
-            ts.append((f"S{s}", d.date(), float(rng.random())))
+            ts.append((f"S{s}", d.date(), float(rng.random()), float(rng.normal() * 0.05)))
             so.append((f"S{s}", d.date(), 5, "WIN" if rng.random() < 0.4 else "LOSS", "technical", "path_barrier"))
     con.executemany("INSERT INTO unified_recommendations_history VALUES (?,?,?,?,?,?,?,?,?)", urh)
     con.executemany("INSERT INTO confluence_signals VALUES (?,?,?,?,?,?)", cs)
     con.executemany("INSERT INTO unified_recommendations VALUES (?,?,?)", ur)
-    con.executemany("INSERT INTO technical_signals VALUES (?,?,?)", ts)
+    con.executemany("INSERT INTO technical_signals VALUES (?,?,?,?)", ts)
     con.executemany("INSERT INTO signal_outcomes VALUES (?,?,?,?,?,?)", so)
     con.commit()
     return sess
@@ -98,7 +99,7 @@ def test_end_to_end_on_a_throwaway_schema_and_persist_writes_one_row():
     out = S.build_scorecard(con, since)
     arms = {r["arm"] for r in out["rows"]}
     assert arms == {"published", "reblend", "reblend_vol_veto", "reblend_no_ml", "random_control", "reblend_no_sector_slot",
-                    "reblend_learned"}
+                    "reblend_learned", "reblend_sector_rs_gate"}
     assert out["no_sector_slot"] == {"sessions_covered": 40, "sessions_excluded": 0, "excluded": []}
     assert {r["floor"] for r in out["rows"]} == {1e8, 5e8} or {r["floor"] for r in out["rows"]} == {1e8}
     pub = [r for r in out["rows"] if r["tier"] == "published"]

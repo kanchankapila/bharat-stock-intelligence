@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   TrendingUp, BarChart2, Zap, Shield, Users, Globe, Star, AlertTriangle,
-  Activity, Layers, RefreshCcw, Calendar, BarChart, ChevronDown, ChevronUp,
+  Activity, Layers, RefreshCcw, Calendar, BarChart,
   ArrowUpRight, Clock, Database
 } from 'lucide-react';
 import { trpc } from '../lib/trpc';
@@ -54,11 +54,6 @@ const SOURCE_COLORS: Record<string, string> = {
   MoneyControl: 'v1-text-accent',
 };
 
-function pct(n: number | null | undefined) {
-  if (n == null) return '—';
-  return `${(n * 100).toFixed(1)}%`;
-}
-
 function fmtScore(n: number | null | undefined) {
   if (n == null) return '—';
   return n.toFixed(3);
@@ -71,7 +66,6 @@ function CategoryCard({ cat, onClick, active }: {
   active: boolean;
 }) {
   const Icon = CAT_ICON[cat.category] ?? Database;
-  const wr = cat.avg_win_rate ? (cat.avg_win_rate * 100).toFixed(1) : null;
   const label = (cat.category as string).replace(/_/g, ' ');
 
   return (
@@ -88,10 +82,10 @@ function CategoryCard({ cat, onClick, active }: {
           {/* ponytail: v1-data-value/label are sized for headline KPI strips (text-lg);
               this grid packs 9 tiles per row, too narrow for that scale -- kept the original
               compact sizing, only the card container (background/border) was unified. */}
-          <p className={cn('text-sm font-bold', wr && parseFloat(wr) >= 60 ? 'text-emerald-400' : 'text-slate-300')}>
-            {wr ? `${wr}%` : '—'}
+          <p className="text-sm font-bold text-slate-500">
+            —
           </p>
-          <p className="text-[10px] text-slate-500">win rate</p>
+          <p className="text-[10px] text-slate-500">win rate unverified</p>
         </div>
         <div className="text-right">
           <p className="text-xs font-semibold text-slate-400">{cat.screener_count}</p>
@@ -131,8 +125,8 @@ function ScreenerRow({ row, selected, onClick }: { row: any; selected: boolean; 
         </span>
       </td>
       <td className="px-3 py-2.5 text-right font-data">
-        <span className={cn(row.win_rate >= 0.6 ? 'text-emerald-400' : 'text-slate-300')}>
-          {pct(row.win_rate)}
+        <span className="text-slate-500">
+          Unverified
         </span>
       </td>
       <td className="px-3 py-2.5 text-right font-data text-slate-300">{fmtScore(row.bayesian_score)}</td>
@@ -145,8 +139,8 @@ function ScreenerRow({ row, selected, onClick }: { row: any; selected: boolean; 
 }
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
-function ScreenerDetail({ screenerId }: { screenerId: string }) {
-  const { data, isLoading } = trpc.getScreenerDetail.useQuery({ screener_id: screenerId });
+function ScreenerDetail({ screenerId, source }: { screenerId: string; source: string }) {
+  const { data, isLoading } = trpc.getScreenerDetail.useQuery({ screener_id: screenerId, source });
 
   if (isLoading) return <div className="p-4 text-slate-500 text-xs">Loading…</div>;
   if (!data?.perf) return <div className="p-4 text-slate-500 text-xs">No data</div>;
@@ -168,8 +162,8 @@ function ScreenerDetail({ screenerId }: { screenerId: string }) {
       {/* Metrics grid */}
       <div className="grid grid-cols-2 gap-2">
         {[
-          ['Win Rate 5D', pct(p.wr_5d)],
-          ['Win Rate 20D', pct(p.wr_20d)],
+          ['Win Rate 5D', 'Unverified'],
+          ['Win Rate 20D', 'Unverified'],
           ['Avg Return 20D', p.avg_ret_20d != null ? `${(p.avg_ret_20d).toFixed(2)}%` : '—'],
           ['Sharpe 20D', p.sharpe_20d?.toFixed(2) ?? '—'],
           ['Alpha 20D', p.alpha_20d != null ? `${p.alpha_20d.toFixed(2)}%` : '—'],
@@ -235,8 +229,7 @@ export function ScreenerIntelligencePage({ onSelectStock }: { onSelectStock?: (s
   const [filterTier, setFilterTier] = useState<string>('');
   const [filterCategory, setFilterCategory] = useState<string>('');
   const [filterSource, setFilterSource] = useState<string>('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sortAsc, setSortAsc] = useState(false);
+  const [selectedScreener, setSelectedScreener] = useState<{ screener_id: string; source: string } | null>(null);
   const [viewMode, setViewMode] = useState<'leaderboard' | 'signals'>('leaderboard');
 
   const { data: categoryStats } = trpc.getScreenerCategoryStats.useQuery({ horizon });
@@ -252,12 +245,11 @@ export function ScreenerIntelligencePage({ onSelectStock }: { onSelectStock?: (s
     trpc.triggerScreenerPerformanceRecompute.useMutation();
 
   const rows = (leaderboard ?? []) as any[];
-  const sorted = sortAsc ? [...rows].reverse() : rows;
+  const sorted = [...rows].sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
   // Unique categories in current results for filter pill
   const cats = categoryStats as any[] ?? [];
-  // Sort categories by avg_win_rate desc
-  const topCats = [...cats].sort((a, b) => (b.avg_win_rate ?? 0) - (a.avg_win_rate ?? 0));
+  const topCats = [...cats].sort((a, b) => String(a.category).localeCompare(String(b.category)));
 
   return (
     <div className="flex h-full" style={{ minHeight: 0 }}>
@@ -399,26 +391,28 @@ export function ScreenerIntelligencePage({ onSelectStock }: { onSelectStock?: (s
                 <tr className="text-[10px] text-slate-500 border-b border-slate-800/50">
                   <th className="px-3 py-2 text-left">Screener</th>
                   <th className="px-3 py-2 text-left">Tier</th>
-                  <th
-                    className="px-3 py-2 text-right cursor-pointer hover:text-slate-300 select-none"
-                    onClick={() => setSortAsc(!sortAsc)}
-                  >
-                    Win Rate {sortAsc ? <ChevronUp className="inline w-3 h-3" /> : <ChevronDown className="inline w-3 h-3" />}
-                  </th>
+                  <th className="px-3 py-2 text-right">Win Rate (unverified)</th>
                   <th className="px-3 py-2 text-right">Score</th>
                   <th className="px-3 py-2 text-right">Signals</th>
                   <th className="px-3 py-2 text-left">Category</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/30">
-                {sorted.map((row: any) => (
-                  <ScreenerRow
-                    key={row.screener_id}
-                    row={row}
-                    selected={selectedId === row.screener_id}
-                    onClick={() => setSelectedId(selectedId === row.screener_id ? null : row.screener_id)}
-                  />
-                ))}
+                {sorted.map((row: any) => {
+                  const selected = selectedScreener?.screener_id === row.screener_id
+                    && selectedScreener.source === row.source;
+                  return (
+                    <ScreenerRow
+                      key={`${row.source}:${row.screener_id}`}
+                      row={row}
+                      selected={selected}
+                      onClick={() => setSelectedScreener(selected ? null : {
+                        screener_id: row.screener_id,
+                        source: row.source,
+                      })}
+                    />
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -428,14 +422,17 @@ export function ScreenerIntelligencePage({ onSelectStock }: { onSelectStock?: (s
       </div>
 
       {/* Detail panel */}
-      {selectedId && (
+      {selectedScreener && (
         <div className="w-72 xl:w-80 border-l border-slate-800/50 flex flex-col flex-shrink-0 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800/50 flex-shrink-0">
             <span className="text-[11px] font-semibold text-slate-400">Screener Detail</span>
-            <button onClick={() => setSelectedId(null)} className="text-slate-500 hover:text-slate-300 text-xs">✕</button>
+            <button onClick={() => setSelectedScreener(null)} className="text-slate-500 hover:text-slate-300 text-xs">✕</button>
           </div>
           <div className="flex-1 overflow-y-auto">
-            <ScreenerDetail screenerId={selectedId} />
+            <ScreenerDetail
+              screenerId={selectedScreener.screener_id}
+              source={selectedScreener.source}
+            />
           </div>
         </div>
       )}

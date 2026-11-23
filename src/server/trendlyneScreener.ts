@@ -13,6 +13,25 @@ import { getStockMapping, getStockMappingByTLId, getStockMappingByName } from '.
 import { delay } from './lib/async';
 import { getAtrBarriers, type Barriers } from './atrBarriers';
 import { cacheGet, cacheSet } from './cacheService';
+import { loadLiveQuotes } from './liveQuotes';
+
+function optionalNumber(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(String(value).replace(/,/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function applyLiveQuotes(stocks: TrendlyneStock[], quotes: Awaited<ReturnType<typeof loadLiveQuotes>>['quotes']): TrendlyneStock[] {
+  return stocks.map((stock) => {
+    const quote = stock.symbol ? quotes.get(stock.symbol) : undefined;
+    if (!quote) return stock;
+    return {
+      ...stock,
+      ...(quote.price != null ? { ltp: quote.price } : {}),
+      ...(quote.changePct != null ? { changePercent: quote.changePct } : {}),
+    };
+  });
+}
 
 const TRENDLYNE_BASE_URL = 'https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/';
 
@@ -426,7 +445,8 @@ export interface TrendlyneStock {
   symbol?: string;
   ltp: number;
   change: number;
-  changePercent: number;
+  changePercent: number | null;
+  return_5d?: number | null;
   screenerName: string;
   screenerType?: string;
   [key: string]: any;
@@ -564,7 +584,7 @@ export async function fetchTrendlyneScreenerData(
       const cached = getCachedData(cacheKey, maxAgeMs);
       if (cached) {
         console.log(`📦 Using cached data for screener: ${screenerName}`);
-        return cached;
+        return { ...cached, data: applyLiveQuotes(cached.data, (await loadLiveQuotes()).quotes) };
       }
     }
 
@@ -621,8 +641,10 @@ export async function fetchTrendlyneScreenerData(
       const nameIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'get_full_name');
       const priceIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'currentPrice');
       const changeIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pPriceChange' || h.unique_name === 'priceChange');
-      const changePctIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pPercentChange' || h.unique_name === 'percentChange');
+      const changePctIndex = tableHeaders.findIndex((h: any) => ['pReturn1D', 'return1D', 'return_1d', 'pPercentChange', 'percentChange'].includes(h.unique_name));
+      const return1dIndex = tableHeaders.findIndex((h: any) => ['pReturn1D', 'return1D', 'return_1d'].includes(h.unique_name));
       const return1wIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pReturn1W' || h.unique_name === 'return1W' || h.unique_name === 'pReturn5D');
+      const return5dIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pReturn5D' || h.unique_name === 'return5D' || h.unique_name === 'return_5d');
       const return1mIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pReturn1M' || h.unique_name === 'return1M' || h.unique_name === 'pReturn21D');
       const nseIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'NSEcode');
 
@@ -643,11 +665,13 @@ export async function fetchTrendlyneScreenerData(
           stockId: tlId,
           name: fullName,
           symbol: mapping?.symbol ?? (/^[A-Z0-9&-]{1,20}$/.test(nseCode) ? nseCode : undefined),
-          ltp: parseFloat(row[priceIndex] || 0),
-          change: changeIndex !== -1 ? parseFloat(row[changeIndex] || 0) : 0,
-          changePercent: changePctIndex !== -1 ? parseFloat(row[changePctIndex] || 0) : 0,
-          return_1w: return1wIndex !== -1 ? parseFloat(row[return1wIndex] || 0) : undefined,
-          return_1m: return1mIndex !== -1 ? parseFloat(row[return1mIndex] || 0) : undefined,
+          ltp: optionalNumber(row[priceIndex]) ?? 0,
+          change: changeIndex !== -1 ? optionalNumber(row[changeIndex]) ?? 0 : 0,
+          changePercent: changePctIndex !== -1 ? optionalNumber(row[changePctIndex]) : null,
+          return_1d: return1dIndex !== -1 ? optionalNumber(row[return1dIndex]) : changePctIndex !== -1 ? optionalNumber(row[changePctIndex]) : null,
+          return_1w: return1wIndex !== -1 && return1wIndex !== return5dIndex ? optionalNumber(row[return1wIndex]) ?? undefined : undefined,
+          return_1m: return1mIndex !== -1 ? optionalNumber(row[return1mIndex]) ?? undefined : undefined,
+          return_5d: return5dIndex !== -1 ? optionalNumber(row[return5dIndex]) : null,
           screenerName: screenerTitle,
           screenerType: 'all-in-one'
         });
@@ -710,6 +734,8 @@ export async function fetchTrendlyneScreenerData(
                 s.score = score.rank_composite;
                 if (s.return_1w === undefined) s.return_1w = score.return_1w;
                 if (s.return_1m === undefined) s.return_1m = score.return_1m;
+                const score5d = optionalNumber(score.return_1w);
+                if (s.return_5d == null && score5d != null) s.return_5d = score5d;
                 s.classification = score.composite_class;
                 s.piotroski_f_score = score.piotroski_f_score;
               }
@@ -745,7 +771,7 @@ export async function fetchTrendlyneScreenerData(
       // Cache the result
       cache.set(cacheKey, { data: result, timestamp: Date.now() });
       console.log(`✅ Fetched ${stocks.length} stocks for screener: ${screenerTitle}`);
-      return result;
+      return { ...result, data: applyLiveQuotes(stocks, (await loadLiveQuotes()).quotes) };
     }
 
     // A degraded read that returns zero rows for a named screener. The message used to

@@ -65,10 +65,8 @@
     "temporal-correctness-audit": "on",
     "test-integrity-audit": "on",
     "threshold-calibration-audit": "on",
-    "trade-desk": "on",
     "trpc-surface-review": "on",
-    "verify-gate-runner": "on",
-    "weekend-audit": "on"
+    "anthropic-skills:built-in-browser": "name-only"
   },
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": false,

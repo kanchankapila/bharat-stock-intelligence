@@ -1046,6 +1046,29 @@ export const CANONICAL_TIMEFRAMES = ['INTRADAY', 'SWING', 'POSITIONAL'] as const
 
 export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   {
+    id: 'nse-ticker-mapping-audit',
+    label: 'Weekly NSE and provider ticker-mapping audit',
+    category: 'reference',
+    critical: false,
+    sql: `SELECT completeness_status, expected_rows, accepted_rows, rejected_rows,
+                 source_version, recorded_at
+            FROM market_data_watermark
+           WHERE dataset = 'nse_ticker_mapping_audit' AND partition_key = 'ALL'
+           LIMIT 1`,
+    evaluate: (row, now) => {
+      if (!row) return { status: 'warn', detail: 'No weekend ticker-mapping audit has completed yet.' };
+      const age = daysStale(row.recorded_at, now);
+      if (age == null) return { status: 'fail', detail: 'Ticker-mapping audit watermark has no valid recorded_at.' };
+      if (age > 10) return { status: 'warn', detail: `Last ticker-mapping audit was ${fmtDays(age)} old.` };
+      const findings = Number(row.rejected_rows) || 0;
+      if (row.completeness_status !== 'complete' || findings > 0) {
+        return { status: 'warn', detail: `${findings} mapping finding(s) across ${Number(row.expected_rows) || 0} NSE symbols; `
+          + `latest source ${row.source_version ?? 'unknown'}, provider IDs are report-only until directly verified.` };
+      }
+      return { status: 'pass', detail: `All ${Number(row.expected_rows) || 0} NSE symbols pass the weekly mapping audit (${row.source_version ?? 'source version unknown'}).` };
+    },
+  },
+  {
     id: 'xbrl-observation-latest-integrity',
     label: 'Latest XBRL observation has a consistent identity',
     category: 'signals',

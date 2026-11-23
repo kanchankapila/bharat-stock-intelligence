@@ -157,3 +157,134 @@ def test_hold_everything_has_no_t_statistic_not_a_huge_one():
     # excess is exactly -cost on every date (zero variance); a numerically-zero sd must not become t = 1e15
     r = ftr.selective_accuracy(_panel(60, 300, signal=1.0), horizon=5, tiers=(1.0,), cost=0.005)[0]
     assert r["t_eff"] != r["t_eff"]                       # NaN
+
+
+# ── trade profitability: positions, both directions, comparators (2026-11-20) ────────────────────
+
+def _calls(rows, sess):
+    """rows: (symbol, session index, classification, raw_fwd_5, raw_intraday)."""
+    return pd.DataFrame([{"symbol": s, "date": sess[i], "classification": c, "raw_fwd_5": f, "raw_intraday": r}
+                         for s, i, c, f, r in rows])
+
+
+def test_a_call_held_on_consecutive_sessions_is_one_position():
+    sess = _sessions()
+    p = _calls([("A", 1, "Buy", 0.02, 0.0), ("A", 2, "Buy", 0.02, 0.0), ("A", 3, "Strong Buy", 0.02, 0.0),
+                ("A", 4, "Hold", 0.0, 0.0), ("A", 5, "Buy", 0.02, 0.0),          # re-entry after a Hold
+                ("B", 1, "Buy", 0.02, 0.0), ("B", 3, "Buy", 0.02, 0.0)], sess)   # a missing session breaks the run
+    e = ftr.position_entries(p, ftr.LONG_CLASSES, sess)
+    assert e.tolist() == [True, False, False, False, True, True, True]
+
+
+def test_a_sell_call_wins_as_an_intraday_short_when_the_price_falls():
+    sess = _sessions()
+    p = _calls([("A", 1, "Sell", 0.0, -0.03), ("B", 1, "Strong Sell", 0.0, +0.01), ("C", 1, "Hold", 0.0, 0.0)], sess)
+    e = ftr.position_entries(p, ftr.SHORT_CLASSES, sess)
+    r = ftr.trade_profitability(p, e, "raw_intraday", "short", 0.0018, 1, "intraday")
+    assert r["trades"] == 2 and r["wins"] == 1 and r["win_rate"] == 0.5
+    assert abs(r["avg_win_pct"] - (3.0 - 0.18)) < 1e-9          # sold high, bought back 3% lower, less costs
+    assert abs(r["avg_loss_pct"] - (-1.0 - 0.18)) < 1e-9        # the price rose 1% against the short
+
+
+def test_costs_turn_a_break_even_trade_into_a_loss():
+    sess = _sessions()
+    p = _calls([("A", 1, "Buy", 0.004, 0.0)], sess)
+    e = ftr.position_entries(p, ftr.LONG_CLASSES, sess)
+    assert ftr.trade_profitability(p, e, "raw_fwd_5", "long", 0.0, 5, "5d")["wins"] == 1
+    assert ftr.trade_profitability(p, e, "raw_fwd_5", "long", 0.005, 5, "5d")["wins"] == 0
+
+
+def test_the_win_rate_is_reported_against_a_random_pick_on_the_same_dates():
+    sess = _sessions()
+    # Rising tape: 3 of 4 names rise. The single Buy rises too -> 100% win rate, but only +25 points above chance.
+    p = _calls([("A", 1, "Buy", 0.03, 0.0), ("B", 1, "Hold", 0.03, 0.0), ("C", 1, "Hold", 0.03, 0.0),
+                ("D", 1, "Sell", -0.03, 0.0), ("E", 9, "Hold", -0.5, 0.0)], sess)   # E is on another date: excluded
+    e = ftr.position_entries(p, ftr.LONG_CLASSES, sess)
+    r = ftr.trade_profitability(p, e, "raw_fwd_5", "long", 0.0, 5, "5d")
+    assert r["win_rate"] == 1.0 and r["base_win_rate"] == 0.75 and abs(r["win_rate_lift"] - 0.25) < 1e-12
+    assert r["profit_factor"] is None and r["low_data"] is True
+
+
+def test_profit_factor_is_gross_wins_over_gross_losses():
+    sess = _sessions()
+    p = _calls([("A", 1, "Buy", 0.04, 0.0), ("B", 1, "Buy", -0.02, 0.0)], sess)
+    r = ftr.trade_profitability(p, ftr.position_entries(p, ftr.LONG_CLASSES, sess), "raw_fwd_5", "long", 0.0, 5, "5d")
+    assert abs(r["profit_factor"] - 2.0) < 1e-9 and abs(r["avg_net_return_pct"] - 1.0) < 1e-9
+
+
+class _RecordingCon:
+    def __init__(self):
+        self.writes = []
+
+    def execute(self, sql, params=()):
+        if sql.lstrip().upper().startswith("INSERT"):
+            self.writes.append(sql)
+
+        class _R:
+            def fetchone(self):
+                return None
+        return _R()
+
+    def commit(self):
+        pass
+
+
+def test_a_preview_run_does_not_freeze_a_protocol():
+    con = _RecordingCon()
+    assert ftr.ensure_protocol(con, "k", {"v": 1}, freeze=False)[1] is True and con.writes == []
+    ftr.ensure_protocol(con, "k", {"v": 1}, freeze=True)
+    assert len(con.writes) == 1
+
+
+def test_build_panel_carries_the_entry_session_open_to_close_return():
+    from pg_test_support import pg_memory_conn
+    con = pg_memory_conn()
+    con.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date DATE, open DOUBLE PRECISION, close DOUBLE PRECISION, "
+                "volume DOUBLE PRECISION, is_suspect INTEGER DEFAULT 0)")
+    sess = _sessions(60)
+    con.executemany("INSERT INTO stock_ohlcv (symbol, date, open, close, volume, is_suspect) VALUES (?,?,?,?,?,?)",
+                    [("LIQ", d.date(), 100.0, 100.0 if i != 31 else 97.0, 1_000_000, 0) for i, d in enumerate(sess)])
+    con.commit()
+    calls = pd.DataFrame({"symbol": ["LIQ"], "session": [sess[30]], "unified_score": [10.0], "classification": ["Sell"]})
+    panel = ftr.build_panel(con, calls, sess, [5], min_adt=10_000_000)
+    assert abs(panel["raw_intraday"].iloc[0] - (-0.03)) < 1e-12     # session 31: opened 100, closed 97
+    con.close()
+
+
+def test_only_eq_series_names_are_graded_as_intraday_shorts():
+    sess = _sessions()
+    p = _calls([("EQS", 1, "Sell", 0.0, -0.02), ("BES", 1, "Sell", 0.0, -0.05), ("BUY", 1, "Buy", 0.03, 0.0)], sess)
+    for h in (10, 21):
+        p[f"raw_fwd_{h}"] = p["raw_fwd_5"]
+    p["eq"] = [True, False, False]          # BES trades trade-to-trade: it cannot be squared off intraday
+    out = ftr.trade_profitability_block(p, sess)
+    assert out["short_intraday"]["trades"] == 1
+    assert abs(out["short_intraday"]["avg_net_return_pct"] - (2.0 - 0.18)) < 1e-9
+    assert out["long_5"]["trades"] == 1      # the long side is not restricted to EQ (BE names can be bought)
+
+
+def test_lift_carries_a_per_date_interval_over_independent_windows():
+    sess = _sessions(60)
+    rng = np.random.default_rng(7)
+    rows = [(f"S{k}", d, "Buy" if k < 5 else "Hold", float(rng.normal(0, 0.03)), 0.0) for d in range(40) for k in range(30)]
+    p = _calls(rows, sess)
+    p["classification"] = ["Buy" if (r[0] in ("S0", "S1", "S2", "S3", "S4") and r[1] % 2 == 0) else "Hold" for r in rows]
+    r = ftr.trade_profitability(p, ftr.position_entries(p, ftr.LONG_CLASSES, sess), "raw_fwd_5", "long", 0.0, 5, "5d")
+    assert r["win_rate_lift_ci95"] is not None and r["win_rate_lift_ci95"] > 0.05   # coin-flip picks: a wide interval
+    assert abs(r["win_rate_lift"]) < r["win_rate_lift_ci95"]                        # no edge claimed
+
+
+def test_attach_eq_series_reads_the_series_through_the_real_driver():
+    # db_compat returns dict rows: an unaliased aggregate comes back under its function name, and a DataFrame built
+    # with explicit column names then reads all-NaN (bugs-data-layer.md). Only a real connection shows it.
+    from pg_test_support import pg_memory_conn
+    con = pg_memory_conn()
+    con.execute("CREATE TABLE nse_universe_history (symbol TEXT, date DATE, series TEXT)")
+    con.executemany("INSERT INTO nse_universe_history VALUES (?,?,?)",
+                    [("EQS", "2026-10-06", "EQ"), ("BES", "2026-10-06", "BE"), ("BOTH", "2026-10-06", "BE"), ("BOTH", "2026-10-06", "EQ")])
+    con.commit()
+    panel = pd.DataFrame({"symbol": ["EQS", "BES", "BOTH", "NONE"], "date": pd.to_datetime(["2026-10-06"] * 4)})
+    out = ftr.attach_eq_series(con, panel).set_index("symbol")["eq"]
+    con.close()
+    assert out["EQS"] == True and out["BES"] == False and out["BOTH"] == True   # noqa: E712
+    assert out["NONE"] != out["NONE"] or out["NONE"] is None                      # no series row: unknown, not EQ

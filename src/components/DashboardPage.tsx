@@ -45,6 +45,8 @@ const rose = '#ef4444';    // bearish
 const hold = '#eab308';    // hold
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+const pct1 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(1)}%`);
+
 function fmtPct(n: number) {
   return (n > 0 ? '+' : '') + n.toFixed(2) + '%';
 }
@@ -605,15 +607,21 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           accent={isGenerating ? amber : '#e2e8f0'}
           icon={<Radio size={9} />}
         />
-        {/* V-09: LONG only, 15d, WIN/(WIN+LOSS+STOP) -- NEUTRAL shown beside it, never in the
-            denominator; return_pct is gross of costs. */}
+        {/* 15d trade win rate per side of the published signal geometry: share of resolved trades whose net,
+            direction-signed return is above zero (a short wins when the price falls), flat exits included. The
+            short leg is a 15-session short (futures/SLB, not a cash-market trade); Sell calls graded as intraday
+            shorts are on the Edge Evidence page. Simulated from recorded prices. */}
         <KpiChip
-          label="Long Win Rate · 15d"
-          value={accuracyMetrics && accuracyMetrics.decisiveSignals > 0 ? `${accuracyMetrics.profitHitRate.toFixed(1)}%` : '—'}
-          sub={accuracyMetrics && accuracyMetrics.decisiveSignals > 0
-            ? `n=${accuracyMetrics.decisiveSignals.toLocaleString('en-IN')} decisive · ${accuracyMetrics.neutralSignals.toLocaleString('en-IN')} neutral · avg ${accuracyMetrics.avgGrossReturnPct == null ? '—' : `${accuracyMetrics.avgGrossReturnPct.toFixed(2)}%`} gross${accuracyMetrics.asOf ? ` · as of ${String(accuracyMetrics.asOf).slice(0, 10)}` : ''}`
-            : 'No decisive long outcomes yet'}
-          up={(accuracyMetrics?.profitHitRate ?? 0) >= 50}
+          label="Signal Trade Win Rate · 15d (S = futures/SLB short)"
+          value={accuracyMetrics
+            ? `L ${pct1(accuracyMetrics.long.netProfitRate)} · S ${pct1(accuracyMetrics.short.netProfitRate)}`
+            : '—'}
+          sub={accuracyMetrics
+            ? [accuracyMetrics.long, accuracyMetrics.short].map(s =>
+                `${s.side === 'LONG' ? 'long' : 'short'} n=${s.resolvedSignals.toLocaleString('en-IN')} avg ${s.avgNetReturnPct == null ? '—' : `${s.avgNetReturnPct.toFixed(2)}%`}`,
+              ).join(' · ') + ' net of costs'
+            : 'No completed outcomes yet'}
+          up={accuracyMetrics?.long.netProfitRate == null ? null : accuracyMetrics.long.netProfitRate >= 50}
           accent={emerald}
           icon={<TrendingUp size={9} />}
         />
@@ -956,10 +964,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         {/* V-10: strategy_performance 'overall' = every technical signal_outcomes row (path_barrier
             label), NEUTRAL in the denominator, gross -- not an ensemble. */}
         <KpiChip
-          label={`All-Signal Win Rate · ${perfDashboard?.overall?.horizon_days ?? '—'}d`}
+          label={`Technical Resolver WIN Label Rate · ${perfDashboard?.overall?.horizon_days ?? '—'}d`}
           value={perfDashboard?.overall?.win_rate != null ? `${(perfDashboard.overall.win_rate * 100).toFixed(1)}%` : '—'}
           sub={perfDashboard?.overall?.total_signals != null
-            ? `n=${Number(perfDashboard.overall.total_signals).toLocaleString('en-IN')} · all sides · incl. neutral · gross${perfDashboard.overall.last_computed ? ` · as of ${String(perfDashboard.overall.last_computed).slice(0, 10)}` : ''}`
+            ? `n=${Number(perfDashboard.overall.total_signals).toLocaleString('en-IN')} · technical path-barrier labels, not net-profit rate${perfDashboard.overall.last_computed ? ` · as of ${String(perfDashboard.overall.last_computed).slice(0, 10)}` : ''}`
             : undefined}
           accent={emerald}
           icon={<Gauge size={11} />}

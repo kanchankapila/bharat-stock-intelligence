@@ -12,6 +12,8 @@ export function ForwardTestPanel() {
   const { data, isError } = trpc.getEdgeStatus.useQuery(undefined, DAILY);
   const ft = data?.forwardTest as ForwardTestReport | null | undefined;
   const block = ft?.blocks?.forward;
+  // Rows without `side` are the superseded v1 Buy-only shape; they are not shown as trades.
+  const trades = Object.entries(block?.trade_profitability ?? {}).filter(([, t]) => t.side != null);
   const call = deriveCallState(ft);
   return (
     <section className="v1-card p-4 space-y-3" aria-label="Forward test">
@@ -21,8 +23,10 @@ export function ForwardTestPanel() {
           Source: app_settings forward_test_report{ft?.protocol_hash ? ` · protocol hash ${ft.protocol_hash}` : ''}
           {block ? ` · since ${block.since} · ${block.sessions ?? 0} sessions · ${block.calls ?? 0} calls` : ''}
           {data?.forwardTestAsOf ? ` · as of ${relativeFromNow(data.forwardTestAsOf)}` : ''}.
-          Entry next open, 0.25% cost per side, benchmark is the equal-weight liquid ranked universe. A tier needs
+          Entry next open, fixed 0.25% cost per side, exits N sessions later at the open; these rows measure beating the
+          equal-weight liquid ranked universe, not the fraction of trades with positive P&L. A tier needs
           {' '}{data?.minIndependentWindows ?? 20} independent windows (dates / horizon) before its verdict is evidence.
+          The published row grades Buy/Strong Buy calls against the universe; the trade table below grades Buy and Sell calls as trades.
         </p>
         <p className="text-[11px] text-amber-300 mt-1">{call.message}</p>
       </div>
@@ -36,7 +40,7 @@ export function ForwardTestPanel() {
           </div>
           <table className="w-full text-[11px] tabular-nums">
             <thead className="text-slate-500">
-              <tr>{['Tier (top %)', 'Dates', 'Independent windows', 'Hit rate', 'Random-pick hit', 'Lift ±95%', 'Excess after cost', 't', 'Verdict'].map(h =>
+              <tr>{['Tier (top %)', 'Dates', 'Independent windows', 'Beat-universe rate', 'Random-pick beat rate', 'Lift ±95%', 'Excess after cost', 't', 'Verdict'].map(h =>
                 <th key={h} scope="col" className="text-left font-normal px-1.5 py-1">{h}</th>)}</tr>
             </thead>
             <tbody>
@@ -57,6 +61,46 @@ export function ForwardTestPanel() {
           </table>
         </div>
       ))}
+      {block && trades.length > 0 && (
+        <div className="overflow-x-auto">
+          <h3 className="text-[12px] font-semibold text-slate-200">Published calls as trades · win rate after costs</h3>
+          <p className="text-[10px] text-slate-500 mt-1">
+            One trade per entry into the call (a name that stays Buy for 21 sessions is one position). Buy/Strong Buy: long
+            from the next open, exit at the open N sessions later, 0.25% per side. Sell/Strong Sell: intraday short sale, sold
+            at the next open and bought back at that session's close, 0.09% per side; it wins when the price falls. A win is a
+            net return above zero. The random-pick rate is the same trade on every liquid ranked name on the same dates, so
+            lift is skill above chance; a lift inside its ± interval is not an edge. Only EQ-series names count as shorts
+            (trade-to-trade and SME series cannot be squared off intraday). Recorded prices, not broker fills; dividends excluded.
+          </p>
+          <table className="w-full text-[11px] tabular-nums mt-2">
+            <thead className="text-slate-500">
+              <tr>{['Trade', 'Trades', 'Win rate', 'Random-pick win rate', 'Lift', 'Avg win', 'Avg loss', 'Profit factor', 'Avg net / trade', 'Independent windows'].map(h =>
+                <th key={h} scope="col" className="text-left font-normal px-1.5 py-1">{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {trades.map(([key, t]) => (
+                <tr key={key} className={`border-t border-slate-800 ${t.low_data ? 'text-slate-500' : 'text-slate-300'}`}>
+                  <td className="px-1.5 py-1">{t.side === 'short' ? 'Sell → intraday short' : `Buy → long ${t.horizon}`}</td>
+                  <td className="px-1.5 py-1">{t.trades}</td>
+                  <td className="px-1.5 py-1">{pctTxt(t.win_rate)}</td>
+                  <td className="px-1.5 py-1">{pctTxt(t.base_win_rate)}</td>
+                  <td className="px-1.5 py-1">{t.win_rate_lift == null ? 'n/a' : `${t.win_rate_lift >= 0 ? '+' : ''}${pctTxt(t.win_rate_lift)}${t.win_rate_lift_ci95 == null ? '' : ` ± ${pctTxt(t.win_rate_lift_ci95)}`}`}</td>
+                  <td className="px-1.5 py-1">{t.avg_win_pct == null ? 'n/a' : `${num(t.avg_win_pct, 2)}%`}</td>
+                  <td className="px-1.5 py-1">{t.avg_loss_pct == null ? 'n/a' : `${num(t.avg_loss_pct, 2)}%`}</td>
+                  <td className="px-1.5 py-1">{num(t.profit_factor, 2)}</td>
+                  <td className={`px-1.5 py-1 ${t.low_data ? '' : (t.avg_net_return_pct ?? 0) > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {t.avg_net_return_pct == null ? 'n/a' : `${num(t.avg_net_return_pct, 2)}%`}
+                  </td>
+                  <td className="px-1.5 py-1">{num(t.eff_dates, 1)}{t.low_data ? ' · low data' : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {block && trades.length === 0 && (
+        <div className="text-[11px] text-amber-300">Trade win rates appear after the nightly report runs with the trade protocol.</div>
+      )}
     </section>
   );
 }
@@ -71,7 +115,7 @@ export function ReliabilityPanel() {
   return (
     <section className="v1-card p-4 space-y-4" aria-label="Reliability">
       <div>
-        <h2 className="v1-title-section">Calibrated win probability: predicted vs realised hit rate</h2>
+        <h2 className="v1-title-section">Resolver-label probability: predicted vs realised WIN rate</h2>
         <p className="text-[11px] text-slate-400 mt-1">
           Brier {num(data.brier)} · base rate {pctTxt(data.baseRate)} · n {data.n} decisive outcomes (WIN vs LOSS/STOP_LOSS; flat
           NEUTRAL exits left out) over {data.dates} signal dates · through {data.asOf ?? 'n/a'}. Source: {data.source}. Overlapping

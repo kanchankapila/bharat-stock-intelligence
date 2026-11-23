@@ -394,11 +394,7 @@ export const screenersRouter = router({
     }),
 
   getScreenerDetail: publicProcedure
-    .input(z.object({ screener_id: z.string() }))
-    // NOTE: screener_id (scan_id) alone can still be ambiguous across providers (MC/ETnow
-    // collide, see the 2026-08-04 screener_master memory) -- this procedure has no `source`
-    // input to disambiguate, so dbGet below can return either provider's row when both exist.
-    // The JOIN itself is now correct (sm always matches spv's own source), just not the input.
+    .input(z.object({ screener_id: z.string(), source: z.string().min(1) }))
     .query(async ({ input }) => {
       const perf = await dbGet(`
         SELECT spv.*, sm.name, sm.inferred_category AS category, sm.subcategory,
@@ -406,27 +402,27 @@ export const screenersRouter = router({
                sm.classified_by
         FROM screener_performance_v2 spv
         JOIN screener_master sm ON sm.scan_id = spv.screener_id AND sm.source = spv.source
-        WHERE spv.screener_id = ?
-      `, [input.screener_id]);
+        WHERE spv.screener_id = ? AND LOWER(spv.source) = LOWER(?)
+      `, [input.screener_id, input.source]);
 
       const recentAppearances = await dbAll(`
         SELECT symbol, appeared_date, exited_date,
                return_5d, return_10d, return_20d, return_60d, return_120d,
                nifty_ret_20d, outcome_20d
         FROM screener_appearances
-        WHERE screener_id = ?
+        WHERE screener_id = ? AND LOWER(source) = LOWER(?)
         ORDER BY appeared_date DESC
         LIMIT 30
-      `, [input.screener_id]);
+      `, [input.screener_id, input.source]);
 
       const topStocks = await dbAll(`
         SELECT symbol, COUNT(*) AS appearances
         FROM screener_appearances
-        WHERE screener_id = ?
+        WHERE screener_id = ? AND LOWER(source) = LOWER(?)
         GROUP BY symbol
         ORDER BY appearances DESC
         LIMIT 15
-      `, [input.screener_id]);
+      `, [input.screener_id, input.source]);
 
       return { perf, recentAppearances, topStocks,
         biasAnalysis: perf ? analyzeScreener(String((perf as any).name ?? ''), String((perf as any).source ?? ''), input.screener_id) : null };

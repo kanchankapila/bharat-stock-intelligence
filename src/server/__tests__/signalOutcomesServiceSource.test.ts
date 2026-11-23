@@ -81,6 +81,22 @@ describe('getWinRateStats is horizon-explicit and counts only real exits', () =>
     expect(s.byHorizon[5].total).toBe(1);
   });
 
+  // 2026-11-20: a win is a trade that made money after costs, not the resolver's barrier label. A
+  // barrier-touch WIN that exited below entry lost money; a NEUTRAL that exited above entry made it.
+  it('counts a win by net return, not by the WIN label, and says the population is a base rate', async () => {
+    await ins('W1', '2020-01-01', 5, 'WIN', -1.5, 98.5);
+    await ins('N1', '2020-01-01', 5, 'NEUTRAL', 0.4, 100.4);
+    await ins('N2', '2020-01-01', 5, 'NEUTRAL', 0.6, 100.6);
+    await ins('L1', '2020-01-01', 5, 'LOSS', -3, 97);
+    const s = await getWinRateStats();
+    expect(s.overall.total).toBe(4);
+    expect(s.overall.wins).toBe(2);         // the label would say 1 (W1), and it lost money
+    expect(s.overall.losses).toBe(2);
+    expect(s.overall.avgWin).toBeCloseTo(0.5, 6);
+    expect(s.overall.avgLoss).toBeCloseTo(-2.25, 6);
+    expect(s.population).toBe('every_scanned_stock_long');
+  });
+
   it('excludes rows with no exit price (fabricated flat labels)', async () => {
     await ins('B', '2020-01-01', 5, 'WIN', 4, 104);
     await ins('C', '2020-01-01', 5, 'NEUTRAL', 0, null);

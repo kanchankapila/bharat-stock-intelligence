@@ -20,6 +20,15 @@ describe('hit-rate uncertainty (AF-20261119-13)', () => {
     expect(u.win_ci_hi!).toBeGreaterThan(55);
   });
 
+  it('gives the trade win rate (profitable of total) its own deflated interval', () => {
+    const u = hitRateUncertainty({ dates: 150, max_horizon: 5, decided: 2000, wins: 1500, total: 3000, profitable: 1200 });
+    const raw = wilson(1200, 3000)!;
+    expect(u.profitable_ci_lo!).toBeLessThan(40);
+    expect(u.profitable_ci_hi!).toBeGreaterThan(40);
+    expect(u.profitable_ci_lo!).toBeLessThan(raw[0]);
+    expect(u.win_ci_lo!).toBeGreaterThan(u.profitable_ci_hi!);   // 75% label rate vs 40% trade rate: not the same number
+  });
+
   it('reads stringified numerics from node-pg and handles empty cells', () => {
     expect(hitRateUncertainty({ dates: '40', max_horizon: '1', decided: '0', wins: '0' }).win_ci_lo).toBeNull();
     expect(hitRateUncertainty({}).low_data).toBe(true);

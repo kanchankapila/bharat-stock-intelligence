@@ -17,7 +17,14 @@ vi.mock('../lib/trpc', () => ({
     getLiveHitRates: q({ rows: [] }),
     getEdgeStatus: q({
       forwardTest: { protocol_hash: '13210b4e2c3ae688', generated_at: '2026-10-08T21:27:09',
-        blocks: { forward: { since: '2026-10-06', calls: 4650, sessions: 2, tiers: { '5': tierRows('LOW-DATA'), '10': tierRows('LOW-DATA') } } } },
+        blocks: { forward: { since: '2026-10-06', calls: 4650, sessions: 2, tiers: { '5': tierRows('LOW-DATA'), '10': tierRows('LOW-DATA') },
+          trade_profitability: {
+            long_5: { side: 'long', horizon: '5d', trades: 1135, wins: 463, win_rate: 0.408, base_win_rate: 0.443, win_rate_lift: -0.035,
+              avg_net_return_pct: -0.787, avg_win_pct: 4.741, avg_loss_pct: -4.596, profit_factor: 0.711, eff_dates: 5, low_data: true },
+            short_intraday: { side: 'short', horizon: 'intraday', trades: 2125, wins: 1113, win_rate: 0.524, base_win_rate: 0.52, win_rate_lift: 0.004,
+              avg_net_return_pct: -0.053, avg_win_pct: 1.727, avg_loss_pct: -2.014, profit_factor: 0.945, eff_dates: 29, low_data: false },
+            '21': { buy_calls: 9, profit_rate: 0.99 },   // superseded v1 Buy-only shape: must not render as a trade
+          } } } },
       forwardTestAsOf: '2026-10-08 15:57:04+00', scorecard: null, scorecardAsOf: null, minIndependentWindows: 20,
       calendarBlockedUntil: { '5': '2027-02-23', '10': '2027-07-13', '21': null },
     }),
@@ -44,8 +51,19 @@ describe('/signal-report-card forward test and reliability sections', () => {
     expect(html).toMatch(/independent windows/);
   });
 
+  it('grades Buy calls as longs and Sell calls as intraday shorts, each against a random pick', () => {
+    expect(html).toContain('Buy → long 5d');
+    expect(html).toContain('Sell → intraday short');
+    expect(html).toContain('Random-pick win rate');
+    expect(html).toContain('40.8%');      // Buy win rate
+    expect(html).toContain('44.3%');      // the random pick it has to beat
+    expect(html).toContain('-3.5%');      // lift: worse than chance
+    expect(html).toContain('52.4%');      // short win rate
+    expect(html.match(/Buy → long/g)?.length).toBe(1);   // the v1 row is not shown as a trade
+  });
+
   it('renders the reliability curve titled predicted vs realised with Brier, base rate and n per bin', () => {
-    expect(html).toContain('predicted vs realised hit rate');
+    expect(html).toContain('predicted vs realised WIN rate');
     expect(html).toContain('Brier 0.271');
     expect(html).toContain('base rate 41.0%');
     expect(html).toContain('16355');

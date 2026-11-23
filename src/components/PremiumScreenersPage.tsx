@@ -11,7 +11,9 @@ interface TrendlyneStock {
   name: string;
   ltp: number;
   change: number;
-  changePercent: number;
+  changePercent: number | null;
+  return_1d?: number | null;
+  return_5d?: number | null;
   score?: number;
   return_1w?: number;
   return_1m?: number;
@@ -62,7 +64,7 @@ function labelForReturnKey(key: string): string {
 
 function extractReturns(stock: TrendlyneStock): Array<{ label: string; value: number }> {
   const dynamic = Object.entries(stock)
-    .filter(([k, v]) => /^return_/.test(k) && typeof v === 'number' && Number.isFinite(v as number))
+    .filter(([k, v]) => /^return_/.test(k) && k !== 'return_1d' && k !== 'return_5d' && typeof v === 'number' && Number.isFinite(v as number))
     .map(([k, v]) => ({ label: labelForReturnKey(k), value: v as number }));
 
   const has1W = dynamic.some((r) => r.label === '1W');
@@ -236,7 +238,9 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
               {stocks.map((stock) => {
                 const nse = resolveNseSymbol(stock);
                 const returns = extractReturns(stock);
-                const positive = stock.changePercent == null ? null : stock.changePercent >= 0;
+                const oneDayMovement = stock.changePercent ?? stock.return_1d ?? null;
+                const positive = oneDayMovement == null ? null : oneDayMovement >= 0;
+                const return5d = typeof stock.return_5d === 'number' && Number.isFinite(stock.return_5d) ? stock.return_5d : null;
                 return (
                   <div
                     key={`${stock.stockId}-${stock.name}`}
@@ -252,7 +256,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
                         <div className="text-[10px] text-slate-400 font-data mt-1">{nse || stock.stockId}</div>
                       </div>
                       <div className={cn('text-[11px] font-black', positive == null ? 'text-slate-400' : positive ? 'text-emerald-400' : 'text-rose-400')}>
-                        {stock.changePercent == null ? '—' : `${positive ? '+' : ''}${stock.changePercent.toFixed(2)}%`}
+                        {oneDayMovement == null ? '—' : `${positive ? '+' : ''}${oneDayMovement.toFixed(2)}%`}
                       </div>
                     </div>
 
@@ -271,8 +275,13 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
                       <div className="text-[9px] text-slate-500 font-display uppercase tracking-widest mb-1">Price Performance Durations</div>
                       <div className="flex flex-wrap gap-2">
                         <span className={cn('text-[10px] font-bold', positive == null ? 'text-slate-400' : positive ? 'text-emerald-400' : 'text-rose-400')}>
-                          1D: {stock.changePercent == null ? '—' : `${positive ? '+' : ''}${stock.changePercent.toFixed(2)}%`}
+                          1D: {oneDayMovement == null ? '—' : `${positive ? '+' : ''}${oneDayMovement.toFixed(2)}%`}
                         </span>
+                        {return5d != null && (
+                          <span className={cn('text-[10px] font-bold', return5d >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                            5D: {return5d >= 0 ? '+' : ''}{return5d.toFixed(2)}%
+                          </span>
+                        )}
                         {returns.map((r) => (
                           <span key={r.label} className={cn('text-[10px] font-bold', r.value >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                             {r.label}: {r.value >= 0 ? '+' : ''}{r.value.toFixed(2)}%

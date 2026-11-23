@@ -4,7 +4,7 @@ A sibling of forward_test_report.py. It imports that module's frozen machinery (
 next-session-OPEN entry, per-date winsorisation, the equal-weight benchmark, selective_accuracy, dates/h windows)
 and never touches its PROTOCOL; the frozen forward test remains the arbiter. This report adds breadth around it:
 
-  arms      published | reblend | reblend_vol_veto | reblend_no_ml | random_control | reblend_no_sector_slot | reblend_learned   (accuracy_shadow_arms.py)
+  arms      published | reblend | reblend_vol_veto | reblend_no_ml | random_control | reblend_no_sector_slot | reblend_learned | reblend_sector_rs_gate   (accuracy_shadow_arms.py)
   tiers     top 1/5/10/25/100% of each session's liquid ranked set, plus Buy/Strong Buy as published
   horizons  5, 10, 21 sessions;  liquidity floors Rs 10cr and Rs 50cr trailing-20d ADT
   regimes   ALL; UP/DOWN = NIFTY50 close vs its own 200-session mean; BROAD/NARROW = share of names above their
@@ -291,6 +291,19 @@ def load_calibration(con, since: str) -> dict:
     return out
 
 
+def attach_sector_rs(con, calls: pd.DataFrame, since: str) -> pd.DataFrame:
+    """Add rs_vs_sector_21d from technical_signals as of each session (point-in-time)."""
+    lo = (pd.Timestamp(since) - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
+    rows = con.execute("SELECT symbol, date, rs_vs_sector_21d FROM technical_signals "
+                       "WHERE date >= ? AND rs_vs_sector_21d IS NOT NULL", (lo,)).fetchall()
+    rs = _frame(rows, ["symbol", "date", "rs_vs_sector_21d"])
+    if rs.empty:
+        return calls
+    rs["session"] = pd.to_datetime(rs["date"])
+    rs["rs_vs_sector_21d"] = pd.to_numeric(rs["rs_vs_sector_21d"], errors="coerce")
+    return calls.merge(rs[["symbol", "session", "rs_vs_sector_21d"]], on=["symbol", "session"], how="left")
+
+
 # ── assembly ──────────────────────────────────────────────────────────────────
 
 def build_scorecard(con, since: str) -> dict:
@@ -308,6 +321,14 @@ def build_scorecard(con, since: str) -> dict:
         calls = attach_confluence_parts(con, calls, sessions)
     except Exception as e:                                  # a shadow arm must not take the scorecard (and its alerts) down; db_compat rolls the aborted transaction back
         out["no_sector_slot_error"] = f"{type(e).__name__}: {e}"[:300]
+    try:
+        calls = attach_sector_rs(con, calls, since)
+    except Exception as e:                                  # a shadow arm must not take the scorecard down
+        try:
+            con.rollback()
+        except Exception:
+            pass
+        out["sector_rs_gate_error"] = f"{type(e).__name__}: {e}"[:300]
     learn_fwd = None
     try:
         # reblend_learned fits weights to realised forward returns; learned_weights() admits only windows that had
@@ -318,12 +339,16 @@ def build_scorecard(con, since: str) -> dict:
                                                        how="left")[f"fwd_{A.LEARN_HORIZON}"].set_axis(calls.index)
     except Exception as e:                                  # a shadow arm must not take the scorecard down
         out["learned_error"] = f"{type(e).__name__}: {e}"[:300]
-    arms = A.arm_scores(calls, calls["vol20"], fwd=learn_fwd, sessions=sessions)
+    arms = A.arm_scores(calls, calls["vol20"], fwd=learn_fwd, sessions=sessions,
+                        sector_rs=calls.get("rs_vs_sector_21d"))
     for a in A.ARMS:
         calls[f"arm_{a}"] = arms[a]
     covered = calls["arm_reblend_no_sector_slot"].notna().groupby(calls["session"]).any()
     out["no_sector_slot"] = {"sessions_covered": int(covered.sum()), "sessions_excluded": int((~covered).sum()),
                              "excluded": [str(d.date()) for d in covered.index[~covered]]}
+    covered_rs = calls["arm_reblend_sector_rs_gate"].notna().groupby(calls["session"]).any()
+    out["sector_rs_gate"] = {"sessions_covered": int(covered_rs.sum()), "sessions_excluded": int((~covered_rs).sum()),
+                             "excluded": [str(d.date()) for d in covered_rs.index[~covered_rs]]}
     calls["buy"] = calls["classification"].isin(["Buy", "Strong Buy"])
 
     disp = []

@@ -183,3 +183,58 @@ def test_reblend_learned_is_nan_without_forward_returns_and_present_with_them():
     assert out["reblend_learned"].notna().all()
     first = p["session"] == sessions[0]                  # nothing closed yet -> identical to the live reblend
     assert np.allclose(out.loc[first, "reblend_learned"], out.loc[first, "reblend"])
+
+
+# ── reblend_sector_rs_gate (AF-20261119-08: gate names lagging their sector) ─────────
+
+def test_sector_rs_gate_haircuts_only_lagging_names_and_fails_open_on_nan():
+    p = _panel(n_dates=2, n=10)
+    # Give half the names positive RS, half negative, and one NaN
+    rs = pd.Series([0.05, -0.02, 0.01, -0.08, 0.00, -0.01, 0.10, -0.04, np.nan, 0.03] * 2, index=p.index)
+    base = A.reblend(p)
+    gated = A.reblend_sector_rs_gate(p, rs)
+    lagging = rs < 0.0
+    # Stocks with rs < 0 must be haircut by exactly SECTOR_RS_GATE_MULT (0.7)
+    assert np.allclose(gated[lagging], base[lagging] * A.SECTOR_RS_GATE_MULT)
+    # Non-lagging (>= 0 or NaN) must keep the exact base score (fail-open)
+    assert np.allclose(gated[~lagging], base[~lagging])
+
+
+def test_sector_rs_gate_reads_column_from_dataframe_if_series_not_passed():
+    p = _panel(n_dates=2, n=10)
+    rs_vals = [0.05, -0.02, 0.01, -0.08, 0.00, -0.01, 0.10, -0.04, np.nan, 0.03] * 2
+    p_with_col = p.assign(rs_vs_sector_21d=rs_vals)
+    base = A.reblend(p)
+    gated = A.reblend_sector_rs_gate(p_with_col)
+    lagging = pd.Series(rs_vals, index=p.index) < 0.0
+    assert np.allclose(gated[lagging], base[lagging] * A.SECTOR_RS_GATE_MULT)
+    assert np.allclose(gated[~lagging], base[~lagging])
+
+
+def test_sector_rs_gate_is_blank_for_unpopulated_sessions():
+    a, b = _panel(n_dates=1, n=10, seed=1), _panel(n_dates=1, n=10, seed=2)
+    b["session"] = pd.Timestamp("2026-01-06")
+    p = pd.concat([a, b], ignore_index=True)
+    # Session a has RS data; session b has all-NaN
+    rs = pd.Series([0.05, -0.02, 0.01, -0.08, 0.00, -0.01, 0.10, -0.04, 0.02, 0.03] + [np.nan] * 10, index=p.index)
+    out = A.reblend_sector_rs_gate(p, rs)
+    # Session a has values; session b is all-NaN
+    assert out[p.session == a.session.iloc[0]].notna().all()
+    assert out[p.session == b.session.iloc[0]].isna().all()
+
+
+def test_sector_rs_gate_is_blank_when_feature_absent():
+    p = _panel(n_dates=2, n=10)
+    assert A.reblend_sector_rs_gate(p).isna().all()
+
+
+def test_sector_rs_gate_negative_control_fails_if_haircut_or_threshold_mutated():
+    p = _panel(n_dates=1, n=10)
+    rs = pd.Series([0.05, -0.02, 0.01, -0.08, 0.00, -0.01, 0.10, -0.04, 0.02, 0.03], index=p.index)
+    base = A.reblend(p)
+    gated = A.reblend_sector_rs_gate(p, rs)
+    # Negative control: lagging stocks must strictly be lower than base
+    lagging_idx = p.index[rs < 0.0]
+    for idx in lagging_idx:
+        assert gated.loc[idx] < base.loc[idx]
+        assert abs(gated.loc[idx] - base.loc[idx] * 0.7) < 1e-9

@@ -958,6 +958,16 @@ for it, and none was run. Do not cite this entry as evidence about the ranker's 
 
 ## Accuracy comes from realized returns, never a proxy
 
+- **Owner decision 2026-11-20 (AF-20261120-03): the headline win rate is the TRADE win rate** -- the share of trades whose net,
+  direction-signed return is above zero, every resolved trade in the denominator (flat exits included), one trade per entry into a
+  call, and always quoted beside the random-pick win rate on the same dates plus avg win / avg loss. Buy = long from the next open;
+  Sell = intraday short sale (sell at the next open, buy back at that close), EQ-series names only (trade-to-trade and SME series
+  cannot be squared off intraday). `forward_test_report.trade_profitability`,
+  `win_definition.net_profit_rate()` and `getAccuracyMetrics` implement it. The label rate `WIN / (WIN + LOSS)` in the next bullet
+  stays a diagnostic of the resolver's barrier label and is never shown as "the win rate". First readings (read-only preview
+  2026-11-20, forward block since 2026-10-06): Buy as a 5d long 40.8% vs random 44.3% (lift -3.5 +/- 7.6pp, eff 5, LOW-DATA,
+  avg -0.79%/trade, profit factor 0.71); Sell as an intraday short 52.5% vs 52.0% (lift +0.5 +/- 2.4pp on 29 independent
+  windows: NOT an edge, avg -0.04%/trade). Neither side makes money after costs.
 - **Accuracy and win-rate must always be computed from actual realized returns vs. the actual system-generated signal — never from a proxy metric** (a job's "success" status, a promotion gate's CV/AUC number, a model's self-reported test score). Join the signal table (`unified_recommendations`/`unified_signals`/`intraday_recommendations`) against what the instrument actually did afterward (`stock_ohlcv`/`intraday_ohlcv`, or the already-graded `signal_outcomes`/`intraday_recommendation_outcomes` tables) and compute win rate as `WIN / (WIN + LOSS)` — decisive outcomes only, NEUTRAL/PENDING excluded — plus average realized return, never a single blended percentage. **Before trusting or comparing any win-rate number, check its `label_definition`** — `signal_outcomes.label_definition` has two structurally different conventions (`terminal_pct2`: strict fixed ±2% terminal barrier; `path_barrier`: path-based max-favorable-excursion) that are NOT comparable — the same calendar window read 88–91% win rate under one and 41–44% under the other, almost entirely the label, not skill. See [[topgainers_reverse_engineering_practice]].
 
 ## Reverse-engineer against what actually happened

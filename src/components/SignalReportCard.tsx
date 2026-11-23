@@ -76,22 +76,27 @@ export function SignalReportCard() {
       <ReliabilityPanel />
       <LiveHitRates />
       <div className="grid gap-4 xl:grid-cols-3">
-        <Card title="Signal Coverage" icon={ChartLine}>
+        <Card title="Historical logged recommendation outcomes" icon={ChartLine}>
           <div className="space-y-3 text-sm text-slate-300">
+            <p className="text-[11px] text-slate-500">Long-only recommendation-log simulations; separate from canonical ranker calls and actual broker fills.</p>
             <div className="flex justify-between">
-              <span>Total recommendations</span>
+              <span>Completed simulations</span>
               <strong className="text-white">{formatNum(recommendationSummary.total_recommendations)}</strong>
             </div>
             <div className="flex justify-between">
-              <span>Win rate</span>
+              <span>Trade win rate (net &gt; 0)</span>
               <strong className="text-white">{formatPct(recommendationSummary.win_count && recommendationSummary.total_recommendations ? (recommendationSummary.win_count / recommendationSummary.total_recommendations) * 100 : 0)}</strong>
             </div>
             <div className="flex justify-between">
-              <span>Avg return</span>
+              <span>Avg net return</span>
               <strong className="text-white">{formatPct(recommendationSummary.avg_actual_return_pct)}</strong>
             </div>
             <div className="flex justify-between">
-              <span>Worst return</span>
+              <span>Avg winning / losing trade</span>
+              <strong className="text-white">{formatPct(recommendationSummary.avg_win_pct)} / {formatPct(recommendationSummary.avg_loss_pct)}</strong>
+            </div>
+            <div className="flex justify-between">
+              <span>Worst net return</span>
               <strong className="text-white">{formatPct(recommendationSummary.worst_actual_return_pct)}</strong>
             </div>
           </div>
@@ -129,8 +134,8 @@ export function SignalReportCard() {
               <strong className="text-white">{formatPct(recentBacktestResults[0]?.cagr_pct)}</strong>
             </div>
             <div className="flex justify-between">
-              <span>Best win rate</span>
-              <strong className="text-white">{formatPct(Math.max(...recentBacktestResults.map(r => r.win_rate ?? 0)))}</strong>
+              <span>Latest backtest win rate</span>
+              <strong className="text-white">{formatPct(recentBacktestResults[0]?.win_rate)}</strong>
             </div>
           </div>
         </Card>
@@ -184,8 +189,8 @@ export function SignalReportCard() {
               <thead>
                 <tr className="text-slate-400 text-xs uppercase tracking-[0.2em]">
                   <th className="px-3 py-2">Strategy</th>
-                  <th className="px-3 py-2">Win Rate</th>
-                  <th className="px-3 py-2">Avg Return</th>
+                  <th className="px-3 py-2">Trade win rate (backtest)</th>
+                  <th className="px-3 py-2">Avg Net Return</th>
                 </tr>
               </thead>
               <tbody>
@@ -270,8 +275,8 @@ export function SignalReportCard() {
               <thead>
                 <tr className="text-slate-400 text-xs uppercase tracking-[0.2em]">
                   <th className="px-3 py-2">Strategy</th>
-                  <th className="px-3 py-2">Win Rate</th>
-                  <th className="px-3 py-2">Avg Return</th>
+                  <th className="px-3 py-2">Trade win rate (backtest)</th>
+                  <th className="px-3 py-2">Avg net return</th>
                 </tr>
               </thead>
               <tbody>
@@ -327,7 +332,7 @@ export function SignalReportCard() {
                 <tr className="text-slate-400 text-xs uppercase tracking-[0.2em]">
                   <th className="px-3 py-2">Source</th>
                   <th className="px-3 py-2">Count</th>
-                  <th className="px-3 py-2">Avg Return</th>
+                  <th className="px-3 py-2">Avg net return</th>
                   <th className="px-3 py-2">Avg Confidence</th>
                 </tr>
               </thead>
@@ -351,8 +356,8 @@ export function SignalReportCard() {
               <thead>
                 <tr className="text-slate-400 text-xs uppercase tracking-[0.2em]">
                   <th className="px-3 py-2">Run</th>
-                  <th className="px-3 py-2">Win Rate</th>
-                  <th className="px-3 py-2">Return</th>
+                  <th className="px-3 py-2">Backtest win rate</th>
+                  <th className="px-3 py-2">Backtest return</th>
                 </tr>
               </thead>
               <tbody>
@@ -377,16 +382,18 @@ export function SignalReportCard() {
                 <tr className="text-slate-400 text-xs uppercase tracking-[0.2em]">
                   <th className="px-3 py-2">Source</th>
                   <th className="px-3 py-2">Horizon</th>
-                  <th className="px-3 py-2">Win %</th>
-                  <th className="px-3 py-2">Avg Return</th>
+                  <th className="px-3 py-2">Trade win rate (net &gt; 0)</th>
+                  <th className="px-3 py-2">Avg realized net return</th>
                 </tr>
               </thead>
               <tbody>
                 {outcomeSummary.map((row, index) => (
                   <tr key={`${row.signal_source}-${row.horizon_days}-${index}`} className="bg-slate-950/60 hover:bg-slate-900 transition-colors even:bg-slate-900/50">
-                    <td className="px-3 py-2 font-semibold text-white">{row.signal_source}</td>
+                    <td className="px-3 py-2 font-semibold text-white">
+                      {row.signal_source === 'TECHNICAL' ? 'TECHNICAL (every scanned stock, long: a base rate)' : row.signal_source}
+                    </td>
                     <td className="px-3 py-2 text-slate-300">{row.horizon_days}d</td>
-                    <td className="px-3 py-2 text-slate-300">{formatPct(row.win_count && row.total_outcomes ? (row.win_count / row.total_outcomes) * 100 : 0)}</td>
+                    <td className="px-3 py-2 text-slate-300">{formatPct(row.total_outcomes ? ((row.profitable_count ?? 0) / row.total_outcomes) * 100 : null)}</td>
                     <td className="px-3 py-2 text-slate-300">{formatPct(row.avg_return_pct)}</td>
                   </tr>
                 ))}

@@ -75,6 +75,23 @@ describe('XBRL observation integrity', () => {
   });
 });
 
+describe('weekly ticker-mapping audit', () => {
+  it('surfaces missing, stale, partial, and clean audit watermarks honestly', () => {
+    const check = DATA_QUALITY_CHECKS.find(c => c.id === 'nse-ticker-mapping-audit')!;
+    const now = new Date('2026-11-28T12:00:00Z');
+    expect(check.evaluate(undefined, now).status).toBe('warn');
+    expect(check.evaluate({ completeness_status: 'partial', expected_rows: 2631, rejected_rows: 12,
+      source_version: 'nse_equity_master+symbolchange.csv', recorded_at: '2026-11-28T10:00:00Z' }, now))
+      .toMatchObject({ status: 'warn', detail: expect.stringContaining('12 mapping finding(s)') });
+    expect(check.evaluate({ completeness_status: 'complete', expected_rows: 2631, rejected_rows: 0,
+      source_version: 'nse_equity_master+symbolchange.csv', recorded_at: '2026-11-28T10:00:00Z' }, now).status)
+      .toBe('pass');
+    expect(check.evaluate({ completeness_status: 'complete', expected_rows: 2631, rejected_rows: 0,
+      source_version: 'nse_equity_master+symbolchange.csv', recorded_at: '2026-11-01T10:00:00Z' }, now).status)
+      .toBe('warn');
+  });
+});
+
 describe('tradingDaysStale', () => {
   it('returns null for missing/unparseable values, same as daysStale', () => {
     const now = new Date('2026-08-03T12:00:00Z');

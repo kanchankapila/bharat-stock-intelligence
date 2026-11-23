@@ -12,7 +12,9 @@ type Row = {
   losses?: number;
   neutrals?: number;
   stops?: number;
+  profitable?: number;
   win_rate?: number | null;
+  profitable_rate?: number | null;
   decisive_rate?: number | null;
   neutral_rate?: number | null;
   avg_return?: number | null;
@@ -20,6 +22,8 @@ type Row = {
   low_data?: boolean;
   win_ci_lo?: number | null;
   win_ci_hi?: number | null;
+  profitable_ci_lo?: number | null;
+  profitable_ci_hi?: number | null;
 };
 
 // AF-20261119-13: a cell with fewer than 20 independent windows (distinct signal dates / horizon)
@@ -77,8 +81,9 @@ function RollupTable({ title, keyName, rows }: { title: string; keyName: 'signal
               <th className="py-1.5 px-2 text-right">Windows</th>
               <th className="py-1.5 px-2 text-right">Decisive</th>
               <th className="py-1.5 px-2 text-right">Neutral</th>
-              <th className="py-1.5 px-2 text-right">Win</th>
-              <th className="py-1.5 pl-2 text-right">Avg ret</th>
+              <th className="py-1.5 px-2 text-right">Resolver WIN</th>
+              <th className="py-1.5 px-2 text-right">Net profitable</th>
+              <th className="py-1.5 pl-2 text-right">Avg net ret</th>
             </tr>
           </thead>
           <tbody>
@@ -90,11 +95,12 @@ function RollupTable({ title, keyName, rows }: { title: string; keyName: 'signal
                 <td className={`py-1.5 px-2 text-right tabular-nums ${decisiveColor(r.decisive_rate)}`}>{pct(r.decisive_rate)}</td>
                 <td className="py-1.5 px-2 text-right tabular-nums text-slate-400">{pct(r.neutral_rate)}</td>
                 <td className={`py-1.5 px-2 text-right tabular-nums ${lowData(r) ? 'text-slate-500' : winColor(r.win_rate)}`}>{winCell(r)}</td>
+                <td className={`py-1.5 px-2 text-right tabular-nums text-slate-200`}>{pct(r.profitable_rate)}</td>
                 <td className={`py-1.5 pl-2 text-right tabular-nums ${retColor(r.avg_return)}`}>{ret(r.avg_return)}</td>
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={7} className="py-4 text-center text-slate-500">No resolved outcomes in window.</td></tr>
+              <tr><td colSpan={8} className="py-4 text-center text-slate-500">No resolved outcomes in window.</td></tr>
             )}
           </tbody>
         </table>
@@ -105,7 +111,8 @@ function RollupTable({ title, keyName, rows }: { title: string; keyName: 'signal
 
 export function LiveHitRates() {
   const [days, setDays] = useState<number>(180);
-  const { data, isLoading, error } = trpc.getLiveHitRates.useQuery({ days, minSignals: 10 });
+  const [side, setSide] = useState<'LONG' | 'SHORT'>('LONG');
+  const { data, isLoading, error } = trpc.getLiveHitRates.useQuery({ days, minSignals: 10, side });
 
   const windows = [90, 180, 365];
 
@@ -115,15 +122,34 @@ export function LiveHitRates() {
         <div className="flex items-center gap-2">
           <Activity className="h-5 w-5 text-indigo-400" />
           <div>
-            <h2 className="text-lg font-semibold text-white">Live Hit Rates</h2>
+            <h2 className="text-lg font-semibold text-white">Resolved Signal Outcomes</h2>
             <p className="text-xs text-slate-500">
-              Emitted-signal outcomes from <code className="text-slate-400">unified_signal_outcomes</code>, by source × regime × horizon.
-              A low <span className="text-rose-400">decisive</span> rate means signals expire flat before resolving.
+              Emitted-signal outcomes from <code className="text-slate-400">unified_signal_outcomes</code>, by source × regime × horizon,
+              one side at a time (Long = target above stop; Short = target below stop, a multi-day short that profits when the
+              price falls and needs futures or stock lending in India; Sell calls graded as intraday shorts are on Edge Evidence).
+              <span className="text-slate-200"> Trade win rate</span> = resolved trades whose net, direction-signed return is above zero,
+              flat exits included. Resolver WIN is the volatility-threshold label among decisive signals, kept as a diagnostic.
+              These are simulated from recorded prices, not broker fills. A low <span className="text-rose-400">decisive</span> rate means signals expire flat before resolving.
               Rows overlap in time, so evidence is counted in independent windows (distinct dates ÷ horizon);
               cells under 20 windows are greyed: not evidence either way. The honest verdict on published
               calls is the frozen forward test.
             </p>
           </div>
+        </div>
+        <div className="flex gap-2">
+        <div className="flex gap-1 rounded-lg border border-slate-800 bg-slate-900/60 p-1">
+          {(['LONG', 'SHORT'] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSide(s)}
+              aria-pressed={side === s}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                side === s ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {s === 'LONG' ? 'Long' : 'Short (futures/SLB)'}
+            </button>
+          ))}
         </div>
         <div className="flex gap-1 rounded-lg border border-slate-800 bg-slate-900/60 p-1">
           {windows.map((w) => (
@@ -138,16 +164,17 @@ export function LiveHitRates() {
             </button>
           ))}
         </div>
+        </div>
       </div>
 
       {isLoading ? (
-        <Card title="Live Hit Rates">
+        <Card title="Resolved Signal Outcomes">
           <div className="flex items-center justify-center py-16 text-slate-400">
             <Loader2 className="mr-3 h-6 w-6 animate-spin" /> Loading outcomes…
           </div>
         </Card>
       ) : error || !data ? (
-        <Card title="Live Hit Rates">
+        <Card title="Resolved Signal Outcomes">
           <div className="text-rose-300">Unable to load hit rates. {error?.message ?? ''}</div>
         </Card>
       ) : (
@@ -156,8 +183,11 @@ export function LiveHitRates() {
             <StatTile label="Resolved signals" value={int(data.overall?.total)} sub={`last ${data.windowDays}d`} />
             <StatTile label="Decisive rate" value={pct(data.overall?.decisive_rate)} tone={decisiveColor(data.overall?.decisive_rate)} sub="resolved directionally" />
             <StatTile label="Neutral rate" value={pct(data.overall?.neutral_rate)} sub="expired flat" />
-            <StatTile label="Win rate" value={pct(data.overall?.win_rate)} tone={data.overall?.low_data ? 'text-slate-400' : winColor(data.overall?.win_rate)}
-              sub={data.overall?.win_ci_lo != null ? `95% ${data.overall.win_ci_lo.toFixed(0)}–${data.overall.win_ci_hi?.toFixed(0)}% · ${data.overall.eff_windows ?? '?'} windows${data.overall.low_data ? ' · low data' : ''}` : 'of decided'} />
+            {/* A win rate alone says nothing about money (40% can pay, 60% can lose): no green/red here; the
+                average return beside it carries the sign. */}
+            <StatTile label="Trade win rate (net > 0)" value={pct(data.overall?.profitable_rate)}
+              tone={data.overall?.low_data ? 'text-slate-400' : 'text-slate-100'}
+              sub={`${int(data.overall?.profitable)} of ${int(data.overall?.total)}${data.overall?.profitable_ci_lo != null ? ` · 95% ${data.overall.profitable_ci_lo.toFixed(0)}–${data.overall.profitable_ci_hi?.toFixed(0)}%` : ''} · ${data.overall?.eff_windows ?? '?'} windows${data.overall?.low_data ? ' · low data' : ''}`} />
             <StatTile label="Avg return" value={ret(data.overall?.avg_return)} tone={retColor(data.overall?.avg_return)} />
           </div>
 
@@ -178,9 +208,10 @@ export function LiveHitRates() {
                     <th className="py-1.5 px-2 text-right">Windows</th>
                     <th className="py-1.5 px-2 text-right">Decisive</th>
                     <th className="py-1.5 px-2 text-right">Neutral</th>
-                    <th className="py-1.5 px-2 text-right">Win</th>
+                    <th className="py-1.5 px-2 text-right">Resolver WIN</th>
+                    <th className="py-1.5 px-2 text-right">Net profitable</th>
                     <th className="py-1.5 px-2 text-right">Stops</th>
-                    <th className="py-1.5 pl-2 text-right">Avg ret</th>
+            <th className="py-1.5 pl-2 text-right">Avg net ret</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -194,12 +225,13 @@ export function LiveHitRates() {
                       <td className={`py-1.5 px-2 text-right tabular-nums ${decisiveColor(r.decisive_rate)}`}>{pct(r.decisive_rate)}</td>
                       <td className="py-1.5 px-2 text-right tabular-nums text-slate-400">{pct(r.neutral_rate)}</td>
                       <td className={`py-1.5 px-2 text-right tabular-nums ${lowData(r) ? 'text-slate-500' : winColor(r.win_rate)}`}>{winCell(r)}</td>
+                      <td className={`py-1.5 px-2 text-right tabular-nums text-slate-200`}>{pct(r.profitable_rate)}</td>
                       <td className="py-1.5 px-2 text-right tabular-nums text-slate-400">{int(r.stops)}</td>
                       <td className={`py-1.5 pl-2 text-right tabular-nums ${retColor(r.avg_return)}`}>{ret(r.avg_return)}</td>
                     </tr>
                   ))}
                   {(data.grid as Row[] ?? []).length === 0 && (
-                    <tr><td colSpan={10} className="py-4 text-center text-slate-500">No source×regime×horizon cell has ≥10 resolved signals in this window.</td></tr>
+                    <tr><td colSpan={11} className="py-4 text-center text-slate-500">No source×regime×horizon cell has ≥10 resolved signals in this window.</td></tr>
                   )}
                 </tbody>
               </table>

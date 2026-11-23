@@ -44,9 +44,10 @@ def ensure_unified_signals_schema(con):
 
 
 def load_high_performing_screeners(con) -> dict:
-    """Returns screener_id -> {bayesian_score, tier, signal_bias, category, name}."""
+    """Returns (source, screener_id) -> {bayesian_score, tier, signal_bias, category, name}."""
     rows = con.execute("""
         SELECT sm.scan_id,
+               LOWER(sm.source) AS source,
                COALESCE(spv.bayesian_score, 0.40) AS bayesian_score,
                COALESCE(spv.tier, 'Unranked')     AS tier,
                sc.signal_bias,
@@ -64,12 +65,12 @@ def load_high_performing_screeners(con) -> dict:
     """, (BAYESIAN_THRESHOLD,)).fetchall()
 
     return {
-        row[0]: {
-            "bayesian": float(row[1]),
-            "tier":     row[2],
-            "bias":     row[3] or "bullish",
-            "category": row[4] or "other",
-            "name":     row[5],
+        (row[1], row[0]): {
+            "bayesian": float(row[2]),
+            "tier":     row[3],
+            "bias":     row[4] or "bullish",
+            "category": row[5] or "other",
+            "name":     row[6],
         }
         for row in rows
     }
@@ -89,7 +90,8 @@ def load_first_appearances_today(con, qualifying_screeners: set) -> dict:
 
     # All recent appearances in qualifying screeners
     rows = con.execute("""
-        SELECT a.symbol, a.screener_id, a.appeared_date::date AS adate
+        SELECT a.symbol, a.screener_id, LOWER(a.source) AS source,
+               a.appeared_date::date AS adate
         FROM screener_appearances a
         WHERE a.appeared_date >= ?
           AND (a.exited_date IS NULL OR a.exited_date >= ?)
@@ -97,19 +99,20 @@ def load_first_appearances_today(con, qualifying_screeners: set) -> dict:
 
     # Previous appearances to detect re-entry vs first entry
     prev_rows = con.execute("""
-        SELECT DISTINCT symbol, screener_id
+        SELECT DISTINCT symbol, screener_id, LOWER(source) AS source
         FROM screener_appearances
         WHERE appeared_date >= ? AND appeared_date < ?
     """, (cooldown_start, window_start)).fetchall()
 
-    prev_set = {(r[0], r[1]) for r in prev_rows}
+    prev_set = {(r[0], r[2], r[1]) for r in prev_rows}
 
     result = defaultdict(list)
-    for sym, sid, _ in rows:
-        if sid not in qualifying_screeners:
+    for sym, sid, source, _ in rows:
+        key = (source, sid)
+        if key not in qualifying_screeners:
             continue
-        if (sym, sid) not in prev_set:   # genuine first/re-entry
-            result[sym].append(sid)
+        if (sym, source, sid) not in prev_set and key not in result[sym]:
+            result[sym].append(key)
 
     return dict(result)
 
@@ -147,8 +150,8 @@ def generate_signals(con, qualifying: dict, entries: dict) -> int:
     generated = 0
     sector_signals = defaultdict(list)  # sector -> [symbol, ...]
 
-    for symbol, screener_ids in entries.items():
-        if len(screener_ids) < MIN_BULL_SCREENERS:
+    for symbol, screener_keys in entries.items():
+        if len(screener_keys) < MIN_BULL_SCREENERS:
             continue
         if signal_already_generated_today(con, symbol):
             continue
@@ -159,7 +162,7 @@ def generate_signals(con, qualifying: dict, entries: dict) -> int:
         sector = get_sector(con, symbol)
 
         # Compute aggregate signal strength
-        screeners_meta = [qualifying[sid] for sid in screener_ids]
+        screeners_meta = [qualifying[key] for key in screener_keys]
         momentum_score = sum(m["bayesian"] for m in screeners_meta)
         tier1_count    = sum(1 for m in screeners_meta if m["tier"] in ("A", "B"))
         categories     = {m["category"] for m in screeners_meta}
@@ -184,7 +187,7 @@ def generate_signals(con, qualifying: dict, entries: dict) -> int:
             stop_loss    = round(price * 0.975, 2)
 
         reasoning = (
-            f"Screener surfacing: {len(screener_ids)} high-performing bullish screeners "
+            f"Screener surfacing: {len(screener_keys)} high-performing bullish screeners "
             f"flagging this stock for the first time. "
             f"Screeners: {top_names}. "
             f"Categories: {', '.join(sorted(categories))}. "
