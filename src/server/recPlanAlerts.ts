@@ -23,6 +23,7 @@ export interface PlanBarRow {
   target_alerted_at: string | null;
   day_low: number | null;
   day_high: number | null;
+  last_close?: number | null;
 }
 
 export interface PlanHit {
@@ -31,6 +32,8 @@ export interface PlanHit {
   kind: 'STOP' | 'TRAILING_STOP' | 'TARGET';
   level: number;
   price: number;
+  confirmed?: boolean;
+  lastPrice?: number;
 }
 
 const num = (v: unknown): number | null => {
@@ -48,10 +51,20 @@ export function detectPlanHits(rows: PlanBarRow[]): PlanHit[] {
     const trail = num(r.trailing_stop);
     const stop = trail ?? published;
     const target = num(r.target_1);
+    const lastClose = num(r.last_close);
     const stopHit = stop != null && low != null && low <= stop && !r.stop_alerted_at;
     if (stopHit) {
       const trailing = trail != null && (published == null || trail > published);
-      hits.push({ id: r.id, symbol: r.symbol, kind: trailing ? 'TRAILING_STOP' : 'STOP', level: stop!, price: low! });
+      const confirmed = lastClose != null ? lastClose <= stop : true;
+      hits.push({
+        id: r.id,
+        symbol: r.symbol,
+        kind: trailing ? 'TRAILING_STOP' : 'STOP',
+        level: stop!,
+        price: low!,
+        confirmed,
+        ...(lastClose != null ? { lastPrice: lastClose } : {}),
+      });
     }
     if (target != null && high != null && high >= target && !r.target_alerted_at && !r.stop_alerted_at) {
       hits.push({ id: r.id, symbol: r.symbol, kind: 'TARGET', level: target, price: high });
@@ -64,18 +77,31 @@ const LABEL: Record<PlanHit['kind'], string> = {
   STOP: 'stop', TRAILING_STOP: 'trailing stop', TARGET: 'target',
 };
 
+const MACRO_STOP_VELOCITY_THRESHOLD = 8;
+
 export function formatPlanHits(hits: PlanHit[], istDate: string): string {
   const both = new Set(
     hits.filter(h => h.kind === 'TARGET').map(h => h.id)
       .filter(id => hits.some(h => h.id === id && h.kind !== 'TARGET')),
   );
+  const stopHits = hits.filter(h => h.kind !== 'TARGET');
+  const macroAlert = stopHits.length >= MACRO_STOP_VELOCITY_THRESHOLD
+    ? [`⚡ *Macro Alert*: High stop velocity (${stopHits.length} stops touched in 15m). Broad pullback detected — check index trend before liquidating.`]
+    : [];
+
   const lines = hits.slice(0, MAX_LINES).map(h => {
-    const verb = h.kind === 'TARGET' ? `reached (high ₹${h.price.toFixed(2)})` : `touched (low ₹${h.price.toFixed(2)})`;
-    return `• *${sanitizeMarkdown(h.symbol)}* — ${LABEL[h.kind]} ₹${h.level.toFixed(2)} ${verb}`;
+    if (h.kind === 'TARGET') {
+      return `• *${sanitizeMarkdown(h.symbol)}* — target ₹${h.level.toFixed(2)} reached (high ₹${h.price.toFixed(2)})`;
+    }
+    if (h.confirmed === false && h.lastPrice != null) {
+      return `• *${sanitizeMarkdown(h.symbol)}* — ${LABEL[h.kind]} ₹${h.level.toFixed(2)} wick-grazed (low ₹${h.price.toFixed(2)}, bounced to ₹${h.lastPrice.toFixed(2)})`;
+    }
+    return `• *${sanitizeMarkdown(h.symbol)}* — ${LABEL[h.kind]} ₹${h.level.toFixed(2)} touched (low ₹${h.price.toFixed(2)})`;
   });
   const more = hits.length - lines.length;
   return [
     `🔔 *Plan levels touched* — ${istDate} (15-min bars)`,
+    ...macroAlert,
     ...lines,
     ...(more > 0 ? [`…and ${more} more`] : []),
     ...(both.size ? ['_Stop and target both touched today: 15-min bars cannot tell which came first._'] : []),
@@ -89,9 +115,10 @@ export async function checkRecPlanHits(now: Date = new Date()): Promise<{ checke
   // Entry is the session after signal_date, so only plans signalled before today are open today.
   const rows = await dbAll<PlanBarRow>(
     `SELECT r.id, r.symbol, r.stop_loss, r.trailing_stop, r.target_1,
-            r.stop_alerted_at, r.target_alerted_at, b.day_low, b.day_high
+            r.stop_alerted_at, r.target_alerted_at, b.day_low, b.day_high, b.last_close
        FROM recommendation_log r
-       JOIN (SELECT symbol, MIN(low) AS day_low, MAX(high) AS day_high
+       JOIN (SELECT symbol, MIN(low) AS day_low, MAX(high) AS day_high,
+                   (ARRAY_AGG(close ORDER BY datetime DESC))[1] AS last_close
                FROM intraday_ohlcv
               WHERE datetime >= ?::timestamptz
               GROUP BY symbol) b ON b.symbol = r.symbol

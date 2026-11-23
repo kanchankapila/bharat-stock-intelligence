@@ -97,6 +97,8 @@ export function livePlanCheck(levels: PlanLevels, q: LiveQuote | undefined | nul
 
 export interface NewsRow { title: string; published_at: unknown; symbols_json: string | null }
 
+const MACRO_DISQUALIFIERS = ['gold import', 'anti-drone missile', 'supermoon', 'gta 6', 'marathon', 'nitish setu'];
+
 /** Pure: high-impact bearish headlines per symbol published after each plan, newest first, at most 2. */
 export function eventRisk(
   plans: Array<{ symbol: string; publishedAt: unknown }>, news: NewsRow[],
@@ -107,12 +109,16 @@ export function eventRisk(
     const pub = new Date(p.publishedAt instanceof Date ? p.publishedAt : String(p.publishedAt)).getTime();
     if (!Number.isFinite(pub)) continue;
     const hits: string[] = [];
+    const symRe = new RegExp(`\\b${p.symbol}\\b`, 'i');
     for (const item of sorted) {
       const t = new Date(item.published_at instanceof Date ? item.published_at : String(item.published_at)).getTime();
       if (!Number.isFinite(t) || t <= pub) continue;
       let syms: unknown = [];
       try { syms = JSON.parse(item.symbols_json ?? '[]'); } catch { syms = []; }
-      if (Array.isArray(syms) && syms.includes(p.symbol) && !hits.includes(item.title)) hits.push(item.title);
+      if (!Array.isArray(syms) || !syms.includes(p.symbol)) continue;
+      // Filter out obvious syndicated macro news mismatches that lack the stock's name
+      if (MACRO_DISQUALIFIERS.some((d) => item.title.toLowerCase().includes(d)) && !symRe.test(item.title)) continue;
+      if (!hits.includes(item.title)) hits.push(item.title);
       if (hits.length === 2) break;
     }
     if (hits.length) out.set(p.symbol, hits);

@@ -338,9 +338,20 @@ function processNewsItem(
   const category = classifyCategory(text);
   const impact   = detectImpact(text, score);
   const sector   = detectSector(text);
-  const symbols  = forceSymbol
-    ? Array.from(new Set([forceSymbol, ...extractSymbols(text)])).slice(0, 5)
-    : extractSymbols(text);
+  const extracted = extractSymbols(text);
+  let symbols = extracted;
+  if (forceSymbol) {
+    // BSE/NSE Announcements are official filings lodged for that exact scrip.
+    // Third-party news feeds (MoneyControl, Google News) often return general market/homepage
+    // news when a stock has no news; only attach forceSymbol if the article actually references
+    // the company alias or the symbol directly.
+    const isOfficialFiling = srcName.includes('BSE') || srcName.includes('NSE');
+    const symbolRegex = new RegExp(`\\b${forceSymbol}\\b`, 'i');
+    const isRelevant = isOfficialFiling || extracted.includes(forceSymbol) || symbolRegex.test(text);
+    if (isRelevant) {
+      symbols = Array.from(new Set([forceSymbol, ...extracted])).slice(0, 5);
+    }
+  }
 
   const id = crypto.createHash('sha1').update(`${srcName}:${raw.key || raw.link || raw.title}`).digest('hex');
 

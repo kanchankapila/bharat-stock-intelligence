@@ -67,6 +67,14 @@ describe('eventRisk and alert dedupe', () => {
     ]);
     expect(out.get('ABC')).toEqual(['auditor resigns']);
   });
+  it('disqualifies generic syndicated macro news even if symbols_json was erroneously tagged', () => {
+    const out = eventRisk([{ symbol: 'LODHA', publishedAt: '2026-11-19T17:00:00Z' }], [
+      { title: 'Gold imports into India decline 40%', published_at: '2026-11-20T05:30:00Z', symbols_json: '["LODHA"]' },
+      { title: 'India tests JWALA MK-1 anti-drone missile at Pokhran', published_at: '2026-11-20T05:35:00Z', symbols_json: '["LODHA"]' },
+      { title: 'Lodha Developers Q2 net profit jumps 40%', published_at: '2026-11-20T05:40:00Z', symbols_json: '["LODHA"]' },
+    ]);
+    expect(out.get('LODHA')).toEqual(['Lodha Developers Q2 net profit jumps 40%']);
+  });
   it('sends each key once per day', () => {
     const first = newAlertLines([{ key: 'A:STOP_HIT', line: 'a' }, { key: 'B:news:x', line: 'b' }], []);
     expect(first.lines).toEqual(['a', 'b']);
