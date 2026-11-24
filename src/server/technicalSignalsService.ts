@@ -109,6 +109,25 @@ let progress: TechnicalSignalsProgress = {
   lastError: null,
 };
 
+/** Mean sector return from each symbol's `bars`-th prior bar to `today` (params: before-date, today, sector).
+ *  The prior bar is fetched per sector symbol with LATERAL. The earlier form filtered EVERY stock_ohlcv row
+ *  through a correlated `date = (SELECT ... OFFSET n)`: one subplan per row over all 25 chunks (22
+ *  compressed), a single backend reached 6.1 GB anon + ~4 GB swapped and the 8 GiB container OOM-killed
+ *  Postgres mid-ml-daily-ops on 2026-11-24 (AF-20261124-01). */
+export function sectorReturnSql(barsBack: 4 | 20): string {
+  return `
+        SELECT AVG((today.close - past.close) / past.close * 100.0) AS ret
+        FROM nse_stocks ns
+        JOIN LATERAL (
+          SELECT o.close FROM stock_ohlcv o
+          WHERE o.symbol = ns.symbol AND o.date < ?
+          ORDER BY o.date DESC LIMIT 1 OFFSET ${barsBack}
+        ) past ON TRUE
+        JOIN stock_ohlcv today ON today.symbol = ns.symbol AND today.date = ?
+        WHERE ns.sector = ?
+      `;
+}
+
 /** recommendation_log insert for a technical-scan BUY. The last parameter repeats the symbol: only an
  *  ACTIVE equity in nse_stocks is logged, the same tradeable-universe rule as scoring_engine's
  *  writer (AF-20261117-21: index symbols NIFTYIT/NIFTYPHARMA were logged as BUY). */
@@ -1442,35 +1461,8 @@ export async function runTechnicalSignalScan(options: {
       const cached = sectorMomentumCache.get(key);
       if (cached) return { sector_ret_5d: cached.ret5, sector_ret_21d: cached.ret21 };
 
-      const row5 = await dbGet(`
-        SELECT AVG((today.close - past.close) / past.close * 100.0) AS ret
-        FROM stock_ohlcv today
-        JOIN nse_stocks ns ON ns.symbol = today.symbol
-        JOIN (
-          SELECT o.symbol, o.close
-          FROM stock_ohlcv o
-          WHERE o.date = (
-            SELECT date FROM stock_ohlcv WHERE symbol = o.symbol AND date < ? ORDER BY date DESC LIMIT 1 OFFSET 4
-          )
-        ) past ON past.symbol = today.symbol
-        WHERE ns.sector = ?
-          AND today.date = ?
-      `, [date, sector, date]) as { ret: number | null } | undefined;
-
-      const row21 = await dbGet(`
-        SELECT AVG((today.close - past.close) / past.close * 100.0) AS ret
-        FROM stock_ohlcv today
-        JOIN nse_stocks ns ON ns.symbol = today.symbol
-        JOIN (
-          SELECT o.symbol, o.close
-          FROM stock_ohlcv o
-          WHERE o.date = (
-            SELECT date FROM stock_ohlcv WHERE symbol = o.symbol AND date < ? ORDER BY date DESC LIMIT 1 OFFSET 20
-          )
-        ) past ON past.symbol = today.symbol
-        WHERE ns.sector = ?
-          AND today.date = ?
-      `, [date, sector, date]) as { ret: number | null } | undefined;
+      const row5 = await dbGet(sectorReturnSql(4), [date, date, sector]) as { ret: number | null } | undefined;
+      const row21 = await dbGet(sectorReturnSql(20), [date, date, sector]) as { ret: number | null } | undefined;
 
       const result = { ret5: row5?.ret ?? null, ret21: row21?.ret ?? null };
       sectorMomentumCache.set(key, result);
