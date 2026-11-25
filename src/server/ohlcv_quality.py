@@ -36,11 +36,11 @@ ACTION_WINDOW_DAYS = 3       # don't flag within ±3d of a known ex-date
 # Duplicated (not imported) because both files are standalone scripts -- keep in step, the
 # same convention as CLOSED_MARKET_SHARE_FLOOR's three copies.
 CLOSED_SESSION_REASON = 'closed session: universe-wide flat zero-volume bar'
-# Same for reconcile_stock_ohlcv_from_bhavcopy's quarantine of bars absent from the official
-# bhavcopy: it runs just BEFORE this module in ml-daily-ops, and the reset used to clear it
-# (CCAVENUE 2026-10-14 kept suspect_reason with is_suspect=0). A flat ghost copy deviates from
-# neither neighbour, so no detector here can re-derive it.
-from reconcile_stock_ohlcv_from_bhavcopy import GHOST_REASON  # noqa: E402
+# The same thing happened to reconcile_stock_ohlcv_from_bhavcopy's ghost-bar quarantine
+# (CCAVENUE 2026-10-14) and to data_integrity_repair's copied-session and unlisted-symbol flags
+# (AF-20261125-01): each was a new reason missing from a hand-kept exemption list. So the reset
+# now touches only rows this module flagged, which it marks by leaving suspect_reason NULL.
+# A flag carrying any reason belongs to the tool that wrote it and survives here.
 
 # ingest_corporate_actions() is one of the report's two 150-minute steps (scheduler-review,
 # 2026-09-04) -- a per-symbol yfinance .splits/.dividends call across the whole universe every
@@ -213,20 +213,16 @@ def flag_bad_prints(conn: ConnWrapper, threshold: float = BAD_PRINT_THRESHOLD,
                     bars_map: dict = None, action_map: dict = None) -> dict:
     """Mark stock_ohlcv.is_suspect for single-bar bad prints. Idempotent (resets first).
 
-    The reset is scoped to THIS module's flags: bars flagged by data_integrity_repair.py
-    --closed-sessions carry CLOSED_SESSION_REASON and survive it (AF-20260912-19 -- the
-    unscoped reset wiped 2,322 repaired flags on 2026-06-26). Rows this module flagged have
-    suspect_reason NULL, so `suspect_reason IS NULL OR <> CLOSED_SESSION_REASON` resets
-    exactly ours; on Postgres `NULL <> x` is NULL (row not updated), which is correct here.
+    The reset is scoped to THIS module's flags, the rows with suspect_reason NULL. Every other
+    flagger writes a reason, and its flags survive (AF-20260912-19, AF-20261125-01).
     """
     # Selected first, then reset by key: stock_ohlcv is a compressed hypertable, and the
     # predicate-wide form of this UPDATE made Timescale decompress every chunk it might
     # touch -- the "tuple decompression limit exceeded" shape hypertable_safe_write.py exists
     # to prevent. Only is_suspect=1 rows are ever reset, so the keyed set is small.
     to_reset = conn.execute(
-        "SELECT symbol, date FROM stock_ohlcv WHERE is_suspect=1 "
-        "AND (suspect_reason IS NULL OR suspect_reason NOT IN (?, ?))",
-        (CLOSED_SESSION_REASON, GHOST_REASON)).fetchall()
+        "SELECT symbol, date FROM stock_ohlcv WHERE is_suspect=1 AND suspect_reason IS NULL"
+    ).fetchall()
     safe_keyed_update(
         conn,
         "UPDATE stock_ohlcv SET is_suspect=0 WHERE symbol=? AND date=?",

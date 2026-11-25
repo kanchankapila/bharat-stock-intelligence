@@ -132,7 +132,28 @@ def test_reset_preserves_closed_session_flags_from_data_integrity_repair():
         "WHERE symbol IN ('HOLIDAY','STALE','OTHER')").fetchall())
     assert rows['HOLIDAY'] == (1, CLOSED_SESSION_REASON)   # preserved, reason intact
     assert rows['STALE'][0] == 0                            # ours: reset (1 bar, not re-flagged)
-    assert rows['OTHER'][0] == 0                            # not a closed session: reset
+    assert rows['OTHER'] == (1, 'some other tool')          # any reason = another flagger's: kept
+
+
+def test_reset_preserves_every_data_integrity_repair_reason():
+    # AF-20261125-01: the reset exempted a hand-kept list of reasons, and the two added by
+    # AF-20261117-18 were never listed, so the daily run un-flagged 2,118 bars of the phantom
+    # 2026-07-11 session and 286 non-NSE bars. No detector here re-derives either.
+    from data_integrity_repair import COPIED_SESSION_REASON, UNLISTED_REASON
+
+    conn = make_db()
+    for sym, d, reason in (('COPY', '2026-07-11', COPIED_SESSION_REASON),
+                           ('JUNK', '2026-07-13', UNLISTED_REASON)):
+        conn.execute(
+            "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume,is_suspect,suspect_reason) "
+            "VALUES (?,?,100,101,99,100,10,1,?)", (sym, d, reason))
+    conn.commit()
+
+    flag_bad_prints(conn)
+
+    rows = dict((r[0], r[1]) for r in conn.execute(
+        "SELECT symbol, is_suspect FROM stock_ohlcv WHERE symbol IN ('COPY','JUNK')").fetchall())
+    assert rows == {'COPY': 1, 'JUNK': 1}
 
 
 def test_reset_preserves_absent_from_official_bhavcopy_quarantine():
