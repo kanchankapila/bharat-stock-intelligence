@@ -1,6 +1,6 @@
 ---
 name: trade-desk
-description: Run the daily Indian-market trading loop against this platform's own data — pre-market candidate generation from the one setup with a measured edge, position sizing, entry/exit rules, and a graded trade journal. Use when asked "what should I trade/buy today", "give me a trade plan", "how much should I size this", "is this a good entry", "should I buy X", "grade my trades", or anything about actually putting money into NSE/BSE names based on this system.
+description: Run the daily Indian-market trading loop against this platform's own data — pre-market candidate generation from the platform's one historically-measured setup (currently UNPROVEN in the 2026 tape), position sizing, entry/exit rules, and a graded trade journal. Use when asked "what should I trade/buy today", "give me a trade plan", "how much should I size this", "is this a good entry", "should I buy X", "grade my trades", or anything about actually putting money into NSE/BSE names based on this system.
 ---
 
 # Trade desk — the daily loop
@@ -23,10 +23,16 @@ than silently skipping it.
 
 ## The honest prior — state this to the user once per session, then stop repeating it
 
-- **One setup on this platform has survived a real measurement review**: the tier-1
-  capitulation triple (`screener_combo_finder.py --tier1`). +0.53%/day excess, net of
-  15bps, t=+3.61, p=0.0003, 425 dates, 6/6 years positive, robust to winsorizing and to
-  dropping the 3 most extreme days.
+- **One setup on this platform ever cleared a real measurement review, and it no longer
+  clears it in the current tape**: the tier-1 capitulation triple
+  (`screener_combo_finder.py --tier1`). Over its full history it is still positive
+  (+0.47%/day excess at the current 0.183% intraday cost, t 3.32), but the 2026-10-27
+  re-check broke it three ways: **2026 YTD is negative** (−0.14%/day, median −0.59%,
+  win 38%, 68 signal-days), **out-of-sample since 2026-08-21 is negative** (−0.02%/day),
+  and **at ADTV ≥ ₹25cr the edge is zero over the whole history** (+0.01%/day, t 0.04;
+  every year 2023-2026 negative). **Treat it as UNPROVEN and say so before sizing any
+  trade on it** (AF-20261026-73). `references/edge-inventory.md` is the source of truth
+  for these numbers — re-read it rather than quoting this paragraph.
 - **Nothing else here does.** `unified_score` 5d rank IC ≈ 0.0001 (t=0.02). Zero of 26
   backtested factors are positive and significant. 14 of 23 `feature_store` columns are
   significantly *negative*. Screener bullish consensus is significantly negative and its
@@ -96,8 +102,10 @@ Expect **~1.5 names on a signal day, and signals on roughly 1 day in 3**. A list
 
 ## Phase 3 — Size it
 
-The edge is +0.53%/day excess. That is smaller than a single sloppy fill, which drives
-everything about sizing.
+The edge was +0.47%/day excess over its full history and is **negative in 2026** (see the
+honest prior). Even the full-history figure is smaller than a single sloppy fill, which
+drives everything about sizing — and a setup that is unproven in the current tape argues
+for the bottom of any size range, or for not trading it at all.
 
 - **Risk a fixed fraction, not a fixed conviction.** ≤1% of trading capital at risk per
   trade is the standard bar and there is nothing here that justifies more — this is one
@@ -109,16 +117,19 @@ everything about sizing.
 - **Cap single-name exposure.** ~1.5 names/day means concentration is structural; the
   measured result is a basket average, and one name is a much wider distribution than the
   basket t-stat suggests.
-- **The 0.53% is an *excess* return, not an absolute one.** Absolute P&L = that day's
-  market move + 0.53%. Unhedged, most of your day-to-day variance is uncompensated market
-  beta. Say this plainly — it is the most commonly misread number in the whole result.
+- **The figure is an *excess* return, not an absolute one.** Absolute P&L = that day's
+  market move + the excess. Unhedged, most of your day-to-day variance is uncompensated
+  market beta. Say this plainly — it is the most commonly misread number in the result.
 
 **Expectancy, stated honestly** (derive it in front of the user, don't assert it):
-SE = 0.53/3.61 = 0.147%, so the 95% CI on the per-day excess is **[0.24%, 0.82%]**. At
-~77 signal days/year with capital deployed on each, that annualizes to roughly
-**[18%, 63%] excess** on deployed capital — *if* the edge holds out of sample, *if* you
-get filled near the open, and *before* your own slippage. Give the range, never the point
-estimate alone.
+on the full history, SE = 0.47/3.32 = 0.142%, so the 95% CI on the per-day excess is
+**[0.19%, 0.75%]**. **Do not annualize this.** The condition that projection needs — that
+the edge holds out of sample — is the exact condition the 2026-10-27 re-check found
+failing: 2026 YTD and the out-of-sample window since 2026-08-21 are both negative, and
+the liquid half of the universe (ADTV ≥ ₹25cr) shows no edge at all. An annualized range
+quoted off a full-history t-stat, against a setup that is currently not working, is the
+single most misleading number this skill could produce. State the full-history CI, state
+that the recent tape is negative, and let the user decide.
 
 ## Phase 4 — Execute to the measured convention
 

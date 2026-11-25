@@ -219,10 +219,18 @@ def flag_bad_prints(conn: ConnWrapper, threshold: float = BAD_PRINT_THRESHOLD,
     suspect_reason NULL, so `suspect_reason IS NULL OR <> CLOSED_SESSION_REASON` resets
     exactly ours; on Postgres `NULL <> x` is NULL (row not updated), which is correct here.
     """
-    conn.execute(
-        "UPDATE stock_ohlcv SET is_suspect=0 WHERE is_suspect=1 "
+    # Selected first, then reset by key: stock_ohlcv is a compressed hypertable, and the
+    # predicate-wide form of this UPDATE made Timescale decompress every chunk it might
+    # touch -- the "tuple decompression limit exceeded" shape hypertable_safe_write.py exists
+    # to prevent. Only is_suspect=1 rows are ever reset, so the keyed set is small.
+    to_reset = conn.execute(
+        "SELECT symbol, date FROM stock_ohlcv WHERE is_suspect=1 "
         "AND (suspect_reason IS NULL OR suspect_reason NOT IN (?, ?))",
-        (CLOSED_SESSION_REASON, GHOST_REASON))
+        (CLOSED_SESSION_REASON, GHOST_REASON)).fetchall()
+    safe_keyed_update(
+        conn,
+        "UPDATE stock_ohlcv SET is_suspect=0 WHERE symbol=? AND date=?",
+        [(r[0], r[1]) for r in to_reset])
     conn.commit()
 
     if action_map is None:
@@ -257,7 +265,8 @@ def flag_bad_prints(conn: ConnWrapper, threshold: float = BAD_PRINT_THRESHOLD,
         # not necessarily `conn`) and made this function untestable against an isolated
         # connection -- flag_bad_prints() always reported the correct count while writing
         # nowhere the caller could see. Route the write through `conn` like every read above.
-        conn.executemany(
+        safe_keyed_update(
+            conn,
             "UPDATE stock_ohlcv SET is_suspect=1 WHERE symbol=? AND date=?",
             suspects_to_update
         )
@@ -297,7 +306,8 @@ def flag_extreme_level_shifts(conn: ConnWrapper, threshold: float = EXTREME_SHIF
 
     print(f"[OHLCVQuality] Flagging {len(suspects_to_update)} extreme-level-shift bars in database...")
     if suspects_to_update:
-        conn.executemany(
+        safe_keyed_update(
+            conn,
             "UPDATE stock_ohlcv SET is_suspect=1 WHERE symbol=? AND date=?",
             suspects_to_update
         )

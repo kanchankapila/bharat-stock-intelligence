@@ -963,6 +963,119 @@ def check_asymmetric_classification_polarity(path: Path, text: str) -> list[str]
     return findings
 
 
+# Compressed hypertables (db/schema.postgres.sql: add_compression_policy). A predicate-wide
+# UPDATE against one of these decompresses every chunk it might touch.
+_COMPRESSED_HYPERTABLES = ("stock_ohlcv", "intraday_ohlcv", "feature_store", "confluence_signals")
+# A per-row key. Timescale only decompresses the chunks these actually land in. Both forms
+# tolerate a cast (`date::text=?`, the convention after the TEXT->DATE migration) and `IN`,
+# which is still bounded to the listed values -- measured against the real call sites, which
+# use all three spellings; requiring a bare `col =` made this a false-positive machine.
+_KEY_OP = r"(?:\s*::\s*\w+)?\s*(?:=|\bIN\b)"
+_ROW_KEY_PREDICATE = re.compile(rf"\b(?:symbol|sym)\b{_KEY_OP}", re.IGNORECASE)
+_TIME_KEY_PREDICATE = re.compile(
+    rf"\b(?:date|datetime|ts|time|bucket|computed_at|trade_date|signal_date)\b{_KEY_OP}",
+    re.IGNORECASE)
+
+
+def check_predicate_wide_hypertable_update(path: Path, text: str) -> list[str]:
+    """Flag an UPDATE against a compressed hypertable that is not keyed per row.
+
+    AF-20261123-02. `ohlcv_quality.flag_bad_prints` reset `is_suspect` with a statement whose
+    only predicate was `is_suspect=1`, against `stock_ohlcv` -- so Timescale had to decompress
+    every chunk it might touch before applying it. That shape already produced "tuple
+    decompression limit exceeded" at 2.2M tuples, which is why `hypertable_safe_write.py`
+    exists; the same file was calling `safe_keyed_update()` correctly from one function and
+    bypassing it from three other sites. Short of the limit it still destroys the compression
+    ratio of every chunk it touches, silently, until the next policy pass.
+
+    A statement is accepted when it carries BOTH a row key and a time key, which is what
+    `safe_keyed_update()` submits. Anything else needs a `hypertable-wide-ok: <reason>` marker
+    on the line (a genuine one-off migration, say) rather than a file-level allowlist.
+    """
+    # Test fixtures build these tables as plain tables in a throwaway schema, with no
+    # compression policy, so the class cannot bite there.
+    if "tests" in path.parts or path.name.startswith("test_"):
+        return []
+
+    findings: list[str] = []
+    for table in _COMPRESSED_HYPERTABLES:
+        for m in re.finditer(rf"UPDATE\s+{table}\b", text, re.IGNORECASE):
+            lineno = text[:m.start()].count("\n") + 1
+            line = text.splitlines()[lineno - 1] if lineno <= len(text.splitlines()) else ""
+            if "hypertable-wide-ok" in line:
+                continue
+            # The statement often spans concatenated literals; look ahead far enough to carry
+            # the WHERE clause with it, and stop at the first terminator.
+            window = text[m.start():m.start() + 400]
+            window = re.split(r";|\"\"\"|'''", window)[0]
+            if _ROW_KEY_PREDICATE.search(window) and _TIME_KEY_PREDICATE.search(window):
+                continue
+            findings.append(
+                f"{_display_path(path)}:{lineno}: UPDATE against the compressed hypertable "
+                f"{table} is not keyed per row -- Timescale decompresses every chunk the "
+                f"predicate might touch (\"tuple decompression limit exceeded\" at 2.2M "
+                f"tuples, and it destroys the compression ratio even short of that). Select "
+                f"the keys first, then write through hypertable_safe_write.safe_keyed_update(), "
+                f"as ohlcv_quality.py does. If this really must be predicate-wide, add a "
+                f"`hypertable-wide-ok: <reason>` marker on the line."
+            )
+    return findings
+
+
+# The tier-1 capitulation triple's pre-correction headline figures. Superseded 2026-10-27.
+_SUPERSEDED_EDGE_FIGURES = re.compile(r"0\.53\s*%\s*/\s*day|t\s*=\s*\+?3\.61|t\s+3\.61")
+_EDGE_CORRECTION_ID = "AF-20261026-73"
+_EDGE_AUTHORITY = ".claude/skills/trade-desk/references/edge-inventory.md"
+
+
+def check_superseded_edge_quoted_as_live() -> list[str]:
+    """Flag a skill still quoting a measurement a later re-check disproved.
+
+    The tier-1 capitulation triple was the one setup here that had ever cleared a measurement
+    review (+0.53%/day net, t=+3.61, 6/6 years). The 2026-10-27 re-check (AF-20261026-73) found
+    2026 YTD negative, out-of-sample since 2026-08-21 negative, and no edge at all above
+    ADTV Rs25cr, and recorded that in the edge inventory. `trade-desk/SKILL.md` never absorbed
+    it -- for four weeks it presented the setup as proven and annualized it to "[18%, 63%]
+    excess" -- and `screener-combo-predictor/SKILL.md` still called it "the one surviving
+    combination". A session reading only a SKILL.md would have sized a real trade on it.
+
+    Docs are where this class hides: no test imports a skill, so nothing else can fail. The
+    rule is therefore structural rather than numeric -- quoting the superseded figures is
+    allowed only alongside the ledger id that carries the current reading.
+    """
+    authority = REPO_ROOT / _EDGE_AUTHORITY
+    # Emptiness self-test: if the authority moved or stopped carrying the correction, this
+    # check would quietly pass on every file. Fail loudly instead of reporting a clean scan.
+    if not authority.exists():
+        return [f"{_EDGE_AUTHORITY}: edge inventory is missing, so the superseded-edge check "
+                f"has nothing to anchor on -- update _EDGE_AUTHORITY if it moved."]
+    if _EDGE_CORRECTION_ID not in authority.read_text(encoding="utf-8", errors="ignore"):
+        return [f"{_EDGE_AUTHORITY}: no longer cites {_EDGE_CORRECTION_ID}; the "
+                f"superseded-edge check cannot tell a corrected file from an uncorrected one."]
+
+    out = subprocess.run(["git", "ls-files", ".claude"], cwd=REPO_ROOT,
+                         capture_output=True, text=True, check=True)
+    findings: list[str] = []
+    for line in out.stdout.splitlines():
+        if not line.endswith(".md"):
+            continue
+        path = REPO_ROOT / line
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        hit = _SUPERSEDED_EDGE_FIGURES.search(text)
+        if not hit or _EDGE_CORRECTION_ID in text:
+            continue
+        lineno = text[:hit.start()].count("\n") + 1
+        findings.append(
+            f"{line}:{lineno}: quotes the capitulation triple's superseded figures "
+            f"({hit.group(0)!r}) without citing {_EDGE_CORRECTION_ID}. That reading was "
+            f"disproven on 2026-10-27 (2026 YTD negative, no edge above ADTV Rs25cr); see "
+            f"{_EDGE_AUTHORITY}. Quote the current reading, or cite the correction."
+        )
+    return findings
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("paths", nargs="*", help="specific files to check")
@@ -1000,6 +1113,7 @@ def main() -> int:
         all_findings.extend(check_degraded_print_to_stdout(path, text, runpython_scripts))
         all_findings.extend(check_screener_catalog_exact_case_source(path, text))
         all_findings.extend(check_asymmetric_classification_polarity(path, text))
+        all_findings.extend(check_predicate_wide_hypertable_update(path, text))
 
     for path in ts_files:
         ts_text = path.read_text(encoding="utf-8", errors="ignore")
@@ -1010,6 +1124,10 @@ def main() -> int:
 
     if not args.skip_live_datasource_check:
         all_findings.extend(check_missing_live_datasource_test(py_files))
+
+    # Repo-wide, not per-file: the defect is a doc disagreeing with the measurement authority,
+    # so a --diff run that touches neither file still needs to see it.
+    all_findings.extend(check_superseded_edge_quoted_as_live())
 
     if all_findings:
         print(f"Found {len(all_findings)} potential issue(s) from the recurring-bug checklist:\n")

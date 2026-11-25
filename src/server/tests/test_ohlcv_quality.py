@@ -194,6 +194,93 @@ def test_flag_all_reads_the_bars_once_and_flags_like_the_separate_passes(monkeyp
     assert {s for s, _ in _suspects(combined)} == {'SPIKE', 'JUMP', 'BROKEN'}
 
 
+# ── AF-20261123-02: every write to stock_ohlcv must be keyed, never predicate-wide ──────
+#
+# stock_ohlcv is a compressed hypertable (180-day policy). A predicate-wide UPDATE forces
+# Timescale to decompress every chunk it might touch -- the "tuple decompression limit
+# exceeded" shape hypertable_safe_write.py was written to prevent, already hit once at 2.2M
+# tuples. The resulting ROWS are identical either way, so a state-based assertion passes
+# against the unfixed code and proves nothing: the defect is the statement's SHAPE. Record
+# the statements and assert on those instead (the connection-proxy technique in
+# bugs-data-layer.md's swallowed-exception entry).
+
+class _RecordingConn:
+    """Pass-through wrapper that records the SQL text of every statement executed."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.statements: list[str] = []
+
+    def execute(self, sql, params=None):
+        self.statements.append(str(sql))
+        if params is None:
+            return self._inner.execute(sql)
+        return self._inner.execute(sql, params)
+
+    def executemany(self, sql, seq):
+        self.statements.append(str(sql))
+        return self._inner.executemany(sql, seq)
+
+    def commit(self):
+        return self._inner.commit()
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def test_every_stock_ohlcv_update_is_keyed_not_predicate_wide():
+    import re as _re
+    from ohlcv_quality import flag_extreme_level_shifts, flag_malformed_bars
+
+    conn = make_db()
+    _mixed_universe(conn)
+    # Give the reset something of this module's own to clear, so that path really fires.
+    conn.execute("UPDATE stock_ohlcv SET is_suspect=1 WHERE symbol='CLEAN'")
+    conn.commit()
+
+    rec = _RecordingConn(conn)
+    flag_bad_prints(rec)
+    flag_extreme_level_shifts(rec)
+    flag_malformed_bars(rec)
+
+    updates = [s for s in rec.statements if _re.search(r"UPDATE\s+stock_ohlcv", s, _re.I)]
+    # Emptiness self-test: an assertion loop over zero statements passes vacuously.
+    assert updates, "no stock_ohlcv UPDATE was recorded -- this test exercised none of the writes"
+    for sql in updates:
+        assert "WHERE symbol=? AND date=?" in " ".join(sql.split()), (
+            "predicate-wide UPDATE against the compressed hypertable stock_ohlcv "
+            f"(decompresses every chunk it might touch): {sql!r}")
+
+    assert any("max_tuples_decompressed_per_dml_transaction" in s for s in rec.statements), (
+        "no decompression-limit override was set -- the writes did not go through "
+        "safe_keyed_update()")
+
+
+def test_keyed_reset_clears_exactly_the_rows_the_predicate_wide_one_did():
+    # The shape changed; the resulting rows must not. Same expectations as the two
+    # reset-preservation tests above, asserted together after the keyed rewrite.
+    from ohlcv_quality import CLOSED_SESSION_REASON
+
+    conn = make_db()
+    _bars(conn, 'SPIKE', [100, 100, 700, 100, 100])
+    conn.execute(
+        "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume,is_suspect,suspect_reason) "
+        "VALUES ('HOLIDAY','2026-06-26',100,100,100,100,0,1,?)", (CLOSED_SESSION_REASON,))
+    conn.execute(
+        "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume,is_suspect,suspect_reason) "
+        "VALUES ('OURS','2024-03-01',100,100,100,100,10,1,NULL)")
+    conn.commit()
+
+    flag_bad_prints(conn)
+
+    rows = dict((r[0], r[1]) for r in conn.execute(
+        "SELECT symbol, is_suspect FROM stock_ohlcv WHERE symbol IN ('HOLIDAY','OURS')").fetchall())
+    assert rows['HOLIDAY'] == 1   # another flagger's row, preserved
+    assert rows['OURS'] == 0      # ours, reset
+    assert {r[0] for r in conn.execute(
+        "SELECT DISTINCT symbol FROM stock_ohlcv WHERE is_suspect=1").fetchall()} == {'HOLIDAY', 'SPIKE'}
+
+
 def test_flag_bad_prints_respects_corporate_action_allowlist():
     conn = make_db()
     _bars(conn, 'CORP', [100, 100, 700, 700, 700])     # a real step up at a split ex-date

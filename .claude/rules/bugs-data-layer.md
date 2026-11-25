@@ -218,6 +218,35 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
 - **Restricting a universe upstream re-tunes every absolute threshold downstream.** An engine fix that deflates one score can collapse actionable output under an unchanged floor (612→22 Buys, one incident). **A related, subtler cause: a multiplier whose INPUT is degenerate**, not the multiplier's own calibration — a crowding discount fired on 98.6% of the universe because 5 upstream factor columns were accidentally constant, and a uniform multiplier is invisible to every rank-based diagnostic since it can't change any ranking, only shift the population against absolute thresholds. **Two tells, either enough:** a gate/veto/discount firing on ~100% of its population carries zero information (check prevalence directly, don't assume miscalibration); a final blended score landing BELOW every component that fed it is not a weighted blend (grep for a `*=` applied after the blend). Measure the input's distribution before "fixing" the multiplier's threshold.
 - **A cleanup keyed on a LABEL column misses every polluted row whose label another writer has since overwritten.** AF-20260930-01: a test wrote the sentinel `roc_auc=0.58 / directional_accuracy=0.55` into `dl_model_performance` under `model_version='lstm_v99'`; the 2026-09-10 cleanup deleted `WHERE model_version='lstm_v99'` and reported "genuine `current` series intact" — but the daily drift upsert (`ON CONFLICT … DO UPDATE SET model_version=excluded.model_version, drift_score=…`) had already relabelled 8 of those rows to `'current'` while leaving the fake metrics in place, and `dl.router.ts` (`getDLModelPerformance`, unfiltered) served them as history. **Select pollution by the polluted VALUE, not by a provenance column any upsert can rewrite**, and verify "after" with the value predicate returning 0. Tell: an upsert whose `DO UPDATE SET` touches the provenance column but not the payload columns.
 
+## A predicate-wide write against a compressed hypertable, and a superseded number quoted as live (2026-11-23, AF-20261123-02/-02)
+
+- 🤖 **An UPDATE against a compressed hypertable that is not keyed per row makes Timescale decompress
+  every chunk the predicate might touch** — `"tuple decompression limit exceeded"` at 2.2M tuples on
+  `stock_ohlcv`, and short of the limit it silently destroys the compression ratio of every chunk it
+  touched until the next policy pass. `hypertable_safe_write.safe_keyed_update()` exists precisely for
+  this and was documented as the rule, and `ohlcv_quality.py` still called it from ONE of four write
+  sites: `flag_bad_prints`'s reset (`WHERE is_suspect=1 AND ...`, no key at all) ran at minimum daily
+  from `outcome-resolver` and `ml-daily-ops`. **Prose did not hold here either — the correct helper
+  sat 100 lines below the defect in the same file.** Fix shape: SELECT the `(symbol, date)` keys first,
+  then write through `safe_keyed_update()`; a reset only ever touches already-flagged rows, so the keyed
+  set is small. The compressed tables are `stock_ohlcv`, `intraday_ohlcv`, `feature_store`,
+  `confluence_signals`. **Tell:** an `UPDATE <hypertable>` whose WHERE names neither a symbol nor a time
+  column. Note `date::text=?`, `computed_at =` and `symbol IN (...)` are all correctly keyed — a check
+  demanding a bare `col =` flags five healthy call sites (measured while writing this one).
+  Automated: `check_predicate_wide_hypertable_update`; the four test-fixture hits are excluded because
+  a throwaway schema builds these as plain uncompressed tables.
+- 🤖 **A measurement a later re-check disproved, still quoted in a skill as a live edge.** The tier-1
+  capitulation triple was the one setup here that had ever cleared a review (+0.53%/day, t=+3.61).
+  The 2026-10-27 re-check (AF-20261026-73) found 2026 YTD negative, out-of-sample negative and no edge
+  at all above ADTV ₹25cr, and recorded that in `trade-desk/references/edge-inventory.md` — but
+  `trade-desk/SKILL.md` kept the old numbers for four weeks and annualized them to "[18%, 63%] excess",
+  and `screener-combo-predictor/SKILL.md` still called it "the one surviving combination". **Docs are
+  where this class hides: no test imports a skill, so nothing else can fail**, and the correction lived
+  one directory away the whole time. Correcting the headline figure is not enough — grep every number
+  derived from it (a sizing rule, an annualization, a "beat this" bar in another skill).
+  Automated: `check_superseded_edge_quoted_as_live` (quoting the superseded figures requires citing the
+  correction's ledger id).
+
 ## Provider identifiers, reverse maps and "the vendor is dead" (2026-09-12 pm2 warn/error sweep)
 
 - **Admission and ids keyed on a ticker string lose a company the day NSE renames it, and a provider code proven by "same name" is not proven (2026-11-21, AF-20261120-07).** ICICIPRULI -> ICICILIFE restarted the per-symbol 60-session admission count, so a large insurer was missing from every ACTIVE read for four weeks (six more names the same way); carry sessions across NSE's `symbolchange.csv` (`reconcile_master(..., predecessors)`). 205 static-list provider ids were wrong (borrowed codes, DVR shares carrying the parent's ids, the NSE ticker typed in as the MoneyControl code): accept a code only when the vendor's own payload for that symbol carries NSE's ISIN, and keep every id family unique (`test_stocklist_provider_ids_unique.py`). **Tell:** a name with `nse_universe_history` rows under a new symbol and none in `nse_stocks`; `SELECT count(*), count(DISTINCT col)` on each id column. Same sweep: a backfill bound hard-coded to a date silently stops there (`mc_ohlcv_backfill.py` ended at 2026-07-13), and a split-adjusted vendor history can still miss a demerger (HEGAM x2.8, fake -63%), so diff every backfill against raw closes on the shared days; and a writer fix must scope the read side too (the exit UPDATE of `screener_appearances` was scoped while its entry snapshot was not, and the test only checked the line that had been edited).
