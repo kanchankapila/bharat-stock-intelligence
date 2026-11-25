@@ -156,6 +156,27 @@ def test_reset_preserves_every_data_integrity_repair_reason():
     assert rows == {'COPY': 1, 'JUNK': 1}
 
 
+def test_reset_still_rejudges_the_bad_bar_reasons_this_module_owns():
+    # data_integrity_repair --bad-bars' checks were merged into this module (queues.ts), so
+    # its reasons stay ours to reset and re-derive: a flat, well-formed bar is not re-flagged.
+    from ohlcv_quality import OWNED_REASONS
+    src = open(os.path.join(os.path.dirname(__file__), '..', 'data_integrity_repair.py'),
+               encoding='utf-8').read()
+    assert OWNED_REASONS and all(f"'{r}'" in src or f'"{r}"' in src for r in OWNED_REASONS)
+
+    conn = make_db()
+    for i, reason in enumerate(OWNED_REASONS):
+        conn.execute(
+            "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume,is_suspect,suspect_reason) "
+            "VALUES (?,'2026-07-14',100,101,99,100,10,1,?)", (f'BAD{i}', reason))
+    conn.commit()
+
+    flag_bad_prints(conn)
+
+    assert conn.execute(
+        "SELECT count(*) FROM stock_ohlcv WHERE symbol LIKE 'BAD%' AND is_suspect=1").fetchone()[0] == 0
+
+
 def test_reset_preserves_absent_from_official_bhavcopy_quarantine():
     # CCAVENUE 2026-10-14 (live): reconcile_stock_ohlcv_from_bhavcopy quarantined a ghost bar
     # (no row in a complete official bhavcopy), then this reset -- the very next nightly step --

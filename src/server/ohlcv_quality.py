@@ -39,8 +39,12 @@ CLOSED_SESSION_REASON = 'closed session: universe-wide flat zero-volume bar'
 # The same thing happened to reconcile_stock_ohlcv_from_bhavcopy's ghost-bar quarantine
 # (CCAVENUE 2026-10-14) and to data_integrity_repair's copied-session and unlisted-symbol flags
 # (AF-20261125-01): each was a new reason missing from a hand-kept exemption list. So the reset
-# now touches only rows this module flagged, which it marks by leaving suspect_reason NULL.
-# A flag carrying any reason belongs to the tool that wrote it and survives here.
+# now touches only rows this module flagged: suspect_reason NULL, plus OWNED_REASONS.
+# A flag carrying any other reason belongs to the tool that wrote it and survives here, so a
+# reason missing from this list leaves a bar flagged rather than wiping a flag.
+# OWNED_REASONS are data_integrity_repair --bad-bars' reasons. Its checks were merged into
+# this module (queues.ts), so the daily run re-judges those bars and re-flags what it still finds.
+OWNED_REASONS = ('impossible_move', 'nonpositive_price', 'ohlc_inconsistent')
 
 # ingest_corporate_actions() is one of the report's two 150-minute steps (scheduler-review,
 # 2026-09-04) -- a per-symbol yfinance .splits/.dividends call across the whole universe every
@@ -213,16 +217,17 @@ def flag_bad_prints(conn: ConnWrapper, threshold: float = BAD_PRINT_THRESHOLD,
                     bars_map: dict = None, action_map: dict = None) -> dict:
     """Mark stock_ohlcv.is_suspect for single-bar bad prints. Idempotent (resets first).
 
-    The reset is scoped to THIS module's flags, the rows with suspect_reason NULL. Every other
-    flagger writes a reason, and its flags survive (AF-20260912-19, AF-20261125-01).
+    The reset is scoped to THIS module's flags: suspect_reason NULL or in OWNED_REASONS. Every
+    other flagger's reason survives (AF-20260912-19, AF-20261125-01).
     """
     # Selected first, then reset by key: stock_ohlcv is a compressed hypertable, and the
     # predicate-wide form of this UPDATE made Timescale decompress every chunk it might
     # touch -- the "tuple decompression limit exceeded" shape hypertable_safe_write.py exists
     # to prevent. Only is_suspect=1 rows are ever reset, so the keyed set is small.
     to_reset = conn.execute(
-        "SELECT symbol, date FROM stock_ohlcv WHERE is_suspect=1 AND suspect_reason IS NULL"
-    ).fetchall()
+        "SELECT symbol, date FROM stock_ohlcv WHERE is_suspect=1 "
+        f"AND (suspect_reason IS NULL OR suspect_reason IN ({','.join('?' * len(OWNED_REASONS))}))",
+        OWNED_REASONS).fetchall()
     safe_keyed_update(
         conn,
         "UPDATE stock_ohlcv SET is_suspect=0 WHERE symbol=? AND date=?",
