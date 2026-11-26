@@ -23,6 +23,7 @@ import json
 import datetime
 
 from db_compat import connect
+from as_of import logical_trading_date
 
 # Fusion weights (sum need not be 1 — renormalized over present inputs). Breadth + VIX carry most
 # weight as the most reliable real-time risk gauges.
@@ -97,7 +98,7 @@ def _latest_macro(conn, symbols):
     script in the same job chain, so a missing today row means that fetch failed, not that
     yesterday's VIX/basis/chg% is still a fair stand-in for today's risk state. Dropping the
     term (renormalizing the rest) is the correct degrade, same as a missing symbol today."""
-    today = datetime.date.today().isoformat()
+    today = logical_trading_date()
     for sym in symbols:
         r = conn.execute(
             "SELECT close FROM macro_asset_prices WHERE symbol=? AND date=?", (sym, today)

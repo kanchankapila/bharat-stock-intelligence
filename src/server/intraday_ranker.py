@@ -508,6 +508,58 @@ class IntradayRanker:
                 acc.setdefault(s, []).append(sc)
         return {s: sum(v) / len(v) for s, v in acc.items() if v}
 
+    def _live_screener_scores(self, max_age_minutes: int = 120):
+        """Read the latest live_screener_runs / live_screener_appearances (NiftyTrader 45-filter
+        collector) into a 0-100 intraday momentum/structure score per symbol (telemetry-only)."""
+        bull_filters = {
+            "todayNR7", "orb5minHigh", "todayStockOpenLow", "todayGapUP",
+            "higherHighHigherLow", "todayAbove20SMA", "todayAbove50SMA",
+        }
+        bear_filters = {
+            "orb5minLow", "todayStockOpenHigh", "todayGapDown",
+            "lowerHighLowerLow", "todayBelow20SMA", "todayBelow50SMA",
+        }
+        try:
+            run_row = self.conn.execute(
+                "SELECT id, timestamp FROM live_screener_runs "
+                "WHERE status IN ('SUCCESS', 'PARTIAL') "
+                "ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            if not run_row:
+                return {}
+            ts_str = str(run_row["timestamp"]).replace("Z", "+00:00")
+            run_dt = datetime.fromisoformat(ts_str)
+            if run_dt.tzinfo is None:
+                run_dt = run_dt.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - run_dt).total_seconds() > max_age_minutes * 60:
+                return {}
+            rows = self.conn.execute(
+                "SELECT symbol, filter_key FROM live_screener_appearances WHERE run_id = ?",
+                (run_row["id"],),
+            ).fetchall()
+        except Exception as e:
+            print(f"[IntradayRanker] live screener lookup skipped: {str(e)[:80]}", file=sys.stderr)
+            return {}
+
+        counts: dict = {}
+        for r in rows:
+            sym = r["symbol"]
+            fk = r["filter_key"]
+            if not sym or not fk:
+                continue
+            c = counts.setdefault(sym, [0, 0])
+            if fk in bull_filters:
+                c[0] += 1
+            elif fk in bear_filters:
+                c[1] += 1
+
+        out = {}
+        for sym, (b, s) in counts.items():
+            tot = b + s
+            if tot > 0:
+                out[sym] = round(50.0 + 50.0 * ((b - s) / tot), 2)
+        return out
+
     def _learned_weights(self):
         """Blend weights learned from realized outcomes by intraday_strategy_learner.py (published
         to app_settings once enough trades accumulate). Falls back to the module defaults."""
@@ -620,6 +672,7 @@ class IntradayRanker:
         breakout_scores = self._breakout_scores()
         reversal_scores = self._reversal_scores()
         news_scores = self._news_sentiment()
+        live_screener_scores = self._live_screener_scores()
         regime = self._intraday_regime()
         tilt = REGIME_TILT.get(regime, 1.0)
         # Blend weights: learned from realized outcomes if available, else defaults (self-improving).
@@ -873,6 +926,7 @@ class IntradayRanker:
                           "emission_gate_short": "open" if sell_emission_ok else "closed",
                           "emission_gate_short_reason": sell_emission_reason, "sell_gated_to_hold": sell_gated,
                           "reversal_scored": len(reversal_scores),
+                          "live_screener_scored": len(live_screener_scores),
                           "intraday_regime": regime}))
         return rows
 

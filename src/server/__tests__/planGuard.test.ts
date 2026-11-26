@@ -7,7 +7,7 @@ vi.mock('../telegramService', () => ({ sanitizeMarkdown: (s: string) => s, teleg
 
 import { toQuoteMap } from '../liveQuotes';
 import { eventRisk, livePlanCheck, sessionAfterPublish } from '../planGuard';
-import { newAlertLines } from '../planGuardAlerts';
+import { formatOpenActionableSummary, newAlertLines } from '../planGuardAlerts';
 
 // AF-20261119-21: a plan published at 22:30 IST is judged only against the session that opens after it.
 const levels = { entryLow: 100, entryHigh: 104, stop: 96, target: 112 };
@@ -75,11 +75,46 @@ describe('eventRisk and alert dedupe', () => {
     ]);
     expect(out.get('LODHA')).toEqual(['Lodha Developers Q2 net profit jumps 40%']);
   });
+  it('filters multi-stock roundup and broker-picks headlines that do not isolate the symbol', () => {
+    const out = eventRisk(
+      [
+        { symbol: 'LGEINDIA', publishedAt: '2026-11-25T17:00:00Z' },
+        { symbol: 'HINDUNILVR', publishedAt: '2026-11-25T17:00:00Z' },
+        { symbol: 'ABC', publishedAt: '2026-11-25T17:00:00Z' },
+      ],
+      [
+        { title: 'Nifty 500: Siemens Energy India jumps 7% as profit surges 82%', published_at: '2026-11-26T05:30:00Z', symbols_json: '["LGEINDIA","SIEMENS"]' },
+        { title: "Pankaj Pandey's stock picks: Why HUL, LG Electronics and HDFC", published_at: '2026-11-26T05:15:00Z', symbols_json: '["HINDUNILVR","LGEINDIA","HDFCBANK"]' },
+        { title: 'Sector wrap: IT & Pharma drag benchmark lower', published_at: '2026-11-26T05:20:00Z', symbols_json: '["ABC","DEF","GHI"]' },
+      ],
+    );
+    expect(out.has('LGEINDIA')).toBe(false);
+    expect(out.has('HINDUNILVR')).toBe(false);
+    expect(out.has('ABC')).toBe(false);
+  });
   it('sends each key once per day', () => {
     const first = newAlertLines([{ key: 'A:STOP_HIT', line: 'a' }, { key: 'B:news:x', line: 'b' }], []);
     expect(first.lines).toEqual(['a', 'b']);
     const again = newAlertLines([{ key: 'A:STOP_HIT', line: 'a' }, { key: 'A:TARGET_HIT', line: 'c' }], first.sent);
     expect(again.lines).toEqual(['c']);
+  });
+});
+
+describe('formatOpenActionableSummary', () => {
+  it('formats executable IN_ENTRY_ZONE / BELOW_ENTRY picks and omits summary when none exist', () => {
+    expect(formatOpenActionableSummary([], '2026-11-26')).toBeNull();
+    const msg = formatOpenActionableSummary(
+      [
+        { symbol: 'INFY', price: 1510, entryLow: 1500, entryHigh: 1520, stop: 1470, target: 1580, state: 'IN_ENTRY_ZONE' },
+        { symbol: 'TCS', price: 3980, entryLow: 4000, entryHigh: 4050, stop: 3920, target: 4200, state: 'BELOW_ENTRY' },
+      ],
+      '2026-11-26',
+    );
+    expect(msg).toContain('Market-Open Actionable Check');
+    expect(msg).toContain('INFY');
+    expect(msg).toContain('in entry zone');
+    expect(msg).toContain('TCS');
+    expect(msg).toContain('below entry, above stop');
   });
 });
 

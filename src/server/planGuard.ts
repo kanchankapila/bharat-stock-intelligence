@@ -98,6 +98,7 @@ export function livePlanCheck(levels: PlanLevels, q: LiveQuote | undefined | nul
 export interface NewsRow { title: string; published_at: unknown; symbols_json: string | null }
 
 const MACRO_DISQUALIFIERS = ['gold import', 'anti-drone missile', 'supermoon', 'gta 6', 'marathon', 'nitish setu'];
+const ROUNDUP_HEADLINE_RE = /\b(stock picks|stocks to watch|top picks|buzzing stocks|stocks in news|market wrap|sector wrap|gainers\b.*\blosers)\b|\bnifty\s*(?:500|50)\s*:/i;
 
 /** Pure: high-impact bearish headlines per symbol published after each plan, newest first, at most 2. */
 export function eventRisk(
@@ -116,8 +117,10 @@ export function eventRisk(
       let syms: unknown = [];
       try { syms = JSON.parse(item.symbols_json ?? '[]'); } catch { syms = []; }
       if (!Array.isArray(syms) || !syms.includes(p.symbol)) continue;
-      // Filter out obvious syndicated macro news mismatches that lack the stock's name
+      // Filter out obvious syndicated macro news mismatches and multi-stock roundups that lack the stock's symbol
       if (MACRO_DISQUALIFIERS.some((d) => item.title.toLowerCase().includes(d)) && !symRe.test(item.title)) continue;
+      if (ROUNDUP_HEADLINE_RE.test(item.title) && !symRe.test(item.title)) continue;
+      if (syms.length >= 3 && !symRe.test(item.title)) continue;
       if (!hits.includes(item.title)) hits.push(item.title);
       if (hits.length === 2) break;
     }

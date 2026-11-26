@@ -33,6 +33,35 @@ export function newAlertLines(
   return { lines, sent: [...seen] };
 }
 
+export interface OpenActionablePick {
+  symbol: string;
+  price: number;
+  entryLow: number | null;
+  entryHigh: number | null;
+  stop: number | null;
+  target: number | null;
+  state: 'IN_ENTRY_ZONE' | 'BELOW_ENTRY';
+}
+
+/** Pure: once-per-day 09:30 IST summary of top published Buy plans trading inside/below entry zone. */
+export function formatOpenActionableSummary(picks: OpenActionablePick[], istDate: string): string | null {
+  if (!picks.length) return null;
+  const lines = picks.slice(0, 10).map((p) => {
+    const status = p.state === 'IN_ENTRY_ZONE' ? 'in entry zone' : 'below entry, above stop';
+    const zone = p.entryLow != null && p.entryHigh != null
+      ? `${p.entryLow.toFixed(2)}–${p.entryHigh.toFixed(2)}`
+      : (p.entryLow ?? p.entryHigh)?.toFixed(2) ?? 'n/a';
+    const sl = p.stop != null ? p.stop.toFixed(2) : 'n/a';
+    const tgt = p.target != null ? p.target.toFixed(2) : 'n/a';
+    return `• *${sanitizeMarkdown(p.symbol)}* ₹${p.price.toFixed(2)} (${status}) — Zone ${zone} · SL ${sl} · Target ${tgt}`;
+  });
+  return [
+    `🔔 *Market-Open Actionable Check* — ${istDate}`,
+    ...lines,
+    '_Filtered from top published plans using live quotes; nothing here re-scores a stock._',
+  ].join('\n');
+}
+
 export async function sendPlanGuardAlerts(now: Date = new Date()): Promise<{ skipped?: string; sent: number }> {
   const live = await loadLiveQuotes();
   // Same TOP tier the Best Picks page and the evening digest publish.
@@ -48,32 +77,64 @@ export async function sendPlanGuardAlerts(now: Date = new Date()): Promise<{ ski
 
   const risk = await fetchEventRisk(plans.map((p) => ({ symbol: p.symbol, publishedAt: p.computed_at })));
   const items: Array<{ key: string; line: string }> = [];
+  const openActionable: OpenActionablePick[] = [];
   for (const p of plans) {
     const quote = live.quotes.get(p.symbol);
-    const check = livePlanCheck(planLevels(p as unknown as Record<string, unknown>), quote);
+    const levels = planLevels(p as unknown as Record<string, unknown>);
+    const check = livePlanCheck(levels, quote);
     if (check?.invalidated) {
       const px = quote?.price != null ? ` (₹${quote.price})` : '';
       items.push({ key: `${p.symbol}:${check.state}`, line: `• *${sanitizeMarkdown(p.symbol)}* ${sanitizeMarkdown(check.label)}${px}` });
+    } else if (check && quote?.price != null && (check.state === 'IN_ENTRY_ZONE' || check.state === 'BELOW_ENTRY')) {
+      openActionable.push({
+        symbol: p.symbol,
+        price: quote.price,
+        entryLow: levels.entryLow,
+        entryHigh: levels.entryHigh,
+        stop: levels.stop,
+        target: levels.target,
+        state: check.state,
+      });
     }
     for (const h of risk.get(p.symbol) ?? []) {
       items.push({ key: `${p.symbol}:news:${h}`, line: `• *${sanitizeMarkdown(p.symbol)}* news since plan: ${sanitizeMarkdown(h)}` });
     }
   }
 
-  const key = KEY_PREFIX + new Date(now.getTime() + IST_MS).toISOString().slice(0, 10);
+  const istNow = new Date(now.getTime() + IST_MS);
+  const istDate = istNow.toISOString().slice(0, 10);
+  const istMinutes = istNow.getUTCHours() * 60 + istNow.getUTCMinutes();
+  const key = KEY_PREFIX + istDate;
   const row = await dbGet<{ value: string }>('SELECT value FROM app_settings WHERE key = ?', [key]);
   let already: string[] = [];
   try { already = row?.value ? JSON.parse(row.value) : []; } catch { already = []; }
-  const { lines, sent } = newAlertLines(items, Array.isArray(already) ? already : []);
-  if (!lines.length) return { sent: 0 };
+  const seenList = Array.isArray(already) ? already : [];
+  const { lines, sent } = newAlertLines(items, seenList);
 
-  await telegramService.sendMarkdownMessage(
-    ['⚠️ *Published plans changed in today\'s session*', ...lines,
-     '_Plan levels are the published ones; nothing here re-scores a stock._'].join('\n'),
-  );
-  await dbRun(
-    'INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
-    [key, JSON.stringify(sent)],
-  );
-  return { sent: lines.length };
+  let totalSent = 0;
+  // Send the Market-Open Actionable Check once per day during the 09:15-10:15 IST opening window.
+  if (istMinutes >= 9 * 60 + 15 && istMinutes <= 10 * 60 + 15 && !sent.includes('open_summary')) {
+    const summaryMsg = formatOpenActionableSummary(openActionable, istDate);
+    if (summaryMsg) {
+      await telegramService.sendMarkdownMessage(summaryMsg);
+      totalSent += openActionable.length;
+    }
+    sent.push('open_summary');
+  }
+
+  if (lines.length) {
+    await telegramService.sendMarkdownMessage(
+      ['⚠️ *Published plans changed in today\'s session*', ...lines,
+       '_Plan levels are the published ones; nothing here re-scores a stock._'].join('\n'),
+    );
+    totalSent += lines.length;
+  }
+
+  if (totalSent > 0 || sent.length !== seenList.length) {
+    await dbRun(
+      'INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
+      [key, JSON.stringify(sent)],
+    );
+  }
+  return { sent: totalSent };
 }
