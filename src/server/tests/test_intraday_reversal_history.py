@@ -1,7 +1,7 @@
 """The reversal component must be recorded in intraday history, or no blend change can be replayed.
 
 reversal_score carries 0.40 of the intraday blend and is the only component that measured the right
-way round (measurement.md 2026-10-25), but until 2026-11-26 it was written to the live table only, so
+way round (measurement.md 2026-10-25), but until 2026-11-26 it was stored in neither intraday table, so
 the 2026-11-26 rescale of the learned weights (c6272751) had no stored input to be graded against.
 """
 import inspect

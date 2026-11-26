@@ -98,6 +98,25 @@ This section is a dated status board, not a verdict list. A claim carrying an ol
 in this file is not wrong, it is *unrefreshed* — check the date before quoting it, and re-run
 rather than assume. Full narrative for anything here: `docs/measurement-history.md`.
 
+### 2026-11-26 — pre-registered: intraday blend without breakout (AF-20261126-10)
+
+Arms, cohort (first 20 sessions with `reversal_score`, from 2026-11-27) and ship bar are frozen in `docs/audits/2026-11-26-intraday-blend-arms-preregistration.md`. Do not grade earlier or change an arm after reading a cohort session.
+
+### 2026-11-26 — intraday screener shadow arm graded: the repaired score adds no information (AF-20261025-01)
+
+Pre-registered (`research/out/af-20261025-01/PREREGISTRATION.md`; `grade_shadow.py`, `result.txt`, `placebo.txt` beside it). 19 sessions 2026-10-29..11-26 (**LOW-DATA**), 541,468 symbol-cycles, entry = next 15m bar open after the cycle, exit = session close, per-cycle rank IC averaged by day. Stored components only (breakout + screener), not the published score.
+
+| arm | daily rank IC | t | top-decile excess | top-decile net of 30 bps |
+|---|---|---|---|---|
+| live (screener constant 50, so this is the breakout ranking) | -0.0398 | -2.94 | -0.010% | -0.294% |
+| shadow blend 0.503/0.497 | -0.0067 | -1.22 | -0.012% | -0.295% |
+| shadow score alone | +0.0067 | +1.34 | +0.013% | -0.271% |
+
+- **Frozen outcome: FAILS.** IC difference +0.0332 (t 2.85, halves +0.056 / +0.013) clears its criteria; top-decile excess not above live and under 20 days do not.
+- **Judgement (post-result): the IC gain is dilution.** A shuffled shadow score within each cycle gains +0.0274; shadow minus placebo +0.0058/day, t 1.19. **Run a placebo whenever a component is added to a blend whose existing ranking is negative.**
+- The top-decile difference moved between -0.001% and -0.002% across two identical runs (unstable tie order); the failure on that criterion is inside that noise.
+- **Breakout ranked the wrong way intraday** (IC -0.040, positive on 4 of 19 days), consistent with AF-20261021-04. No weight changed; the published score also carries reversal, recorded in history only from AF-20261126-07.
+
 ### 2026-11-26 — rank hysteresis (`factor_backtest.py --exit-rank`): cuts turnover, does not create an edge (AF-20261126-06)
 
 Pre-registered before any hysteresis result (`research/out/hysteresis-20261126/PREREGISTRATION.md`; outputs beside it). 25 bps/side, top-50, same panel, `exit_rank` = keep a holding while it ranks inside the top N.

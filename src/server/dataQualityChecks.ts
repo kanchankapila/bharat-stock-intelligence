@@ -4430,6 +4430,53 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    // AF-20261025-01: screener_score was 50.0 for every symbol from 2026-08-12 and found on 10-25.
+    // A constant cannot change any ranking, so no rank metric or freshness check sees it, but it does
+    // shift every name against the Buy/Sell thresholds. Warn, not critical: the current case awaits an
+    // owner decision. reversal_score exists only in history, reached per symbol through its index.
+    id: 'intraday-blend-component-stuck',
+    label: 'Intraday blend component with one value across the universe',
+    category: 'scoring',
+    critical: false,
+    sql: `WITH latest AS (
+            SELECT symbol, computed_at, screener_score, breakout_score FROM intraday_recommendations
+             WHERE computed_at = (SELECT max(computed_at) FROM intraday_recommendations)
+          ),
+          rev AS (
+            SELECT count(h.reversal_score) AS n, count(DISTINCT h.reversal_score) AS d,
+                   min(h.reversal_score) AS v
+              FROM latest l
+              JOIN intraday_recommendations_history h
+                ON h.symbol = l.symbol AND h.computed_at = l.computed_at
+          )
+          SELECT max(computed_at) AS day,
+                 count(screener_score) AS screener_n, count(DISTINCT screener_score) AS screener_d,
+                 min(screener_score) AS screener_v,
+                 count(breakout_score) AS breakout_n, count(DISTINCT breakout_score) AS breakout_d,
+                 min(breakout_score) AS breakout_v,
+                 (SELECT n FROM rev) AS reversal_n, (SELECT d FROM rev) AS reversal_d,
+                 (SELECT v FROM rev) AS reversal_v
+            FROM latest`,
+    evaluate: (row) => {
+      const stuck: string[] = [];
+      const varying: string[] = [];
+      const unmeasured: string[] = [];
+      for (const c of ['screener', 'breakout', 'reversal']) {
+        const n = Number(row?.[`${c}_n`] ?? 0);
+        const distinct = Number(row?.[`${c}_d`] ?? 0);
+        if (n < 50) unmeasured.push(`${c}_score`);
+        else if (distinct <= 1) stuck.push(`${c}_score is ${Number(row?.[`${c}_v`])} for all ${n} rows`);
+        else varying.push(`${c}_score ${distinct} distinct`);
+      }
+      const missing = unmeasured.length ? `; not measured: ${unmeasured.join(', ')}` : '';
+      if (stuck.length) {
+        return { status: 'warn', detail: `${row?.day}: ${stuck.join('; ')} -- it cannot rank anything${missing}` };
+      }
+      if (!varying.length) return { status: 'warn', detail: `No intraday component rows to measure${missing}` };
+      return { status: 'pass', detail: `${row?.day}: ${varying.join(', ')}${missing}` };
+    },
+  },
+  {
     id: 'ur-engine-dispersion-collapse',
     label: 'How often each engine collapses below ZERO_DISPERSION_MIN_SD and is dropped from the blend',
     category: 'scoring',

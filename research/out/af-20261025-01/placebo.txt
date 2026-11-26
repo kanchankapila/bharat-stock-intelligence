@@ -1,0 +1,16 @@
+read 572,802 history rows, 1,206,429 bars in 13s
+graded rows 541,468; dropped 31,334; |ret|>20%: 57
+alone         days 19  IC +0.0067 (t +1.34, 13 positive)  top-decile excess +0.014%  gross +0.031%  net -0.269%
+live          days 19  IC -0.0398 (t -2.94, 4 positive)  top-decile excess -0.010%  gross +0.006%  net -0.294%
+shadow        days 19  IC -0.0067 (t -1.22, 8 positive)  top-decile excess -0.012%  gross +0.005%  net -0.295%
+live_const    days 19  IC -0.0398 (t -2.94, 4 positive)  top-decile excess -0.010%  gross +0.006%  net -0.294%
+shadow_const  days 19  IC -0.0005 (t -0.11, 10 positive)  top-decile excess -0.004%  gross +0.013%  net -0.287%
+shadow-live        days 19  IC diff +0.0332 (t +2.85, better 15)  halves +0.0555 / +0.0131  top-excess diff -0.002%
+shadow-live_const  days 19  IC diff +0.0393 (t +2.86, better 15)  halves +0.0656 / +0.0156  top-excess diff +0.007%
+placebo seed 0: IC -0.0117  minus live +0.0281
+placebo seed 1: IC -0.0122  minus live +0.0276
+placebo seed 2: IC -0.0134  minus live +0.0264
+placebo seed 3: IC -0.0124  minus live +0.0274
+placebo seed 4: IC -0.0127  minus live +0.0272
+placebo mean diff +0.0274 vs real shadow diff +0.0332
+shadow minus placebo, paired by day: +0.0058 (t +1.19)
