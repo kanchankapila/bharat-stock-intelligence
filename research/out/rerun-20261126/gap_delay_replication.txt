@@ -1,0 +1,12 @@
+all sized days 62 gap-up 460 other 5306
+ thin 2026-08-13 too_few_others 1 0 {'no_preopen_row': 11}
+ thin 2026-08-24 None 2 4 {'no_preopen_row': 94}
+ thin 2026-08-28 None 1 8 {'no_preopen_row': 110}
+days 78 with a result 50 pending 0 {'no_buy_names': 8, 'no_gap_up': 11, 'too_few_others': 1, 'no_preopen': 8}
+gap-up names 459 other 5110 locked 10
+D +0.318% t +1.31 halves +0.516/+0.121 gap-up saving +0.452% always-delay +0.152%
+study O2: graded 51, gap-up 470, other 5495, D +0.325% t +1.37 halves +0.516/+0.142
+
+Reconciliation: the arm needs a later session before grading, so it leaves out 2026-11-26. Graded alone with a
+placeholder later session (gap_delay_replication_lastday.txt): 10 gap-up, 190 other, D +0.686. Adding it gives
+51 graded days, 470 gap-up, 5496 other (study 5495) and D +0.325, matching opportunities.txt O2.

@@ -2198,6 +2198,24 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'gap-up-delay-shadow-freshness',
+    label: 'gap_up_delay_shadow snapshot (pre-registered entry-timing shadow, written by ml-daily-ops)',
+    category: 'scoring',
+    critical: false,
+    // AF-20261126-15: graded days are append-only, so a day stuck pending (bars never completed) is lost quietly.
+    sql: `SELECT "updatedAt" AS last_date, jsonb_array_length((value::jsonb)->'pending') AS pending
+          FROM app_settings WHERE key = 'gap_up_delay_shadow'`,
+    evaluate: (row, now) => {
+      const stale = tradingDaysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'No gap_up_delay_shadow snapshot yet - run gap_up_delay_shadow.py --persist (ml-daily-ops does this nightly)' };
+      if (stale > 6) return { status: 'fail', detail: `gap_up_delay_shadow snapshot is ${fmtDays(stale)} old - the shadow arm has stopped accumulating` };
+      if (stale > 3) return { status: 'warn', detail: `gap_up_delay_shadow snapshot is ${fmtDays(stale)} old` };
+      const pending = Number(row?.pending ?? 0);
+      if (pending >= 3) return { status: 'warn', detail: `${pending} days pending (15-minute or daily bars incomplete) - they are not being graded` };
+      return { status: 'pass', detail: `gap_up_delay_shadow snapshot ${fmtDays(stale)} old, ${pending} days pending` };
+    },
+  },
+  {
     id: 'earnings-preview-freshness',
     label: 'earnings preview snapshot + append-only forecast log (earnings_preview.py, ml-daily-ops)',
     category: 'fundamentals',

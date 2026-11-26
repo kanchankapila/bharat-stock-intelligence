@@ -1374,6 +1374,12 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   await runPython('forward_test_report.py', ['--persist'], 10 * 60_000)
     .catch(e => T.fail('forward_test_report', e));
 
+  // Pre-registered gap-up delay shadow (AF-20261126-15): appends each newly gradeable day to one app_settings
+  // snapshot, changes no score or entry time, exits 2 on protocol drift; watched by `gap-up-delay-shadow-freshness`.
+  // Takes seconds: a 78-day replay ran in 28 s, and a night adds one day.
+  await runPython('gap_up_delay_shadow.py', ['--persist'], 5 * 60_000)
+    .catch(e => T.fail('gap_up_delay_shadow', e));
+
   // Shadow arms + objective-regime scorecard + alerts (2026-10-09, AF-20261008-16/-17). Same contract as the
   // forward test: read-only apart from one app_settings snapshot, never changes a score, watched by
   // `accuracy-scorecard-freshness`. ~50 s measured against the live DB.

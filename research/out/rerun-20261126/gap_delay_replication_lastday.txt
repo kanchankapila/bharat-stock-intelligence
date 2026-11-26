@@ -1,0 +1,1 @@
+2026-11-26 graded n_up 10 n_other 190 D 0.6860601493097621 {'below_adt': 61, 'no_preopen_row': 19, 'surveillance': 6}
