@@ -1199,6 +1199,7 @@ CREATE TABLE IF NOT EXISTS "intraday_recommendations_history" (
   "risk_reward" DOUBLE PRECISION,
   "position_size_pct" DOUBLE PRECISION,
   "screener_score_shadow" DOUBLE PRECISION,
+  "reversal_score" DOUBLE PRECISION,
   PRIMARY KEY ("symbol", "cycle_at")
 );
 CREATE INDEX idx_irh_symbol_date ON public.intraday_recommendations_history USING btree (symbol, computed_at, cycle_at);

@@ -1273,7 +1273,8 @@ def run_backtest(panel: pd.DataFrame,
                  missing_exit_pct: float = MISSING_EXIT_PCT,
                  exit_by_date: dict | None = None,
                  last_alive: dict | None = None,
-                 veto_fn=None) -> dict:
+                 veto_fn=None,
+                 exit_rank: int | None = None) -> dict:
     """Equal-weight top-K portfolio, rebalanced every `rebalance_days` SESSIONS.
 
     Rebalance cadence is counted in trading sessions, not calendar days, so holidays cannot
@@ -1289,9 +1290,15 @@ def run_backtest(panel: pd.DataFrame,
     HIGH_VOL_VETO in unified_ranker.py) for the mean-reversion-14 finding, as an alternative to
     the standalone-factor construction already tested and rejected (see measurement.md). Default
     None preserves every existing call site's behavior exactly.
+
+    `exit_rank` (rank hysteresis, 2026-11-26): enter from the top `top_k`, but keep a prior
+    holding while it still ranks within the top `exit_rank`; vacated slots refill from the top.
+    None = full replacement every rebalance (the construction every recorded result used).
     """
     if factor not in FACTORS:
         raise KeyError(f"unknown factor {factor!r}; known: {sorted(FACTORS)}")
+    if exit_rank is not None and (exit_rank < top_k or long_short):
+        raise ValueError("exit_rank must be >= top_k and is long-only")
     score_fn = FACTORS[factor]
 
     dates = sorted(panel.loc[panel['eligible'], 'date'].unique())
@@ -1324,7 +1331,13 @@ def run_backtest(panel: pd.DataFrame,
             continue
         scored = scored.sort_values('_s', ascending=False)
 
-        longs = scored.head(top_k)['symbol'].tolist()
+        if exit_rank is None:
+            longs = scored.head(top_k)['symbol'].tolist()
+        else:
+            ranked = scored['symbol'].tolist()
+            longs = [s for s in ranked[:exit_rank] if prev_w.get(s, 0.0) > 0][:top_k]
+            held = set(longs)
+            longs += [s for s in ranked if s not in held][:top_k - len(longs)]
         shorts = scored.tail(top_k)['symbol'].tolist() if long_short else []
 
         w = {s: 1.0 / len(longs) for s in longs}
@@ -1406,8 +1419,10 @@ def run_backtest(panel: pd.DataFrame,
 
     if not periods:
         raise RuntimeError('no completed rebalance periods -- widen the window or lower --top-k')
-    return _summarize(pd.DataFrame(periods), factor, rebalance_days, top_k,
-                      cost_bps_per_side, long_short, clamped, missing_exit_pct)
+    r = _summarize(pd.DataFrame(periods), factor, rebalance_days, top_k,
+                   cost_bps_per_side, long_short, clamped, missing_exit_pct)
+    r['exit_rank'] = exit_rank
+    return r
 
 
 def _summarize(df: pd.DataFrame, factor: str, rebalance_days: int, top_k: int,
@@ -1791,6 +1806,8 @@ def main() -> None:
     p.add_argument('--end', default=None)
     p.add_argument('--rebalance', type=int, default=21, help='trading sessions between rebalances')
     p.add_argument('--top-k', type=int, default=50)
+    p.add_argument('--exit-rank', type=int, default=None,
+                   help='rank hysteresis: hold a name until it leaves the top-N (N >= --top-k)')
     p.add_argument('--cost-bps', type=float, default=DEFAULT_COST_BPS_PER_SIDE)
     p.add_argument('--min-adt', type=float, default=DEFAULT_MIN_ADT)
     p.add_argument('--long-short', action='store_true')
@@ -1869,7 +1886,8 @@ def main() -> None:
         try:
             r = run_backtest(panel, f, a.rebalance, a.top_k, a.cost_bps, a.long_short,
                              by_date=by_date, missing_exit_pct=a.missing_exit_pct,
-                             exit_by_date=exit_by_date, last_alive=last_alive)
+                             exit_by_date=exit_by_date, last_alive=last_alive,
+                             exit_rank=a.exit_rank)
         except Exception as e:                              # noqa: BLE001
             print(f"[FactorBacktest] {f}: FAILED -- {e}", file=sys.stderr)
             continue

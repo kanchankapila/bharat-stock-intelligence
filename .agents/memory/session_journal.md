@@ -713,3 +713,6 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 ## 2026-11-26 - Unshown data wired to the frontend (Claude)
 - Full account: docs/session-log.md same date; ledger AF-20261126-01..05 all closed (restart 14:29 IST); full test suites pending the after-16:00 window.
 - Rule to carry: component edits are live immediately (Vite middleware), new server procedures are not; give every new panel an error state.
+
+## 2026-11-26 (evening) - pasted improvement list audit (Claude)
+- Added `factor_backtest.py --exit-rank`; hysteresis cuts turnover, no edge. Added `reversal_score` to intraday history (AF-20261126-07 open until a 09:15 cycle writes it). Full account: docs/session-log.md same date.

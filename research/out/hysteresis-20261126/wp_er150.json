@@ -1,0 +1,54 @@
+[Backtester] bhavcopy fallback: 1091 symbols, 444119 bars, 130 split adjustments applied
+[FactorBacktest] price panel: 3697 symbols (2606 from stock_ohlcv + 1091 survivorship-filled), 3,259,106 bars
+[FactorBacktest] valuation: earnings_yield on 2,534,022 rows, book_to_price on 2,540,714
+[FactorBacktest] insider: 49,355 open-market filings, 969 covered symbols, insider_net on 1,154,327 rows (disclosure lag 7d)
+[FactorBacktest] mojo indigraph: 1,377,203 panel rows scored across 1791 symbols
+[FactorBacktest] sector: 2580/3697 symbols mapped (69.8%), 14 sectors
+[FactorBacktest] screener_breadth: 2,190,721 membership spans, 123 distinct capture dates, breadth defined on 300,948 panel rows
+[FactorBacktest] feature_store: 2,802,183 rows merged, 1463 distinct dates. Coverage -- dist_sma20_pct=2,601,572, dist_sma200_pct=1,801,185, macd_hist=2,536,468, adx=2,797,459, di_plus=2,797,459, di_minus=2,797,459, stoch_k=2,628,391, stoch_d=2,619,046, cci=2,600,614, williams_r=2,628,391, atr_pct=2,797,459, bb_width=2,601,572, volume_ratio_20d=2,593,668, volume_ratio_5d=2,662,765, obv_slope=2,648,115, vwap_dist_pct=2,672,174, mtf_alignment_score=2,402,061, debt_to_equity=202,231, roe=160,432, op_margins=227,838, rev_growth=1,915,791, eps_growth=1,990,047, piotroski_f=228,238, news_sentiment_score=197,038, news_impact_count=164,342
+[FactorBacktest] earnings_category: 216,233 rows merged, 117 distinct dates. Coverage -- yoy=172,274, qoq=172,220
+[FactorBacktest] win_probability: 216,233 rows merged, 117 distinct dates. Coverage -- 214,555
+[FactorBacktest] eligible (>=Rs 1cr ADT & tradeable next open): 2,077,833 symbol-days (2,079,805 signal-eligible)
+[
+  {
+    "factor": "win_probability",
+    "long_short": false,
+    "excess_by_year_pct": {
+      "2026": 0.161
+    },
+    "years_positive": "1/1",
+    "rebalance_days": 5,
+    "top_k": 50,
+    "cost_bps_per_side": 25.0,
+    "missing_exit_pct": -100.0,
+    "missing_exits": 4,
+    "periods": 22,
+    "years": 0.44,
+    "gross_per_period_pct": 0.3512,
+    "cost_per_period_pct": 0.3709,
+    "net_per_period_pct": -0.0197,
+    "universe_per_period_pct": -0.1812,
+    "universe_annualised_pct": -8.73,
+    "benchmark_sane": true,
+    "net_excess_vs_universe_pct": 0.1615,
+    "excess_t_stat": 0.34,
+    "pct_periods_beating_universe": 50.0,
+    "avg_oneway_turnover": 0.742,
+    "annual_cost_drag_pct": 18.69,
+    "cagr_net_pct": -5.67,
+    "sharpe_net": -0.03,
+    "max_drawdown_pct": -16.06,
+    "clamped_returns": 0,
+    "exit_rank": 150,
+    "index_name": "NIFTY500",
+    "index_periods": 22,
+    "index_per_period_pct": 0.1415,
+    "net_excess_vs_index_pct": -0.1612,
+    "excess_vs_index_t_stat": -0.22,
+    "pct_periods_beating_index": 50.0,
+    "years_positive_vs_index": "0/1",
+    "index_cagr_pct": 5.93,
+    "index_sharpe": 0.42,
+    "index_max_drawdown_pct": -9.55
+  }
+]

@@ -910,13 +910,13 @@ class IntradayRanker:
                    (symbol, computed_at, cycle_at, intraday_regime, intraday_score, conviction_level,
                     classification, screener_score, breakout_score, news_sentiment, bullish_count,
                     bearish_count, cmp, entry_price, stop_loss, target_1, risk_reward, position_size_pct,
-                    screener_score_shadow)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    screener_score_shadow, reversal_score)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(symbol, cycle_at) DO NOTHING""",
                 (r["symbol"], today, cycle_at, regime, r["score"], r["conviction"], r["raw_classification"],
                  r["screener_score"], r["breakout_score"], r["news_sentiment"], r["bull"], r["bear"],
                  hist_entry, hist_entry, hist_stop, hist_target, hist_rr,
-                 r["position_size_pct"], r["screener_score_shadow"]),
+                 r["position_size_pct"], r["screener_score_shadow"], r["reversal_score"]),
             )
         self.conn.commit()
         buys = sum(1 for r in rows if r["classification"] in ("Strong Buy", "Buy"))

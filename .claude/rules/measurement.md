@@ -98,6 +98,22 @@ This section is a dated status board, not a verdict list. A claim carrying an ol
 in this file is not wrong, it is *unrefreshed* — check the date before quoting it, and re-run
 rather than assume. Full narrative for anything here: `docs/measurement-history.md`.
 
+### 2026-11-26 — rank hysteresis (`factor_backtest.py --exit-rank`): cuts turnover, does not create an edge (AF-20261126-06)
+
+Pre-registered before any hysteresis result (`research/out/hysteresis-20261126/PREREGISTRATION.md`; outputs beside it). 25 bps/side, top-50, same panel, `exit_rank` = keep a holding while it ranks inside the top N.
+
+| arm | periods / years | one-way turnover | cost drag %/yr | net excess %/period vs universe | t |
+|---|---|---|---|---|---|
+| `momentum_12_1` 21d, none | 57 / 4.75 | 0.351 | 2.11 | +0.815 | 1.73 |
+| `momentum_12_1` 21d, exit 100 | 57 / 4.75 | 0.221 | 1.33 | +0.627 | 1.44 |
+| `win_probability` 5d, none | 22 / 0.44 | 0.879 | 22.15 | +0.011 | 0.02 |
+| `win_probability` 5d, exit 150 | 22 / 0.44 | 0.742 | 18.69 | +0.162 | 0.34 |
+
+- **Momentum: hysteresis FAILS the bar** (less turnover, lower net excess).
+- **win_probability: passes "helps" (less turnover, higher net excess), no edge claim** (under 1 year, |t| < 2; net CAGR is negative in both arms, -13.5% and -5.7%). Turnover stays high (74%): the score itself moves, so a wider band alone does not get it near 25%.
+- **Frozen gate vs judgement:** the pre-registered gate said momentum must reproduce +0.80%, t 1.67, 56 periods. It read +0.815%, t 1.73, 57 periods, so the gate as written did NOT reproduce. Judgement (made after seeing it): the panel gained one period; HEAD's harness run on the same panel gives identical output on every field, so the default path is unchanged.
+- Only these two factors and these two band widths were run. Do not tune the band on this panel.
+
 ### 2026-11-21 — screener membership: the 3-day window drops half the memberships; both replays rerun on valid membership (AF-20261106-04, AF-20261106-01)
 
 Pre-registered before any return was read (`docs/audits/2026-11-21-screener-membership-preregistration.md`, `...-semantic-replay-rerun-preregistration.md`); a 3-date and a 2-date smoke run preceded the full runs and no definition changed after them. Membership is rebuilt from `screener_appearances` episodes (`scripts/screener_membership_replay.py`); 54 sessions 2026-09-01..2026-11-19; next-session open to close; Rs 1 cr ADT, |r| <= 40, at least 1,489 names a date; the 20 provider-shared screener ids are dropped from both arms. Artifacts: `research/out/screener-membership-replay-20261121/` and `research/out/screener-semantic-replay-rerun-20261121.json`.
