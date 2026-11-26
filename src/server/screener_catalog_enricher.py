@@ -121,7 +121,8 @@ def classify_screener(name: str, source: str = '', screener_id: str = '') -> str
         'promoter pledge', 'high debt', 'less than industry', 'lower than sector',
         'less than sector', 'lower than industry', 'falling rsi', 'macd negative',
         'signal changed to sell', 'negative surprise', 'negative revenue growth',
-        'negative quarterly', 'negative eps', 'analysts estimate negative', 'profit to loss']):
+        'negative quarterly', 'negative eps', 'analysts estimate negative', 'profit to loss',
+        'value trap', 'beware', 'debt trap', 'wealth destroyer']):
         return 'bearish'
     if any(k in nl for k in [
         'trending up', 'crossed above', 'oversold', 'bullish', 'breakout',
@@ -156,6 +157,9 @@ def reclassify_directional_neutrals(con) -> tuple[int, int]:
         SELECT scan_id, source, name, inferred_category
         FROM screener_master
         WHERE inferred_sentiment IS NULL OR LOWER(inferred_sentiment) = 'neutral'
+           OR LOWER(name) LIKE '%value trap%'
+           OR LOWER(name) LIKE '%debt trap%'
+           OR LOWER(name) LIKE '%wealth destroyer%'
     """).fetchall():
         bias, _, _, _ = resolve_screener_defaults(
             row['inferred_category'] or 'other', None, row['name'] or '', row['source'], row['scan_id']
@@ -173,6 +177,9 @@ def reclassify_directional_neutrals(con) -> tuple[int, int]:
         SELECT screener_id, source, screener_name, category
         FROM screener_catalog
         WHERE LOWER(signal_bias) = 'neutral'
+           OR LOWER(screener_name) LIKE '%value trap%'
+           OR LOWER(screener_name) LIKE '%debt trap%'
+           OR LOWER(screener_name) LIKE '%wealth destroyer%'
     """).fetchall():
         bias, _, _, _ = resolve_screener_defaults(
             row['category'] or 'other', None, row['screener_name'] or '', row['source'], row['screener_id']

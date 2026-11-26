@@ -225,3 +225,9 @@ class TestExistingCorruptedRowsBackfilled:
             WHERE sc.category = 'other' AND sm.inferred_category IS NOT NULL AND sm.inferred_category != 'other'
         """).fetchall()
         assert drift == [('above-ema-20', 'et_marketstats', 'technical_trend')]
+
+
+def test_value_trap_and_debt_trap_classify_bearish():
+    assert sce.classify_screener('Value TrapBeware of these sub-standard undervalued stocks') == 'bearish'
+    assert sce.classify_screener('Debt Trap Stocks') == 'bearish'
+    assert sce.classify_screener('Wealth Destroyer Companies') == 'bearish'

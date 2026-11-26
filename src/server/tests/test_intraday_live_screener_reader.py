@@ -36,3 +36,16 @@ def test_live_screener_scores_reads_latest_successful_run():
     scores = ir.IntradayRanker(conn)._live_screener_scores()
     assert scores["INFY"] > 50.0
     assert scores["TCS"] < 50.0
+
+
+def test_learned_weights_preserve_reversal_budget():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute(
+        "INSERT INTO app_settings VALUES ('intraday_learned_weights', ?)",
+        ('{"W_BREAKOUT": 0.503, "W_SCREENER": 0.497, "NEWS_TILT_WEIGHT": 0.155}',),
+    )
+    conn.commit()
+    w_bo, w_scr, _ = ir.IntradayRanker(conn)._learned_weights()
+    assert abs((w_bo + w_scr + ir.W_REVERSAL) - 1.0) < 1e-6

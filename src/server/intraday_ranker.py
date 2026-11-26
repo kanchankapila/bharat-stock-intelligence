@@ -18,6 +18,7 @@ import math
 from datetime import date, datetime, timedelta, timezone
 
 from db_compat import connect
+import as_of
 # Index series stored alongside stocks in intraday_ohlcv -- excluded from the stock ranking.
 from intraday_fetcher import _INDEX_SYMBOLS
 from unified_ranker import (
@@ -274,7 +275,7 @@ class IntradayRanker:
         if not symbols:
             return set()
         ph = ",".join("?" for _ in symbols)
-        cutoff = (date.today() - timedelta(days=30)).isoformat()
+        cutoff = (date.fromisoformat(as_of.logical_trading_date()) - timedelta(days=30)).isoformat()
         rows = self.conn.execute(
             f"SELECT symbol, AVG(volume * close) AS avg_turnover FROM stock_ohlcv "
             f"WHERE symbol IN ({ph}) AND date >= ? AND COALESCE(is_suspect,0)=0 "
@@ -285,7 +286,7 @@ class IntradayRanker:
 
     def _breakout_scores(self):
         """Latest breakout_probability per symbol, scaled to 0-100 (same source as unified_ranker)."""
-        cutoff = (date.today() - timedelta(days=7)).isoformat()
+        cutoff = (date.fromisoformat(as_of.logical_trading_date()) - timedelta(days=7)).isoformat()
         rows = self.conn.execute(
             "SELECT symbol, breakout_probability FROM technical_signals "
             "WHERE date>=? AND breakout_probability IS NOT NULL ORDER BY date DESC", (cutoff,)
@@ -324,7 +325,7 @@ class IntradayRanker:
         Ranked cross-sectionally (not thresholded) so the score is comparable across days
         regardless of how trendy the tape is.
         """
-        today = date.today().isoformat()
+        today = as_of.logical_trading_date()
         try:
             rows = self.conn.execute(
                 """SELECT symbol, datetime, high, low, close, volume
@@ -395,7 +396,7 @@ class IntradayRanker:
         the DAILY bar and included pre-signal price action, so this gate would have been
         reading fabricated exits -- the two changes only make sense together.
         """
-        cutoff = (date.today() - timedelta(days=EMISSION_GATE_LOOKBACK_DAYS)).isoformat()
+        cutoff = (date.fromisoformat(as_of.logical_trading_date()) - timedelta(days=EMISSION_GATE_LOOKBACK_DAYS)).isoformat()
         try:
             row = self.conn.execute(
                 "SELECT AVG(pnl_pct) AS avg_pnl, COUNT(*) AS n "
@@ -571,9 +572,13 @@ class IntradayRanker:
         try:
             import json as _json
             w = _json.loads(row["value"])
-            return (float(w.get("W_BREAKOUT", W_BREAKOUT)),
-                    float(w.get("W_SCREENER", W_SCREENER)),
-                    float(w.get("NEWS_TILT_WEIGHT", NEWS_TILT_WEIGHT)))
+            w_bo = float(w.get("W_BREAKOUT", W_BREAKOUT))
+            w_scr = float(w.get("W_SCREENER", W_SCREENER))
+            budget = 1.0 - W_REVERSAL
+            if w_bo + w_scr > 0 and abs((w_bo + w_scr) - budget) > 1e-6:
+                scale = budget / (w_bo + w_scr)
+                w_bo, w_scr = round(w_bo * scale, 4), round(w_scr * scale, 4)
+            return (w_bo, w_scr, float(w.get("NEWS_TILT_WEIGHT", NEWS_TILT_WEIGHT)))
         except Exception:
             return W_BREAKOUT, W_SCREENER, NEWS_TILT_WEIGHT
 
@@ -848,7 +853,7 @@ class IntradayRanker:
             target, stop, rr = _atr_barriers_short(cmp_, atr)
             shadow_geom[sym] = (round(cmp_, 2), stop, target, rr)
 
-        today = date.today().isoformat()
+        today = as_of.logical_trading_date()
         cycle_at = datetime.utcnow().isoformat()
         cur = self.conn.cursor()
         for r in rows:
@@ -863,6 +868,7 @@ class IntradayRanker:
                          + (f"; reversal {r['reversal_score']:.0f}/100" if r.get("reversal_score") is not None else "")
                          + (f"; breakout P={r['breakout_prob']:.2f}" if r["breakout_prob"] else "")
                          + (f"; news {r['news_sentiment']:+.2f}" if r["news_sentiment"] is not None else "")
+                         + ("; NEGATIVE NEWS RISK" if r["news_sentiment"] is not None and r["news_sentiment"] < -0.25 and r["raw_classification"] in ("Strong Buy", "Buy") else "")
                          + gate_note
                          + (f"; EVENT RISK: {r['event_risk_flag']} (size cut {int((1 - EVENT_RISK_TILT) * 100)}%)"
                             if r.get("event_risk_flag") else ""))

@@ -18,7 +18,7 @@ from indian_market_costs import round_trip_cost_bps, equity_trade_type_for_timef
 CSV_PATH         = Path(__file__).parent.parent.parent / 'screener_scoring_v2.csv'
 CORRECTIONS_PATH = Path(__file__).parent.parent.parent / 'screener_corrections.csv'
 
-BIAS_SIGN = {'bullish': 1.0, 'bearish': -1.0, 'neutral': 0.3}
+BIAS_SIGN = {'bullish': 1.0, 'bearish': -1.0, 'neutral': 0.0}
 
 CAT_BASE_WT = {
     'composite_strategy':      0.1287,
@@ -1582,9 +1582,9 @@ def veto_classification(classification):
     return 'Hold' if classification in ('Strong Buy', 'Buy') else classification
 
 
-def penalty_record(pre_penalty_score, quality, red_flag, high_vol, crowding, bull, bear, fresh_result):
+def penalty_record(pre_penalty_score, quality, red_flag, high_vol, crowding, bull, bear, fresh_result, bearish_news=False):
     """What each penalty did to one row, for grading a risk-only abstention (AF-20261030-05)."""
-    return {
+    rec = {
         'pre_penalty_score': pre_penalty_score,
         'pre_penalty_class': _classify(pre_penalty_score, bull, bear),
         'quality': quality,
@@ -1593,6 +1593,9 @@ def penalty_record(pre_penalty_score, quality, red_flag, high_vol, crowding, bul
         'crowding': crowding,
         'fresh_result': fresh_result,
     }
+    if bearish_news:
+        rec['bearish_news'] = True
+    return rec
 
 
 # ── High-realized-volatility veto (2026-08-10) ───────────────────────────────────
@@ -2111,7 +2114,7 @@ class UnifiedRanker:
         averaging across a regime shift blurs exactly the spike this veto exists to catch.
         See HIGH_VOL_VETO_PCTILE's comment for why this column and not quant_scores.
         """
-        cutoff = (date.today() - timedelta(days=7)).isoformat()
+        cutoff = (date.fromisoformat(as_of.logical_trading_date()) - timedelta(days=7)).isoformat()
         try:
             # ROW_NUMBER(), not DISTINCT ON: the latter is Postgres-only and is not translated
             # for the SQLite fallback path. Matches _get_confluence_latest_map() et al.
@@ -2740,6 +2743,49 @@ class UnifiedRanker:
             self.conn.rollback()
             return set()
 
+    _ROUNDUP_NEWS_RE = re.compile(
+        r"\b(stock picks|stocks to watch|top picks|buzzing stocks|stocks in news|market wrap|sector wrap|gainers\b.*\blosers)\b|\bnifty\s*(?:500|50)\s*:",
+        re.IGNORECASE,
+    )
+
+    def _get_bearish_news_symbols(self, days: int = 2) -> dict:
+        """Latest HIGH-impact BEARISH headline per symbol in the last `days` days, excluding
+        multi-stock roundups that do not isolate the symbol. Surfaced as a risk flag in
+        trade_reasoning and penalty telemetry without altering unified_score."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        try:
+            rows = self.conn.execute(
+                "SELECT title, symbols_json FROM news_sentiment_items "
+                "WHERE impact = 'HIGH' AND sentiment = 'BEARISH' AND published_at >= ? "
+                "AND symbols_json IS NOT NULL AND symbols_json != '' AND symbols_json != '[]' "
+                "ORDER BY published_at DESC LIMIT 500",
+                (cutoff,),
+            ).fetchall()
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_bearish_news_symbols failed: {e}")
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            return {}
+        out: dict = {}
+        for r in rows:
+            title = r['title'] or ''
+            try:
+                syms = json.loads(r['symbols_json'] or '[]')
+            except Exception:
+                continue
+            if not isinstance(syms, list):
+                continue
+            for sym in syms:
+                if not sym or sym in out:
+                    continue
+                sym_in_title = bool(re.search(rf"\b{re.escape(sym)}\b", title, re.IGNORECASE))
+                if not sym_in_title and (self._ROUNDUP_NEWS_RE.search(title) or len(syms) >= 3):
+                    continue
+                out[sym] = title
+        return out
+
     def _get_multi_factor_map(self):
         """Finding #28: multi_factor_scorer.py's 5-factor breakdown, keyed by symbol, for the
         factor-crowding check. Empty dict (safe no-op via factor_crowding_multiplier's own
@@ -3071,6 +3117,7 @@ class UnifiedRanker:
         # High-realized-vol veto cutoff for today's tape (see HIGH_VOL_VETO_PCTILE).
         realized_vol = self._get_realized_vol()
         fresh_results = self._get_fresh_result_symbols()
+        bearish_news_map = self._get_bearish_news_symbols()
         hv_cut = high_vol_cutoff(realized_vol.values())
         if hv_cut is None:
             print(f"[UnifiedRanker] high-vol veto INACTIVE (only {len(realized_vol)} symbols "
@@ -3084,7 +3131,8 @@ class UnifiedRanker:
                                 'red_flag_veto', 'high_vol_veto', 'factor_crowding',
                                 'ml_bet_nonzero', 'breakout_computed',
                                 'breakout_ACTUALLY_BINDS', 'size_confidence_haircut',
-                                'thin_engine_coverage_veto', 'actionable_without_plan_veto')}
+                                'thin_engine_coverage_veto', 'actionable_without_plan_veto',
+                                'bearish_news_flagged')}
         for sym in all_symbols:
             if not self._passes_rl_gate(sym, rl_gate_map):
                 # Advisory only (2026-10-05). recommendation_log is dominated by universe-wide
@@ -3264,6 +3312,14 @@ class UnifiedRanker:
             if trig:
                 base = et.get('trade_reasoning') or ''
                 et['trade_reasoning'] = f"{base} | ⚠ {trig}".strip(' |')
+            if sym in fresh_results:
+                base = et.get('trade_reasoning') or ''
+                et['trade_reasoning'] = f"{base} | ⚠ Recent results filing (last 2 sessions)".strip(' |')
+            bear_news = bearish_news_map.get(sym)
+            if bear_news:
+                fired['bearish_news_flagged'] += 1
+                base = et.get('trade_reasoning') or ''
+                et['trade_reasoning'] = f"{base} | ⚠ Bearish news: {bear_news[:120]}".strip(' |')
 
             # Direction/geometry backstop: `_get_entry_targets`'s 3 fallback sources
             # (confluence_signals, recommendation_log, unified_signals) are looked up by
@@ -3311,6 +3367,7 @@ class UnifiedRanker:
                     bull_counts.get(sym, 0),
                     bear_counts.get(sym, 0),
                     sym in fresh_results,
+                    bearish_news=bool(bear_news),
                 )),
                 'screener_stock_score':    round(engine_scores['screener'], 2) if 'screener' in has_data else None,
                 'ml_score':                round(engine_scores['ml'], 2) if 'ml' in has_data else None,
