@@ -53,6 +53,7 @@ const HighConvictionPage = React.lazy(() => import('../components/HighConviction
 const EtCallsPage = React.lazy(() => import('../components/EtCallsPage').then(m => ({ default: m.EtCallsPage })));
 const UltimateDecisionMatrix = React.lazy(() => import('../components/UltimateDecisionMatrix').then(m => ({ default: m.UltimateDecisionMatrix })));
 const DailySignals       = React.lazy(() => import('../components/DailySignals').then(m => ({ default: m.DailySignals })));
+const TelegramAlertsPage = React.lazy(() => import('../components/TelegramAlertsPage').then(m => ({ default: m.TelegramAlertsPage })));
 const SentimentIntelligence = React.lazy(() => import('../components/SentimentIntelligence').then(m => ({ default: m.SentimentIntelligence })));
 const SignalTracking     = React.lazy(() => import('../components/SignalTracking').then(m => ({ default: m.SignalTracking })));
 const StockChatbot       = React.lazy(() => import('../components/StockChatbot'));
@@ -299,6 +300,7 @@ const V1Routes = ({
                             )} />
                             <Route path="/backtest" element={<V1Backtest stocks={stocks} />} />
                             <Route path="/signals" element={<DailySignals onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />} />
+                            <Route path="/telegram-alerts" element={<TelegramAlertsPage onSelectStock={onSelectStock} />} />
                             <Route path="/signal-tracking" element={<SignalTracking />} />
                             <Route path="/signal-intelligence" element={<SignalIntelligence />} />
                             <Route path="/signal-report-card" element={<SignalReportCard />} />

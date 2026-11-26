@@ -7,7 +7,7 @@ import {
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
   ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar, Sparkles,
   FlaskConical, Layers, MonitorDot, ChartLine, X, MessageSquare, Gauge, FileDown,
-  Sunrise, Shield, SlidersHorizontal, ChartCandlestick,
+  Sunrise, Shield, SlidersHorizontal, ChartCandlestick, Bell,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEscapeKey, SkipLink, MAIN_CONTENT_ID } from '../lib/a11y';
@@ -117,6 +117,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Signal Tools',
     items: [
       { icon: Radio,        label: 'Signal Ledger',      id: 'signal-tracking'    },
+      { icon: Bell,         label: '15m Telegram Alerts', id: 'telegram-alerts'   },
       { icon: Radio,        label: 'Signals',            id: 'signals'            },
       { icon: ChartLine,    label: 'Signal Report Card', id: 'signal-report-card' },
       { icon: ChartLine,    label: 'Signal Review',      id: 'signal-review'      },
