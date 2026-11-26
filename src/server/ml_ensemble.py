@@ -3117,8 +3117,10 @@ def drop_retired_source_features(
         written = dates[~recent & df[col].notna()]
         if written.empty:
             continue
-        span = [d for d in sessions if written.min() <= d < sessions[-recent_sessions]]
-        coverage = written.nunique() / max(1, len(span))
+        span = [d for d in sessions if written.min() <= d <= written.max()]
+        if len(span) < 10:
+            continue
+        coverage = written.nunique() / len(span)
         if coverage >= min_date_coverage:
             retired.append(col)
             report['retired_sources'][col] = {

@@ -58,3 +58,25 @@ def test_short_history_is_never_judged():
     X = build_features(df)
     X2, report = drop_retired_source_features(df, X)
     assert report["dropped"] == [] and X2.shape == X.shape
+
+
+def test_long_retired_daily_source_is_still_dropped():
+    # Regression for AF-20261119-17: pead_score stopped 2026-08-19, so by Nov 2026
+    # the gap after written.max() diluted span coverage below 0.90 when span ran to sessions[-20].
+    df = _frame(n_sessions=100)
+    days = sorted(df["signal_date"].unique())
+    df["pead_score"] = np.where(df["signal_date"].isin(days[:30]), df["pead_score"].fillna(0.25), np.nan)
+    X = build_features(df)
+    X2, report = drop_retired_source_features(df, X)
+    assert "pead_score" in report["retired_sources"]
+    assert "pead_score" not in X2.columns and "pead_x_event" not in X2.columns
+
+
+def test_single_day_blip_is_not_treated_as_retired_daily_source():
+    df = _frame(n_sessions=60)
+    days = sorted(df["signal_date"].unique())
+    df["pead_score"] = np.where(df["signal_date"] == days[0], 0.5, np.nan)
+    X = build_features(df)
+    X2, report = drop_retired_source_features(df, X)
+    assert "pead_score" not in report["retired_sources"]
+    assert "pead_score" in X2.columns
