@@ -49,7 +49,29 @@ FROM pg_stat_activity WHERE state <> 'idle';
 `wait_event_type = 'Lock'` across many rows plus one long root with
 `cardinality(pg_blocking_pids(pid)) = 0` is the whole answer in one query.
 
+**Isolating a dependency version: prove which artifact the trial executed.** Prepending a scratch
+directory (`sys.path.insert(0, scratch)`) is not isolation — the environment's own site-packages
+stays on the path and the loader can pick up its copy of the compiled files. One such run produced
+a false "this version is blocked" and a false "a fresh copy loads" before an OS block log showed the
+venv's own DLLs being loaded. For each trial:
+
+- Replace the search path (`sys.path = [scratch] + stdlib`) rather than prepending to it.
+- Use a fresh install per trial; never reuse a directory a previous trial touched, since a
+  per-file cached verdict (byte-identical files blocked in one place, allowed in another) pollutes
+  later runs.
+- Confirm from an independent record (`module.__file__`, or the OS loader / code-integrity log)
+  which file was actually loaded before believing the result.
+
 ## 3. Check the known recurring causes before inventing a new one
+
+**First, cluster the failure timestamps.** Bucket every failure in the report by minute. If several
+unrelated jobs share a minute — script timeouts with empty stderr and a duration equal to the full
+budget, DNS `ENOTFOUND` on several hosts, a missed scheduled snapshot — the cause is outside the code.
+Before opening any script, query the Windows System log for that window
+(`Get-WinEvent` on Kernel-Power 506/507 Modern Standby enter/exit, plus 42, 107 and 1074). One
+incident showed ~25 unrelated-looking failures landing on two timestamps that matched a Modern Standby
+enter/exit: the host was asleep for hours and every timeout fired on resume. Debugging each script
+would have found nothing.
 
 Each of these has bitten this repo **more than once**. Full signatures in
 `.claude/rules/recurring-bugs.md`.

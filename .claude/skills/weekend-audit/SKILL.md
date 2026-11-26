@@ -138,6 +138,14 @@ script that gets killed at its budget has *never executed*):
 pm2 logs --nostream --lines 3000 2>/dev/null | grep -iE "killed by timeout|Timed out after|SIGKILL|heap out of memory" | sort | uniq -c | sort -rn | head
 ```
 
+**Before treating a burst of failures as separate job defects, bucket their timestamps by minute.**
+If several unrelated jobs fail in the same minute — timeouts with empty stderr and a duration equal
+to the full budget, DNS `ENOTFOUND` on several hosts, a missed scheduled snapshot — check the
+Windows System log for that window first (Kernel-Power 506/507 Modern Standby enter/exit, plus 42,
+107 and 1074, via `Get-WinEvent`). A host that slept through the window explains the whole burst,
+and the timeouts fire on resume; record it as one host-power finding, not one finding per job. See
+`.claude/commands/production-debug.md` §3.
+
 ## Lane 4 — Database
 
 **`psql` is not on PATH on this machine.** Run SQL through the production venv with psycopg2 and

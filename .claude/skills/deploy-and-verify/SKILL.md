@@ -26,7 +26,24 @@ or `pytest` run, both of which only prove the code runs, not that it's live or c
 If the task touched more than one of these, do all of them — a session that restarts the server
 but not the ML API on a change spanning both leaves half the fix undeployed with no error.
 
-## 2. Restart and confirm identity, not just uptime
+## 2. Restart safely, then confirm identity, not just uptime
+
+### Restart safety (preflight and restart are ONE command)
+
+A healthy process is not necessarily idle. Before restarting a process that runs queue or
+background work:
+
+1. Enumerate active queue jobs. Separate work that is progressing from stale or orphaned work.
+2. Wait for a zero-active boundary. Where the queue cadence would let new work race into that
+   boundary, hold new work back until the restart completes.
+3. Record any job you intentionally interrupt, and its recovery path.
+
+Run the preflight (active-job check, clean tree) and the restart in a single command, so the
+check executes when the action executes. If the command is permission-gated, approval can delay it
+by hours and a separate preflight goes stale. Print the clock (`date`) in the command's output and
+report restart times from that output, never from when the call was issued.
+
+### Restart and confirm identity
 
 ```bash
 pm2 restart <name>
@@ -84,6 +101,20 @@ PATH is a different install with a different sklearn/pandas and has silently pro
 results before.
 
 ## 5. Live-verify the actual change, not just its plumbing
+
+**A script that jobs start fresh from the live checkout is deployed the moment the file is saved.**
+Never revert it in that tree to prove a test fails: a job can start during the revert and run the old
+code against production. Do the negative control in a throwaway worktree (`git worktree add`), then
+remove it.
+
+**To ask "has the new code run?", read step-level logs, not only job history.** `job_run_history`
+records a chain when the whole chain finishes, so one of its steps can have run the new code hours
+before any row says so.
+
+**Before committing a file other sessions also edit (`docs/audit-findings.md`), read
+`git diff -- <file>` and confirm every hunk is yours.** Committing by explicit path protects other
+files, not their hunks inside that one. Chain the edit and the commit with `&&` or `set -e`, so a
+failed edit cannot fall through to `git commit`.
 
 Re-run the specific code path the fix touches against real production data, and query the
 result back — this is `.claude/rules/measurement.md`'s reverse-engineering discipline applied to

@@ -78,6 +78,10 @@ Ready to commit.
 
 ## What It Verifies
 
+A green gate does not show a new test can fail: negative-control it. If jobs start the file under
+test fresh from the live checkout, revert it in a throwaway worktree (`git worktree add`), never in
+the live tree, where a job could run the reverted code against production.
+
 ### TypeScript Gate
 - No type errors in `.ts` or `.tsx` files
 - Catches: type mismatches, missing imports, incorrect prop types

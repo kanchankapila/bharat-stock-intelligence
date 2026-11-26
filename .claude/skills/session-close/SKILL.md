@@ -23,6 +23,11 @@ and commits, the same "reverse-engineer against what actually happened" discipli
 `measurement.md` applies to signal claims. A session that felt like "just a small fix" can still
 span several files; check before deciding this skill isn't worth running.
 
+**If you commit, check hunks, not just paths.** Right before `git add` of a file other sessions also
+edit (`docs/audit-findings.md`, `docs/session-log.md`), read `git diff -- <file>` and confirm every
+hunk is yours; commit-by-path still takes their hunks inside it. Chain the edit and the commit with
+`&&` or `set -e`, so a failed edit cannot fall through to `git commit`.
+
 ## 1. `docs/session-log.md`
 
 Append (don't rewrite) an entry for what changed and, more importantly, *what was learned* —
