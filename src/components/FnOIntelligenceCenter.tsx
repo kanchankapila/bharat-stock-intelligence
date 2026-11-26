@@ -14,6 +14,7 @@ import { EarningsPlaybook } from './EarningsPlaybook';
 import { RolloverPositioningPanel } from './RolloverPositioningPanel';
 import { isNseMarketOpen } from '../lib/timeFormat';
 import { AsOfLine } from './AsOfLine';
+import { FnoBanList } from './NseExchangeData';
 
 interface FnOScannerProps {
   onSelectStock: (symbol: string) => void;
@@ -464,6 +465,8 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
           )}
         </div>
       </div>
+
+      <FnoBanList onSelectStock={onSelectStock} />
 
       {masterView === 'chain' ? (
         <OptionChainView onSymbolSelect={onSelectStock} />

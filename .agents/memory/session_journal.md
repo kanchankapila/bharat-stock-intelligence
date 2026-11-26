@@ -709,3 +709,7 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 ## 2026-11-21 - Screener membership replay and the last symbol items (Claude 2b)
 - Full account: docs/session-log.md same date; ledger AF-20261106-04 (open: features window is an owner decision), AF-20261106-01 (closed, candidate rejected), AF-20261121-03 (alerts dismissed), AF-20261120-07.
 - Rules to carry: results and definitions in `.claude/rules/measurement.md` 2026-11-21; the capture population boundary is the first run on 2026-11-23.
+
+## 2026-11-26 - Unshown data wired to the frontend (Claude)
+- Full account: docs/session-log.md same date; ledger AF-20261126-01..05 all closed (restart 14:29 IST); full test suites pending the after-16:00 window.
+- Rule to carry: component edits are live immediately (Vite middleware), new server procedures are not; give every new panel an error state.

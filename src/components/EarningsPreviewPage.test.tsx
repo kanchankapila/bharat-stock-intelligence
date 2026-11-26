@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { EarningsPreviewPage, pct, setupLabel, signedPct } from './EarningsPreviewPage';
+import { EarningsPreviewPage, SourcesTab, pct, setupLabel, signedPct } from './EarningsPreviewPage';
 
 const { preview, log } = vi.hoisted(() => ({ preview: vi.fn(), log: vi.fn() }));
 vi.mock('../lib/trpc', () => ({
@@ -61,5 +61,16 @@ describe('EarningsPreviewPage', () => {
     const html = renderToStaticMarkup(<EarningsPreviewPage />);
     expect(html).toContain('No preview snapshot yet');
     expect(html).not.toContain('Upcoming results');
+  });
+});
+
+// AF-20261126-03: the 2026-10-27 review note stated two source gaps in the present tense after
+// both sources were filled (options history backfilled from 2026-11-12, insider trades current).
+describe('SourcesTab', () => {
+  it('dates the excluded-source gaps to the review instead of stating them as current', () => {
+    const html = renderToStaticMarkup(<SourcesTab bt={null} />);
+    expect(html).not.toContain('stock_option_features_history ends 2024-07)');
+    expect(html).not.toContain('insider trades (stale since 2026-05)');
+    expect(html).toContain('not re-evaluated');
   });
 });

@@ -154,33 +154,28 @@ export const confluenceRouter = router({
   getConfluenceOutcomes: publicProcedure
     .input(z.object({
       symbol: z.string().optional(),
-      limit:  z.number().optional().default(50),
+      limit:  z.number().int().min(1).max(500).optional().default(50),
     }).optional())
     .query(async ({ input }) => {
       const symbol = input?.symbol;
       const limit = input?.limit ?? 50;
-      // Range-based join (see confluenceJoinOnSignalDate above) -- also fixes the type-mismatch
-      // crash the previous `DATE(cs.computed_at) = so.signal_date` form needed a bare ::text
-      // cast for (a DATE-typed expression has no implicit-cast comparison against a TEXT-typed
-      // column in Postgres); a plain range on computed_at needs no such cast at all.
-      const joinCond = confluenceJoinOnSignalDate();
-      if (symbol) {
-        return dbAll(`
-          SELECT so.*, cs.conviction_level, cs.bullish_screener_count, cs.screener_names_json
-          FROM signal_outcomes so
-          LEFT JOIN confluence_signals cs ON cs.symbol = so.symbol AND ${joinCond}
-          WHERE so.symbol = ? AND so.signal_source = 'confluence'
-          ORDER BY so.signal_date DESC
-          LIMIT ?
-        `, [symbol, limit]);
-      }
+      // Outcomes are limited first, then each looks up that day's latest confluence row by its
+      // (symbol, computed_at) key (AF-20261126-02): joining first nested-looped ~960k outcomes against
+      // ~6.5M confluence rows and never returned, and a day with two batches duplicated the outcome.
       return dbAll(`
         SELECT so.*, cs.conviction_level, cs.bullish_screener_count, cs.screener_names_json
-        FROM signal_outcomes so
-        LEFT JOIN confluence_signals cs ON cs.symbol = so.symbol AND ${joinCond}
-        WHERE so.signal_source = 'confluence'
+        FROM (
+          SELECT * FROM signal_outcomes
+          WHERE signal_source = 'confluence' ${symbol ? 'AND symbol = ?' : ''}
+          ORDER BY signal_date DESC
+          LIMIT ?) so
+        LEFT JOIN LATERAL (
+          SELECT conviction_level, bullish_screener_count, screener_names_json
+          FROM confluence_signals cs
+          WHERE cs.symbol = so.symbol AND ${confluenceJoinOnSignalDate()}
+          ORDER BY cs.computed_at DESC LIMIT 1
+        ) cs ON true
         ORDER BY so.signal_date DESC
-        LIMIT ?
-      `, [limit]);
+      `, symbol ? [symbol, limit] : [limit]);
     }),
 });

@@ -59,6 +59,22 @@ export const fundamentalsRouter = router({
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => fetchWithCache(`fund:ratios:${input.symbol}`, () => fetchMCRatios(input.symbol), 3600)),
 
+  // NSE equity filings (nse_corporate_announcements_fetcher.py); market-wide when no symbol is given.
+  getCompanyAnnouncements: publicProcedure
+    .input(z.object({ symbol: z.string().optional(), limit: z.number().int().min(1).max(100).default(30) }).default({ limit: 30 }))
+    .query(({ input }) => {
+      const symbol = input.symbol?.toUpperCase();
+      return dbAll<{
+        seq_id: string; symbol: string; company_name: string | null; category: string | null; summary: string | null;
+        attachment_url: string | null; disseminated_at: Date; fetched_at: Date;
+      }>(
+        `SELECT seq_id, symbol, company_name, category, summary, attachment_url, disseminated_at, fetched_at
+         FROM nse_corporate_announcements ${symbol ? 'WHERE symbol = ?' : ''}
+         ORDER BY disseminated_at DESC LIMIT ?`,
+        symbol ? [symbol, input.limit] : [input.limit]
+      );
+    }),
+
   getShareholding: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => fetchWithCache(`fund:shareholding:${input.symbol}`, async () => {

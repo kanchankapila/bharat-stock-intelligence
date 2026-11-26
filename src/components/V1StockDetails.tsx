@@ -26,6 +26,7 @@ import { FinologyPanel } from './FinologyPanel';
 import { AiInsightsTab } from '../components/v2/views/stock-analysis/AiInsightsTab';
 import { V1PeadConcallWidget } from './V1PeadConcallWidget';
 import { PlanTimeline } from './PlanTimeline';
+import { CompanyAnnouncements, FnoBanBadge } from './NseExchangeData';
 import { V1TradeRiskCalculatorWidget } from './V1TradeRiskCalculatorWidget';
 import { ProfileAnalysisProvenance } from './ProfileAnalysisProvenance';
 
@@ -228,6 +229,7 @@ export const V1StockDetails: React.FC<{
               >
                 <WatchlistIcon className={cn("w-5 h-5", watchlist.includes(symbol) && "fill-amber-500")} />
               </button>
+              <FnoBanBadge symbol={symbol} />
             </div>
             <div className="flex items-center gap-3 mt-1">
               {priceLoading
@@ -669,7 +671,12 @@ export const V1StockDetails: React.FC<{
             </div>
           )}
           {activeTab === 'mf' && <React.Suspense fallback={<PageFallback />}><V1MFAnalysis symbol={symbol} /></React.Suspense>}
-          {activeTab === 'news' && <React.Suspense fallback={<PageFallback />}><V1NewsTab symbol={symbol} /></React.Suspense>}
+          {activeTab === 'news' && (
+            <div className="col-span-12 space-y-6">
+              <CompanyAnnouncements symbol={symbol} />
+              <React.Suspense fallback={<PageFallback />}><V1NewsTab symbol={symbol} /></React.Suspense>
+            </div>
+          )}
 
           {activeTab === 'trendlyne' && (
             <div className="space-y-6">

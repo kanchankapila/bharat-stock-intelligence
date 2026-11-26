@@ -772,8 +772,20 @@ class FeatureEngineer:
                                  WHEN LOWER(COALESCE(trade_type, '')) = 'sell' THEN FALSE
                                  ELSE session LIKE 'Session 1'
                             END AS is_buy
-                     FROM block_deals
-                     WHERE symbol = ? AND date >= ?) t
+                     FROM block_deals b
+                     WHERE symbol = ? AND date >= ?
+                       -- AF-20261126-04: MoneyControl and NSE re-report Tickertape's deals; count a
+                       -- row only if no higher-priority source holds the same trade.
+                       AND NOT EXISTS (
+                         SELECT 1 FROM block_deals t2
+                         WHERE t2.symbol = b.symbol AND t2.date = b.date AND t2.qty = b.qty
+                           AND ABS(t2.price - b.price) < 0.01
+                           AND (t2.trade_type IS NULL OR b.trade_type IS NULL
+                                OR LOWER(t2.trade_type) = LOWER(b.trade_type))
+                           AND (CASE t2.source WHEN 'tickertape' THEN 0 WHEN 'moneycontrol' THEN 1
+                                               WHEN 'nse' THEN 2 ELSE 3 END)
+                             < (CASE b.source WHEN 'tickertape' THEN 0 WHEN 'moneycontrol' THEN 1
+                                              WHEN 'nse' THEN 2 ELSE 3 END))) t
                GROUP BY date ORDER BY date""",
             (symbol, feat.index.min().strftime("%Y-%m-%d")),
         )

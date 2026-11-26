@@ -114,6 +114,24 @@ class TestBlockDealMerge:
         assert out.loc[DATES[0], "block_deal_net_qty"] == 70
         assert out.loc[DATES[0], "block_deal_value_cr"] == pytest.approx(2.6)
 
+    def test_cross_source_copies_count_once(self):
+        """AF-20261126-04: MoneyControl and NSE re-report deals Tickertape already holds.
+
+        Two Tickertape deals of the same size on D[0] are separate trades and both count; the
+        MoneyControl and NSE copies of them do not. A MoneyControl-only deal (D[1]) still counts."""
+        con = _make_db("TEST", [(0, 100, 2.0, "buy", None), (0, 100, 2.0, "buy", None)])
+        extra = [("mc-0", D[0], None, 100, "BUY", "moneycontrol"),
+                 ("nse-0", D[0], "Session 1", 100, None, "nse"),
+                 ("mc-1", D[1], None, 40, "BUY", "moneycontrol")]
+        for rid, d, sess, qty, ttype, src in extra:
+            con.execute(
+                "INSERT INTO block_deals (id, symbol, date, session, qty, price, value_cr, trade_type, source)"
+                " VALUES (?,?,?,?,?,?,?,?,?)", (rid, "TEST", d, sess, qty, 100.0, qty / 50, ttype, src))
+        out = _merge(con, _feat(with_upstream=False))
+        assert out.loc[DATES[0], "block_deal_net_qty"] == 200
+        assert out.loc[DATES[0], "block_deal_value_cr"] == pytest.approx(4.0)
+        assert out.loc[DATES[1], "block_deal_net_qty"] == 40
+
     def test_session1_fallback_is_buy(self):
         """trade_type-NULL rows (the NSE source) fall back to the session rule."""
         con = _make_db("TEST", [(1, 50, 1.0, None, "Session 1"),

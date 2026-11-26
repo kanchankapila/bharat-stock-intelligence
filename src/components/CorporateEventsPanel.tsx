@@ -1,6 +1,7 @@
 import React from 'react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
+import { CompanyAnnouncements } from './NseExchangeData';
 import { ShieldCheck, CalendarDays, FileCheck2 } from 'lucide-react';
 
 const ACTION_COLORS: Record<string, string> = {
@@ -141,6 +142,8 @@ export const CorporateEventsPanel: React.FC<{ onSelectStock?: (symbol: string) =
           </div>
         )}
       </div>
+
+      <CompanyAnnouncements className="v1-card p-5 lg:col-span-3" onSelectStock={onSelectStock} />
     </div>
   );
 };

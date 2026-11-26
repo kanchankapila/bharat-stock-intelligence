@@ -392,12 +392,13 @@ const SOURCES: { name: string; table: string; use: string; window: string }[] = 
   { name: 'Concall takeaways', table: 'concall_takeaways', use: 'Last quarter management tone and key takeaway (shown, not scored)', window: 'since 2026-06' },
 ];
 
-function SourcesTab({ bt }: { bt: Row | null }) {
+export function SourcesTab({ bt }: { bt: Row | null }) {
   return (
     <div className="v1-card p-4 overflow-x-auto">
       <p className="text-xs text-slate-400 mb-3">
         Reviewed 2026-10-27. Also checked and left out: broker targets (trendlyne_analyst_targets: known only months after the report date),
-        options implied move (stock_option_features_history ends 2024-07), insider trades (stale since 2026-05), and exchange-announcement news
+        options implied move (stock_option_features_history then ended 2024-07; backfilled since 2026-11-12, not re-evaluated),
+        insider trades (then stale since 2026-05; current since, not re-evaluated), and exchange-announcement news
         (measured 2026-10-09: the move is over within ~15 minutes, faster than our feed).
       </p>
       <table className="w-full text-xs">

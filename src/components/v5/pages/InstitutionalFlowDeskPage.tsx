@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Landmark } from 'lucide-react';
 import { trpc } from '../../../lib/trpc';
 import { fmtFixed, numOrNull, s } from '../utils';
+import { ParticipantPositions } from '../../NseExchangeData';
 import { V5KpiStrip } from '../components/V5KpiStrip';
 import { V5DecisionSummaryStrip, V5DeskSkeleton, V5InsightPanel, V5MiniBarChart, V5Sparkline } from '../components/V5Visuals';
 
@@ -103,6 +104,8 @@ export function InstitutionalFlowDeskPage() {
           <V5Sparkline title="Combined Net Trend" values={netSeries} colorClass="v5-sparkline-stroke-indigo" />
         </div>
       </div>
+
+      <ParticipantPositions className="v5-card col-span-12 p-4" />
 
       <div className="v5-card col-span-12 p-4">
         <h3 className="v5-title mb-3 text-base font-semibold">Institutional Detail Feed</h3>

@@ -215,10 +215,18 @@ export const miscRouter = router({
     .input(z.object({ symbol: z.string().optional(), limit: z.number().min(1).max(200).optional().default(100) }))
     .query(async ({ input }) => {
       try {
+        // MoneyControl and NSE re-report deals Tickertape already stored (AF-20261126-04): keep a row
+        // only when no higher-priority source holds the same trade. Same-source rows are distinct trades.
+        const prio = (t: string) => `CASE ${t}.source WHEN 'tickertape' THEN 0 WHEN 'moneycontrol' THEN 1 WHEN 'nse' THEN 2 ELSE 3 END`;
         const rows = await dbAll<any>(
           `SELECT symbol, date, qty, price, value_cr, pct_transacted, client_name, trade_type, category
-           FROM block_deals
-           ${input.symbol ? "WHERE symbol = ?" : ""}
+           FROM block_deals b
+           WHERE NOT EXISTS (
+             SELECT 1 FROM block_deals t
+             WHERE t.symbol = b.symbol AND t.date = b.date AND t.qty = b.qty AND abs(t.price - b.price) < 0.01
+               AND (t.trade_type IS NULL OR b.trade_type IS NULL OR lower(t.trade_type) = lower(b.trade_type))
+               AND ${prio('t')} < ${prio('b')})
+           ${input.symbol ? "AND b.symbol = ?" : ""}
            ORDER BY date DESC
            LIMIT ?`,
           input.symbol ? [input.symbol.toUpperCase(), input.limit] : [input.limit]

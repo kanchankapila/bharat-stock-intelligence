@@ -152,14 +152,64 @@ export const fnoRouter = router({
       };
     }),
 
+  // NSE's fo_secban.csv, keyed on the file's own "For Trade Date". A day with an empty list writes no
+  // rows, so the newest stored date can be older than today; the date goes to the client to judge.
+  getFnoBanList: publicProcedure.query(async () => {
+    const rows = await dbAll<{ trade_date: string; symbol: string; fetched_at: Date }>(`
+      SELECT trade_date::text AS trade_date, symbol, fetched_at FROM nse_fo_ban_list
+      WHERE trade_date = (SELECT MAX(trade_date) FROM nse_fo_ban_list)
+      ORDER BY symbol
+    `);
+    return {
+      tradeDate: rows[0]?.trade_date ?? null,
+      fetchedAt: rows[0]?.fetched_at ?? null,
+      symbols: rows.map(r => r.symbol),
+    };
+  }),
+
+  // NSE participant-wise open interest, in contracts, for the two newest stored sessions.
+  getParticipantPositions: publicProcedure.query(async () => {
+    const rows = await dbAll<any>(`
+      SELECT trade_date::text AS trade_date, client_type, fetched_at,
+             fut_idx_long, fut_idx_short, fut_stk_long, fut_stk_short,
+             opt_idx_call_long, opt_idx_call_short, opt_idx_put_long, opt_idx_put_short
+      FROM nse_participant_positions
+      WHERE kind = 'oi' AND client_type <> 'TOTAL'
+        AND trade_date IN (SELECT DISTINCT trade_date FROM nse_participant_positions
+                           WHERE kind = 'oi' ORDER BY trade_date DESC LIMIT 2)
+    `);
+    const [date = null, prevDate = null] = [...new Set<string>(rows.map(r => r.trade_date))].sort().reverse();
+    const net = (r: any, leg: string): number | null =>
+      r?.[`${leg}_long`] == null || r?.[`${leg}_short`] == null ? null : Number(r[`${leg}_long`]) - Number(r[`${leg}_short`]);
+    const change = (a: number | null, b: number | null) => (a == null || b == null ? null : a - b);
+    const out = ['FII', 'DII', 'PRO', 'CLIENT'].flatMap(participant => {
+      const cur = rows.find(r => r.trade_date === date && r.client_type.toUpperCase() === participant);
+      if (!cur) return [];
+      const prev = rows.find(r => r.trade_date === prevDate && r.client_type.toUpperCase() === participant);
+      const idxFutNet = net(cur, 'fut_idx');
+      const stkFutNet = net(cur, 'fut_stk');
+      const gross = idxFutNet == null ? 0 : Number(cur.fut_idx_long) + Number(cur.fut_idx_short);
+      return [{
+        participant,
+        idxFutNet,
+        idxFutNetChange: change(idxFutNet, net(prev, 'fut_idx')),
+        idxFutLongPct: gross > 0 ? Math.round((Number(cur.fut_idx_long) / gross) * 1000) / 10 : null,
+        stkFutNet,
+        stkFutNetChange: change(stkFutNet, net(prev, 'fut_stk')),
+        idxCallNet: net(cur, 'opt_idx_call'),
+        idxPutNet: net(cur, 'opt_idx_put'),
+      }];
+    });
+    return { date, prevDate, fetchedAt: (rows.find(r => r.trade_date === date)?.fetched_at ?? null) as Date | null, rows: out };
+  }),
+
   getMaxPainAlerts: publicProcedure
-    .query(async () => {
+    .query(() => fetchWithCache('fno:max_pain_alerts', async () => {
       try {
         // so_stock_oi_summary.fut_price is not currently populated by the fetcher (data gap,
         // tracked separately) — use the latest stock_ohlcv close as the reference price instead.
-        // DISTINCT ON is Postgres-only and doesn't survive sqlTranslate.ts's translation to the
-        // SQLite dev fallback (same reason confluenceEngine.ts/scoring.router.ts/unified_ranker.py
-        // all use ROW_NUMBER() instead — see recurring-bugs.md's SQL dialect table).
+        // The close is read per symbol inside a 30-day bound (AF-20261126-01): a ROW_NUMBER over all
+        // of stock_ohlcv ran 100-200 s per call, and an older close is not a current price anyway.
         const rows = await dbAll<any>(`
           WITH latest_oi AS (
             SELECT symbol, MAX(date) AS max_date
@@ -174,18 +224,15 @@ export const fnoRouter = router({
               FROM so_stock_oi_summary o
               JOIN latest_oi l ON l.symbol = o.symbol AND l.max_date = o.date
             ) t WHERE rn = 1
-          ),
-          latest_close AS (
-            SELECT symbol, close, date FROM (
-              SELECT symbol, close, date,
-                     ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
-              FROM stock_ohlcv
-            ) t WHERE rn = 1
           )
           SELECT n.symbol, ns.name, lc.close AS ltp, n.max_pain, n.pcr, n.mwpl,
                  ROUND((((lc.close - n.max_pain) / lc.close) * 100)::numeric, 2) AS diff_pct
           FROM nearest_expiry n
-          JOIN latest_close lc ON lc.symbol = n.symbol AND lc.close > 0
+          JOIN LATERAL (
+            SELECT o.close FROM stock_ohlcv o
+            WHERE o.symbol = n.symbol AND o.date >= current_date - 30
+            ORDER BY o.date DESC LIMIT 1
+          ) lc ON lc.close > 0
           LEFT JOIN nse_stocks ns ON ns.symbol = n.symbol AND ns.status = 'ACTIVE'
           WHERE ABS(lc.close - n.max_pain) / lc.close > 0.003
           ORDER BY ABS(lc.close - n.max_pain) / lc.close DESC
@@ -209,7 +256,7 @@ export const fnoRouter = router({
         console.error('[FnO Router] Error fetching max pain alerts:', e);
         return [];
       }
-    }),
+    }, 900)),
 
   // fno_rollover_fetcher.py has computed real per-symbol rollover% and cost-of-carry since it
   // shipped, but nothing ever assembled it into a dedicated view -- the closest thing to a

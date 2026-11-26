@@ -6,6 +6,7 @@ import { V5KpiStrip } from '../components/V5KpiStrip';
 import { V5DecisionSummaryStrip, V5InsightPanel, V5MiniBarChart } from '../components/V5Visuals';
 import { stockDisplayName } from '../stockIdentity';
 import { AsOfLine } from '../../AsOfLine';
+import { FnoBanList } from '../../NseExchangeData';
 
 export function OptionsDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: string) => void }) {
   const [symbol, setSymbol] = useState('nifty');
@@ -111,6 +112,8 @@ export function OptionsDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
           <Metric title="Rows" value={String(rows.length)} />
         </div>
       </div>
+
+      <FnoBanList className="v5-card col-span-12 p-4" onSelectStock={onSelectSymbol} />
 
       <div className="v5-card col-span-12 p-4 xl:col-span-6">
         <div className="mb-2 flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-[var(--v5-negative)]" /><h3 className="v5-title text-base font-semibold">Top Call OI Resistance</h3></div>
