@@ -37,6 +37,7 @@ endpoint's own `expiryDates`: equity F&O expiries are the month's last TUESDAY
 from __future__ import annotations
 
 import sys
+from urllib.parse import quote
 
 # The row tuple `save_chain()` inserts. Kept as a named constant so the two parsers that feed
 # the same INSERT (this one and so_option_chain_fetcher._parse_chain) cannot silently drift
@@ -55,12 +56,17 @@ def _f(v):
     return f if f == f else None  # NaN check; plain Python != is correct here (not SQL)
 
 
-def parse_nse_chain(payload: dict, symbol: str, today: str, expiry: str):
+def parse_nse_chain(payload: dict, symbol: str, today: str, expiry: str, lot_size: float):
     """Parse an `option-chain-v3` response into (chain_rows, summary).
 
     Returns the identical shapes `so_option_chain_fetcher._parse_chain` returns, so both
-    sources feed `save_chain()` unchanged.
+    sources feed `save_chain()` unchanged. NSE publishes open interest in LOTS and SmartOptions in
+    shares, so it is multiplied by `lot_size`. A 0 price or IV means "no quote" and is stored NULL.
     """
+    def shares(leg):
+        oi = _f(leg.get("openInterest"))
+        return None if oi is None else oi * lot_size
+
     records = (payload or {}).get("records") or {}
     data = records.get("data") or []
     if not data:
@@ -77,14 +83,14 @@ def parse_nse_chain(payload: dict, symbol: str, today: str, expiry: str):
         rows.append((
             symbol, today, expiry, strike,
             # CE: price, volume, oi, oi_chg, iv, then iv_chg + 5 Greeks + buildup (unpublished)
-            _f(ce.get("lastPrice")), _f(ce.get("totalTradedVolume")),
-            _f(ce.get("openInterest")), _f(ce.get("changeinOpenInterest")),
-            _f(ce.get("impliedVolatility")),
+            _f(ce.get("lastPrice")) or None, _f(ce.get("totalTradedVolume")),
+            shares(ce), _f(ce.get("pchangeinOpenInterest")),
+            _f(ce.get("impliedVolatility")) or None,
             None, None, None, None, None, None, None,
             # PE, same layout
-            _f(pe.get("lastPrice")), _f(pe.get("totalTradedVolume")),
-            _f(pe.get("openInterest")), _f(pe.get("changeinOpenInterest")),
-            _f(pe.get("impliedVolatility")),
+            _f(pe.get("lastPrice")) or None, _f(pe.get("totalTradedVolume")),
+            shares(pe), _f(pe.get("pchangeinOpenInterest")),
+            _f(pe.get("impliedVolatility")) or None,
             None, None, None, None, None, None, None,
         ))
 
@@ -147,7 +153,7 @@ def fetch_nse_chain(session, symbol: str, expiry_ddmmmyyyy: str, is_index: bool 
     """
     url = CHAIN_V3_URL.format(
         kind="Indices" if is_index else "Equity",
-        symbol=symbol.upper(),
+        symbol=quote(symbol.upper(), safe=""),  # M&M unencoded asks for "M"
         expiry=expiry_ddmmmyyyy,
     )
     try:

@@ -35,9 +35,9 @@ PAYLOAD = {
                     "changeinOpenInterest": -10, "impliedVolatility": 22.0}},
             {"strikePrice": 2300,
              "CE": {"lastPrice": 66.7, "totalTradedVolume": 3132, "openInterest": 2960,
-                    "changeinOpenInterest": 246, "impliedVolatility": 23.51},
+                    "changeinOpenInterest": 246, "pchangeinOpenInterest": 9.06, "impliedVolatility": 23.51},
              "PE": {"lastPrice": 60.0, "totalTradedVolume": 400, "openInterest": 1040,
-                    "changeinOpenInterest": 5, "impliedVolatility": 23.0}},
+                    "changeinOpenInterest": 5, "pchangeinOpenInterest": 0.48, "impliedVolatility": 23.0}},
             # NSE genuinely sends rows carrying only one leg at far strikes.
             {"strikePrice": 2400,
              "CE": {"lastPrice": 12.0, "totalTradedVolume": 10, "openInterest": 100,
@@ -48,7 +48,7 @@ PAYLOAD = {
 
 
 def rows_and_summary():
-    return parse_nse_chain(PAYLOAD, "TCS", "2026-09-05", "2026-09-29")
+    return parse_nse_chain(PAYLOAD, "TCS", "2026-09-05", "2026-09-29", 1)
 
 
 def test_maps_both_legs_oi_iv_price_and_volume():
@@ -56,8 +56,8 @@ def test_maps_both_legs_oi_iv_price_and_volume():
     by_strike = {r[3]: r for r in rows}
     r = by_strike[2300.0]
     assert r[0] == "TCS" and r[1] == "2026-09-05" and r[2] == "2026-09-29"
-    assert (r[4], r[5], r[6], r[7], r[8]) == (66.7, 3132.0, 2960.0, 246.0, 23.51)   # CE
-    assert (r[16], r[17], r[18], r[19], r[20]) == (60.0, 400.0, 1040.0, 5.0, 23.0)  # PE
+    assert (r[4], r[5], r[6], r[7], r[8]) == (66.7, 3132.0, 2960.0, 9.06, 23.51)    # CE
+    assert (r[16], r[17], r[18], r[19], r[20]) == (60.0, 400.0, 1040.0, 0.48, 23.0)  # PE
 
 
 def test_greeks_are_none_not_zero():
@@ -103,5 +103,14 @@ def test_max_pain_is_computed_since_nse_does_not_publish_it():
 
 
 def test_an_empty_payload_yields_no_rows_rather_than_raising():
-    rows, summary = parse_nse_chain({}, "TCS", "2026-09-05", "2026-09-29")
+    rows, summary = parse_nse_chain({}, "TCS", "2026-09-05", "2026-09-29", 1)
     assert rows == [] and summary is None
+
+
+def test_open_interest_is_stored_in_shares_like_the_other_source():
+    """NSE publishes lots, SmartOptions shares: M&M read 3369 vs 674200 at lot 200 on 2026-11-27."""
+    rows, summary = parse_nse_chain(PAYLOAD, "TCS", "2026-09-05", "2026-09-29", 175)
+    r = next(r for r in rows if r[3] == 2300.0)
+    assert (r[6], r[18]) == (2960.0 * 175, 1040.0 * 175)
+    assert (r[5], r[17]) == (3132.0, 400.0)  # volume is in contracts in both sources
+    assert summary["pcr"] == (900 + 1040) / (500 + 2960 + 100)

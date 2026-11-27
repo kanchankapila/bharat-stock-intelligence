@@ -12623,3 +12623,4 @@ remain gated by AF-20261106-01/04. Detailed evidence is in docs/audits/2026-11-0
 - `repo-doctor` quick: 33 pass, 7 warn, 1 fail (`bulk-endpoint-fetcher-coverage`). `e2e-lifecycle-check`: PASS (plumbing only). `findings:check`, `doc:numbers:check`, `schema:drift` and the recurring-bug check: clean.
 - Filed AF-20261127-01 (futures OI fetch times out, stores nothing), -02 (stock IV pass timeout), -03 (option-chain vendor block). No fixes: report-only request.
 - Not run: local full vitest/pytest and `repo-doctor --full` (market hours); `tsc` passed before the restart.
+- Option chain (AF-20261127-03): the 09-05 NSE fallback was never called and would have stored lots as shares. Wired as a gap fill only (owner ruling), with `&` encoding and an exchange-file universe. First real run is the 2026-11-27 evening chain.

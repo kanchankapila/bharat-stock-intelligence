@@ -30,12 +30,15 @@ from pydantic import BaseModel
 
 import argparse
 import time
-from datetime import date as _date, timedelta
+from datetime import date as _date, datetime as _datetime, timedelta
+from urllib.parse import quote
 
 import requests
 
 from db_compat import execute, executemany, query_all
 from fetch_utils import VendorBlockLatch
+from nse_option_chain_source import fetch_nse_chain, parse_nse_chain, to_nse_expiry
+from preopen_fetcher import _nse_session
 from as_of import is_trading_session
 import sys
 
@@ -187,10 +190,19 @@ def _get_nearest_expiry(symbol: str, exchange: str = "NSE") -> str:
     return last_tuesday_expiry()
 
 
+# Names that actually trade futures, from the exchange's own file. fno_eligible kept six names without
+# derivatives (they never gain coverage, so they sorted first on every run) and missed new entrants.
+_FNO_SQL = (
+    "SELECT symbol FROM nse_stocks WHERE status = 'ACTIVE' AND symbol IN ("
+    "  SELECT symbol FROM stock_futures_eod_history WHERE trade_date >= current_date - 14"
+    ") ORDER BY symbol"
+)
+
+
 def _get_fno_symbols() -> list[str]:
-    """Return all F&O-eligible NSE symbols."""
+    """Return all F&O NSE symbols; the fno_eligible flag only if the exchange file is empty."""
     try:
-        rows = query_all(
+        rows = query_all(_FNO_SQL) or query_all(
             "SELECT symbol FROM nse_stocks WHERE fno_eligible = 1 ORDER BY symbol"
         )
         return [r["symbol"] for r in rows]
@@ -245,7 +257,7 @@ VENDOR_BLOCK = VendorBlockLatch("so_chain")
 def fetch_chain(symbol: str, expiry: str) -> dict | None:
     if VENDOR_BLOCK.tripped():
         return None
-    url = CHAIN_URL.format(symbol=symbol, expiry=expiry)
+    url = CHAIN_URL.format(symbol=quote(symbol, safe=""), expiry=expiry)
     try:
         r = requests.get(url, headers=SO_HEADERS, timeout=20)
         # A 403/405/429 is the shared Trendlyne allowance refusing, not "this symbol has no
@@ -335,9 +347,13 @@ def _parse_chain(body: dict, symbol: str, today: str, expiry: str) -> tuple[list
     return rows, summary
 
 
-def save_chain(chain_rows: list, summary: dict | None) -> int:
+def save_chain(chain_rows: list, summary: dict | None, overwrite: bool = True) -> int:
+    """`overwrite=False` is for the NSE gap fill, which has no Greeks and must never replace a row."""
+    def conflict(sql: str) -> str:
+        return sql if overwrite else sql.split("DO UPDATE SET")[0] + "DO NOTHING"
+
     if chain_rows:
-        executemany("""
+        executemany(conflict("""
             INSERT INTO so_option_chain
                 (symbol, date, expiry, strike,
                  ce_price, ce_volume, ce_oi, ce_oi_chg_pct, ce_iv, ce_iv_chg,
@@ -359,10 +375,10 @@ def save_chain(chain_rows: list, summary: dict | None) -> int:
                 pe_theta=excluded.pe_theta, pe_vega=excluded.pe_vega,
                 pe_rho=excluded.pe_rho, pe_buildup=excluded.pe_buildup,
                 fetched_at=CURRENT_TIMESTAMP
-        """, chain_rows)
+        """), chain_rows)
 
     if summary:
-        execute("""
+        execute(conflict("""
             INSERT INTO so_stock_oi_summary
                 (symbol, date, expiry, max_pain, atm, mwpl, iv_call, iv_put,
                  pcr, fut_price, fut_oi, fut_oi_chg)
@@ -373,7 +389,7 @@ def save_chain(chain_rows: list, summary: dict | None) -> int:
                 pcr=excluded.pcr, fut_price=excluded.fut_price,
                 fut_oi=excluded.fut_oi, fut_oi_chg=excluded.fut_oi_chg,
                 fetched_at=CURRENT_TIMESTAMP
-        """, (
+        """), (
             summary["symbol"], summary["date"], summary["expiry"],
             summary["max_pain"], summary["atm"], summary["mwpl"],
             summary["iv_call"], summary["iv_put"], summary["pcr"],
@@ -391,6 +407,67 @@ def run_symbol(symbol: str, expiry: str | None = None, today: str | None = None)
         return 0
     chain_rows, summary = _parse_chain(body, symbol.upper(), today, exp)
     return save_chain(chain_rows, summary)
+
+
+NSE_MAX_CONSECUTIVE_FAILURES = 10
+
+
+def _lot_size(symbol: str, expiry: str) -> float | None:
+    rows = query_all(
+        "SELECT lot_size FROM nt_fno_expiry WHERE symbol = ? AND CAST(expiry AS TEXT) = ? "
+        "AND exchange = 'NSE' AND lot_size > 0",
+        (symbol, expiry),
+    )
+    return float(rows[0]["lot_size"]) if rows else None
+
+
+def fill_gaps_from_nse(symbols: list[str], today: str, expiry: str | None = None, delay: float = 0.3) -> int:
+    """NSE chains (no Greeks) for names with no chain today; returns how many were written.
+
+    SmartOptions' request allowance leaves most of the universe uncovered (AF-20261127-03). Only gaps are
+    filled and nothing is replaced: so_option_chain's key has no source column (owner ruling 2026-11-27).
+    """
+    try:
+        have = {r["symbol"] for r in query_all("SELECT DISTINCT symbol FROM so_option_chain WHERE date = ?", (today,))}
+    except Exception as e:
+        print(f"[so_chain] NSE gap fill skipped, cannot tell which names are covered: {e}", file=sys.stderr)
+        return 0
+    missing = [s for s in symbols if s not in have]
+    if not missing:
+        return 0
+    session = _nse_session()
+    filled = misses = 0
+    skipped: list[str] = []
+    for sym in missing:
+        try:
+            exp = str(expiry or _get_nearest_expiry(sym))[:10]
+            lot = _lot_size(sym, exp)
+            if not lot:  # without it lots cannot be turned into shares
+                skipped.append(sym)
+                continue
+            payload = fetch_nse_chain(session, sym, to_nse_expiry(exp))
+            stamp = ((payload or {}).get("records") or {}).get("timestamp")
+            if stamp and _datetime.strptime(stamp[:11], "%d-%b-%Y").date().isoformat() != today:
+                skipped.append(sym)  # a pre-open catch-up would store the previous session as today's
+                continue
+            rows, summary = parse_nse_chain(payload, sym, today, exp, lot) if stamp else ([], None)
+            if rows:
+                save_chain(rows, summary, overwrite=False)
+                filled += 1
+                misses = 0
+            else:
+                misses += 1
+        except Exception as e:
+            print(f"[so_chain] NSE {sym}: {e}", file=sys.stderr)
+            misses += 1
+        if misses >= NSE_MAX_CONSECUTIVE_FAILURES:
+            print(f"[so_chain] NSE gap fill stopped after {misses} failures in a row", file=sys.stderr)
+            break
+        if delay > 0:
+            time.sleep(delay)
+    print(f"[so_chain] NSE filled {filled} of {len(missing)} names without a chain today"
+          + (f"; skipped (no lot size or old snapshot): {', '.join(skipped[:15])}" if skipped else ""))
+    return filled
 
 
 def run(
@@ -453,7 +530,8 @@ def run(
             time.sleep(delay)
 
     print(f"[so_chain] Done. ok={ok} fail={fail} total={ok+fail}")
-    if ok == 0 and symbols:
+    nse_filled = 0 if target_symbol else fill_gaps_from_nse(symbols, today, expiry, delay)
+    if ok == 0 and nse_filled == 0 and symbols:
         # Nothing landed: a refused or empty run must not report success (2026-11-16 did).
         print(f"[so_chain] wrote no chain for any of {len(symbols)} symbols"
               + (f" (vendor refused: HTTP {VENDOR_BLOCK.status})" if VENDOR_BLOCK.tripped() else ""),

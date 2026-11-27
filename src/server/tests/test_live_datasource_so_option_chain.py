@@ -157,3 +157,22 @@ class TestSoOptionChainFetcherLiveDataSource:
                 "fut_price/fut_oi/fut_oi_chg came back non-None -- Trendlyne may have started "
                 "populating futureData; if so, wire the real keys instead of leaving these NULL"
             )
+
+
+@pytest.mark.live_datasource
+def test_nse_gap_fill_source_returns_a_chain_for_a_real_symbol():
+    """AF-20261127-03: NSE is the second source for this table. M&M because its '&' must survive the URL."""
+    from datetime import date
+
+    from nse_option_chain_source import fetch_nse_chain, parse_nse_chain, to_nse_expiry
+    from preopen_fetcher import _nse_session
+
+    expiry = str(soc._get_nearest_expiry("M&M"))[:10]
+    payload = fetch_nse_chain(_nse_session(), "M&M", to_nse_expiry(expiry))
+    assert payload, "NSE option-chain-v3 returned nothing for M&M"
+    assert payload["records"].get("timestamp"), "the gap fill dates rows by records.timestamp"
+    rows, summary = parse_nse_chain(payload, "M&M", date.today().isoformat(), expiry, 1)
+    assert rows and summary
+    assert_numeric_and_finite(summary["pcr"], "pcr")
+    assert any((r[6] or 0) > 0 for r in rows), "no call open interest in any strike"
+    assert any(r[7] for r in rows), "pchangeinOpenInterest missing or renamed"

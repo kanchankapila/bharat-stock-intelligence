@@ -103,6 +103,7 @@ def test_option_chain_stops_at_the_first_refusal_and_fails_when_nothing_landed(m
     monkeypatch.setattr(so, "_coverage_map", lambda syms: {})
     monkeypatch.setattr(so, "resume_order", lambda syms, cov: syms)
     monkeypatch.setattr(so, "_get_nearest_expiry", lambda sym: "2026-11-24")
+    monkeypatch.setattr(so, "fill_gaps_from_nse", lambda *a, **k: 0)  # NSE has nothing either
     with pytest.raises(SystemExit) as exc:
         so.run(delay=0)
     assert exc.value.code == 1
