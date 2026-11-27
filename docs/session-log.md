@@ -12600,3 +12600,26 @@ remain gated by AF-20261106-01/04. Detailed evidence is in docs/audits/2026-11-0
 - **Screener shadow arm graded (AF-20261025-01):** fails as registered; its IC gain over the live score is dilution (placebo). Mapping not applied; row now waits on an owner decision. Read inside the evening-chain window: a few 12-second read-only extracts.
 - **Stuck-component check and blend plan:** `intraday-blend-component-stuck` added (AF-20261126-09, live after the next `bharat-server` restart); intraday arms with and without breakout pre-registered (AF-20261126-10).
 - **Screener bias review (AF-20261126-11):** wrong and self-reverting labels found; pins written and pre-registered, not wired until the replay runs outside the evening window.
+
+## 2026-11-26 (evening) - Intraday study inventory, re-runs on current data, capitulation correction (Claude)
+
+- **New intraday study (AF-20261126-12):** pre-registered H1-H6 on 103 sessions. Gaps fade on F&O names (IC -0.035, t -3.34), but no book clears costs. The production early-hours list has no edge (-0.36% a trade after costs). Live `orb5minLow` does not reproduce July.
+- **Re-runs and follow-ups (AF-20261126-14):** forward test LOW-DATA, value decaying (t 1.76), futures OI h1 reproduces. Extreme gap fade fails. Delaying Buy entries on gap-up days is the one underpowered lead (+0.33%, t 1.37). Point-in-time F&O changes no verdict.
+- **Capitulation correction (AF-20261126-13):** the harness spread subtracted a falling universe at half the cost, and the verdict was uncorrected for the search. Fixed test-first: long-only return, 0.30% cost, Bonferroni. Re-persisted verdict is NO PROVEN EDGE (backup in `research/out/rerun-20261126/`). `/best-picks` no longer shows it, or its live matches, as validated. Stale +0.53% claims updated in `trade_journal.py`, two skills, the edge inventory, `measurement.md` and `monitor.router.ts`.
+- **Gates:** targeted pytest (48 passed), page vitest (7 passed, negative-controlled), `tsc` clean, `findings:check`/`backlog:check` OK, recurring-bug check clean. The full pytest and vitest suites were NOT run: the evening window (18:50-00:30) bars them. Run them in the next 16:30-21:30 or late-morning gap. Nothing committed: `docs/audit-findings.md` carries another session's staged hunk.
+- **Load:** the harness re-runs ran 20:38-21:05 IST, inside the evening window. `job_heartbeat` shows no non-success job since 20:00 IST, and every `job_run_history` row 20:30-21:05 IST is a success.
+
+## 2026-11-26 (night) - Gap-up delay forward shadow arm (Claude, AF-20261126-15)
+
+- Built `gap_up_delay_shadow.py` for the O2 lead: from 2026-11-27, Buy names gapping up 1% or more, bought at 15:15 instead of the open; one verdict at 150 graded days (around October 2027). Graded days are stored once and never recomputed.
+- Pre-registered before any forward session; protocol frozen in `app_settings` at 23:12 IST. The arm's grading code reproduces O2 on in-sample data once the newest session is included.
+- Wired: step in `ml-daily-ops`, DQ check `gap-up-delay-shadow-freshness`. NOT live until `bharat-server` restarts. Arm files committed as `4f10a1f1` at 23:23 IST (not pushed); the ledger row and notes are not in it.
+- Gates: 18 pytest tests (nine broken guards each caught), 475 targeted vitest tests, `tsc` clean. Full suites not run (evening window).
+- Updated the two module counts in `CLAUDE.md` (337 / 884); they assume the other session's staged `screener_bias_pins.py` and its test are committed too.
+
+## 2026-11-27 (morning) - Push, restart, repo checks (Claude)
+
+- Pushed `4f10a1f1` about 09:51 IST (CI green) and restarted `bharat-server` at 10:07:21 with 0 active jobs. Both new data-quality checks ran live about 10:23 (AF-20261126-09 closed).
+- `repo-doctor` quick: 33 pass, 7 warn, 1 fail (`bulk-endpoint-fetcher-coverage`). `e2e-lifecycle-check`: PASS (plumbing only). `findings:check`, `doc:numbers:check`, `schema:drift` and the recurring-bug check: clean.
+- Filed AF-20261127-01 (futures OI fetch times out, stores nothing), -02 (stock IV pass timeout), -03 (option-chain vendor block). No fixes: report-only request.
+- Not run: local full vitest/pytest and `repo-doctor --full` (market hours); `tsc` passed before the restart.

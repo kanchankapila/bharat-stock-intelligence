@@ -716,3 +716,11 @@ Ran a backticked-path existence scan over every tracked `.md` (the cheap, reusab
 
 ## 2026-11-26 (evening) - pasted improvement list audit (Claude)
 - Added `factor_backtest.py --exit-rank`; hysteresis cuts turnover, no edge. Added `reversal_score` to intraday history (AF-20261126-07 open until a 09:15 cycle writes it). Full account: docs/session-log.md same date.
+
+## 2026-11-26 (night) - gap-up delay shadow arm (Claude)
+
+AF-20261126-15: `src/server/gap_up_delay_shadow.py`, protocol frozen in production; nightly step and DQ check await a bharat-server restart; arm files committed `4f10a1f1`, not pushed. Details in the ledger row.
+
+## 2026-11-27 - restart and repo checks (Claude)
+
+Shadow arm pushed and live. Open from the checks: AF-20261127-01/-02/-03. Check the 2026-11-27 evening `ml-daily-ops` for the gap-up step and the two timeouts.
