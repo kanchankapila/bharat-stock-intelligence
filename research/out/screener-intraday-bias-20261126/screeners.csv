@@ -1,0 +1,161 @@
+source,id,name,category,subcategory,bias,confidence,hz,members
+trendlyne,15-min-adx-bearish-divergence,15 min ADX Bearish Divergence,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,15-min-adx-bullish-divergence,15 min ADX Bullish Divergence,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,15-min-adx-mild-trending-stocks,15 min ADX Mild Trending Stocks,intraday,intraday,neutral,0.6,intraday,100
+trendlyne,15-min-adx-strong-trending-stocks,15 min ADX Strong Trending Stocks,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,15-min-adx-trending-stocks,15 min ADX Trending Stocks,intraday,intraday,neutral,0.6,intraday,100
+trendlyne,15-min-bollinger-band-breakdown,15 min Bollinger Band Breakdown,intraday,intraday,bearish,0.6,intraday,100
+trendlyne,15-min-bollinger-band-breakout,15 min Bollinger Band Breakout,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,15-min-cci-bearish,15 min CCI Bearish,intraday,intraday,bearish,0.72,intraday,42
+trendlyne,15-min-cci-bullish,15 min CCI Bullish,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,15-min-cci-crossed-above-100,15 min CCI crossed above 100,intraday,intraday,bearish,0.72,intraday,56
+trendlyne,15-min-cci-crossed-below--100,15 min CCI crossed below -100,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,15-min-cci-overbought,15 min CCI Overbought,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,15-min-cci-oversold,15 min CCI Oversold,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,15-min-cci-trending-down,15 min CCI Trending Down,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,15-min-cci-trending-up,15 min CCI Trending Up,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,15-min-macd-crossover-above-signal-line,15 min MACD Crossover Above Signal Line,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,15-min-macd-crossover-below-signal-line,15 min MACD Crossover below Signal Line,intraday,intraday,bearish,0.6,intraday,100
+trendlyne,15-min-relative-strength-index-(rsi)-bearish,15 min Relative Strength Index (RSI) Bearish,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,15-min-relative-strength-index-(rsi)-bullish,15 min Relative Strength Index (RSI) bullish,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,15-min-roc-trending-down,15 min ROC Trending Down,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,15-min-roc-trending-up,15 min ROC Trending Up,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,15-min-supertrend-buys,15 min Supertrend Buys,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,15-min-supertrend-sells,15 min Supertrend Sells,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,15-min-supertrend-signal-changed-to-buy,15 min Supertrend Signal changed to Buy,intraday,intraday,bullish,0.6,intraday,99
+trendlyne,15-min-supertrend-signal-changed-to-sell,15 min Supertrend Signal changed to Sell,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,15-min-willaims-%r-in-oversold-zone,15 min Willaims %R in Oversold zone,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,15-min-williams-%r-bearish,15 min Williams %R Bearish,intraday,intraday,bearish,0.72,intraday,82
+trendlyne,15-min-williams-%r-bullish,15 min Williams %R Bullish,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,15-min-williams-%r-crossed--20-from-below,15 min Williams %R crossed -20 from below,intraday,intraday,bearish,0.72,intraday,68
+trendlyne,15-min-williams-%r-crossed--80-from-above,15 min Williams %R crossed -80 from above,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,15-min-williams-%r-in-overbought-zone,15 min Williams %R in Overbought zone,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,15-min-williams-trending-down,15 min Williams Trending Down,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,30-min-adx-bearish-divergence,30 min ADX Bearish Divergence,intraday,intraday,bearish,0.6,intraday,100
+trendlyne,30-min-adx-bullish-divergence,30 min ADX Bullish Divergence,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,30-min-adx-mild-trending-stocks,30 min ADX Mild Trending Stocks,intraday,intraday,neutral,0.6,intraday,100
+trendlyne,30-min-adx-strong-trending-stocks,30 min ADX Strong Trending Stocks,intraday,intraday,bullish,0.6,intraday,86
+trendlyne,30-min-adx-trending-stocks,30 min ADX Trending Stocks,intraday,intraday,neutral,0.6,intraday,100
+trendlyne,30-min-bollinger-band-breakdown,30 min Bollinger Band Breakdown,intraday,intraday,bearish,0.6,intraday,63
+trendlyne,30-min-bollinger-band-breakout,30 min Bollinger Band Breakout,intraday,intraday,bullish,0.6,intraday,58
+trendlyne,30-min-macd-crossover-above-signal-line,30 min MACD Crossover Above Signal Line,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,30-min-macd-crossover-below-signal-line,30 min MACD Crossover below Signal Line,intraday,intraday,bearish,0.6,intraday,100
+trendlyne,30-min-relative-strength-index-(rsi)-bearish,30 min Relative Strength Index (RSI) Bearish,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,30-min-relative-strength-index-(rsi)-bullish,30 min Relative Strength Index (RSI) bullish,intraday,intraday,bullish,0.6,intraday,97
+trendlyne,30-min-supertrend-buys,30 min Supertrend Buys,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,30-min-supertrend-sells,30 min Supertrend Sells,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,30-min-supertrend-signal-changed-to-buy,30 min Supertrend Signal changed to Buy,intraday,intraday,bullish,0.6,intraday,96
+trendlyne,30-min-supertrend-signal-changed-to-sell,30 min Supertrend Signal changed to Sell,intraday,intraday,bearish,0.6,intraday,94
+trendlyne,bear-1,Negative Momentum Breakdown,momentum,,bearish,0.6,short_term,1
+trendlyne,bull-1,Strong Bullish Breakout,momentum,,bullish,0.6,short_term,2
+trendlyne,new-1-week-low-today,New 1 week low today,intraday,intraday,bearish,0.6,intraday,100
+trendlyne,overbought-by-15-min-money-flow-index-(mfi),Overbought by 15 min Money Flow Index (MFI),intraday,intraday,bearish,0.72,intraday,100
+trendlyne,overbought-by-30-min-money-flow-index-(mfi),Overbought by 30 min Money Flow Index (MFI),intraday,intraday,bearish,0.72,intraday,100
+trendlyne,overbought-on-both-15-min-mfi-and-15-min-rsi,Overbought on both 15 min MFI and 15 min RSI,intraday,intraday,bearish,0.72,intraday,88
+trendlyne,overbought-on-both-30-min-mfi-and-30-min-rsi,Overbought on both 30 min MFI and 30 min RSI,intraday,intraday,bearish,0.72,intraday,84
+trendlyne,oversold-by-15-min-money-flow-index-(mfi),Oversold by 15 min Money Flow Index (MFI),intraday,intraday,bullish,0.6,intraday,100
+trendlyne,oversold-by-30-min-money-flow-index-(mfi),Oversold by 30 min Money Flow Index (MFI),intraday,intraday,bullish,0.6,intraday,100
+trendlyne,oversold-on-both-15-min-rsi-and-15-min-mfi,Oversold on both 15 min RSI and 15 min MFI,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,oversold-on-both-30-min-rsi-and-30-min-mfi,Oversold on both 30 min RSI and 30 min MFI,intraday,intraday,bullish,0.6,intraday,81
+trendlyne,positive-breakout-second-resistance-(-ltp->-r2),Positive Breakout Second Resistance  ( LTP > R2),technical,,bullish,0.6,short_term,47
+trendlyne,price-crossed-above-15-min-bollinger-band,Price crossed above 15 min Bollinger Band,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,price-crossed-above-15-min-bollinger-band-central-line,Price crossed above 15 min Bollinger Band Central Line,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,price-crossed-above-30-min-bollinger-band,Price crossed above 30 min Bollinger Band,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,price-crossed-above-30-min-bollinger-band-central-line,Price crossed above 30 min Bollinger Band Central Line,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,price-crossed-below-15-min-bollinger-band,Price crossed below 15 min Bollinger Band,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,price-crossed-below-15-min-bollinger-band-central-line,Price crossed below 15 min Bollinger Band Central Line,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,price-crossed-below-30-min-bollinger-band,Price crossed below 30 min Bollinger Band,intraday,intraday,bullish,0.6,intraday,100
+trendlyne,price-crossed-below-30-min-bollinger-band-central-line,Price crossed below 30 min Bollinger Band Central Line,intraday,intraday,bearish,0.72,intraday,100
+trendlyne,top-gainers-of-the-week,Top gainers of the week,intraday,intraday,neutral,0.6,intraday,100
+trendlyne,top-losers-of-the-month,Top losers of the month,intraday,intraday,neutral,0.6,intraday,100
+trendlyne,top-losers-of-the-week,Top losers of the week,intraday,intraday,neutral,0.6,intraday,100
+moneycontrol,362,Oversold - RSI below 30 Stocks having RSI below 30 and considered oversold. Indication of a bullish signal,technical,,bearish,0.6,short_term,1091
+moneycontrol,367,Upward Momentum - Price & Volume Sudden increase in trading activity with high weekly returns,momentum,,bullish,0.6,short_term,11
+moneycontrol,371,Downward Momentum - Price & VolumeSudden increase in trading activity with negative weekly returns,momentum,,neutral,0.6,short_term,256
+moneycontrol,411,Previous Day Breakout - Up List of stocks which have closed above their previous day's high price,momentum,,bullish,0.6,short_term,170
+moneycontrol,412,Previous Day Breakout - Down Stocks which have closed below their previous day's low price,momentum,,bullish,0.6,short_term,18
+moneycontrol,413,Previous Month Breakout - UpList of stocks which have closed above their previous month's high price,momentum,,bullish,0.6,short_term,335
+moneycontrol,417,Previous Month Breakout - Down Stocks which have closed below their previous month's low price,momentum,,bullish,0.6,short_term,12
+moneycontrol,422,52W High Breakout - Up Stocks where price has crossed above its 52 week high price which is considered as a bullish signal,momentum,,bullish,0.72,short_term,21
+moneycontrol,423,52W Low Breakout - Down Stocks where current price has gone below its 52 week low price which indicates a bearish signal,momentum,,bearish,0.6,short_term,578
+moneycontrol,430,Price Near 52W Low Zone Stocks where price has reached very near to its 52 week low price and indicates a possible breakdown,technical,,bearish,0.72,short_term,109
+moneycontrol,OHLC_D_I_10DSTOCHBULL,Swing Breakout,momentum,,bullish,0.6,short_term,189
+moneycontrol,OHLC_D_I_DSMARTBULLC,Smart Breakout,momentum,,bullish,0.6,short_term,18
+moneycontrol,OHLC_D_I_MOMRAVBE,Momentum Breakdown,momentum,,bearish,0.72,short_term,4
+moneycontrol,OHLC_D_I_MOMRAVBU,Momentum Breakout,momentum,,bullish,0.6,short_term,3
+moneycontrol,OHLC_D_I_RISE3BULL,Rising Three Candle Pattern (Daily),technical,,bullish,0.6,short_term,3
+moneycontrol,OHLC_D_I_RSI70607DNBU,Breakout after consolidation,momentum,,bullish,0.6,short_term,80
+moneycontrol,OHLC_D_I_RSIPOWBD,RSI Power Breakdown,technical,,bearish,0.6,short_term,83
+moneycontrol,OHLC_D_I_RSIPOWBO,RSI Power Breakout,technical,,bullish,0.6,short_term,80
+moneycontrol,OHLC_D_I_SQZBEARBO,Squeeze Breakdown,technical,,bearish,0.72,short_term,5
+moneycontrol,OHLC_D_I_SQZBULLBO,Squeeze Breakout,technical,,bullish,0.6,short_term,19
+moneycontrol,OHLC_D_I_TRNGLCANDBEAR,Triangle Breakdown,technical,,bearish,0.72,short_term,10
+moneycontrol,OHLC_D_I_TRNGLCANDBULL,Triangle Breakout,technical,,bullish,0.6,short_term,14
+moneycontrol,OHLC_D_P_2YRHIGH,2 year Breakout,momentum,,bullish,0.6,short_term,23
+moneycontrol,OHLC_D_P_3YRHIGH,3 Year Breakout,momentum,,bullish,0.6,short_term,16
+moneycontrol,OHLC_D_P_5YRHIGH,5 Year Breakout,momentum,,bullish,0.6,short_term,13
+moneycontrol,OHLC_W_P_52HIGH,52 Week High,technical,,bullish,0.6,short_term,56
+moneycontrol,OHLC_W_P_52LOW,52 Week Low,technical,,bearish,0.6,short_term,107
+etnow,206,Bullish Cross - SMA 3 and 5 List of stocks where 3 day moving average has crossed the 5 day moving average from below. This crossover indicates a bullish trend,technical,,bullish,0.6,short_term,20
+etnow,208,Bullish Cross - SMA 3 and 7This crossover indicates a bullish signal where 3 day moving average has crossed above 7 day moving average from below,technical,,bullish,0.6,short_term,20
+etnow,209,Bullish Cross - SMA 5 and 10This crossover indicates a bullish signal where 5 day moving average of price has crossed above 10 day moving average from below,technical,,bullish,0.6,short_term,20
+etnow,210,Bullish Cross - SMA 5 and 20This crossover indicates a bullish signal where 5 day moving average of price has crossed above 20 day moving average from below,technical,,bullish,0.6,short_term,20
+etnow,211,Bullish Cross - SMA 7 and 26This crossover indicates a bullish signal where 7 day moving average of price has crossed above 26 day moving average from below,technical,,bullish,0.6,short_term,20
+etnow,212,Bullish Cross - SMA 7 and 14This crossover indicates a bullish signal where 7 day moving average of price has crossed above 14 day moving average from below,technical,,bullish,0.6,short_term,20
+etnow,214,"Golden Cross - SMA 50 and 200 Here, the 50 day moving average of price has crossed above the 200 day moving average from below. This crossover indicates a bullish signal and is called Golden Cross",technical,,bullish,0.6,short_term,2
+etnow,215,"Bullish Cross -SMA 3,5 and 7 Here, two short term moving averages of price i.e. 3day MA and 5day MA both have crossed above the 7day moving average. This is a strong Bullish crossover",technical,,bullish,0.6,short_term,20
+etnow,216,"Bearish Cross -SMA 3,5 and 7Here, two short term moving averages of price i.e. 3day MA and 5day MA both have crossed below the 7day moving average. This is a strong Bearish crossover",technical,,bearish,0.6,short_term,20
+etnow,217,"Death Cross - SMA 50 and 200 Here, the 50 day moving average of price has crossed below the 200 day moving average from above. This crossover indicates a bearish signal and is called Death Cross",technical,,bearish,0.72,short_term,13
+etnow,218,Bearish Cross - SMA 7 and 14This crossover indicates a bearish signal where 7 day moving average of price has crossed below 14 day moving average from above,technical,,bearish,0.6,short_term,20
+etnow,219,Bearish Cross - SMA 7 and 26This crossover indicates a bearish signal where 7 day moving average of price has crossed below 26 day moving average from above,technical,,bearish,0.72,short_term,20
+etnow,220,Bearish Cross - SMA 3 and 7This crossover indicates a bearish signal where 3 day moving average has crossed below 7 day moving average from above,technical,,bearish,0.6,short_term,20
+etnow,221,Bearish Cross - SMA 5 and 10This crossover indicates a bearish signal where 5 day moving average of price has crossed below the 10 day moving average from above,technical,,bearish,0.6,short_term,20
+etnow,222,Bearish Cross - SMA 5 and 20This crossover indicates a bearish signal where 5 day moving average of price has crossed below the 20 day moving average from above,technical,,bearish,0.72,short_term,20
+etnow,223,"Bearish Cross - SMA 3 and 5Stocks where 3day moving average has crossed below 5 day moving average from above, indicating a bullish signal",technical,,bearish,0.6,short_term,20
+etnow,309,Overbought - RSI above 75Stocks having RSI above 75 and considered overbought. Indication of a bearish signal,technical,,bearish,0.6,short_term,20
+etnow,362,Oversold - RSI below 30 Stocks having RSI below 30 and considered oversold. Indication of a bullish signal,technical,,bearish,0.6,short_term,20
+etnow,367,Upward Momentum - Price & Volume Sudden increase in trading activity with high weekly returns,momentum,,bullish,0.6,short_term,20
+etnow,371,Downward Momentum - Price & VolumeSudden increase in trading activity with negative weekly returns,momentum,,neutral,0.6,short_term,20
+etnow,411,Previous Day Breakout - Up List of stocks which have closed above their previous day's high price,momentum,,bullish,0.6,short_term,8
+etnow,412,Previous Day Breakout - Down Stocks which have closed below their previous day's low price,momentum,,bullish,0.6,short_term,17
+etnow,413,Previous Month Breakout - UpList of stocks which have closed above their previous month's high price,momentum,,bullish,0.72,short_term,20
+etnow,417,Previous Month Breakout - Down Stocks which have closed below their previous month's low price,momentum,,bullish,0.6,short_term,20
+etnow,422,52W High Breakout - Up Stocks where price has crossed above its 52 week high price which is considered as a bullish signal,momentum,,bullish,0.72,short_term,3
+etnow,423,52W Low Breakout - Down Stocks where current price has gone below its 52 week low price which indicates a bearish signal,momentum,,bearish,0.6,short_term,3
+etnow,428,Price Near 52W High ZoneStocks where price has reached very close to its 52 week high price which indicates a possible price breakout,momentum,,bullish,0.72,short_term,20
+etnow,430,Price Near 52W Low Zone Stocks where price has reached very near to its 52 week low price and indicates a possible breakdown,technical,,bearish,0.6,short_term,20
+etnow,606,Top Gainers List of stocks which have gained more than 2% in a single day,momentum,,bullish,0.6,short_term,20
+etnow,646,Stocks Near 52W HighList of stocks which have reached very close to their 52 week High prices,technical,,bullish,0.6,short_term,20
+etnow,647,Stocks Near 52W LowList of stocks which have reached very close to their 52 week Low prices,technical,,bearish,0.72,short_term,20
+etnow,711,"Bearish EngulfingBearish Engulfing is a bearish reversal pattern in an uptrend, with a small white candle followed by a large black candle that fully ""engulfs"" it, suggesting bears are gaining control.",technical,,bearish,0.72,short_term,1
+etnow,717,"One Candle Shooting StarThe One Candle Shooting Star is a bearish reversal pattern that appears on a chart in the context of an uptrend. It is a tall candle with a small body and a long upper shadow, suggesting that bulls may be losing control and bears may take over.",technical,,bearish,0.72,short_term,1
+etnow,718,"Bearish Harami CrossThe Bearish Harami Cross is a bearish reversal pattern in an uptrend, with a large white candle followed by a small black candle contained within it, indicating bulls may be losing control",technical,,bearish,0.72,short_term,1
+etnow,719,"Hanging ManThe Hanging Man is a bearish reversal pattern that appears on a chart in the context of an uptrend. It is a candle with a small body, long lower shadow, and little or no upper shadow, suggesting that bulls may be losing control and bears may take over",technical,,bearish,0.72,short_term,1
+etnow,721,"HammerThe Hammer is a bullish reversal pattern that appears on a chart in the context of a downtrend. It is a candle with a small body and a long lower shadow, suggesting that bears are losing control and bulls may take over",technical,,bullish,0.6,short_term,1
+etnow,722,"Dark Cover CloudThe Dark Cloud Cover is a bearish reversal pattern in an uptrend, with a long white candle followed by a black candle that opens above it and closes within it, indicating bears may be gaining control",technical,,bearish,0.72,short_term,3
+etnow,724,"Bearish Belt HoldThe Bearish Belt Hold is a bearish reversal pattern in an uptrend, with a small body and a long upper shadow, indicating bulls may be losing control",technical,,bearish,0.72,short_term,1
+etnow,725,"Bullish Harami The Bullish Harami is a bullish reversal pattern in a downtrend, with a large black candle followed by a small white candle contained within it, indicating bears may be losing control",technical,,bullish,0.6,short_term,2
+etnow,728,"Bearish Strong LineThe Bearish Strong Line is a bearish reversal pattern in an uptrend, with a long black candle and a small or no shadow, indicating bears may be taking control",technical,,bearish,0.6,short_term,7
+etnow,732,"Bearish HaramiThe Bearish Harami is a bearish reversal pattern in an uptrend, with a large white candle followed by a small black candle contained within it, indicating bulls may be losing control",technical,,bearish,0.72,short_term,1
+etnow,735,"Inverted HammerThe Inverted Hammer is a bullish reversal pattern in a downtrend, with a small body and a long upper shadow, indicating bears may be losing control",technical,,bullish,0.6,short_term,1
+etnow,737,"Bullish Belt HoldThe Bullish Belt Hold is a bullish reversal pattern in a downtrend, with a small body and a long lower shadow, indicating bears may be losing control",technical,,bullish,0.6,short_term,1
+etnow,738,Bullish Harami CrossA Bullish Harami Cross is a bullish candlestick pattern indicating a potential reversal to an upward trend,technical,,bullish,0.6,short_term,1
+etnow,739,"Four Price DojiA Four Price Doji is a rare candlestick pattern where the open, high, low, and close prices are all the same. It indicates indecision in the market and can be a sign of a potential trend reversal",technical,,neutral,0.6,short_term,1
+etnow,787,Bullish MACD CrossoverList of stocks where the MACD line crosses from below to above the signal line. This crossover is considered bullish,technical,,bullish,0.6,short_term,20
+etnow,788,Bearish MACD CrossoverList of stocks where the MACD line crosses from above to above the signal line. This crossover is considered bearish,technical,,bearish,0.6,short_term,20
+etnow,789,RSI Crossover - Overbought ZoneStocks where the Relative Strength Index (RSI) has just crossed above 75 and entered into the overbought zone,technical,,bearish,0.6,short_term,15
+etnow,790,RSI Crossover - Oversold Zone Stocks where the Relative Strength Index (RSI) has just crossed below 25 and entered into the oversold zone,technical,,bearish,0.6,short_term,15
+etnow,8479,"Momentum Stocks Highlights stocks with recent strong price performance, indicating upward price trends that may attract short-term traders and momentum-based investors. Screens for stocks with 1-month returns exceeding 10%.",momentum,,bullish,0.6,short_term,20
+etnow,8483,"Low Volatility StocksIdentifies stocks with relatively stable price movements, appealing to risk-averse investors looking for steadier investment options. Screens stocks where Average True Range (ATR) is below 2.",technical,,bearish,0.72,short_term,20
+etnow,8491,"High Relative Strength StocksHighlights stocks showing strong recent price performance, potentially indicating short-term overbought conditions. Selects stocks where Relative Strength Index (RSI) is currently above 70.",momentum,,bearish,0.6,short_term,20
+etnow,8508,"Low Volatility Momentum Stocks Highlights stocks with upward momentum and reduced market sensitivity, potentially providing growth opportunities with lower risk. Selects stocks where 3-month Beta is under 1 and 6-month returns are above 15%.",momentum,,neutral,0.6,short_term,20
+etnow,8557,"Dividend Stocks with Strong Price PerformanceHighlights dividend-paying stocks with recent strong price performance, catering to investors seeking income along with capital appreciation. Filters stocks with Dividend Yield above 3% and 1-year Returns exceeding 10%.",momentum,,bullish,0.6,short_term,8
+etnow,8564,"Dividend Stocks with Strong Price Performance Highlights dividend-paying stocks with strong recent price performance, catering to investors seeking income along with capital appreciation. Targets stocks with Dividend Yield above 3% and 1-year Returns exceeding 15%.",momentum,,bullish,0.6,short_term,5
+etnow,8573,"Dividend Stocks with Strong Price PerformanceFocuses on dividend-paying stocks with strong recent price performance, catering to investors seeking income along with capital appreciation. Targets stocks with Dividend Yield above 3% and 1-year Returns exceeding 15%.",momentum,,bullish,0.6,short_term,5
+etnow,8581,"High-Quality Dividend Stocks with Stable Price PerformanceHighlights dividend-paying stocks with stable recent price performance, catering to investors seeking income and stability. Filters stocks with Dividend Yield above 3% and 1-year Returns under 5%.",momentum,,bullish,0.6,short_term,20
+etnow,8585,"Dividend Stocks with Strong Price PerformanceHighlights dividend-paying stocks with strong recent price performance, catering to investors seeking income along with capital appreciation. Targets stocks with Dividend Yield above 3% and 1-year Returns exceeding 10%.",momentum,,bullish,0.6,short_term,8
+etnow,8591,"High-Quality Dividend Stocks with Strong Price Performance and Low DebtTargets dividend-paying stocks with strong price performance and low debt, catering to income-oriented investors seeking quality and stability. Highlights stocks with Dividend Yield above 3%, 1-year Returns surpassing 10%, and Debt-to-Equity ratio below 0.4.",momentum,,bullish,0.6,short_term,8
+etnow,8598,"Growth Stocks with Strong Price Performance and Low DebtFocuses on growth-oriented stocks with strong recent price performance and lower debt levels, appealing to investors seeking growth and stability. Targets stocks with 1-year Returns above 10% and Debt-to-Equity ratio below 0.4.",momentum,,bullish,0.6,short_term,20
+etnow,8620,"Close Within 52 Week Low Zone Close Within 52 Week Low Zone refers to stocks that have recently closed their trading session at a price level that is within the range of their lowest price observed in the past 52 weeks. It suggests that the stock is currently trading near its lowest point in the past year. Utilize this data page to identify stocks that are trading within their 52-week low zone. This information can be useful for investors looking for potential buying opportunities or stocks that may be oversold. However, it is important to conduct further analysis and consider other factors before making investment decisions. Embark on a journey where the whispers of opportunity converge with the depths of the market. Witness the resilience of stocks as they navigate the realm of their 52-week lows, teetering on the precipice of possibility. Explore the hidden potential that lies within these undervalued gems, waiting to be unearthed.",technical,,bearish,0.6,short_term,20
+etnow,8655,Increasing Trading Activity with Negative Weekly returns - Large CapDiscovering Momentum in Large-Cap Stocks Amidst Weekly Losses: Identifying High Trading Activity Despite Negative Returns - Valuable Insights for Investors.,momentum,,bearish,0.6,short_term,20
+etnow,8656,"Increasing Trading Activity with Positive Weekly returns - Micro CapExplore Micro-Cap Momentum: Rising Trade Volume, Weekly Gains. Valuable for Investors. Due diligence, market analysis essential before investment.",momentum,,bullish,0.6,short_term,20

@@ -12599,3 +12599,4 @@ remain gated by AF-20261106-01/04. Detailed evidence is in docs/audits/2026-11-0
 - **Not done:** no weight, veto or label change. AF-20261025-01's screener shadow arm is due for grading (19 sessions on 11-26).
 - **Screener shadow arm graded (AF-20261025-01):** fails as registered; its IC gain over the live score is dilution (placebo). Mapping not applied; row now waits on an owner decision. Read inside the evening-chain window: a few 12-second read-only extracts.
 - **Stuck-component check and blend plan:** `intraday-blend-component-stuck` added (AF-20261126-09, live after the next `bharat-server` restart); intraday arms with and without breakout pre-registered (AF-20261126-10).
+- **Screener bias review (AF-20261126-11):** wrong and self-reverting labels found; pins written and pre-registered, not wired until the replay runs outside the evening window.
