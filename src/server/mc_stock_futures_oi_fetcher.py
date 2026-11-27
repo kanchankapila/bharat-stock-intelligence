@@ -198,29 +198,37 @@ def write_rows(rows: list[dict], as_of: str) -> int:
     return len(payload)
 
 
+# Only names with a futures contract are requested: asking for all ~2,500 mapped names ran past the
+# 30 min budget on 2026-11-25 and 11-26 (AF-20261127-01). fno_eligible alone misses new F&O entrants
+# (ICICILIFE, VMM, ENRIN on 2026-11-26), so the exchange's own futures file counts too.
+_MAP_SQL = (
+    "SELECT symbol, mcsymbol, CASE WHEN fno_eligible = 1 OR symbol IN ("
+    "  SELECT symbol FROM stock_futures_eod_history WHERE trade_date >= current_date - 14"
+    ") THEN 1 ELSE 0 END AS has_futures FROM nse_stocks "
+    "WHERE mcsymbol IS NOT NULL AND mcsymbol != '' AND status = 'ACTIVE'"
+)
+
+
 def load_mc_symbol_map(symbols: list[str] | None = None) -> dict:
-    """{NSE symbol: mcsymbol}. Resolution comes from nse_stocks, never constructed by
-    convention -- MC's scId is opaque (data-sources.md)."""
-    rows = query_all(
-        "SELECT symbol, mcsymbol, fno_eligible FROM nse_stocks "
-        "WHERE mcsymbol IS NOT NULL AND mcsymbol != '' AND status = 'ACTIVE'"
-    )
+    """{NSE symbol: mcsymbol} for names that trade futures. Resolution comes from nse_stocks,
+    never constructed by convention -- MC's scId is opaque (data-sources.md)."""
+    rows = query_all(_MAP_SQL)
     # mcsymbol is not unique (AF-20260918-02). MC answers a shared code with ONE company's futures,
     # so fetching it once per sharing symbol stored e.g. ASIANPAINT's contract under AGROPHOS (a
     # non-F&O name): 12 of 228 rows on 2026-11-11, each a verbatim copy of the real owner's row.
-    # Only an F&O name has a futures contract, so a shared code goes to its single F&O-flagged
+    # Only an F&O name has a futures contract, so a shared code goes to its single futures
     # owner; with zero or several, nobody gets it rather than a guess.
     by_code: dict = {}
     for r in rows:
         by_code.setdefault(r["mcsymbol"], []).append(r)
     m, dropped = {}, []
     for code, rs in by_code.items():
-        if len(rs) > 1:
-            rs = [r for r in rs if r["fno_eligible"] == 1]
-            if len(rs) != 1:
+        owners = [r for r in rs if r["has_futures"] == 1]
+        if len(owners) != 1:
+            if len(rs) > 1:
                 dropped.append(code)
-                continue
-        m[rs[0]["symbol"]] = code
+            continue
+        m[owners[0]["symbol"]] = code
     if dropped:
         log.warning("%d shared mcsymbol codes have no single F&O owner and are skipped: %s",
                     len(dropped), ", ".join(sorted(dropped)[:10]))
@@ -264,7 +272,7 @@ def run(symbols: list[str] | None = None, dry_run: bool = False, sleep: float = 
         log.warning("no symbols with an mcsymbol -- nothing to fetch")
         return 0
 
-    rows, failed = [], 0
+    rows, pending, written, failed = [], [], 0, 0
     for i, (sym, sc_id) in enumerate(sorted(mapping.items()), 1):
         try:
             for r in fetch_symbol(sc_id, as_of=as_of):
@@ -272,10 +280,15 @@ def run(symbols: list[str] | None = None, dry_run: bool = False, sleep: float = 
                 # for those, which parse_futures already turns into None.
                 r["symbol"] = sym
                 rows.append(r)
+                pending.append(r)
         except Exception as exc:
             failed += 1
             log.warning("[%d/%d] %s (%s) failed: %s", i, len(mapping), sym, sc_id, exc)
         time.sleep(sleep)
+        # Write as we go: a run killed at its budget kept nothing when the only write followed the loop.
+        if not dry_run and i % 50 == 0:
+            written += write_rows(pending, as_of)
+            pending = []
         if i % 100 == 0:
             log.info("progress %d/%d, %d rows so far", i, len(mapping), len(rows))
 
@@ -287,14 +300,14 @@ def run(symbols: list[str] | None = None, dry_run: bool = False, sleep: float = 
                      r["symbol"], r["expiry"], r["open_interest"], r["oi_buildup"],
                      r["rollover_pct"], r["basis"])
         return len(rows)
-    written = write_rows(rows, as_of)
+    written += write_rows(pending, as_of)
     log.info("wrote %d rows into stock_futures_oi_history", written)
     return written
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--symbols", help="comma-separated NSE symbols (default: all with an mcsymbol)")
+    ap.add_argument("--symbols", help="comma-separated NSE symbols (default: all names that trade futures)")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     run(symbols=a.symbols.split(",") if a.symbols else None, dry_run=a.dry_run)

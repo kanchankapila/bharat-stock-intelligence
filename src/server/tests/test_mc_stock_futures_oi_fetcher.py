@@ -6,6 +6,7 @@ computed from nothing, which then became the newest session getFuturesBuildupMat
 """
 import os
 import sys
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -44,3 +45,28 @@ def test_selection_is_anchored_to_the_session_date_not_the_wall_clock(monkeypatc
     seen = _patch(monkeypatch, EXPIRIES)
     mc.fetch_symbol("XX", as_of="2026-09-28")
     assert seen[0] == "2026-09-29"
+
+
+def test_a_run_killed_midway_keeps_what_it_fetched(monkeypatch):
+    """AF-20261127-01: the only write followed the loop, so the runs killed at the 30 min budget on
+    2026-11-25 and 11-26 stored nothing. Batches of 50 must already be in the table."""
+    import datetime
+
+    names = {f"S{i:03d}": f"C{i:03d}" for i in range(120)}
+    calls = []
+
+    def fetch(sc_id, as_of=None):
+        calls.append(sc_id)
+        if len(calls) > 110:
+            raise SystemExit("killed by timeout")
+        return [{"expiry": "2026-12-29"}]
+
+    written = []
+    monkeypatch.setattr(mc, "is_trading_session", lambda *a, **k: True)
+    monkeypatch.setattr(mc, "ensure_schema", lambda: None)
+    monkeypatch.setattr(mc, "load_mc_symbol_map", lambda s=None: names)
+    monkeypatch.setattr(mc, "fetch_symbol", fetch)
+    monkeypatch.setattr(mc, "write_rows", lambda rows, as_of: written.extend(r["symbol"] for r in rows) or len(rows))
+    with pytest.raises(SystemExit):
+        mc.run(now=datetime.datetime(2026, 11, 26, 20, 0), sleep=0)
+    assert written == sorted(names)[:100]

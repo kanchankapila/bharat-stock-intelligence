@@ -17,7 +17,7 @@ import screener_ohlcv_backfill
 
 READERS = [
     ("analyst_estimates_snapshot._SELECT_SYMBOLS", analyst_estimates_snapshot._SELECT_SYMBOLS),
-    ("mc_stock_futures_oi_fetcher.load_mc_symbol_map", inspect.getsource(mc_stock_futures_oi_fetcher.load_mc_symbol_map)),
+    ("mc_stock_futures_oi_fetcher._MAP_SQL", mc_stock_futures_oi_fetcher._MAP_SQL),
     ("credit_rating_fetcher ISIN map", inspect.getsource(credit_rating_fetcher)),
     ("screener_ohlcv_backfill.get_missing_symbols", inspect.getsource(screener_ohlcv_backfill.get_missing_symbols)),
 ]
