@@ -195,6 +195,7 @@ def _get_nearest_expiry(symbol: str, exchange: str = "NSE") -> str:
 _FNO_SQL = (
     "SELECT symbol FROM nse_stocks WHERE status = 'ACTIVE' AND symbol IN ("
     "  SELECT symbol FROM stock_futures_eod_history WHERE trade_date >= current_date - 14"
+    "  AND expiry >= current_date"  # IEX and IREDA left F&O with the 2026-11-23 expiry
     ") ORDER BY symbol"
 )
 
@@ -421,6 +422,28 @@ def _lot_size(symbol: str, expiry: str) -> float | None:
     return float(rows[0]["lot_size"]) if rows else None
 
 
+LOT_FILE_URL = "https://nsearchives.nseindia.com/content/fo/fo_mktlots.csv"
+
+
+def parse_lot_sizes(text: str, expiry: str) -> dict[str, float]:
+    """{symbol: lot size} for the expiry's contract month from NSE's fo_mktlots.csv (columns like DEC-26)."""
+    rows = [[c.strip() for c in line.split(",")] for line in text.splitlines()]
+    month = _date.fromisoformat(expiry).strftime("%b-%y").upper()
+    if not rows or month not in rows[0]:
+        return {}
+    col = rows[0].index(month)
+    return {r[1]: float(r[col]) for r in rows[1:] if len(r) > col and r[col].isdigit() and int(r[col]) > 0}
+
+
+def _nse_lot_file(session) -> str:
+    try:
+        r = session.get(LOT_FILE_URL, timeout=30)
+        return r.text if r.ok else ""
+    except Exception as e:
+        print(f"[so_chain] NSE lot size file unavailable: {e}", file=sys.stderr)
+        return ""
+
+
 def fill_gaps_from_nse(symbols: list[str], today: str, expiry: str | None = None, delay: float = 0.3) -> int:
     """NSE chains (no Greeks) for names with no chain today; returns how many were written.
 
@@ -438,10 +461,15 @@ def fill_gaps_from_nse(symbols: list[str], today: str, expiry: str | None = None
     session = _nse_session()
     filled = misses = 0
     skipped: list[str] = []
+    lot_file: str | None = None
     for sym in missing:
         try:
             exp = str(expiry or _get_nearest_expiry(sym))[:10]
             lot = _lot_size(sym, exp)
+            if not lot:  # nt_fno_expiry lags new entrants; NSE's file agreed with it on all 222 shared names
+                if lot_file is None:
+                    lot_file = _nse_lot_file(session)
+                lot = parse_lot_sizes(lot_file, exp).get(sym)
             if not lot:  # without it lots cannot be turned into shares
                 skipped.append(sym)
                 continue

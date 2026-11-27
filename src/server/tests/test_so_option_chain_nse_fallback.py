@@ -145,3 +145,44 @@ def test_a_gap_fill_write_never_replaces_an_existing_row(pg_db):
     so.save_chain([row(999.0, None)], None, overwrite=False)
     got = query_all("SELECT ce_oi, ce_delta FROM so_option_chain WHERE symbol = ?", ("AAA",))
     assert (got[0]["ce_oi"], got[0]["ce_delta"]) == (111.0, 0.5)
+
+
+LOT_FILE = (
+    "UNDERLYING          ,SYMBOL    ,DEC-26     ,JAN-27     \n"
+    "KOTHARI             ,ACUTAAS   ,150        ,175        \n"
+    "Derivatives on Individual Securities,Symbol,DEC-26,JAN-27\n"
+    "NOT LISTED YET      ,NEWCO     ,           ,25         \n"
+)
+
+
+def test_lot_file_is_read_from_the_expiry_month_column():
+    assert so.parse_lot_sizes(LOT_FILE, "2026-12-29") == {"ACUTAAS": 150.0}
+    assert so.parse_lot_sizes(LOT_FILE, "2027-01-26") == {"ACUTAAS": 175.0, "NEWCO": 25.0}
+    assert so.parse_lot_sizes(LOT_FILE, "2027-06-29") == {}
+    assert so.parse_lot_sizes("", "2026-12-29") == {}
+
+
+def test_a_lot_size_nt_does_not_carry_comes_from_the_exchange_file(monkeypatch):
+    _, saved = _fill(monkeypatch, lots={"CCC": 50})
+    fetched = []
+
+    class S:
+        def get(self, url, **kw):
+            fetched.append(url)
+            return _Resp(200, LOT_FILE.replace("ACUTAAS", "BBB    ") .replace("NOT LISTED YET      ,NEWCO", "X,DDD"))
+
+    monkeypatch.setattr(so, "_nse_session", lambda: S())
+    assert so.fill_gaps_from_nse(["BBB", "CCC", "ZZZ"], TODAY, delay=0) == 2
+    assert saved[0][0][0][6] == 100 * 150  # BBB in shares, from the file
+    assert fetched == [so.LOT_FILE_URL]  # one download per run, even with two names missing from NT
+
+
+def test_universe_drops_names_whose_contracts_have_all_expired(pg_db):
+    from db_compat import execute
+
+    for i, sym in enumerate(("LIVE", "GONE")):
+        execute("INSERT INTO nse_stocks (id, symbol, name, status, fno_eligible) VALUES (?, ?, ?, 'ACTIVE', 1)",
+                (990000 + i, sym, sym))
+        execute("INSERT INTO stock_futures_eod_history (symbol, trade_date, expiry, instrument, expiry_rank, is_expiry_day, source) "
+                "VALUES (?, current_date - 3, current_date + CAST(? AS int), 'STF', 1, false, 't')", (sym, 30 if sym == "LIVE" else -3))
+    assert so._get_fno_symbols() == ["LIVE"]

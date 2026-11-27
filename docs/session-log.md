@@ -12624,3 +12624,4 @@ remain gated by AF-20261106-01/04. Detailed evidence is in docs/audits/2026-11-0
 - Filed AF-20261127-01 (futures OI fetch times out, stores nothing), -02 (stock IV pass timeout), -03 (option-chain vendor block). No fixes: report-only request.
 - Not run: local full vitest/pytest and `repo-doctor --full` (market hours); `tsc` passed before the restart.
 - Option chain (AF-20261127-03): the 09-05 NSE fallback was never called and would have stored lots as shares. Wired as a gap fill only (owner ruling), with `&` encoding and an exchange-file universe. First real run is the 2026-11-27 evening chain.
+- Option chain follow-up (AF-20261127-03): universe now requires an unexpired contract (218 names, IEX/IREDA out) and missing lot sizes come from NSE `fo_mktlots.csv` (ACUTAAS, APARINDS fill).

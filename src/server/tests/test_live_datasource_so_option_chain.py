@@ -176,3 +176,15 @@ def test_nse_gap_fill_source_returns_a_chain_for_a_real_symbol():
     assert_numeric_and_finite(summary["pcr"], "pcr")
     assert any((r[6] or 0) > 0 for r in rows), "no call open interest in any strike"
     assert any(r[7] for r in rows), "pchangeinOpenInterest missing or renamed"
+
+
+@pytest.mark.live_datasource
+def test_nse_lot_size_file_parses_for_the_current_expiry():
+    """The gap fill turns NSE lots into shares with this file when nt_fno_expiry has no row."""
+    from preopen_fetcher import _nse_session
+
+    expiry = str(soc._get_nearest_expiry("RELIANCE"))[:10]
+    lots = soc.parse_lot_sizes(soc._nse_lot_file(_nse_session()), expiry)
+    assert len(lots) > 150, f"only {len(lots)} lot sizes for {expiry}: file layout changed?"
+    assert_numeric_and_finite(lots.get("RELIANCE"), "RELIANCE lot size")
+    assert lots["RELIANCE"] > 0
