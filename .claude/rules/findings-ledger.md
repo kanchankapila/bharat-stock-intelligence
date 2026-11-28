@@ -13,7 +13,7 @@ the unfixed code, then passing, and named in the ledger row's `Immunized` cell.
 `npm run findings:check` enforces this for rows from 2026-09-30; a red result means the session is not finished.
 
 `docs/audit-findings.md` is the **only** open/pending tracker (stable `AF-YYYYMMDD-NN` ids; never delete
-a row, close it in place). Do not create another "things to do later" file — three were retired for drifting.
+a row, close it; closed rows may move to `docs/audit-findings-archive.md`, which is history and not a second queue; search both files before adding an ID). Do not create another "things to do later" file — three were retired for drifting.
 Findings are not GitHub issues; GitHub (`kanchankapila/bharat-stock-intelligence`, via `gh`) is for PRs.
 
 ### Shared backlog — every agent and model
@@ -59,3 +59,12 @@ A finding may stay **open** only for one of these reasons, stated in its row:
 This applies equally to findings from a log sweep: a pm2 warning/error that means data was not written is a
 defect to fix now, whatever level it was logged at, including a step that exited 0. Re-verify any open row
 you touch and either close it or update why it is still blocked; an open row nobody re-checks is itself a finding.
+
+## Keeping the ledger moving (AF-20261127-07)
+
+- Every open row carries `Recheck: YYYY-MM-DD` in its Status cell (required for rows found from 2026-11-29). `findings:check`, `repo-doctor` and the daily Telegram job digest list the rows whose date has arrived.
+- Clear the due rows before starting a new audit.
+- Once a week, list the rows saying `needs a user decision` and put them to the owner as one batch.
+- The Status cell starts with the current state. Older notes follow `Earlier:` and need not grow; narrative goes to `docs/session-log.md`.
+- An audit adds ledger rows, not a new `.md` file. Pre-registered test rules are the exception.
+- The Closed cell is blank, `—`, or starts with the closing date. Never `open` or `partial`.

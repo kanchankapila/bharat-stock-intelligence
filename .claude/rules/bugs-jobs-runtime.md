@@ -223,6 +223,7 @@ Split out of `recurring-bugs.md` (the index) on 2026-09-26 so each area loads on
   raise from `finally` **REPLACES the propagating exception** — so the real failure is swallowed
   and reported as a connection error at teardown. Wrap cleanup closes.
 
+- **A stalest-first queue puts the never-writable first, for ever (2026-11-28, AF-20261128-05).** Symbols with no provider id were "never synced", so they took 87 of each 110-name Trendlyne slice. Filter to what can be requested before ordering by age. **Tell:** successes per bounded run falling while the slice size is constant.
 - **A skip-list built from rows successfully WRITTEN can never contain the things that never
   write — so those are re-fetched on every run, forever.** `mf_holdings_fetcher`'s staleness skip
   read the symbols present in its output table; a symbol the vendor has no data for is never

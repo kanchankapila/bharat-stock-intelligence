@@ -1,0 +1,59 @@
+{
+  "rows": 191207,
+  "labelled_dates": 99,
+  "block_columns": [
+    "breadth_thrust",
+    "gift_nifty_pct",
+    "nifty_gex",
+    "nifty_long_gamma",
+    "india_10y",
+    "india_us_spread",
+    "high_impact_3d",
+    "asia_sentiment",
+    "global_risk",
+    "risk_on",
+    "adrs_bullish",
+    "mmi_norm",
+    "mmi_extreme_fear",
+    "usdinr_ret",
+    "nikkei_ret",
+    "hangseng_ret",
+    "asia_adr_risk",
+    "earnings_breadth",
+    "mkt_np_yoy",
+    "earnings_breadth_m",
+    "fii_net_today",
+    "fii_buying",
+    "fii_selling",
+    "risk_on_confirm",
+    "usdinr_chg",
+    "nifty_basis",
+    "nifty_contango",
+    "days_to_fno_expiry",
+    "results_season"
+  ],
+  "test_dates": 58,
+  "graded_rows": 84069,
+  "ic_full": {
+    "dates": 58,
+    "eff_dates": 11.6,
+    "mean_pct": 3.4017723373661592,
+    "t_eff": 1.1939169249558514,
+    "verdict": "LOW-DATA"
+  },
+  "ic_drop": {
+    "dates": 58,
+    "eff_dates": 11.6,
+    "mean_pct": 3.4834962429978993,
+    "t_eff": 1.385444230133758,
+    "verdict": "LOW-DATA"
+  },
+  "full_minus_drop": {
+    "dates": 58,
+    "eff_dates": 11.6,
+    "mean_pct": -0.08172390563173948,
+    "t_eff": -0.06619300017712704,
+    "verdict": "LOW-DATA"
+  },
+  "note": "mean_pct is the mean rank IC x 100"
+}

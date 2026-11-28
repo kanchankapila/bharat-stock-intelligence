@@ -2,7 +2,7 @@
 
 Real-time Indian stock market (NSE/BSE) research and decision-support platform. Express + tRPC
 backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, 337 non-test Python modules
-in `src/server/` (93 `*_fetcher.py` plus ML engines, jobs and helpers; 885 `.py` files including tests).
+in `src/server/` (93 `*_fetcher.py` plus ML engines, jobs and helpers; 886 `.py` files including tests).
 
 What the product is for and the contracts a change must preserve: `CONTEXT.md`. Skills, commands,
 subagents and hooks: `AGENTS.md`. Services, layout, hook enforcement and full architecture notes:
@@ -35,7 +35,7 @@ subagents and hooks: `AGENTS.md`. Services, layout, hook enforcement and full ar
 A finding is done only when **fixed, verified against live production, and closed with a date and
 evidence** — in the same session. Every fix ships with a regression test shown to FAIL on the unfixed
 code, named in the ledger row's `Immunized` cell. `docs/audit-findings.md` is the **only** open/pending
-tracker for every agent (stable `AF-YYYYMMDD-NN` ids; never delete a row; re-read a row before updating it).
+tracker for every agent (stable `AF-YYYYMMDD-NN` ids; never delete a row, closed rows may move to `docs/audit-findings-archive.md`; re-read a row before updating it).
 A row may stay open only for EVIDENCE, calendar-blocked, needs-a-user-decision or depends-on-another-row;
 the full rules, the dead-vendor lookup order and the shared-backlog contract are in
 `.claude/rules/findings-ledger.md`. Run `npm run backlog:check` and `npm run findings:check` before handing off.
