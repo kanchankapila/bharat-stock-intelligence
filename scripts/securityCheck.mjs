@@ -2,10 +2,8 @@
 import { execSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-export const ACCEPTED = [
-  { id: 'GHSA-fc5q-39xc-vjpf', until: '2026-12-17',
-    why: 'picomatch <=4.0.7 ReDoS: no patched release exists (4.0.7 is latest); reached only through dev tooling (vite, vitest, tinyglobby, pm2). AF-20261025-33.' },
-];
+// { id, until, why } per advisory with no patched release.
+export const ACCEPTED = [];
 
 export function unaccepted(audit, accepted = ACCEPTED, today = new Date().toISOString().slice(0, 10)) {
   const live = new Set(accepted.filter(a => a.until >= today).map(a => a.id));

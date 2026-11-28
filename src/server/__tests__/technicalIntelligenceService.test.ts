@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockFetchTechnical = vi.fn();
 const mockDbRun = vi.fn();
+const mockStockId = vi.fn(async (_symbol: string): Promise<string | undefined> => '1');
 const mockDbAll = vi.fn(async () => [] as any[]);
 const mockGetAllStocks = vi.fn(() => [{ symbol: 'AAA' }, { symbol: 'BBB' }]);
 
 vi.mock('../dbAsync', () => ({ dbRun: mockDbRun, dbAll: mockDbAll }));
 vi.mock('../trendlyneService', () => ({
   fetchTrendlyneAdvTechnicalAnalysis: mockFetchTechnical,
+  trendlyneTaStockId: mockStockId,
 }));
 vi.mock('../stockMapping', () => ({
   getAllStocks: mockGetAllStocks,
@@ -22,6 +24,8 @@ describe('syncTrendlyneTechnicals vendor-block handling', () => {
   beforeEach(() => {
     _resetTrendlyneTaCircuitForTests();
     mockFetchTechnical.mockReset();
+    mockStockId.mockReset();
+    mockStockId.mockResolvedValue('1');
     mockDbRun.mockReset();
     mockDbAll.mockReset();
     mockDbAll.mockResolvedValue([]);
@@ -71,5 +75,29 @@ describe('syncTrendlyneTechnicals vendor-block handling', () => {
 
     expect(mockFetchTechnical).toHaveBeenCalledTimes(DEFAULT_TRENDLYNE_TA_DAILY_SLICE);
     expect(mockFetchTechnical.mock.calls.at(-1)?.[0]).toBe('S109');
+  });
+
+  it('does not spend the slice on a symbol with no Trendlyne id (it can never be written, so it stays stalest)', async () => {
+    mockStockId.mockImplementation(async (symbol: string) => (symbol === 'AAA' ? undefined : '1'));
+    mockFetchTechnical.mockImplementation(async () => {
+      markTrendlyneTaBlocked('405');
+      return null;
+    });
+    await expect(syncTrendlyneTechnicals(1)).rejects.toThrow(/TA vendor block/);
+    expect(mockFetchTechnical.mock.calls.map((c) => c[0])).toEqual(['BBB']);
+  });
+
+  it('really aborts after repeated cooldowns with no success', async () => {
+    vi.useFakeTimers();
+    try {
+      mockGetAllStocks.mockReturnValue(Array.from({ length: 40 }, (_, i) => ({ symbol: `S${i}` })));
+      mockFetchTechnical.mockResolvedValue(null);
+      const outcome = expect(syncTrendlyneTechnicals()).rejects.toThrow(/sustained fetch failures/);
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      await outcome;
+      expect(mockFetchTechnical).toHaveBeenCalledTimes(20);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

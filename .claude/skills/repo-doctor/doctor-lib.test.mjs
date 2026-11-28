@@ -184,3 +184,17 @@ describe('restart teardown classification (AF-20260910-27)', () => {
     expect(isRestartTeardown('[QUEUE] unified-ranker failed: relation does not exist', at('2026-11-16 08:20:02'), [boot])).toBe(false);
   });
 });
+
+describe('repo-doctor due times', () => {
+  it('match the cron registered for the same job', () => {
+    const doctor = fs.readFileSync(new URL('./doctor.mjs', import.meta.url), 'utf8');
+    const registry = fs.readFileSync(new URL('../../../src/server/jobRegistry.ts', import.meta.url), 'utf8');
+    const entries = [...doctor.matchAll(/\['([\w-]+)', \d+, 'nse-daily', \{ hourUtc: (\d+), minuteUtc: (\d+)/g)];
+    expect(entries.length).toBeGreaterThanOrEqual(3);
+    for (const [, job, hour, minute] of entries) {
+      const cron = registry.match(new RegExp(String.raw`jobName: '${job}',[^\n]*?cronPattern: '(\d+) (\d+) `));
+      expect(cron, job).not.toBeNull();
+      expect({ job, due: `${minute} ${hour}` }).toEqual({ job, due: `${Number(cron[1])} ${Number(cron[2])}` });
+    }
+  });
+});

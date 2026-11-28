@@ -50,6 +50,13 @@ const persistedPm2EnvHas = (name) => {
 // ───────────────────────── A. CODEBASE static checks ─────────────────────────
 console.log('\n━━━ A. Codebase ━━━');
 
+// AF-20261127-07: a recheck date written only in prose is a date nothing notices
+const { overdueRows, unscheduledRows } = await import(new URL('../../../scripts/checkFindingsLedger.mjs', import.meta.url));
+const due = overdueRows(read('docs/audit-findings.md'));
+const unscheduled = unscheduledRows(read('docs/audit-findings.md')).length;
+check('ledger-recheck-due', 'code', due.length ? 'WARN' : 'PASS',
+  due.length ? `${due.length} ledger row(s) due: ${due.map(r => `${r.id} (${r.recheck})`).join(', ')}` : `no ledger row is past its recheck date (${unscheduled} open rows have none)`);
+
 // AF-20260909-07: 429 must be retried, never treated as final
 const tg = read('src/server/telegramService.ts');
 check('tg-429-retry', 'code',
@@ -287,7 +294,7 @@ if (client) {
     ['data-quality-daily', 30], ['job-digest', 30], ['job-digest-morning', 30],
     ['recommendations-digest', 30, 'nse-daily', { hourUtc: 17, minuteUtc: 10, graceMinutes: 90 }],
     ['quant-eod-sync', 30, 'nse-daily', { hourUtc: 16, minuteUtc: 30, graceMinutes: 360 }],
-    ['outcome-resolver', 30, 'nse-daily', { hourUtc: 4, minuteUtc: 0, graceMinutes: 45 }],
+    ['outcome-resolver', 30, 'nse-daily', { hourUtc: 2, minuteUtc: 0, graceMinutes: 45 }],
     ['trendlyne-midweek', 24 * 9],
     ['nt-live-filter-capture', 20, 'nse-intraday'], ['technical-scan', 24 * 3, 'nse-intraday'],
   ];

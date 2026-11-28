@@ -304,6 +304,10 @@ setInterval(() => {
   }
 }, 5 * 60_000); // sweep every 5 min
 
+export function trendlyneTaStockId(symbol: string): Promise<string | undefined> {
+  return resolveTrendlyneStockId(symbol, getStockMapping(symbol)?.tlid);
+}
+
 export async function fetchTrendlyneAdvTechnicalAnalysis(symbol: string, timeframe: 'D' | 'W' | 'M' = 'D') {
   const cacheKey = `${symbol}_${timeframe}`;
   const cached = taCache.get(cacheKey);

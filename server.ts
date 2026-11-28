@@ -214,11 +214,11 @@ async function startServer() {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  if (!bullmqReady) {
-    // Legacy fallback: simple periodic refresh without job queue
-    const { startBackgroundRefresh } = await import('./src/server/liveStockData');
-    startBackgroundRefresh();
+  // No BullMQ job refreshes every 5 min, and liveQuotes.ts readers see nothing once the cache expires.
+  const { startBackgroundRefresh } = await import('./src/server/liveStockData');
+  startBackgroundRefresh();
 
+  if (!bullmqReady) {
     // Fallback for daily OHLCV persistence (Mon-Fri at 4:30 PM IST / 11:00 AM UTC)
     setInterval(async () => {
       const now = new Date();

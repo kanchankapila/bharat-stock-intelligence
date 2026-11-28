@@ -37,9 +37,9 @@ export const V1OptionChain: React.FC<{ symbol: string; stockPrice: number | null
   // chart above already plots, not invented numbers.
   const portfolioGreeks = useMemo(() => {
     const totalOi = chain.reduce((s: number, r: any) => s + (r.callOi || 0) + (r.putOi || 0), 0);
-    if (!totalOi) return { Delta: 0, Gamma: 0, Theta: 0, Vega: 0 };
-    const weighted = (callKey: string, putKey: string) => chain.reduce((s: number, r: any) =>
-      s + (r[callKey] || 0) * (r.callOi || 0) + (r[putKey] || 0) * (r.putOi || 0), 0) / totalOi;
+    const weighted = (callKey: string, putKey: string) =>
+      !totalOi || chain.every((r: any) => r[callKey] == null && r[putKey] == null) ? null : chain.reduce((s: number, r: any) =>
+        s + (r[callKey] || 0) * (r.callOi || 0) + (r[putKey] || 0) * (r.putOi || 0), 0) / totalOi;
     return {
       Delta: weighted('callDelta', 'putDelta'),
       Gamma: weighted('callGamma', 'putGamma'),
@@ -175,8 +175,8 @@ export const V1OptionChain: React.FC<{ symbol: string; stockPrice: number | null
                     row.callBuiltup?.includes('Long') ? "text-emerald-400" : row.callBuiltup?.includes('Short') ? "text-rose-400" : "text-slate-400"
                   )}>{row.callBuiltup}</td>
                   <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{(row.callOi/1000).toFixed(1)}k</td>
-                  <td className="px-3 py-4 text-[10px] font-bold text-emerald-400">{row.callDelta?.toFixed(2)}</td>
-                  <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{row.callIv?.toFixed(1)}%</td>
+                  <td className="px-3 py-4 text-[10px] font-bold text-emerald-400">{row.callDelta?.toFixed(2) ?? '—'}</td>
+                  <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{row.callIv != null ? `${row.callIv.toFixed(1)}%` : '—'}</td>
                   <td className="px-3 py-4 text-[10px] font-black text-white tabular-nums">₹{row.callLtp?.toFixed(2)}</td>
 
                   {/* STRIKE */}
@@ -184,8 +184,8 @@ export const V1OptionChain: React.FC<{ symbol: string; stockPrice: number | null
 
                   {/* PUTS */}
                   <td className="px-3 py-4 text-[10px] font-black text-white tabular-nums">₹{row.putLtp?.toFixed(2)}</td>
-                  <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{row.putIv?.toFixed(1)}%</td>
-                  <td className="px-3 py-4 text-[10px] font-bold text-rose-400">{row.putDelta?.toFixed(2)}</td>
+                  <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{row.putIv != null ? `${row.putIv.toFixed(1)}%` : '—'}</td>
+                  <td className="px-3 py-4 text-[10px] font-bold text-rose-400">{row.putDelta?.toFixed(2) ?? '—'}</td>
                   <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{(row.putOi/1000).toFixed(1)}k</td>
                   <td className={cn(
                     "px-3 py-4 text-[8px] font-black uppercase",
@@ -228,7 +228,7 @@ export const V1OptionChain: React.FC<{ symbol: string; stockPrice: number | null
                   g === 'Delta' ? 'bg-emerald-500' : g === 'Theta' ? 'bg-rose-500' : 'bg-blue-500'
                 )} />
                 <p className="text-[10px] font-bold text-slate-300">
-                  {portfolioGreeks[g as keyof typeof portfolioGreeks].toFixed(g === 'Gamma' ? 4 : 2)}
+                  {portfolioGreeks[g as keyof typeof portfolioGreeks]?.toFixed(g === 'Gamma' ? 4 : 2) ?? '—'}
                 </p>
              </div>
            ))}

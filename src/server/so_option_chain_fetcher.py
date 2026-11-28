@@ -252,7 +252,7 @@ def _sf(v) -> float | None:
         return None
 
 
-VENDOR_BLOCK = VendorBlockLatch("so_chain")
+VENDOR_BLOCK = VendorBlockLatch("so_chain", has_fallback=True)
 
 
 def fetch_chain(symbol: str, expiry: str) -> dict | None:
@@ -581,6 +581,10 @@ def run(
     if not target_symbol:
         cutoff = (_date.today() - timedelta(days=STALE_DAYS)).isoformat()
         after = _coverage_map(symbols)
+        uncovered = sorted(s for s in symbols if (after.get(s) or "")[:10] != today)
+        if VENDOR_BLOCK.tripped() and uncovered:
+            print(f"[so_chain] vendor refused (HTTP {VENDOR_BLOCK.status}) and NSE did not fill "
+                  f"{len(uncovered)} of {len(symbols)} names: {', '.join(uncovered[:15])}", file=sys.stderr)
         stale = sorted(s for s in symbols if (after.get(s) or "")[:10] < cutoff)
         print(f"[so_chain] cumulative coverage: {len(symbols) - len(stale)}/{len(symbols)} "
               f"symbols refreshed within {STALE_DAYS}d")

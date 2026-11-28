@@ -807,6 +807,18 @@ describe('trendlyne-screener-constituent-coverage (hand-rolled: per-screener, ag
 });
 
 describe('bulk-endpoint-fetcher-coverage (hand-rolled: a fresh table is not a delivered feature, AF-20260904-01/02/03)', () => {
+  it('does not warn on the 2026-11-27 pre-open day: the exchange book itself held 2,139 names (AF-20261128-03)', () => {
+    // nse_stocks had grown to 2,594 rows, past the source's own 45-day best of 2,502
+    const row = { canon_universe: 2594, fno_universe: 218, bhav_n: 2500, preopen_n: 2133, preopen_universe: 2502, opt_n: 218 };
+    const evaluate = (r: Record<string, unknown>) => DATA_QUALITY_CHECKS.find(c => c.id === 'bulk-endpoint-fetcher-coverage')!.evaluate(r, new Date());
+    expect(evaluate(row).status).toBe('pass');
+    expect(evaluate({ ...row, preopen_n: 1900 }).status).toBe('warn');
+    // a master that keeps growing must not drag the line back over healthy days
+    expect(evaluate({ ...row, canon_universe: 3200, bhav_n: 3100 }).status).toBe('pass');
+    // and a source whose own ceiling has collapsed still fails against the master
+    expect(evaluate({ ...row, preopen_n: 210, preopen_universe: 210 }).status).toBe('fail');
+  });
+
   const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
   const check = () => byId('bulk-endpoint-fetcher-coverage');
   const healthyRow = {

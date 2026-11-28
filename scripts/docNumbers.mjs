@@ -148,7 +148,8 @@ if (CHECK) {
   expect(ledgerRule, urlEndpoints === null ? null : String(urlEndpoints), 'findings-ledger.md url_endpoints count');
   // Every current-guidance doc that copies these figures (dated reports and logs are history).
   const guidance = execFileSync('git', ['ls-files', '*.md'], { cwd: ROOT, encoding: 'utf8' }).split('\n')
-    .filter((f) => f && !/session-log|audit-findings|session_journal|history|docs\/audits\/|superpowers\/|\d{4}-\d{2}-\d{2}/.test(f));
+    // existsSync: ls-files still lists a document deleted but not yet committed.
+    .filter((f) => f && existsSync(join(ROOT, f)) && !/session-log|audit-findings|session_journal|history|docs\/audits\/|superpowers\/|\d{4}-\d{2}-\d{2}/.test(f));
   for (const f of guidance) {
     const txt = readFileSync(join(ROOT, f), 'utf8');
     const checks = [

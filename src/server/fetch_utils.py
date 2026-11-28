@@ -51,8 +51,9 @@ VENDOR_BLOCK_STATUSES = frozenset({403, 405, 429})
 class VendorBlockLatch:
     """Tripped by the first refused response in a run; every later fetch then skips its request."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, has_fallback: bool = False):
         self.name = name
+        self.has_fallback = has_fallback  # the caller reports on stderr only if the fallback also fails
         self.status: int | None = None
 
     def tripped(self) -> bool:
@@ -64,7 +65,7 @@ class VendorBlockLatch:
         if self.status is None:
             self.status = status_code
             print(f"[{self.name}] vendor block (HTTP {status_code}): no further requests this "
-                  f"run; the next run resumes from the DB", file=sys.stderr)
+                  f"run; the next run resumes from the DB", file=sys.stdout if self.has_fallback else sys.stderr)
         return True
 
 

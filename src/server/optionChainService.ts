@@ -101,7 +101,8 @@ export async function fetchOptionChain(symbol: string): Promise<any> {
         console.error(`[OPTION CHAIN] Greeks enrichment lookup failed for ${normalizedSymbol}:`, e);
       }
 
-      // Map the chain data, handling underscored or camelCase fields
+      // Map the chain data, handling underscored or camelCase fields. A 0 IV or Greek from either
+      // source means "not supplied", so it is reported as null rather than as a measurement.
       const mappedChain = oc.map((row: any) => {
         const g = greeksByStrike.get(Number(row.strike_price));
         return {
@@ -109,11 +110,11 @@ export async function fetchOptionChain(symbol: string): Promise<any> {
         callOiChange: row.calls_change_oi || 0,
         callLtp: row.calls_ltp || 0,
         callVol: row.calls_volume || 0,
-        callIv: row.calls_iv || g?.ce_iv || 0,
-        callDelta: row.call_delta || g?.ce_delta || 0,
-        callTheta: row.call_theta || g?.ce_theta || 0,
-        callVega: row.call_vega || g?.ce_vega || 0,
-        callGamma: row.call_gamma || g?.ce_gamma || 0,
+        callIv: row.calls_iv || g?.ce_iv || null,
+        callDelta: row.call_delta || g?.ce_delta || null,
+        callTheta: row.call_theta || g?.ce_theta || null,
+        callVega: row.call_vega || g?.ce_vega || null,
+        callGamma: row.call_gamma || g?.ce_gamma || null,
         callBuiltup: row.calls_builtup || "No Conclusion",
         callBid: row.calls_bid_price || 0,
         callAsk: row.calls_ask_price || 0,
@@ -124,11 +125,11 @@ export async function fetchOptionChain(symbol: string): Promise<any> {
         putOiChange: row.puts_change_oi || 0,
         putOi: row.puts_oi || 0,
         putVol: row.puts_volume || 0,
-        putIv: row.puts_iv || g?.pe_iv || 0,
-        putDelta: row.put_delta || g?.pe_delta || 0,
-        putTheta: row.put_theta || g?.pe_theta || 0,
-        putVega: row.put_vega || g?.pe_vega || 0,
-        putGamma: row.put_gamma || g?.pe_gamma || 0,
+        putIv: row.puts_iv || g?.pe_iv || null,
+        putDelta: row.put_delta || g?.pe_delta || null,
+        putTheta: row.put_theta || g?.pe_theta || null,
+        putVega: row.put_vega || g?.pe_vega || null,
+        putGamma: row.put_gamma || g?.pe_gamma || null,
         putBuiltup: row.puts_builtup || "No Conclusion",
         putBid: row.puts_bid_price || 0,
         putAsk: row.puts_ask_price || 0,

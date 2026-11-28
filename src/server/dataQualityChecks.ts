@@ -1044,6 +1044,9 @@ const RETIRED_TECHNICAL_SIGNAL_COLUMNS_SQL = Object.keys(RETIRED_TECHNICAL_SIGNA
  *  edit alongside the ranker's tuple. */
 export const CANONICAL_TIMEFRAMES = ['INTRADAY', 'SWING', 'POSITIONAL'] as const;
 
+// Sessions NSE declares on a day that is otherwise closed; market_holidays records closures only.
+export const NSE_SPECIAL_SESSIONS: string[] = ['2026-11-08']; // Diwali Muhurat
+
 export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   {
     id: 'nse-ticker-mapping-audit',
@@ -2961,13 +2964,17 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // repaired history ages out instead of warning forever.
     // The pass detail carries the judged row count and latest date: a fixed sentence was
     // byte-identical for 200+ runs and dq-uninformative-checks rightly called it frozen.
-    sql: `SELECT COUNT(*) FILTER (WHERE EXTRACT(ISODOW FROM b.date) IN (6, 7)
-                 OR EXISTS (SELECT 1 FROM market_holidays h WHERE h.exchange = 'NSE' AND h.date = b.date)) AS bad,
-                 string_agg(b.date::text, ', ' ORDER BY b.date) FILTER (WHERE EXTRACT(ISODOW FROM b.date) IN (6, 7)
-                 OR EXISTS (SELECT 1 FROM market_holidays h WHERE h.exchange = 'NSE' AND h.date = b.date)) AS dates,
-                 COUNT(*) AS total, MAX(b.date)::text AS latest
-          FROM market_breadth b
-          WHERE b.date >= CURRENT_DATE - 30`,
+    sql: `WITH b AS (
+            SELECT date, date <> ALL(?::date[])
+                     AND (EXTRACT(ISODOW FROM date) IN (6, 7)
+                          OR EXISTS (SELECT 1 FROM market_holidays h WHERE h.exchange = 'NSE' AND h.date = m.date)) AS closed
+            FROM market_breadth m
+            WHERE date >= CURRENT_DATE - 30)
+          SELECT COUNT(*) FILTER (WHERE closed) AS bad,
+                 string_agg(date::text, ', ' ORDER BY date) FILTER (WHERE closed) AS dates,
+                 COUNT(*) AS total, MAX(date)::text AS latest
+          FROM b`,
+    params: [NSE_SPECIAL_SESSIONS],
     evaluate: (row) => {
       const bad = Number(row?.bad) || 0;
       if (bad > 0) return { status: 'warn', detail: `${bad} row(s) on non-trading days: ${row?.dates}` };
@@ -4184,22 +4191,12 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
                  -- MAX cannot ratchet down while any good day remains in the window, and one
                  -- spike cannot hide a collapse the way a high percentile could.
                  --
-                 -- GREATEST(..., canon) is the part that makes this permanent: MAX alone still
-                 -- ratchets down after 45 CONSECUTIVE collapsed days, at which point the
-                 -- denominator would equal the numerator and the check would go green having
-                 -- certified exactly the failure it exists to catch. Caught by the unit test
-                 -- that feeds a ratcheted-down ceiling back in. nse_stocks is a stable external
-                 -- anchor that no preopen outage can move, so flooring the denominator there
-                 -- makes a full collapse read 210/2,366 = 8.9% (fail) no matter how long it
-                 -- lasts. It also stays 2,479 on healthy days, since the source's own ceiling
-                 -- is above the canonical count, so the calibrated bands are unchanged.
-                 GREATEST(
-                   COALESCE((SELECT MAX(d.n) FROM (SELECT COUNT(DISTINCT symbol) AS n
-                               FROM preopen_stock_snapshot
-                              WHERE snapshot_date >= (SELECT d FROM preopen_latest) - INTERVAL '45 days'
-                              GROUP BY snapshot_date) d), 0),
-                   (SELECT n FROM canon)
-                 ) AS preopen_universe,
+                 -- The collapse floor (a discounted master) is applied in evaluate(), not here: taken
+                 -- whole in SQL it replaced the ceiling once nse_stocks outgrew the source (AF-20261128-03).
+                 COALESCE((SELECT MAX(d.n) FROM (SELECT COUNT(DISTINCT symbol) AS n
+                             FROM preopen_stock_snapshot
+                            WHERE snapshot_date >= (SELECT d FROM preopen_latest) - INTERVAL '45 days'
+                            GROUP BY snapshot_date) d), 0) AS preopen_universe,
                  (SELECT COUNT(DISTINCT symbol) FROM so_option_chain
                     WHERE date = (SELECT d FROM opt_latest)) AS opt_n,
                  (SELECT d FROM opt_latest) AS opt_date`,
@@ -4225,14 +4222,13 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         //   failBelow 0.60 = 1,487 symbols: still an order of magnitude above the 210-symbol
         //     collapse this check was written to catch (8.5% of the ceiling) while leaving ~31%
         //     headroom below the worst healthy day.
-        //   warnBelow 0.85 = 2,107 symbols: below the worst healthy session (2,179), so a healthy
-        //     day can never trip it, but a real partial degradation still surfaces.
+        //   warnBelow 0.80: must sit below the worst healthy session so a healthy day never trips it
+        //     (2,002 of a 2,502 ceiling; 45-day low 2,122 on 2026-11-28).
         //
-        // Math.max(..., canonUniverse) re-applies the SQL's GREATEST() floor in code. Deliberate
-        // duplication: the denominator must not be able to collapse toward the numerator even if
-        // the SQL is later simplified, because a self-referential denominator is the one shape
-        // that turns this check into a permanent pass during exactly the outage it monitors.
-        { name: 'preopen_stock_snapshot', n: Number(row?.preopen_n ?? 0), date: row?.preopen_date, universe: Math.max(Number(row?.preopen_universe ?? 0), canonUniverse), failBelow: 0.60, warnBelow: 0.85 },
+        // The master is only a collapse anchor, discounted to 0.7: taken whole, it grew to 2,594 rows,
+        // past the source's own best (2,502), and warned on a healthy day (AF-20261128-03). At 0.7 a
+        // source that has collapsed for 45 days still fails against it.
+        { name: 'preopen_stock_snapshot', n: Number(row?.preopen_n ?? 0), date: row?.preopen_date, universe: Math.max(Number(row?.preopen_universe || canonUniverse), Math.round(0.7 * canonUniverse)), failBelow: 0.60, warnBelow: 0.80 },
         { name: 'so_option_chain', n: Number(row?.opt_n ?? 0), date: row?.opt_date, universe: fnoUniverse, failBelow: 0.25, warnBelow: 0.50 },
       ].map(p => ({ ...p, pct: p.n / p.universe }));
       const detail = parts

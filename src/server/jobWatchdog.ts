@@ -29,6 +29,7 @@ import { dbGet, dbRun, dbAll } from './dbAsync';
 import { runDataQualityChecks, getLatestDataQualityResults } from './dataQualityChecks';
 import { recoverPgStatsIfReset } from './pgStatsRecovery';
 import log from './logger';
+import { overdueRows } from '../../scripts/checkFindingsLedger.mjs';
 
 // Needs a minimum sample so a job with 1 failure out of 2 runs doesn't false-positive.
 const FAIL_RATE_WARN = 0.25;
@@ -397,6 +398,19 @@ const dqIcon = (state: string) => state === 'pass' ? '✅' : state === 'warn' ? 
  * getLatestDataQualityResults() (already kept fresh by checkAndAlertDataQuality's 15-min poll)
  * rather than re-run here, so the digest doesn't duplicate that DB work or its persistence.
  */
+function ledgerRecheckLines(now: Date): string[] {
+  try {
+    const ledger = String(fs.readFileSync(path.join(process.cwd(), 'docs/audit-findings.md'), 'utf8'));
+    const due: { id: string; recheck: string }[] = overdueRows(ledger, istDateStr(now.getTime()));
+    if (!due.length) return [];
+    return ['', `*Ledger rows due for recheck (${due.length}):*`,
+      ...due.slice(0, 10).map(r => `📌 \`${r.id}\` since ${r.recheck}`)];
+  } catch (err) {
+    console.warn('[WATCHDOG] could not read the findings ledger:', (err as Error).message);
+    return [];
+  }
+}
+
 export async function buildDailyDigest(now: Date = new Date()): Promise<string> {
   const late = await getLateJobs(now);
   const lateByName = new Map(late.map(l => [l.job, l]));
@@ -553,6 +567,8 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
   if (eventDriven.length) {
     lines.push('', '*Event-driven (no fixed schedule):*', ...eventDriven.map(j => `⏳ ${j.label}`));
   }
+
+  lines.push(...ledgerRecheckLines(now));
 
   // A pause makes essentially every scheduled job read as "late". Silently filtering that out
   // would turn a pause into a blind spot -- the digest would look green while nothing ran. State

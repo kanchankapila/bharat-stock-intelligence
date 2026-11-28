@@ -17,6 +17,8 @@ import { fileURLToPath } from 'node:url';
 export const RULE_START = '2026-09-30';
 // From here a FIX-lane row cannot stay open on EVIDENCE: the lane says the fix is known.
 export const FIX_RULE_START = '2026-11-04';
+// From here an open row names the date it is next looked at, so nothing waits unnoticed in prose.
+export const RECHECK_RULE_START = '2026-11-29';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // An artifact that can fail: a test file, a scanner/check script, or a named static check.
@@ -34,6 +36,26 @@ const SPLIT = /(?<!\\)\|/;
 const cells = line => line.split(SPLIT).slice(1, -1).map(c => c.trim());
 const isSep = line => /^\|[-: |]+\|$/.test(line);
 const isDate = s => /^\*{0,2}\d{4}-\d{2}-\d{2}/.test(s);
+// First match only: history is appended after the current state in a status cell.
+const RECHECK = /Recheck: (\d{4}-\d{2}-\d{2})/;
+const istToday = () => new Date(Date.now() + 19_800_000).toISOString().slice(0, 10);
+
+/** Open rows nothing will bring back: no Recheck date, so they never reach the overdue list. */
+export function unscheduledRows(text) {
+  return text.split(/\r?\n/).filter(l => l.startsWith('| AF-')).map(cells)
+    .filter(c => c.length === 8 && !isDate(c[7]) && !RECHECK.test(c[5])).map(c => c[0]);
+}
+
+/** Open rows whose Recheck date has arrived, oldest first. */
+export function overdueRows(text, today = istToday()) {
+  return text.split(/\r?\n/)
+    .filter(l => l.startsWith('| AF-'))
+    .map(cells)
+    .filter(c => c.length === 8 && !isDate(c[7]))
+    .map(c => ({ id: c[0], recheck: c[5].match(RECHECK)?.[1] }))
+    .filter(r => r.recheck && r.recheck <= today)
+    .sort((a, b) => a.recheck.localeCompare(b.recheck));
+}
 
 // Every directory a test or check can live in; both lookups below read this one list.
 const TEST_DIRS = ['src/server/tests', 'src/server/__tests__', 'src', 'scripts', 'tests', '.claude/hooks', 'bharat_alpha/tests'];
@@ -120,8 +142,12 @@ export function validateDetailed(text) {
       (found < RULE_START ? warnings : problems).push(`L${n} ${id}: duplicate ID (also L${seen.get(id)})`);
     }
     seen.set(id, n);
+    if (!/^[-—]?$/.test(closed) && !isDate(closed)) problems.push(`L${n} ${id}: Closed cell must be empty or start with the closing date, not "${closed.slice(0, 20)}"`);
     if (found < RULE_START) return;
     const isClosed = isDate(closed);
+    if (!isClosed && found >= RECHECK_RULE_START && !RECHECK.test(status)) {
+      problems.push(`L${n} ${id}: open row has no "Recheck: YYYY-MM-DD"`);
+    }
     if (isClosed && /FIX/i.test(lane) && !artifactExists(immunized)) {
       problems.push(`L${n} ${id}: closed FIX row cites no existing regression test/check in "Immunized" (${immunized.slice(0, 60) || 'empty'})`);
     }
@@ -143,18 +169,39 @@ export function missingIds(earlierText, text) {
   return [...idsOf(earlierText)].filter(id => !now.has(id));
 }
 
+const ARCHIVE = 'docs/audit-findings-archive.md';
+
+/** Rows of `earlier` (ledger + archive texts) that are in neither current file. */
+export const goneRows = (earlier, current) => missingIds(earlier.join('\n'), current.join('\n'));
+
+/** Post-RULE_START ids used in both files; older restatements predate the rule. */
+export function crossFileDuplicates(ledger, archive) {
+  const archived = idsOf(archive);
+  return [...idsOf(ledger)].filter(id => archived.has(id) && id.slice(3, 11) >= RULE_START.replaceAll('-', ''));
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const file = resolve(ROOT, process.argv[2] ?? 'docs/audit-findings.md');
   const current = readFileSync(file, 'utf8');
   const { problems, warnings } = validateDetailed(current);
   if (!process.argv[2]) {
-    try {
-      const head = execFileSync('git', ['show', 'HEAD:docs/audit-findings.md'], { cwd: ROOT, maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
-      const gone = missingIds(head, current);
-      if (gone.length) problems.push(`row(s) present in HEAD are gone from the ledger (never delete a row, close it): ${gone.slice(0, 8).join(', ')}${gone.length > 8 ? ` and ${gone.length - 8} more` : ''}`);
-    } catch { /* not a git checkout, or HEAD has no ledger yet: nothing to compare against */ }
+    const archive = existsSync(resolve(ROOT, ARCHIVE)) ? readFileSync(resolve(ROOT, ARCHIVE), 'utf8') : '';
+    const archived = validateDetailed(archive);
+    problems.push(...archived.problems.map(p => `archive ${p}`));
+    problems.push(...crossFileDuplicates(current, archive).map(id => `${id}: used in both the ledger and the archive`));
+    const atHead = path => {
+      try {
+        return execFileSync('git', ['show', `HEAD:${path}`], { cwd: ROOT, maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+      } catch { return ''; /* not a git checkout, or HEAD has no such file yet */ }
+    };
+    const gone = goneRows([atHead('docs/audit-findings.md'), atHead(ARCHIVE)], [current, archive]);
+    if (gone.length) problems.push(`row(s) present in HEAD are gone from the ledger and its archive (never delete a row, close it): ${gone.slice(0, 8).join(', ')}${gone.length > 8 ? ` and ${gone.length - 8} more` : ''}`);
   }
   for (const w of warnings) console.warn(`[findings:check] warn: ${w}`);
+  const none = unscheduledRows(current).length;
+  if (none) console.warn(`[findings:check] ${none} open row(s) have no Recheck date`);
+  const due = overdueRows(current);
+  if (due.length) console.warn(`[findings:check] ${due.length} row(s) due for recheck: ${due.map(r => `${r.id} (${r.recheck})`).join(', ')}`);
   if (problems.length) {
     console.error(`[findings:check] ${problems.length} problem(s) in ${file}:`);
     for (const p of problems) console.error(`  - ${p}`);

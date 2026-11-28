@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 // @ts-expect-error -- plain .mjs module, no type declarations
-import { validate, validateDetailed, missingIds } from '../checkFindingsLedger.mjs';
+import { validate, validateDetailed, missingIds, goneRows, crossFileDuplicates, overdueRows, unscheduledRows } from '../checkFindingsLedger.mjs';
 
 const HDR = '| ID | Found | Class | Finding | Lane | Status | Immunized | Closed |\n|---|---|---|---|---|---|---|---|';
 const table = (...rows: string[]) => [HDR, ...rows].join('\n');
@@ -150,10 +150,57 @@ describe('checkFindingsLedger.validate', { timeout: 60_000 }, () => {
 
   it('the real ledger has no structural problems beyond the known-blocked rows', () => {
     const real = readFileSync(resolve(__dirname, '../../docs/audit-findings.md'), 'utf8');
-    const structural = (validate(real) as string[]).filter(p => !/cites no existing|none of the four reasons|FIX row/.test(p));
+    const structural = (validate(real) as string[]).filter(p => !/cites no existing|none of the four reasons|FIX row|Closed cell|no "Recheck/.test(p));
     const unexpected = structural.filter(p => !KNOWN_BLOCKED.some(id => p.includes(id)));
     expect(unexpected).toEqual([]);
     const stillBroken = KNOWN_BLOCKED.filter(id => structural.some(p => p.includes(id)));
     expect(stillBroken, 'repaired -- remove these from KNOWN_BLOCKED').toEqual(KNOWN_BLOCKED);
+  });
+});
+
+// 2026-11-27: closed rows move to docs/audit-findings-archive.md at the user's request.
+describe('findings ledger with an archive file', () => {
+  const row = (id: string) => `| ${id} | 2026-10-01 | c | f | EVIDENCE | calendar-blocked | x | 2026-10-02 |`;
+  const tbl = (...ids: string[]) =>
+    ['| ID | Found | Class | Finding | Lane | Status | Immunized | Closed |', '|---|---|---|---|---|---|---|---|', ...ids.map(row)].join('\n');
+
+  it('treats an archived row as present and still reports one that is in neither file', () => {
+    const before = [tbl('AF-20261001-01', 'AF-20261001-02', 'AF-20261001-03'), ''];
+    expect(goneRows(before, [tbl('AF-20261001-01'), tbl('AF-20261001-02')])).toEqual(['AF-20261001-03']);
+  });
+
+  it('rejects an id used in both the ledger and the archive', () => {
+    expect(crossFileDuplicates(tbl('AF-20261001-01'), tbl('AF-20261001-01'))).toEqual(['AF-20261001-01']);
+    expect(crossFileDuplicates(tbl('AF-20260801-01'), tbl('AF-20260801-01'))).toEqual([]);
+  });
+});
+
+describe('recheck dates and the Closed cell (AF-20261127-07)', { timeout: 60_000 }, () => {
+  const open = (id: string, found: string, status: string, closed = '') =>
+    `| ${id} | ${found} | x | bug | EVIDENCE | Open: EVIDENCE. ${status} | | ${closed} |`;
+
+  it('lists open rows whose Recheck date has arrived, and no closed or future ones', () => {
+    const t = table(
+      open('AF-20261001-01', '2026-10-01', 'Recheck: 2026-11-27.'),
+      open('AF-20261001-02', '2026-10-01', 'Recheck: 2026-11-29.'),
+      '| AF-20261001-03 | 2026-10-01 | x | bug | EVIDENCE | done. Recheck: 2026-11-01. | | 2026-11-02 |',
+      // history prepended to a cell: the first token is the current one
+      open('AF-20261001-04', '2026-10-01', 'Recheck: 2027-01-01. Earlier: Recheck: 2026-11-01.'),
+    );
+    expect(overdueRows(t, '2026-11-28')).toEqual([{ id: 'AF-20261001-01', recheck: '2026-11-27' }]);
+    expect(unscheduledRows(table(open('AF-20261001-05', '2026-10-01', ''), open('AF-20261001-06', '2026-10-01', 'Recheck: 2027-01-01.'))))
+      .toEqual(['AF-20261001-05']);
+  });
+
+  it('rejects a placeholder in the Closed cell, which hid 35 open rows from the open count', () => {
+    for (const cell of ['open', 'partial', '�', '(a)(b) 2026-09-10']) {
+      expect(validate(table(open('AF-20261001-01', '2026-10-01', '', cell))).join()).toMatch(/Closed cell/);
+    }
+  });
+
+  it('requires a Recheck date on an open row found from 2026-11-29', () => {
+    expect(validate(table(open('AF-20261129-01', '2026-11-29', ''))).join()).toMatch(/Recheck/);
+    expect(validate(table(open('AF-20261129-01', '2026-11-29', 'Recheck: 2026-12-06.')))).toEqual([]);
+    expect(validate(table(open('AF-20261128-01', '2026-11-28', '')))).toEqual([]);
   });
 });

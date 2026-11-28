@@ -2,7 +2,7 @@
 
 Four writers set the same bias and the last one wins, and the feature builder re-derives direction from
 the name, so a correction made in any one of them is lost. These pins are meant to be applied after all
-of them. NOT WIRED YET: wiring is gated on the replay in
+of them. NOT WIRED: the 2026-11-27 replay read HARMFUL (first half t -3.94); rules in
 docs/audits/2026-11-26-screener-bias-pins-preregistration.md.
 
 Deliberately narrow. Convention disputes (CCI, Williams %R, bare RSI oversold) are not pinned: the

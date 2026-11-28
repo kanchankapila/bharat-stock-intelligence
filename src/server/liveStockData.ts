@@ -486,7 +486,8 @@ async function runBulkRefresh(): Promise<void> {
     }
 
     // If market closed, cache for a long time (until next open approx), else standard TTL
-    const ttl = marketOpen ? BULK_TTL : 12 * 60 * 60; // 12 hours when closed
+    // +60s so the key outlives the next refresh, which writes only after its fetch completes.
+    const ttl = marketOpen ? BULK_TTL + 60 : 12 * 60 * 60; // 12 hours when closed
     await cacheSet(BULK_CACHE_KEY, freshData, ttl);
     // When this snapshot was taken and whether the session was live, so a reader can tell
     // today's session high/low from a pre-open read of yesterday's (liveQuotes.ts, planGuard.ts).

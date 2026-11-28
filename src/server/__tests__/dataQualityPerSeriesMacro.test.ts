@@ -12,7 +12,7 @@ if (!process.env.VITEST_PG_SCHEMA) {
 }
 const SCHEMA = process.env.VITEST_PG_SCHEMA;
 const { dbRun, dbGet } = await import('../dbAsync');
-const { DATA_QUALITY_CHECKS } = await import('../dataQualityChecks');
+const { DATA_QUALITY_CHECKS, NSE_SPECIAL_SESSIONS } = await import('../dataQualityChecks');
 
 async function run(id: string) {
   const check = DATA_QUALITY_CHECKS.find(c => c.id === id);
@@ -78,6 +78,18 @@ describe('market-breadth-trading-day', () => {
     expect((await run('market-breadth-trading-day')).status).toBe('warn');
   });
 
+  it('accepts a row on a declared special session such as Muhurat Sunday', async () => {
+    expect(NSE_SPECIAL_SESSIONS).toContain('2026-11-08');
+    const sunday = (await dbGet<{ d: string }>(`SELECT (${SUNDAY})::text AS d`))!.d;
+    await dbRun(`INSERT INTO "${SCHEMA}".market_breadth (date, adv_decline_ratio) VALUES (${SUNDAY}, 0.8)`);
+    NSE_SPECIAL_SESSIONS.push(sunday);
+    try {
+      expect((await run('market-breadth-trading-day')).status).toBe('pass');
+    } finally {
+      NSE_SPECIAL_SESSIONS.pop();
+    }
+  });
+
   it('warns on a known NSE holiday row', async () => {
     await dbRun(`INSERT INTO "${SCHEMA}".market_holidays (date, exchange) VALUES (${SUNDAY} - 2, 'NSE')`);
     await dbRun(`INSERT INTO "${SCHEMA}".market_breadth (date, adv_decline_ratio) VALUES (${SUNDAY} - 2, 0.2219)`);
@@ -119,5 +131,21 @@ describe('dq-uninformative-checks (real SQL)', () => {
     expect(r.detail).toContain('1 check(s) have returned the SAME non-pass verdict');
     expect(r.detail).toContain('really-stuck');
     expect(r.detail).not.toMatch(/verdict on every one of their last 10\+ runs: [^.]*dq-uninformative-checks/);
+  });
+});
+
+describe('bulk-endpoint-fetcher-coverage pre-open denominator, through the real SQL (AF-20261128-03)', () => {
+  it('uses the source\'s own 45-day best, not a stock master that has outgrown it', async () => {
+    await dbRun(`DELETE FROM "${SCHEMA}".preopen_stock_snapshot`);
+    await dbRun(`DELETE FROM "${SCHEMA}".nse_stocks`);
+    await dbRun(`INSERT INTO "${SCHEMA}".nse_stocks (symbol, name) SELECT 'ZZ' || g, 'x' FROM generate_series(1, 30) g`);
+    await dbRun(`INSERT INTO "${SCHEMA}".preopen_stock_snapshot (symbol, snapshot_date)
+                 SELECT 'ZZ' || g, CURRENT_DATE FROM generate_series(1, 25) g`);
+    const check = DATA_QUALITY_CHECKS.find(c => c.id === 'bulk-endpoint-fetcher-coverage')!;
+    const row = await dbGet<Record<string, unknown>>(check.sql, check.params ?? []);
+    expect(Number(row?.canon_universe)).toBe(30);
+    expect(Number(row?.preopen_universe)).toBe(25);
+    await dbRun(`DELETE FROM "${SCHEMA}".preopen_stock_snapshot`);
+    await dbRun(`DELETE FROM "${SCHEMA}".nse_stocks`);
   });
 });

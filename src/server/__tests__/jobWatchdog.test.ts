@@ -578,3 +578,23 @@ describe('buildDailyDigest', () => {
     expect(digest).not.toContain('Changed since last report');
   });
 });
+
+describe('daily digest lists ledger rows due for recheck (AF-20261127-07)', () => {
+  const ledger = [
+    '| ID | Found | Class | Finding | Lane | Status | Immunized | Closed |',
+    '|---|---|---|---|---|---|---|---|',
+    '| AF-20261001-01 | 2026-10-01 | c | f | EVIDENCE | Open: EVIDENCE. Recheck: 2026-11-27. | | |',
+    '| AF-20261001-02 | 2026-10-01 | c | f | EVIDENCE | Open: EVIDENCE. Recheck: 2026-12-27. | | |',
+  ].join('\n');
+
+  it('names the due row and not the future one', async () => {
+    mockGetLateJobs.mockResolvedValue([]);
+    mockReadFileSync.mockImplementation((p: unknown) => {
+      if (String(p).includes('audit-findings.md')) return ledger;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    const text = await buildDailyDigest(new Date('2026-11-28T03:00:00Z'));
+    expect(text).toContain('AF-20261001-01');
+    expect(text).not.toContain('AF-20261001-02');
+  });
+});

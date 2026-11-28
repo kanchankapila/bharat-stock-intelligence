@@ -186,3 +186,25 @@ def test_universe_drops_names_whose_contracts_have_all_expired(pg_db):
         execute("INSERT INTO stock_futures_eod_history (symbol, trade_date, expiry, instrument, expiry_rank, is_expiry_day, source) "
                 "VALUES (?, current_date - 3, current_date + CAST(? AS int), 'STF', 1, false, 't')", (sym, 30 if sym == "LIVE" else -3))
     assert so._get_fno_symbols() == ["LIVE"]
+
+
+@pytest.mark.parametrize("covered, reported", [(["AAA", "BBB"], False), (["AAA"], True)])
+def test_a_smartoptions_block_is_an_error_only_if_a_name_is_left_without_a_chain(monkeypatch, capsys, covered, reported):
+    today = so._date.today().isoformat()
+    maps = iter([{}, {sym: today for sym in covered}])
+    monkeypatch.setattr(so, "VENDOR_BLOCK", fetch_utils.VendorBlockLatch("test", has_fallback=True))
+    monkeypatch.setattr(so.requests, "get", lambda url, **kw: _Resp(405))
+    monkeypatch.setattr(so, "is_trading_session", lambda d: True)
+    monkeypatch.setattr(so, "_get_fno_symbols", lambda: ["AAA", "BBB"])
+    monkeypatch.setattr(so, "_coverage_map", lambda syms: next(maps))
+    monkeypatch.setattr(so, "_get_nearest_expiry", lambda sym: EXPIRY)
+    monkeypatch.setattr(so, "fill_gaps_from_nse", lambda *a, **k: len(covered))
+    monkeypatch.setattr(so, "MAX_STALE_SYMBOLS", 10)
+    so.run(delay=0)
+    err = capsys.readouterr().err
+    assert ("HTTP 405" in err) is reported
+    assert ("BBB" in err) is reported
+
+
+def test_the_option_chain_latch_is_marked_as_having_a_fallback():
+    assert so.VENDOR_BLOCK.has_fallback

@@ -1,5 +1,5 @@
 import { dbAll, dbRun } from './dbAsync';
-import { fetchTrendlyneAdvTechnicalAnalysis } from './trendlyneService';
+import { fetchTrendlyneAdvTechnicalAnalysis, trendlyneTaStockId } from './trendlyneService';
 import { getTrendlyneTaCircuitState, isTrendlyneTaBlocked } from './trendlyneTechnicalCircuit';
 
 export interface TechnicalCompositeScore {
@@ -289,7 +289,13 @@ export async function syncTrendlyneTechnicals(maxSymbols?: number) {
   const dailyLimit = Number.isFinite(configuredLimit) && configuredLimit > 0
     ? Math.floor(configuredLimit)
     : DEFAULT_TRENDLYNE_TA_DAILY_SLICE;
-  const plannedStocks = stocks.slice(0, dailyLimit);
+  // A symbol with no Trendlyne id is never written, so it would stay stalest and hold its place
+  // in the slice for ever: by 2026-11-27, 87 of each day's 110 were such names.
+  const plannedStocks: typeof stocks = [];
+  for (const s of stocks) {
+    if (plannedStocks.length >= dailyLimit) break;
+    if (await trendlyneTaStockId(s.symbol)) plannedStocks.push(s);
+  }
   console.log(
     `[TRENDLYNE TECHNICALS] Starting bounded stalest-first slice: ` +
     `${plannedStocks.length}/${stocks.length} symbols (daily limit ${dailyLimit})...`,
@@ -354,7 +360,7 @@ export async function syncTrendlyneTechnicals(maxSymbols?: number) {
       // Do not turn the provider-level block into a per-symbol retry loop. The exception above
       // is deliberately rethrown so quantStep records the step as failed and BullMQ can retry
       // it later, after the local circuit has had time to expire.
-      if (isTrendlyneTaBlocked()) throw e;
+      if (isTrendlyneTaBlocked() || blockedCycles >= MAX_BLOCKED_CYCLES) throw e;
     }
 
     // Jittered sleep to evade rate limits

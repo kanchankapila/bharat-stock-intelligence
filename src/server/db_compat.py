@@ -16,6 +16,7 @@ Conversion notes for P3f:
   - SQLite-only SQL (INSERT OR REPLACE, strftime, PRAGMA table_info) must be hand-converted.
 """
 import os
+import re
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -23,7 +24,8 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError, TimeoutError as SATimeoutError
 
 # Auto-load .env once per process (not on every importlib.reload).
@@ -99,6 +101,30 @@ def database_url() -> str:
 _engines: dict = {}
 
 
+# One column per statement; a multi-clause ALTER is left as written.
+_ADD_COLUMN_RE = re.compile(
+    r'^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?"?(\w+)"?\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+"?(\w+)"?'
+    r'(?!.*,\s*(?:ADD|ALTER|DROP)\b)',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _guard_add_column(conn, cursor, statement, parameters, context, executemany):
+    """`ADD COLUMN IF NOT EXISTS` locks the table exclusively even when the column is there, and
+    every later reader queues behind that request. Look first; bound the wait for a real add."""
+    match = _ADD_COLUMN_RE.match(statement)
+    if not match:
+        return statement, parameters
+    cursor.execute(
+        "SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass(%s) AND attname = %s AND NOT attisdropped",
+        (match[1], match[2].lower()),
+    )
+    if cursor.fetchone():
+        return "SELECT 1", {}
+    cursor.execute("SET LOCAL lock_timeout = '5s'")
+    return statement, parameters
+
+
 def get_engine():
     """Cached SQLAlchemy Engine for the active dialect (one per resolved URL/process)."""
     url = database_url()
@@ -116,6 +142,8 @@ def get_engine():
             future=True,
             connect_args={"application_name": f"bsi:{writer_name}"[:63]},
         )
+        if isinstance(eng, Engine):  # tests substitute create_engine
+            event.listen(eng, "before_cursor_execute", _guard_add_column, retval=True)
         _engines[url] = eng
     return eng
 
